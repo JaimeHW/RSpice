@@ -15,10 +15,14 @@ use super::super::state::{VerificationPage, WorkbenchSession, Workspace};
 use crate::state::ModelsPage;
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
+mod code;
+mod design;
 mod keyboard;
 mod menu_entries;
 mod menu_row;
 mod menus;
+use code::code_title_cell;
+use design::design_title_cell;
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
     claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
@@ -702,21 +706,13 @@ fn active_title_cell(app: &RSpiceApp) -> String {
     }
     match app.state.workbench.workspace {
         Workspace::Project => "Project overview".to_owned(),
-        Workspace::Design => format!(
-            "{} · {}",
-            app.state.model.workspace.content.active_view.cell,
-            app.state.model.workspace.content.active_view.view
-        ),
+        Workspace::Design => design_title_cell(&app.state),
         Workspace::Simulate => "Simulation plan".to_owned(),
         Workspace::Stimulus => "Stimulus Library".to_owned(),
         Workspace::Results => "Results".to_owned(),
         Workspace::Verify => "Verification".to_owned(),
         Workspace::Models => "Models & PDKs".to_owned(),
-        Workspace::Netlist => crate::workbench::documents::code_workspace::active_document_label(
-            &app.state.model.workspace,
-            &app.state.code.code_workspace,
-            app.state.workbench.messages(),
-        ),
+        Workspace::Netlist => code_title_cell(&app.state),
     }
 }
 

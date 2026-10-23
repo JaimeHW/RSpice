@@ -1,18 +1,34 @@
 //! Workspace-scoped document tabs. Stable project identities drive every tab;
 //! the shell never fabricates datasets, source files, or verification records.
 
+mod code;
+mod design;
+mod models;
+mod project;
+mod results;
+mod simulate;
+
 use egui::containers::menu::MenuButton;
 use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
-use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::documents::netlist_document::run_deck_snapshot_run_id;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
+
+use code::{
+    activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
+    activate_netlist_run_snapshot, activate_owned_netlist, active_netlist_document_id,
+    netlist_workspace_documents,
+};
+use design::{activate_cell_view, design_documents};
+use models::models_documents;
+use project::project_documents;
+use results::{activate_result_dataset, activate_visualization_document, result_documents};
+use simulate::{simulation_plan_documents, verification_documents};
 
 const TAB_MAX_WIDTH: f32 = 190.0;
 /// The narrowest a tab shrinks to before the strip scrolls instead: its icon,
@@ -488,175 +504,20 @@ fn available_documents_for_workspace(
     workspace: Workspace,
 ) -> Vec<WorkspaceDocument> {
     match workspace {
-        Workspace::Project => vec![WorkspaceDocument {
-            id: WorkspaceDocumentId::Project,
-            label: "Project overview".to_owned(),
-            icon: WorkbenchIcon::Project,
-            dirty: false,
-        }],
-        Workspace::Design => state
-            .model
-            .workspace
-            .content
-            .open_views
-            .iter()
-            .map(|document| WorkspaceDocument {
-                id: WorkspaceDocumentId::CellView(document.reference.clone()),
-                label: format!("{} · {}", document.reference.cell, document.reference.view),
-                icon: icon_for_view(document.view_type),
-                dirty: document.dirty,
-            })
-            .collect(),
-        // One plan, one document. The Studio used to open a "<name> · setup"
-        // tab per analysis instance too, and activating one only selected that
-        // instance on the Analyses page — which the plan's own analysis list
-        // does, permanently, on the left. A plan with seven analyses therefore
-        // paid a strip of eight tabs for nothing the list did not already say,
-        // so the strip is gone: `document_strip_visible` hides a lone
-        // non-Design document.
-        Workspace::Simulate => vec![WorkspaceDocument {
-            id: WorkspaceDocumentId::SimulationPlan,
-            label: "Simulation plan".to_owned(),
-            icon: WorkbenchIcon::Simulate,
-            dirty: false,
-        }],
+        Workspace::Project => project_documents(),
+        Workspace::Design => design_documents(state),
+        Workspace::Simulate => simulation_plan_documents(),
         // The library is one project-owned record, and the shell has no
         // document identity for it yet — the instrument that edits a
         // definition is what will open one. Naming a tab here before that
         // exists would put a document in the window session that nothing can
         // detach, close, or save.
         Workspace::Stimulus => Vec::new(),
-        Workspace::Results => state
-            .model
-            .simulation
-            .retained
-            .runs
-            .iter()
-            .map(|run| WorkspaceDocument {
-                id: WorkspaceDocumentId::ResultDataset(run.dataset_id),
-                label: run.label.clone(),
-                icon: WorkbenchIcon::Results,
-                dirty: false,
-            })
-            .collect(),
-        Workspace::Verify => vec![WorkspaceDocument {
-            id: WorkspaceDocumentId::Verification,
-            label: "Verification".to_owned(),
-            icon: WorkbenchIcon::Verify,
-            dirty: false,
-        }],
-        Workspace::Models => vec![WorkspaceDocument {
-            id: WorkspaceDocumentId::Models,
-            label: "Models & PDKs".to_owned(),
-            icon: WorkbenchIcon::Models,
-            dirty: false,
-        }],
+        Workspace::Results => result_documents(state),
+        Workspace::Verify => verification_documents(),
+        Workspace::Models => models_documents(),
         Workspace::Netlist => netlist_workspace_documents(state),
     }
-}
-
-fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-    if state.code.code_workspace.page != CodeWorkspacePage::Netlist {
-        return vec![code_workspace_document(state)];
-    }
-    let mut documents = Vec::new();
-    if let Some(generated) = state.model.netlist_artifacts.generated_document.as_ref() {
-        documents.push(WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
-            label: "Generated netlist".to_owned(),
-            icon: WorkbenchIcon::Netlist,
-            dirty: false,
-        });
-        documents.extend(generated.dependencies().iter().filter_map(|dependency| {
-            dependency.source()?;
-            let id = WorkspaceDocumentId::NetlistDependency {
-                root: generated.id(),
-                logical_identity: dependency.locator().logical_identity().to_owned(),
-            };
-            if !state.code.netlist_open_documents.contains(&id) {
-                return None;
-            }
-            Some(WorkspaceDocument {
-                id,
-                label: format!("{} · generated", dependency.locator().display_name()),
-                icon: WorkbenchIcon::Code,
-                dirty: false,
-            })
-        }));
-    }
-
-    if let Some(owned) = state.code.netlist.owned_document.as_ref() {
-        let owned_label = state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .map(|descriptor| descriptor.artifact_name.clone())
-            .filter(|label| !label.trim().is_empty())
-            .unwrap_or_else(|| "Project netlist".to_owned());
-        documents.push(WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistOwned(owned.id()),
-            label: owned_label,
-            icon: WorkbenchIcon::Netlist,
-            dirty: state.model.workspace.content.netlist_source_dirty,
-        });
-        documents.extend(owned.dependencies().iter().filter_map(|dependency| {
-            dependency.source()?;
-            let identity = dependency.locator().logical_identity();
-            let id = WorkspaceDocumentId::NetlistDependency {
-                root: owned.id(),
-                logical_identity: identity.to_owned(),
-            };
-            if !state.code.netlist_open_documents.contains(&id) {
-                return None;
-            }
-            let project_owned = state
-                .model
-                .workspace
-                .content
-                .netlist_descriptor
-                .as_ref()
-                .and_then(|descriptor| descriptor.owned_include(identity))
-                .is_some();
-            Some(WorkspaceDocument {
-                id,
-                label: if project_owned {
-                    dependency.locator().display_name().to_owned()
-                } else {
-                    format!("{} · external", dependency.locator().display_name())
-                },
-                icon: WorkbenchIcon::Code,
-                dirty: project_owned && state.model.workspace.content.netlist_source_dirty,
-            })
-        }));
-    }
-
-    if !state.code.netlist.generated_diff_source.is_empty() {
-        documents.push(WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistComparison,
-            label: "Netlist comparison".to_owned(),
-            icon: WorkbenchIcon::Code,
-            dirty: false,
-        });
-    }
-    if let Some(run_id) = run_deck_snapshot_run_id(state) {
-        documents.push(WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistRunSnapshot,
-            label: state.workbench.messages().format(
-                crate::workbench::MessageId::NetlistRunSnapshotDocument,
-                &[("id", &run_id.to_string())],
-            ),
-            icon: WorkbenchIcon::Results,
-            dirty: false,
-        });
-    }
-    if documents.is_empty() {
-        documents.push(code_workspace_document(state));
-    }
-    documents
 }
 
 fn owned_available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
@@ -689,30 +550,6 @@ fn document_is_closable(state: &AppState, document: &WorkspaceDocumentId) -> boo
     available_documents_for_workspace(state, document.workspace())
         .first()
         .is_some_and(|root| root.id != *document)
-}
-
-/// The Code & Automation workspace shows one document at a time and the page
-/// decides which. Only the netlist page has a dirty bit to report: Automation
-/// sources are a project-owned bundle whose dirtiness belongs to the bundle,
-/// not to this tab.
-fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-    let page = state.code.code_workspace.page;
-    WorkspaceDocument {
-        id: WorkspaceDocumentId::NetlistSource,
-        label: crate::workbench::documents::code_workspace::active_document_label(
-            &state.model.workspace,
-            &state.code.code_workspace,
-            state.workbench.messages(),
-        ),
-        icon: match page {
-            CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
-            CodeWorkspacePage::Automation => WorkbenchIcon::Terminal,
-        },
-        dirty: page == CodeWorkspacePage::Netlist
-            && state.model.workspace.content.netlist_source_dirty,
-    }
 }
 
 fn authoritative_active_document(
@@ -761,48 +598,6 @@ fn authoritative_active_document(
                 })
                 .map(|document| document.id.clone())
         })
-}
-
-fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-    use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-
-    if state.code.code_workspace.page != CodeWorkspacePage::Netlist {
-        return Some(WorkspaceDocumentId::NetlistSource);
-    }
-    let netlist = &state.code.netlist;
-    if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        return Some(WorkspaceDocumentId::NetlistComparison);
-    }
-    if netlist.active_document == ActiveNetlistDocument::RunSnapshot {
-        return Some(WorkspaceDocumentId::NetlistRunSnapshot);
-    }
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
-    let document = match root {
-        ActiveNetlistDocument::Generated => {
-            state.model.netlist_artifacts.generated_document.as_ref()
-        }
-        ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
-        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
-    }?;
-    if let Some(logical_identity) = netlist.active_dependency_identity.as_ref() {
-        Some(WorkspaceDocumentId::NetlistDependency {
-            root: document.id(),
-            logical_identity: logical_identity.clone(),
-        })
-    } else {
-        Some(match root {
-            ActiveNetlistDocument::Generated => {
-                WorkspaceDocumentId::NetlistGenerated(document.id())
-            }
-            ActiveNetlistDocument::OwnedSource => WorkspaceDocumentId::NetlistOwned(document.id()),
-            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
-                return None;
-            }
-        })
-    }
 }
 
 fn visible_documents(state: &AppState) -> Vec<WorkspaceDocument> {
@@ -974,105 +769,25 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         return false;
     }
     let activated = match document {
-        WorkspaceDocumentId::CellView(reference) => {
-            if state
-                .model
-                .workspace
-                .content
-                .open_views
-                .iter()
-                .any(|open| open.reference == *reference)
-            {
-                state.open_workspace_view(reference.clone());
-                state.model.workspace.content.active_view == *reference
-            } else {
-                false
-            }
-        }
+        WorkspaceDocumentId::CellView(reference) => activate_cell_view(state, reference),
         WorkspaceDocumentId::VisualizationDocument(document_id) => {
-            crate::workbench::documents::result_document::activate_persistent_document(
-                state,
-                *document_id,
-            )
+            activate_visualization_document(state, document_id)
         }
-        // Re-activating the dataset that is already active must not re-select
-        // its run. `select_run` resynchronizes the displayed waveforms, which
-        // advances the simulation data version, and every version change
-        // retires cursors, the selected trace, the active pane, and pinned
-        // readouts. This path runs on every frame the document bar draws, so
-        // an unguarded re-selection made those states impossible to hold.
-        WorkspaceDocumentId::ResultDataset(dataset_id) => state
-            .model
-            .simulation
-            .retained
-            .runs
-            .iter()
-            .position(|run| run.dataset_id == *dataset_id)
-            .is_some_and(|index| {
-                state.model.simulation.view.active_run_idx == Some(index)
-                    || state.model.simulation.select_run(index)
-            }),
+        WorkspaceDocumentId::ResultDataset(dataset_id) => {
+            activate_result_dataset(state, dataset_id)
+        }
         WorkspaceDocumentId::NetlistGenerated(document_id) => {
-            let available = state
-                .model
-                .netlist_artifacts
-                .generated_document
-                .as_ref()
-                .is_some_and(|document| document.id() == *document_id);
-            available
-                && ((state.code.netlist.active_document
-                    == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-                    && state.code.netlist.active_dependency_identity.is_none())
-                    || crate::workbench::documents::netlist_document::open_generated_primary(state))
+            activate_generated_netlist(state, document_id)
         }
         WorkspaceDocumentId::NetlistOwned(document_id) => {
-            let available = state
-                .code
-                .netlist
-                .owned_document
-                .as_ref()
-                .is_some_and(|document| document.id() == *document_id);
-            available && crate::workbench::documents::netlist_document::open_owned_primary(state)
+            activate_owned_netlist(state, document_id)
         }
         WorkspaceDocumentId::NetlistDependency {
             root,
             logical_identity,
-        } => {
-            use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-            let root_kind = if state
-                .model
-                .netlist_artifacts
-                .generated_document
-                .as_ref()
-                .is_some_and(|document| document.id() == *root)
-            {
-                Some(ActiveNetlistDocument::Generated)
-            } else if state
-                .code
-                .netlist
-                .owned_document
-                .as_ref()
-                .is_some_and(|document| document.id() == *root)
-            {
-                Some(ActiveNetlistDocument::OwnedSource)
-            } else {
-                None
-            };
-            root_kind.is_some_and(|root_kind| {
-                crate::workbench::documents::netlist_document::open_netlist_dependency_from_root(
-                    state,
-                    root_kind,
-                    logical_identity,
-                )
-                .is_ok()
-            })
-        }
-        WorkspaceDocumentId::NetlistComparison => {
-            crate::workbench::documents::netlist_document::open_netlist_comparison(state)
-        }
-        WorkspaceDocumentId::NetlistRunSnapshot => {
-            crate::workbench::documents::netlist_document::open_run_deck_snapshot(state)
-        }
+        } => activate_netlist_dependency(state, root, logical_identity),
+        WorkspaceDocumentId::NetlistComparison => activate_netlist_comparison(state),
+        WorkspaceDocumentId::NetlistRunSnapshot => activate_netlist_run_snapshot(state),
         WorkspaceDocumentId::Project
         | WorkspaceDocumentId::SimulationPlan
         | WorkspaceDocumentId::Verification
@@ -1418,22 +1133,12 @@ fn suffix_width(dirty: bool, closable: bool) -> f32 {
     }
 }
 
-const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
-    match view_type {
-        ViewType::Schematic | ViewType::Testbench => WorkbenchIcon::Design,
-        ViewType::Symbol => WorkbenchIcon::Models,
-        // A Verilog-A module is edited in its own tab beside the schematic it
-        // describes; borrowing the netlist mark made it read as a deck.
-        ViewType::VerilogA => WorkbenchIcon::VerilogA,
-        ViewType::Spice | ViewType::Verilog => WorkbenchIcon::Netlist,
-        _ => WorkbenchIcon::File,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::design::icon_for_view;
     use super::*;
     use crate::product::ObjectRevision;
+    use crate::state::ViewType;
     use crate::state::{
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
         NetlistDocument, NetlistDocumentId, SimulationRun, SourceLocator,

@@ -1,5 +1,11 @@
 //! Compact application status with exact engineering context.
 
+mod design;
+mod results;
+mod run;
+mod sheets;
+mod shell;
+
 use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::simulation::status::EngineAvailability;
@@ -12,6 +18,12 @@ use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticCounts, l
 use super::super::commands::vocabulary::Command;
 use super::super::layout::LayoutSpec;
 use super::super::state::Workspace;
+
+use design::{design_engineering_context, selection_summary, zoom_factor};
+use results::{format_plot_zoom, results_view_summary};
+use run::{preflight_status, simulation_engine_status};
+use sheets::sheet_position_summary;
+use shell::platform_label;
 
 const STATUS_PADDING_X: f32 = 9.0;
 const STATUS_MARK_GAP: f32 = 5.0;
@@ -433,70 +445,6 @@ fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
     }
 }
 
-fn simulation_progress_percent(progress: f64) -> u8 {
-    (progress.clamp(0.0, 1.0) * 100.0).round() as u8
-}
-
-/// The engine segment, or nothing while the engine sits ready and idle.
-fn simulation_engine_status(
-    simulation: &crate::state::SimulationState,
-    availability: &EngineAvailability,
-) -> Option<String> {
-    if availability.failure_reason().is_some() {
-        return Some("Engine unavailable".to_owned());
-    }
-    if *availability == EngineAvailability::Starting && !simulation.cancellation_is_pending() {
-        return Some("Engine starting".to_owned());
-    }
-    if !simulation.execution.has_active_execution() {
-        return (*availability == EngineAvailability::Restartable)
-            .then(|| "Engine stopped".to_owned());
-    }
-    let phase = match simulation.active_execution_lifecycle() {
-        Some(crate::state::SimulationRunLifecycle::Preparing) => "preparing",
-        Some(crate::state::SimulationRunLifecycle::Cancelling) => "stopping",
-        Some(crate::state::SimulationRunLifecycle::Running)
-        | Some(
-            crate::state::SimulationRunLifecycle::LegacyUnknown
-            | crate::state::SimulationRunLifecycle::Completed
-            | crate::state::SimulationRunLifecycle::Failed
-            | crate::state::SimulationRunLifecycle::Aborted
-            | crate::state::SimulationRunLifecycle::Interrupted,
-        )
-        | None => "running",
-    };
-    let phase = if simulation.cancellation_is_pending() {
-        "stopping"
-    } else {
-        phase
-    };
-    Some(format!(
-        "Engine {phase} · {}%",
-        simulation_progress_percent(simulation.execution.progress)
-    ))
-}
-
-/// The engine segment while preflight prepares the run and then has the
-/// engine build its decks: the stage, and how far it has got once it has
-/// counted what it works through. A run of one point is not counted.
-fn preflight_status(stage: crate::simulation::controller::PreflightStage) -> String {
-    use crate::simulation::controller::PreflightStage;
-    match stage {
-        PreflightStage::Preparing(progress) if progress.total > 1 => format!(
-            "Preparing · {} of {} points",
-            progress.prepared, progress.total
-        ),
-        PreflightStage::Preparing(_) => "Preparing".to_owned(),
-        PreflightStage::EngineChecking(progress) if progress.total > 0 => format!(
-            "Engine checking · {} of {} deck{}",
-            progress.built,
-            progress.total,
-            if progress.total == 1 { "" } else { "s" }
-        ),
-        PreflightStage::EngineChecking(_) => "Engine checking".to_owned(),
-    }
-}
-
 /// The mark in front of the engine segment: a failure when the engine cannot
 /// run, the one live dot while a run is in progress, and nothing otherwise.
 fn engine_status_mark(availability: &EngineAvailability, run_in_progress: bool) -> StatusMark {
@@ -509,33 +457,6 @@ fn engine_status_mark(availability: &EngineAvailability, run_in_progress: bool) 
     }
 }
 
-fn schematic_cursor_summary(
-    state: &crate::workbench::app_state::AppState,
-    grid_x: f64,
-    grid_y: f64,
-) -> String {
-    let grid = f64::from(state.model.schematic.document().grid_size.max(1));
-    let sheet = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state);
-    sheet.cursor_status(grid_x * grid, grid_y * grid)
-}
-
-fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState) -> String {
-    let unit = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state)
-        .format
-        .display_unit;
-    format!("x — · y — {}", unit.suffix())
-}
-
-/// The zoom chip's waveform form: whole numbers once the magnification is
-/// deep, one decimal while it is shallow enough for the fraction to matter.
-fn format_plot_zoom(zoom: f64) -> String {
-    if zoom >= 10.0 {
-        return format!("{zoom:.0}×");
-    }
-    let text = format!("{zoom:.1}");
-    format!("{}×", text.strip_suffix(".0").unwrap_or(text.as_str()))
-}
-
 fn engineering_context_summary(
     app: &RSpiceApp,
     results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
@@ -544,61 +465,7 @@ fn engineering_context_summary(
         return "No project loaded".to_owned();
     }
     match app.state.workbench.workspace {
-        Workspace::Design => {
-            let view_type = app.state.model.workspace.content.active_view_type();
-            app.state.design.canvas_hover.map_or_else(
-                || match view_type {
-                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
-                        empty_schematic_cursor_summary(&app.state)
-                    }
-                    crate::state::ViewType::Layout => "x — · y — layout".to_owned(),
-                    crate::state::ViewType::Symbol => {
-                        format!(
-                            "x — · y — · grid {}",
-                            app.state.model.schematic.document().grid_size.max(1)
-                        )
-                    }
-                    _ => format!(
-                        "revision {}",
-                        app.state.model.workspace.content.project.revision().get()
-                    ),
-                },
-                |(x, y)| match view_type {
-                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
-                        schematic_cursor_summary(&app.state, x, y)
-                    }
-                    crate::state::ViewType::Layout => {
-                        // The open layout's own database unit is the one its
-                        // coordinates count in.
-                        let content = &app.state.model.workspace.content;
-                        content
-                            .physical_layout_document(&content.active_view)
-                            .map(|document| document.technology().database_unit())
-                            .or(app.state.model.pdk_config.layout_database_unit)
-                            .map_or_else(
-                                || format!("x {x:.0} · y {y:.0} DBU unavailable"),
-                                |dbu| {
-                                    let policy =
-                                        app.state.model.preferences.quantity_presentation_policy();
-                                    format!(
-                                        "x {} · y {}",
-                                        policy.format_layout_coordinate(x, dbu),
-                                        policy.format_layout_coordinate(y, dbu)
-                                    )
-                                },
-                            )
-                    }
-                    crate::state::ViewType::Symbol => format!(
-                        "x {x:.0} · y {y:.0} · grid {}",
-                        app.state.model.schematic.document().grid_size.max(1)
-                    ),
-                    _ => format!(
-                        "revision {}",
-                        app.state.model.workspace.content.project.revision().get()
-                    ),
-                },
-            )
-        }
+        Workspace::Design => design_engineering_context(&app.state),
         Workspace::Results => results_view_summary(app, results_view),
         Workspace::Project
         | Workspace::Simulate
@@ -611,114 +478,6 @@ fn engineering_context_summary(
                 app.state.model.workspace.content.project.revision().get()
             )
         }
-    }
-}
-
-/// The Results coordinate segment.
-///
-/// The instrument bar already carries the A/B cursor readout, so this states
-/// the interval the panes are showing. Sheets with no plotted interval — a
-/// table, or a run that has not been opened yet — name the dataset instead.
-fn results_view_summary(
-    app: &RSpiceApp,
-    results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
-) -> String {
-    if let Some(view) = results_view {
-        return view.span.clone();
-    }
-    app.state
-        .model
-        .simulation
-        .view
-        .active_run_idx
-        .and_then(|index| app.state.model.simulation.retained.runs.get(index))
-        .map_or_else(
-            // The selection segment beside this one already reports that no
-            // dataset is chosen. This segment answers a different question —
-            // what interval am I reading — and has to say so in its own
-            // words, or the bar prints the same sentence twice.
-            || "No plotted interval".to_owned(),
-            |run| run.label.clone(),
-        )
-}
-
-/// Where the reader is in a multi-sheet drawing: the active sheet's page
-/// number over the number of sheets, and the sentence that expands it.
-///
-/// A single-sheet cell view has no position to report, so the segment is
-/// absent rather than reading `p1/1`. The page number is the catalog's, so it
-/// is the number the sheet strip's chip and the printed title block carry.
-fn sheet_position_summary(
-    state: &crate::workbench::app_state::AppState,
-) -> Option<(String, String)> {
-    let catalog = crate::schematic::view::sheet_visibility::multi_sheet_catalog(state)?;
-    let active = catalog.active_sheet_id()?;
-    let (page, count) = catalog.page_number_and_count(active)?;
-    let name = catalog.find(active)?.name();
-    Some((
-        format!("p{page}/{count}"),
-        format!("Sheet {page} of {count} \u{00b7} {name}"),
-    ))
-}
-
-fn selection_summary(app: &RSpiceApp) -> String {
-    if !app.state.platform.project_lifecycle.is_open() {
-        return "No engineering object selected".to_owned();
-    }
-    if app.state.workbench.workspace == Workspace::Results {
-        return app
-            .state
-            .model
-            .simulation
-            .view
-            .active_run_idx
-            .and_then(|index| app.state.model.simulation.retained.runs.get(index))
-            .map_or_else(
-                || "No result dataset selected".to_owned(),
-                |run| {
-                    let analysis_count = run.analyses.len();
-                    format!(
-                        "Run {} · {analysis_count} {}",
-                        run.id,
-                        if analysis_count == 1 {
-                            "analysis"
-                        } else {
-                            "analyses"
-                        }
-                    )
-                },
-            );
-    }
-    if app.state.workbench.workspace != Workspace::Design {
-        return app.state.workbench.workspace.label().to_owned();
-    }
-    let selection = &app.state.model.schematic.session.editor.selection;
-    if let Some(id) = selection.single_component() {
-        app.state
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == id)
-            .map(|component| format!("{} · {}", component.name, component.value))
-            .unwrap_or_else(|| "Selected object unavailable".to_owned())
-    } else if selection.count() > 0 {
-        format!("{} items selected", selection.count())
-    } else {
-        "No object selected".to_owned()
-    }
-}
-
-/// The canvas zoom behind the percentage chip. The Results workspace never
-/// reaches here — its chip reports plot magnification instead.
-fn zoom_factor(app: &RSpiceApp) -> f64 {
-    if app.state.workbench.workspace == Workspace::Design
-        && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
-    {
-        f64::from(app.state.design.symbol.editor.zoom)
-    } else {
-        app.state.model.schematic.session.editor.zoom
     }
 }
 
@@ -955,22 +714,10 @@ fn paint_processor(painter: &egui::Painter, rect: egui::Rect, color: egui::Color
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-fn platform_label() -> String {
-    "Browser · WASM worker".to_owned()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn platform_label() -> String {
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    format!(
-        "Desktop · local {threads} thread{}",
-        if threads == 1 { "" } else { "s" }
-    )
-}
-
 #[cfg(test)]
 mod tests {
+    use super::design::schematic_cursor_summary;
+    use super::run::simulation_progress_percent;
     use super::*;
 
     /// The counts the bar states, read as the page reads them.

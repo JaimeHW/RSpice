@@ -1,5 +1,7 @@
 //! Desktop/tablet primary workspace rail.
 
+mod results;
+
 use egui::{Frame, Panel, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
@@ -9,6 +11,8 @@ use crate::workbench::RSpiceApp;
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};
 use super::super::state::Workspace;
+
+use results::unseen_result_count;
 
 const ACTIVITY_BUTTON_WIDTH: f32 = 50.0;
 const ACTIVITY_BUTTON_HEIGHT: f32 = 45.0;
@@ -71,13 +75,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
             }
             for workspace in Workspace::ALL {
                 let active = app.state.workbench.workspace == workspace;
-                let new_result_count = usize::from(
-                    workspace == Workspace::Results
-                        && !active
-                        && app.state.model.simulation.retained.has_results()
-                        && app.state.results.results_seen_version
-                            != app.state.model.simulation.view.data_version,
-                );
+                let new_result_count = unseen_result_count(&app.state, workspace, active);
                 let command = Command::OpenWorkspace(workspace);
                 let shortcut = app.state.model.preferences.shortcuts().resolved_label(
                     &crate::workbench::commands::vocabulary::CommandRegistry,

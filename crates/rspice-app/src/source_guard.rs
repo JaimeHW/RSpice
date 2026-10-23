@@ -867,16 +867,30 @@ mod tests {
     /// roles.
     #[test]
     fn chrome_console_tools_and_help_paint_no_status_in_colour() {
-        const FILES: [&str; 32] = [
+        const FILES: [&str; 46] = [
             "workbench/app/dialogs/help.rs",
             "workbench/chrome.rs",
             "workbench/chrome/activity_rail.rs",
+            "workbench/chrome/activity_rail/results.rs",
             "workbench/chrome/document_bar.rs",
+            "workbench/chrome/document_bar/code.rs",
+            "workbench/chrome/document_bar/design.rs",
+            "workbench/chrome/document_bar/models.rs",
+            "workbench/chrome/document_bar/project.rs",
+            "workbench/chrome/document_bar/results.rs",
+            "workbench/chrome/document_bar/simulate.rs",
             "workbench/chrome/phone_navigation.rs",
             "workbench/chrome/presence.rs",
             "workbench/chrome/sheet_strip.rs",
             "workbench/chrome/status_bar.rs",
+            "workbench/chrome/status_bar/design.rs",
+            "workbench/chrome/status_bar/results.rs",
+            "workbench/chrome/status_bar/run.rs",
+            "workbench/chrome/status_bar/sheets.rs",
+            "workbench/chrome/status_bar/shell.rs",
             "workbench/chrome/title_bar.rs",
+            "workbench/chrome/title_bar/code.rs",
+            "workbench/chrome/title_bar/design.rs",
             "workbench/chrome/toolbar.rs",
             "workbench/chrome/toolbar/code.rs",
             "workbench/chrome/toolbar/design.rs",
