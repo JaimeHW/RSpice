@@ -658,7 +658,8 @@ def measure(source_root: Path):
     # item itself are still counted below.
     symbols = {
         name: next(iter(found)) for name, found in public_in.items()
-        if len(name) >= 4 and len(defined_in[name]) == 1 and name not in ("Cell", "Align", "Request")
+        if len(name) >= 4 and len(defined_in[name]) == 1
+        and name not in ("Cell", "Align", "Request", "ResultRun")
     }
 
     # `use` declarations: re-export table, external roots, per-file imports and globs.
