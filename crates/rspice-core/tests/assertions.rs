@@ -495,6 +495,88 @@ mod vector_files {
         assert!(reports.is_empty(), "{reports:?}");
     }
 
+    /// The C4 corpus file against an ideal register: b7..b0 hold `S_k` from
+    /// 500 ns into conversion k to 999 ns, across each check at k us + 975 ns.
+    fn ideal_register(vector_path: &str) -> Netlist {
+        const STAIRCASE: [u8; 32] = [
+            0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 127, 128, 129, 144, 170, 191, 200, 233, 250, 254,
+            255, 64, 63, 32, 31, 16, 15, 7, 6, 4, 192,
+        ];
+        let mut deck = format!(
+            "* c04 vec against an ideal register\n.vec '{vector_path}'\nrclk clk 0 1meg\n\
+             rstart start 0 1meg\n"
+        );
+        for bit in (0..8).rev() {
+            deck.push_str(&format!("vb{bit} b{bit} 0 pwl("));
+            for (k, code) in STAIRCASE.iter().enumerate() {
+                let level = if code & (1 << bit) != 0 { 1.8 } else { 0.0 };
+                let base = k as f64 * 1e-6;
+                deck.push_str(&format!(
+                    " {:e} {level} {:e} {level}",
+                    base + 500e-9,
+                    base + 999e-9
+                ));
+            }
+            deck.push_str(")\n");
+        }
+        deck.push_str(".tran 10n 32u\n.end\n");
+        parse(&deck)
+    }
+
+    const C04: &str = include_str!("../../../tests/mixed-corpus/c04-sar8/net/c04.vec");
+
+    #[test]
+    fn the_c4_checks_pass_on_its_codes_and_one_corrupted_row_is_one_violation() {
+        register("assertions-c04/c04.vec", C04);
+        let netlist = ideal_register("assertions-c04/c04.vec");
+        let reports = tran_reports(&netlist);
+        assert_eq!(reports.len(), 8, "one report per output bit: {reports:?}");
+        for report in &reports {
+            assert_eq!(report.name, "c04.vec");
+            assert_eq!(report.level, AssertLevel::Error);
+            assert!(report.error.is_none(), "{report:?}");
+            assert!(report.violations.is_empty(), "{report:?}");
+        }
+        assert_eq!(reports[0].target, "V(b7)");
+        assert_eq!(reports[7].target, "V(b0)");
+
+        // Conversion 5 ends with S_5 = 8 (0x08) on the row at 5950 ns; the
+        // corrupted row expects 0x88, so b7 must be high and is not.
+        let row = C04
+            .lines()
+            .position(|line| line == "5950 1 0 0 8")
+            .expect("conversion 5's row")
+            + 1;
+        let corrupted = C04.replace("5950 1 0 0 8", "5950 1 0 8 8");
+        register("assertions-c04-corrupt/c04.vec", &corrupted);
+        let netlist = ideal_register("assertions-c04-corrupt/c04.vec");
+        let reports = tran_reports(&netlist);
+        let violated: Vec<&AssertionReport> = reports
+            .iter()
+            .filter(|report| !report.violations.is_empty())
+            .collect();
+        let [violated] = violated[..] else {
+            panic!("exactly one violation: {reports:?}");
+        };
+        assert_eq!(
+            violated.origin.to_string(),
+            format!("assertions-c04-corrupt/c04.vec:{row}")
+        );
+        assert_eq!(violated.target, "V(b7)");
+        let message = violated.message.as_deref().unwrap_or_default();
+        assert!(message.contains(&format!("c04.vec:{row}")), "{message}");
+        assert!(message.contains("column 3 expects 1 on b7"), "{message}");
+        let [violation] = violated.violations.as_slice() else {
+            panic!("{violated:?}");
+        };
+        let at = 5.95e-6 + 25e-9;
+        assert!(
+            (violation.start.unwrap() - at).abs() <= 1e-18,
+            "{violation:?}"
+        );
+        assert_eq!(violation.extreme, Some(0.0));
+    }
+
     #[test]
     fn the_card_sets_the_level_and_an_unreadable_file_is_reported() {
         register(
