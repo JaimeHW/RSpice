@@ -1236,55 +1236,49 @@ mod tests {
         .expect_err("a declared nonempty plot still requires its data");
     }
 
+    /// `input` must fail to parse with an error containing either needle.
+    fn assert_raw_rejected(input: &str, why: &str, needles: [&str; 2]) {
+        let err = parse_raw(input).expect_err(why);
+        let message = err.to_string();
+        assert!(
+            needles.iter().any(|needle| message.contains(needle)),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn ascii_raw_rejects_variable_count_mismatch() {
-        let err = parse_raw(
+        assert_raw_rejected(
             "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\nValues:\n0 0.0 1.0\n",
-        )
-        .expect_err("declared/listed variable count mismatch must reject");
-
-        assert!(
-            err.to_string().contains("No. Variables") || err.to_string().contains("variable"),
-            "unexpected error: {err}"
+            "declared/listed variable count mismatch must reject",
+            ["No. Variables", "variable"],
         );
     }
 
     #[test]
     fn ascii_raw_rejects_short_declared_data() {
-        let err = parse_raw(
+        assert_raw_rejected(
             "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0\n",
-        )
-        .expect_err("short data against No. Points must reject");
-
-        assert!(
-            err.to_string().contains("No. Points") || err.to_string().contains("point"),
-            "unexpected error: {err}"
+            "short data against No. Points must reject",
+            ["No. Points", "point"],
         );
     }
 
     #[test]
     fn ascii_raw_rejects_extra_columns() {
-        let err = parse_raw(
+        assert_raw_rejected(
             "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0 2.0\n",
-        )
-        .expect_err("extra ASCII data columns must reject");
-
-        assert!(
-            err.to_string().contains("column") || err.to_string().contains("value"),
-            "unexpected error: {err}"
+            "extra ASCII data columns must reject",
+            ["column", "value"],
         );
     }
 
     #[test]
     fn ascii_raw_rejects_nonfinite_values() {
-        let err = parse_raw(
+        assert_raw_rejected(
             "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 NaN\n",
-        )
-        .expect_err("non-finite ASCII raw values must reject");
-
-        assert!(
-            err.to_string().contains("NaN") || err.to_string().contains("finite"),
-            "unexpected error: {err}"
+            "non-finite ASCII raw values must reject",
+            ["NaN", "finite"],
         );
     }
 
