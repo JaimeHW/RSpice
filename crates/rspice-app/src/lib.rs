@@ -314,7 +314,7 @@ impl RSpiceApp {
             .model
             .netlist_artifacts
             .current_generation_input_digest = None;
-        self.state.clear_project_design_history();
+        self.state.model.clear_project_design_history();
         Ok(receipt)
     }
 

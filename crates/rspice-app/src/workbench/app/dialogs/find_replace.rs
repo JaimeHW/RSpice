@@ -224,7 +224,9 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
         changed += if renames {
             // An instance renamed here is renamed as the Rename form
             // renames it, references and all.
-            state.replace_text_carrying_references(&document.reference, &document.matches)?
+            state
+                .model
+                .replace_text_carrying_references(&document.reference, &document.matches)?
         } else if document.key == active {
             state.model.schematic.replace_text(&document.matches)?
         } else if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&document.key) {
@@ -462,6 +464,7 @@ mod tests {
         assert_eq!(
             by_form
                 .state
+                .model
                 .rename_component_transaction(&expected, "R10".to_owned()),
             Ok(true)
         );

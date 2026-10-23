@@ -106,7 +106,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
         )
         .is_err()
     );
-    assert!(!app.state.can_undo_project_design());
+    assert!(!app.state.model.can_undo_project_design());
 }
 
 /// An edit to a governed sheet is one presentation transaction: the sheet
@@ -126,7 +126,7 @@ fn an_edit_is_one_exact_undoable_presentation_transaction() {
     assert_eq!(after.inheritance, DrawingSheetInheritance::Explicit);
     assert_eq!(after.authored_size, before.authored_size);
     assert_eq!(after.border, before.border);
-    assert!(app.state.can_undo_project_design());
+    assert!(app.state.model.can_undo_project_design());
     assert!(app.state.model.workspace.content.project_metadata_dirty);
     assert_eq!(app.state.model.schematic.topology_version(), topology);
     assert_eq!(
@@ -151,7 +151,7 @@ fn an_edit_is_one_exact_undoable_presentation_transaction() {
     assert_eq!(receipt.kind, DrawingSheetTransactionKind::PageSetup);
     assert_eq!(receipt.applied_sheet_ids, vec![ids[0]]);
     assert!(app.state.undo_project_design().unwrap().is_some());
-    assert!(!app.state.can_undo_project_design());
+    assert!(!app.state.model.can_undo_project_design());
 }
 
 /// Each edit is its own undo step.
@@ -198,7 +198,7 @@ fn a_refused_edit_leaves_nothing_behind() {
     )
     .unwrap_err();
     assert!(error.contains("Title is required"), "{error}");
-    assert!(!app.state.can_undo_project_design());
+    assert!(!app.state.model.can_undo_project_design());
 }
 
 /// A sheet's own title is edited without taking it off the project default
@@ -298,7 +298,7 @@ fn the_first_edit_gives_the_schematic_its_governed_sheet() {
             [&DrawingSheetTitleFieldId::Organization],
         "Example Labs"
     );
-    assert!(app.state.can_undo_project_design());
+    assert!(app.state.model.can_undo_project_design());
 
     let mut app = RSpiceApp::test_instance();
     apply_drawing_sheet_edit(
@@ -539,7 +539,7 @@ fn an_edit_that_changes_nothing_leaves_no_history() {
         DrawingSheetEdit::Orientation(SchematicPageOrientation::Landscape),
     )
     .unwrap();
-    assert!(!app.state.can_undo_project_design());
+    assert!(!app.state.model.can_undo_project_design());
 }
 
 /// ASME Y14.1 5.2 recommends one size for every sheet of a drawing: the

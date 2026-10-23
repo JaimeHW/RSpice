@@ -259,7 +259,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
     code_workspace::replace_selected_veriloga_file(&mut app, &saved, "model.va", edited).unwrap();
     let later = code_workspace::selected_veriloga_source(&app).unwrap();
 
-    assert!(!app.state.can_undo_project_design());
+    assert!(!app.state.model.can_undo_project_design());
     Command::Undo.execute(&mut app);
     let after = code_workspace::selected_veriloga_source(&app).unwrap();
     assert_eq!(

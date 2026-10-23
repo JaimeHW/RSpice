@@ -235,6 +235,7 @@ pub(crate) fn bind_component_model_from_catalog(
     let mut candidate = component.clone();
     candidate.params = params;
     app.state
+        .model
         .edit_component_transaction(&component, candidate, "bind instance model")?;
     app.invalidate_simulation_preflight();
     Ok(())

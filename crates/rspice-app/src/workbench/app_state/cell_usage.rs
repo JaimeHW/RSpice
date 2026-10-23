@@ -79,6 +79,69 @@ impl Model {
         });
         uses
     }
+
+    /// Take a removed cell out of every workspace collection that names it,
+    /// and say what that left undecided.
+    pub(in crate::workbench) fn drop_workspace_references_to_cell(
+        &mut self,
+        library: &str,
+        cell: &str,
+    ) -> CellRemovalScope {
+        let active_removed = self.workspace.content.active_view.library == library
+            && self.workspace.content.active_view.cell == cell;
+        let project_root_removed = self.workspace.content.project.root_library == library
+            && self.workspace.content.project.top_cell == cell;
+        let prefix = format!("{library}/{cell}/");
+        self.workspace
+            .content
+            .schematic_buffers
+            .retain(|key, _| !key.starts_with(&prefix));
+        self.workspace
+            .session
+            .schematic_sessions
+            .retain(|key, _| !key.starts_with(&prefix));
+        let orphaned_layouts = self
+            .workspace
+            .content
+            .physical_layout_documents()
+            .values()
+            .filter(|document| document.owner().library == library && document.owner().cell == cell)
+            .map(|document| document.owner().clone())
+            .collect::<Vec<_>>();
+        for owner in orphaned_layouts {
+            self.workspace
+                .content
+                .remove_physical_layout_document(&owner);
+        }
+        self.workspace
+            .content
+            .open_views
+            .retain(|open| open.reference.library != library || open.reference.cell != cell);
+        let libraries = &self.library_manager;
+        for schematic in self.workspace.content.schematic_buffers.values_mut() {
+            schematic.revalidate_instance_bindings(libraries.catalog());
+        }
+        let hierarchy_pruned = self
+            .workspace
+            .content
+            .retain_valid_occurrences(|reference| {
+                reference.library != library || reference.cell != cell
+            });
+        CellRemovalScope {
+            active_removed,
+            project_root_removed,
+            hierarchy_pruned,
+        }
+    }
+}
+
+/// What taking one cell out of the workspace left undecided: the focus, the
+/// project root, and the occurrence trail all name cell views, and any of the
+/// three can have named the cell that just went.
+pub(in crate::workbench) struct CellRemovalScope {
+    pub(in crate::workbench) active_removed: bool,
+    pub(in crate::workbench) project_root_removed: bool,
+    pub(in crate::workbench) hierarchy_pruned: bool,
 }
 
 fn collect(

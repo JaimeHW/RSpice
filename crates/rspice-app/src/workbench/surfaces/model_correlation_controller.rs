@@ -831,6 +831,7 @@ fn publish_correlation(
     )?;
     let committed_revision =
         app.state
+            .model
             .publish_project_model_candidate(candidate, commit, description)?;
 
     app.state.select_model_library(&context.library_name);

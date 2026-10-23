@@ -139,7 +139,7 @@ impl RSpiceApp {
                 .construct_symbol(&imported.definition)
                 .map_err(|error| error.to_string())?;
             publish_symbol_definition_candidate(
-                &mut self.state,
+                &mut self.state.model,
                 candidate,
                 &library_name,
                 &cell_name,

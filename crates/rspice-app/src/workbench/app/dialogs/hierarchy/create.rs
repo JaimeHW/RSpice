@@ -587,7 +587,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
             ));
         }
     }
-    validate_hierarchy_target_unreferenced(state, &target)?;
+    validate_hierarchy_target_unreferenced(&state.model, &target)?;
     Ok(plan)
 }
 
@@ -859,21 +859,23 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         &cell_name,
         target_view_type.display_name(),
     );
-    state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
-        parent_ref,
-        target_schematic_ref,
-        target_open_ref,
-        before_parent,
-        after_parent: candidate.parent,
-        child: candidate.child,
-        target_cell,
-        open_views_before,
-        hierarchy_stack_before,
-        hierarchy_instances_before,
-        open_views_after,
-        hierarchy_stack_after,
-        hierarchy_instances_after,
-    });
+    state
+        .model
+        .record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
+            parent_ref,
+            target_schematic_ref,
+            target_open_ref,
+            before_parent,
+            after_parent: candidate.parent,
+            child: candidate.child,
+            target_cell,
+            open_views_before,
+            hierarchy_stack_before,
+            hierarchy_instances_before,
+            open_views_after,
+            hierarchy_stack_after,
+            hierarchy_instances_after,
+        });
     state.design.create_hierarchy.close();
     state.record(
         LogSeverity::Info,
@@ -1185,7 +1187,7 @@ mod tests {
             .for_each(|view| view.modified = false);
         state.model.schematic.session.is_dirty = false;
         assert!(
-            state.can_undo_project_design(),
+            state.model.can_undo_project_design(),
             "saving must not disable undo"
         );
         assert_eq!(
@@ -1201,7 +1203,7 @@ mod tests {
                 .and_then(|library| library.get_cell(DEFAULT_CELL))
                 .is_none()
         );
-        assert!(state.can_redo_project_design());
+        assert!(state.model.can_redo_project_design());
         assert_eq!(
             state.redo_project_design().expect("redo"),
             Some("create hierarchical cell".to_owned())

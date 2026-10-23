@@ -295,7 +295,7 @@ fn the_document_date_and_status_are_held_to_the_document_controls_rules() {
         panel.app.state.prompt_text(),
         Some("The date must be a calendar date written YYYY-MM-DD.")
     );
-    assert!(!panel.app.state.can_undo_project_design());
+    assert!(!panel.app.state.model.can_undo_project_design());
 
     let refused = apply_drawing_sheet_edit(
         &mut panel.app.state,
@@ -485,7 +485,7 @@ fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
     let mut panel = SheetPanel::new();
     panel.type_into("Created by", "J. Whitfield");
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
-    assert!(!panel.app.state.can_undo_project_design());
+    assert!(!panel.app.state.model.can_undo_project_design());
 
     panel.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(
@@ -495,7 +495,7 @@ fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
 
     assert!(panel.app.state.undo_project_design().unwrap().is_some());
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
-    assert!(!panel.app.state.can_undo_project_design());
+    assert!(!panel.app.state.model.can_undo_project_design());
 }
 
 #[test]
@@ -505,7 +505,7 @@ fn escape_abandons_a_typed_title_value() {
     panel.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
     panel.pass(Vec::new());
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
-    assert!(!panel.app.state.can_undo_project_design());
+    assert!(!panel.app.state.model.can_undo_project_design());
 }
 
 /// Selecting something on the canvas mid-edit swaps the panel in the same
@@ -560,7 +560,7 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
     commit_pending_sheet_text(&panel.ctx, &mut panel.app.state);
 
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
-    assert!(!panel.app.state.can_undo_project_design());
+    assert!(!panel.app.state.model.can_undo_project_design());
 }
 
 /// The size menu names each standard with its oriented size, and a choice

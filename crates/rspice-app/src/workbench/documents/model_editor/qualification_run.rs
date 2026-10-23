@@ -127,7 +127,7 @@ pub fn create_editable_project_copy_and_open(
         expected_project_revision,
     )?;
 
-    app.state.publish_project_model_candidate(
+    app.state.model.publish_project_model_candidate(
         candidate,
         commit,
         format!(
@@ -690,6 +690,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     };
     let committed_revision =
         app.state
+            .model
             .publish_project_model_candidate(candidate, commit, description)?;
     if definition_changed {
         app.invalidate_simulation_preflight();

@@ -241,6 +241,7 @@ impl RSpiceApp {
         draft.validate().map_err(|error| error.to_string())?;
         let schematic_tx = self
             .state
+            .model
             .prepare_design_management_schematic_transaction(&draft)?;
         let owner = self
             .state
@@ -256,9 +257,11 @@ impl RSpiceApp {
             .replace_design_management(draft)
             .map_err(|error| error.to_string())?;
         self.state
+            .model
             .apply_design_management_schematic_transaction(&schematic_tx);
         let candidate = (*self.state.model.workspace.content.design_management).clone();
         self.state
+            .model
             .record_design_management_transaction(DesignManagementHistoryEntry {
                 description: "apply reviewed design-management changes".to_owned(),
                 owner,

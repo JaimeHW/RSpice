@@ -132,7 +132,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     );
     assert!(Command::ModelEditor.is_enabled(&app));
 
-    assert!(app.state.can_undo_project_design());
+    assert!(app.state.model.can_undo_project_design());
     let undo_description = app
         .state
         .undo_project_design()
@@ -147,7 +147,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
             .is_none(),
         "undo removes the newly created project library"
     );
-    assert!(app.state.can_redo_project_design());
+    assert!(app.state.model.can_redo_project_design());
     app.state
         .redo_project_design()
         .expect("copy redo succeeds")

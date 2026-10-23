@@ -50,7 +50,7 @@ impl AppState {
                 )
             })??;
         publish_symbol_definition_candidate(
-            self,
+            &mut self.model,
             candidate,
             &reference.library,
             &reference.cell,

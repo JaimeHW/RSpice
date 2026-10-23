@@ -689,7 +689,7 @@ pub(super) fn publish_model_hub_output(
     } = part;
     if state.platform.project_lifecycle.is_open() {
         let published = publish_model_library_candidate(
-            state,
+            &mut state.model,
             *candidate,
             &library_name,
             request.revision_reason(&part_id),

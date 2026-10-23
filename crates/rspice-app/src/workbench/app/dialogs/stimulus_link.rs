@@ -454,7 +454,7 @@ pub(crate) fn commit_adoption(
             ));
         }
     } else {
-        state.edit_component_transaction(
+        state.model.edit_component_transaction(
             &expected,
             candidate.into_component(),
             "adopt stimulus definition",
@@ -510,7 +510,9 @@ pub(crate) fn commit_readoption(
     let mut candidate = expected.clone();
     held.readopt_onto(&mut candidate)?;
     let reference = candidate.spice_instance_name();
-    state.edit_component_transaction(&expected, candidate, "re-adopt stimulus definition")?;
+    state
+        .model
+        .edit_component_transaction(&expected, candidate, "re-adopt stimulus definition")?;
     Ok(format!(
         "{reference} re-adopted {definition} r{}; its card is the library's again.",
         held.revision()
@@ -554,7 +556,9 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
         .insert(definition)
         .map_err(|error| error.to_string())?;
     if let Err(refusal) =
-        state.edit_component_transaction(&expected, candidate, "save stimulus definition")
+        state
+            .model
+            .edit_component_transaction(&expected, candidate, "save stimulus definition")
     {
         let _ = state.model.workspace.content.stimulus_library.delete(&name);
         return Err(refusal);

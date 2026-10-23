@@ -330,7 +330,7 @@ impl Bench {
     /// none.
     pub(super) fn forget_history(&mut self) {
         self.app.state.model.schematic.clear_undo_history();
-        self.app.state.clear_project_design_history();
+        self.app.state.model.clear_project_design_history();
     }
 
     /// Copy the selection to the application's clipboard.

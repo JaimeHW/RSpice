@@ -1772,6 +1772,7 @@ pub(super) fn commit_project_candidate(
     candidate.validate().map_err(|error| error.to_string())?;
     let schematic_tx = app
         .state
+        .model
         .prepare_design_management_schematic_transaction(&candidate)?;
     let owner = app
         .state
@@ -1787,9 +1788,11 @@ pub(super) fn commit_project_candidate(
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
+        .model
         .apply_design_management_schematic_transaction(&schematic_tx);
     let after = (*app.state.model.workspace.content.design_management).clone();
     app.state
+        .model
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),
             owner,
@@ -2008,7 +2011,7 @@ mod tests {
                 .revision(),
             before + 1
         );
-        assert!(app.state.can_undo_project_design());
+        assert!(app.state.model.can_undo_project_design());
         assert_eq!(
             app.state
                 .model

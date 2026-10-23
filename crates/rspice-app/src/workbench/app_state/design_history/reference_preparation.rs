@@ -26,7 +26,7 @@ impl SchematicReferenceTransaction {
     }
 }
 
-impl AppState {
+impl Model {
     /// Restore the guarded design edit while resolving its current consumers.
     /// Outputs, configurations and other documents can acquire references after
     /// the original commit; their current roots and occurrences remain authority.
@@ -65,9 +65,9 @@ impl AppState {
     pub(super) fn schematic_reference_sources(
         &self,
     ) -> BTreeMap<String, crate::state::SchematicEditorRef<'_>> {
-        self.model.workspace.schematic_reference_sources(
-            &self.model.workspace.content.active_schematic_reference(),
-            self.model.schematic.editor_ref(),
+        self.workspace.schematic_reference_sources(
+            &self.workspace.content.active_schematic_reference(),
+            self.schematic.editor_ref(),
         )
     }
 
@@ -79,16 +79,13 @@ impl AppState {
         for (key, source) in &before {
             validate_reference_document(self, key, source.editor_ref())?;
         }
-        let transaction = self
-            .model
-            .workspace
-            .prepare_schematic_reference_transaction(
-                &self.model.library_manager,
-                &self.model.workspace.content.active_schematic_reference(),
-                self.model.schematic.editor_ref(),
-                before,
-                after,
-            )?;
+        let transaction = self.workspace.prepare_schematic_reference_transaction(
+            &self.library_manager,
+            &self.workspace.content.active_schematic_reference(),
+            self.schematic.editor_ref(),
+            before,
+            after,
+        )?;
         for (key, source) in &transaction.before {
             validate_reference_document(self, key, source.editor_ref())?;
         }
@@ -97,12 +94,12 @@ impl AppState {
 }
 
 pub(super) fn validate_reference_document(
-    state: &AppState,
+    state: &Model,
     key: &str,
     source: crate::state::SchematicEditorRef<'_>,
 ) -> Result<(), String> {
     let reference = reference_from_key(key)?;
-    if !state.model.project_open.is_open() || document_read_only(state, &reference) {
+    if !state.project_open.is_open() || document_read_only(state, &reference) {
         return Err(format!(
             "Reference editing requires an open, writable schematic '{key}'."
         ));

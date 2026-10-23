@@ -140,6 +140,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
         .id;
     assert!(
         app.state
+            .model
             .rename_component_transaction(&expected, "V9".to_owned())
             .unwrap()
     );
@@ -157,7 +158,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     app.action_edit_undo();
     assert_reference(&app, configuration, plan, "V1");
     assert!(!app.state.model.schematic.can_undo());
-    assert!(app.state.project_undo_sequence().is_none());
+    assert!(app.state.model.project_undo_sequence().is_none());
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
@@ -256,6 +257,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         candidate.params = "ac=1".to_owned();
         assert!(
             app.state
+                .model
                 .edit_component_transaction(&expected, candidate, "edit properties")
                 .is_err(),
             "{refusal}"
@@ -275,7 +277,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         assert_eq!(dirty, app.state.model.schematic.session.is_dirty);
         assert!(!app.state.model.workspace.content.project_metadata_dirty);
         assert_eq!(epoch, app.state.model.design_execution_epoch);
-        assert!(app.state.project_undo_sequence().is_none());
+        assert!(app.state.model.project_undo_sequence().is_none());
         assert_eq!(
             app.state
                 .model
@@ -294,6 +296,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
 fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
     let (mut app, expected, configuration, plan) = fixture();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     let payload = app
@@ -325,9 +328,10 @@ fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
 fn history_refusal_keeps_the_transaction_available_for_retry() {
     let (mut app, expected, configuration, plan) = fixture();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
-    let sequence = app.state.project_undo_sequence();
+    let sequence = app.state.model.project_undo_sequence();
     let revision = app
         .state
         .model
@@ -347,7 +351,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
         .revision = ObjectRevision::new(u64::MAX).unwrap();
     assert!(app.state.undo_project_design().is_err());
     assert_reference(&app, configuration, plan, "V9");
-    assert_eq!(sequence, app.state.project_undo_sequence());
+    assert_eq!(sequence, app.state.model.project_undo_sequence());
     app.state
         .model
         .workspace
@@ -372,6 +376,7 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
     let mut expected = expected;
     expected.value = "2".to_owned();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     app.state
@@ -383,10 +388,10 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
         .saved_outputs[0]
         .source_expression = "I(V_other)".to_owned();
     let snapshot = SchematicSnapshot::capture(app.state.model.schematic.document());
-    let sequence = app.state.project_undo_sequence();
+    let sequence = app.state.model.project_undo_sequence();
     app.action_edit_undo();
     assert!(snapshot.is_equal_document(app.state.model.schematic.document()));
-    assert_eq!(sequence, app.state.project_undo_sequence());
+    assert_eq!(sequence, app.state.model.project_undo_sequence());
     assert!(
         app.state.model.schematic.can_undo(),
         "the older value edit was not consumed"
@@ -397,6 +402,7 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
 fn local_edit_and_project_rename_follow_one_global_history_order() {
     let (mut app, expected, configuration, plan) = fixture();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     app.state
@@ -435,6 +441,7 @@ fn rename_starts_a_new_history_branch_without_stale_local_redo() {
     app.action_edit_undo();
     assert!(app.state.model.schematic.can_redo());
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     assert!(!app.state.model.schematic.can_redo());
@@ -456,6 +463,7 @@ fn switching_documents_does_not_redirect_rename_history() {
         .content
         .active_schematic_reference();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     let other = CellViewRef::new("work", "other", "schematic");
@@ -536,6 +544,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         .add_saved_output(second_plan, source)
         .unwrap();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     app.state.model.sim_setup.activate_plan(first_plan).unwrap();
@@ -615,6 +624,7 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
         .unwrap()
         .clone();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     assert_reference(&app, configuration, plan, "V9");
@@ -656,6 +666,7 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
         Some("I(Vbias)".to_owned());
     app.state.model.schematic.document_mut_for_test().probes[0].reference = "I(Vbias)".to_owned();
     app.state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     assert_eq!(
@@ -712,11 +723,12 @@ fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
     let epoch = app.state.model.design_execution_epoch;
     assert!(
         !app.state
+            .model
             .rename_component_transaction(&expected, expected.name.clone())
             .unwrap()
     );
     assert!(before.is_equal_document(app.state.model.schematic.document()));
     assert_eq!(app.state.model.design_execution_epoch, epoch);
-    assert!(app.state.project_undo_sequence().is_none());
+    assert!(app.state.model.project_undo_sequence().is_none());
     assert!(!app.state.model.workspace.content.project_metadata_dirty);
 }

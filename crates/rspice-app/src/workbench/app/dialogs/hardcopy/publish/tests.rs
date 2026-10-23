@@ -290,7 +290,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         &authored_before
     );
     assert!(
-        !app.state.can_undo_project_design(),
+        !app.state.model.can_undo_project_design(),
         "output-media setup must not create an authored-sheet transaction"
     );
     assert_eq!(

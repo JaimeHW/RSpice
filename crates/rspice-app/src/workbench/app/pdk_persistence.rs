@@ -375,7 +375,7 @@ impl RSpiceApp {
                         } = *settings;
                         let publication = if self.state.platform.project_lifecycle.is_open() {
                             publish_model_library_set_candidate(
-                                &mut self.state,
+                                &mut self.state.model,
                                 model_libraries,
                                 "apply configured PDK model sources",
                             )

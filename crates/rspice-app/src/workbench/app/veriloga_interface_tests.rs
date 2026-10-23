@@ -720,7 +720,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
         code_workspace::symbol_drift_text(&drift, app.state.workbench.messages()),
         "1 pin missing, 1 extra"
     );
-    assert!(!app.state.can_undo_project_design());
+    assert!(!app.state.model.can_undo_project_design());
 
     let summary = app
         .state
@@ -737,11 +737,11 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
         "the missing pin is added and the extra one kept"
     );
 
-    assert!(app.state.can_undo_project_design());
+    assert!(app.state.model.can_undo_project_design());
     assert!(app.state.undo_project_design().expect("undo").is_some());
     assert_eq!(symbol(&app, &reference), drawn, "undo restores the drawing");
     assert!(
-        !app.state.can_undo_project_design(),
+        !app.state.model.can_undo_project_design(),
         "the update was exactly one undo step"
     );
 }

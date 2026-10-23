@@ -619,7 +619,9 @@ fn commit_sheet_candidate(
         preferences.set_drawing_sheet_personal_preferences(personal)?;
     }
     candidate.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = state.prepare_design_management_schematic_transaction(&candidate)?;
+    let schematic_tx = state
+        .model
+        .prepare_design_management_schematic_transaction(&candidate)?;
     let owner = state.model.workspace.content.active_schematic_reference();
     let committed_revision = state
         .model
@@ -627,18 +629,22 @@ fn commit_sheet_candidate(
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
-    state.apply_design_management_schematic_transaction(&schematic_tx);
+    state
+        .model
+        .apply_design_management_schematic_transaction(&schematic_tx);
     let after = (*state.model.workspace.content.design_management).clone();
-    state.record_design_management_transaction(DesignManagementHistoryEntry {
-        description: "Sheet format".to_owned(),
-        owner,
-        before,
-        after,
-        before_schematics: schematic_tx.before,
-        after_schematics: schematic_tx.after,
-        references: schematic_tx.references,
-        committed_revision,
-    });
+    state
+        .model
+        .record_design_management_transaction(DesignManagementHistoryEntry {
+            description: "Sheet format".to_owned(),
+            owner,
+            before,
+            after,
+            before_schematics: schematic_tx.before,
+            after_schematics: schematic_tx.after,
+            references: schematic_tx.references,
+            committed_revision,
+        });
     state.model.preferences = preferences;
     Ok(())
 }

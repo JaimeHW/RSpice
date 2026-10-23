@@ -1005,7 +1005,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     };
 
     publish_symbol_definition_candidate_with_fixture(
-        state,
+        &mut state.model,
         candidate,
         &library_name,
         &cell_name,

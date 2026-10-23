@@ -133,7 +133,7 @@ impl RSpiceApp {
     fn try_project_design_undo(&mut self) -> bool {
         match self.state.undo_project_design() {
             Ok(Some(_)) => self.invalidate_simulation_preflight(),
-            Ok(None) if self.state.project_undo_sequence().is_some() => {
+            Ok(None) if self.state.model.project_undo_sequence().is_some() => {
                 self.state.prompt(
                     "Undo is unavailable because the latest project edit's document or references changed.",
                 );
@@ -147,7 +147,7 @@ impl RSpiceApp {
     fn try_project_design_redo(&mut self) -> bool {
         match self.state.redo_project_design() {
             Ok(Some(_)) => self.invalidate_simulation_preflight(),
-            Ok(None) if self.state.project_redo_sequence().is_some() => {
+            Ok(None) if self.state.model.project_redo_sequence().is_some() => {
                 self.state.prompt(
                     "Redo is unavailable because the latest project edit's document or references changed.",
                 );
@@ -217,7 +217,7 @@ impl RSpiceApp {
                 }
             };
         }
-        if !self.state.can_redo_active_schematic() {
+        if !self.state.model.can_redo_active_schematic() {
             return false;
         }
         if self.state.model.schematic.redo() {
@@ -307,7 +307,7 @@ impl RSpiceApp {
         // The history holding the newer step takes it. With nothing to undo
         // the command is silent: the Edit menu already shows it disabled.
         let project_first = project_step_is_newer(
-            self.state.project_undo_sequence(),
+            self.state.model.project_undo_sequence(),
             self.active_document_undo_sequence(),
         );
         if project_first && self.try_project_design_undo() {
@@ -341,9 +341,9 @@ impl RSpiceApp {
         // A step committed in either history since an undo replaces what
         // the other can redo, so only the steps no newer edit replaced are
         // left to arbitrate.
-        self.state.retire_replaced_redo_steps();
+        self.state.model.retire_replaced_redo_steps();
         let project_first = project_step_is_newer(
-            self.state.project_redo_sequence(),
+            self.state.model.project_redo_sequence(),
             self.active_document_redo_sequence(),
         );
         if project_first && self.try_project_design_redo() {
@@ -473,16 +473,18 @@ mod shortcut_ownership_tests {
             .replace_design_management(candidate)
             .expect("publish reviewed catalog");
         let after = (*state.model.workspace.content.design_management).clone();
-        state.record_design_management_transaction(DesignManagementHistoryEntry {
-            description: "assign objects to the active sheet".to_owned(),
-            owner: owner.clone(),
-            before,
-            after,
-            before_schematics: std::collections::BTreeMap::new(),
-            after_schematics: std::collections::BTreeMap::new(),
-            references: Default::default(),
-            committed_revision,
-        });
+        state
+            .model
+            .record_design_management_transaction(DesignManagementHistoryEntry {
+                description: "assign objects to the active sheet".to_owned(),
+                owner: owner.clone(),
+                before,
+                after,
+                before_schematics: std::collections::BTreeMap::new(),
+                after_schematics: std::collections::BTreeMap::new(),
+                references: Default::default(),
+                committed_revision,
+            });
         owner
     }
 

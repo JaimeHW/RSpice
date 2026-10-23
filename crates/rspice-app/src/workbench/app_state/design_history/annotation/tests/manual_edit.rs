@@ -30,6 +30,7 @@ fn rename(fixture: &mut Fixture, name: &str) -> Result<bool, String> {
         .clone();
     fixture
         .state
+        .model
         .rename_component_transaction(&expected, name.to_owned())
 }
 
@@ -209,7 +210,7 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
             let revision = state.model.workspace.content.project.revision();
             let undo_len = state.model.project_design_history.undo.len();
             if history {
-                assert!(!state.can_undo_project_design(), "{failure}");
+                assert!(!state.model.can_undo_project_design(), "{failure}");
                 assert!(
                     !matches!(state.undo_project_design(), Ok(Some(_))),
                     "{failure}"
@@ -349,9 +350,10 @@ fn unrelated_descriptor_changes_cannot_reanchor_annotation_history() {
         .unwrap();
     fixture
         .state
+        .model
         .retain_annotation_history_after_save_descriptor(&published);
     fixture.state.model.workspace.content.project = published;
-    assert!(!fixture.state.can_undo_project_design());
+    assert!(!fixture.state.model.can_undo_project_design());
     assert!(fixture.state.undo_project_design().unwrap().is_none());
     assert_projection(&fixture, "V42");
 }

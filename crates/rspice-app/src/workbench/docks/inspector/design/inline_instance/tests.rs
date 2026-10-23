@@ -319,7 +319,7 @@ fn escape_discards_valid_and_invalid_fields_without_design_or_history_changes() 
             topology
         );
         assert!(!editor.app.state.model.schematic.can_undo());
-        assert!(editor.app.state.project_undo_sequence().is_none());
+        assert!(editor.app.state.model.project_undo_sequence().is_none());
     }
 }
 
@@ -368,7 +368,7 @@ fn switching_fields_in_either_render_order_commits_each_edit_once() {
             before
         );
         assert!(!editor.app.state.model.schematic.can_undo());
-        assert!(editor.app.state.project_undo_sequence().is_none());
+        assert!(editor.app.state.model.project_undo_sequence().is_none());
         editor.app.action_edit_redo();
         editor.app.action_edit_redo();
         assert_eq!(
@@ -570,7 +570,7 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
                 .buffer,
             "V9"
         );
-        assert!(editor.app.state.project_undo_sequence().is_none());
+        assert!(editor.app.state.model.project_undo_sequence().is_none());
     }
 }
 
@@ -657,7 +657,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
             .source_expression,
         "I(V1)"
     );
-    assert!(editor.app.state.project_undo_sequence().is_none());
+    assert!(editor.app.state.model.project_undo_sequence().is_none());
     assert!(!editor.app.state.model.schematic.can_undo());
     editor.app.action_edit_redo();
     assert_eq!(

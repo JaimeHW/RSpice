@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use crate::state::{CellViewRef, SheetId, UndoSequence, next_undo_sequence};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 use super::schematic_for_reference;
 
@@ -35,9 +35,8 @@ pub(super) struct DocumentCompensation {
 impl DocumentCompensation {
     /// A document whose objects move as part of the transaction, so undo has
     /// to put them back on the sheets they were recorded on.
-    pub(super) fn with_recorded_sheets(state: &AppState, reference: CellViewRef) -> Self {
+    pub(super) fn with_recorded_sheets(state: &Model, reference: CellViewRef) -> Self {
         let before_sheet_assignments = state
-            .model
             .workspace
             .content
             .design_management
@@ -70,13 +69,12 @@ impl DocumentCompensation {
     /// something, so a project without governed sheets never advances its
     /// revision here — an undo that silently bumped the revision would fail
     /// every guard beneath it on the stack.
-    pub(super) fn restore_recorded_sheets(&self, state: &mut AppState) -> Result<(), String> {
+    pub(super) fn restore_recorded_sheets(&self, state: &mut Model) -> Result<(), String> {
         if self.before_sheet_assignments.is_empty() {
             return Ok(());
         }
         let key = self.reference.key();
         if state
-            .model
             .workspace
             .content
             .design_management
@@ -90,7 +88,7 @@ impl DocumentCompensation {
         else {
             return Ok(());
         };
-        let mut candidate = (*state.model.workspace.content.design_management).clone();
+        let mut candidate = (*state.workspace.content.design_management).clone();
         let catalog = candidate
             .sheet_catalog_mut(&key)
             .expect("the cloned catalog retains the key just found on the live one");
@@ -115,7 +113,6 @@ impl DocumentCompensation {
             return Ok(());
         }
         state
-            .model
             .workspace
             .content
             .replace_design_management(candidate)

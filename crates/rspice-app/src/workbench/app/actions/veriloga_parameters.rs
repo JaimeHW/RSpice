@@ -126,7 +126,8 @@ impl AppState {
         let mut candidate = component.clone();
         candidate.params =
             crate::state::params_string::set_parameter_value(&component.params, key, "")?;
-        self.edit_component_transaction(&component, candidate, &format!("remove {key}"))
+        self.model
+            .edit_component_transaction(&component, candidate, &format!("remove {key}"))
     }
 }
 

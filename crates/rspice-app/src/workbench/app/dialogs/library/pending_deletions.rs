@@ -625,7 +625,7 @@ fn apply_instance_resolution(
             .insert_schematic_editor(key, after.clone());
         documents.push((reference, before, after));
     }
-    state.record_instance_removal_transaction(
+    state.model.record_instance_removal_transaction(
         format!("remove placements of {}", target.display_path()),
         documents,
     );
@@ -2070,7 +2070,7 @@ mod tests {
             );
         }
         assert!(
-            app.state.can_undo_project_design(),
+            app.state.model.can_undo_project_design(),
             "the reader's one answer is one undoable step"
         );
 
@@ -2092,7 +2092,7 @@ mod tests {
             );
         }
         assert!(
-            app.state.project_undo_sequence().is_none(),
+            app.state.model.project_undo_sequence().is_none(),
             "both drawings came back on one step, not two"
         );
     }

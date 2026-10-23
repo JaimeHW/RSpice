@@ -393,6 +393,7 @@ fn wired_device() -> (User, Device) {
     assert_eq!(
         user.app
             .state
+            .model
             .edit_component_transaction(&expected, one_volt, "edit value"),
         Ok(true)
     );

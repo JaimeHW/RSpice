@@ -1718,7 +1718,7 @@ fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corne
         })
         .and_then(|()| {
             publish_model_library_candidate(
-                app.state,
+                &mut app.state.model,
                 candidate,
                 library_name,
                 format!("activate model corner {corner_name}"),

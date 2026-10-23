@@ -308,8 +308,12 @@ fn publish_prepared_pdk_configuration_with_persistence(
     })?;
 
     let publication = if state.platform.project_lifecycle.is_open() {
-        publish_model_library_set_candidate(state, candidate, "apply configured PDK model sources")
-            .map(|_| ())
+        publish_model_library_set_candidate(
+            &mut state.model,
+            candidate,
+            "apply configured PDK model sources",
+        )
+        .map(|_| ())
     } else {
         state.model.model_library_manager = candidate;
         Ok(())
@@ -1053,7 +1057,7 @@ fn publish_native_model_catalog_library(
     };
     let revision = if state.platform.project_lifecycle.is_open() {
         Some(
-            publish_model_library_candidate(state, candidate, library_name, reason)
+            publish_model_library_candidate(&mut state.model, candidate, library_name, reason)
                 .map_err(|error| vec![error])?,
         )
     } else {
@@ -1801,7 +1805,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
             candidate.add_library(parsed.library);
             if state.platform.project_lifecycle.is_open() {
                 publish_model_library_candidate(
-                    state,
+                    &mut state.model,
                     candidate,
                     &library_name,
                     if replace_library.is_some() {
@@ -2214,7 +2218,7 @@ mod tests {
                 .is_some()
         );
         assert_eq!(state.model.pdk_config.managed_model_sources.len(), 2);
-        assert!(state.can_undo_project_design());
+        assert!(state.model.can_undo_project_design());
 
         let mut disabled = state.model.pdk_config.clone();
         disabled.toggle_path_enabled(0);
@@ -2304,7 +2308,7 @@ mod tests {
         assert!(state.model.pdk_config.library_paths().is_empty());
         assert_eq!(state.model.workspace.content.project.revision(), revision);
         assert_eq!(state.model.design_execution_epoch, epoch);
-        assert!(!state.can_undo_project_design());
+        assert!(!state.model.can_undo_project_design());
 
         std::fs::remove_dir_all(root).expect("remove persistence source root");
     }
@@ -2336,7 +2340,7 @@ mod tests {
         assert_eq!(state.model.workspace.content.project.revision(), revision);
         assert_eq!(state.model.design_execution_epoch, epoch);
         assert!(!state.model.workspace.content.project_metadata_dirty);
-        assert!(!state.can_undo_project_design());
+        assert!(!state.model.can_undo_project_design());
 
         std::fs::remove_dir_all(root).expect("remove startup source root");
     }

@@ -679,6 +679,7 @@ fn commit_candidate(
     candidate.validate().map_err(|error| error.to_string())?;
     let schematic_tx = app
         .state
+        .model
         .prepare_design_management_schematic_transaction(&candidate)?;
     let owner = app
         .state
@@ -694,9 +695,11 @@ fn commit_candidate(
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
+        .model
         .apply_design_management_schematic_transaction(&schematic_tx);
     let after = (*app.state.model.workspace.content.design_management).clone();
     app.state
+        .model
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),
             owner,
@@ -1184,7 +1187,7 @@ mod tests {
         assert_eq!(receipt.applied_sheet_ids, vec![ordinary]);
         assert_eq!(receipt.unchanged_sheet_ids, vec![first]);
         assert_eq!(receipt.skipped[0].sheet_id, managed);
-        assert!(app.state.can_undo_project_design());
+        assert!(app.state.model.can_undo_project_design());
         assert_eq!(app.state.model.schematic.topology_version(), topology);
     }
 
@@ -1208,6 +1211,6 @@ mod tests {
             apply_sheet_format_manager(&mut app).unwrap_err(),
             "Edit the open sheet in Sheet properties."
         );
-        assert!(!app.state.can_undo_project_design());
+        assert!(!app.state.model.can_undo_project_design());
     }
 }

@@ -62,6 +62,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         .clone();
     fixture
         .state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     let documents = fixture
@@ -98,7 +99,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
             (&child, vec!["X1"]),
             (&other, vec!["X5"]),
         ] {
-            let schematic = schematic_for_reference(state, document).unwrap();
+            let schematic = schematic_for_reference(&state.model, document).unwrap();
             assert!(!schematic.design.history().can_redo());
             for (probe, parent) in schematic.document().probes.iter().zip(parents) {
                 assert_eq!(
@@ -177,6 +178,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
             if history {
                 fixture
                     .state
+                    .model
                     .rename_component_transaction(&expected, "V9".to_owned())
                     .unwrap();
             }
@@ -224,13 +226,14 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 .content
                 .configuration_sets
                 .clone();
-            let sequence = fixture.state.project_undo_sequence();
+            let sequence = fixture.state.model.project_undo_sequence();
             if history {
                 assert!(fixture.state.undo_project_design().is_err(), "{failure}");
             } else {
                 assert!(
                     fixture
                         .state
+                        .model
                         .rename_component_transaction(&expected, "V9".to_owned())
                         .is_err(),
                     "{failure}"
@@ -258,7 +261,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 fixture.state.model.workspace.content.configuration_sets,
                 configurations
             );
-            assert_eq!(fixture.state.project_undo_sequence(), sequence);
+            assert_eq!(fixture.state.model.project_undo_sequence(), sequence);
             assert_eq!(
                 fixture
                     .state
@@ -292,6 +295,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 assert!(
                     fixture
                         .state
+                        .model
                         .rename_component_transaction(&expected, "V9".to_owned())
                         .unwrap()
                 );
@@ -328,12 +332,13 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             .clone();
         fixture
             .state
+            .model
             .rename_component_transaction(&expected, "X9".to_owned())
             .unwrap();
         for (step, name) in ["X9", original, "X9"].into_iter().enumerate() {
             let state = &fixture.state;
             for reference in [&root, &child] {
-                let source = schematic_for_reference(state, reference).unwrap();
+                let source = schematic_for_reference(&state.model, reference).unwrap();
                 assert_eq!(
                     source.document().probes[0].source_expression.as_deref(),
                     Some(format!("I(/{name}/V42)").as_str())
@@ -499,6 +504,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     candidate.value = "2".to_owned();
     fixture
         .state
+        .model
         .edit_component_transaction(&expected, candidate, "Edit source properties")
         .unwrap();
     let mut late_outputs = Vec::new();

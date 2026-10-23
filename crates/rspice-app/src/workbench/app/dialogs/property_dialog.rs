@@ -141,7 +141,9 @@ pub fn render_property_dialog(
             candidate.kind == crate::state::ComponentType::Port && &candidate != component;
         let expected = component.clone();
         if let Err(error) =
-            state.edit_component_transaction(&expected, candidate, "edit properties")
+            state
+                .model
+                .edit_component_transaction(&expected, candidate, "edit properties")
         {
             state.design.tabbed_property_dialog.open = true;
             state.design.tabbed_property_dialog.draft.commit_error =
@@ -998,7 +1000,7 @@ mod tests {
                 state.model.schematic.topology_version(),
             );
             let undo = state.model.schematic.undo_description().map(str::to_owned);
-            let project_undo = state.project_undo_sequence();
+            let project_undo = state.model.project_undo_sequence();
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 render_property_dialog(ctx, &mut state);
             });
@@ -1037,7 +1039,11 @@ mod tests {
                 undo.as_deref(),
                 "{change}"
             );
-            assert_eq!(state.project_undo_sequence(), project_undo, "{change}");
+            assert_eq!(
+                state.model.project_undo_sequence(),
+                project_undo,
+                "{change}"
+            );
         }
     }
 
@@ -1099,7 +1105,7 @@ mod tests {
                 .source_expression,
             "I(R1)"
         );
-        assert!(state.project_undo_sequence().is_none());
+        assert!(state.model.project_undo_sequence().is_none());
         assert!(state.redo_project_design().unwrap().is_some());
         assert_eq!(state.model.schematic.document().components[0].name, "R99");
         assert_eq!(state.model.schematic.document().components[0].value, "2k");
@@ -1183,7 +1189,7 @@ mod tests {
             PropertyValue::String("R99".to_owned())
         );
         assert!(!state.model.schematic.can_undo());
-        assert!(state.project_undo_sequence().is_none());
+        assert!(state.model.project_undo_sequence().is_none());
     }
 
     #[test]
@@ -1244,7 +1250,7 @@ mod tests {
             );
             assert!(state.design.tabbed_property_dialog.draft.is_modified("r"));
             assert!(!state.model.schematic.can_undo());
-            assert!(state.project_undo_sequence().is_none());
+            assert!(state.model.project_undo_sequence().is_none());
         }
     }
 

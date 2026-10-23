@@ -190,7 +190,7 @@ impl AppState {
         self.model.workspace.content.project_metadata_dirty = true;
         self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
         self.model.netlist_artifacts.current_generation_input_digest = None;
-        self.clear_project_design_history();
+        self.model.clear_project_design_history();
     }
 
     pub(crate) fn technology_inputs(
@@ -397,7 +397,7 @@ impl AppState {
             open.dirty = true;
         }
         self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
-        self.clear_project_design_history();
+        self.model.clear_project_design_history();
         Ok(revision)
     }
 
@@ -519,7 +519,7 @@ impl AppState {
             open.dirty = true;
         }
         self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
-        self.clear_project_design_history();
+        self.model.clear_project_design_history();
         Ok(revision)
     }
 
@@ -643,7 +643,7 @@ impl AppState {
         self.model.workspace.content.project_metadata_dirty = true;
         self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
         self.model.netlist_artifacts.current_generation_input_digest = None;
-        self.clear_project_design_history();
+        self.model.clear_project_design_history();
         Ok(receipt)
     }
 

@@ -581,7 +581,7 @@ pub(crate) fn accept_loaded_project(
     binding: Option<PersistenceBinding>,
 ) {
     state.models.clear_project_model_editor();
-    state.clear_project_design_history();
+    state.model.clear_project_design_history();
     state.project.check_and_save.close();
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding
@@ -633,7 +633,7 @@ pub(crate) fn accept_loaded_project(
 
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
     state.models.clear_project_model_editor();
-    state.clear_project_design_history();
+    state.model.clear_project_design_history();
     state.project.check_and_save.close();
     state.platform.native_project_binding_receipt = None;
     state.platform.browser_project_binding_receipt = None;
@@ -663,7 +663,7 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
     state.design.selected_stimulus_definition = None;
     state.design.stimulus_editor.clear();
     state.design.stimulus_browser.clear();
-    state.clear_project_design_history();
+    state.model.clear_project_design_history();
     state.project.check_and_save.close();
     state.platform.native_project_binding_receipt = None;
     state.platform.browser_project_binding_receipt = None;
@@ -1265,6 +1265,7 @@ fn adopt_successful_save(
             || active_document(state) == ProjectDocumentId::ProjectConfiguration
         {
             state
+                .model
                 .retain_annotation_history_after_save_descriptor(&candidate.file.workspace.project);
             state.model.workspace.content.project = candidate.file.workspace.project.clone();
         } else {

@@ -13,6 +13,7 @@ use crate::state::{
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicObjectKey,
     SchematicProbe, UnresolvedBindingPolicy,
 };
+use crate::workbench::app_state::AppState;
 
 struct Fixture {
     state: AppState,
@@ -163,6 +164,7 @@ fn publish(fixture: &mut Fixture) {
     let state = &mut fixture.state;
     let before = (*state.model.workspace.content.design_management).clone();
     let transaction = state
+        .model
         .prepare_design_management_schematic_transaction(&fixture.candidate)
         .unwrap();
     let committed_revision = state
@@ -171,17 +173,21 @@ fn publish(fixture: &mut Fixture) {
         .content
         .replace_design_management(fixture.candidate.clone())
         .unwrap();
-    state.apply_design_management_schematic_transaction(&transaction);
-    state.record_design_management_transaction(DesignManagementHistoryEntry {
-        description: "renumber schematic references".to_owned(),
-        owner: state.model.workspace.content.active_schematic_reference(),
-        before,
-        after: (*state.model.workspace.content.design_management).clone(),
-        before_schematics: transaction.before,
-        after_schematics: transaction.after,
-        references: transaction.references,
-        committed_revision,
-    });
+    state
+        .model
+        .apply_design_management_schematic_transaction(&transaction);
+    state
+        .model
+        .record_design_management_transaction(DesignManagementHistoryEntry {
+            description: "renumber schematic references".to_owned(),
+            owner: state.model.workspace.content.active_schematic_reference(),
+            before,
+            after: (*state.model.workspace.content.design_management).clone(),
+            before_schematics: transaction.before,
+            after_schematics: transaction.after,
+            references: transaction.references,
+            committed_revision,
+        });
 }
 
 fn assert_component_references(fixture: &Fixture, names: &[&str]) {
@@ -349,6 +355,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
         assert!(
             fixture
                 .state
+                .model
                 .prepare_design_management_schematic_transaction(&fixture.candidate)
                 .is_err(),
             "{failure}"
@@ -373,7 +380,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
             fixture.state.model.workspace.content.project.revision(),
             revision
         );
-        assert!(fixture.state.project_undo_sequence().is_none());
+        assert!(fixture.state.model.project_undo_sequence().is_none());
     }
 }
 
@@ -408,7 +415,7 @@ fn annotation_history_refusal_does_not_partly_restore_names_or_catalogs() {
         fixture.state.model.workspace.content.project.revision(),
         revision
     );
-    assert!(fixture.state.project_undo_sequence().is_some());
+    assert!(fixture.state.model.project_undo_sequence().is_some());
 }
 
 #[test]

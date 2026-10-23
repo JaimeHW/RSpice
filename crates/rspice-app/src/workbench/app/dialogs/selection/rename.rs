@@ -555,7 +555,7 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
     let schematic = &mut state.model.schematic;
     match commit {
         RenameCommit::Component { expected, name } => {
-            state.rename_component_transaction(&expected, name)
+            state.model.rename_component_transaction(&expected, name)
         }
         RenameCommit::NetLabel { expected, name } => schematic.rename_net_label(expected, name),
         RenameCommit::NamedNet { expected, name } => {
@@ -787,7 +787,8 @@ mod tests {
             original_name
         );
         assert!(
-            app.state.project_undo_sequence().is_none() && !app.state.model.schematic.can_undo(),
+            app.state.model.project_undo_sequence().is_none()
+                && !app.state.model.schematic.can_undo(),
             "rename created more than one undo step"
         );
         app.action_edit_redo();

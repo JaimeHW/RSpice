@@ -341,6 +341,7 @@ pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, 
     let binding = rebind.and_then(|rebind| rebind.apply(app));
     let changed = after_revision != before_revision || binding.is_some();
     app.state
+        .model
         .record_veriloga_build_settings(VerilogABuildSettingsHistoryEntry {
             bundle,
             before_revision,

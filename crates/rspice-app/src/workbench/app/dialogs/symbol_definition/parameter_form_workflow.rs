@@ -193,7 +193,7 @@ impl RSpiceApp {
                 .construct_symbol(&replacement)
                 .map_err(|error| error.to_string())?;
             publish_symbol_definition_candidate(
-                &mut self.state,
+                &mut self.state.model,
                 candidate,
                 &target.library,
                 &target.cell,

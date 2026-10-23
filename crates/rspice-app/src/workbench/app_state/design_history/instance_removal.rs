@@ -23,7 +23,7 @@ struct InstanceRemovalDocument {
     after: SchematicSnapshot,
 }
 
-impl AppState {
+impl Model {
     /// Record one answer to "what happens to the placements", however many
     /// drawings it reached. Each document is named so undo puts its objects
     /// back on the sheets they were drawn on, and the reader is returned to
@@ -52,7 +52,7 @@ impl AppState {
                 document.reference.clone(),
             ));
         }
-        let active = self.model.workspace.content.active_schematic_reference();
+        let active = self.workspace.content.active_schematic_reference();
         let header = RecordHeader::committed(compensations, Some(active.clone()), Some(active));
         self.push_project_record(
             header,
@@ -65,24 +65,20 @@ impl AppState {
 }
 
 impl InstanceRemovalRecord {
-    pub(super) fn after_design_matches(&self, state: &AppState) -> bool {
+    pub(super) fn after_design_matches(&self, state: &Model) -> bool {
         self.documents
             .iter()
             .all(|document| document.matches(state, &document.after))
     }
 
-    pub(super) fn before_design_matches(&self, state: &AppState) -> bool {
+    pub(super) fn before_design_matches(&self, state: &Model) -> bool {
         self.documents
             .iter()
             .all(|document| document.matches(state, &document.before))
     }
 
-    pub(super) fn validate_mutation(
-        &self,
-        state: &AppState,
-        operation: &str,
-    ) -> Result<(), String> {
-        if !state.model.project_open.is_open() {
+    pub(super) fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Instance removal cannot be {operation} without an open project."
             ));
@@ -98,7 +94,7 @@ impl InstanceRemovalRecord {
         Ok(())
     }
 
-    pub(super) fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    pub(super) fn apply_before(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
                 "Instance removal cannot be undone because those drawings changed.".to_owned(),
@@ -108,11 +104,11 @@ impl InstanceRemovalRecord {
         for document in &self.documents {
             document.restore(state, &document.before)?;
         }
-        state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
     }
 
-    pub(super) fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    pub(super) fn apply_after(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
                 "Instance removal cannot be redone because those drawings changed.".to_owned(),
@@ -122,28 +118,27 @@ impl InstanceRemovalRecord {
         for document in &self.documents {
             document.restore(state, &document.after)?;
         }
-        state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
     }
 }
 
 impl InstanceRemovalDocument {
-    fn matches(&self, state: &AppState, expected: &SchematicSnapshot) -> bool {
+    fn matches(&self, state: &Model, expected: &SchematicSnapshot) -> bool {
         schematic_for_reference(state, &self.reference)
             .is_some_and(|schematic| expected.is_equal_document(schematic.document()))
     }
 
-    fn restore(&self, state: &mut AppState, snapshot: &SchematicSnapshot) -> Result<(), String> {
+    fn restore(&self, state: &mut Model, snapshot: &SchematicSnapshot) -> Result<(), String> {
         let key = self.reference.key();
-        if state.model.workspace.content.active_schematic_reference() == self.reference {
-            state.model.schematic.apply_snapshot(snapshot);
+        if state.workspace.content.active_schematic_reference() == self.reference {
+            state.schematic.apply_snapshot(snapshot);
             state
-                .model
                 .workspace
-                .insert_schematic_editor(key, state.model.schematic.clone());
+                .insert_schematic_editor(key, state.schematic.clone());
             return Ok(());
         }
-        let Some(mut stored) = state.model.workspace.schematic_editor_mut(&key) else {
+        let Some(mut stored) = state.workspace.schematic_editor_mut(&key) else {
             return Err(format!(
                 "Instance removal cannot restore '{}' because it is no longer loaded.",
                 self.reference.display_path()

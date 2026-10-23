@@ -43,6 +43,7 @@ fn rename_source(fixture: &mut Fixture, child: &CellViewRef) {
         .clone();
     fixture
         .state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
 }
@@ -57,9 +58,9 @@ fn cross_history(state: &mut AppState, forward: bool) -> Result<Option<String>, 
 
 fn sequence(state: &AppState, forward: bool) -> Option<u64> {
     if forward {
-        state.project_redo_sequence()
+        state.model.project_redo_sequence()
     } else {
-        state.project_undo_sequence()
+        state.model.project_undo_sequence()
     }
 }
 
@@ -123,11 +124,11 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
         .workspace
         .content
         .active_schematic_reference();
-    let sequence = fixture.state.project_undo_sequence().unwrap();
+    let sequence = fixture.state.model.project_undo_sequence().unwrap();
 
     assert!(fixture.state.undo_project_design().is_err());
-    assert_eq!(fixture.state.project_undo_sequence(), Some(sequence));
-    assert_eq!(fixture.state.project_redo_sequence(), None);
+    assert_eq!(fixture.state.model.project_undo_sequence(), Some(sequence));
+    assert_eq!(fixture.state.model.project_redo_sequence(), None);
     assert_eq!(
         fixture
             .state
@@ -218,7 +219,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             let state = &mut fixture.state;
             let snapshots = [&root, &child, &other].map(|reference| {
                 SchematicSnapshot::capture(
-                    schematic_for_reference(state, reference)
+                    schematic_for_reference(&state.model, reference)
                         .unwrap()
                         .document(),
                 )
@@ -242,7 +243,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             for (reference, snapshot) in [&root, &child, &other].into_iter().zip(&snapshots) {
                 assert!(
                     snapshot.is_equal_document(
-                        schematic_for_reference(state, reference)
+                        schematic_for_reference(&state.model, reference)
                             .unwrap()
                             .document()
                     )
@@ -595,7 +596,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
                 target_name
             );
             assert_eq!(
-                schematic_for_reference(state, &child)
+                schematic_for_reference(&state.model, &child)
                     .unwrap()
                     .document()
                     .components
@@ -624,6 +625,7 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
         .unwrap()
         .clone();
     state
+        .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     let output = SavedOutput::new(

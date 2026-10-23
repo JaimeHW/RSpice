@@ -48,7 +48,7 @@ use crate::state::{
     ModelLibraryManager, OpenCellView, SchematicSnapshot, SchematicState, UndoSequence,
 };
 
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 
@@ -222,14 +222,11 @@ pub(crate) struct SymbolDefinitionHistoryEntry {
 }
 
 fn require_unchanged_valid_model_resolution_ledger(
-    state: &AppState,
+    state: &Model,
     candidate: &ModelLibraryManager,
     transaction: &str,
 ) -> Result<(), String> {
-    let expected = state
-        .model
-        .model_library_manager
-        .owned_model_resolution_records();
+    let expected = state.model_library_manager.owned_model_resolution_records();
     if candidate.owned_model_resolution_records() != expected {
         return Err(format!(
             "{transaction} cannot change model provider decisions; publish that ledger as a separate guarded transaction"
@@ -248,19 +245,18 @@ fn require_unchanged_valid_model_resolution_ledger(
 /// Publish an already validated model-manager candidate at the project
 /// revision boundary and add one guarded global undo step.
 pub(crate) fn publish_model_definition_candidate(
-    state: &mut AppState,
+    state: &mut Model,
     mut candidate: ModelLibraryManager,
     commit: ProjectModelCommit,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
-    if !state.model.project_open.is_open() {
+    if !state.project_open.is_open() {
         return Err("Model definitions require an open project.".to_owned());
     }
-    if state.model.safe_mode.project_read_only() {
+    if state.safe_mode.project_read_only() {
         return Err("Model definitions cannot change while the project is read-only.".to_owned());
     }
     let observed = state
-        .model
         .model_library_manager
         .get_library(&commit.library_name);
     if !model_library_semantics_match(observed, commit.before.as_ref()) {
@@ -278,7 +274,7 @@ pub(crate) fn publish_model_definition_candidate(
     if !model_library_semantics_match(Some(candidate_library), Some(&commit.after)) {
         return Err("Candidate model manager does not contain the validated commit.".to_owned());
     }
-    let before_set = state.model.model_library_manager.library_snapshot();
+    let before_set = state.model_library_manager.library_snapshot();
     let after_set = candidate.library_snapshot();
     let unrelated_before = before_set
         .iter()
@@ -312,14 +308,12 @@ pub(crate) fn publish_model_definition_candidate(
     }
 
     let expected_revision = state
-        .model
         .workspace
         .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     let committed_revision = state
-        .model
         .workspace
         .content
         .project
@@ -327,14 +321,11 @@ pub(crate) fn publish_model_definition_candidate(
         .map_err(|error| error.to_string())?;
     debug_assert_eq!(committed_revision, expected_revision);
     candidate.invalidate_model_validation_receipt();
-    state.model.model_library_manager = candidate;
-    state.model.workspace.content.project_metadata_dirty = true;
+    state.model_library_manager = candidate;
+    state.workspace.content.project_metadata_dirty = true;
     if commit.affects_execution {
-        state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-        state
-            .model
-            .netlist_artifacts
-            .current_generation_input_digest = None;
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+        state.netlist_artifacts.current_generation_input_digest = None;
     }
     state.record_model_definition_transaction(ModelDefinitionRecord {
         description: description.into(),
@@ -353,19 +344,18 @@ pub(crate) fn publish_model_definition_candidate(
 /// may be externally sourced; its authenticated retained bytes and authority
 /// still participate in undo conflict checks and execution invalidation.
 pub(crate) fn publish_model_library_candidate(
-    state: &mut AppState,
+    state: &mut Model,
     mut candidate: ModelLibraryManager,
     library_name: &str,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
-    if !state.model.project_open.is_open() {
+    if !state.project_open.is_open() {
         return Err("Model libraries require an open project.".to_owned());
     }
-    if state.model.safe_mode.project_read_only() {
+    if state.safe_mode.project_read_only() {
         return Err("Model libraries cannot change while the project is read-only.".to_owned());
     }
     let before = state
-        .model
         .model_library_manager
         .get_library(library_name)
         .cloned();
@@ -373,7 +363,7 @@ pub(crate) fn publish_model_library_candidate(
     if model_library_semantics_match(before.as_ref(), after.as_ref()) {
         return Err("The model-library transaction has no changes to publish.".to_owned());
     }
-    let before_set = state.model.model_library_manager.library_snapshot();
+    let before_set = state.model_library_manager.library_snapshot();
     let after_set = candidate.library_snapshot();
     let unrelated_before = before_set
         .iter()
@@ -396,20 +386,16 @@ pub(crate) fn publish_model_library_candidate(
         "The model-library transaction",
     )?;
     let committed_revision = state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     candidate.invalidate_model_validation_receipt();
-    state.model.model_library_manager = candidate;
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    state.model_library_manager = candidate;
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.netlist_artifacts.current_generation_input_digest = None;
     state.record_model_definition_transaction(ModelDefinitionRecord {
         description: description.into(),
         library: library_name.to_owned(),
@@ -425,17 +411,17 @@ pub(crate) fn publish_model_library_candidate(
 /// Publish one validated multi-library replacement as a single project
 /// revision and one guarded global Undo step.
 pub(crate) fn publish_model_library_set_candidate(
-    state: &mut AppState,
+    state: &mut Model,
     mut candidate: ModelLibraryManager,
     description: impl Into<String>,
 ) -> Result<Option<ObjectRevision>, String> {
-    if !state.model.project_open.is_open() {
+    if !state.project_open.is_open() {
         return Err("Model libraries require an open project.".to_owned());
     }
-    if state.model.safe_mode.project_read_only() {
+    if state.safe_mode.project_read_only() {
         return Err("Model libraries cannot change while the project is read-only.".to_owned());
     }
-    let before = state.model.model_library_manager.library_snapshot();
+    let before = state.model_library_manager.library_snapshot();
     let after = candidate.library_snapshot();
     require_unchanged_valid_model_resolution_ledger(
         state,
@@ -446,20 +432,16 @@ pub(crate) fn publish_model_library_set_candidate(
         return Ok(None);
     }
     let committed_revision = state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     candidate.invalidate_model_validation_receipt();
-    state.model.model_library_manager = candidate;
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    state.model_library_manager = candidate;
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.netlist_artifacts.current_generation_input_digest = None;
     state.record_model_libraries_transaction(ModelLibrariesRecord {
         description: description.into(),
         before,
@@ -474,27 +456,24 @@ pub(crate) fn publish_model_library_set_candidate(
 /// project transaction. The loaded libraries must remain byte-for-byte the
 /// same; only the durable provider ledger may change.
 pub(crate) fn publish_model_resolution_candidate(
-    state: &mut AppState,
+    state: &mut Model,
     mut candidate: ModelLibraryManager,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
-    if !state.model.project_open.is_open() {
+    if !state.project_open.is_open() {
         return Err("Model provider decisions require an open project.".to_owned());
     }
-    if state.model.safe_mode.project_read_only() {
+    if state.safe_mode.project_read_only() {
         return Err(
             "Model provider decisions cannot change while the project is read-only.".to_owned(),
         );
     }
-    let before_libraries = state.model.model_library_manager.library_snapshot();
+    let before_libraries = state.model_library_manager.library_snapshot();
     let after_libraries = candidate.library_snapshot();
     if !model_library_snapshots_match(&before_libraries, &after_libraries) {
         return Err("A provider-decision candidate cannot change model libraries.".to_owned());
     }
-    let before = state
-        .model
-        .model_library_manager
-        .owned_model_resolution_records();
+    let before = state.model_library_manager.owned_model_resolution_records();
     let after = candidate.owned_model_resolution_records();
     if before == after {
         return Err("The model provider decision has no changes to publish.".to_owned());
@@ -503,20 +482,16 @@ pub(crate) fn publish_model_resolution_candidate(
     let mut validated = candidate.clone();
     validated.restore_model_resolution_records(after.clone())?;
     let committed_revision = state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     candidate.invalidate_model_validation_receipt();
-    state.model.model_library_manager = candidate;
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    state.model_library_manager = candidate;
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.netlist_artifacts.current_generation_input_digest = None;
     state.record_model_resolution_transaction(ModelResolutionRecordsRecord {
         description: description.into(),
         before,
@@ -533,7 +508,7 @@ pub(crate) fn publish_model_resolution_candidate(
 /// this boundary owns authority/read-only checks and the monotonic project
 /// revision.
 pub(crate) fn publish_symbol_definition_candidate(
-    state: &mut AppState,
+    state: &mut Model,
     candidate: LibraryManager,
     library_name: &str,
     cell_name: &str,
@@ -550,21 +525,20 @@ pub(crate) fn publish_symbol_definition_candidate(
 }
 
 pub(crate) fn publish_symbol_definition_candidate_with_fixture(
-    state: &mut AppState,
+    state: &mut Model,
     candidate: LibraryManager,
     library_name: &str,
     cell_name: &str,
     description: impl Into<String>,
     fixture: Option<SymbolDefinitionFixtureDelta>,
 ) -> Result<ObjectRevision, String> {
-    if !state.model.project_open.is_open() {
+    if !state.project_open.is_open() {
         return Err("Symbol definitions require an open project.".to_owned());
     }
-    if state.model.safe_mode.project_read_only() {
+    if state.safe_mode.project_read_only() {
         return Err("Symbol definitions cannot change while the project is read-only.".to_owned());
     }
     let source_library = state
-        .model
         .library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -611,26 +585,24 @@ pub(crate) fn publish_symbol_definition_candidate_with_fixture(
     // `next_revision` proves the only fallible mutation before either live
     // owner changes. `advance_revision` cannot then fail in this transaction.
     let expected_revision = state
-        .model
         .workspace
         .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     let committed_revision = state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     debug_assert_eq!(committed_revision, expected_revision);
-    state.model.library_manager = candidate;
+    state.library_manager = candidate;
     if let Some(fixture) = fixture.as_ref() {
         apply_symbol_fixture(state, &fixture.reference, fixture.after.as_ref());
     }
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.record_symbol_definition_transaction(SymbolDefinitionHistoryEntry {
         description: description.into(),
         library: library_name.to_owned(),
@@ -674,7 +646,7 @@ pub(crate) struct HierarchyExtractionHistoryEntry {
     pub(crate) hierarchy_instances_after: Vec<String>,
 }
 
-impl AppState {
+impl Model {
     /// Atomically publish a fully validated project-owned model candidate and
     /// record the change in the project-wide undo/redo history.
     pub fn publish_project_model_candidate(
@@ -687,25 +659,22 @@ impl AppState {
     }
 
     pub(crate) fn clear_project_design_history(&mut self) {
-        self.model.project_design_history = ProjectDesignHistory::default();
+        self.project_design_history = ProjectDesignHistory::default();
     }
 
     /// Push one freshly committed transaction, stamped into the global order
     /// by its header, and retire the redo stack the way any new step does.
     fn push_project_record(&mut self, header: RecordHeader, body: ProjectDesignBody) {
-        self.model.project_design_history.committed = Some(header.sequence());
-        self.model
-            .project_design_history
-            .undo
-            .push(ProjectDesignRecord {
-                header,
-                body,
-                stranded: Vec::new(),
-            });
-        if self.model.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
-            self.model.project_design_history.undo.remove(0);
+        self.project_design_history.committed = Some(header.sequence());
+        self.project_design_history.undo.push(ProjectDesignRecord {
+            header,
+            body,
+            stranded: Vec::new(),
+        });
+        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
+            self.project_design_history.undo.remove(0);
         }
-        self.model.project_design_history.redo.clear();
+        self.project_design_history.redo.clear();
     }
 
     pub(crate) fn record_hierarchy_extraction(&mut self, entry: HierarchyExtractionHistoryEntry) {
@@ -878,8 +847,7 @@ impl AppState {
     }
 
     pub(crate) fn can_undo_project_design(&self) -> bool {
-        self.model
-            .project_design_history
+        self.project_design_history
             .undo
             .last()
             .is_some_and(|record| {
@@ -891,7 +859,6 @@ impl AppState {
     pub(crate) fn can_redo_project_design(&self) -> bool {
         !self.project_redo_is_replaced()
             && self
-                .model
                 .project_design_history
                 .redo
                 .last()
@@ -904,7 +871,7 @@ impl AppState {
     /// Whether the active schematic has a step to redo that no newer step
     /// replaced.
     pub(crate) fn can_redo_active_schematic(&self) -> bool {
-        self.model.schematic.can_redo() && !self.schematic_redo_is_replaced()
+        self.schematic.can_redo() && !self.schematic_redo_is_replaced()
     }
 
     /// Drop the redo steps a newer step replaced.
@@ -916,10 +883,10 @@ impl AppState {
     /// them as well, or Redo would replay an undone step over the newer edit.
     pub(crate) fn retire_replaced_redo_steps(&mut self) {
         if self.project_redo_is_replaced() {
-            self.model.project_design_history.redo.clear();
+            self.project_design_history.redo.clear();
         }
         if self.schematic_redo_is_replaced() {
-            self.model.schematic.clear_schematic_redo();
+            self.schematic.clear_schematic_redo();
         }
     }
 
@@ -927,26 +894,24 @@ impl AppState {
     /// redo step was undone.
     fn project_redo_is_replaced(&self) -> bool {
         self.project_redo_sequence()
-            .zip(self.model.schematic.history().commit_sequence())
+            .zip(self.schematic.history().commit_sequence())
             .is_some_and(|(undone, committed)| committed > undone)
     }
 
     /// Whether the project committed a transaction after the active
     /// schematic's next redo step was undone.
     fn schematic_redo_is_replaced(&self) -> bool {
-        self.model
-            .schematic
+        self.schematic
             .history()
             .redo_sequence()
-            .zip(self.model.project_design_history.committed)
+            .zip(self.project_design_history.committed)
             .is_some_and(|(undone, committed)| committed > undone)
     }
 
     /// Where the next project undo step sits in the global order, for
     /// arbitration against the active document's own history.
     pub(crate) fn project_undo_sequence(&self) -> Option<UndoSequence> {
-        self.model
-            .project_design_history
+        self.project_design_history
             .undo
             .last()
             .map(|record| record.header.sequence())
@@ -954,15 +919,18 @@ impl AppState {
 
     /// Where the next project redo step sits in the global order.
     pub(crate) fn project_redo_sequence(&self) -> Option<UndoSequence> {
-        self.model
-            .project_design_history
+        self.project_design_history
             .redo
             .last()
             .map(|record| record.header.sequence())
     }
 
-    pub(crate) fn undo_project_design(&mut self) -> Result<Option<String>, String> {
-        let Some(record) = self.model.project_design_history.undo.last() else {
+    /// The first part of an undo: whether the step on top of the undo stack
+    /// can be taken, and what taking it needs. Nothing changes here.
+    pub(in crate::workbench) fn stage_project_undo(
+        &self,
+    ) -> Result<Option<StagedProjectStep>, String> {
+        let Some(record) = self.project_design_history.undo.last() else {
             return Ok(None);
         };
         if !record.after_design_matches(self) {
@@ -973,37 +941,18 @@ impl AppState {
             record.validate_mutation(self, "undone")?;
         }
         let destination = record.header.undo_activates().cloned();
-        if let Some(destination) = destination {
-            self.activate_history_document(&destination, "Undo");
-        }
-        let mut record = self
-            .model
-            .project_design_history
-            .undo
-            .pop()
-            .expect("the guarded project transaction remains present");
-        let cells_before = library_cell_keys(self);
-        if let Some(prepared) = prepared {
-            record
-                .body
-                .apply_prepared_reference(self, prepared, false)?;
-        } else {
-            record.body.apply_before(self)?;
-        }
-        record.body.include_reference_documents(&mut record.header);
-        for document in record.header.documents() {
-            document.restore_recorded_sheets(self)?;
-        }
-        self.restore_stranded_placements(std::mem::take(&mut record.stranded));
-        record.stranded = self.repair_placements_stranded_since(&cells_before);
-        record.header.restamp();
-        let description = record.body.description().to_owned();
-        self.model.project_design_history.redo.push(record);
-        Ok(Some(description))
+        Ok(Some(StagedProjectStep {
+            forward: false,
+            prepared,
+            destination,
+        }))
     }
 
-    pub(crate) fn redo_project_design(&mut self) -> Result<Option<String>, String> {
-        let Some(record) = self.model.project_design_history.redo.last() else {
+    /// The first part of a redo, as [`Self::stage_project_undo`] states it.
+    pub(in crate::workbench) fn stage_project_redo(
+        &self,
+    ) -> Result<Option<StagedProjectStep>, String> {
+        let Some(record) = self.project_design_history.redo.last() else {
             return Ok(None);
         };
         if !record.before_design_matches(self) {
@@ -1014,28 +963,81 @@ impl AppState {
             record.validate_mutation(self, "redone")?;
         }
         let destination = record.header.redo_activates().cloned();
-        if let Some(destination) = destination {
-            self.activate_history_document(&destination, "Redo");
-        }
-        let mut record = self
-            .model
-            .project_design_history
-            .redo
+        Ok(Some(StagedProjectStep {
+            forward: true,
+            prepared,
+            destination,
+        }))
+    }
+
+    /// Apply a staged step's record, once the document it names is in front.
+    ///
+    /// `selected_model` is the model the reader has selected. What applying
+    /// the record leaves for the application is added to `effects` as the
+    /// record reaches it, so it stands even where the record then fails.
+    pub(in crate::workbench) fn apply_project_step(
+        &mut self,
+        staged: StagedProjectStep,
+        selected_model: Option<&str>,
+        effects: &mut HistoryEffects,
+    ) -> Result<AppliedProjectStep, String> {
+        let StagedProjectStep {
+            forward, prepared, ..
+        } = staged;
+        let stack = if forward {
+            &mut self.project_design_history.redo
+        } else {
+            &mut self.project_design_history.undo
+        };
+        let mut record = stack
             .pop()
             .expect("the guarded project transaction remains present");
         let cells_before = library_cell_keys(self);
         if let Some(prepared) = prepared {
-            record.body.apply_prepared_reference(self, prepared, true)?;
+            record
+                .body
+                .apply_prepared_reference(self, prepared, forward)?;
+        } else if forward {
+            record.body.apply_after(self, selected_model, effects)?;
         } else {
-            record.body.apply_after(self)?;
+            record.body.apply_before(self, selected_model, effects)?;
         }
+        Ok(AppliedProjectStep {
+            forward,
+            record,
+            cells_before,
+        })
+    }
+
+    /// Finish an applied step, once the application has done what applying
+    /// it asked: an undone step's documents go back on their recorded sheets,
+    /// the placements the catalog left stranded are repaired, and the record
+    /// moves to the other stack. Returns the step's description.
+    pub(in crate::workbench) fn finish_project_step(
+        &mut self,
+        applied: AppliedProjectStep,
+    ) -> Result<String, String> {
+        let AppliedProjectStep {
+            forward,
+            mut record,
+            cells_before,
+        } = applied;
         record.body.include_reference_documents(&mut record.header);
+        if !forward {
+            for document in record.header.documents() {
+                document.restore_recorded_sheets(self)?;
+            }
+        }
         self.restore_stranded_placements(std::mem::take(&mut record.stranded));
         record.stranded = self.repair_placements_stranded_since(&cells_before);
         record.header.restamp();
         let description = record.body.description().to_owned();
-        self.model.project_design_history.undo.push(record);
-        Ok(Some(description))
+        if forward {
+            self.project_design_history.undo.push(record);
+        } else {
+            self.project_design_history.redo.push(record);
+        }
+        Ok(description)
     }
 
     /// Bring every drawing back into step with the cell catalog a history step
@@ -1064,9 +1066,7 @@ impl AppState {
         // For the length of the repair the active drawing is a workspace
         // document like any other, so the sweep and the compensation it returns
         // describe the same design.
-        self.model
-            .workspace
-            .save_active_schematic(&self.model.schematic);
+        self.workspace.save_active_schematic(&self.schematic);
         let stranded = placements_of_masters(self, &removed);
         for (library, cell) in &removed {
             self.prune_workspace_after_history_removed_cell(library, cell);
@@ -1084,15 +1084,9 @@ impl AppState {
         if stranded.is_empty() {
             return;
         }
-        let active = self
-            .model
-            .workspace
-            .content
-            .active_schematic_reference()
-            .key();
+        let active = self.workspace.content.active_schematic_reference().key();
         for placement in &stranded {
             if self
-                .model
                 .library_manager
                 .get_library(&placement.binding.library)
                 .and_then(|library| library.get_cell(&placement.binding.cell))
@@ -1100,11 +1094,7 @@ impl AppState {
             {
                 continue;
             }
-            if let Some(mut schematic) = self
-                .model
-                .workspace
-                .schematic_editor_mut(&placement.document)
-            {
+            if let Some(mut schematic) = self.workspace.schematic_editor_mut(&placement.document) {
                 restore_placement_binding(&mut schematic.editor, placement);
             }
             // The active drawing is a copy of its buffer, and a history step
@@ -1112,7 +1102,7 @@ impl AppState {
             // connectivity and republish the browser selection while the
             // step's own restore is still in flight.
             if placement.document == active {
-                restore_placement_binding(&mut self.model.schematic, placement);
+                restore_placement_binding(&mut self.schematic, placement);
             }
         }
     }
@@ -1129,12 +1119,17 @@ impl AppState {
     /// here would rewrite the very content the step is about to compare its
     /// retained snapshot against; the step's own restore does that afterwards,
     /// once the design is the one it recorded.
-    fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
-        if self.model.workspace.content.active_view == *reference {
-            return;
+    ///
+    /// Returns whether the document was brought to the front: the editor then
+    /// takes up its new active drawing, and the console says so.
+    pub(in crate::workbench) fn activate_history_document(
+        &mut self,
+        reference: &CellViewRef,
+    ) -> bool {
+        if self.workspace.content.active_view == *reference {
+            return false;
         }
         let Some(view_type) = self
-            .model
             .workspace
             .content
             .open_views
@@ -1142,41 +1137,83 @@ impl AppState {
             .find(|open| open.reference == *reference)
             .map(|open| open.view_type)
         else {
-            return;
+            return false;
         };
-        self.model
-            .workspace
-            .save_active_schematic(&self.model.schematic);
-        self.model
-            .workspace
-            .activate_view(reference.clone(), view_type);
-        let key = self
-            .model
-            .workspace
-            .content
-            .active_schematic_reference()
-            .key();
-        if let Some(buffer) = self.model.workspace.clone_schematic_editor(&key) {
-            self.model.schematic = buffer;
+        self.workspace.save_active_schematic(&self.schematic);
+        self.workspace.activate_view(reference.clone(), view_type);
+        let key = self.workspace.content.active_schematic_reference().key();
+        if let Some(buffer) = self.workspace.clone_schematic_editor(&key) {
+            self.schematic = buffer;
         }
-        self.bump_active_schematic_epoch();
-        self.prompt(format!(
-            "{operation} switched to {} to restore it.",
-            reference.display_path()
-        ));
+        true
+    }
+
+    /// Take a cell a project-history step removed out of the workspace.
+    ///
+    /// Three things the deletion command does are wrong at this seam, because
+    /// the step is still in flight. Synchronizing the active drawing reconciles
+    /// sheet membership — which can record a project transaction of its own —
+    /// and republishes the active cell's generated symbol view; reloading it
+    /// afterwards re-derives connectivity and republishes the browser
+    /// selection; and re-deciding focus retires every tab whose cell view does
+    /// not exist yet. All three rewrite the design the step's guards are stated
+    /// against. Focus is the record's own business in any case: a symbol record
+    /// is guarded against removing a cell any open view belongs to, and an
+    /// extraction restores tabs, breadcrumbs and the active view itself. What
+    /// is left is the part no record covers — the placements standing in
+    /// drawings the record never named, the active one included.
+    fn prune_workspace_after_history_removed_cell(&mut self, library: &str, cell: &str) {
+        self.drop_workspace_references_to_cell(library, cell);
+        self.schematic
+            .revalidate_instance_bindings(&self.library_manager);
     }
 }
 
+/// A history step that can be taken, staged before the document it restores
+/// is brought to the front.
+pub(crate) struct StagedProjectStep {
+    forward: bool,
+    prepared: Option<PreparedReferenceMutation>,
+    destination: Option<CellViewRef>,
+}
+
+impl StagedProjectStep {
+    /// The document the step restores, where that is not the active one.
+    pub(crate) fn destination(&self) -> Option<&CellViewRef> {
+        self.destination.as_ref()
+    }
+}
+
+/// A history step whose record has been applied, still to be finished.
+pub(crate) struct AppliedProjectStep {
+    forward: bool,
+    record: ProjectDesignRecord,
+    cells_before: BTreeSet<(String, String)>,
+}
+
+/// What applying a history step leaves for the application, set as the step
+/// reaches each. A step is one record, and no record sets more than one.
+#[derive(Debug, Default)]
+pub(crate) struct HistoryEffects {
+    /// The selected model left the selected model library.
+    pub(crate) clear_selected_model: bool,
+    /// A Verilog-A source was restored, so what it compiled to is void.
+    pub(crate) void_veriloga_evidence: bool,
+    /// The step restored the active document: the editor reloads it from
+    /// the workspace.
+    pub(crate) restore_active_schematic: bool,
+}
+
 impl ProjectDesignRecord {
-    fn after_design_matches(&self, state: &AppState) -> bool {
+    fn after_design_matches(&self, state: &Model) -> bool {
         self.body.after_design_matches(state)
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
+    fn before_design_matches(&self, state: &Model) -> bool {
         self.body.before_design_matches(state)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
         self.body.validate_mutation(state, operation)
     }
 }
@@ -1184,7 +1221,7 @@ impl ProjectDesignRecord {
 impl ProjectDesignBody {
     fn prepare_reference_mutation(
         &self,
-        state: &AppState,
+        state: &Model,
         forward: bool,
     ) -> Result<Option<PreparedReferenceMutation>, String> {
         match self {
@@ -1206,7 +1243,7 @@ impl ProjectDesignBody {
 
     fn apply_prepared_reference(
         &mut self,
-        state: &mut AppState,
+        state: &mut Model,
         prepared: PreparedReferenceMutation,
         forward: bool,
     ) -> Result<(), String> {
@@ -1246,7 +1283,7 @@ impl ProjectDesignBody {
         }
     }
 
-    fn after_design_matches(&self, state: &AppState) -> bool {
+    fn after_design_matches(&self, state: &Model) -> bool {
         match self {
             Self::ComponentRename(record) => record.after_design_matches(state),
             Self::HierarchyExtraction(record) => record.after_design_matches(state),
@@ -1260,7 +1297,7 @@ impl ProjectDesignBody {
         }
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
+    fn before_design_matches(&self, state: &Model) -> bool {
         match self {
             Self::ComponentRename(record) => record.before_design_matches(state),
             Self::HierarchyExtraction(record) => record.before_design_matches(state),
@@ -1274,7 +1311,7 @@ impl ProjectDesignBody {
         }
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
         match self {
             Self::ComponentRename(record) => record.validate_mutation(state, operation),
             Self::HierarchyExtraction(record) => record.validate_mutation(state, operation),
@@ -1302,61 +1339,69 @@ impl ProjectDesignBody {
         }
     }
 
-    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_before(
+        &mut self,
+        state: &mut Model,
+        selected_model: Option<&str>,
+        effects: &mut HistoryEffects,
+    ) -> Result<(), String> {
         match self {
-            Self::HierarchyExtraction(record) => record.apply_before(state),
+            Self::HierarchyExtraction(record) => record.apply_before(state, effects),
             Self::ComponentRename(_) | Self::DesignManagement(_) => {
                 unreachable!("reference history is prepared before applying")
             }
             Self::InstanceRemoval(record) => record.apply_before(state),
             Self::SymbolDefinition(record) => record.apply_before(state),
-            Self::ModelDefinition(record) => record.apply_before(state),
+            Self::ModelDefinition(record) => record.apply_before(state, selected_model, effects),
             Self::ModelLibraries(record) => record.apply_before(state),
             Self::ModelResolutions(record) => record.apply_before(state),
-            Self::VerilogABuildSettings(record) => record.apply_before(state),
+            Self::VerilogABuildSettings(record) => record.apply_before(state, effects),
         }
     }
 
-    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_after(
+        &mut self,
+        state: &mut Model,
+        selected_model: Option<&str>,
+        effects: &mut HistoryEffects,
+    ) -> Result<(), String> {
         match self {
-            Self::HierarchyExtraction(record) => record.apply_after(state),
+            Self::HierarchyExtraction(record) => record.apply_after(state, effects),
             Self::ComponentRename(_) | Self::DesignManagement(_) => {
                 unreachable!("reference history is prepared before applying")
             }
             Self::InstanceRemoval(record) => record.apply_after(state),
             Self::SymbolDefinition(record) => record.apply_after(state),
-            Self::ModelDefinition(record) => record.apply_after(state),
+            Self::ModelDefinition(record) => record.apply_after(state, selected_model, effects),
             Self::ModelLibraries(record) => record.apply_after(state),
             Self::ModelResolutions(record) => record.apply_after(state),
-            Self::VerilogABuildSettings(record) => record.apply_after(state),
+            Self::VerilogABuildSettings(record) => record.apply_after(state, effects),
         }
     }
 }
 
 impl ModelLibrariesRecord {
-    fn after_design_matches(&self, state: &AppState) -> bool {
-        model_library_snapshots_match(
-            &state.model.model_library_manager.library_snapshot(),
-            &self.after,
-        ) && state.model.workspace.content.project.revision() == self.undo_guard_revision
+    fn after_design_matches(&self, state: &Model) -> bool {
+        model_library_snapshots_match(&state.model_library_manager.library_snapshot(), &self.after)
+            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
+    fn before_design_matches(&self, state: &Model) -> bool {
         model_library_snapshots_match(
-            &state.model.model_library_manager.library_snapshot(),
+            &state.model_library_manager.library_snapshot(),
             &self.before,
         ) && self
             .redo_guard_revision
-            .is_some_and(|revision| state.model.workspace.content.project.revision() == revision)
+            .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.model.project_open.is_open() {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Model libraries cannot be {operation} without an open project."
             ));
         }
-        if state.model.safe_mode.project_read_only() {
+        if state.safe_mode.project_read_only() {
             return Err(format!(
                 "Model libraries cannot be {operation} while the project is read-only."
             ));
@@ -1364,7 +1409,7 @@ impl ModelLibrariesRecord {
         Ok(())
     }
 
-    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_before(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
                 "Model libraries cannot be undone because their sources or project revision changed."
@@ -1376,7 +1421,7 @@ impl ModelLibrariesRecord {
         Ok(())
     }
 
-    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_after(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
                 "Model libraries cannot be redone because their sources or project revision changed."
@@ -1390,33 +1435,25 @@ impl ModelLibrariesRecord {
 }
 
 impl ModelResolutionRecordsRecord {
-    fn after_design_matches(&self, state: &AppState) -> bool {
-        state
-            .model
-            .model_library_manager
-            .owned_model_resolution_records()
-            == self.after
-            && state.model.workspace.content.project.revision() == self.undo_guard_revision
+    fn after_design_matches(&self, state: &Model) -> bool {
+        state.model_library_manager.owned_model_resolution_records() == self.after
+            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
-        state
-            .model
-            .model_library_manager
-            .owned_model_resolution_records()
-            == self.before
-            && self.redo_guard_revision.is_some_and(|revision| {
-                state.model.workspace.content.project.revision() == revision
-            })
+    fn before_design_matches(&self, state: &Model) -> bool {
+        state.model_library_manager.owned_model_resolution_records() == self.before
+            && self
+                .redo_guard_revision
+                .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.model.project_open.is_open() {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Model provider decisions cannot be {operation} without an open project."
             ));
         }
-        if state.model.safe_mode.project_read_only() {
+        if state.safe_mode.project_read_only() {
             return Err(format!(
                 "Model provider decisions cannot be {operation} while the project is read-only."
             ));
@@ -1424,7 +1461,7 @@ impl ModelResolutionRecordsRecord {
         Ok(())
     }
 
-    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_before(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
                 "Model provider decisions cannot be undone because their catalog or project revision changed."
@@ -1436,7 +1473,7 @@ impl ModelResolutionRecordsRecord {
         Ok(())
     }
 
-    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_after(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
                 "Model provider decisions cannot be redone because their catalog or project revision changed."
@@ -1450,29 +1487,29 @@ impl ModelResolutionRecordsRecord {
 }
 
 impl ModelDefinitionRecord {
-    fn after_design_matches(&self, state: &AppState) -> bool {
+    fn after_design_matches(&self, state: &Model) -> bool {
         model_library_semantics_match(
-            state.model.model_library_manager.get_library(&self.library),
+            state.model_library_manager.get_library(&self.library),
             self.after.as_ref(),
-        ) && state.model.workspace.content.project.revision() == self.undo_guard_revision
+        ) && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
+    fn before_design_matches(&self, state: &Model) -> bool {
         model_library_semantics_match(
-            state.model.model_library_manager.get_library(&self.library),
+            state.model_library_manager.get_library(&self.library),
             self.before.as_ref(),
         ) && self
             .redo_guard_revision
-            .is_some_and(|revision| state.model.workspace.content.project.revision() == revision)
+            .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.model.project_open.is_open() {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Model definition cannot be {operation} without an open project."
             ));
         }
-        if state.model.safe_mode.project_read_only() {
+        if state.safe_mode.project_read_only() {
             return Err(format!(
                 "Model definition cannot be {operation} while the project is read-only."
             ));
@@ -1480,7 +1517,12 @@ impl ModelDefinitionRecord {
         Ok(())
     }
 
-    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_before(
+        &mut self,
+        state: &mut Model,
+        selected_model: Option<&str>,
+        effects: &mut HistoryEffects,
+    ) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(format!(
                 "Model '{}' cannot be undone because its source or project revision changed.",
@@ -1492,11 +1534,18 @@ impl ModelDefinitionRecord {
             state,
             &self.library,
             self.before.as_ref(),
+            selected_model,
+            effects,
         )?);
         Ok(())
     }
 
-    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_after(
+        &mut self,
+        state: &mut Model,
+        selected_model: Option<&str>,
+        effects: &mut HistoryEffects,
+    ) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(format!(
                 "Model '{}' cannot be redone because its source or project revision changed.",
@@ -1504,8 +1553,13 @@ impl ModelDefinitionRecord {
             ));
         }
         self.validate_mutation(state, "redone")?;
-        self.undo_guard_revision =
-            replace_model_library(state, &self.library, self.after.as_ref())?;
+        self.undo_guard_revision = replace_model_library(
+            state,
+            &self.library,
+            self.after.as_ref(),
+            selected_model,
+            effects,
+        )?;
         Ok(())
     }
 }
@@ -1546,84 +1600,74 @@ fn model_library_snapshots_match(observed: &[ModelLibrary], expected: &[ModelLib
 }
 
 fn replace_model_library_snapshot(
-    state: &mut AppState,
+    state: &mut Model,
     replacement: &[ModelLibrary],
 ) -> Result<ObjectRevision, String> {
     let revision = state
-        .model
         .workspace
         .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     state
-        .model
         .model_library_manager
         .replace_library_snapshot(replacement.to_vec())?;
     state
-        .model
         .model_library_manager
         .invalidate_model_validation_receipt();
     state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.model.workspace.content.project.revision(), revision);
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.netlist_artifacts.current_generation_input_digest = None;
     Ok(revision)
 }
 
 fn replace_model_resolution_records(
-    state: &mut AppState,
+    state: &mut Model,
     replacement: &[crate::state::model_library::ModelResolutionRecord],
 ) -> Result<ObjectRevision, String> {
     let revision = state
-        .model
         .workspace
         .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     state
-        .model
         .model_library_manager
         .restore_model_resolution_records(replacement.to_vec())?;
     state
-        .model
         .model_library_manager
         .invalidate_model_validation_receipt();
     state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.model.workspace.content.project.revision(), revision);
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.netlist_artifacts.current_generation_input_digest = None;
     Ok(revision)
 }
 
+/// Put `library_name` back as `replacement`, or take it out with none.
+/// `selected_model` is the model the reader has selected; where the library
+/// no longer holds it, `effects` asks for the selection to go.
 fn replace_model_library(
-    state: &mut AppState,
+    state: &mut Model,
     library_name: &str,
     replacement: Option<&ModelLibrary>,
+    selected_model: Option<&str>,
+    effects: &mut HistoryEffects,
 ) -> Result<ObjectRevision, String> {
     let revision = state
-        .model
         .workspace
         .content
         .project
@@ -1632,67 +1676,50 @@ fn replace_model_library(
     match replacement {
         Some(replacement) => {
             let mut replacement = replacement.clone();
-            if let Some(current) = state.model.model_library_manager.get_library(library_name) {
+            if let Some(current) = state.model_library_manager.get_library(library_name) {
                 replacement.expanded = current.expanded;
             }
-            state.model.model_library_manager.add_library(replacement);
-            if state
-                .model
-                .model_library_manager
-                .selected_library
-                .as_deref()
-                == Some(library_name)
-                && state.models.selected_model.as_ref().is_some_and(|model| {
+            state.model_library_manager.add_library(replacement);
+            if state.model_library_manager.selected_library.as_deref() == Some(library_name)
+                && selected_model.is_some_and(|model| {
                     state
-                        .model
                         .model_library_manager
                         .get_library(library_name)
                         .is_none_or(|library| !library.models.contains_key(model))
                 })
             {
-                state.models.selected_model = None;
+                effects.clear_selected_model = true;
             }
         }
         None => {
             if state
-                .model
                 .model_library_manager
                 .remove_library(library_name)
                 .is_none()
             {
                 return Err(format!("Model library '{library_name}' no longer exists."));
             }
-            if state
-                .model
-                .model_library_manager
-                .selected_library
-                .as_deref()
-                == Some(library_name)
-            {
-                state.model.model_library_manager.selected_library = None;
-                state.models.selected_model = None;
+            if state.model_library_manager.selected_library.as_deref() == Some(library_name) {
+                state.model_library_manager.selected_library = None;
+                effects.clear_selected_model = true;
             }
         }
     }
     state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.model.workspace.content.project.revision(), revision);
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.netlist_artifacts.current_generation_input_digest = None;
     Ok(revision)
 }
 
 impl SymbolDefinitionRecord {
-    fn after_design_matches(&self, state: &AppState) -> bool {
+    fn after_design_matches(&self, state: &Model) -> bool {
         cell_semantics_match(
             symbol_cell(state, &self.library, &self.cell),
             self.after.as_ref(),
@@ -1701,10 +1728,10 @@ impl SymbolDefinitionRecord {
                 schematic_for_reference(state, &fixture.reference),
                 fixture.after.as_ref(),
             )
-        }) && state.model.workspace.content.project.revision() == self.undo_guard_revision
+        }) && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
+    fn before_design_matches(&self, state: &Model) -> bool {
         cell_semantics_match(
             symbol_cell(state, &self.library, &self.cell),
             self.before.as_ref(),
@@ -1715,22 +1742,21 @@ impl SymbolDefinitionRecord {
             )
         }) && self
             .redo_guard_revision
-            .is_some_and(|revision| state.model.workspace.content.project.revision() == revision)
+            .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.model.project_open.is_open() {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Symbol definition cannot be {operation} without an open project."
             ));
         }
-        if state.model.safe_mode.project_read_only() {
+        if state.safe_mode.project_read_only() {
             return Err(format!(
                 "Symbol definition cannot be {operation} while the project is read-only."
             ));
         }
         let library = state
-            .model
             .library_manager
             .get_library(&self.library)
             .ok_or_else(|| format!("Library '{}' no longer exists.", self.library))?;
@@ -1741,7 +1767,7 @@ impl SymbolDefinitionRecord {
             ));
         }
         if self.before.is_none()
-            && state.model.workspace.content.open_views.iter().any(|open| {
+            && state.workspace.content.open_views.iter().any(|open| {
                 open.reference.library.eq_ignore_ascii_case(&self.library)
                     && open.reference.cell.eq_ignore_ascii_case(&self.cell)
             })
@@ -1761,9 +1787,8 @@ impl SymbolDefinitionRecord {
             });
         if fixture_removed
             && self.fixture.as_ref().is_some_and(|fixture| {
-                state.model.workspace.content.active_schematic_reference() == fixture.reference
+                state.workspace.content.active_schematic_reference() == fixture.reference
                     || state
-                        .model
                         .workspace
                         .content
                         .open_views
@@ -1780,7 +1805,7 @@ impl SymbolDefinitionRecord {
         Ok(())
     }
 
-    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_before(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
                 "Symbol definition cannot be undone because the target cell or project revision changed."
@@ -1796,7 +1821,7 @@ impl SymbolDefinitionRecord {
         Ok(())
     }
 
-    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    fn apply_after(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
                 "Symbol definition cannot be redone because the target cell or project revision changed."
@@ -1816,9 +1841,9 @@ impl SymbolDefinitionRecord {
 /// Every project cell the libraries hold, so a history step can be asked what
 /// applying it took away. Read-only libraries are included: a placement does
 /// not care who owns its master, only whether the master is there.
-fn library_cell_keys(state: &AppState) -> BTreeSet<(String, String)> {
+fn library_cell_keys(state: &Model) -> BTreeSet<(String, String)> {
     let mut keys = BTreeSet::new();
-    for (_, library) in state.model.library_manager.libraries_by_key() {
+    for (_, library) in state.library_manager.libraries_by_key() {
         for cell in library.cells_sorted() {
             keys.insert((library.name.clone(), cell.name.clone()));
         }
@@ -1834,9 +1859,9 @@ fn restore_placement_binding(schematic: &mut SchematicState, placement: &Strande
 
 /// Every placement of one of `masters` in the workspace, with the identity it
 /// currently carries — the exact set the sweep for those masters will clear.
-fn placements_of_masters(state: &AppState, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
+fn placements_of_masters(state: &Model, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
     let mut stranded = Vec::new();
-    for (document, schematic) in &state.model.workspace.content.schematic_buffers {
+    for (document, schematic) in &state.workspace.content.schematic_buffers {
         for component in &schematic.document().components {
             if component.kind != ComponentType::CellInstance {
                 continue;
@@ -1860,9 +1885,8 @@ fn placements_of_masters(state: &AppState, masters: &[(String, String)]) -> Vec<
     stranded
 }
 
-fn symbol_cell<'a>(state: &'a AppState, library: &str, cell: &str) -> Option<&'a Cell> {
+fn symbol_cell<'a>(state: &'a Model, library: &str, cell: &str) -> Option<&'a Cell> {
     state
-        .model
         .library_manager
         .get_library(library)
         .and_then(|library| library.get_cell(cell))
@@ -1882,13 +1906,13 @@ fn cell_semantics_match(left: Option<&Cell>, right: Option<&Cell>) -> bool {
 }
 
 fn schematic_for_reference<'a>(
-    state: &'a AppState,
+    state: &'a Model,
     reference: &CellViewRef,
 ) -> Option<crate::state::SchematicEditorRef<'a>> {
-    if state.model.workspace.content.active_schematic_reference() == *reference {
-        Some(state.model.schematic.editor_ref())
+    if state.workspace.content.active_schematic_reference() == *reference {
+        Some(state.schematic.editor_ref())
     } else {
-        state.model.workspace.schematic_editor(&reference.key())
+        state.workspace.schematic_editor(&reference.key())
     }
 }
 
@@ -1906,7 +1930,7 @@ fn schematic_option_matches(
 }
 
 fn apply_symbol_fixture(
-    state: &mut AppState,
+    state: &mut Model,
     reference: &CellViewRef,
     replacement: Option<&SchematicState>,
 ) {
@@ -1914,14 +1938,12 @@ fn apply_symbol_fixture(
     match replacement {
         Some(schematic) => {
             state
-                .model
                 .workspace
                 .insert_schematic_editor(key.clone(), schematic.clone());
-            if state.model.workspace.content.active_schematic_reference() == *reference {
-                state.model.schematic = schematic.clone();
+            if state.workspace.content.active_schematic_reference() == *reference {
+                state.schematic = schematic.clone();
             }
             if let Some(open) = state
-                .model
                 .workspace
                 .content
                 .open_views
@@ -1932,26 +1954,24 @@ fn apply_symbol_fixture(
             }
         }
         None => {
-            state.model.workspace.remove_schematic_editor(&key);
+            state.workspace.remove_schematic_editor(&key);
         }
     }
 }
 
 fn replace_symbol_cell(
-    state: &mut AppState,
+    state: &mut Model,
     library_name: &str,
     cell_name: &str,
     replacement: Option<&Cell>,
 ) -> Result<ObjectRevision, String> {
     let revision = state
-        .model
         .workspace
         .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     let mut library = state
-        .model
         .library_manager
         .edit_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -1968,55 +1988,46 @@ fn replace_symbol_cell(
                     "Cell '{library_name}/{cell_name}' no longer exists."
                 ));
             }
-            if state.model.library_manager.selected_library.as_deref() == Some(library_name)
-                && state.model.library_manager.selected_cell.as_deref() == Some(cell_name)
+            if state.library_manager.selected_library.as_deref() == Some(library_name)
+                && state.library_manager.selected_cell.as_deref() == Some(cell_name)
             {
-                state.model.library_manager.selected_cell = None;
-                state.model.library_manager.selected_view = None;
+                state.library_manager.selected_cell = None;
+                state.library_manager.selected_view = None;
             }
         }
     }
     state
-        .model
         .workspace
         .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.model.workspace.content.project.revision(), revision);
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     Ok(revision)
 }
 
 impl DesignManagementRecord {
-    fn after_design_matches(&self, state: &AppState) -> bool {
-        design_management_semantics_match(
-            &state.model.workspace.content.design_management,
-            &self.after,
-        ) && schematic_map_matches(state, &self.after_schematics)
-            && self
-                .references
-                .matches(&state.model.workspace.content, false)
-            && state.model.workspace.content.project.revision() == self.undo_guard_revision
+    fn after_design_matches(&self, state: &Model) -> bool {
+        design_management_semantics_match(&state.workspace.content.design_management, &self.after)
+            && schematic_map_matches(state, &self.after_schematics)
+            && self.references.matches(&state.workspace.content, false)
+            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
-    fn before_design_matches(&self, state: &AppState) -> bool {
-        design_management_semantics_match(
-            &state.model.workspace.content.design_management,
-            &self.before,
-        ) && schematic_map_matches(state, &self.before_schematics)
+    fn before_design_matches(&self, state: &Model) -> bool {
+        design_management_semantics_match(&state.workspace.content.design_management, &self.before)
+            && schematic_map_matches(state, &self.before_schematics)
+            && self.references.matches(&state.workspace.content, true)
             && self
-                .references
-                .matches(&state.model.workspace.content, true)
-            && self.redo_guard_revision.is_some_and(|revision| {
-                state.model.workspace.content.project.revision() == revision
-            })
+                .redo_guard_revision
+                .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
-    fn validate_authority(&self, state: &AppState, forward: bool) -> Result<(), String> {
+    fn validate_authority(&self, state: &Model, forward: bool) -> Result<(), String> {
         let operation = if forward { "redone" } else { "undone" };
-        if !state.model.project_open.is_open() {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Design management cannot be {operation} without an open project."
             ));
@@ -2033,9 +2044,8 @@ impl DesignManagementRecord {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             reference_preparation::validate_reference_document(state, key, source)?;
         }
-        self.references
-            .prepare(&state.model.workspace.content, forward)?;
-        let current = &state.model.workspace.content.design_management;
+        self.references.prepare(&state.workspace.content, forward)?;
+        let current = &state.workspace.content.design_management;
         let mut prepared_catalog = current.clone();
         prepared_catalog
             .publish_reviewed_candidate(
@@ -2044,7 +2054,6 @@ impl DesignManagementRecord {
             )
             .map_err(|error| error.to_string())?;
         state
-            .model
             .workspace
             .content
             .project
@@ -2056,63 +2065,57 @@ impl DesignManagementRecord {
 
     fn prepare_history(
         &self,
-        state: &AppState,
+        state: &Model,
         forward: bool,
     ) -> Result<reference_preparation::PreparedReferenceHistory, String> {
         self.validate_authority(state, forward)?;
         state.prepare_reference_history(&self.before_schematics, &self.after_schematics, forward)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+    fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
         self.validate_authority(state, operation != "undone")
     }
 
     fn apply_before(
         &mut self,
-        state: &mut AppState,
+        state: &mut Model,
         history: reference_preparation::PreparedReferenceHistory,
     ) -> Result<(), String> {
         let revision = state
-            .model
             .workspace
             .content
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.before, false)?;
-        history
-            .references
-            .publish(&mut state.model.workspace.content);
+        history.references.publish(&mut state.workspace.content);
         self.before_schematics = history.before;
         self.after_schematics = history.after;
         self.references = history.changes;
         state.reanchor_annotation_history_revision(self.before_project_revision, revision);
         self.before_project_revision = revision;
         self.redo_guard_revision = Some(revision);
-        state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
     }
 
     fn apply_after(
         &mut self,
-        state: &mut AppState,
+        state: &mut Model,
         history: reference_preparation::PreparedReferenceHistory,
     ) -> Result<(), String> {
         let revision = state
-            .model
             .workspace
             .content
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.after, false)?;
-        history
-            .references
-            .publish(&mut state.model.workspace.content);
+        history.references.publish(&mut state.workspace.content);
         self.before_schematics = history.before;
         self.after_schematics = history.after;
         self.references = history.changes;
         state.reanchor_annotation_history_revision(self.undo_guard_revision, revision);
         self.undo_guard_revision = revision;
-        state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
     }
 }
@@ -2126,19 +2129,13 @@ fn capture_schematic_map(
         .collect()
 }
 
-fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, SchematicSnapshot>) -> bool {
-    let active_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+fn schematic_map_matches(state: &Model, expected: &BTreeMap<String, SchematicSnapshot>) -> bool {
+    let active_key = state.workspace.content.active_schematic_reference().key();
     expected.iter().all(|(key, snapshot)| {
         if key.eq_ignore_ascii_case(&active_key) {
-            snapshot.is_equal_document(state.model.schematic.document())
+            snapshot.is_equal_document(state.schematic.document())
         } else {
             state
-                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -2150,32 +2147,25 @@ fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, Schematic
 }
 
 fn apply_schematic_map(
-    state: &mut AppState,
+    state: &mut Model,
     snapshots: &BTreeMap<String, SchematicSnapshot>,
     preserve_selection: bool,
 ) -> Result<(), String> {
-    let active_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     for (key, snapshot) in snapshots {
         if key.eq_ignore_ascii_case(&active_key) {
             let selection =
-                preserve_selection.then(|| state.model.schematic.session.editor.selection.clone());
-            state.model.schematic.apply_snapshot(snapshot);
+                preserve_selection.then(|| state.schematic.session.editor.selection.clone());
+            state.schematic.apply_snapshot(snapshot);
             if let Some(selection) = selection {
-                state.model.schematic.session.editor.selection = selection;
+                state.schematic.session.editor.selection = selection;
             }
             state
-                .model
                 .workspace
-                .insert_schematic_editor(active_key.clone(), state.model.schematic.clone());
+                .insert_schematic_editor(active_key.clone(), state.schematic.clone());
             continue;
         }
         let Some(existing_key) = state
-            .model
             .workspace
             .content
             .schematic_buffers
@@ -2188,7 +2178,6 @@ fn apply_schematic_map(
             ));
         };
         let mut stored = state
-            .model
             .workspace
             .schematic_editor_mut(&existing_key)
             .expect("the retained schematic key remains present");
@@ -2199,7 +2188,7 @@ fn apply_schematic_map(
             schematic.session.editor.selection = selection;
         }
     }
-    for open in &mut state.model.workspace.content.open_views {
+    for open in &mut state.workspace.content.open_views {
         if snapshots
             .keys()
             .any(|key| key.eq_ignore_ascii_case(&open.reference.key()))
@@ -2227,12 +2216,11 @@ fn design_management_semantics_match(
     )
 }
 
-fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
-    if state.model.workspace.content.active_schematic_reference() == *reference {
-        state.model.schematic.session.read_only
+fn schematic_read_only(state: &Model, reference: &CellViewRef) -> bool {
+    if state.workspace.content.active_schematic_reference() == *reference {
+        state.schematic.session.read_only
     } else {
         state
-            .model
             .workspace
             .schematic_editor(&reference.key())
             .is_some_and(|schematic| schematic.read_only())
@@ -2246,17 +2234,15 @@ fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
 /// library master — asked about the document a record owns rather than the
 /// one in front of the operator. A record must fail closed on its own
 /// document, and must not fail on someone else's.
-fn document_read_only(state: &AppState, reference: &CellViewRef) -> bool {
-    state.model.safe_mode.project_read_only()
+fn document_read_only(state: &Model, reference: &CellViewRef) -> bool {
+    state.safe_mode.project_read_only()
         || state
-            .model
             .workspace
             .content
             .open_views
             .iter()
             .any(|open| open.reference == *reference && open.read_only_reference)
         || state
-            .model
             .library_manager
             .get_library(&reference.library)
             .is_some_and(|library| library.read_only)

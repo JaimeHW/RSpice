@@ -63,7 +63,7 @@ struct ProfileStep {
     redo_guard: Option<ObjectRevision>,
 }
 
-impl AppState {
+impl Model {
     /// Record one save of Build settings as one undo step. A save that
     /// changed nothing records nothing.
     pub(crate) fn record_veriloga_build_settings(
@@ -95,7 +95,7 @@ impl AppState {
 }
 
 impl VerilogABuildSettingsRecord {
-    pub(super) fn after_design_matches(&self, state: &AppState) -> bool {
+    pub(super) fn after_design_matches(&self, state: &Model) -> bool {
         self.profile.as_ref().is_none_or(|profile| {
             bundle_revision(state, profile.bundle) == Some(profile.undo_guard)
         }) && self
@@ -104,7 +104,7 @@ impl VerilogABuildSettingsRecord {
             .is_none_or(|binding| bound_module(state, &binding.view) == Some(&binding.after))
     }
 
-    pub(super) fn before_design_matches(&self, state: &AppState) -> bool {
+    pub(super) fn before_design_matches(&self, state: &Model) -> bool {
         self.profile.as_ref().is_none_or(|profile| {
             profile.redo_guard.is_some()
                 && bundle_revision(state, profile.bundle) == profile.redo_guard
@@ -114,24 +114,19 @@ impl VerilogABuildSettingsRecord {
             .is_none_or(|binding| bound_module(state, &binding.view) == binding.before.as_ref())
     }
 
-    pub(super) fn validate_mutation(
-        &self,
-        state: &AppState,
-        operation: &str,
-    ) -> Result<(), String> {
-        if !state.model.project_open.is_open() {
+    pub(super) fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Build settings cannot be {operation} without an open project."
             ));
         }
-        if state.model.safe_mode.project_read_only() {
+        if state.safe_mode.project_read_only() {
             return Err(format!(
                 "Build settings cannot be {operation} while the project is read-only."
             ));
         }
         if let Some(binding) = &self.binding {
             let library = state
-                .model
                 .library_manager
                 .get_library(&binding.view.library)
                 .ok_or_else(|| format!("Library '{}' no longer exists.", binding.view.library))?;
@@ -145,7 +140,11 @@ impl VerilogABuildSettingsRecord {
         Ok(())
     }
 
-    pub(super) fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+    pub(super) fn apply_before(
+        &mut self,
+        state: &mut Model,
+        effects: &mut HistoryEffects,
+    ) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
                 "Build settings cannot be undone because the source or its module changed."
@@ -154,8 +153,13 @@ impl VerilogABuildSettingsRecord {
         }
         self.validate_mutation(state, "undone")?;
         if let Some(profile) = &mut self.profile {
-            let restored =
-                restore_bundle(state, profile.bundle, profile.undo_guard, profile.before)?;
+            let restored = restore_bundle(
+                state,
+                profile.bundle,
+                profile.undo_guard,
+                profile.before,
+                effects,
+            )?;
             profile.after = profile.undo_guard;
             profile.redo_guard = Some(restored);
         }
@@ -165,7 +169,11 @@ impl VerilogABuildSettingsRecord {
         Ok(())
     }
 
-    pub(super) fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+    pub(super) fn apply_after(
+        &mut self,
+        state: &mut Model,
+        effects: &mut HistoryEffects,
+    ) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
                 "Build settings cannot be redone because the source or its module changed."
@@ -177,7 +185,7 @@ impl VerilogABuildSettingsRecord {
             let current = profile
                 .redo_guard
                 .expect("a step on the redo stack was undone");
-            let restored = restore_bundle(state, profile.bundle, current, profile.after)?;
+            let restored = restore_bundle(state, profile.bundle, current, profile.after, effects)?;
             profile.before = current;
             profile.undo_guard = restored;
             profile.redo_guard = None;
@@ -189,9 +197,8 @@ impl VerilogABuildSettingsRecord {
     }
 }
 
-fn bundle_revision(state: &AppState, bundle: ProjectSourceId) -> Option<ObjectRevision> {
+fn bundle_revision(state: &Model, bundle: ProjectSourceId) -> Option<ObjectRevision> {
     state
-        .model
         .workspace
         .content
         .project_sources
@@ -199,9 +206,8 @@ fn bundle_revision(state: &AppState, bundle: ProjectSourceId) -> Option<ObjectRe
         .map(|bundle| bundle.revision())
 }
 
-fn bound_module<'a>(state: &'a AppState, view: &CellViewRef) -> Option<&'a String> {
+fn bound_module<'a>(state: &'a Model, view: &CellViewRef) -> Option<&'a String> {
     state
-        .model
         .library_manager
         .get_library(&view.library)?
         .get_cell(&view.cell)?
@@ -211,24 +217,24 @@ fn bound_module<'a>(state: &'a AppState, view: &CellViewRef) -> Option<&'a Strin
 }
 
 /// Put the bundle back at `retained`, from `current`, and say what it became.
-/// What it compiled to is evidence of the text it left, so that goes too.
+/// What it compiled to is evidence of the text it left, so `effects` asks
+/// for that to go too.
 fn restore_bundle(
-    state: &mut AppState,
+    state: &mut Model,
     bundle: ProjectSourceId,
     current: ObjectRevision,
     retained: ObjectRevision,
+    effects: &mut HistoryEffects,
 ) -> Result<ObjectRevision, String> {
     state
-        .model
         .workspace
         .content
         .restore_project_source_bundle_revision(bundle, current, retained)
         .map_err(|error| format!("Build settings could not be restored: {error}"))?;
     let restored = bundle_revision(state, bundle)
         .ok_or_else(|| "The Verilog-A source no longer exists.".to_owned())?;
-    state.code.code_workspace.veriloga.void_evidence();
+    effects.void_veriloga_evidence = true;
     let owner = state
-        .model
         .workspace
         .content
         .project_sources
@@ -236,7 +242,6 @@ fn restore_bundle(
         .map(|bundle| bundle.owner().clone());
     if let Some(crate::state::ProjectSourceOwner::CellView { reference }) = owner
         && let Some(open) = state
-            .model
             .workspace
             .content
             .open_views
@@ -249,8 +254,8 @@ fn restore_bundle(
 }
 
 /// Bind `view` to `module`, or to none.
-fn bind_module(state: &mut AppState, view: &CellViewRef, module: Option<&str>) {
-    let Some(mut library) = state.model.library_manager.edit_library(&view.library) else {
+fn bind_module(state: &mut Model, view: &CellViewRef, module: Option<&str>) {
+    let Some(mut library) = state.library_manager.edit_library(&view.library) else {
         return;
     };
     let Some(mut metadata) = library
@@ -267,5 +272,5 @@ fn bind_module(state: &mut AppState, view: &CellViewRef, module: Option<&str>) {
     };
     library.replace_view_metadata(&view.cell, &view.view, metadata);
     library.mark_view_modified(&view.cell, &view.view);
-    state.model.workspace.content.project_metadata_dirty = true;
+    state.workspace.content.project_metadata_dirty = true;
 }

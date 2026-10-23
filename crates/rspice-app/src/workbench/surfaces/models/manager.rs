@@ -1592,7 +1592,7 @@ fn author_technology_symbol_variant(
         .commit_symbol_construction(plan)
         .map_err(|error| error.to_string())?;
     let revision = publish_symbol_definition_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         target_library,
         target_cell,
@@ -1620,7 +1620,7 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
         candidate.remove_library(library);
     }
     let result = publish_model_library_set_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         format!("detach model pack {pack_id}"),
     )
@@ -1657,7 +1657,7 @@ fn publish_definition_provider(
         .resolve_definition_provider(scope, definition, provider_library, reason.trim())
         .and_then(|record| {
             publish_model_resolution_candidate(
-                app.state,
+                &mut app.state.model,
                 candidate,
                 format!(
                     "resolve {} {} to {}",
@@ -1693,7 +1693,7 @@ fn clear_definition_provider(
         ));
     }
     publish_model_resolution_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         format!("clear {} provider decision {definition}", scope.label()),
     )

@@ -297,7 +297,7 @@ mod tests {
                 .is_some()
         );
         assert!(!state.model.schematic.can_undo());
-        assert!(state.project_undo_sequence().is_none());
+        assert!(state.model.project_undo_sequence().is_none());
         state.open_project_session();
         state
             .workbench

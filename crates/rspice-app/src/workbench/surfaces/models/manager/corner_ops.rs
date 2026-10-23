@@ -111,7 +111,7 @@ pub(super) fn add_corner(
         library.activate_corner(name);
     }
     let result = publish_model_library_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         library_name,
         format!("add model corner {name}"),
@@ -281,7 +281,7 @@ pub(super) fn edit_corner(
     }
     let action = if duplicate { "duplicate" } else { "edit" };
     let result = publish_model_library_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         library_name,
         format!("{action} model corner {name}"),
@@ -374,7 +374,7 @@ pub(super) fn set_default_corner(
         })
         .and_then(|()| {
             publish_model_library_candidate(
-                app.state,
+                &mut app.state.model,
                 candidate,
                 library_name,
                 format!("set default model corner {corner_name}"),
@@ -448,7 +448,7 @@ pub(super) fn delete_corner(
         }
     }
     let result = publish_model_library_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         library_name,
         format!("delete model corner {corner_name}"),
@@ -517,7 +517,7 @@ pub(super) fn unbind_corner_section(
         return;
     }
     let result = publish_model_library_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         library_name,
         format!("unbind {} section for corner {corner_name}", domain.label()),
@@ -597,7 +597,7 @@ pub(super) fn bind_corner_section(
         return;
     }
     let result = publish_model_library_candidate(
-        app.state,
+        &mut app.state.model,
         candidate,
         library_name,
         format!("bind {} section {section} for corner {corner_name}", domain.label()),

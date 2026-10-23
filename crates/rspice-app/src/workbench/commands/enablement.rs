@@ -111,7 +111,7 @@ impl Command {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
-                    || state.can_undo_project_design()
+                    || state.model.can_undo_project_design()
                 {
                     true
                 } else if active_symbol_editor(app) {
@@ -129,7 +129,7 @@ impl Command {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
-                    || state.can_redo_project_design()
+                    || state.model.can_redo_project_design()
                 {
                     true
                 } else if active_symbol_editor(app) {
@@ -137,7 +137,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && state.can_redo_active_schematic()
+                        && state.model.can_redo_active_schematic()
                 }
             }
             Self::Cut => {

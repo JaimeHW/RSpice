@@ -1395,7 +1395,7 @@ mod tests {
         assert_eq!(sheet.format.authored_size.label(), "Lab panel");
         assert!(!app.state.sheets.drawing_sheet_presets.any_open());
         assert!(app.state.sheets.reveal_sheet_section);
-        assert!(app.state.can_undo_project_design());
+        assert!(app.state.model.can_undo_project_design());
     }
 
     fn build_package(

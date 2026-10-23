@@ -6,6 +6,7 @@
 //! read-only schematic refuses.
 
 mod design_checks;
+mod history;
 mod libraries;
 pub(in crate::workbench) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;
@@ -119,15 +120,6 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
             .get_library(&reference.library)
             .is_some_and(|library| library.read_only);
     schematic
-}
-
-/// What taking one cell out of the workspace left undecided: the focus, the
-/// project root, and the occurrence trail all name cell views, and any of the
-/// three can have named the cell that just went.
-struct CellRemovalScope {
-    active_removed: bool,
-    project_root_removed: bool,
-    hierarchy_pruned: bool,
 }
 
 impl AppState {
@@ -769,22 +761,24 @@ impl AppState {
         // A dropped contract is a step of its own, recorded below; anything
         // else membership published is bookkeeping the earlier steps survive.
         if published && removed_ports == 0 {
-            self.carry_project_history_over_sheet_membership(revision_before, committed_revision);
+            self.model
+                .carry_project_history_over_sheet_membership(revision_before, committed_revision);
         }
         let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {
             return;
         };
         let after = (*self.model.workspace.content.design_management).clone();
-        self.record_design_management_transaction(DesignManagementHistoryEntry {
-            description: "drop cross-sheet connections whose anchors were deleted".to_owned(),
-            owner: active.clone(),
-            before,
-            after,
-            before_schematics: BTreeMap::from([(active.key(), before_schematic)]),
-            after_schematics: BTreeMap::from([(active.key(), self.model.schematic.clone())]),
-            references: Default::default(),
-            committed_revision,
-        });
+        self.model
+            .record_design_management_transaction(DesignManagementHistoryEntry {
+                description: "drop cross-sheet connections whose anchors were deleted".to_owned(),
+                owner: active.clone(),
+                before,
+                after,
+                before_schematics: BTreeMap::from([(active.key(), before_schematic)]),
+                after_schematics: BTreeMap::from([(active.key(), self.model.schematic.clone())]),
+                references: Default::default(),
+                committed_revision,
+            });
         let subject = if removed_ports == 1 {
             "connection"
         } else {
@@ -984,88 +978,13 @@ impl AppState {
     /// here instead, and read as unresolved from this point on.
     pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         self.sync_active_schematic_to_workspace();
-        let removal = self.drop_workspace_references_to_cell(library, cell);
+        let removal = self.model.drop_workspace_references_to_cell(library, cell);
         self.restore_valid_workspace_focus_after_prune(
             removal.active_removed,
             removal.hierarchy_pruned,
             removal.project_root_removed,
             true,
         );
-    }
-
-    /// The same removal, for a cell a project-history step took away.
-    ///
-    /// Three things the deletion command does are wrong at this seam, because
-    /// the step is still in flight. Synchronizing the active drawing reconciles
-    /// sheet membership — which can record a project transaction of its own —
-    /// and republishes the active cell's generated symbol view; reloading it
-    /// afterwards re-derives connectivity and republishes the browser
-    /// selection; and re-deciding focus retires every tab whose cell view does
-    /// not exist yet. All three rewrite the design the step's guards are stated
-    /// against. Focus is the record's own business in any case: a symbol record
-    /// is guarded against removing a cell any open view belongs to, and an
-    /// extraction restores tabs, breadcrumbs and the active view itself. What
-    /// is left is the part no record covers — the placements standing in
-    /// drawings the record never named, the active one included.
-    pub(crate) fn prune_workspace_after_history_removed_cell(&mut self, library: &str, cell: &str) {
-        self.drop_workspace_references_to_cell(library, cell);
-        self.model
-            .schematic
-            .revalidate_instance_bindings(&self.model.library_manager);
-    }
-
-    fn drop_workspace_references_to_cell(&mut self, library: &str, cell: &str) -> CellRemovalScope {
-        let active_removed = self.model.workspace.content.active_view.library == library
-            && self.model.workspace.content.active_view.cell == cell;
-        let project_root_removed = self.model.workspace.content.project.root_library == library
-            && self.model.workspace.content.project.top_cell == cell;
-        let prefix = format!("{library}/{cell}/");
-        self.model
-            .workspace
-            .content
-            .schematic_buffers
-            .retain(|key, _| !key.starts_with(&prefix));
-        self.model
-            .workspace
-            .session
-            .schematic_sessions
-            .retain(|key, _| !key.starts_with(&prefix));
-        let orphaned_layouts = self
-            .model
-            .workspace
-            .content
-            .physical_layout_documents()
-            .values()
-            .filter(|document| document.owner().library == library && document.owner().cell == cell)
-            .map(|document| document.owner().clone())
-            .collect::<Vec<_>>();
-        for owner in orphaned_layouts {
-            self.model
-                .workspace
-                .content
-                .remove_physical_layout_document(&owner);
-        }
-        self.model
-            .workspace
-            .content
-            .open_views
-            .retain(|open| open.reference.library != library || open.reference.cell != cell);
-        let libraries = &self.model.library_manager;
-        for schematic in self.model.workspace.content.schematic_buffers.values_mut() {
-            schematic.revalidate_instance_bindings(libraries.catalog());
-        }
-        let hierarchy_pruned = self
-            .model
-            .workspace
-            .content
-            .retain_valid_occurrences(|reference| {
-                reference.library != library || reference.cell != cell
-            });
-        CellRemovalScope {
-            active_removed,
-            project_root_removed,
-            hierarchy_pruned,
-        }
     }
 
     pub(crate) fn prune_workspace_after_view_deleted(
