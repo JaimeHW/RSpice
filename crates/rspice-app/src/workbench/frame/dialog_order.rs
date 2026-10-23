@@ -8,7 +8,7 @@
 
 use crate::workbench::app::dialogs;
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, Modality};
+use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
 use crate::workbench::{RSpiceApp, SurfaceId};
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
@@ -26,8 +26,11 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("framework.confirmation"),
-        modality: Modality::Application,
-        is_open: None,
+        modality: Modality::Dialog,
+        is_open: Some(|state| {
+            state.workbench.confirmation_dialog.visible
+                || state.workbench.project_review_dialog.request.is_some()
+        }),
         render: |app, ctx| app.render_confirmation_dialog(ctx),
     },
     DialogSpec {
@@ -46,79 +49,84 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("settings.preferences"),
-        modality: Modality::Application,
-        is_open: None,
+        modality: Modality::Dialog,
+        is_open: Some(|state| {
+            state.settings.preferences_open
+                || state.settings.workspace_layout_manager.open
+                || state.settings.shortcut_portability.application_modal_open()
+                || state.settings.shortcut_editor.open
+        }),
         render: |app, ctx| app.render_preferences_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("cloud.license"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.cloud.license_dialog.open),
         render: |app, ctx| app.render_license_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("project.new_project"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_project.open),
         render: |app, ctx| app.render_new_project_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("cloud.publish_web"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.cloud.publish_web.open),
         render: |app, ctx| app.render_publish_web_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("cloud.live_session"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.cloud.live_session.open),
         render: |app, ctx| app.render_live_session_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("cloud.unpublish_web"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.cloud.unpublish_web.open),
         render: |app, ctx| app.render_unpublish_web_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("framework.command_palette"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.workbench.command_palette.open),
         render: |app, ctx| app.render_command_palette(ctx),
     },
     DialogSpec {
         key: DialogKey("design.bus_tap"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.bus_tap.open),
         render: |app, ctx| app.render_bus_tap_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.builtin_xspice_placement"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.builtin_xspice_placement.open),
         render: |app, ctx| app.render_builtin_xspice_placement_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.net_label"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.net_label_placement.open),
         render: |app, ctx| app.render_net_label_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.grid_snap_routing"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.grid_snap_routing.open),
         render: |app, ctx| app.render_grid_snap_routing_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_overflow"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.sheets.drawing_sheet_overflow_open),
         render: |app, ctx| app.render_drawing_sheet_overflow_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.schematic_visibility"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.schematic_visibility_dialog.open),
         render: |app, ctx| app.render_schematic_visibility_dialog(ctx),
     },
@@ -130,74 +138,74 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("design.engineering_table"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.engineering_table.open),
         render: |app, ctx| app.render_engineering_table_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.pin_port"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.pin_port.open),
         render: |app, ctx| app.render_pin_port_dialog(ctx),
     },
     // New comment hands input to the note editor in this same frame.
     DialogSpec {
         key: DialogKey("design.design_review_comments"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.design_review_comments.open),
         render: |app, ctx| app.render_design_review_comments_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.design_note"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.design_note.open),
         render: |app, ctx| app.render_design_note_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.documentation_shape"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.documentation_shape.open),
         render: |app, ctx| app.render_documentation_shape_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.array_selection"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.array_selection.open),
         render: |app, ctx| app.render_array_selection_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.replace_instance"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.replace_instance.open),
         render: |app, ctx| app.render_replace_instance_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.stimulus_link"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.stimulus_link.open),
         render: |app, ctx| dialogs::stimulus_link::render_stimulus_link_dialog(ctx, &mut app.state),
     },
     DialogSpec {
         key: DialogKey("design.create_hierarchy"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.create_hierarchy.open),
         render: |app, ctx| app.render_create_hierarchy_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("project.check_and_save"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.check_and_save.open),
         render: |app, ctx| app.render_check_and_save_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.connectivity_manager"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.connectivity_manager.open),
         render: |app, ctx| app.render_connectivity_manager_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("sheets.delete_sheet"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.sheets.delete_sheet.is_some()),
         render: |app, ctx| {
             dialogs::delete_sheet::render_delete_sheet_confirmation(ctx, &mut app.state)
@@ -205,19 +213,19 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("project.design_management"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.design_management.open),
         render: |app, ctx| app.render_design_management_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.selection_bulk_edit"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.selection_bulk_edit.open),
         render: |app, ctx| app.render_selection_bulk_edit_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("project.project_revision_history"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.project_revision_history.open),
         render: |app, ctx| app.render_project_revision_history_dialog(ctx),
     },
@@ -241,19 +249,21 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("design.create_model_bound_symbol"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.create_model_bound_symbol.open),
         render: |app, ctx| app.render_create_model_bound_symbol_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.symbol_definition"),
-        modality: Modality::Application,
-        is_open: None,
+        modality: Modality::Dialog,
+        is_open: Some(|state| {
+            state.design.symbol_import.open || state.design.symbol_parameter_form.open
+        }),
         render: |app, ctx| app.render_symbol_definition_dialogs(ctx),
     },
     DialogSpec {
         key: DialogKey("simulate.configuration_sets"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.configuration_sets.open),
         render: |app, ctx| app.render_configuration_sets_dialog(ctx),
     },
@@ -261,7 +271,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     // old one is not authorized under it.
     DialogSpec {
         key: DialogKey("design.rule_setup"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.rule_setup.open),
         render: |app, ctx| {
             if dialogs::rule_setup::render_rule_setup_dialog(ctx, &mut app.state) {
@@ -271,67 +281,67 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_defaults"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.sheets.drawing_sheet_defaults.open),
         render: |app, ctx| app.render_drawing_sheet_defaults_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_presets"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.sheets.drawing_sheet_presets.any_open()),
         render: |app, ctx| app.render_drawing_sheet_preset_dialogs(ctx),
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_support"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.sheets.drawing_sheet_support.any_open()),
         render: |app, ctx| app.render_drawing_sheet_support_dialogs(ctx),
     },
     DialogSpec {
         key: DialogKey("hardcopy.hardcopy"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.hardcopy.hardcopy.open),
         render: |app, ctx| app.render_hardcopy_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.object_properties"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.object_properties.open),
         render: |app, ctx| app.render_object_properties_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.rename_selection"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.rename_selection.open),
         render: |app, ctx| app.render_rename_selection_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.find_replace"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.find_replace.open),
         render: |app, ctx| app.render_find_replace_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("design.shared_properties"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.design.shared_properties.open),
         render: |app, ctx| app.render_shared_properties_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("framework.window_session"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.workbench.window_session_dialog.open),
         render: |app, ctx| app.render_window_session_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("shell.help_center"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.shell.help_center.open),
         render: |app, ctx| app.render_help_center_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("shell.about"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.shell.about),
         render: |app, ctx| app.render_about_dialog(ctx),
     },
@@ -362,7 +372,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("shell.shortcuts_help"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.shell.shortcuts_help),
         render: |app, ctx| app.render_shortcuts_help_dialog(ctx),
     },
@@ -374,19 +384,19 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("project.new_cell"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_cell_dialog),
         render: |app, ctx| app.process_new_cell_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("project.new_view"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_view_dialog),
         render: |app, ctx| app.process_new_view_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("code.new_veriloga_device"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.code.new_veriloga_device.open),
         render: |app, ctx| app.render_new_veriloga_device_form(ctx),
     },
@@ -404,44 +414,44 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     DialogSpec {
         key: DialogKey("code.veriloga_build_settings"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.code.veriloga_build_settings.is_some()),
         render: |app, ctx| app.render_veriloga_build_settings(ctx),
     },
     DialogSpec {
         key: DialogKey("project.copy_cell"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.copy_cell_dialog),
         render: |app, ctx| app.process_copy_cell_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("project.rename_cell"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.rename_cell_dialog),
         render: |app, ctx| app.process_rename_cell_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("project.library_deletion_review"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.project.library_deletion_review.target.is_some()),
         render: |app, ctx| app.process_library_deletion_review_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("simulate.plan_removal_review"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.plan_removal_review.target.is_some()),
         render: |app, ctx| app.process_plan_removal_review_dialog(ctx),
     },
     DialogSpec {
         key: DialogKey("simulate.plan_removal_refusal"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.plan_removal_refusal.analysis.is_some()),
         render: |app, ctx| app.process_plan_removal_refusal_dialog(ctx),
     },
     #[cfg(not(target_arch = "wasm32"))]
     DialogSpec {
         key: DialogKey("services.autosave_restore"),
-        modality: Modality::Application,
+        modality: Modality::Dialog,
         is_open: Some(|state| state.platform.pending_autosave_restore.is_some()),
         render: |app, ctx| {
             crate::workbench::app_state::services_access::process_autosave_restore_dialog(
@@ -499,12 +509,152 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("simulate.workflow_dialogs"),
         modality: Modality::Application,
-        is_open: None,
+        is_open: Some(|state| {
+            state.simulate.simulation_workflow.is_some()
+                || state.model.sim_setup.session.palette_open
+        }),
         render: |app, ctx| crate::workbench::surfaces::show_simulation_workflow_dialogs(ctx, app),
     },
 ];
 
-const _: () = crate::workbench::framework::dialogs::check(DIALOG_ORDER);
+/// What holds a modal gate while it is open but is drawn by no step of
+/// [`DIALOG_ORDER`], under the slice that hosts it. The order is not
+/// behaviour: a gate is open while any of them is.
+const MODAL_ONLY: &[ModalSpec<AppState>] = &[
+    ModalSpec {
+        key: DialogKey("project.new_library"),
+        modality: Modality::Dialog,
+        is_open: |state| state.project.new_library_dialog,
+    },
+    ModalSpec {
+        key: DialogKey("project.rename_library"),
+        modality: Modality::Dialog,
+        is_open: |state| state.project.rename_library_dialog,
+    },
+    ModalSpec {
+        key: DialogKey("project.delete_library"),
+        modality: Modality::Dialog,
+        is_open: |state| state.project.delete_library_dialog,
+    },
+    ModalSpec {
+        key: DialogKey("project.rename_view"),
+        modality: Modality::Dialog,
+        is_open: |state| state.project.rename_view_dialog,
+    },
+    ModalSpec {
+        key: DialogKey("project.technology_attachment"),
+        modality: Modality::Dialog,
+        is_open: |state| state.project.technology_attachment.open,
+    },
+    ModalSpec {
+        key: DialogKey("results.dataset_export"),
+        modality: Modality::Dialog,
+        is_open: |state| state.results.dataset_export.is_some(),
+    },
+    ModalSpec {
+        key: DialogKey("simulate.run_details"),
+        modality: Modality::Dialog,
+        is_open: |state| state.simulate.run_details.is_some(),
+    },
+    ModalSpec {
+        key: DialogKey("project.launcher"),
+        modality: Modality::Application,
+        is_open: |state| state.project.project_launcher_open,
+    },
+    ModalSpec {
+        key: DialogKey("project.launcher_route"),
+        modality: Modality::Application,
+        is_open: |state| state.workbench.current_route().surface_id() == SurfaceId::ProjectLauncher,
+    },
+    ModalSpec {
+        key: DialogKey("project.examples"),
+        modality: Modality::Application,
+        is_open: |state| state.project.examples_selection.is_some(),
+    },
+    ModalSpec {
+        key: DialogKey("project.design_management_route"),
+        modality: Modality::Application,
+        is_open: |state| {
+            state.workbench.current_route().surface_id() == SurfaceId::DesignManagement
+        },
+    },
+    ModalSpec {
+        key: DialogKey("settings.preferences_route"),
+        modality: Modality::Application,
+        is_open: |state| state.workbench.current_route().surface_id() == SurfaceId::Preferences,
+    },
+    ModalSpec {
+        key: DialogKey("framework.notification_center"),
+        modality: Modality::Application,
+        is_open: |state| state.workbench.notification_center_open,
+    },
+    ModalSpec {
+        key: DialogKey("framework.notification_center_route"),
+        modality: Modality::Application,
+        is_open: |state| {
+            state.workbench.current_route().surface_id() == SurfaceId::NotificationCenter
+        },
+    },
+    // The browser draws its pending file operation under the confirmation
+    // step, but only this gate counts it.
+    #[cfg(target_arch = "wasm32")]
+    ModalSpec {
+        key: DialogKey("framework.browser_file_operation"),
+        modality: Modality::Application,
+        is_open: |state| {
+            crate::workbench::workflows::project_workflow::browser_file_operation_label(state)
+                .is_some()
+        },
+    },
+    ModalSpec {
+        key: DialogKey("models.model_correlation"),
+        modality: Modality::Application,
+        is_open: |state| state.models.model_correlation.dialog_open(),
+    },
+    ModalSpec {
+        key: DialogKey("models.models_view"),
+        modality: Modality::Application,
+        is_open: |state| state.models.models_view.dialog.is_some(),
+    },
+    ModalSpec {
+        key: DialogKey("results.create_result_document"),
+        modality: Modality::Application,
+        is_open: |state| state.results.create_result_document.open,
+    },
+    ModalSpec {
+        key: DialogKey("results.result_document"),
+        modality: Modality::Application,
+        is_open: |state| state.results.result_document_dialog.is_some(),
+    },
+    ModalSpec {
+        key: DialogKey("simulate.regression_baseline_picker"),
+        modality: Modality::Application,
+        is_open: |state| state.simulate.verification.regression_baseline_picker_open,
+    },
+    ModalSpec {
+        key: DialogKey("simulate.tuning_review"),
+        modality: Modality::Application,
+        is_open: |state| state.simulate.verification.tuning_review_open,
+    },
+    // The Netlist document's own dialogs hold the gate only while its
+    // workspace shows them.
+    ModalSpec {
+        key: DialogKey("code.netlist"),
+        modality: Modality::Application,
+        is_open: |state| {
+            state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+                && state.code.netlist.application_modal_open()
+        },
+    },
+];
+
+const _: () = crate::workbench::framework::dialogs::check(DIALOG_ORDER, MODAL_ONLY);
+
+impl ModalGate for AppState {
+    type Host = RSpiceApp;
+    const ORDER: &'static [DialogSpec<RSpiceApp, Self>] = DIALOG_ORDER;
+    const MODAL_ONLY: &'static [ModalSpec<Self>] = MODAL_ONLY;
+}
 
 #[cfg(test)]
 mod tests {

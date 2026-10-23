@@ -820,7 +820,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app_state", "app", 4),
     ("app_state", "slots", 3),
     ("app_state", "workflows/file_workflow", 1),
-    ("app_state", "workflows/project_workflow", 1),
     // What still reaches the application root rather than the session data.
     // These name `RSpiceApp` itself, so they retire with the `&mut RSpiceApp`
     // burndown, not with a module move.

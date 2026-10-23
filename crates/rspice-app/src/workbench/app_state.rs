@@ -746,44 +746,9 @@ impl AppState {
     }
 
     /// Whether any retained application workflow owns exclusive keyboard and
-    /// pointer intent for this frame.
+    /// pointer intent for this frame: anything modal the shell lists is open.
     pub(crate) fn application_modal_open(&self) -> bool {
-        #[cfg(target_arch = "wasm32")]
-        let browser_file_operation_open =
-            crate::workbench::workflows::project_workflow::browser_file_operation_label(self)
-                .is_some();
-        #[cfg(not(target_arch = "wasm32"))]
-        let browser_file_operation_open = false;
-
-        self.project.project_launcher_open
-            || self.project.examples_selection.is_some()
-            || self.workbench.notification_center_open
-            || self.models.model_correlation.dialog_open()
-            || self.results.create_result_document.open
-            || self.results.result_document_dialog.is_some()
-            || self.results.result_import.open
-            || self.models.models_view.dialog.is_some()
-            || self.simulate.simulation_workflow.is_some()
-            || self.simulate.verification.regression_baseline_picker_open
-            || self.simulate.verification.tuning_review_open
-            || matches!(
-                self.workbench.current_route().surface_id(),
-                SurfaceId::ProjectLauncher
-                    | SurfaceId::Preferences
-                    | SurfaceId::DesignManagement
-                    | SurfaceId::AccountOrganization
-                    | SurfaceId::JobsManager
-                    | SurfaceId::SpecialistToolBrowser
-                    | SurfaceId::NotificationCenter
-            )
-            || self.dialog_modal_open()
-            || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
-                && self.code.netlist.application_modal_open())
-            || self.model.sim_setup.session.palette_open
-            || self.design.tabbed_property_dialog.open
-            || self.models.pdk_settings_dialog.open
-            || self.models.model_browser_state.open
-            || browser_file_operation_open
+        crate::workbench::framework::dialogs::application_modal_open(self)
     }
 
     pub fn open_project_launcher(&mut self) {
