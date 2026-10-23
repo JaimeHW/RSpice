@@ -1837,6 +1837,40 @@ mod tests {
         }
     }
 
+    /// `PULSE(V1 V2 TD TR TF PW PER NP)` in card order, with an authored PW.
+    fn pulse(card: [Value; 8]) -> crate::netlist::SourceSpec {
+        let [v1, v2, delay, rise, fall, width, period, pulse_count] = card;
+        crate::netlist::SourceSpec::Pulse {
+            v1,
+            v2,
+            delay,
+            rise,
+            fall,
+            width,
+            period,
+            pulse_count,
+            width_defaults_to_zero: false,
+        }
+    }
+
+    /// The breakpoints `spec` schedules over the window, merged within `tolerance`.
+    fn source_breakpoints(
+        tolerance: Value,
+        spec: &crate::netlist::SourceSpec,
+        tstop: Value,
+        tstep_hint: Value,
+        dialect: crate::engine::SpiceDialect,
+    ) -> Vec<Value> {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(tolerance);
+        let window = BreakpointWindow {
+            tstop,
+            tstep_hint,
+            dialect,
+        };
+        Engine::add_source_spec_breakpoints(&mut breakpoints, spec, window);
+        breakpoints.times().to_vec()
+    }
+
     #[test]
     fn authored_schedule_union_honors_the_engine_resource_limit_before_allocation() {
         let netlist = crate::netlist::Netlist::parse(
@@ -2012,7 +2046,6 @@ mod tests {
     /// waveform side and the reference deck that pins it.
     #[test]
     fn pulse_with_only_rise_and_fall_schedules_one_shot_breakpoints() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
         let spec = crate::netlist::SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -2024,18 +2057,14 @@ mod tests {
             pulse_count: 0.0,
             width_defaults_to_zero: true,
         };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
+        let times = source_breakpoints(
+            1.0e-21,
             &spec,
-            BreakpointWindow {
-                tstop: 20.0e-9,
-                tstep_hint: 0.5e-9,
-                dialect: crate::engine::SpiceDialect::BestAvailable,
-            },
+            20.0e-9,
+            0.5e-9,
+            crate::engine::SpiceDialect::BestAvailable,
         );
-
-        assert_delays_close(breakpoints.times(), &[1.0e-9, 3.0e-9, 6.0e-9]);
+        assert_delays_close(&times, &[1.0e-9, 3.0e-9, 6.0e-9]);
     }
 
     /// An authored PW still supplies a period worth repeating on, so the
@@ -2044,110 +2073,49 @@ mod tests {
     /// one-shot rule above narrow.
     #[test]
     fn pulse_with_authored_width_and_omitted_period_still_repeats() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 1.0e-9,
-            rise: 2.0e-9,
-            fall: 3.0e-9,
-            width: 4.0e-9,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 20.0e-9,
-                tstep_hint: 0.5e-9,
-                dialect: crate::engine::SpiceDialect::BestAvailable,
-            },
+        let times = source_breakpoints(
+            1.0e-21,
+            &pulse([0.0, 1.0, 1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9, Value::NAN, 0.0]),
+            20.0e-9,
+            0.5e-9,
+            crate::engine::SpiceDialect::BestAvailable,
         );
-
         // Period is TR + PW + TF = 9 ns: edges at TD, +TR, +TR+PW, +TR+PW+TF,
         // then the same four one period later, and the start of the third.
         assert_delays_close(
-            breakpoints.times(),
+            &times,
             &[1.0e-9, 3.0e-9, 7.0e-9, 10.0e-9, 12.0e-9, 16.0e-9, 19.0e-9],
         );
     }
 
     #[test]
     fn xyce_pulse_omitted_period_breakpoints_use_transient_stop_default() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 10.0e-6,
-            rise: 1.0e-6,
-            fall: 1.0e-6,
-            width: 100.0e-3,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 400.0e-3,
-                tstep_hint: 0.5e-6,
-                dialect: crate::engine::SpiceDialect::Xyce,
-            },
+        let times = source_breakpoints(
+            1.0e-15,
+            &pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]),
+            400.0e-3,
+            0.5e-6,
+            crate::engine::SpiceDialect::Xyce,
         );
-
-        assert_delays_close(
-            breakpoints.times(),
-            &[10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3],
-        );
+        assert_delays_close(&times, &[10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3]);
     }
 
     #[test]
     fn xyce_explicit_zero_pulse_edges_do_not_gain_tstep_ramps() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 20.0,
-            delay: 0.0,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.2,
-            period: 0.4,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 0.8,
-                tstep_hint: 0.02,
-                dialect: crate::engine::SpiceDialect::Xyce,
-            },
+        let times = source_breakpoints(
+            1.0e-15,
+            &pulse([0.0, 20.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0]),
+            0.8,
+            0.02,
+            crate::engine::SpiceDialect::Xyce,
         );
-
-        assert_delays_close(breakpoints.times(), &[0.0, 0.2, 0.4, 0.6, 0.8]);
+        assert_delays_close(&times, &[0.0, 0.2, 0.4, 0.6, 0.8]);
     }
 
     #[test]
     fn xyce_far_negative_pulse_delay_skips_historical_cycles() {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: -2_000_000.0,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.25,
-            period: 1.0,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 1.0, -2_000_000.0, 0.0, 0.0, 0.25, 1.0, 0.0]);
 
         Engine::add_source_spec_breakpoints_with_pwl(
             &mut breakpoints,
@@ -2169,31 +2137,15 @@ mod tests {
 
     #[test]
     fn xyce_fractional_period_includes_representable_final_cycle() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 0.001,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.0,
-            period: 0.001,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 0.011,
-                tstep_hint: 0.0001,
-                dialect: crate::engine::SpiceDialect::Xyce,
-            },
+        let times = source_breakpoints(
+            1.0e-15,
+            &pulse([0.0, 1.0, 0.001, 0.0, 0.0, 0.0, 0.001, 0.0]),
+            0.011,
+            0.0001,
+            crate::engine::SpiceDialect::Xyce,
         );
-
         assert_delays_close(
-            breakpoints.times(),
+            &times,
             &[
                 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010, 0.011,
             ],
@@ -2202,59 +2154,27 @@ mod tests {
 
     #[test]
     fn xyce_negative_pulse_period_has_no_nonnegative_edges() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 0.0,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.2,
-            period: -0.4,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 0.8,
-                tstep_hint: 0.02,
-                dialect: crate::engine::SpiceDialect::Xyce,
-            },
+        let times = source_breakpoints(
+            1.0e-15,
+            &pulse([0.0, 1.0, 0.0, 0.0, 0.0, 0.2, -0.4, 0.0]),
+            0.8,
+            0.02,
+            crate::engine::SpiceDialect::Xyce,
         );
-
-        assert!(breakpoints.times().is_empty());
+        assert!(times.is_empty());
     }
 
     #[test]
     fn ngspice_pulse_omitted_period_breakpoints_repeat_after_waveform_duration() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 10.0e-6,
-            rise: 1.0e-6,
-            fall: 1.0e-6,
-            width: 100.0e-3,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 400.0e-3,
-                tstep_hint: 0.5e-6,
-                dialect: crate::engine::SpiceDialect::Ngspice,
-            },
+        let times = source_breakpoints(
+            1.0e-15,
+            &pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]),
+            400.0e-3,
+            0.5e-6,
+            crate::engine::SpiceDialect::Ngspice,
         );
-
         assert_delays_close(
-            breakpoints.times(),
+            &times,
             &[
                 10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3, 100.013e-3, 200.013e-3, 200.014e-3,
                 200.015e-3, 300.015e-3, 300.016e-3, 300.017e-3,
@@ -2267,31 +2187,15 @@ mod tests {
     /// then a flat hold that needs no timestep placed in it.
     #[test]
     fn bounded_pulse_train_stops_scheduling_edges_after_its_last_period() {
-        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
-        let spec = crate::netlist::SourceSpec::Pulse {
-            v1: -1.0,
-            v2: 1.0,
-            delay: 0.0,
-            rise: 1.0e-5,
-            fall: 1.0e-5,
-            width: 5.0e-4,
-            period: 1.0e-3,
-            pulse_count: 2.0,
-            width_defaults_to_zero: false,
-        };
-
-        Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
-            &spec,
-            BreakpointWindow {
-                tstop: 1.0e-2,
-                tstep_hint: 2.0e-5,
-                dialect: crate::engine::SpiceDialect::BestAvailable,
-            },
+        let times = source_breakpoints(
+            1.0e-15,
+            &pulse([-1.0, 1.0, 0.0, 1.0e-5, 1.0e-5, 5.0e-4, 1.0e-3, 2.0]),
+            1.0e-2,
+            2.0e-5,
+            crate::engine::SpiceDialect::BestAvailable,
         );
-
         assert_delays_close(
-            breakpoints.times(),
+            &times,
             &[
                 0.0, 1.0e-5, 5.1e-4, 5.2e-4, 1.0e-3, 1.01e-3, 1.51e-3, 1.52e-3, 2.0e-3, 2.01e-3,
                 2.51e-3, 2.52e-3,
