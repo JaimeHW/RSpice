@@ -436,7 +436,7 @@ fn generated_runtime_snapshots_only_mutable_evaluation_state() {
     let nonlinear_lf = nonlinear.replace("\r\n", "\n");
 
     assert!(
-        runtime.contains("pub(crate) struct BuiltinVerilogADevicesRollback")
+        runtime.contains("pub struct BuiltinVerilogADevicesRollback")
             && runtime.contains("capture_rollback_state(&self)")
             && runtime.contains("restore_rollback_state(&mut self"),
         "generated runtime should use compact rollback state:\n{runtime}"
