@@ -1939,43 +1939,6 @@ fn rename_library_propagation_matrix() {
 }
 
 #[test]
-fn rename_library_is_blocked_by_a_lease_on_either_name() {
-    for locked in ["user", "project_lib"] {
-        let mut state = state_with_populated_user_library();
-        let snapshot = crate::state::library_browser::ProjectLibraryLockSnapshot::try_new(
-            state.model.workspace.content.project.id(),
-            1,
-            state.model.workspace.content.project.revision(),
-            state.model.library_manager.revision(),
-            "org-lock-service",
-            vec![crate::state::library_browser::ProjectLibraryEditLock::new(
-                uuid::Uuid::new_v4(),
-                "engineer@example.test",
-                "org-lock-service",
-                crate::state::library_browser::ProjectLibraryEditLockScope::Library {
-                    library: locked.to_owned(),
-                },
-                10,
-                20,
-            )],
-        )
-        .expect("valid lock snapshot");
-        state
-            .model
-            .library_edit_locks
-            .install_authoritative(snapshot)
-            .expect("authority installs");
-
-        let error = state
-            .rename_library("user", "project_lib")
-            .expect_err("a lease on either name blocks the rename");
-
-        assert!(error.contains("is locked by"), "{error}");
-        assert!(state.model.library_manager.get_library("user").is_some());
-    }
-}
-
-#[test]
 fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
     let mut state = state_with_populated_user_library();
 

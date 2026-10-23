@@ -27,8 +27,5 @@
 mod placement;
 
 pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
-pub use rspice_design::library::{
-    Cell, Library, ProjectLibraryEditLock, ProjectLibraryEditLockScope,
-    ProjectLibraryLockAuthority, ProjectLibraryLockSnapshot, View, ViewType,
-};
+pub use rspice_design::library::{Cell, Library, ProjectLibraryLockAuthority, View, ViewType};
 pub use rspice_project::ProjectLibraries as LibraryManager;

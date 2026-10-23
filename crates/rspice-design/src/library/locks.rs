@@ -132,31 +132,6 @@ impl ProjectLibraryEditLock {
     pub const fn lock_id(&self) -> Uuid {
         self.lock_id
     }
-
-    #[must_use]
-    pub fn owner_id(&self) -> &str {
-        &self.owner_id
-    }
-
-    #[must_use]
-    pub fn authority_id(&self) -> &str {
-        &self.authority_id
-    }
-
-    #[must_use]
-    pub fn scope(&self) -> &ProjectLibraryEditLockScope {
-        &self.scope
-    }
-
-    #[must_use]
-    pub const fn acquired_unix_ms(&self) -> u64 {
-        self.acquired_unix_ms
-    }
-
-    #[must_use]
-    pub const fn lease_until_unix_ms(&self) -> u64 {
-        self.lease_until_unix_ms
-    }
 }
 
 /// Exact, digest-sealed lock snapshot delivered by an external authority.
@@ -275,45 +250,10 @@ impl ProjectLibraryLockSnapshot {
         .map_err(|error| format!("project library lock snapshot serialization failed: {error}"))?;
         Ok(ContentDigest::from_bytes(Sha256::digest(bytes).into()))
     }
-
-    #[must_use]
-    pub const fn project_id(&self) -> ProjectId {
-        self.project_id
-    }
-
-    #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    #[must_use]
-    pub const fn project_revision(&self) -> ObjectRevision {
-        self.project_revision
-    }
-
-    #[must_use]
-    pub const fn library_revision(&self) -> u64 {
-        self.library_revision
-    }
-
-    #[must_use]
-    pub fn authority_id(&self) -> &str {
-        &self.authority_id
-    }
-
-    #[must_use]
-    pub fn locks(&self) -> &[ProjectLibraryEditLock] {
-        &self.locks
-    }
-
-    #[must_use]
-    pub const fn snapshot_digest(&self) -> ContentDigest {
-        self.snapshot_digest
-    }
 }
 
-/// Runtime lock mode. Local projects remain explicitly unmanaged; a
-/// collaboration session must install monotonically newer authority snapshots.
+/// Runtime lock mode. Local projects remain explicitly unmanaged; an
+/// authoritative snapshot gates every library mutation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ProjectLibraryLockAuthority {
     #[default]
@@ -371,39 +311,6 @@ impl std::fmt::Display for ProjectLibraryLockBlockReason {
 }
 
 impl ProjectLibraryLockAuthority {
-    pub fn install_authoritative(
-        &mut self,
-        snapshot: ProjectLibraryLockSnapshot,
-    ) -> Result<(), String> {
-        snapshot.validate()?;
-        if let Self::Authoritative(current) = self {
-            if snapshot.project_id != current.project_id {
-                return Err("a lock authority snapshot cannot switch projects in place".to_owned());
-            }
-            if snapshot.authority_id != current.authority_id {
-                return Err(
-                    "a lock authority snapshot cannot switch authorities in place".to_owned(),
-                );
-            }
-            if snapshot.generation <= current.generation {
-                return Err(format!(
-                    "project library lock snapshot generation {} is not newer than {}",
-                    snapshot.generation, current.generation
-                ));
-            }
-        }
-        *self = Self::Authoritative(snapshot);
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn snapshot(&self) -> Option<&ProjectLibraryLockSnapshot> {
-        match self {
-            Self::UnmanagedLocal => None,
-            Self::Authoritative(snapshot) => Some(snapshot),
-        }
-    }
-
     pub fn require_mutation_authority(
         &self,
         project_id: ProjectId,
@@ -667,7 +574,6 @@ mod tests {
     #[test]
     fn stale_or_tampered_lock_authority_fails_closed() {
         let project_id = ProjectId::new();
-        let mut authority = ProjectLibraryLockAuthority::default();
         let first = snapshot(
             project_id,
             ObjectRevision::INITIAL,
@@ -676,9 +582,7 @@ mod tests {
                 library: "work".to_owned(),
             },
         );
-        authority
-            .install_authoritative(first.clone())
-            .expect("first snapshot installs");
+        let authority = ProjectLibraryLockAuthority::Authoritative(first.clone());
         assert!(matches!(
             authority.require_mutation_authority(
                 project_id,
@@ -691,9 +595,8 @@ mod tests {
             ),
             Err(ProjectLibraryLockBlockReason::StaleSnapshot { .. })
         ));
-        assert!(authority.install_authoritative(first).is_err());
 
-        let mut json = serde_json::to_value(authority.snapshot().unwrap()).unwrap();
+        let mut json = serde_json::to_value(&first).unwrap();
         json["authority_id"] = serde_json::json!("attacker");
         let tampered: ProjectLibraryLockSnapshot = serde_json::from_value(json).unwrap();
         assert!(tampered.validate().is_err());

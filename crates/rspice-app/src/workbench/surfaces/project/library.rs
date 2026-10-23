@@ -15,7 +15,6 @@ const BROWSER_ROW_HEIGHT: f32 = 31.0;
 const MIN_BROWSER_WIDTH: f32 = 620.0;
 const USAGE_REPORT_ID: &str = "workbench.project.library.where-used";
 const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
-const LOCK_REPORT_ID: &str = "workbench.project.library.edit-locks";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LibraryIntent {
@@ -35,7 +34,6 @@ enum LibraryIntent {
     RenameView(CellViewRef),
     DeleteView(CellViewRef),
     ShowAuditHistory,
-    ShowEditLocks,
     PublishLibrary,
     RollbackPublication,
 }
@@ -93,7 +91,6 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     show_library_usage_report(&ctx);
     show_library_audit_history(&ctx, &app.state);
-    show_library_edit_locks(&ctx, &app.state);
     super::library_publication::show(&ctx, app);
     // The library and view membership modals are reachable only from this
     // surface's own routes, so this surface owns their frame.
@@ -602,9 +599,6 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     if publish.clicked() {
                         intent = Some(LibraryIntent::PublishLibrary);
                     }
-                    if Button::new("Edit locks\u{2026}").show(ui).clicked() {
-                        intent = Some(LibraryIntent::ShowEditLocks);
-                    }
                     if Button::new("Audit history\u{2026}").show(ui).clicked() {
                         intent = Some(LibraryIntent::ShowAuditHistory);
                     }
@@ -880,11 +874,6 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                 data.insert_temp(egui::Id::new(AUDIT_REPORT_ID), true);
             });
         }
-        LibraryIntent::ShowEditLocks => {
-            ctx.data_mut(|data| {
-                data.insert_temp(egui::Id::new(LOCK_REPORT_ID), true);
-            });
-        }
         LibraryIntent::PublishLibrary => {
             super::library_publication::open_publication(ctx, &app.state);
         }
@@ -1093,106 +1082,6 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
         ctx.data_mut(|data| {
             data.remove::<bool>(egui::Id::new(AUDIT_REPORT_ID));
-        });
-    }
-}
-
-fn show_library_edit_locks(ctx: &Context, state: &AppState) {
-    if !ctx.data(|data| {
-        data.get_temp::<bool>(egui::Id::new(LOCK_REPORT_ID))
-            .unwrap_or(false)
-    }) {
-        return;
-    }
-
-    let snapshot = state.model.library_edit_locks.snapshot();
-    let description = match snapshot {
-        Some(snapshot) => format!(
-            "{} authoritative edit lock{} at synchronization generation {}.",
-            snapshot.locks().len(),
-            if snapshot.locks().len() == 1 { "" } else { "s" },
-            snapshot.generation()
-        ),
-        None => {
-            "This device-local project has no connected collaboration lock authority.".to_owned()
-        }
-    };
-    let choice = Dialog::new("Edit locks", "Close")
-        .description(&description)
-        .size(DialogSize::Manager)
-        .show(ctx, |ui| {
-            property_card(ui, "Authority boundary", |ui| match snapshot {
-                Some(snapshot) => {
-                    property_row(ui, "Mode", "authoritative collaboration snapshot");
-                    property_row(ui, "Project", &snapshot.project_id().to_string());
-                    property_row(ui, "Authority", snapshot.authority_id());
-                    property_row(ui, "Generation", &snapshot.generation().to_string());
-                    property_row(
-                        ui,
-                        "Project revision",
-                        &snapshot.project_revision().get().to_string(),
-                    );
-                    property_row(
-                        ui,
-                        "Library revision",
-                        &snapshot.library_revision().to_string(),
-                    );
-                    property_row(
-                        ui,
-                        "Snapshot digest",
-                        &snapshot.snapshot_digest().to_string(),
-                    );
-                }
-                None => {
-                    property_row(ui, "Mode", "unmanaged local project");
-                    property_row(
-                        ui,
-                        "Behavior",
-                        "Local revision checks remain active; no distributed lock is inferred.",
-                    );
-                }
-            });
-            ui.add_space(8.0);
-            ScrollArea::vertical()
-                .id_salt("workbench.project.library.edit-locks.rows")
-                .auto_shrink([false, true])
-                .max_height(360.0)
-                .show(ui, |ui| {
-                    let Some(snapshot) = snapshot else {
-                        return;
-                    };
-                    if snapshot.locks().is_empty() {
-                        property_card(ui, "No active leases", |ui| {
-                            property_row(
-                                ui,
-                                "Status",
-                                "The authoritative snapshot contains no library edit locks.",
-                            );
-                        });
-                    }
-                    for lock in snapshot.locks() {
-                        property_card(ui, &lock.scope().display_path(), |ui| {
-                            property_row(ui, "Owner", lock.owner_id());
-                            property_row(ui, "Authority", lock.authority_id());
-                            property_row(ui, "Lease identity", &lock.lock_id().to_string());
-                            property_row(
-                                ui,
-                                "Acquired (Unix ms)",
-                                &lock.acquired_unix_ms().to_string(),
-                            );
-                            property_row(
-                                ui,
-                                "Lease until (Unix ms)",
-                                &lock.lease_until_unix_ms().to_string(),
-                            );
-                        });
-                        ui.add_space(6.0);
-                    }
-                });
-        });
-    if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        ctx.data_mut(|data| {
-            data.remove::<bool>(egui::Id::new(LOCK_REPORT_ID));
         });
     }
 }
@@ -1526,19 +1415,6 @@ mod tests {
     }
 
     #[test]
-    fn edit_lock_intent_opens_the_authority_view() {
-        let mut app = RSpiceApp::test_instance();
-        let ctx = egui::Context::default();
-
-        apply_library_intent(&ctx, &mut app, LibraryIntent::ShowEditLocks);
-
-        assert!(ctx.data(|data| {
-            data.get_temp::<bool>(egui::Id::new(LOCK_REPORT_ID))
-                .unwrap_or(false)
-        }));
-    }
-
-    #[test]
     fn publication_and_rollback_intents_open_the_governed_transactions() {
         let mut app = RSpiceApp::test_instance();
         let ctx = egui::Context::default();
@@ -1561,61 +1437,6 @@ mod tests {
 
         assert!(!super::library_publication::publication_dialog_open(&ctx));
         assert!(super::library_publication::rollback_dialog_open(&ctx));
-    }
-
-    #[test]
-    fn authoritative_library_lock_blocks_preflight_without_partial_mutation() {
-        use crate::state::library_browser::{
-            ProjectLibraryEditLock, ProjectLibraryEditLockScope, ProjectLibraryLockSnapshot,
-        };
-
-        let mut app = RSpiceApp::test_instance();
-        let project_revision = app.state.model.workspace.content.project.revision();
-        let library_revision = app.state.model.library_manager.revision();
-        let library = app
-            .state
-            .model
-            .library_manager
-            .libraries_sorted()
-            .first()
-            .expect("bootstrapped library")
-            .name
-            .clone();
-        let snapshot = ProjectLibraryLockSnapshot::try_new(
-            app.state.model.workspace.content.project.id(),
-            1,
-            project_revision,
-            library_revision,
-            "organization-lock-service",
-            vec![ProjectLibraryEditLock::new(
-                uuid::Uuid::new_v4(),
-                "other-engineer@example.test",
-                "organization-lock-service",
-                ProjectLibraryEditLockScope::Library {
-                    library: library.clone(),
-                },
-                10,
-                20,
-            )],
-        )
-        .expect("valid lock authority snapshot");
-        app.install_project_library_lock_snapshot(snapshot)
-            .expect("lock authority installs");
-
-        let error = app
-            .state
-            .preflight_project_library_mutation(crate::state::ProjectLibraryMutation::CreateCell {
-                library,
-                cell: "locked_candidate".to_owned(),
-            })
-            .expect_err("foreign library lock must block the mutation");
-
-        assert!(error.contains("locked by other-engineer@example.test"));
-        assert_eq!(
-            app.state.model.workspace.content.project.revision(),
-            project_revision
-        );
-        assert_eq!(app.state.model.library_manager.revision(), library_revision);
     }
 
     #[test]

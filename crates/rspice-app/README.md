@@ -76,9 +76,6 @@ editor with completion and a parameter tuner).
 - `ModelHub` with `ModelHubStore` and `ModelHubTransport`: the
   model-distribution client: signed catalog, verified installation and the
   part shelf over foundation, installed, catalog and retained parts.
-- `RSpiceApp::install_project_library_lock_snapshot` with
-  `ProjectLibraryLockSnapshot`: the trusted in-process collaboration boundary
-  for revision-bound project-library edit locks.
 
 ## Feature flags
 

@@ -133,11 +133,6 @@ pub use workbench::logging::{install_studio_logger, native_log_env};
 /// Typed identities, for `tests/simulation_configuration_contract.rs`.
 pub use product::{AnalysisInstanceId, ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
 
-/// Trusted in-process collaboration-connector boundary for exact,
-/// revision-bound project-library edit-lock snapshots.
-pub use state::library_browser::{
-    ProjectLibraryEditLock, ProjectLibraryEditLockScope, ProjectLibraryLockSnapshot,
-};
 pub use state::workspace::ProjectLibraryPublicationReceipt;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -196,39 +191,6 @@ impl ProjectLibraryPublicationCandidate {
 }
 
 impl RSpiceApp {
-    /// Install a snapshot already authenticated by a trusted collaboration
-    /// connector. RSpice validates its content digest, project identity,
-    /// authority continuity, generation, and exact live revisions before the
-    /// snapshot can govern any edit.
-    pub fn install_project_library_lock_snapshot(
-        &mut self,
-        snapshot: ProjectLibraryLockSnapshot,
-    ) -> Result<(), String> {
-        snapshot.validate()?;
-        if snapshot.project_id() != self.state.model.workspace.content.project.id() {
-            return Err(format!(
-                "project library lock snapshot belongs to project {}, not current project {}",
-                snapshot.project_id(),
-                self.state.model.workspace.content.project.id()
-            ));
-        }
-        if snapshot.project_revision() != self.state.model.workspace.content.project.revision()
-            || snapshot.library_revision() != self.state.model.library_manager.revision()
-        {
-            return Err(format!(
-                "project library lock snapshot is stale (project {} vs {}, library {} vs {})",
-                snapshot.project_revision().get(),
-                self.state.model.workspace.content.project.revision().get(),
-                snapshot.library_revision(),
-                self.state.model.library_manager.revision()
-            ));
-        }
-        self.state
-            .model
-            .library_edit_locks
-            .install_authoritative(snapshot)
-    }
-
     /// Prepare the exact artifact and receipt candidate without changing live
     /// project state. A native, browser, or repository writer must durably
     /// publish `artifact_bytes()` before commit.
