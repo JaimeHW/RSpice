@@ -765,6 +765,36 @@ fn assert_mir_validation_message(mir: &MirModel, expected_substring: &str) {
     );
 }
 
+type IrParts = (CanonicalMetadata, HirModel, MirModel);
+
+/// A mismatched-parts case: its name, the valid parts it starts from, the one
+/// corruption applied to them, and the phase and message substring of the
+/// diagnostic assembly must report (an empty substring accepts any message).
+type ArtifactRejection = (
+    &'static str,
+    fn() -> IrParts,
+    fn(&mut IrParts),
+    CompilerPhase,
+    &'static str,
+);
+
+fn assert_artifact_rejections(cases: &[ArtifactRejection]) {
+    for (name, fixture, corrupt, phase, expected) in cases {
+        let mut parts = fixture();
+        corrupt(&mut parts);
+        let (metadata, hir, mir) = parts;
+        let Err(diagnostics) = CanonicalIrArtifact::from_parts(metadata, hir, mir) else {
+            panic!("{name}: mismatched parts must not assemble an artifact");
+        };
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.phase == *phase && diagnostic.message.contains(expected)
+            }),
+            "{name}: expected {phase:?} diagnostic containing {expected:?}, got {diagnostics:#?}"
+        );
+    }
+}
+
 fn lower_tiny_resistor_mir() -> MirModel {
     let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
@@ -863,6 +893,12 @@ fn contribution_branch_access_id(hir: &HirModel) -> ExprId {
     };
 
     *left
+}
+
+fn parameter_array_artifact() -> CanonicalIrArtifact {
+    VerilogACompiler::default()
+        .compile_canonical_ir(parameter_array_source())
+        .expect("parameter-array canonical IR")
 }
 
 fn tiny_resistor_source() -> &'static str {
@@ -2497,52 +2533,86 @@ endmodule
 }
 
 #[test]
-fn artifact_validation_rejects_mismatched_module_names() {
-    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
-    mir.module_name = "other_module".into();
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-        .expect_err("module name mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic.message.contains("module names must match")
-    }));
-}
-
-#[test]
-fn artifact_validation_rejects_metadata_feature_flag_mismatch() {
-    let (mut metadata, hir, mir) = lower_tiny_resistor_parts();
-    metadata.feature_flags.push("artifact-only".into());
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-        .expect_err("metadata feature flags mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("feature_flags")
-    }));
-}
-
-#[test]
-fn artifact_validation_rejects_unknown_schema_even_when_hir_matches() {
-    for adjustment in [-1_i32, 1] {
-        let (mut metadata, mut hir, mir) = lower_tiny_resistor_parts();
-        metadata.schema_version = metadata
-            .schema_version
-            .checked_add_signed(adjustment)
-            .unwrap();
-        hir.schema_version = metadata.schema_version;
-
-        let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-            .expect_err("an unsupported schema must fail closed, even when both versions agree");
-
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.phase == CompilerPhase::Artifact
-                && diagnostic
-                    .message
-                    .contains("unsupported canonical IR schema_version")
-        }));
-    }
+fn artifact_validation_rejects_mismatched_parts() {
+    assert_artifact_rejections(&[
+        (
+            "mismatched module names",
+            lower_tiny_resistor_parts,
+            |(_, _, mir)| mir.module_name = "other_module".into(),
+            CompilerPhase::Artifact,
+            "module names must match",
+        ),
+        (
+            "metadata feature flag mismatch",
+            lower_tiny_resistor_parts,
+            |(metadata, _, _)| metadata.feature_flags.push("artifact-only".into()),
+            CompilerPhase::Artifact,
+            "feature_flags",
+        ),
+        // An unsupported schema fails closed even when both versions agree.
+        (
+            "schema below the supported version",
+            lower_tiny_resistor_parts,
+            |(metadata, hir, _)| {
+                metadata.schema_version = metadata.schema_version.checked_add_signed(-1).unwrap();
+                hir.schema_version = metadata.schema_version;
+            },
+            CompilerPhase::Artifact,
+            "unsupported canonical IR schema_version",
+        ),
+        (
+            "schema above the supported version",
+            lower_tiny_resistor_parts,
+            |(metadata, hir, _)| {
+                metadata.schema_version = metadata.schema_version.checked_add_signed(1).unwrap();
+                hir.schema_version = metadata.schema_version;
+            },
+            CompilerPhase::Artifact,
+            "unsupported canonical IR schema_version",
+        ),
+        (
+            "HIR/MIR parameter mismatch",
+            lower_tiny_resistor_parts,
+            |(_, _, mir)| mir.parameters[0].name = "conductance".into(),
+            CompilerPhase::Artifact,
+            "parameter 0",
+        ),
+        (
+            "HIR/MIR parameter dimension mismatch",
+            || {
+                let artifact = parameter_array_artifact();
+                (artifact.metadata, artifact.hir, artifact.mir)
+            },
+            |(_, _, mir)| mir.parameters[1].dimensions[0].span.end += 1,
+            CompilerPhase::Artifact,
+            "parameter 1",
+        ),
+        (
+            "HIR/MIR equation expression mismatch",
+            lower_tiny_resistor_parts,
+            |(_, _, mir)| mir.equations[0].expression.span.end += 1,
+            CompilerPhase::Artifact,
+            "equation 0 expression",
+        ),
+        (
+            "HIR/MIR ground node mismatch",
+            || lower_fixture_parts(ground_alias_source(), "ground_alias"),
+            |(_, _, mir)| {
+                assert!(mir.validate().is_ok());
+                mir.ground_nodes = vec!["different_ground".into()];
+                assert!(mir.validate().is_ok());
+            },
+            CompilerPhase::Artifact,
+            "ground nodes",
+        ),
+        (
+            "invalid child IR",
+            lower_tiny_resistor_parts,
+            |(_, _, mir)| mir.equations[0].active_domains.clear(),
+            CompilerPhase::MirValidation,
+            "",
+        ),
+    ]);
 }
 
 #[test]
@@ -2586,36 +2656,6 @@ fn canonical_parameter_array_safety_stale_schema_short_circuits_hostile_children
 }
 
 #[test]
-fn artifact_validation_rejects_hir_mir_parameter_mismatch() {
-    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
-    mir.parameters[0].name = "conductance".into();
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-        .expect_err("HIR/MIR parameter mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("parameter 0")
-    }));
-}
-
-#[test]
-fn artifact_validation_rejects_hir_mir_parameter_dimension_mismatch() {
-    let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(parameter_array_source())
-        .expect("parameter-array canonical IR");
-    let mut mir = artifact.mir.clone();
-    mir.parameters[1].dimensions[0].span.end += 1;
-
-    let diagnostics =
-        CanonicalIrArtifact::from_parts(artifact.metadata.clone(), artifact.hir.clone(), mir)
-            .expect_err("HIR/MIR parameter dimensions must match");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("parameter 1")
-    }));
-}
-
-#[test]
 fn parameter_dimension_direction_changes_canonical_digest() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(parameter_array_source())
@@ -2636,50 +2676,6 @@ fn parameter_dimension_direction_changes_canonical_digest() {
 
     assert_ne!(artifact.hir_digest, reversed.hir_digest);
     assert_ne!(artifact.mir_digest, reversed.mir_digest);
-}
-
-#[test]
-fn artifact_validation_rejects_hir_mir_equation_expression_mismatch() {
-    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
-    mir.equations[0].expression.span.end += 1;
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-        .expect_err("MIR equation expression mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic.message.contains("equation 0 expression")
-    }));
-}
-
-#[test]
-fn artifact_validation_rejects_hir_mir_ground_node_mismatch() {
-    let (metadata, hir, mut mir) = lower_fixture_parts(ground_alias_source(), "ground_alias");
-    assert!(mir.validate().is_ok());
-    mir.ground_nodes = vec!["different_ground".into()];
-    assert!(mir.validate().is_ok());
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-        .expect_err("HIR/MIR ground node mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("ground nodes")
-    }));
-}
-
-#[test]
-fn artifact_validation_rejects_invalid_child_ir() {
-    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
-    mir.equations[0].active_domains.clear();
-
-    let diagnostics =
-        CanonicalIrArtifact::from_parts(metadata, hir, mir).expect_err("invalid MIR must fail");
-
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.phase == CompilerPhase::MirValidation)
-    );
 }
 
 #[test]
