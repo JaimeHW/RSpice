@@ -389,6 +389,7 @@ fn system_function_shape(
         }
         "$rtoi" | "$clog2" => integer(true),
         "$itor" => real,
+        crate::analog_tasks::CDS_GET_ANALOG_VALUE => real,
         name if super::super::digital_value::DigitalMathFunction::from_name(name).is_some() => real,
         name => match DigitalSystemCallKind::from_name(name) {
             Some(kind) if kind.is_function() => integer(kind.result_signed()),

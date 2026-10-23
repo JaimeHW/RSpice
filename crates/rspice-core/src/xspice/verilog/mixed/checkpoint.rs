@@ -224,6 +224,10 @@ impl MixedSignalHost {
                 AnalogProbeWiring::Variable { name, retained } => {
                     (1u8, (0, 0), 0, Some((name, *retained)))
                 }
+                // Bound before any analysis, so a checkpoint never sees one.
+                AnalogProbeWiring::External { path, flow, .. } => {
+                    (2u8, (0, 0), 0, Some((path, *flow)))
+                }
             })
             .collect();
         let inputs: Vec<_> = self

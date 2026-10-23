@@ -5588,6 +5588,32 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Read terminals the device was given a node for as unconnected:
+    /// `$port_connected` returns 0 for each, and each keeps its node.
+    ///
+    /// A hidden terminal that binds a local net to a deck node
+    /// (`$analog_node_alias`) trails the module's ports, so the prefix rule
+    /// of [`Self::try_set_unconnected_terminal_indices`] cannot express it:
+    /// the host gives every terminal a node, the alias whose path names
+    /// nothing and a port the card left out a net of the instance's own, and
+    /// names those terminals here.
+    pub fn try_set_terminals_unconnected(&mut self, terminals: &[usize]) -> Result<(), VmError> {
+        for &terminal in terminals {
+            let available = self.context.port_connected.len();
+            let connected = self
+                .context
+                .port_connected
+                .get_mut(terminal)
+                .ok_or_else(|| {
+                    VmError::InvalidRuntimeConfiguration(format!(
+                        "unconnected terminal {terminal} is outside the device's {available} terminal(s)"
+                    ))
+                })?;
+            *connected = 0;
+        }
+        Ok(())
+    }
+
     /// Number of branch-current unknowns required by this device's
     /// potential contributions (the engine allocates one extra system
     /// unknown per entry)

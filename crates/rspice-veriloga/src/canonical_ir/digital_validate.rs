@@ -496,6 +496,7 @@ impl CanonicalDigitalPlan {
                     | super::digital::DigitalAnalogProbeTarget::Variable { name } => {
                         name.is_empty()
                     }
+                    super::digital::DigitalAnalogProbeTarget::External { path } => path.is_empty(),
                 }
             {
                 return Err(error(

@@ -1000,6 +1000,31 @@ pub struct HirModel {
     /// deck-level discrete port, so the deck's converters convert it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hoisted_ports: Vec<HirHoistedPort>,
+    /// Local nets `$analog_node_alias` and `$analog_port_alias` bind to deck
+    /// nodes, in call order; see [`HirNodeAlias`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub node_aliases: Vec<HirNodeAlias>,
+}
+
+/// A local net `$analog_node_alias(net, "path")` or
+/// `$analog_port_alias(net, "path")` binds to a node of the deck (Verilog-AMS
+/// LRM 2.4 section 9), called in `analog initial` with constant arguments.
+///
+/// The net is a hidden terminal of the module: a trailing entry of
+/// [`HirModel::ports`] that no formal port owns, which the host connects to
+/// the deck node `path` names, or leaves unconnected when it names none.
+/// `V(net)` reads and `I(net) <+` contributes through it as through any
+/// terminal, so the Jacobian is exact in every analysis, and the call's value
+/// is that terminal's `$port_connected`: 1 when bound, 0 when not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirNodeAlias {
+    /// The local net, as declared.
+    pub net: SmolStr,
+    /// The deck path as written: absolute from the deck root, as `.print`
+    /// spells it, with `$root.` accepted.
+    pub path: SmolStr,
+    /// `$analog_port_alias`: the path names a port of an instance.
+    pub port: bool,
 }
 
 /// One discrete signal of the design linked on a circuit node.
@@ -1331,6 +1356,7 @@ impl HirModel {
             ground_nodes: module.ground_nodes.clone(),
             external_leaves: module.external_leaves.clone(),
             hoisted_ports: module.hoisted_ports.clone(),
+            node_aliases: module.node_aliases.clone(),
             digital_observations: Vec::new(),
             discrete_selections: module
                 .discrete_selections
@@ -1434,7 +1460,12 @@ impl HirModel {
         }
 
         validate_dense_port_ids(&mut diagnostics, &self.ports);
-        validate_formal_ports(&mut diagnostics, &self.ports, &self.formal_ports);
+        validate_formal_ports(
+            &mut diagnostics,
+            &self.ports,
+            &self.formal_ports,
+            &self.node_aliases,
+        );
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
         if self
@@ -2978,7 +3009,23 @@ fn validate_formal_ports(
     diagnostics: &mut Vec<IrDiagnostic>,
     ports: &[HirPort],
     formal_ports: &[HirFormalPort],
+    node_aliases: &[HirNodeAlias],
 ) {
+    // An aliased net is a hidden terminal: one of the trailing ports, in call
+    // order, that no formal port owns.
+    let hidden = ports.len().saturating_sub(node_aliases.len());
+    if node_aliases.len() > ports.len()
+        || ports[hidden..]
+            .iter()
+            .zip(node_aliases)
+            .any(|(port, alias)| port.name != alias.net)
+    {
+        diagnostics.push(IrDiagnostic::global_error(
+            CompilerPhase::HirValidation,
+            "HIR node aliases must name the trailing terminals in call order".to_string(),
+        ));
+    }
+    let ports = &ports[..hidden];
     let mut owner = vec![None; ports.len()];
     for formal in formal_ports {
         let mut error = |detail: String| {

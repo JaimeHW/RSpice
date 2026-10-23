@@ -90,6 +90,8 @@ mod connect_modules;
 #[cfg(all(test, feature = "veriloga"))]
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
+mod hdl_external_paths;
+#[cfg(feature = "veriloga")]
 pub(super) mod hdl_spice_leaves;
 #[cfg(feature = "veriloga")]
 mod mixed_boundaries;
@@ -9300,14 +9302,22 @@ impl Engine {
                             }
 
                             let model = &prepared.model;
-                            if element.nodes.len() > model.num_terminals {
+                            // Nets `analog initial` binds to deck nodes are
+                            // hidden terminals after the declared ports,
+                            // which the card does not name.
+                            let aliases = prepared
+                                .canonical_ir
+                                .as_deref()
+                                .map_or(&[][..], |artifact| &artifact.hir.node_aliases[..]);
+                            let declared = model.num_terminals.saturating_sub(aliases.len());
+                            if element.nodes.len() > declared {
                                 return Err(refuse_veriloga_instance(
                                     &element.name,
                                     subckt_name,
                                     crate::ElaborationErrorKind::PortCount,
                                     format!(
                                         "the master declares at most {} terminal(s) and the card connects {}",
-                                        model.num_terminals,
+                                        declared,
                                         element.nodes.len()
                                     ),
                                 ));
@@ -9320,6 +9330,32 @@ impl Engine {
                                 } else {
                                     circuit.get_or_create_node(node_name)
                                 });
+                            }
+                            let mut unbound_terminals = Vec::new();
+                            if !aliases.is_empty() {
+                                // A declared port the card leaves out is a net
+                                // of the instance's own, as it is without
+                                // aliases, but it no longer trails the
+                                // terminals: the device is told by index.
+                                for terminal in node_ids.len()..declared {
+                                    node_ids.push(circuit.get_or_create_node(&format!(
+                                        "{}.{}",
+                                        element.name, model.terminal_names[terminal]
+                                    )));
+                                    unbound_terminals.push(terminal);
+                                }
+                                let (unbound, unresolved) =
+                                    hdl_external_paths::bind_alias_terminals(
+                                        &mut circuit,
+                                        netlist,
+                                        &flat_elements,
+                                        &element.name,
+                                        declared,
+                                        aliases,
+                                        &mut node_ids,
+                                    );
+                                unbound_terminals.extend(unbound);
+                                self.record_compiler_diagnostics(&unresolved);
                             }
 
                             if prepared.canonical_ir.is_none()
@@ -9366,10 +9402,20 @@ impl Engine {
                                 model.internal_nodes,
                             );
                             let branch_names = veriloga_branch_unknown_names(model);
+                            device
+                                .try_set_terminals_unconnected(&unbound_terminals)
+                                .map_err(|error| {
+                                    refuse_veriloga_instance(
+                                        &element.name,
+                                        subckt_name,
+                                        crate::ElaborationErrorKind::Internal,
+                                        error.to_string(),
+                                    )
+                                })?;
                             let unconnected_names: Vec<String> = model
                                 .terminal_names
                                 .iter()
-                                .skip(element.nodes.len())
+                                .skip(node_ids.len())
                                 .map(ToString::to_string)
                                 .collect();
                             let names = VerilogAUnknownNames {
@@ -10684,6 +10730,10 @@ impl Engine {
         circuit
             .bind_behavioral_references(&known_device_names)
             .map_err(SimulationError::from)?;
+        // HDL reads of deck objects by path, now that a branch's solution
+        // index is final.
+        #[cfg(feature = "veriloga")]
+        hdl_external_paths::bind_external_probes(&mut circuit, netlist)?;
 
         // Resolve all pending control element references after final node count
         // is established (required for current-controlled switch branch indexing).

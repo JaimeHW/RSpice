@@ -119,6 +119,7 @@ use super::digital_value::{
 use super::ids::{
     BlockId, DigitalAnalogProbeId, DigitalLocalId, DigitalProcessId, DigitalSignalId, ValueId,
 };
+use crate::analog_tasks::CDS_GET_ANALOG_VALUE;
 use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
     ArrayLiteralElement, BinaryOp, BranchAccess, DigitalAssign, DigitalCase, DigitalLValue,
@@ -4781,6 +4782,7 @@ impl ProcessLowerer<'_> {
             // path it exists to leave.
             Expression::SystemFunction(function) => {
                 function.name == "$bitstoreal"
+                    || function.name == CDS_GET_ANALOG_VALUE
                     || self.module_time_query(function).is_some()
                     || super::digital::DigitalTimeQuery::from_name(&function.name)
                         .is_some_and(|query| query.bit_width().is_none())
@@ -5194,8 +5196,57 @@ impl ProcessLowerer<'_> {
                 DigitalAnalogProbeTarget::Branch { name: name.clone() },
             ),
         };
+        self.solution_probe(block, function, quantity.into(), target, access.span())
+    }
+
+    /// `$cds_get_analog_value(path [, 0 [, quantity]])`: a read of a deck
+    /// object outside the module, resolved by the host. The analyzer has
+    /// already refused every other argument shape, naming the call.
+    fn external_probe(&mut self, block: BlockId, function: &crate::ast::SystemFunction) -> ValueId {
+        use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
+        if self.constant_expression {
+            self.error(
+                format!("`{CDS_GET_ANALOG_VALUE}` is not a constant expression"),
+                function.span,
+            );
+            return self.real_constant(0.0);
+        }
+        let Some(Expression::StringLit(path)) = function.args.first() else {
+            self.invariant(
+                format!("`{CDS_GET_ANALOG_VALUE}` reached lowering without a literal path"),
+                function.span,
+            );
+            return self.real_constant(0.0);
+        };
+        let quantity = match function.args.get(2) {
+            Some(Expression::StringLit(quantity)) if quantity.value == "flow" => {
+                DigitalAnalogQuantity::Flow
+            }
+            _ => DigitalAnalogQuantity::Potential,
+        };
+        let target = DigitalAnalogProbeTarget::External {
+            path: path.value.clone(),
+        };
+        self.solution_probe(
+            block,
+            function.name.clone(),
+            quantity,
+            target,
+            function.span,
+        )
+    }
+
+    /// Intern one read of the circuit solution plan-wide and read it here.
+    fn solution_probe(
+        &mut self,
+        block: BlockId,
+        function: SmolStr,
+        quantity: super::digital::DigitalAnalogQuantity,
+        target: super::digital::DigitalAnalogProbeTarget,
+        span: Span,
+    ) -> ValueId {
         let id = match self.probes.iter().position(|probe| {
-            probe.access == function && probe.quantity == quantity.into() && probe.target == target
+            probe.access == function && probe.quantity == quantity && probe.target == target
         }) {
             Some(index) => DigitalAnalogProbeId::from(index),
             None => {
@@ -5205,16 +5256,18 @@ impl ProcessLowerer<'_> {
                     event_signal: None,
                     id,
                     access: function,
-                    quantity: quantity.into(),
+                    quantity,
                     target,
-                    span: SourceSpanRef::from(access.span()),
+                    span: SourceSpanRef::from(span),
                 });
                 id
             }
         };
         let kind = match quantity {
-            crate::ast::AccessKind::Potential => CfgValueKind::DigitalAnalogPotential { probe: id },
-            crate::ast::AccessKind::Flow => CfgValueKind::DigitalAnalogFlow { probe: id },
+            super::digital::DigitalAnalogQuantity::Flow => {
+                CfgValueKind::DigitalAnalogFlow { probe: id }
+            }
+            _ => CfgValueKind::DigitalAnalogPotential { probe: id },
         };
         self.builder.push(block, CfgValueType::Real, kind)
     }
@@ -5405,6 +5458,11 @@ impl ProcessLowerer<'_> {
             && let Some(value) = self.module_time_query(function)
         {
             return self.real_constant(value);
+        }
+        if let Expression::SystemFunction(function) = expression
+            && function.name == CDS_GET_ANALOG_VALUE
+        {
+            return self.external_probe(block, function);
         }
         match expression {
             Expression::Number(number) if is_real_literal(&number.raw) => {

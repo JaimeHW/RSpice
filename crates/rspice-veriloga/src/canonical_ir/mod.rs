@@ -86,7 +86,8 @@ pub use hir::{
     CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
     HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirExternalLeaf, HirExternalNet,
     HirFormalPort, HirHoistedPort, HirInternalNode, HirLimiterArgument, HirLoop, HirModel,
-    HirParamRange, HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable,
+    HirNodeAlias, HirParamRange, HirParameter, HirParameterDimension, HirPort, HirStatement,
+    HirVariable,
 };
 pub use ids::{
     ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalProcessId,

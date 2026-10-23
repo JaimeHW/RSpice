@@ -934,6 +934,14 @@ enum AnalogProbeWiring {
         name: String,
         retained: bool,
     },
+    /// A deck object outside the module, named by its absolute path
+    /// (`$cds_get_analog_value`). The builder resolves it once every node and
+    /// branch of the deck exists, and replaces this with a [`Self::Solution`].
+    External {
+        path: String,
+        flow: bool,
+        call: String,
+    },
 }
 
 impl AnalogProbeWiring {
@@ -946,9 +954,22 @@ impl AnalogProbeWiring {
             } => Some(
                 scale * (node_voltage(solution, *positive) - node_voltage(solution, *negative)),
             ),
-            Self::Variable { .. } => None,
+            Self::Variable { .. } | Self::External { .. } => None,
         }
     }
+}
+
+/// One `$cds_get_analog_value` read a mixed module makes, for the builder to
+/// resolve against the deck.
+pub(crate) struct ExternalProbeRequest {
+    /// Its slot in the module's probe table.
+    pub(crate) slot: usize,
+    /// The path as written: absolute from the deck root, `$root.` accepted.
+    pub(crate) path: String,
+    /// A branch current (`"flow"`) rather than a node potential.
+    pub(crate) flow: bool,
+    /// The call as the author wrote it, for a refusal.
+    pub(crate) call: String,
 }
 
 /// The bridge declarations, fixed once the module is wired.
@@ -1765,7 +1786,7 @@ impl MixedSignalHost {
         scheduler_limits: SchedulerLimits,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<Self, MixedSignalError> {
-        Self::from_compiled_with_analog_setup(
+        let host = Self::from_compiled_with_analog_setup(
             instance,
             model,
             canonical_ir,
@@ -1781,7 +1802,16 @@ impl MixedSignalHost {
                     Ok(())
                 }
             },
-        )
+        )?;
+        if let Some(request) = host.external_probe_requests().first() {
+            return Err(MixedSignalError::InvalidBridge {
+                detail: format!(
+                    "`{}` names a deck object, and only a deck the module is built in can resolve it",
+                    request.call
+                ),
+            });
+        }
+        Ok(host)
     }
 
     /// Bind internal-node and branch-current indices before cross-domain
@@ -1970,6 +2000,46 @@ impl MixedSignalHost {
         };
         host.watch_own_digital_edges();
         Ok(host)
+    }
+
+    /// The reads of deck objects outside this module, by path, that the
+    /// builder has still to resolve.
+    pub(crate) fn external_probe_requests(&self) -> Vec<ExternalProbeRequest> {
+        self.analog_probes
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, probe)| match probe {
+                AnalogProbeWiring::External { path, flow, call } => Some(ExternalProbeRequest {
+                    slot,
+                    path: path.clone(),
+                    flow: *flow,
+                    call: call.clone(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Bind the read in probe slot `slot` to one-based solution index
+    /// `index`: a node's potential, or a branch's current. Called once every
+    /// node and branch of the deck exists, so the index is final.
+    pub(crate) fn bind_external_probe(&mut self, slot: usize, index: usize) {
+        debug_assert!(matches!(
+            self.analog_probes.get(slot),
+            Some(AnalogProbeWiring::External { .. })
+        ));
+        if let Some(probe) = self.analog_probes.get_mut(slot) {
+            *probe = AnalogProbeWiring::Solution {
+                positive: index,
+                negative: 0,
+                scale: 1.0,
+            };
+            self.max_circuit_node = self.max_circuit_node.max(index);
+            // As every physical probe starts: at the unsolved zero vector.
+            if let Some(value) = self.state.accepted_probe_values.get_mut(slot) {
+                *value = Some(0.0);
+            }
+        }
     }
 
     /// Reset both domains for a fresh analysis, retaining compiled code and
@@ -6103,6 +6173,13 @@ fn wire_analog_probes(
                 }
                 DigitalAnalogProbeTarget::Nodes { positive, negative } => {
                     (positive.as_str(), negative.as_deref(), None)
+                }
+                DigitalAnalogProbeTarget::External { path } => {
+                    return Ok(AnalogProbeWiring::External {
+                        path: path.to_string(),
+                        flow: probe.quantity == AccessKind::Flow,
+                        call: probe.spelling(),
+                    });
                 }
                 DigitalAnalogProbeTarget::Branch { name } => {
                     let branch = canonical_ir

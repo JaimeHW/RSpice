@@ -497,7 +497,12 @@ use super::*;
 //
 // Version 171 follows the schema to 181, whose digital plan carries the
 // timing checks of `specify` blocks. A version-170 record refused them.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 171;
+//
+// Version 172 follows the schema to 182, whose digital plan may read a deck
+// node or branch by path (`$cds_get_analog_value`) and whose HIR carries the
+// local nets `analog initial` binds to deck nodes as hidden terminals. A
+// version-171 record refused all three calls.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 172;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

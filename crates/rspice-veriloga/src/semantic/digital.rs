@@ -3563,6 +3563,10 @@ impl SemanticAnalyzer {
                     }
                     return;
                 }
+                if function.name == crate::analog_tasks::CDS_GET_ANALOG_VALUE {
+                    self.check_cds_get_analog_value(function);
+                    return;
+                }
                 // The two the standard leaves open. Verilog-AMS LRM 2.4 section
                 // 3.7 names them as the *only* bridge between a real net and
                 // bits — "connection to explicitly declared 64-bit wires can be
@@ -3587,6 +3591,58 @@ impl SemanticAnalyzer {
                     return;
                 }
                 self.check_system_call(function, false, signals, index);
+            }
+        }
+    }
+
+    /// `$cds_get_analog_value(path [, index [, quantity]])`, Cadence's read of
+    /// an analog value anywhere in the deck.
+    ///
+    /// Only the subset whose meaning is unambiguous is accepted: the path is a
+    /// string literal, so the host can resolve it before the run; the index
+    /// is 0 or absent; the quantity is `"pot"`, the node's potential and the
+    /// default, or `"flow"`, the branch current of an element that owns one.
+    /// Each refusal names the call.
+    fn check_cds_get_analog_value(&mut self, call: &SystemFunction) {
+        let name = crate::analog_tasks::CDS_GET_ANALOG_VALUE;
+        let mut refuse = |detail: String| {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!("`{name}`: {detail}")),
+                call.span,
+            );
+        };
+        if !(1..=3).contains(&call.args.len()) {
+            refuse(format!(
+                "takes a path, an optional index and an optional quantity, and was given {} \
+                 argument(s)",
+                call.args.len()
+            ));
+            return;
+        }
+        match &call.args[0] {
+            Expression::StringLit(path) if !path.value.trim().is_empty() => {}
+            Expression::StringLit(_) => refuse("the path names nothing".into()),
+            _ => refuse(
+                "the path must be a string literal; a computed path cannot be resolved against \
+                 the deck before the run"
+                    .into(),
+            ),
+        }
+        if let Some(index) = call.args.get(1)
+            && !matches!(index, Expression::Number(number) if number.value == 0.0)
+        {
+            refuse("the index must be 0; only a scalar node or branch can be read".into());
+        }
+        if let Some(quantity) = call.args.get(2) {
+            match quantity {
+                Expression::StringLit(quantity)
+                    if matches!(quantity.value.as_str(), "pot" | "flow") => {}
+                Expression::StringLit(quantity) => refuse(format!(
+                    "unknown quantity \"{}\"; it is \"pot\" for a node's potential or \"flow\" \
+                     for an element's branch current",
+                    quantity.value
+                )),
+                _ => refuse("the quantity must be the string literal \"pot\" or \"flow\"".into()),
             }
         }
     }

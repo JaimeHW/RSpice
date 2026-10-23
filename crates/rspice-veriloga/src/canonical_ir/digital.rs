@@ -555,6 +555,15 @@ pub enum DigitalAnalogProbeTarget {
     Variable {
         name: SmolStr,
     },
+    /// An object of the deck outside the module, named by its absolute path
+    /// in the flattened hierarchy as `.print` spells it (`xdiv.m`, with
+    /// `$root.` accepted): a node for a potential, an element that owns a
+    /// branch current for a flow. Cadence's `$cds_get_analog_value` reads it;
+    /// the host resolves the path once the deck is flattened, so a module
+    /// carries it as written.
+    External {
+        path: SmolStr,
+    },
 }
 
 /// The value domain of a continuous-domain read. Integer variables retain
@@ -607,6 +616,10 @@ impl DigitalAnalogProbe {
             } => format!("{}({})", self.access, positive),
             DigitalAnalogProbeTarget::Branch { name } => format!("{}(<{}>)", self.access, name),
             DigitalAnalogProbeTarget::Variable { name } => name.to_string(),
+            DigitalAnalogProbeTarget::External { path } => match self.quantity {
+                DigitalAnalogQuantity::Flow => format!("{}(\"{path}\", 0, \"flow\")", self.access),
+                _ => format!("{}(\"{path}\")", self.access),
+            },
         }
     }
 }

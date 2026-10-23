@@ -444,6 +444,8 @@ pub fn link_digital_plans(
                 | super::digital::DigitalAnalogProbeTarget::Variable { name } => {
                     *name = format!("{}.{name}", layout.instance.name).into();
                 }
+                // Absolute from the deck root, so no instance prefixes it.
+                super::digital::DigitalAnalogProbeTarget::External { .. } => {}
             }
             relocate_span(&mut probe.span, &layout.map);
             layout.map.analog_probes.push(id);

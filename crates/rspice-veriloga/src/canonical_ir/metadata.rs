@@ -14,6 +14,14 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 182 lets HDL code reach values inside the deck's hierarchy. A
+/// discrete read may name a deck node or branch by its absolute path
+/// (`DigitalAnalogProbeTarget::External`, `$cds_get_analog_value`), and a
+/// module may bind a local net to a deck node in `analog initial`
+/// (`HirModel::node_aliases`, `$analog_node_alias`/`$analog_port_alias`),
+/// which makes the net a hidden trailing terminal. Earlier artifacts refused
+/// all three calls, and would read an absent alias table as none.
+///
 /// Version 181 lowers the timing checks of `specify` blocks
 /// (`DigitalDelayPlan::checks`) and the module paths that delay their
 /// delayed signals. Earlier artifacts refused timing checks, and would
@@ -226,7 +234,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 181;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 182;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

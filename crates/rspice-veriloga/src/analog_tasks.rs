@@ -142,11 +142,22 @@ const STANDARD_SYSTEM_NAMES: &[&str] = &[
     "$atanh",
 ];
 
+/// Cadence's read of an analog value anywhere in the deck from discrete code.
+/// It is not a standard name, so an analog position refuses it by its own
+/// sentence rather than as unknown.
+pub(crate) const CDS_GET_ANALOG_VALUE: &str = "$cds_get_analog_value";
+
 /// Why an analog position refuses the system task or function `name`
 /// (`role` is "task" or "function"): a standard one is unsupported here, any
 /// other is unknown.
 pub(crate) fn system_name_refusal(name: &str, role: &str) -> String {
-    if STANDARD_SYSTEM_NAMES.contains(&name) {
+    if name == CDS_GET_ANALOG_VALUE {
+        format!(
+            "system {role} '{name}' reads the analog solution from discrete code only; in analog \
+             code, bind a local node to the deck node with `$analog_node_alias` in `analog \
+             initial` and read it with V()"
+        )
+    } else if STANDARD_SYSTEM_NAMES.contains(&name) {
         format!("system {role} '{name}' is not supported in analog code")
     } else {
         format!("unknown system {role} '{name}'")

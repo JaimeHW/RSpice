@@ -117,6 +117,27 @@ pub(super) fn try_build_mixed_signal_instance(
     if !artifact.digital.has_executable_content() {
         return Ok(false);
     }
+    // An aliased net is a hidden terminal the analog route connects; the
+    // boundary this route builds has no place for one yet.
+    if let Some(alias) = artifact.hir.node_aliases.first() {
+        return Err(refuse(
+            &element.name,
+            subckt_name,
+            ElaborationErrorKind::PortDiscipline,
+            format!(
+                "binds `{}` to the deck node \"{}\" with `{}` and also runs discrete processes; \
+                 a module with discrete processes cannot alias a deck node yet, so read the node \
+                 from discrete code with `$cds_get_analog_value`",
+                alias.net,
+                alias.path,
+                if alias.port {
+                    "$analog_port_alias"
+                } else {
+                    "$analog_node_alias"
+                }
+            ),
+        ));
+    }
 
     let model = &prepared.model;
     let declared_nodes = declared_node_count(artifact);

@@ -10250,6 +10250,7 @@ mod tests {
             ground_nodes: Vec::new(),
             external_leaves: Vec::new(),
             hoisted_ports: Vec::new(),
+            node_aliases: Vec::new(),
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
             digital: Default::default(),

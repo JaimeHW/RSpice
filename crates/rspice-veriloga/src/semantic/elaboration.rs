@@ -723,6 +723,19 @@ impl<'a> HierarchyElaborator<'a> {
                     instance.module
                 ))
             })?;
+        // An aliased net is a hidden terminal the host connects, and only the
+        // module a deck instance binds has terminals the host sees.
+        if let Some(alias) = child.node_aliases.first() {
+            return Err(semantic_error(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "module '{}' binds `{}` to the deck node \"{}\" in `analog initial`, and \
+                     instance '{path}' places it inside another module; only a module the deck \
+                     instantiates directly may alias a deck node",
+                    instance.module, alias.net, alias.path
+                )),
+                instance.span,
+            ));
+        }
         let overrides = bind_parameter_overrides(instance, child, path)?;
         self.validate_parameter_array_overrides(
             child_source,

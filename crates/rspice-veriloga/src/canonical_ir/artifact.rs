@@ -995,6 +995,16 @@ fn hir_summary(hir: &HirModel) -> String {
         )
         .expect("write to string");
     }
+    for alias in &hir.node_aliases {
+        writeln!(
+            out,
+            "node_alias net={} path={} port={}",
+            enc_str(&alias.net),
+            enc_str(&alias.path),
+            alias.port
+        )
+        .expect("write to string");
+    }
     for expression in &hir.expressions {
         write_hir_expression(&mut out, expression);
     }

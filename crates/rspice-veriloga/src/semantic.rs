@@ -404,6 +404,7 @@ mod flow_probes;
 mod hierarchy_connections;
 pub(crate) mod library_binding;
 mod net_types;
+mod node_aliases;
 mod node_vectors;
 mod parameter_arrays;
 mod port_attributes;
@@ -479,6 +480,9 @@ pub struct SemanticAnalyzer {
     /// module without reconstructing the correspondence.
     next_analog_site: u32,
     in_analog_initial: bool,
+    /// The `$analog_node_alias`/`$analog_port_alias` calls of the module's
+    /// `analog initial`, in call order, with where each was written.
+    node_aliases: Vec<(crate::canonical_ir::HirNodeAlias, Span)>,
     assignment_events: analog_events::AssignmentEvents,
     occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     /// Constant parameter default values (compile-time diagnostics only:
@@ -600,6 +604,7 @@ impl SemanticAnalyzer {
             local_counter: 0,
             next_analog_site: 0,
             in_analog_initial: false,
+            node_aliases: Vec::new(),
             assignment_events: Default::default(),
             occurrence_source: None,
             param_consts: HashMap::new(),
@@ -1196,6 +1201,7 @@ impl SemanticAnalyzer {
             ground_nodes: Vec::new(),
             external_leaves: Vec::new(),
             hoisted_ports: Vec::new(),
+            node_aliases: Vec::new(),
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
             digital: AnalyzedDigital::default(),
@@ -1222,6 +1228,7 @@ impl SemanticAnalyzer {
             .map(|routine| routine.name.clone())
             .collect();
         self.in_analog_initial = false;
+        self.node_aliases.clear();
         self.implicit_integrators.clear();
         self.arrays.clear();
         self.discrete_validity.clear();
@@ -2548,6 +2555,7 @@ impl SemanticAnalyzer {
         }
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
         self.protect_physical_parameters(original_source, &mut analyzed)?;
+        self.promote_node_aliases(&mut analyzed)?;
         analyzed.formal_ports = self.formal_ports(&analyzed);
         Ok(analyzed)
     }
@@ -3950,6 +3958,11 @@ impl SemanticAnalyzer {
             // prints the calls of accepted evaluations only
             AnalogStatement::Call(call) => match call.name.as_str() {
                 "$finish" => self.analyze_control_task(call, module, sink)?,
+                // Elaboration, not evaluation: the net becomes a hidden
+                // terminal, and the statement form discards the value.
+                name if node_aliases::is_alias_call(name) => {
+                    self.record_node_alias(name, &call.args, call.span)?;
+                }
                 "$bound_step" => {
                     self.validate_system_task_arity(call, 1, Some(1))?;
                     self.analyze_bound_step(call, module, sink)?;
@@ -7792,6 +7805,9 @@ impl SemanticAnalyzer {
             }
             Expression::Conditional(c) => self.lower_conditional_chain(c)?,
             Expression::SystemFunction(f) => {
+                if node_aliases::is_alias_call(&f.name) {
+                    return self.lower_node_alias_call(f);
+                }
                 if let Some(resolved) = self.lower_module_query_function(f)? {
                     return Ok(resolved);
                 }
@@ -9484,7 +9500,9 @@ impl SemanticAnalyzer {
     /// A standard system task or function this position does not accept is
     /// unsupported; any other `$name` is unknown.
     fn system_name_error_kind(name: &str, role: &'static str) -> SemanticErrorKind {
-        if crate::analog_tasks::is_standard_system_name(name) {
+        if crate::analog_tasks::is_standard_system_name(name)
+            || name == crate::analog_tasks::CDS_GET_ANALOG_VALUE
+        {
             SemanticErrorKind::UnsupportedFeature(crate::analog_tasks::system_name_refusal(
                 name, role,
             ))

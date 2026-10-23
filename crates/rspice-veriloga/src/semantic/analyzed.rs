@@ -164,6 +164,10 @@ pub struct AnalyzedModule {
     /// Discrete ports the elaborated hierarchy links on circuit nodes; see
     /// [`crate::canonical_ir::HirModel::hoisted_ports`].
     pub hoisted_ports: Vec<crate::canonical_ir::HirHoistedPort>,
+    /// Local nets bound to deck nodes in `analog initial`, each the hidden
+    /// terminal that trails [`Self::ports`]; see
+    /// [`crate::canonical_ir::HirNodeAlias`].
+    pub node_aliases: Vec<crate::canonical_ir::HirNodeAlias>,
     /// Array variables: name -> contiguous element storage layout
     pub arrays: HashMap<SmolStr, AnalyzedArray>,
     pub symbol_table: SymbolTable,
