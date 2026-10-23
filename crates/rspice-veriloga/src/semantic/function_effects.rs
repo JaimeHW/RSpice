@@ -230,9 +230,9 @@ impl Effects {
             }
             Expression::Unary(unary) => self.expression(&unary.operand),
             Expression::Conditional(conditional) => {
-                self.expression(&conditional.condition);
-                self.expression(&conditional.then_expr);
-                self.expression(&conditional.else_expr);
+                for operand in conditional.operands() {
+                    self.expression(operand);
+                }
             }
             Expression::ArrayAccess(access) => {
                 for child in access.children() {

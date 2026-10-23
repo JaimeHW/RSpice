@@ -1040,7 +1040,43 @@ pub enum HirExternalNet {
     Net(SmolStr),
 }
 
+/// The arms of the right-nested conditional chain at `id` in `expressions`,
+/// outermost first, each `(conditional, condition, then)`, and the expression
+/// its last else-branch holds; no arms and `id` itself for any other
+/// expression.
+///
+/// A chain `a ? x : b ? y : ...` has no length limit (see
+/// [`crate::parser::MAX_EXPRESSION_NESTING`]), so a walk over the HIR (or the
+/// MIR, which shares its expression arena) follows one with this loop instead
+/// of recursing down its else-branches.
+pub(crate) fn conditional_chain(
+    expressions: &[HirExpression],
+    id: ExprId,
+) -> (Vec<[ExprId; 3]>, ExprId) {
+    let mut arms = Vec::new();
+    let mut tail = id;
+    while let Some(HirExpression {
+        kind:
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            },
+        ..
+    }) = expressions.get(usize::from(tail))
+    {
+        arms.push([tail, *condition, *then_expr]);
+        tail = *else_expr;
+    }
+    (arms, tail)
+}
+
 impl HirModel {
+    /// [`conditional_chain`] over this model's expressions.
+    pub(crate) fn conditional_chain(&self, id: ExprId) -> (Vec<[ExprId; 3]>, ExprId) {
+        conditional_chain(&self.expressions, id)
+    }
+
     pub fn from_analyzed_module(metadata: &CanonicalMetadata, module: &AnalyzedModule) -> Self {
         let branch_names = module
             .branches
@@ -3403,6 +3439,9 @@ impl HirLowerer {
     }
 
     fn lower_expr(&mut self, expr: &Expression) -> HirExprRef {
+        if let Expression::Conditional(conditional) = expr {
+            return self.lower_conditional_chain(conditional);
+        }
         let kind_label = expression_kind(expr);
         let span = SourceSpanRef::from(expr.span());
         let kind = self.lower_expr_kind(expr);
@@ -3415,6 +3454,39 @@ impl HirLowerer {
             kind: kind_label,
             span,
         }
+    }
+
+    /// Lower a right-nested `?:` chain in a loop, pushing the expressions
+    /// lowering each arm's else-branch in turn would push, in the same order:
+    /// every arm's condition and then-branch, the last else-branch, then one
+    /// conditional per arm from the innermost out.
+    fn lower_conditional_chain(&mut self, conditional: &crate::ast::ConditionalExpr) -> HirExprRef {
+        let (arms, tail) = conditional.chain();
+        let mut lowered = Vec::with_capacity(arms.len());
+        for arm in &arms {
+            let condition = self.lower_expr(&arm.condition).id;
+            lowered.push((condition, self.lower_expr(&arm.then_expr).id));
+        }
+        let mut else_expr = self.lower_expr(tail);
+        for (arm, (condition, then_expr)) in arms.iter().zip(lowered).rev() {
+            let id = ExprId::from(self.expressions.len());
+            let span = SourceSpanRef::from(arm.span);
+            self.expressions.push(HirExpression {
+                id,
+                kind: HirExprKind::Conditional {
+                    condition,
+                    then_expr,
+                    else_expr: else_expr.id,
+                },
+                span,
+            });
+            else_expr = HirExprRef {
+                id,
+                kind: "conditional".into(),
+                span,
+            };
+        }
+        else_expr
     }
 
     fn lower_expr_kind(&mut self, expr: &Expression) -> HirExprKind {
@@ -3823,10 +3895,16 @@ fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
             }
         }
         Expression::Conditional(conditional) => {
-            if evaluate(&conditional.condition)? != 0 {
-                evaluate(&conditional.then_expr)
-            } else {
-                evaluate(&conditional.else_expr)
+            // A right-nested chain is followed in a loop.
+            let mut conditional = conditional;
+            loop {
+                if evaluate(&conditional.condition)? != 0 {
+                    break evaluate(&conditional.then_expr);
+                }
+                match &*conditional.else_expr {
+                    Expression::Conditional(next) => conditional = next,
+                    tail => break evaluate(tail),
+                }
             }
         }
         _ => None,

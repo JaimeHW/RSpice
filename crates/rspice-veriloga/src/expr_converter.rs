@@ -1333,16 +1333,49 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert a conditional expression
+    ///
+    /// A right-nested chain converts in a loop, pushing the same nodes in the
+    /// same order as converting each arm's else-branch in turn would: every
+    /// arm's condition and then-branch, the last else-branch, then one
+    /// conditional node per arm from the innermost out.
     fn convert_conditional(
         &self,
         arena: &mut ExprArena,
         cond: &crate::ast::ConditionalExpr,
     ) -> CompileResult<NodeId> {
-        let condition = self.convert(arena, &cond.condition)?;
-        let then_expr = self.convert(arena, &cond.then_expr)?;
-        let else_expr = self.convert(arena, &cond.else_expr)?;
+        let (arms, tail) = cond.chain();
+        let mut converted = Vec::with_capacity(arms.len());
+        for (index, arm) in arms.iter().enumerate() {
+            let operands = self
+                .convert(arena, &arm.condition)
+                .and_then(|condition| Ok((condition, self.convert(arena, &arm.then_expr)?)));
+            match operands {
+                Ok(operands) => converted.push(operands),
+                Err(error) => return Err(Self::locate_in_chain(error, &arms[1..=index])),
+            }
+        }
+        let mut else_expr = self
+            .convert(arena, tail)
+            .map_err(|error| Self::locate_in_chain(error, &arms[1..]))?;
+        for (condition, then_expr) in converted.into_iter().rev() {
+            else_expr = arena.push(Node::Conditional(condition, then_expr, else_expr));
+        }
+        Ok(else_expr)
+    }
 
-        Ok(arena.push(Node::Conditional(condition, then_expr, else_expr)))
+    /// The location [`Self::convert`] gives an error from inside `arms`, the
+    /// nested arms of a chain (outermost first) around the failing operand:
+    /// the innermost of them with a span, when the operand had none.
+    fn locate_in_chain(
+        mut error: crate::CompileError,
+        arms: &[&crate::ast::ConditionalExpr],
+    ) -> crate::CompileError {
+        if let crate::CompileError::CodeGen(error) = &mut error
+            && let Some(arm) = arms.iter().rev().find(|arm| !arm.span.is_empty())
+        {
+            error.span.get_or_insert(arm.span);
+        }
+        error
     }
 
     /// Convert a function call

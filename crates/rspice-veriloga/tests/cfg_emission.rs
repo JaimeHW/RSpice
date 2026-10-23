@@ -293,6 +293,108 @@ fn the_emitted_rust_reproduces_the_interpreter() {
     }
 }
 
+/// A long else chain is emitted flat, as one labeled block, and runs to the
+/// interpreter's value bit for bit.
+#[test]
+fn a_100_arm_conditional_chain_emits_flat_rust_that_agrees() {
+    conditional_chain_emits_rust_that_agrees(100, 77);
+}
+
+/// A right-nested `?:` chain has no length limit, so the source emitted for
+/// one of 10,000 arms has to be something rustc compiles with its default
+/// stack: it runs to the interpreter's value, bit for bit, at the arm a
+/// parameter selects.
+#[test]
+#[ignore = "transpiles 10,000 arms and runs rustc -O on them, minutes in release; run with --release --ignored"]
+fn a_10000_arm_conditional_chain_emits_rust_that_compiles_and_agrees() {
+    conditional_chain_emits_rust_that_agrees(10_000, 7777);
+}
+
+/// `I(p, n) <+ (x < 0.5 ? 0.0 : x < 1.5 ? 1.0 : ... : -1.0) + x * V(p, n)`
+/// with `x = sel + V(p, n)`, `sel` defaulting to `selected`.
+fn conditional_chain_emits_rust_that_agrees(arms: usize, selected: usize) {
+    let chain = (0..arms)
+        .map(|i| format!("x < {i}.5 ? {i}.0 : "))
+        .collect::<String>();
+    let source = format!(
+        "module chain(p, n); inout p, n; electrical p, n; parameter real sel = {selected}.0; real x;\n\
+         analog begin x = sel + V(p, n);\nI(p, n) <+ ({chain}-1.0) + x * V(p, n);\nend\nendmodule\n"
+    );
+    let artifact = artifact(&source);
+    // The whole generator, on the test's own thread.
+    let started = std::time::Instant::now();
+    let generated = rspice_veriloga::rust_backend::RustTranspiler::new(Default::default())
+        .transpile(&artifact)
+        .expect("transpiles");
+    eprintln!(
+        "transpiled {} bytes in {:?}",
+        generated
+            .files
+            .iter()
+            .map(|file| file.contents.len())
+            .sum::<usize>(),
+        started.elapsed()
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    let lanes = [
+        AdSeed::NodePotential(0usize.into()),
+        AdSeed::NodePotential(1usize.into()),
+    ];
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("differentiates");
+    let mut wanted = cfg.residuals.clone();
+    for residual in &cfg.residuals {
+        wanted.extend(
+            differentiated
+                .derivative_row(*residual)
+                .into_iter()
+                .flatten(),
+        );
+    }
+    let (optimized, wanted) = optimize_cfg(&differentiated.function, &wanted);
+    let bias = bias(&artifact);
+    let expected = evaluate_cfg(&optimized, &inputs(&bias)).expect("interprets");
+    let expected: Vec<f64> = wanted
+        .iter()
+        .map(|value| expected.value(*value).expect("defined on every path"))
+        .collect();
+
+    let started = std::time::Instant::now();
+    let (body, names) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+    eprintln!("emitted {} bytes in {:?}", body.len(), started.elapsed());
+    // Flat: one break per arm, and nesting no deeper than one arm.
+    assert_eq!(body.matches("break '").count(), arms, "{body}");
+    let mut depth = 0usize;
+    let mut deepest = 0usize;
+    for brace in body.chars().filter(|c| matches!(c, '{' | '}')) {
+        if brace == '{' {
+            depth += 1;
+            deepest = deepest.max(depth);
+        } else {
+            depth = depth.saturating_sub(1);
+        }
+    }
+    assert!(deepest <= 4, "the chain nests {deepest} deep:\n{body}");
+    let program = program(&body, &names, &bias);
+    let name = format!("chain_{arms}");
+    let started = std::time::Instant::now();
+    let actual = compile_and_run(&scratch(&name), &name, &program);
+    eprintln!("rustc -O and run in {:?}", started.elapsed());
+    assert_eq!(actual.len(), expected.len());
+    let value = selected as f64 + (selected as f64 + 0.13) * 0.13;
+    assert!(
+        expected
+            .iter()
+            .any(|output| (output.abs() - value).abs() < 1e-6),
+        "the parameter selects arm {selected}: {expected:?}"
+    );
+    for (index, (emitted, interpreted)) in actual.iter().zip(&expected).enumerate() {
+        assert!(
+            bit_identical(*emitted, *interpreted),
+            "output {index} is {emitted} from the emitted code and {interpreted} from the interpreter"
+        );
+    }
+}
+
 #[test]
 fn one_lane_derivatives_are_scalar_and_executable() {
     let source = r#"

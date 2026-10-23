@@ -461,11 +461,10 @@ fn noise_substitution_is_zero(hir: &HirModel, id: ExprId) -> bool {
             "Div" => zero(*left) && !contains_noise(hir, *right),
             _ => false,
         },
-        HirExprKind::Conditional {
-            then_expr,
-            else_expr,
-            ..
-        } => zero(*then_expr) && zero(*else_expr),
+        HirExprKind::Conditional { .. } => {
+            let (arms, tail) = hir.conditional_chain(id);
+            arms.into_iter().all(|[_, _, then_expr]| zero(then_expr)) && zero(tail)
+        }
         HirExprKind::AnalogOperator { op } => match op {
             HirAnalogOperator::Limit { .. } | HirAnalogOperator::LimiterArgument { .. } => false,
         },
@@ -862,11 +861,12 @@ fn hir_expr_is_instance_static(
         HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
             recurse(*operand)
         }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => recurse(*condition) && recurse(*then_expr) && recurse(*else_expr),
+        HirExprKind::Conditional { .. } => {
+            let (arms, tail) = hir.conditional_chain(expression.id);
+            arms.into_iter()
+                .all(|[_, condition, then_expr]| recurse(condition) && recurse(then_expr))
+                && recurse(tail)
+        }
         HirExprKind::ArrayAccess {
             array,
             index,
@@ -1919,43 +1919,85 @@ impl<'a> CfgLowerer<'a> {
             self.unsupported_noise(span, "condition");
             return;
         }
-        let condition = self.expr(condition);
-        let then_block = self.builder.create_block();
-        let else_block = self.builder.create_block();
-        let join = self.builder.create_block();
-        self.builder.set_terminator(
-            self.block,
-            CfgTerminator::Branch {
-                condition,
-                then_target: then_block,
-                then_args: Vec::new(),
-                else_target: else_block,
-                else_args: Vec::new(),
-            },
-        );
-        self.builder.seal_block(then_block);
-        self.builder.seal_block(else_block);
+        self.noise_diamonds([condition, then_expr, else_expr], &mut |this, branch| {
+            this.metadata_noise_expr(branch)
+        });
+    }
 
-        self.block = then_block;
-        self.metadata_noise_expr(then_expr);
-        self.builder.set_terminator(
-            self.block,
-            CfgTerminator::Jump {
-                target: join,
-                args: Vec::new(),
-            },
-        );
-        self.block = else_block;
-        self.metadata_noise_expr(else_expr);
-        self.builder.set_terminator(
-            self.block,
-            CfgTerminator::Jump {
-                target: join,
-                args: Vec::new(),
-            },
-        );
-        self.builder.seal_block(join);
-        self.block = join;
+    /// Lower `condition ? then_expr : else_expr` as a diamond whose arms
+    /// `branch` lowers, following a right-nested chain in a loop: an
+    /// else-branch that is itself a conditional carrying noise, none of it in
+    /// its condition, is the next diamond, inside this one's else block, as
+    /// `branch` would have lowered it. The joins close from the innermost out.
+    fn noise_diamonds(
+        &mut self,
+        [condition, then_expr, else_expr]: [ExprId; 3],
+        branch: &mut impl FnMut(&mut Self, ExprId),
+    ) {
+        let mut arm = (condition, then_expr, else_expr);
+        let mut joins = Vec::new();
+        loop {
+            let (condition, then_expr, else_expr) = arm;
+            let condition = self.expr(condition);
+            let then_block = self.builder.create_block();
+            let else_block = self.builder.create_block();
+            let join = self.builder.create_block();
+            self.builder.set_terminator(
+                self.block,
+                CfgTerminator::Branch {
+                    condition,
+                    then_target: then_block,
+                    then_args: Vec::new(),
+                    else_target: else_block,
+                    else_args: Vec::new(),
+                },
+            );
+            self.builder.seal_block(then_block);
+            self.builder.seal_block(else_block);
+
+            self.block = then_block;
+            branch(self, then_expr);
+            self.builder.set_terminator(
+                self.block,
+                CfgTerminator::Jump {
+                    target: join,
+                    args: Vec::new(),
+                },
+            );
+            self.block = else_block;
+            joins.push(join);
+            let next = contains_noise(self.hir, else_expr)
+                .then(|| self.hir.expressions.get(usize::from(else_expr)))
+                .flatten()
+                .and_then(|expression| match expression.kind {
+                    HirExprKind::Conditional {
+                        condition,
+                        then_expr,
+                        else_expr,
+                    } if !contains_noise(self.hir, condition) => {
+                        Some((condition, then_expr, else_expr))
+                    }
+                    _ => None,
+                });
+            match next {
+                Some(next) => arm = next,
+                None => {
+                    branch(self, else_expr);
+                    break;
+                }
+            }
+        }
+        for join in joins.into_iter().rev() {
+            self.builder.set_terminator(
+                self.block,
+                CfgTerminator::Jump {
+                    target: join,
+                    args: Vec::new(),
+                },
+            );
+            self.builder.seal_block(join);
+            self.block = join;
+        }
     }
 
     fn noise_term(&mut self, contribution: ContributionId, id: ExprId, amplitude: ValueId) {
@@ -2084,46 +2126,9 @@ impl<'a> CfgLowerer<'a> {
         else_expr: ExprId,
         amplitude: ValueId,
     ) {
-        let condition = self.expr(condition);
-        let then_block = self.builder.create_block();
-        let else_block = self.builder.create_block();
-        let join = self.builder.create_block();
-
-        self.builder.set_terminator(
-            self.block,
-            CfgTerminator::Branch {
-                condition,
-                then_target: then_block,
-                then_args: Vec::new(),
-                else_target: else_block,
-                else_args: Vec::new(),
-            },
-        );
-        self.builder.seal_block(then_block);
-        self.builder.seal_block(else_block);
-
-        self.block = then_block;
-        self.noise_term(contribution, then_expr, amplitude);
-        self.builder.set_terminator(
-            self.block,
-            CfgTerminator::Jump {
-                target: join,
-                args: Vec::new(),
-            },
-        );
-
-        self.block = else_block;
-        self.noise_term(contribution, else_expr, amplitude);
-        self.builder.set_terminator(
-            self.block,
-            CfgTerminator::Jump {
-                target: join,
-                args: Vec::new(),
-            },
-        );
-
-        self.builder.seal_block(join);
-        self.block = join;
+        self.noise_diamonds([condition, then_expr, else_expr], &mut |this, branch| {
+            this.noise_term(contribution, branch, amplitude)
+        });
     }
 
     fn noise_call(
@@ -3153,30 +3158,55 @@ impl<'a> CfgLowerer<'a> {
     }
 
     /// `c ? a : b` as a diamond, so the untaken side costs nothing.
+    /// Lower `condition ? then_expr : else_expr` as [`Self::conditional_value`]
+    /// would, following a right-nested chain of them in a loop: each arm's
+    /// else block holds the next arm, and the joins close from the innermost
+    /// out, building the blocks and variables the recursion built, in its
+    /// order.
     fn conditional_expr(
         &mut self,
         condition: ExprId,
         then_expr: ExprId,
         else_expr: ExprId,
     ) -> ValueId {
-        let condition = self.expr(condition);
-        self.conditional_value(
-            condition,
-            |this| this.expr(then_expr),
-            |this| this.expr(else_expr),
-        )
+        let mut arm = (condition, then_expr, else_expr);
+        let mut open = Vec::new();
+        let tail = loop {
+            let (condition, then_expr, else_expr) = arm;
+            let condition = self.expr(condition);
+            open.push(self.open_conditional(condition, |this| this.expr(then_expr)));
+            match self
+                .hir
+                .expressions
+                .get(usize::from(else_expr))
+                .map(|expression| &expression.kind)
+            {
+                Some(&HirExprKind::Conditional {
+                    condition,
+                    then_expr,
+                    else_expr,
+                }) => arm = (condition, then_expr, else_expr),
+                _ => break else_expr,
+            }
+        };
+        let mut value = self.expr(tail);
+        for (result, join, then_value) in open.into_iter().rev() {
+            value = self.close_conditional(result, join, then_value, value);
+        }
+        value
     }
 
-    fn conditional_value(
+    /// [`Self::conditional_value`] up to its else arm: branch on `condition`,
+    /// lower the then arm, and leave the else block current. Returns the
+    /// result variable, the join block and the then arm's value.
+    fn open_conditional(
         &mut self,
         condition: ValueId,
         then_value: impl FnOnce(&mut Self) -> ValueId,
-        else_value: impl FnOnce(&mut Self) -> ValueId,
-    ) -> ValueId {
+    ) -> (CfgVariable, BlockId, ValueId) {
         let then_block = self.builder.create_block();
         let else_block = self.builder.create_block();
         let join = self.builder.create_block();
-
         self.builder.set_terminator(
             self.block,
             CfgTerminator::Branch {
@@ -3189,12 +3219,10 @@ impl<'a> CfgLowerer<'a> {
         );
         self.builder.seal_block(then_block);
         self.builder.seal_block(else_block);
-
         // The result is carried through an SSA variable of its own, which is
         // what turns the two arms into one block parameter at the join — and
         // into no parameter at all when both arms produce the same value.
         let result = CfgVariable::Local(self.result_variable());
-
         self.block = then_block;
         let then_value = then_value(self);
         self.builder.write_variable(result, self.block, then_value);
@@ -3205,9 +3233,18 @@ impl<'a> CfgLowerer<'a> {
                 args: Vec::new(),
             },
         );
-
         self.block = else_block;
-        let else_value = else_value(self);
+        (result, join, then_value)
+    }
+
+    /// [`Self::conditional_value`] after its else arm produced `else_value`.
+    fn close_conditional(
+        &mut self,
+        result: CfgVariable,
+        join: BlockId,
+        then_value: ValueId,
+        else_value: ValueId,
+    ) -> ValueId {
         self.builder.write_variable(result, self.block, else_value);
         self.builder.set_terminator(
             self.block,
@@ -3216,12 +3253,22 @@ impl<'a> CfgLowerer<'a> {
                 args: Vec::new(),
             },
         );
-
         self.builder.seal_block(join);
         self.block = join;
         self.builder
             .read_variable(result, join)
             .unwrap_or(then_value)
+    }
+
+    fn conditional_value(
+        &mut self,
+        condition: ValueId,
+        then_value: impl FnOnce(&mut Self) -> ValueId,
+        else_value: impl FnOnce(&mut Self) -> ValueId,
+    ) -> ValueId {
+        let (result, join, then_value) = self.open_conditional(condition, then_value);
+        let else_value = else_value(self);
+        self.close_conditional(result, join, then_value, else_value)
     }
 
     /// A fresh SSA key for one conditional expression's result.

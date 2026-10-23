@@ -273,3 +273,64 @@ fn constant_functions_fold_parameters_and_ranges() {
     assert!(error.contains("parameter `P`"), "{error}");
     assert!(!error.contains("Internal error"), "{error}");
 }
+
+/// A function whose body is one right-nested `?:` chain of `arms` arms over
+/// its argument, `s == i ? i + 7 : ...`, ending in `-1`; and a module that
+/// calls it at every `stride`-th arm and the last, at run time, and folds it
+/// in constant expressions.
+fn conditional_chain_module(arms: usize, stride: usize) -> String {
+    let chain = |on: &str| {
+        (0..arms)
+            .map(|i| format!("{on} == {i} ? {} : ", i + 7))
+            .collect::<String>()
+    };
+    let (body, folded, last) = (chain("s"), chain("K"), arms - 1);
+    format!(
+        "module top;\n\
+         \x20 parameter K = {last};\n\
+         \x20 function integer select(input integer s);\n\
+         \x20   select = {body}-1;\n\
+         \x20 endfunction\n\
+         \x20 localparam integer FOLDED = {folded}-1;\n\
+         \x20 localparam integer CONSTANT = select(K);\n\
+         \x20 integer s, misses, last, past, folded, constant;\n\
+         \x20 initial begin\n\
+         \x20   misses = 0;\n\
+         \x20   for (s = 0; s < {arms}; s = s + {stride})\n\
+         \x20     if (select(s) != s + 7) misses = misses + 1;\n\
+         \x20   last = select({last}); past = select({arms});\n\
+         \x20   folded = FOLDED; constant = CONSTANT;\n\
+         \x20 end\n\
+         endmodule\n"
+    )
+}
+
+/// A right-nested `?:` chain is the else-if shape generated multiplexers and
+/// decoders are written in, and has no length limit (ivtest's `br_gh330` is a
+/// 512-arm chain in a function), from a caller with a 1 MiB stack.
+///
+/// Every arm of the 512-arm chain is selected once. Selecting arm `i` walks
+/// `i` conditions, so selecting every arm of the 10,000-arm chain is fifty
+/// million interpreter steps; it selects every 97th arm and the last instead.
+/// Both fold in a parameter and in a constant function call.
+#[test]
+fn a_conditional_chain_of_any_length_selects_each_arm() {
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            for (arms, stride) in [(512, 1), (10_000, 97)] {
+                let source = conditional_chain_module(arms, stride);
+                let mut harness = Harness::from_source(&source);
+                expect_finished(harness.run());
+                let integer = |value: i64| format!("{:032b}", value as i32);
+                assert_eq!(harness.get("misses"), integer(0), "{arms} arms");
+                assert_eq!(harness.get("last"), integer(arms as i64 + 6), "{arms}");
+                assert_eq!(harness.get("past"), integer(-1), "{arms} arms");
+                assert_eq!(harness.get("folded"), integer(arms as i64 + 6), "{arms}");
+                assert_eq!(harness.get("constant"), integer(arms as i64 + 6), "{arms}");
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

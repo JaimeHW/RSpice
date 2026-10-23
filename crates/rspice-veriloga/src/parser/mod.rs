@@ -35,13 +35,20 @@ pub(crate) use config::WORK_LIBRARY;
 pub const MAX_STATEMENT_NESTING: usize = 256;
 
 /// The deepest expression nesting the front end reads: every parenthesis,
-/// `?:` branch, unary operator and call argument is one level. See
+/// unary operator, call argument and `?:` then-branch is one level. See
 /// [`MAX_STATEMENT_NESTING`].
+///
+/// The else-branch of a `?:` opens no level. A right-nested chain
+/// `a ? x : b ? y : c ? z : ...` is the else-if shape generated multiplexers
+/// and decoders are written in, so it has no length limit: every phase walks
+/// it in a loop (see [`crate::ast::ConditionalExpr::chain`]).
 pub const MAX_EXPRESSION_NESTING: usize = 256;
 
 /// The deepest operator tree one expression may build. A chain of binary
 /// operators (`a + b + c ...`) nests its tree without nesting its text, so it
-/// is bounded separately from [`MAX_EXPRESSION_NESTING`].
+/// is bounded separately from [`MAX_EXPRESSION_NESTING`]. The else-branch of a
+/// `?:` sits at its conditional's depth, as it does for
+/// [`MAX_EXPRESSION_NESTING`].
 pub const MAX_EXPRESSION_DEPTH: usize = 1024;
 
 /// Which bound a nesting level counts against; see [`Parser::nested`].
@@ -63,8 +70,8 @@ impl Nesting {
             Self::Expression => ParseErrorKind::NestingLimit {
                 what: "Expression",
                 limit: MAX_EXPRESSION_NESTING,
-                counted: "every parenthesis, `?:` branch, unary operator and call argument is \
-                          a level",
+                counted: "every parenthesis, unary operator, call argument and `?:` \
+                          then-branch is a level",
             },
         }
     }
@@ -3129,23 +3136,27 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse ternary conditional
+    ///
+    /// A right-nested chain `a ? x : b ? y : c` is read in a loop: each
+    /// then-branch is a nested expression, but the else-branch continues the
+    /// chain at its conditional's level (see [`MAX_EXPRESSION_NESTING`]).
     fn parse_ternary(&mut self) -> Result<Expression, ParseError> {
-        let start = self.current_span();
-        let mut expr = self.parse_or()?;
-
-        if self.match_token(TokenKind::Question) {
-            let then_expr = Box::new(self.parse_expression()?);
+        let mut arms = Vec::new();
+        let tail = loop {
+            let start = self.current_span();
+            let condition = self.parse_or()?;
+            if !self.match_token(TokenKind::Question) {
+                break condition;
+            }
+            let then_expr = self.parse_expression()?;
             self.expect(TokenKind::Colon)?;
-            let else_expr = Box::new(self.parse_expression()?);
-            expr = Expression::Conditional(ConditionalExpr {
-                condition: Box::new(expr),
-                then_expr,
-                else_expr,
-                span: start.extend(self.previous_span()),
-            });
-        }
-
-        Ok(expr)
+            arms.push((condition, then_expr, start));
+        };
+        let end = self.previous_span();
+        let arms = arms
+            .into_iter()
+            .map(|(condition, then_expr, start)| (condition, then_expr, start.extend(end)));
+        Ok(ConditionalExpr::from_arms(arms, tail))
     }
 
     /// Parse logical or

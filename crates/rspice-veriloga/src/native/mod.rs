@@ -351,6 +351,71 @@ endmodule
         assert!(context.take_runtime_error().is_none());
     }
 
+    /// Select arms of a right-nested `?:` chain of `branches` arms, each arm
+    /// at the voltage that selects it, through the native device, built and
+    /// run from a caller with a 1 MiB stack.
+    fn select_conditional_chain_arms(branches: usize, selections: Vec<usize>) {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || {
+                let arms = (0..branches)
+                    .map(|i| format!("x < {i}.5 ? {i}.0 : "))
+                    .collect::<String>();
+                let source = format!(
+                    "module chain(p, n); inout p, n; electrical p, n; real x;\n\
+                     analog begin x = V(p, n);\nI(p, n) <+ {arms}-1.0;\nend\nendmodule\n"
+                );
+                let report = VerilogACompiler::new(CompilerOptions::default())
+                    .compile_runtime(&source, None)
+                    .expect("a chain of any length compiles");
+                let mut device = crate::device::VerilogADevice::try_new_with_canonical_ir(
+                    "X",
+                    report.model,
+                    &report.canonical_ir,
+                    &[1, 0],
+                )
+                .expect("native device");
+                for selected in selections {
+                    device.update_voltages(&[selected as f64]);
+                    let expected = if selected == branches {
+                        -1.0
+                    } else {
+                        selected as f64
+                    };
+                    assert_eq!(
+                        device.try_evaluate().expect("chain evaluates"),
+                        vec![expected],
+                        "{branches} arms, V = {selected}"
+                    );
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// A right-nested `?:` chain has no length limit, and the native route
+    /// lowers it arm by arm: every arm of ivtest's `br_gh330` shape, a
+    /// 512-arm chain, and its last else-branch.
+    #[test]
+    fn every_arm_of_a_512_arm_conditional_chain_runs_natively() {
+        select_conditional_chain_arms(512, (0..=512).collect());
+    }
+
+    /// Every 97th arm, the last arm and the last else-branch of a 10,000-arm
+    /// chain: selecting all of them would walk fifty million conditions.
+    /// Release only, as the release `native::` run in CI has it: compiling
+    /// the chain and building its 10,000-diamond device takes about sixteen
+    /// minutes unoptimized.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn a_10000_arm_conditional_chain_runs_natively() {
+        select_conditional_chain_arms(
+            10_000,
+            (0..10_000).step_by(97).chain([9_999, 10_000]).collect(),
+        );
+    }
+
     #[test]
     fn public_canonical_dispatch_compiles_stateful_and_reactive_model() {
         let source = r#"

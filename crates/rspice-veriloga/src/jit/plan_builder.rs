@@ -17,6 +17,7 @@ use super::model_plan::NativeObservationPlan;
 use super::model_plan::{NativeAssignmentCoverage, NativeModelPlan};
 use super::plan_program::PlanProgram;
 use super::{JitError, JitResult};
+use crate::canonical_ir::hir::conditional_chain;
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalStateOperator, EquationId, ExprId, HirAnalogOperator,
     HirAssignment, HirExprKind, HirExprRef, HirExpression, HirLoop, HirModel, HirStatement,
@@ -901,26 +902,34 @@ fn canonical_extract_reactive_charge(
                 )
             }))
         }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            let then_charge = canonical_extract_reactive_charge(model, mir, then_expr)?;
-            let else_charge = canonical_extract_reactive_charge(model, mir, else_expr)?;
-            if then_charge.is_none() && else_charge.is_none() {
-                return Ok(None);
+        HirExprKind::Conditional { .. } => {
+            // A right-nested chain is extracted in a loop, appending what
+            // extracting each arm's else-branch in turn would, in order.
+            let (arms, tail) = conditional_chain(&mir.expressions, expr_id);
+            let mut then_charges = Vec::with_capacity(arms.len());
+            for [_, _, then_expr] in &arms {
+                then_charges.push(canonical_extract_reactive_charge(model, mir, *then_expr)?);
             }
-            let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
-            Ok(Some(append_canonical_expr(
-                mir,
-                HirExprKind::Conditional {
-                    condition,
-                    then_expr: then_charge.unwrap_or(zero),
-                    else_expr: else_charge.unwrap_or(zero),
-                },
-                expression.span,
-            )))
+            let mut charge = canonical_extract_reactive_charge(model, mir, tail)?;
+            for ([conditional, condition, _], then_charge) in
+                arms.into_iter().zip(then_charges).rev()
+            {
+                if then_charge.is_none() && charge.is_none() {
+                    continue;
+                }
+                let span = canonical_expression(model, mir, conditional)?.span;
+                let zero = append_canonical_number(mir, 0.0, "0.0", span);
+                charge = Some(append_canonical_expr(
+                    mir,
+                    HirExprKind::Conditional {
+                        condition,
+                        then_expr: then_charge.unwrap_or(zero),
+                        else_expr: charge.unwrap_or(zero),
+                    },
+                    span,
+                ));
+            }
+            Ok(charge)
         }
         _ => {
             if canonical_expr_contains_ddt(model, mir, expr_id)? {
@@ -972,13 +981,18 @@ fn canonical_expr_contains_ddt(
             Ok(canonical_expr_contains_ddt(model, mir, *left)?
                 || canonical_expr_contains_ddt(model, mir, *right)?)
         }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => Ok(canonical_expr_contains_ddt(model, mir, *condition)?
-            || canonical_expr_contains_ddt(model, mir, *then_expr)?
-            || canonical_expr_contains_ddt(model, mir, *else_expr)?),
+        HirExprKind::Conditional { .. } => {
+            // A right-nested chain is searched in a loop.
+            let (arms, tail) = conditional_chain(&mir.expressions, expr_id);
+            for [_, condition, then_expr] in arms {
+                if canonical_expr_contains_ddt(model, mir, condition)?
+                    || canonical_expr_contains_ddt(model, mir, then_expr)?
+                {
+                    return Ok(true);
+                }
+            }
+            canonical_expr_contains_ddt(model, mir, tail)
+        }
         HirExprKind::AnalogOperator { op } => {
             canonical_analog_operator_contains_ddt(model, mir, op)
         }
@@ -1574,44 +1588,57 @@ fn extract_canonical_noise_expr(
                 "nonlinear unary expression",
             )),
         },
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            if canonical_expr_contains_noise(model, mir, condition)? {
-                return Err(unsupported_canonical_noise_position(
-                    model,
-                    equation_index,
-                    "conditional guard",
-                ));
+        HirExprKind::Conditional { .. } => {
+            // A right-nested chain is extracted in a loop: each arm gates the
+            // amplitude its else-branch carries on into the next, appending
+            // what extracting each else-branch in turn would, in order.
+            let (arms, tail) = conditional_chain(&mir.expressions, expr_id);
+            // Whether the chain from each arm on (the tail's last) carries
+            // noise, in one pass from the innermost arm out.
+            let mut noisy = vec![canonical_expr_contains_noise(model, mir, tail)?; arms.len() + 1];
+            for (index, [_, condition, then_expr]) in arms.iter().enumerate().rev() {
+                noisy[index] = noisy[index + 1]
+                    || canonical_expr_contains_noise(model, mir, *condition)?
+                    || canonical_expr_contains_noise(model, mir, *then_expr)?;
             }
-            if canonical_expr_contains_noise(model, mir, then_expr)? {
-                let one = append_canonical_number(mir, 1.0, "1.0", expression.span);
-                let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
-                let gate = append_canonical_expr(
-                    mir,
-                    HirExprKind::Conditional {
-                        condition,
-                        then_expr: one,
-                        else_expr: zero,
-                    },
-                    expression.span,
-                );
-                let gated_amplitude =
-                    append_canonical_binary(mir, "Mul", amplitude, gate, expression.span);
-                extract_canonical_noise_expr(
-                    model,
-                    mir,
-                    equation_index,
-                    then_expr,
-                    gated_amplitude,
-                    out,
-                )?;
-            }
-            if canonical_expr_contains_noise(model, mir, else_expr)? {
-                let one = append_canonical_number(mir, 1.0, "1.0", expression.span);
-                let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
+            let mut amplitude = amplitude;
+            for (index, [conditional, condition, then_expr]) in arms.into_iter().enumerate() {
+                let span = canonical_expression(model, mir, conditional)?.span;
+                if canonical_expr_contains_noise(model, mir, condition)? {
+                    return Err(unsupported_canonical_noise_position(
+                        model,
+                        equation_index,
+                        "conditional guard",
+                    ));
+                }
+                if canonical_expr_contains_noise(model, mir, then_expr)? {
+                    let one = append_canonical_number(mir, 1.0, "1.0", span);
+                    let zero = append_canonical_number(mir, 0.0, "0.0", span);
+                    let gate = append_canonical_expr(
+                        mir,
+                        HirExprKind::Conditional {
+                            condition,
+                            then_expr: one,
+                            else_expr: zero,
+                        },
+                        span,
+                    );
+                    let gated_amplitude =
+                        append_canonical_binary(mir, "Mul", amplitude, gate, span);
+                    extract_canonical_noise_expr(
+                        model,
+                        mir,
+                        equation_index,
+                        then_expr,
+                        gated_amplitude,
+                        out,
+                    )?;
+                }
+                if !noisy[index + 1] {
+                    return Ok(());
+                }
+                let one = append_canonical_number(mir, 1.0, "1.0", span);
+                let zero = append_canonical_number(mir, 0.0, "0.0", span);
                 let gate = append_canonical_expr(
                     mir,
                     HirExprKind::Conditional {
@@ -1619,20 +1646,11 @@ fn extract_canonical_noise_expr(
                         then_expr: zero,
                         else_expr: one,
                     },
-                    expression.span,
+                    span,
                 );
-                let gated_amplitude =
-                    append_canonical_binary(mir, "Mul", amplitude, gate, expression.span);
-                extract_canonical_noise_expr(
-                    model,
-                    mir,
-                    equation_index,
-                    else_expr,
-                    gated_amplitude,
-                    out,
-                )?;
+                amplitude = append_canonical_binary(mir, "Mul", amplitude, gate, span);
             }
-            Ok(())
+            extract_canonical_noise_expr(model, mir, equation_index, tail, amplitude, out)
         }
         _ => Err(unsupported_canonical_noise_position(
             model,
@@ -1680,13 +1698,18 @@ fn canonical_expr_contains_noise(
             Ok(canonical_expr_contains_noise(model, mir, *left)?
                 || canonical_expr_contains_noise(model, mir, *right)?)
         }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => Ok(canonical_expr_contains_noise(model, mir, *condition)?
-            || canonical_expr_contains_noise(model, mir, *then_expr)?
-            || canonical_expr_contains_noise(model, mir, *else_expr)?),
+        HirExprKind::Conditional { .. } => {
+            // A right-nested chain is searched in a loop.
+            let (arms, tail) = conditional_chain(&mir.expressions, expr_id);
+            for [_, condition, then_expr] in arms {
+                if canonical_expr_contains_noise(model, mir, condition)?
+                    || canonical_expr_contains_noise(model, mir, then_expr)?
+                {
+                    return Ok(true);
+                }
+            }
+            canonical_expr_contains_noise(model, mir, tail)
+        }
         HirExprKind::AnalogOperator { op } => {
             canonical_analog_operator_contains_noise(model, mir, op)
         }

@@ -229,14 +229,16 @@ impl<'a> Walk<'a> {
     /// The identifiers an expression reads.
     fn identifiers(&self, id: ExprId, out: &mut Vec<&'a str>) {
         let hir = self.hir;
-        let Some(expression) = hir.expressions.get(usize::from(id)) else {
-            return;
-        };
-        if let HirExprKind::Identifier { name } = &expression.kind {
-            out.push(name.as_str());
-        }
-        for child in children(&expression.kind) {
-            self.identifiers(child, out);
+        // Preorder on a stack of its own: a `?:` chain has no length limit.
+        let mut pending = vec![id];
+        while let Some(id) = pending.pop() {
+            let Some(expression) = hir.expressions.get(usize::from(id)) else {
+                continue;
+            };
+            if let HirExprKind::Identifier { name } = &expression.kind {
+                out.push(name.as_str());
+            }
+            pending.extend(children(&expression.kind).into_iter().rev());
         }
     }
 
@@ -521,15 +523,18 @@ impl<'a> Walk<'a> {
                 self.push_value(*operand, values, out);
                 out.extend(op);
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.push_value(*condition, values, out);
-                self.push_value(*then_expr, values, out);
-                self.push_value(*else_expr, values, out);
-                out.push(Op::Select);
+            HirExprKind::Conditional { .. } => {
+                // A right-nested chain in a loop: its operands in postfix
+                // order, then one select per arm.
+                let (arms, tail) = hir.conditional_chain(id);
+                for &[_, condition, then_expr] in &arms {
+                    self.push_value(condition, values, out);
+                    self.push_value(then_expr, values, out);
+                }
+                self.push_value(tail, values, out);
+                for _ in &arms {
+                    out.push(Op::Select);
+                }
             }
             _ => out.push(Op::Unknown),
         }

@@ -148,14 +148,29 @@ impl MetadataDependencies<'_> {
             {
                 self.value(id)
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.value(*condition);
-                self.noise(*then_expr);
-                self.noise(*else_expr);
+            HirExprKind::Conditional { .. } => {
+                // A right-nested chain is visited in a loop. Whether the
+                // chain from each arm on carries noise is found in one pass
+                // from the innermost arm out, where asking at each arm would
+                // walk the rest of the chain again.
+                let (arms, tail) = self.hir.conditional_chain(id);
+                let mut noisy = contains_noise(self.hir, tail);
+                for &[conditional, condition, then_expr] in arms.iter().rev() {
+                    noisy = noisy
+                        || contains_noise(self.hir, condition)
+                        || contains_noise(self.hir, then_expr);
+                    self.noisy.entry(conditional).or_insert(noisy);
+                }
+                for (index, [conditional, condition, then_expr]) in arms.into_iter().enumerate() {
+                    if index > 0
+                        && (!self.noisy[&conditional] || !self.visited_noise.insert(conditional))
+                    {
+                        return true;
+                    }
+                    self.value(condition);
+                    self.noise(then_expr);
+                }
+                self.noise(tail);
             }
             kind => {
                 let mut children = Vec::new();

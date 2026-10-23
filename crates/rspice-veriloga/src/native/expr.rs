@@ -13,6 +13,7 @@ use super::{JitError, JitResult};
 use crate::array_index::checked_array_slot;
 use crate::ast::AccessKind;
 use crate::canonical_ir::FROZEN_DERIVATIVE_UNARY;
+use crate::canonical_ir::hir::conditional_chain;
 use crate::canonical_ir::state::CanonicalStateOperator;
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLimiterArgument, MirEquationKind,
@@ -3107,15 +3108,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Binary { op, left, right } => {
                 self.lower_binary(op.as_str(), *left, *right)
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.lower(*condition)?;
-                self.lower(*then_expr)?;
-                self.lower(*else_expr)?;
-                self.append_ifelse()
+            HirExprKind::Conditional { .. } => {
+                // A right-nested chain lowers in a loop, appending the ops
+                // lowering each arm's else-branch in turn would, in order.
+                let (arms, tail) = conditional_chain(&self.mir.expressions, expr_id);
+                for [_, condition, then_expr] in &arms {
+                    self.lower(*condition)?;
+                    self.lower(*then_expr)?;
+                }
+                self.lower(tail)?;
+                arms.iter().try_for_each(|_| self.append_ifelse())
             }
             HirExprKind::SystemFunction { name, args } => {
                 self.lower_system_function_call(expression.id, name.as_str(), args.as_slice())
@@ -3383,15 +3385,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Binary { op, left, right } => {
                 self.lower_binary_derivative(op.as_str(), *left, *right, wrt)
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.lower(*condition)?;
-                self.lower_derivative(*then_expr, wrt)?;
-                self.lower_derivative(*else_expr, wrt)?;
-                self.append_ifelse()
+            HirExprKind::Conditional { .. } => {
+                let (arms, tail) = conditional_chain(&self.mir.expressions, expr_id);
+                let zero =
+                    chain_suffix_is_zero(&arms, tail, |id| self.expr_derivative_is_zero(id, wrt))?;
+                let opened = self.lower_chain_arms(&arms, &zero, |lowerer, id| {
+                    lowerer.lower_derivative(id, wrt)
+                })?;
+                if opened == arms.len() {
+                    self.lower_derivative(tail, wrt)?;
+                }
+                (0..opened).try_for_each(|_| self.append_ifelse())
             }
             HirExprKind::SystemFunction { name, args } => self.lower_system_function_derivative(
                 expression.id,
@@ -3451,15 +3455,18 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Binary { op, left, right } => {
                 self.lower_binary_second_derivative(op.as_str(), *left, *right, first, second)
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.lower(*condition)?;
-                self.lower_second_derivative(*then_expr, first, second)?;
-                self.lower_second_derivative(*else_expr, first, second)?;
-                self.append_ifelse()
+            HirExprKind::Conditional { .. } => {
+                let (arms, tail) = conditional_chain(&self.mir.expressions, expr_id);
+                let zero = chain_suffix_is_zero(&arms, tail, |id| {
+                    self.expr_second_derivative_is_zero(id, first, second)
+                })?;
+                let opened = self.lower_chain_arms(&arms, &zero, |lowerer, id| {
+                    lowerer.lower_second_derivative(id, first, second)
+                })?;
+                if opened == arms.len() {
+                    self.lower_second_derivative(tail, first, second)?;
+                }
+                (0..opened).try_for_each(|_| self.append_ifelse())
             }
             HirExprKind::SystemFunction { name, args } => self
                 .lower_system_function_second_derivative(
@@ -3536,12 +3543,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 | "Shl" | "Shr" => Ok(true),
                 _ => Ok(false),
             },
-            HirExprKind::Conditional {
-                then_expr,
-                else_expr,
-                ..
-            } => Ok(self.expr_derivative_is_zero(*then_expr, wrt)?
-                && self.expr_derivative_is_zero(*else_expr, wrt)?),
+            HirExprKind::Conditional { .. } => {
+                let (arms, tail) = conditional_chain(&self.mir.expressions, expr_id);
+                for [_, _, then_expr] in arms {
+                    if !self.expr_derivative_is_zero(then_expr, wrt)? {
+                        return Ok(false);
+                    }
+                }
+                self.expr_derivative_is_zero(tail, wrt)
+            }
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 self.call_derivative_is_zero(name.as_str(), args.as_slice(), wrt)
             }
@@ -3617,14 +3627,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 | "Shl" | "Shr" => Ok(true),
                 _ => Ok(false),
             },
-            HirExprKind::Conditional {
-                then_expr,
-                else_expr,
-                ..
-            } => Ok(
-                self.expr_second_derivative_is_zero(*then_expr, first, second)?
-                    && self.expr_second_derivative_is_zero(*else_expr, first, second)?,
-            ),
+            HirExprKind::Conditional { .. } => {
+                let (arms, tail) = conditional_chain(&self.mir.expressions, expr_id);
+                for [_, _, then_expr] in arms {
+                    if !self.expr_second_derivative_is_zero(then_expr, first, second)? {
+                        return Ok(false);
+                    }
+                }
+                self.expr_second_derivative_is_zero(tail, first, second)
+            }
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 self.call_second_derivative_is_zero(name.as_str(), args.as_slice(), first, second)
             }
@@ -8183,6 +8194,32 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    /// Lower the arms of a right-nested chain whose derivative `lower_branch`
+    /// takes, as lowering each arm's else-branch in turn would: each arm's
+    /// condition and differentiated then-branch, until the chain from an arm
+    /// on has a zero derivative (`zero`, from [`chain_suffix_is_zero`]), which
+    /// becomes the else-branch constant zero. Returns how many arms were
+    /// opened; when that is all of them, the caller lowers the last
+    /// else-branch.
+    fn lower_chain_arms(
+        &mut self,
+        arms: &[[ExprId; 3]],
+        zero: &[bool],
+        mut lower_branch: impl FnMut(&mut Self, ExprId) -> JitResult<()>,
+    ) -> JitResult<usize> {
+        for (index, [_, condition, then_expr]) in arms.iter().enumerate() {
+            // The chain from the first arm on is the expression itself, which
+            // the caller has already found non-zero.
+            if index > 0 && zero[index] {
+                self.push(NativeOp::Const(0.0))?;
+                return Ok(index);
+            }
+            self.lower(*condition)?;
+            lower_branch(self, *then_expr)?;
+        }
+        Ok(arms.len())
+    }
+
     fn append_ifelse(&mut self) -> JitResult<()> {
         require_stack(
             self.model.clone(),
@@ -8785,6 +8822,24 @@ fn pop_binary_stack(
     depth: usize,
 ) -> JitResult<()> {
     require_stack(model, entry_kind, op, depth, 2)
+}
+
+/// For a right-nested chain of `arms` ending in `tail`, whether the chain
+/// from each arm on has a zero derivative (`is_zero` of every then-branch from
+/// there and of `tail`), the tail's own last: one pass from the innermost arm
+/// out, where asking each arm's else-branch in turn would walk the chain once
+/// per arm.
+fn chain_suffix_is_zero(
+    arms: &[[ExprId; 3]],
+    tail: ExprId,
+    mut is_zero: impl FnMut(ExprId) -> JitResult<bool>,
+) -> JitResult<Vec<bool>> {
+    let mut zero = vec![false; arms.len() + 1];
+    zero[arms.len()] = is_zero(tail)?;
+    for (index, [_, _, then_expr]) in arms.iter().enumerate().rev() {
+        zero[index] = zero[index + 1] && is_zero(*then_expr)?;
+    }
+    Ok(zero)
 }
 
 fn require_stack(

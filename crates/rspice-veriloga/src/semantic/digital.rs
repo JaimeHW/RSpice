@@ -3460,9 +3460,9 @@ impl SemanticAnalyzer {
                 self.check_digital_expression(&unary.operand, signals, index);
             }
             Expression::Conditional(conditional) => {
-                self.check_digital_expression(&conditional.condition, signals, index);
-                self.check_digital_expression(&conditional.then_expr, signals, index);
-                self.check_digital_expression(&conditional.else_expr, signals, index);
+                for operand in conditional.operands() {
+                    self.check_digital_expression(operand, signals, index);
+                }
             }
             Expression::ArrayLiteral(literal) => {
                 for element in &literal.elements {

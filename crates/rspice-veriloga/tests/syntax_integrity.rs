@@ -520,17 +520,161 @@ fn nesting_past_the_front_end_bounds_is_refused_by_name() {
         + &(1..3000)
             .map(|i| format!(" else if (x > {i}) y = {i}.0;"))
             .collect::<String>();
-    let ternaries = format!(
-        "y = {}0.0;",
+    // A `?:` nested through its then-branches is nested text, unlike the
+    // right-nested chain `conditional_chains_of_any_length_select_each_branch`
+    // runs.
+    let nested_ternaries = format!(
+        "y = {}0.0{};",
         (0..3000)
-            .map(|i| format!("(x < {i}.0) ? {i}.0 : "))
-            .collect::<String>()
+            .map(|i| format!("(x < {i}.0) ? "))
+            .collect::<String>(),
+        " : 1.0".repeat(3000)
     );
     let negations = format!("y = {}x;", "-".repeat(3000));
     let sum = format!("y = {};", vec!["x"; 20000].join(" + "));
-    for statement in [nested_ifs, else_ifs, ternaries, negations, sum] {
+    for statement in [nested_ifs, else_ifs, nested_ternaries, negations, sum] {
         nesting_refusal(&nesting_module(&statement));
     }
+
+    // 300 parentheses, past the bound however the levels are counted.
+    let source = expression_nesting(300);
+    let (message, _) = nesting_refusal(&source);
+    assert!(
+        message.contains("Expression nesting exceeds the compiler's limit"),
+        "{message}"
+    );
+}
+
+/// A module whose analog block drives `I(p, n)` with a right-nested chain of
+/// `branches` arms on `V(p, n)`: arm `i` holds `x < i + 0.5`, selecting `i`
+/// for `x == i`, and the chain ends in `-1`.
+fn conditional_chain(branches: usize) -> String {
+    let arms = (0..branches)
+        .map(|i| format!("x < {i}.5 ? {i}.0 : "))
+        .collect::<String>();
+    format!(
+        "module chain(p, n); inout p, n; electrical p, n; real x;\n\
+         analog begin x = V(p, n);\nI(p, n) <+ {arms}-1.0;\nend\nendmodule\n"
+    )
+}
+
+/// A right-nested `?:` chain is the else-if shape generated multiplexers and
+/// decoders are written in, and it has no length limit: every phase walks it
+/// in a loop, so neither the compile nor an evaluation needs stack in
+/// proportion to its length.
+///
+/// ivtest's `br_gh330` is a 512-arm chain. Before, any chain past 256 arms was
+/// refused as expression nesting, and one long enough to get past that
+/// overflowed semantic analysis. Arms are selected at the voltage that selects
+/// them, from a caller with a 1 MiB stack: every arm of the 512-arm chain, on
+/// the production route (native where the build has it) and on the bytecode
+/// the interpreter runs; every 97th arm and the last of the 10,000-arm one,
+/// where selecting all of them would walk fifty million conditions, on the
+/// bytecode (the production device of a 10,000-diamond CFG takes minutes to
+/// build unoptimized).
+#[test]
+fn conditional_chains_of_any_length_select_each_branch() {
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            for (branches, stride) in [(512, 1), (10_000, 97)] {
+                let fixture = DeviceFixture::compile(&conditional_chain(branches));
+                let bytecode = fixture
+                    .try_bytecode_device("B", &[1, 0])
+                    .or_else(|_| fixture.try_device("B", &[1, 0]))
+                    .expect("bytecode device");
+                let devices = if branches == 512 {
+                    vec![fixture.device("X", &[1, 0]), bytecode]
+                } else {
+                    vec![bytecode]
+                };
+                let selections = (0..branches)
+                    .step_by(stride)
+                    .chain([branches - 1, branches])
+                    .collect::<Vec<_>>();
+                for mut device in devices {
+                    for &selected in &selections {
+                        device.update_voltages(&[selected as f64]);
+                        let expected = if selected == branches {
+                            -1.0
+                        } else {
+                            selected as f64
+                        };
+                        assert_eq!(
+                            device.try_evaluate().expect("chain evaluates"),
+                            vec![expected],
+                            "{branches} arms, V = {selected}"
+                        );
+                    }
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// A chain longer than any statement nesting a source may write, whose arms
+/// call a function with an output argument, runs the selected arm's call and
+/// no other: every arm sets the output to twice its value, so the current is
+/// three times the selected value only if no other arm ran.
+#[test]
+fn a_long_chain_of_output_function_calls_runs_only_the_selected_arm() {
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let branches = 300;
+            let arms = (0..branches)
+                .map(|i| format!("x < {i}.5 ? twice({i}.0, o) : "))
+                .collect::<String>();
+            let fixture = DeviceFixture::compile(&format!(
+                "module chain(p, n); inout p, n; electrical p, n; real x, y, o;\n\
+                 analog function real twice; input v; output w; real v, w;\n\
+                 begin w = 2 * v; twice = v; end endfunction\n\
+                 analog begin x = V(p, n); o = 0; y = {arms}twice(-1.0, o);\n\
+                 I(p, n) <+ y + o;\nend\nendmodule\n"
+            ));
+            let bytecode = fixture
+                .try_bytecode_device("B", &[1, 0])
+                .or_else(|_| fixture.try_device("B", &[1, 0]))
+                .expect("bytecode device");
+            for mut device in [fixture.device("X", &[1, 0]), bytecode] {
+                for selected in 0..=branches {
+                    device.update_voltages(&[selected as f64]);
+                    let value = if selected == branches {
+                        -1.0
+                    } else {
+                        selected as f64
+                    };
+                    assert_eq!(
+                        device.try_evaluate().expect("chain evaluates"),
+                        vec![3.0 * value],
+                        "V = {selected}"
+                    );
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// A chain in a parameter-array constant folds exactly at any length: its
+/// else-branches do not count toward the constant evaluator's depth bound.
+#[test]
+fn a_long_conditional_chain_folds_in_a_parameter_array() {
+    let arms = (0..512)
+        .map(|i| format!("K < {i}.5 ? {i}.0 : "))
+        .collect::<String>();
+    let fixture = DeviceFixture::compile(&format!(
+        "module table(p, n); inout p, n; electrical p, n;\n\
+         localparam integer K = 300;\n\
+         parameter real T[0:1] = '{{{arms}-1.0, 2.0}};\n\
+         analog I(p, n) <+ (T[0] + T[1]) * V(p, n);\nendmodule\n"
+    ));
+    let mut device = fixture.device("X", &[1, 0]);
+    device.update_voltages(&[1.0]);
+    assert_eq!(device.try_evaluate().expect("evaluates"), vec![302.0]);
 }
 
 /// A source at every bound compiles, through the full runtime pipeline, from a

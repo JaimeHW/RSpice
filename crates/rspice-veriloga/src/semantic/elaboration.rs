@@ -14,8 +14,8 @@ use super::{
 };
 use crate::ast::{
     AccessKind, AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
-    BinaryOp, BranchAccess, CallExpr, ConditionalExpr, Expression, Identifier, Item, Module,
-    ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, UnaryOp, VarType,
+    BinaryOp, BranchAccess, CallExpr, Expression, Identifier, Item, Module, ModuleInstance,
+    NoiseSource, NumberLit, SystemFunction, UnaryExpr, UnaryOp, VarType,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -2090,12 +2090,9 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
             operand: Box::new(rewrite_expression(&unary.operand, scope)?),
             span: unary.span,
         }),
-        Expression::Conditional(conditional) => Expression::Conditional(ConditionalExpr {
-            condition: Box::new(rewrite_expression(&conditional.condition, scope)?),
-            then_expr: Box::new(rewrite_expression(&conditional.then_expr, scope)?),
-            else_expr: Box::new(rewrite_expression(&conditional.else_expr, scope)?),
-            span: conditional.span,
-        }),
+        Expression::Conditional(conditional) => {
+            conditional.try_map(|operand| rewrite_expression(operand, scope))?
+        }
         Expression::Call(call) => {
             if let Some(value) =
                 rewritten_connectivity_predicate(&call.name, &call.args, call.span, scope)

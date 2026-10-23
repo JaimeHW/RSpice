@@ -1987,6 +1987,35 @@ struct ConditionalSplitter<'a> {
     current: BlockId,
 }
 
+/// One pending step of [`ConditionalSplitter::emit`].
+#[cfg_attr(not(test), allow(dead_code))]
+enum SplitStep {
+    /// Emit `members[next..]` into the current block.
+    Region { members: Vec<usize>, next: usize },
+    /// The then arm of conditional `index` is laid out: close it and lay out
+    /// the else arm.
+    Else {
+        index: usize,
+        condition: ValueId,
+        branch_block: BlockId,
+        then_entry: BlockId,
+        then_value: ValueId,
+        else_value: ValueId,
+    },
+    /// Both arms of conditional `index` are laid out: close the else arm,
+    /// open the join and write the branch and arm terminators.
+    Join {
+        index: usize,
+        condition: ValueId,
+        branch_block: BlockId,
+        then_entry: BlockId,
+        then_tail: BlockId,
+        then_argument: ValueId,
+        else_entry: BlockId,
+        else_value: ValueId,
+    },
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 impl<'a> ConditionalSplitter<'a> {
     fn new(source: &'a Program, owners: &[Option<ArmOwner>]) -> JitResult<Self> {
@@ -2062,76 +2091,145 @@ impl<'a> ConditionalSplitter<'a> {
         })
     }
 
-    fn emit(&mut self, region: &[usize]) -> JitResult<()> {
+    /// Emit `region`, splitting each `IfElse` in it into a branch, its two
+    /// arm regions and a join.
+    ///
+    /// The arms are walked from a stack of pending steps rather than by
+    /// recursion: a right-nested `?:` chain puts each conditional in the else
+    /// region of the last, as deep as the chain is long.
+    fn emit(&mut self, region: Vec<usize>) -> JitResult<()> {
         let source = self.source;
-        for index in region.iter().copied() {
-            let instruction = &source.instructions[index];
-            if !matches!(instruction.op, NativeOp::IfElse) {
-                let operands = instruction
-                    .operands
-                    .iter()
-                    .copied()
-                    .map(|operand| self.mapped(operand))
-                    .collect::<JitResult<Vec<_>>>()?
-                    .into_boxed_slice();
-                let result = ValueId::new(self.instructions.len())?;
-                self.instructions.push(Instruction {
-                    result,
-                    value_type: instruction.value_type,
-                    op: instruction.op,
-                    operands,
-                    effects: instruction.effects,
-                });
-                self.remap[index] = Some(result);
-                continue;
+        let mut pending = vec![SplitStep::Region {
+            members: region,
+            next: 0,
+        }];
+        while let Some(step) = pending.pop() {
+            match step {
+                SplitStep::Region { members, next } => {
+                    for position in next..members.len() {
+                        let index = members[position];
+                        let instruction = &source.instructions[index];
+                        if !matches!(instruction.op, NativeOp::IfElse) {
+                            let operands = instruction
+                                .operands
+                                .iter()
+                                .copied()
+                                .map(|operand| self.mapped(operand))
+                                .collect::<JitResult<Vec<_>>>()?
+                                .into_boxed_slice();
+                            let result = ValueId::new(self.instructions.len())?;
+                            self.instructions.push(Instruction {
+                                result,
+                                value_type: instruction.value_type,
+                                op: instruction.op,
+                                operands,
+                                effects: instruction.effects,
+                            });
+                            self.remap[index] = Some(result);
+                            continue;
+                        }
+
+                        let [condition, then_value, else_value] = *instruction.operands else {
+                            return Err(JitError::Verifier {
+                                model: MODEL.into(),
+                                detail: "conditional splitting requires three IfElse operands"
+                                    .into(),
+                            });
+                        };
+                        let condition = self.mapped(condition)?;
+                        let branch_block = self.current;
+                        self.close_range(branch_block);
+
+                        let then_entry = self.open_block(0)?;
+                        self.current = then_entry;
+                        let then_members = self.take_region(index, true);
+                        // Popped in order: the then arm, the else arm, the
+                        // join, then the rest of this region.
+                        pending.push(SplitStep::Region {
+                            members,
+                            next: position + 1,
+                        });
+                        pending.push(SplitStep::Else {
+                            index,
+                            condition,
+                            branch_block,
+                            then_entry,
+                            then_value,
+                            else_value,
+                        });
+                        pending.push(SplitStep::Region {
+                            members: then_members,
+                            next: 0,
+                        });
+                        break;
+                    }
+                }
+                SplitStep::Else {
+                    index,
+                    condition,
+                    branch_block,
+                    then_entry,
+                    then_value,
+                    else_value,
+                } => {
+                    let then_tail = self.current;
+                    let then_argument = self.mapped(then_value)?;
+                    self.close_range(then_tail);
+
+                    let else_entry = self.open_block(0)?;
+                    self.current = else_entry;
+                    let else_members = self.take_region(index, false);
+                    pending.push(SplitStep::Join {
+                        index,
+                        condition,
+                        branch_block,
+                        then_entry,
+                        then_tail,
+                        then_argument,
+                        else_entry,
+                        else_value,
+                    });
+                    pending.push(SplitStep::Region {
+                        members: else_members,
+                        next: 0,
+                    });
+                }
+                SplitStep::Join {
+                    index,
+                    condition,
+                    branch_block,
+                    then_entry,
+                    then_tail,
+                    then_argument,
+                    else_entry,
+                    else_value,
+                } => {
+                    let else_tail = self.current;
+                    let else_argument = self.mapped(else_value)?;
+                    self.close_range(else_tail);
+
+                    let join = self.open_block(1)?;
+                    let merged = self.parameters[self.blocks[join.index()].parameter_start].value;
+                    self.blocks[branch_block.index()].terminator = Terminator::Branch {
+                        condition,
+                        then_edge: Edge::new(then_entry, Vec::new()),
+                        else_edge: Edge::new(else_entry, Vec::new()),
+                    };
+                    self.blocks[then_tail.index()].terminator =
+                        Terminator::Jump(Edge::new(join, vec![then_argument]));
+                    self.blocks[else_tail.index()].terminator =
+                        Terminator::Jump(Edge::new(join, vec![else_argument]));
+                    self.current = join;
+                    self.remap[index] = Some(merged);
+                }
             }
-
-            let [condition, then_value, else_value] = *instruction.operands else {
-                return Err(JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: "conditional splitting requires three IfElse operands".into(),
-                });
-            };
-            let condition = self.mapped(condition)?;
-            let branch_block = self.current;
-            self.close_range(branch_block);
-
-            let then_entry = self.open_block(0)?;
-            self.current = then_entry;
-            let then_members = self.take_region(index, true);
-            self.emit(&then_members)?;
-            let then_tail = self.current;
-            let then_argument = self.mapped(then_value)?;
-            self.close_range(then_tail);
-
-            let else_entry = self.open_block(0)?;
-            self.current = else_entry;
-            let else_members = self.take_region(index, false);
-            self.emit(&else_members)?;
-            let else_tail = self.current;
-            let else_argument = self.mapped(else_value)?;
-            self.close_range(else_tail);
-
-            let join = self.open_block(1)?;
-            let merged = self.parameters[self.blocks[join.index()].parameter_start].value;
-            self.blocks[branch_block.index()].terminator = Terminator::Branch {
-                condition,
-                then_edge: Edge::new(then_entry, Vec::new()),
-                else_edge: Edge::new(else_entry, Vec::new()),
-            };
-            self.blocks[then_tail.index()].terminator =
-                Terminator::Jump(Edge::new(join, vec![then_argument]));
-            self.blocks[else_tail.index()].terminator =
-                Terminator::Jump(Edge::new(join, vec![else_argument]));
-            self.current = join;
-            self.remap[index] = Some(merged);
         }
         Ok(())
     }
 
     fn run(mut self) -> JitResult<Program> {
         let outer = std::mem::take(&mut self.outer);
-        self.emit(&outer)?;
+        self.emit(outer)?;
         let result = self.mapped(self.source.result())?;
         let exit = self.current;
         self.close_range(exit);

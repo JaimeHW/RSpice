@@ -161,12 +161,7 @@ fn expand_static_guard(
         });
     }
     if let Expression::Conditional(conditional) = expression {
-        return Ok(Expression::Conditional(ConditionalExpr {
-            condition: Box::new(expand_static_guard(&conditional.condition, statements)?),
-            then_expr: Box::new(expand_static_guard(&conditional.then_expr, statements)?),
-            else_expr: Box::new(expand_static_guard(&conditional.else_expr, statements)?),
-            span: conditional.span,
-        }));
+        return conditional.try_map(|operand| expand_static_guard(operand, statements));
     }
     if let Expression::Identifier(identifier) = expression
         && let Some(index) = statements.iter().rposition(|statement| {

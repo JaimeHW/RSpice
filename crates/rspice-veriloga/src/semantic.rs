@@ -252,7 +252,8 @@ fn wide_integer_value(expression: &Expression) -> bool {
         Expression::Number(number) => SemanticAnalyzer::integer_literal_value(number)
             .is_some_and(|v| i32::try_from(v).is_err()),
         Expression::Conditional(conditional) => {
-            wide_integer_value(&conditional.then_expr) || wide_integer_value(&conditional.else_expr)
+            let (arms, tail) = conditional.chain();
+            arms.iter().any(|arm| wide_integer_value(&arm.then_expr)) || wide_integer_value(tail)
         }
         _ => false,
     }
@@ -3169,11 +3170,9 @@ impl SemanticAnalyzer {
                     || Self::expr_contains_identifier(&binary.right, expected)
             }
             Expression::Unary(unary) => Self::expr_contains_identifier(&unary.operand, expected),
-            Expression::Conditional(conditional) => {
-                Self::expr_contains_identifier(&conditional.condition, expected)
-                    || Self::expr_contains_identifier(&conditional.then_expr, expected)
-                    || Self::expr_contains_identifier(&conditional.else_expr, expected)
-            }
+            Expression::Conditional(conditional) => conditional
+                .operands()
+                .any(|operand| Self::expr_contains_identifier(operand, expected)),
             Expression::Call(call) => call
                 .args
                 .iter()
@@ -3234,11 +3233,9 @@ impl SemanticAnalyzer {
                     || Self::expr_contains_call(&binary.right, expected)
             }
             Expression::Unary(unary) => Self::expr_contains_call(&unary.operand, expected),
-            Expression::Conditional(conditional) => {
-                Self::expr_contains_call(&conditional.condition, expected)
-                    || Self::expr_contains_call(&conditional.then_expr, expected)
-                    || Self::expr_contains_call(&conditional.else_expr, expected)
-            }
+            Expression::Conditional(conditional) => conditional
+                .operands()
+                .any(|operand| Self::expr_contains_call(operand, expected)),
             Expression::SystemFunction(function) => function
                 .args
                 .iter()
@@ -3290,11 +3287,9 @@ impl SemanticAnalyzer {
                     || Self::expr_contains_number_close(&binary.right, expected)
             }
             Expression::Unary(unary) => Self::expr_contains_number_close(&unary.operand, expected),
-            Expression::Conditional(conditional) => {
-                Self::expr_contains_number_close(&conditional.condition, expected)
-                    || Self::expr_contains_number_close(&conditional.then_expr, expected)
-                    || Self::expr_contains_number_close(&conditional.else_expr, expected)
-            }
+            Expression::Conditional(conditional) => conditional
+                .operands()
+                .any(|operand| Self::expr_contains_number_close(operand, expected)),
             Expression::Call(call) => call
                 .args
                 .iter()
@@ -6622,6 +6617,83 @@ impl SemanticAnalyzer {
         }
     }
 
+    /// A right-nested chain of `arms` ending in `tail` that calls a function
+    /// with output arguments, materialized into `target` without nesting a
+    /// statement per arm. Each arm's `if`/`else` would nest one statement in
+    /// the last, past the depth any source can write
+    /// ([`crate::parser::MAX_STATEMENT_NESTING`]) for a chain this long.
+    ///
+    /// A selector records whether an arm has been taken; every arm after the
+    /// first runs its condition only while none has, and a taken arm assigns
+    /// its value and sets the selector. The conditions and branches, with the
+    /// output arguments they write, run exactly where the nested statements
+    /// would run them.
+    fn materialize_conditional_chain(
+        &mut self,
+        arms: &[&ConditionalExpr],
+        tail: &Expression,
+        target: &SmolStr,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        let span = arms[0].span;
+        self.local_counter += 1;
+        let taken: SmolStr = format!("__conditional{}", self.local_counter).into();
+        self.register_function_temp(module, taken.clone(), VarType::Integer, span)?;
+        let assign = |name: &SmolStr, value: Expression| {
+            AnalogStatement::Assignment(AssignmentStmt {
+                target: LValue::Variable {
+                    name: name.clone(),
+                    span,
+                },
+                value,
+                span,
+            })
+        };
+        let flag = |value: u8| {
+            Expression::Number(NumberLit {
+                value: f64::from(value),
+                raw: value.to_string().into(),
+                span,
+            })
+        };
+        let when = |condition: Expression, then_branch: AnalogStatement| {
+            AnalogStatement::Conditional(ConditionalStmt {
+                condition,
+                then_branch: Box::new(then_branch),
+                else_branch: None,
+                span,
+            })
+        };
+        let untaken = Expression::Binary(BinaryExpr {
+            op: BinaryOp::Eq,
+            left: Box::new(Expression::Identifier(Identifier {
+                name: taken.clone(),
+                span,
+            })),
+            right: Box::new(flag(0)),
+            span,
+        });
+        self.analyze_statement(&assign(&taken, flag(0)), module, sink)?;
+        for (index, arm) in arms.iter().enumerate() {
+            let body = AnalogStatement::Block(BlockStmt {
+                name: None,
+                statements: vec![
+                    assign(target, (*arm.then_expr).clone()),
+                    assign(&taken, flag(1)),
+                ],
+                variables: Vec::new(),
+                span: arm.span,
+            });
+            let mut statement = when((*arm.condition).clone(), body);
+            if index > 0 {
+                statement = when(untaken.clone(), statement);
+            }
+            self.analyze_statement(&statement, module, sink)?;
+        }
+        self.analyze_statement(&when(untaken, assign(target, tail.clone())), module, sink)
+    }
+
     fn materialize_non_operator_function_calls(
         &mut self,
         expr: &Expression,
@@ -6674,6 +6746,14 @@ impl SemanticAnalyzer {
                         VarType::Real
                     };
                     self.register_function_temp(module, name.clone(), var_type, conditional.span)?;
+                    let (arms, tail) = conditional.chain();
+                    if arms.len() > crate::parser::MAX_STATEMENT_NESTING {
+                        self.materialize_conditional_chain(&arms, tail, &name, module, sink)?;
+                        return Ok(Expression::Identifier(Identifier {
+                            name,
+                            span: conditional.span,
+                        }));
+                    }
                     let assignment = |value: &Expression| {
                         Box::new(AnalogStatement::Assignment(AssignmentStmt {
                             target: LValue::Variable {
@@ -6699,24 +6779,9 @@ impl SemanticAnalyzer {
                         span: conditional.span,
                     }));
                 }
-                Expression::Conditional(ConditionalExpr {
-                    condition: Box::new(self.materialize_output_function_calls(
-                        &conditional.condition,
-                        module,
-                        sink,
-                    )?),
-                    then_expr: Box::new(self.materialize_output_function_calls(
-                        &conditional.then_expr,
-                        module,
-                        sink,
-                    )?),
-                    else_expr: Box::new(self.materialize_output_function_calls(
-                        &conditional.else_expr,
-                        module,
-                        sink,
-                    )?),
-                    span: conditional.span,
-                })
+                conditional.try_map(|operand| {
+                    self.materialize_output_function_calls(operand, module, sink)
+                })?
             }
             Expression::Call(call) => {
                 if call.name == "idt"
@@ -7013,11 +7078,9 @@ impl SemanticAnalyzer {
             Expression::Unary(unary) => {
                 self.expression_contains_output_function_call(&unary.operand)
             }
-            Expression::Conditional(conditional) => {
-                self.expression_contains_output_function_call(&conditional.condition)
-                    || self.expression_contains_output_function_call(&conditional.then_expr)
-                    || self.expression_contains_output_function_call(&conditional.else_expr)
-            }
+            Expression::Conditional(conditional) => conditional
+                .operands()
+                .any(|operand| self.expression_contains_output_function_call(operand)),
             Expression::ArrayAccess(access) => access
                 .children()
                 .any(|child| self.expression_contains_output_function_call(child)),
@@ -7274,13 +7337,13 @@ impl SemanticAnalyzer {
             {
                 return Ok((resolved, ValueType::Real));
             }
+            if let Expression::Conditional(c) = expression {
+                let expression = c.try_map(|operand| self.normalize_integer_expression(operand))?;
+                let value_type = self.infer_type(&expression)?;
+                return Ok((expression, value_type));
+            }
             let mut expression = expression.clone();
             match &mut expression {
-                Expression::Conditional(c) => {
-                    *c.condition = self.normalize_integer_expression(&c.condition)?;
-                    *c.then_expr = self.normalize_integer_expression(&c.then_expr)?;
-                    *c.else_expr = self.normalize_integer_expression(&c.else_expr)?;
-                }
                 Expression::Call(c) => {
                     self.validate_null_arguments(c)?;
                     for arg in &mut c.args {
@@ -7448,6 +7511,46 @@ impl SemanticAnalyzer {
         result
     }
 
+    /// Lower a right-nested `?:` chain arm by arm, in a loop.
+    ///
+    /// Each branch below a condition that varies during simulation lowers
+    /// inside one more dynamic guard, as a nested conditional would: arm `k`'s
+    /// condition inside the guards of arms `0..k`, its then-branch and every
+    /// arm after it inside its own as well. A failed condition stops the
+    /// chain; the error reported is the first in source order among the
+    /// then-branches before it and that condition.
+    fn lower_conditional_chain(&mut self, c: &ConditionalExpr) -> CompileResult<Expression> {
+        let (arms, tail) = c.chain();
+        let mut lowered = Vec::with_capacity(arms.len());
+        let mut guards = 0;
+        let mut stopped = None;
+        for arm in &arms {
+            let condition = match self.lower_expression(&arm.condition) {
+                Ok(condition) => condition,
+                Err(error) => {
+                    stopped = Some(error);
+                    break;
+                }
+            };
+            if !self.expression_is_simulation_invariant(&condition) {
+                self.dynamic_analog_operator_guard_depth += 1;
+                guards += 1;
+            }
+            let then_result = self.lower_expression(&arm.then_expr);
+            lowered.push((condition, then_result, arm.span));
+        }
+        let tail = match stopped {
+            Some(error) => Err(error),
+            None => self.lower_expression(tail),
+        };
+        self.dynamic_analog_operator_guard_depth -= guards;
+        let mut arms = Vec::with_capacity(lowered.len());
+        for (condition, then_result, span) in lowered {
+            arms.push((condition, then_result?, span));
+        }
+        Ok(ConditionalExpr::from_arms(arms.into_iter(), tail?))
+    }
+
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         let mut lowered = self.lower_non_operator_node(expr)?;
         self.read_settled_discrete_values(&mut lowered)?;
@@ -7552,24 +7655,7 @@ impl SemanticAnalyzer {
             Expression::Binary(_) | Expression::Unary(_) => {
                 unreachable!("operator expressions use the iterative lowering path")
             }
-            Expression::Conditional(c) => {
-                let condition = self.lower_expression(&c.condition)?;
-                let dynamic_condition = !self.expression_is_simulation_invariant(&condition);
-                if dynamic_condition {
-                    self.dynamic_analog_operator_guard_depth += 1;
-                }
-                let then_result = self.lower_expression(&c.then_expr);
-                let else_result = self.lower_expression(&c.else_expr);
-                if dynamic_condition {
-                    self.dynamic_analog_operator_guard_depth -= 1;
-                }
-                Expression::Conditional(ConditionalExpr {
-                    condition: Box::new(condition),
-                    then_expr: Box::new(then_result?),
-                    else_expr: Box::new(else_result?),
-                    span: c.span,
-                })
-            }
+            Expression::Conditional(c) => self.lower_conditional_chain(c)?,
             Expression::SystemFunction(f) => {
                 if let Some(resolved) = self.lower_module_query_function(f)? {
                     return Ok(resolved);
@@ -8054,21 +8140,9 @@ impl SemanticAnalyzer {
                 Self::validate_zi_freeze_expression(&unary.operand, operator, argument_index)
             }
             Expression::Conditional(conditional) => {
-                Self::validate_zi_freeze_expression(
-                    &conditional.condition,
-                    operator,
-                    argument_index,
-                )?;
-                Self::validate_zi_freeze_expression(
-                    &conditional.then_expr,
-                    operator,
-                    argument_index,
-                )?;
-                Self::validate_zi_freeze_expression(
-                    &conditional.else_expr,
-                    operator,
-                    argument_index,
-                )
+                conditional.operands().try_for_each(|operand| {
+                    Self::validate_zi_freeze_expression(operand, operator, argument_index)
+                })
             }
             Expression::ArrayAccess(access) => access.children().try_for_each(|child| {
                 Self::validate_zi_freeze_expression(child, operator, argument_index)
@@ -9607,11 +9681,9 @@ impl SemanticAnalyzer {
                 self.expression_is_simulation_invariant(&binary.left)
                     && self.expression_is_simulation_invariant(&binary.right)
             }
-            Expression::Conditional(conditional) => {
-                self.expression_is_simulation_invariant(&conditional.condition)
-                    && self.expression_is_simulation_invariant(&conditional.then_expr)
-                    && self.expression_is_simulation_invariant(&conditional.else_expr)
-            }
+            Expression::Conditional(conditional) => conditional
+                .operands()
+                .all(|operand| self.expression_is_simulation_invariant(operand)),
             // Physical analysis selection is fixed across its solver phases.
             // IC, static, nodeset, and step-event queries may change within it.
             // Unknown literal queries are consistently false.
@@ -9905,11 +9977,16 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::Conditional(c) => {
-                let cond = eval(&c.condition)?;
-                if cond.is_truthy() {
-                    eval(&c.then_expr)
-                } else {
-                    eval(&c.else_expr)
+                // A right-nested chain is followed in a loop.
+                let mut conditional = c;
+                loop {
+                    if eval(&conditional.condition)?.is_truthy() {
+                        break eval(&conditional.then_expr);
+                    }
+                    match &*conditional.else_expr {
+                        Expression::Conditional(next) => conditional = next,
+                        tail => break eval(tail),
+                    }
                 }
             }
             Expression::Call(call) => {
@@ -10898,10 +10975,9 @@ impl SemanticAnalyzer {
                 left && right && operands
             }
             Expression::Conditional(conditional) => {
-                let condition = validate_child(self, &conditional.condition);
-                let then_expr = validate_child(self, &conditional.then_expr);
-                let else_expr = validate_child(self, &conditional.else_expr);
-                condition && then_expr && else_expr
+                conditional.operands().fold(true, |valid, operand| {
+                    validate_child(self, operand) && valid
+                })
             }
             Expression::Call(call) => {
                 let expected_arity = match call.name.as_str() {
@@ -11201,24 +11277,14 @@ impl SemanticAnalyzer {
                 references,
             ),
             Expression::Conditional(conditional) => {
-                Self::collect_parameter_identifier_references(
-                    &conditional.condition,
-                    parameter_indices,
-                    param_given_indices,
-                    references,
-                );
-                Self::collect_parameter_identifier_references(
-                    &conditional.then_expr,
-                    parameter_indices,
-                    param_given_indices,
-                    references,
-                );
-                Self::collect_parameter_identifier_references(
-                    &conditional.else_expr,
-                    parameter_indices,
-                    param_given_indices,
-                    references,
-                );
+                for operand in conditional.operands() {
+                    Self::collect_parameter_identifier_references(
+                        operand,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
             }
             Expression::Call(call) => {
                 for argument in &call.args {
@@ -11337,11 +11403,9 @@ impl SemanticAnalyzer {
                     || Self::references_identifiers(&b.right, names)
             }
             Expression::Unary(u) => Self::references_identifiers(&u.operand, names),
-            Expression::Conditional(c) => {
-                Self::references_identifiers(&c.condition, names)
-                    || Self::references_identifiers(&c.then_expr, names)
-                    || Self::references_identifiers(&c.else_expr, names)
-            }
+            Expression::Conditional(c) => c
+                .operands()
+                .any(|operand| Self::references_identifiers(operand, names)),
             Expression::Call(call) => call
                 .args
                 .iter()
@@ -11430,21 +11494,13 @@ impl SemanticAnalyzer {
                 canonical_storage,
                 external_storage,
             ),
-            Expression::Conditional(conditional) => {
+            Expression::Conditional(conditional) => conditional.operands().any(|operand| {
                 Self::references_parameter_without_model_storage(
-                    &conditional.condition,
-                    canonical_storage,
-                    external_storage,
-                ) || Self::references_parameter_without_model_storage(
-                    &conditional.then_expr,
-                    canonical_storage,
-                    external_storage,
-                ) || Self::references_parameter_without_model_storage(
-                    &conditional.else_expr,
+                    operand,
                     canonical_storage,
                     external_storage,
                 )
-            }
+            }),
             Expression::Call(call) => call.args.iter().any(|argument| {
                 Self::references_parameter_without_model_storage(
                     argument,

@@ -611,6 +611,44 @@ define_fixed_lanes!(L32, 32, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 
 "#
 );
 
+/// A step [`Emitter::block`] has still to take.
+enum Pending {
+    /// Walk the region from `block`, stopping before `stop`.
+    Region {
+        block: BlockId,
+        stop: Option<BlockId>,
+        depth: usize,
+    },
+    /// Assign an edge's arguments to its target's parameters.
+    Arguments {
+        target: BlockId,
+        args: Vec<ValueId>,
+        depth: usize,
+    },
+    /// Continue or close a construct.
+    Line { depth: usize, text: String },
+    /// Lay out a later link of a flat else chain: the link's own
+    /// instructions, then its `if`.
+    Link { block: BlockId, depth: usize },
+}
+
+/// The fewest links an else chain needs before it is emitted flat.
+///
+/// Nested `if`/`else` is what every ordinary model emits. Only a chain
+/// thousands deep, which a right-nested `?:` can be, takes rustc's recursive
+/// passes past their stack.
+const FLAT_ELSE_CHAIN_LINKS: usize = 64;
+
+/// A run of diamonds, each the whole else arm of the one before.
+struct ElseChain {
+    /// Each link's branch block and the join its diamond reaches, outermost
+    /// first.
+    links: Vec<(BlockId, BlockId)>,
+    /// Each inner join parameter and the outer join parameter it is handed on
+    /// to unchanged, outermost first.
+    renames: Vec<(ValueId, ValueId)>,
+}
+
 struct Emitter<'a> {
     function: &'a CfgFunction,
     bindings: &'a EmitBindings,
@@ -1087,11 +1125,48 @@ impl Emitter<'_> {
     }
 
     /// Emit `block` and everything it flows into, stopping before `stop`.
+    ///
+    /// The arms of a diamond and the body of a loop are walked from a stack
+    /// of pending steps rather than by recursion: a right-nested `?:` chain
+    /// lowers to one diamond inside the else arm of the last, as deep as the
+    /// chain is long, and the emitted text is the same either way.
     fn block(
         &mut self,
         block: BlockId,
         stop: Option<BlockId>,
         depth: usize,
+    ) -> Result<(), EmitError> {
+        let mut pending = vec![Pending::Region { block, stop, depth }];
+        while let Some(step) = pending.pop() {
+            match step {
+                Pending::Region { block, stop, depth } => {
+                    self.region(block, stop, depth, &mut pending)?
+                }
+                Pending::Arguments {
+                    target,
+                    args,
+                    depth,
+                } => self.pass_arguments(target, &args, depth),
+                Pending::Line { depth, text } => self.line(depth, &text),
+                Pending::Link { block, depth } => {
+                    self.instructions(block, depth)?;
+                    self.declare_loop_targets(block, depth);
+                    self.open_link(block, depth)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit the straight-line run from `block` until it ends, reaches `stop`,
+    /// or opens a construct whose arms or body are not inline; such a
+    /// construct's steps, then the region after it, go on `pending`.
+    fn region(
+        &mut self,
+        block: BlockId,
+        stop: Option<BlockId>,
+        depth: usize,
+        pending: &mut Vec<Pending>,
     ) -> Result<(), EmitError> {
         let mut current = block;
         loop {
@@ -1099,14 +1174,16 @@ impl Emitter<'_> {
                 return Ok(());
             }
             if self.loop_headers.contains(&current) {
-                self.emit_loop(current, depth)?;
-                match self.loop_exit(current) {
-                    Some(exit) => {
-                        current = exit;
-                        continue;
-                    }
-                    None => return Ok(()),
+                if let Some(exit) = self.loop_exit(current) {
+                    pending.push(Pending::Region {
+                        block: exit,
+                        stop,
+                        depth,
+                    });
                 }
+                let steps = self.emit_loop(current, depth)?;
+                pending.extend(steps.into_iter().rev());
+                return Ok(());
             }
 
             self.instructions(current, depth)?;
@@ -1129,18 +1206,45 @@ impl Emitter<'_> {
                     // targets declared outside the arms; each selected edge
                     // assigns them through the ordinary parallel-copy path.
                     self.declare_loop_targets(current, depth);
-                    let join = self.emit_diamond(current, depth)?;
-                    match join {
-                        Some(join) => current = join,
-                        None => return Ok(()),
+                    if let Some(chain) = self.else_chain(current) {
+                        let (join, steps) = self.emit_else_chain(chain, depth)?;
+                        pending.push(Pending::Region {
+                            block: join,
+                            stop,
+                            depth,
+                        });
+                        pending.extend(steps.into_iter().rev());
+                        return Ok(());
+                    }
+                    let (join, steps) = self.emit_diamond(current, depth)?;
+                    if steps.is_empty() {
+                        match join {
+                            Some(join) => current = join,
+                            None => return Ok(()),
+                        }
+                    } else {
+                        if let Some(join) = join {
+                            pending.push(Pending::Region {
+                                block: join,
+                                stop,
+                                depth,
+                            });
+                        }
+                        pending.extend(steps.into_iter().rev());
+                        return Ok(());
                     }
                 }
             }
         }
     }
 
-    /// `if c { .. } else { .. }`, returning the block both arms reach.
-    fn emit_diamond(&mut self, block: BlockId, depth: usize) -> Result<Option<BlockId>, EmitError> {
+    /// `if c { .. } else { .. }`, returning the block both arms reach and
+    /// the steps, in order, that emit the arms after the opening line.
+    fn emit_diamond(
+        &mut self,
+        block: BlockId,
+        depth: usize,
+    ) -> Result<(Option<BlockId>, Vec<Pending>), EmitError> {
         let CfgTerminator::Branch {
             condition,
             then_target,
@@ -1164,7 +1268,7 @@ impl Emitter<'_> {
                 depth,
             )?
         {
-            return Ok(Some(join));
+            return Ok((Some(join), Vec::new()));
         }
         // Declared before the arms so both may assign it, which is also how
         // Rust's definite-assignment check ends up doing the SSA verification.
@@ -1172,39 +1276,245 @@ impl Emitter<'_> {
             self.declare_all(&self.function.block(join).params.clone(), depth);
         }
 
+        let arm = |block, stop| Pending::Region {
+            block,
+            stop,
+            depth: depth + 1,
+        };
+        let close = Pending::Line {
+            depth,
+            text: "}".into(),
+        };
         if let Some(join) = join {
             let then_empty = self.empty_diamond_arm(then_target, &then_args, join);
             let else_empty = self.empty_diamond_arm(else_target, &else_args, join);
             if then_empty && else_empty {
-                return Ok(Some(join));
+                return Ok((Some(join), Vec::new()));
             }
             if else_empty {
                 let condition = self.truth_operand(condition);
                 self.line(depth, &format!("if {condition}{{"));
                 self.pass_arguments(then_target, &then_args, depth + 1);
-                self.block(then_target, Some(join), depth + 1)?;
-                self.line(depth, "}");
-                return Ok(Some(join));
+                return Ok((Some(join), vec![arm(then_target, Some(join)), close]));
             }
             if then_empty {
                 let condition = self.false_operand(condition);
                 self.line(depth, &format!("if {condition}{{"));
                 self.pass_arguments(else_target, &else_args, depth + 1);
-                self.block(else_target, Some(join), depth + 1)?;
-                self.line(depth, "}");
-                return Ok(Some(join));
+                return Ok((Some(join), vec![arm(else_target, Some(join)), close]));
             }
         }
 
         let condition = self.truth_operand(condition);
         self.line(depth, &format!("if {condition}{{"));
         self.pass_arguments(then_target, &then_args, depth + 1);
-        self.block(then_target, join, depth + 1)?;
-        self.line(depth, "}else{");
-        self.pass_arguments(else_target, &else_args, depth + 1);
-        self.block(else_target, join, depth + 1)?;
-        self.line(depth, "}");
-        Ok(join)
+        Ok((
+            join,
+            vec![
+                arm(then_target, join),
+                Pending::Line {
+                    depth,
+                    text: "}else{".into(),
+                },
+                Pending::Arguments {
+                    target: else_target,
+                    args: else_args,
+                    depth: depth + 1,
+                },
+                arm(else_target, join),
+                close,
+            ],
+        ))
+    }
+
+    /// The else chain the branch at `head` starts, when it has at least
+    /// [`FLAT_ELSE_CHAIN_LINKS`] links.
+    ///
+    /// A link is a diamond that is the whole else arm of the one before: a
+    /// block of its own, entered only from that branch, that computes the next
+    /// condition and branches on it. Its join is the one before's join, or
+    /// does nothing but hand its parameters on to it unchanged, so each can
+    /// share the binding of the parameter it is handed to.
+    fn else_chain(&self, head: BlockId) -> Option<ElseChain> {
+        let join = self.join_of(head)?;
+        if self.loop_headers.contains(&join) || !self.effectful_branches.contains(&head) {
+            return None;
+        }
+        let mut links = vec![(head, join)];
+        let mut renames = Vec::new();
+        let (mut block, mut block_join) = (head, join);
+        while let CfgTerminator::Branch {
+            else_target,
+            else_args,
+            ..
+        } = &self.function.block(block).terminator
+        {
+            let next = *else_target;
+            if next == block_join
+                || !else_args.is_empty()
+                || self.loop_headers.contains(&next)
+                || self.predecessor_counts[usize::from(next)] != 1
+                || !self.function.block(next).params.is_empty()
+                || !self.effectful_branches.contains(&next)
+                || !matches!(
+                    self.function.block(next).terminator,
+                    CfgTerminator::Branch { .. }
+                )
+            {
+                break;
+            }
+            let Some(next_join) = self.join_of(next) else {
+                break;
+            };
+            if next_join != block_join {
+                let Some(forwarded) = self.forwarded_parameters(next_join, block_join) else {
+                    break;
+                };
+                renames.extend(forwarded);
+            }
+            links.push((next, next_join));
+            (block, block_join) = (next, next_join);
+        }
+        (links.len() >= FLAT_ELSE_CHAIN_LINKS).then_some(ElseChain { links, renames })
+    }
+
+    /// `inner`'s live parameters, each paired with the parameter of `outer` it
+    /// is handed to, when `inner` does nothing else before jumping to `outer`.
+    fn forwarded_parameters(
+        &self,
+        inner: BlockId,
+        outer: BlockId,
+    ) -> Option<Vec<(ValueId, ValueId)>> {
+        let block = self.function.block(inner);
+        if self.loop_headers.contains(&inner)
+            || block
+                .instructions
+                .iter()
+                .any(|instruction| self.emitted[usize::from(instruction.result)])
+        {
+            return None;
+        }
+        let CfgTerminator::Jump { target, args } = &block.terminator else {
+            return None;
+        };
+        if *target != outer {
+            return None;
+        }
+        let mut pairs = Vec::new();
+        for (parameter, argument) in self.function.block(outer).params.iter().zip(args) {
+            if !self.emitted[usize::from(*parameter)] {
+                continue;
+            }
+            if !block.params.contains(argument)
+                || self.wanted.contains(argument)
+                || self.function.value(*argument).value_type
+                    != self.function.value(*parameter).value_type
+            {
+                return None;
+            }
+            pairs.push((*argument, *parameter));
+        }
+        // A parameter handed to two outer ones cannot share both bindings.
+        let each_once = block
+            .params
+            .iter()
+            .filter(|parameter| self.emitted[usize::from(**parameter)])
+            .all(|parameter| pairs.iter().filter(|(inner, _)| inner == parameter).count() == 1);
+        each_once.then_some(pairs)
+    }
+
+    /// An else chain as one labeled block, `'c:{if c0{..;break 'c;} .. }`.
+    ///
+    /// Each link's then arm breaks out of the block once it has run, and a
+    /// link whose condition is false falls through to the next, so the block
+    /// is as deep as one link however many there are. Every inner join's
+    /// parameters share the outermost join's bindings, which is what lets a
+    /// then arm assign the chain's result directly. Returns the outermost join
+    /// and the steps, in order, that emit the rest of the block.
+    fn emit_else_chain(
+        &mut self,
+        chain: ElseChain,
+        depth: usize,
+    ) -> Result<(BlockId, Vec<Pending>), EmitError> {
+        for (inner, outer) in chain.renames {
+            self.names[usize::from(inner)] = self.value_name(outer).to_owned();
+            self.declared.insert(inner);
+        }
+        let (head, join) = chain.links[0];
+        self.declare_all(&self.function.block(join).params.clone(), depth);
+        let label = format!("'c{}", usize::from(head));
+        self.line(depth, &format!("{label}:{{"));
+        self.open_link(head, depth + 1)?;
+        let mut steps = Vec::with_capacity(3 * chain.links.len() + 3);
+        let mut last = (head, join);
+        for (index, (block, link_join)) in chain.links.into_iter().enumerate() {
+            if index > 0 {
+                steps.push(Pending::Link {
+                    block,
+                    depth: depth + 1,
+                });
+            }
+            let (then_target, _) = self.branch_targets(block)?;
+            steps.push(Pending::Region {
+                block: then_target,
+                stop: Some(link_join),
+                depth: depth + 2,
+            });
+            steps.push(Pending::Line {
+                depth: depth + 1,
+                text: format!("break {label};}}"),
+            });
+            last = (block, link_join);
+        }
+        let (_, (else_target, else_args)) = self.branch_targets(last.0)?;
+        steps.push(Pending::Arguments {
+            target: else_target,
+            args: else_args,
+            depth: depth + 1,
+        });
+        steps.push(Pending::Region {
+            block: else_target,
+            stop: Some(last.1),
+            depth: depth + 1,
+        });
+        steps.push(Pending::Line {
+            depth,
+            text: "}".into(),
+        });
+        Ok((join, steps))
+    }
+
+    /// `if c{` for one link of a flat else chain, and its then edge.
+    fn open_link(&mut self, block: BlockId, depth: usize) -> Result<(), EmitError> {
+        let CfgTerminator::Branch {
+            condition,
+            then_target,
+            then_args,
+            ..
+        } = self.function.block(block).terminator.clone()
+        else {
+            return Err(EmitError::UnstructuredControlFlow(block));
+        };
+        let condition = self.truth_operand(condition);
+        self.line(depth, &format!("if {condition}{{"));
+        self.pass_arguments(then_target, &then_args, depth + 1);
+        Ok(())
+    }
+
+    /// A branch's then target, and its else target with that edge's arguments.
+    fn branch_targets(
+        &self,
+        block: BlockId,
+    ) -> Result<(BlockId, (BlockId, Vec<ValueId>)), EmitError> {
+        match &self.function.block(block).terminator {
+            CfgTerminator::Branch {
+                then_target,
+                else_target,
+                else_args,
+                ..
+            } => Ok((*then_target, (*else_target, else_args.clone()))),
+            _ => Err(EmitError::UnstructuredControlFlow(block)),
+        }
     }
 
     /// Whether emitting one arm would produce no live statements or edge writes.
@@ -1307,7 +1617,8 @@ impl Emitter<'_> {
 
     /// `loop { .. if !c { break } .. }` for the header/body/exit triple the
     /// lowering builds.
-    fn emit_loop(&mut self, header: BlockId, depth: usize) -> Result<(), EmitError> {
+    /// Returns the steps, in order, that emit the body and close the loop.
+    fn emit_loop(&mut self, header: BlockId, depth: usize) -> Result<Vec<Pending>, EmitError> {
         // The carried variables enter with the values the edge into the loop
         // supplied, and are reassigned on the back edge.
         for param in &self.function.block(header).params.clone() {
@@ -1352,11 +1663,19 @@ impl Emitter<'_> {
         self.line(depth + 1, "}");
 
         self.pass_arguments(body, &body_args, depth + 1);
-        self.block(body, Some(header), depth + 1)?;
         // Falling out of the body means reaching the back edge, whose arguments
         // were already assigned by `pass_arguments` on the jump.
-        self.line(depth, "}");
-        Ok(())
+        Ok(vec![
+            Pending::Region {
+                block: body,
+                stop: Some(header),
+                depth: depth + 1,
+            },
+            Pending::Line {
+                depth,
+                text: "}".into(),
+            },
+        ])
     }
 
     fn loop_exit(&self, header: BlockId) -> Option<BlockId> {

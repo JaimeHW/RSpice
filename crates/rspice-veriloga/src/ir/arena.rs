@@ -819,6 +819,23 @@ impl ExprArena {
         &self.chunks[index >> CHUNK_SHIFT][index & CHUNK_MASK]
     }
 
+    /// The arms of the right-nested conditional chain at `id`, outermost
+    /// first, each `(conditional, condition, then)`, and the node its last
+    /// else-branch holds; no arms and `id` itself for any other node.
+    ///
+    /// A chain `a ? x : b ? y : ...` has no length limit (see
+    /// [`crate::parser::MAX_EXPRESSION_NESTING`]), so a pass over the arena
+    /// walks one with this loop instead of recursing down its else-branches.
+    pub fn conditional_chain(&self, id: NodeId) -> (Vec<(NodeId, NodeId, NodeId)>, NodeId) {
+        let mut arms = Vec::new();
+        let mut tail = id;
+        while let Node::Conditional(condition, then_expr, else_expr) = *self.node(tail) {
+            arms.push((tail, condition, then_expr));
+            tail = else_expr;
+        }
+        (arms, tail)
+    }
+
     /// Append a node and return its id.
     pub fn push(&mut self, node: Node) -> NodeId {
         let index = self.len;
@@ -1340,7 +1357,14 @@ pub fn operator_operands(arena: &ExprArena, node: &Node) -> Vec<NodeId> {
 /// site-ordinal walks correct over an arena and is the whole of why nothing
 /// here memoizes by [`NodeId`].
 pub fn visit(arena: &ExprArena, id: NodeId, f: &mut impl FnMut(&Node)) {
-    let node = *arena.node(id);
+    // A conditional chain's else-branches are walked in a loop.
+    let (arms, tail) = arena.conditional_chain(id);
+    for (conditional, condition, then_expr) in arms {
+        f(arena.node(conditional));
+        visit(arena, condition, f);
+        visit(arena, then_expr, f);
+    }
+    let node = *arena.node(tail);
     f(&node);
     for_each_child(arena, &node, &mut |child| visit(arena, child, f));
 }
@@ -1360,13 +1384,40 @@ pub fn rewrite(
     id: NodeId,
     f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
 ) -> NodeId {
-    let node = *arena.node(id);
-    if let Some(replacement) = f(arena, node) {
-        return arena.push(replacement);
-    }
-    rebuild_children(arena, id, node, &mut |arena, child| {
-        rewrite(arena, child, f)
-    })
+    // A conditional chain's else-branches are rewritten in a loop, in the
+    // order and with the reuse the recursive walk had.
+    let mut arms = Vec::new();
+    let mut current = id;
+    let tail = loop {
+        let node = *arena.node(current);
+        if let Some(replacement) = f(arena, node) {
+            break arena.push(replacement);
+        }
+        let Node::Conditional(condition, then_expr, else_expr) = node else {
+            break rebuild_children(arena, current, node, &mut |arena, child| {
+                rewrite(arena, child, f)
+            });
+        };
+        let new_condition = rewrite(arena, condition, f);
+        let new_then = rewrite(arena, then_expr, f);
+        arms.push((
+            current,
+            [condition, then_expr, else_expr],
+            new_condition,
+            new_then,
+        ));
+        current = else_expr;
+    };
+    arms.into_iter().rev().fold(
+        tail,
+        |new_else, (original, old, new_condition, new_then)| {
+            if [new_condition, new_then, new_else] == old {
+                original
+            } else {
+                arena.push(Node::Conditional(new_condition, new_then, new_else))
+            }
+        },
+    )
 }
 
 /// Rebuild one node's children through `descend`, keeping its id if none moved.
@@ -1465,14 +1516,30 @@ pub fn rebuild_children(
             }
             arena.push_call(func, &new)
         }
-        Node::Conditional(condition, then_expr, else_expr) => {
-            let new_condition = descend(arena, condition);
-            let new_then = descend(arena, then_expr);
-            let new_else = descend(arena, else_expr);
-            if new_condition == condition && new_then == then_expr && new_else == else_expr {
-                return id;
+        Node::Conditional(..) => {
+            // A chain's else-branches are rebuilt here, in a loop, so a walk
+            // that recurses through this function never recurses down one:
+            // the walk sees every arm's condition and then-branch and the
+            // last else-branch, in the order descending each else would have.
+            let (arms, tail) = arena.conditional_chain(id);
+            let mut rebuilt = Vec::with_capacity(arms.len());
+            for &(_, condition, then_expr) in &arms {
+                rebuilt.push((descend(arena, condition), descend(arena, then_expr)));
             }
-            arena.push(Node::Conditional(new_condition, new_then, new_else))
+            let mut new_else = descend(arena, tail);
+            let mut old_else = tail;
+            for (&(arm, condition, then_expr), (new_condition, new_then)) in
+                arms.iter().zip(rebuilt).rev()
+            {
+                new_else =
+                    if [new_condition, new_then, new_else] == [condition, then_expr, old_else] {
+                        arm
+                    } else {
+                        arena.push(Node::Conditional(new_condition, new_then, new_else))
+                    };
+                old_else = arm;
+            }
+            new_else
         }
         Node::Ddt(inner) => rebuild_unary(arena, id, inner, Node::Ddt, descend),
         Node::FreezeDerivative(inner) => {

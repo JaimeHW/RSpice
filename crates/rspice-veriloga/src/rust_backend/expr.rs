@@ -20,6 +20,7 @@
 use std::collections::HashMap;
 
 use crate::ast::AccessKind;
+use crate::canonical_ir::hir::conditional_chain;
 use crate::canonical_ir::{CanonicalIrArtifact, ExprId, HirExprKind};
 
 use super::RustBackendError;
@@ -373,6 +374,10 @@ impl ExprEmitter<'_> {
         then_expr: ExprId,
         else_expr: ExprId,
     ) -> Result<ExprValue, RustBackendError> {
+        let (arms, tail) = conditional_chain(&self.artifact.mir.expressions, id);
+        if arms.len() > 1 {
+            return self.lower_conditional_chain(id, &arms, tail);
+        }
         let condition = self.lower_condition(condition)?;
         let then_branch = self.lower_isolated_branch(then_expr)?;
         let else_branch = self.lower_isolated_branch(else_expr)?;
@@ -404,8 +409,60 @@ impl ExprEmitter<'_> {
         Ok(ExprValue { value: base })
     }
 
-    fn lower_isolated_branch(&self, expr: ExprId) -> Result<ConditionalBranch, RustBackendError> {
-        let mut branch = ExprEmitter {
+    /// A right-nested chain of `arms` (two or more) ending in `tail`, emitted
+    /// flat: one labeled block in which each arm's condition is lowered where
+    /// the nested form lowers that arm's else-branch, and a selected arm's
+    /// then-branch breaks out with its value. The conditions run in order and
+    /// only until one holds, as nested `if`/`else` blocks would run them, but
+    /// neither the emitter nor rustc nests a block per arm, so a chain of any
+    /// length emits text in proportion to its length.
+    fn lower_conditional_chain(
+        &mut self,
+        id: ExprId,
+        arms: &[[ExprId; 3]],
+        tail: ExprId,
+    ) -> Result<ExprValue, RustBackendError> {
+        let base = format!("{}_e{}", self.prefix, id.index());
+        let label = format!("'{base}");
+        // The first condition is lowered before the block, as a lone
+        // conditional's is; the rest inside it.
+        let mut condition = self.lower_condition(arms[0][1])?;
+        let mut block = self.fork();
+        for (index, [_, next_condition, then_expr]) in arms.iter().enumerate() {
+            if index > 0 {
+                condition = block.lower_condition(*next_condition)?;
+            }
+            let then_branch = block.lower_isolated_branch(*then_expr)?;
+            let mut arm = format!("if {condition} {{\n");
+            for line in &then_branch.lines {
+                push_indented_lines(&mut arm, "    ", line);
+            }
+            arm.push_str(&format!(
+                "    break {label} {};\n}}",
+                tuple_values(std::slice::from_ref(&then_branch.value.value))
+            ));
+            block.lines.push(arm);
+        }
+        let tail = block.lower(tail)?;
+        let mut out = format!(
+            "let {} = {label}: {{\n",
+            tuple_pattern(std::slice::from_ref(&base))
+        );
+        for line in &block.lines {
+            push_indented_lines(&mut out, "    ", line);
+        }
+        out.push_str(&format!(
+            "    {}\n}};",
+            tuple_values(std::slice::from_ref(&tail.value))
+        ));
+        self.lines.push(out);
+        Ok(ExprValue { value: base })
+    }
+
+    /// An emitter for a scope inside this one: it sees every value emitted so
+    /// far, and nothing it emits is visible here.
+    fn fork(&self) -> Self {
+        ExprEmitter {
             artifact: self.artifact,
             prefix: self.prefix,
             parameter_fields: self.parameter_fields,
@@ -413,7 +470,11 @@ impl ExprEmitter<'_> {
             branch_current_unknowns: self.branch_current_unknowns,
             emitted: self.emitted.clone(),
             lines: Vec::new(),
-        };
+        }
+    }
+
+    fn lower_isolated_branch(&self, expr: ExprId) -> Result<ConditionalBranch, RustBackendError> {
+        let mut branch = self.fork();
         let value = branch.lower(expr)?;
         Ok(ConditionalBranch {
             lines: branch.lines,

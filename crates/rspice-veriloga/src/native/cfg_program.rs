@@ -1673,6 +1673,10 @@ fn layout_order(function: &CfgFunction) -> JitResult<Layout> {
 
 /// Emit one single-entry region: `start` and everything it reaches before
 /// `stop`, in nesting order.
+///
+/// A branch's arms, then its join, are walked from a stack of pending
+/// regions rather than by recursion: a right-nested `?:` chain lowers to one
+/// diamond inside the else arm of the last, as deep as the chain is long.
 fn emit_region(
     start: usize,
     stop: Option<usize>,
@@ -1682,49 +1686,47 @@ fn emit_region(
     order: &mut Vec<usize>,
     refuse: &impl Fn(String) -> JitError,
 ) -> JitResult<()> {
-    let mut current = start;
-    loop {
-        if Some(current) == stop || emitted[current] {
-            return Ok(());
-        }
-        emitted[current] = true;
-        order.push(current);
-        match &function.blocks[current].terminator {
-            CfgTerminator::Return => return Ok(()),
-            CfgTerminator::Jump { target, .. } => current = usize::from(*target),
-            CfgTerminator::Branch {
-                then_target,
-                else_target,
-                ..
-            } => {
-                let join = ipdom[current].filter(|join| *join != current).ok_or_else(|| {
-                    refuse(format!(
-                        "CFG block {current} branches without reconverging, which the block model has no structure for"
-                    ))
-                })?;
-                for arm in [*then_target, *else_target] {
-                    emit_region(
-                        usize::from(arm),
-                        Some(join),
-                        function,
-                        ipdom,
-                        emitted,
-                        order,
-                        refuse,
-                    )?;
+    let mut pending = vec![(start, stop)];
+    'regions: while let Some((mut current, stop)) = pending.pop() {
+        loop {
+            if Some(current) == stop || emitted[current] {
+                continue 'regions;
+            }
+            emitted[current] = true;
+            order.push(current);
+            match &function.blocks[current].terminator {
+                CfgTerminator::Return => continue 'regions,
+                CfgTerminator::Jump { target, .. } => current = usize::from(*target),
+                CfgTerminator::Branch {
+                    then_target,
+                    else_target,
+                    ..
+                } => {
+                    let join =
+                        ipdom[current].filter(|join| *join != current).ok_or_else(|| {
+                            refuse(format!(
+                                "CFG block {current} branches without reconverging, which the block model has no structure for"
+                            ))
+                        })?;
+                    // Popped in order: the then arm, the else arm, then the
+                    // rest of this region from the join.
+                    pending.push((join, stop));
+                    pending.push((usize::from(*else_target), Some(join)));
+                    pending.push((usize::from(*then_target), Some(join)));
+                    continue 'regions;
                 }
-                current = join;
-            }
-            CfgTerminator::Wait { .. } => {
-                return Err(refuse(format!(
-                    "CFG block {current} ends in a digital process suspension (Wait), which the analog block model has no counterpart for"
-                )));
-            }
-            CfgTerminator::Unset => {
-                return Err(refuse(format!("CFG block {current} is unterminated")));
+                CfgTerminator::Wait { .. } => {
+                    return Err(refuse(format!(
+                        "CFG block {current} ends in a digital process suspension (Wait), which the analog block model has no counterpart for"
+                    )));
+                }
+                CfgTerminator::Unset => {
+                    return Err(refuse(format!("CFG block {current} is unterminated")));
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// Immediate dominators of the graph rooted at `root`, by the iterative

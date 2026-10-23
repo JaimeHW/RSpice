@@ -89,15 +89,31 @@ impl Algebra {
                 let right = self.import(lowerer, *right)?;
                 Node::Binary(op, left, right)
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                let condition = self.import(lowerer, *condition)?;
-                let then_expr = self.import(lowerer, *then_expr)?;
-                let else_expr = self.import(lowerer, *else_expr)?;
-                Node::Conditional(condition, then_expr, else_expr)
+            HirExprKind::Conditional { .. } => {
+                // A right-nested chain imports in a loop, pushing the nodes
+                // importing each arm's else-branch in turn would, in order.
+                let (arms, tail) = conditional_chain(&lowerer.mir.expressions, id);
+                let mut imported = Vec::with_capacity(arms.len());
+                let mut done = None;
+                for [conditional, condition, then_expr] in arms {
+                    if let Some(&node) = self.imported.get(&conditional) {
+                        done = Some(node);
+                        break;
+                    }
+                    let condition = self.import(lowerer, condition)?;
+                    imported.push((conditional, condition, self.import(lowerer, then_expr)?));
+                }
+                let mut else_expr = match done {
+                    Some(node) => node,
+                    None => self.import(lowerer, tail)?,
+                };
+                for (conditional, condition, then_expr) in imported.into_iter().rev() {
+                    else_expr = self
+                        .arena
+                        .push(Node::Conditional(condition, then_expr, else_expr));
+                    self.imported.insert(conditional, else_expr);
+                }
+                return Ok(else_expr);
             }
             HirExprKind::Call { name, args } | HirExprKind::SystemFunction { name, args }
                 if math_function(name).is_some() =>
@@ -263,11 +279,16 @@ impl Algebra {
                     _ => lowerer.append_integer_binary(&name),
                 }
             }
-            Node::Conditional(condition, then_expr, else_expr) => {
-                self.emit(lowerer, condition)?;
-                self.emit(lowerer, then_expr)?;
-                self.emit(lowerer, else_expr)?;
-                lowerer.append_ifelse()
+            Node::Conditional(..) => {
+                // A right-nested chain emits in a loop, in the order emitting
+                // each arm's else-branch in turn would.
+                let (arms, tail) = self.arena.conditional_chain(id);
+                for &(_, condition, then_expr) in &arms {
+                    self.emit(lowerer, condition)?;
+                    self.emit(lowerer, then_expr)?;
+                }
+                self.emit(lowerer, tail)?;
+                arms.iter().try_for_each(|_| lowerer.append_ifelse())
             }
             Node::Call { func, a, b, .. } => {
                 let args = a.into_iter().chain(b).collect::<Vec<_>>();

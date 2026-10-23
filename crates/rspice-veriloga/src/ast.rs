@@ -1821,12 +1821,103 @@ pub enum UnaryOp {
 }
 
 /// Conditional expression
-#[derive(Debug, Clone)]
+///
+/// A right-nested chain `a ? x : b ? y : c` is one `ConditionalExpr` per arm,
+/// each holding the next in `else_expr`. Such a chain has no length limit (see
+/// [`crate::parser::MAX_EXPRESSION_NESTING`]), so whatever walks one walks it
+/// in a loop: [`Self::chain`], and this type's `Clone` and `Drop`.
+#[derive(Debug)]
 pub struct ConditionalExpr {
     pub condition: Box<Expression>,
     pub then_expr: Box<Expression>,
     pub else_expr: Box<Expression>,
     pub span: Span,
+}
+
+impl ConditionalExpr {
+    /// The arms of the right-nested chain this conditional starts, outermost
+    /// first, and the expression its last else-branch holds.
+    pub fn chain(&self) -> (Vec<&ConditionalExpr>, &Expression) {
+        let mut arms = vec![self];
+        let mut tail = &*self.else_expr;
+        while let Expression::Conditional(next) = tail {
+            arms.push(next);
+            tail = &next.else_expr;
+        }
+        (arms, tail)
+    }
+
+    /// Every operand of the chain this conditional starts, in source order:
+    /// each arm's condition and then-branch, then the last else-branch.
+    pub fn operands(&self) -> impl Iterator<Item = &Expression> {
+        let (arms, tail) = self.chain();
+        arms.into_iter()
+            .flat_map(|arm| [&*arm.condition, &*arm.then_expr])
+            .chain(std::iter::once(tail))
+    }
+
+    /// The right-nested chain of `arms`, each `(condition, then-branch,
+    /// span)`, outermost first, whose last else-branch is `tail`; `tail`
+    /// itself when there are no arms.
+    pub fn from_arms(
+        arms: impl DoubleEndedIterator<Item = (Expression, Expression, Span)>,
+        tail: Expression,
+    ) -> Expression {
+        arms.rev()
+            .fold(tail, |else_expr, (condition, then_expr, span)| {
+                Expression::Conditional(Self {
+                    condition: Box::new(condition),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                    span,
+                })
+            })
+    }
+
+    /// Rebuild the chain this conditional starts with every operand passed
+    /// through `map`, in source order; the first error stops the walk.
+    pub fn try_map<E>(
+        &self,
+        mut map: impl FnMut(&Expression) -> Result<Expression, E>,
+    ) -> Result<Expression, E> {
+        let (arms, tail) = self.chain();
+        let mut mapped = Vec::with_capacity(arms.len());
+        for arm in arms {
+            mapped.push((map(&arm.condition)?, map(&arm.then_expr)?, arm.span));
+        }
+        Ok(Self::from_arms(mapped.into_iter(), map(tail)?))
+    }
+}
+
+impl Clone for ConditionalExpr {
+    fn clone(&self) -> Self {
+        let (arms, tail) = self.chain();
+        let else_expr = Self::from_arms(
+            arms[1..].iter().map(|arm| {
+                let condition = (*arm.condition).clone();
+                (condition, (*arm.then_expr).clone(), arm.span)
+            }),
+            tail.clone(),
+        );
+        Self {
+            condition: self.condition.clone(),
+            then_expr: self.then_expr.clone(),
+            else_expr: Box::new(else_expr),
+            span: self.span,
+        }
+    }
+}
+
+impl Drop for ConditionalExpr {
+    fn drop(&mut self) {
+        // Unlink the chain one arm at a time, so dropping it never recurses
+        // down its else-branches.
+        let placeholder = Expression::NullArgument(self.span);
+        let mut next = std::mem::replace(&mut *self.else_expr, placeholder);
+        while let Expression::Conditional(mut arm) = next {
+            next = std::mem::replace(&mut *arm.else_expr, Expression::NullArgument(arm.span));
+        }
+    }
 }
 
 /// Function call expression

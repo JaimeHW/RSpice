@@ -1544,10 +1544,11 @@ impl DeviceIR {
                     .call_args(args)
                     .iter()
                     .any(|arg| contains_ddt(arena, *arg)),
-                Node::Conditional(condition, then_expr, else_expr) => {
-                    contains_ddt(arena, condition)
-                        || contains_ddt(arena, then_expr)
-                        || contains_ddt(arena, else_expr)
+                Node::Conditional(..) => {
+                    let (arms, tail) = arena.conditional_chain(id);
+                    arms.into_iter().any(|(_, condition, then_expr)| {
+                        contains_ddt(arena, condition) || contains_ddt(arena, then_expr)
+                    }) || contains_ddt(arena, tail)
                 }
                 Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => {
                     contains_ddt(arena, input)
@@ -1635,21 +1636,31 @@ impl DeviceIR {
                 let charge = Self::extract_charge(arena, inner)?;
                 Some(arena.push(Node::Unary(op, charge)))
             }
-            Node::Conditional(condition, then_expr, else_expr) => {
-                let then_charge = Self::extract_charge(arena, then_expr);
-                let else_charge = Self::extract_charge(arena, else_expr);
-                if then_charge.is_none() && else_charge.is_none() {
-                    return None;
+            Node::Conditional(..) => {
+                // A chain is walked in a loop; each arm combines its
+                // then-branch's charge with the arms below it, innermost first.
+                let (arms, tail) = arena.conditional_chain(expr);
+                let then_charges = arms
+                    .iter()
+                    .map(|&(_, _, then_expr)| Self::extract_charge(arena, then_expr))
+                    .collect::<Vec<_>>();
+                let mut else_charge = Self::extract_charge(arena, tail);
+                for (&(_, condition, _), then_charge) in arms.iter().zip(then_charges).rev() {
+                    if then_charge.is_none() && else_charge.is_none() {
+                        continue;
+                    }
+                    let then_charge = match then_charge {
+                        Some(charge) => charge,
+                        None => arena.push(Node::Const(0.0)),
+                    };
+                    let else_branch = match else_charge {
+                        Some(charge) => charge,
+                        None => arena.push(Node::Const(0.0)),
+                    };
+                    else_charge =
+                        Some(arena.push(Node::Conditional(condition, then_charge, else_branch)));
                 }
-                let then_charge = match then_charge {
-                    Some(charge) => charge,
-                    None => arena.push(Node::Const(0.0)),
-                };
-                let else_charge = match else_charge {
-                    Some(charge) => charge,
-                    None => arena.push(Node::Const(0.0)),
-                };
-                Some(arena.push(Node::Conditional(condition, then_charge, else_charge)))
+                else_charge
             }
             _ => {
                 if contains_ddt(arena, expr) {
@@ -1841,8 +1852,11 @@ impl DeviceIR {
             }
             Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
             Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
-            Node::Conditional(condition, then_expr, else_expr) => {
-                recurse(condition) && recurse(then_expr) && recurse(else_expr)
+            Node::Conditional(..) => {
+                let (arms, tail) = arena.conditional_chain(expr);
+                arms.into_iter()
+                    .all(|(_, condition, then_expr)| recurse(condition) && recurse(then_expr))
+                    && recurse(tail)
             }
             _ => false,
         }
@@ -1860,8 +1874,11 @@ impl DeviceIR {
             }
             Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
             Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
-            Node::Conditional(condition, then_expr, else_expr) => {
-                recurse(condition) && recurse(then_expr) && recurse(else_expr)
+            Node::Conditional(..) => {
+                let (arms, tail) = arena.conditional_chain(expr);
+                arms.into_iter()
+                    .all(|(_, condition, then_expr)| recurse(condition) && recurse(then_expr))
+                    && recurse(tail)
             }
             _ => false,
         }
@@ -1912,8 +1929,11 @@ impl DeviceIR {
             }
             Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
             Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
-            Node::Conditional(condition, then_expr, else_expr) => {
-                recurse(condition) && recurse(then_expr) && recurse(else_expr)
+            Node::Conditional(..) => {
+                let (arms, tail) = arena.conditional_chain(expr);
+                arms.into_iter()
+                    .all(|(_, condition, then_expr)| recurse(condition) && recurse(then_expr))
+                    && recurse(tail)
             }
             Node::Analysis(_) => allow_analysis,
             _ => false,
@@ -2426,7 +2446,13 @@ pub mod autodiff {
                     .fold(0, |acc, mask| acc | mask),
             },
             // The condition only selects; the branches carry the slope
-            Node::Conditional(_, then_expr, else_expr) => recurse(then_expr) | recurse(else_expr),
+            Node::Conditional(..) => {
+                let (arms, tail) = arena.conditional_chain(expr);
+                arms.into_iter()
+                    .fold(recurse(tail), |axes, (_, _, then_expr)| {
+                        axes | recurse(then_expr)
+                    })
+            }
             Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => recurse(input),
             Node::TableDerivativeApply {
                 input_derivative, ..
@@ -2806,10 +2832,13 @@ pub mod autodiff {
                 }
                 Node::Ddx { expr, .. } => self.expression(expr, order + 1, pending),
                 Node::FreezeDerivative(expr) => self.expression(expr, 0, pending),
-                Node::Conditional(condition, left, right) => {
-                    self.expression(condition, 0, pending);
-                    self.expression(left, order, pending);
-                    self.expression(right, order, pending);
+                Node::Conditional(..) => {
+                    let (arms, tail) = self.arena.conditional_chain(expr);
+                    for (_, condition, then_expr) in arms {
+                        self.expression(condition, 0, pending);
+                        self.expression(then_expr, order, pending);
+                    }
+                    self.expression(tail, order, pending);
                 }
                 _ => {
                     let arena = self.arena;
@@ -3301,15 +3330,35 @@ pub mod autodiff {
                     _ => SimplifiedConstant::Other,
                 }
             }
-            Node::Conditional(condition, then_expr, else_expr) => {
-                let condition = simplified_constant(arena, condition, constants);
-                let then_expr = simplified_constant(arena, then_expr, constants);
-                let else_expr = simplified_constant(arena, else_expr, constants);
-                match condition {
-                    SimplifiedConstant::Value(value) if value != 0.0 => then_expr,
-                    SimplifiedConstant::Value(_) => else_expr,
-                    SimplifiedConstant::Other => SimplifiedConstant::Other,
+            Node::Conditional(..) => {
+                // A chain is walked in a loop, memoizing each arm as the
+                // recursive walk would.
+                let mut arms = Vec::new();
+                let mut current = expr;
+                let mut value = loop {
+                    if let Some(value) = constants.get(&current).filter(|_| current != expr) {
+                        break *value;
+                    }
+                    let Node::Conditional(condition, then_expr, else_expr) = *arena.node(current)
+                    else {
+                        break simplified_constant(arena, current, constants);
+                    };
+                    let condition = simplified_constant(arena, condition, constants);
+                    let then_value = simplified_constant(arena, then_expr, constants);
+                    arms.push((current, condition, then_value));
+                    current = else_expr;
+                };
+                for (arm, condition, then_value) in arms.into_iter().rev() {
+                    value = match condition {
+                        SimplifiedConstant::Value(value) if value != 0.0 => then_value,
+                        SimplifiedConstant::Value(_) => value,
+                        SimplifiedConstant::Other => SimplifiedConstant::Other,
+                    };
+                    if arm != expr {
+                        constants.insert(arm, value);
+                    }
                 }
+                value
             }
             Node::Call { a, b, .. } => {
                 if let Some(argument) = a {
@@ -3466,16 +3515,28 @@ pub mod autodiff {
             }
             Node::Unary(IrUnaryOp::Not | IrUnaryOp::BitNot | IrUnaryOp::ToInteger, _)
             | Node::ArrayIndex { .. } => {}
-            Node::Conditional(condition, then_expr, else_expr) => {
+            Node::Conditional(..) => {
                 // The predicate selects a derivative branch but is not itself
-                // differentiated. Match `simplify`'s constant-branch fold.
-                match simplified_constant(arena, condition, constants) {
-                    SimplifiedConstant::Value(value) if value != 0.0 => collect!(then_expr),
-                    SimplifiedConstant::Value(_) => collect!(else_expr),
-                    SimplifiedConstant::Other => {
-                        collect!(then_expr);
-                        collect!(else_expr);
+                // differentiated. Match `simplify`'s constant-branch fold. A
+                // chain's else-branches are followed in a loop.
+                let mut current = expr;
+                let tail = loop {
+                    let Node::Conditional(condition, then_expr, else_expr) = *arena.node(current)
+                    else {
+                        break Some(current);
+                    };
+                    match simplified_constant(arena, condition, constants) {
+                        SimplifiedConstant::Value(value) if value != 0.0 => {
+                            collect!(then_expr);
+                            break None;
+                        }
+                        SimplifiedConstant::Value(_) => {}
+                        SimplifiedConstant::Other => collect!(then_expr),
                     }
+                    current = else_expr;
+                };
+                if let Some(tail) = tail {
+                    collect!(tail);
                 }
             }
             Node::Call { func, argc, a, b } => match (func, argc, a, b) {
@@ -4654,11 +4715,18 @@ pub mod autodiff {
                 constant!(0.0)
             }
 
-            // d(c ? a : b) = c ? da : db
-            Node::Conditional(condition, then_expr, else_expr) => {
-                let dt = differentiate!(then_expr);
-                let de = differentiate!(else_expr);
-                arena.push(Node::Conditional(condition, dt, de))
+            // d(c ? a : b) = c ? da : db, down a chain in a loop
+            Node::Conditional(..) => {
+                let (arms, tail) = arena.conditional_chain(expr);
+                let mut then_derivatives = Vec::with_capacity(arms.len());
+                for &(_, _, then_expr) in &arms {
+                    then_derivatives.push(differentiate!(then_expr));
+                }
+                let mut derivative = differentiate!(tail);
+                for (&(_, condition, _), dt) in arms.iter().zip(then_derivatives).rev() {
+                    derivative = arena.push(Node::Conditional(condition, dt, derivative));
+                }
+                derivative
             }
 
             Node::Call {
@@ -5510,28 +5578,49 @@ pub mod autodiff {
                     bounds,
                 })
             }
-            Node::Conditional(condition, then_expr, else_expr) => {
-                let simplified_condition = simplify_from(arena, condition, primal_len);
-                let simplified_then = simplify_from(arena, then_expr, primal_len);
-                let simplified_else = simplify_from(arena, else_expr, primal_len);
-                if let Node::Const(value) = *arena.node(simplified_condition) {
-                    return if value != 0.0 {
-                        simplified_then
+            Node::Conditional(..) => {
+                // A chain is simplified in a loop, arm by arm, and folded
+                // back from the innermost arm out as the recursion would.
+                let mut arms = Vec::new();
+                let mut current = expr;
+                let mut simplified_else = loop {
+                    if current != expr && primal_len.is_some_and(|len| current.index() < len) {
+                        break current;
+                    }
+                    let Node::Conditional(condition, then_expr, else_expr) = *arena.node(current)
+                    else {
+                        break simplify_from(arena, current, primal_len);
+                    };
+                    let simplified_condition = simplify_from(arena, condition, primal_len);
+                    let simplified_then = simplify_from(arena, then_expr, primal_len);
+                    arms.push((
+                        current,
+                        [condition, then_expr, else_expr],
+                        simplified_condition,
+                        simplified_then,
+                    ));
+                    current = else_expr;
+                };
+                for (arm, original, simplified_condition, simplified_then) in arms.into_iter().rev()
+                {
+                    simplified_else = if let Node::Const(value) = *arena.node(simplified_condition)
+                    {
+                        if value != 0.0 {
+                            simplified_then
+                        } else {
+                            simplified_else
+                        }
+                    } else if [simplified_condition, simplified_then, simplified_else] == original {
+                        arm
                     } else {
-                        simplified_else
+                        arena.push(Node::Conditional(
+                            simplified_condition,
+                            simplified_then,
+                            simplified_else,
+                        ))
                     };
                 }
-                if simplified_condition == condition
-                    && simplified_then == then_expr
-                    && simplified_else == else_expr
-                {
-                    return expr;
-                }
-                arena.push(Node::Conditional(
-                    simplified_condition,
-                    simplified_then,
-                    simplified_else,
-                ))
+                simplified_else
             }
             Node::Call { func, argc, a, b } => {
                 let simplified_a = a.map(|argument| simplify_from(arena, argument, primal_len));

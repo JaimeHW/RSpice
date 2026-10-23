@@ -3510,54 +3510,113 @@ impl SsaBuilder {
     }
 
     /// The value of `variable` on entry to `block`, creating merges as needed.
+    ///
+    /// The lookup recurses into predecessors, through every single-predecessor
+    /// block and every merge between `block` and a definition. It runs on a
+    /// stack of its own, because a long `?:` chain lowers to as many nested
+    /// diamonds, and reading a variable below their joins would otherwise take
+    /// native frames in proportion to the chain.
     pub fn read_variable(&mut self, variable: CfgVariable, block: BlockId) -> Option<ValueId> {
-        if let Some(value) = self.definitions.get(&(variable, block)) {
-            // Resolved on the way out rather than rewritten in place: the
-            // definition table is large and a collapse would otherwise have to
-            // sweep it.
-            return Some(self.resolve(*value));
+        /// A lookup waiting on the one it started in a predecessor.
+        enum Waiting {
+            /// A single-predecessor block, defined as whatever its
+            /// predecessor reads.
+            Single(BlockId),
+            /// A merge whose argument from `predecessors[next - 1]` is being
+            /// read.
+            Merge {
+                block: BlockId,
+                parameter: ValueId,
+                predecessors: Vec<BlockId>,
+                next: usize,
+            },
         }
-        self.read_variable_recursive(variable, block)
-    }
-
-    fn read_variable_recursive(
-        &mut self,
-        variable: CfgVariable,
-        block: BlockId,
-    ) -> Option<ValueId> {
-        if !self.sealed.contains(&block) {
-            // Predecessors are still arriving. Reserve a parameter now and fill
-            // its arguments in on sealing; this is the only reason construction
-            // needs two passes over a loop.
-            let value_type = self.variable_type(variable);
-            let value = self.new_value(value_type, CfgValueKind::BlockParameter);
-            self.blocks[usize::from(block)].params.push(value);
-            self.incomplete.push((block, variable, value));
-            self.write_variable(variable, block, value);
-            return Some(value);
-        }
-
-        let preds = self.predecessors.get(&block).cloned().unwrap_or_default();
-        let value = match preds.as_slice() {
-            // Unreachable or the entry block: the variable has no definition
-            // on this path, which the caller reports as a use before assignment.
-            [] => return None,
-            // One predecessor needs no merge — this is what keeps the form
-            // minimal without a separate cleanup pass.
-            [single] => self.read_variable(variable, *single)?,
-            _ => {
-                let value_type = self.variable_type(variable);
-                let value = self.new_value(value_type, CfgValueKind::BlockParameter);
-                self.blocks[usize::from(block)].params.push(value);
-                // Written before recursing so a cycle terminates here rather
-                // than spinning through the loop body forever.
-                self.write_variable(variable, block, value);
-                self.add_parameter_arguments(variable, block, value);
-                return self.try_remove_trivial_parameter(block, value);
+        let mut waiting = Vec::new();
+        let mut target = block;
+        'read: loop {
+            let mut value = loop {
+                if let Some(value) = self.definitions.get(&(variable, target)) {
+                    // Resolved on the way out rather than rewritten in place:
+                    // the definition table is large and a collapse would
+                    // otherwise have to sweep it.
+                    break Some(self.resolve(*value));
+                }
+                if !self.sealed.contains(&target) {
+                    // Predecessors are still arriving. Reserve a parameter now
+                    // and fill its arguments in on sealing; this is the only
+                    // reason construction needs two passes over a loop.
+                    let value_type = self.variable_type(variable);
+                    let value = self.new_value(value_type, CfgValueKind::BlockParameter);
+                    self.blocks[usize::from(target)].params.push(value);
+                    self.incomplete.push((target, variable, value));
+                    self.write_variable(variable, target, value);
+                    break Some(value);
+                }
+                let predecessors = self.predecessors.get(&target).cloned().unwrap_or_default();
+                match predecessors.as_slice() {
+                    // Unreachable or the entry block: the variable has no
+                    // definition on this path, which the caller reports as a
+                    // use before assignment.
+                    [] => break None,
+                    // One predecessor needs no merge — this is what keeps the
+                    // form minimal without a separate cleanup pass.
+                    &[single] => {
+                        waiting.push(Waiting::Single(target));
+                        target = single;
+                    }
+                    _ => {
+                        let value_type = self.variable_type(variable);
+                        let parameter = self.new_value(value_type, CfgValueKind::BlockParameter);
+                        self.blocks[usize::from(target)].params.push(parameter);
+                        // Written before reading the predecessors so a cycle
+                        // terminates here rather than spinning through the loop
+                        // body forever.
+                        self.write_variable(variable, target, parameter);
+                        let first = predecessors[0];
+                        waiting.push(Waiting::Merge {
+                            block: target,
+                            parameter,
+                            predecessors,
+                            next: 1,
+                        });
+                        target = first;
+                    }
+                }
+            };
+            loop {
+                match waiting.pop() {
+                    None => return value,
+                    Some(Waiting::Single(block)) => {
+                        if let Some(value) = value {
+                            self.write_variable(variable, block, value);
+                        }
+                    }
+                    Some(Waiting::Merge {
+                        block,
+                        parameter,
+                        predecessors,
+                        next,
+                    }) => {
+                        // A predecessor with no definition contributes the
+                        // parameter itself, as in `add_parameter_arguments`.
+                        let argument = value.unwrap_or(parameter);
+                        self.blocks[usize::from(predecessors[next - 1])]
+                            .push_argument(block, argument);
+                        if let Some(&predecessor) = predecessors.get(next) {
+                            waiting.push(Waiting::Merge {
+                                block,
+                                parameter,
+                                predecessors,
+                                next: next + 1,
+                            });
+                            target = predecessor;
+                            continue 'read;
+                        }
+                        value = self.try_remove_trivial_parameter(block, parameter);
+                    }
+                }
             }
-        };
-        self.write_variable(variable, block, value);
-        Some(value)
+        }
     }
 
     fn add_parameter_arguments(

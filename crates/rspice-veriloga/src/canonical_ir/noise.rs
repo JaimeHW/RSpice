@@ -504,47 +504,62 @@ fn extract_expression(
                 sources,
             )
         }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            if contains_noise(hir, *condition) {
-                return Err(unsupported("condition"));
+        HirExprKind::Conditional { .. } => {
+            // A right-nested chain is extracted in a loop: each arm's
+            // else-branch carries the activation on into the next, as
+            // extracting each else-branch in turn would.
+            let (arms, tail) = hir.conditional_chain(expr);
+            // Whether the chain from each arm on (the tail's last) carries
+            // noise, in one pass from the innermost arm out.
+            let mut noisy = vec![contains_noise(hir, tail); arms.len() + 1];
+            for (index, [_, condition, then_expr]) in arms.iter().enumerate().rev() {
+                noisy[index] = noisy[index + 1]
+                    || contains_noise(hir, *condition)
+                    || contains_noise(hir, *then_expr);
             }
-            if contains_noise(hir, *then_expr) {
-                let branch_activation =
-                    combine_activation(hir, activation.clone(), *condition, false, expression.span);
-                extract_expression(
-                    hir,
-                    *then_expr,
-                    amplitude.clone(),
-                    Some(branch_activation),
-                    equation,
-                    is_current,
-                    branch_ordinal,
-                    pos,
-                    neg,
-                    sources,
-                )?;
+            let mut activation = activation;
+            for (index, [conditional, condition, then_expr]) in arms.into_iter().enumerate() {
+                let span = hir.expressions[usize::from(conditional)].span;
+                if contains_noise(hir, condition) {
+                    return Err(IrDiagnostic::error(
+                        CompilerPhase::HirLowering,
+                        "noise function in a condition (noise terms must enter contributions additively, optionally scaled)",
+                        span,
+                    ));
+                }
+                if contains_noise(hir, then_expr) {
+                    let branch_activation =
+                        combine_activation(hir, activation.clone(), condition, false, span);
+                    extract_expression(
+                        hir,
+                        then_expr,
+                        amplitude.clone(),
+                        Some(branch_activation),
+                        equation,
+                        is_current,
+                        branch_ordinal,
+                        pos,
+                        neg,
+                        sources,
+                    )?;
+                }
+                if !noisy[index + 1] {
+                    return Ok(());
+                }
+                activation = Some(combine_activation(hir, activation, condition, true, span));
             }
-            if contains_noise(hir, *else_expr) {
-                let branch_activation =
-                    combine_activation(hir, activation, *condition, true, expression.span);
-                extract_expression(
-                    hir,
-                    *else_expr,
-                    amplitude,
-                    Some(branch_activation),
-                    equation,
-                    is_current,
-                    branch_ordinal,
-                    pos,
-                    neg,
-                    sources,
-                )?;
-            }
-            Ok(())
+            extract_expression(
+                hir,
+                tail,
+                amplitude,
+                activation,
+                equation,
+                is_current,
+                branch_ordinal,
+                pos,
+                neg,
+                sources,
+            )
         }
         HirExprKind::Call { name, args } if name == "slew" && args.len() == 1 => {
             // With both rates omitted, slew is an exact stateless identity.

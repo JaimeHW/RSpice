@@ -2388,6 +2388,49 @@ endmodule
         }
     }
 
+    /// A right-nested `?:` chain has no length limit: every arm of ivtest's
+    /// `br_gh330` shape, a 512-arm chain, and its last else-branch, selected
+    /// through emitted WebAssembly in both plans.
+    #[test]
+    fn wasm_every_arm_of_a_512_arm_conditional_chain_is_selected() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let arms = (0..512)
+            .map(|i| format!("x < {i}.5 ? {i}.0 : "))
+            .collect::<String>();
+        let source = format!(
+            "module chain(p, n); inout p, n; electrical p, n; real x;\n\
+             analog begin x = V(p, n);\nI(p, n) <+ {arms}-1.0;\nend\nendmodule\n"
+        );
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(&source, "chain", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            for selected in 0..=512_u32 {
+                let context = harness.store.data_mut().context_mut();
+                context.begin_stateful_evaluation();
+                let inputs = context.variables.clone();
+                for (slot, input) in inputs.iter().copied().enumerate() {
+                    harness.write_f64(FusedKernelHarness::VARIABLES as usize + slot * 8, input);
+                }
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, f64::from(selected));
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0, "postfix={postfix}, V = {selected}");
+                let expected = if selected == 512 {
+                    -1.0
+                } else {
+                    f64::from(selected)
+                };
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    expected,
+                    "postfix={postfix}, V = {selected}"
+                );
+            }
+        }
+    }
+
     /// The counter and sample-and-hold of the route parity row
     /// `retained_counter_and_hold_agree_across_lowerings_and_rejected_trials`,
     /// through emitted WebAssembly in both plans: every evaluation computes its

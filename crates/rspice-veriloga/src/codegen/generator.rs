@@ -1452,17 +1452,26 @@ impl CodeGenerator {
                     self.emit_expr(arena, inner, emit_ctx, program)?;
                     program.instructions.push(Instruction::Limexp);
                 }
-                Node::Conditional(cond, then_expr, else_expr) => {
-                    self.emit_expr(arena, cond, emit_ctx, program)?;
-                    let branch = program.instructions.len();
-                    program.instructions.push(Instruction::JumpIfFalse(0));
-                    self.emit_expr(arena, then_expr, emit_ctx, program)?;
-                    let jump = program.instructions.len();
-                    program.instructions.push(Instruction::Jump(0));
-                    program.instructions[branch] = Instruction::JumpIfFalse(jump - branch);
-                    self.emit_expr(arena, else_expr, emit_ctx, program)?;
-                    program.instructions[jump] =
-                        Instruction::Jump(program.instructions.len() - jump - 1);
+                Node::Conditional(..) => {
+                    // A chain is emitted arm by arm in a loop: every arm's
+                    // jump past its else-branch lands at the chain's end.
+                    let (arms, tail) = arena.conditional_chain(id);
+                    let mut jumps = Vec::with_capacity(arms.len());
+                    for (_, cond, then_expr) in arms {
+                        self.emit_expr(arena, cond, emit_ctx, program)?;
+                        let branch = program.instructions.len();
+                        program.instructions.push(Instruction::JumpIfFalse(0));
+                        self.emit_expr(arena, then_expr, emit_ctx, program)?;
+                        let jump = program.instructions.len();
+                        program.instructions.push(Instruction::Jump(0));
+                        program.instructions[branch] = Instruction::JumpIfFalse(jump - branch);
+                        jumps.push(jump);
+                    }
+                    self.emit_expr(arena, tail, emit_ctx, program)?;
+                    let end = program.instructions.len();
+                    for jump in jumps {
+                        program.instructions[jump] = Instruction::Jump(end - jump - 1);
+                    }
                 }
                 Node::Ddt(inner) => {
                     // Backward-Euler time derivative with a dedicated state slot:

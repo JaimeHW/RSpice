@@ -342,9 +342,20 @@ pub fn visit_state_sites(
             then_expr,
             else_expr,
         } => {
-            visit_state_sites(expressions, *condition, visit)?;
-            visit_state_sites(expressions, *then_expr, visit)?;
-            visit_state_sites(expressions, *else_expr, visit)?;
+            // A right-nested chain is followed in a loop.
+            let (mut condition, mut then_expr, mut tail) = (*condition, *then_expr, *else_expr);
+            loop {
+                visit_state_sites(expressions, condition, visit)?;
+                visit_state_sites(expressions, then_expr, visit)?;
+                match expressions.get(usize::from(tail)).map(|next| &next.kind) {
+                    Some(&HirExprKind::Conditional {
+                        condition: next_condition,
+                        then_expr: next_then,
+                        else_expr: next_else,
+                    }) => (condition, then_expr, tail) = (next_condition, next_then, next_else),
+                    _ => break visit_state_sites(expressions, tail, visit)?,
+                }
+            }
         }
         HirExprKind::AnalogOperator { op } => {
             visit_analog_operator_children(expressions, op, visit)?;

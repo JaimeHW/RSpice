@@ -9,7 +9,8 @@ pub(crate) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
 }
 
 /// [`visit_expression`], also passing each node's depth in the tree (the root
-/// is 1). A node for which `visit` returns `false` is not descended into.
+/// is 1), where the else-branch of a `?:` counts at its conditional's depth.
+/// A node for which `visit` returns `false` is not descended into.
 pub(crate) fn visit_expression_at_depth(
     expression: &Expression,
     visit: &mut impl FnMut(&Expression, usize) -> bool,
@@ -49,7 +50,9 @@ pub(crate) fn visit_expression_at_depth(
             Expression::Conditional(expr) => {
                 pending.push(below(&expr.condition, depth));
                 pending.push(below(&expr.then_expr, depth));
-                pending.push(below(&expr.else_expr, depth));
+                // A right-nested `?:` chain is walked in a loop by every
+                // phase, so its else-branch continues the conditional's level.
+                pending.push((Pending::Expression(&expr.else_expr), depth));
             }
             Expression::Call(expr) => pending.extend(expr.args.iter().map(child)),
             Expression::SystemFunction(expr) => pending.extend(expr.args.iter().map(child)),

@@ -15,6 +15,7 @@ use std::fmt::Write as _;
 use smol_str::SmolStr;
 
 use crate::ast::PortDirection;
+use crate::canonical_ir::hir::conditional_chain;
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, ExprId, HirExprKind, HirPort, MirParameterSlot,
 };
@@ -1640,14 +1641,33 @@ fn collect_canonical_parameter_default_references(
         HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
             visit(*operand)?
         }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            visit(*condition)?;
-            visit(*then_expr)?;
-            visit(*else_expr)?;
+        HirExprKind::Conditional { .. } => {
+            // A right-nested chain is followed in a loop, each arm's
+            // conditional marked visited where entering it would mark it.
+            let (arms, tail) = conditional_chain(&artifact.mir.expressions, expr);
+            for (index, [conditional, condition, then_expr]) in arms.into_iter().enumerate() {
+                if index > 0 && !visited.insert(conditional) {
+                    return Ok(());
+                }
+                for child in [condition, then_expr] {
+                    collect_canonical_parameter_default_references(
+                        artifact,
+                        child,
+                        canonical_indices,
+                        external_indices,
+                        visited,
+                        references,
+                    )?;
+                }
+            }
+            collect_canonical_parameter_default_references(
+                artifact,
+                tail,
+                canonical_indices,
+                external_indices,
+                visited,
+                references,
+            )?;
         }
         HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
             for argument in args {
@@ -2973,6 +2993,37 @@ fn lower_parameter_default_expr(
             then_expr,
             else_expr,
         } => {
+            let (arms, tail) = conditional_chain(&artifact.mir.expressions, expr);
+            if arms.len() > 1 {
+                // A right-nested chain is one labeled block whose arms break
+                // out with their value in order: nothing in the emitted source
+                // nests per arm, where `if`/`else` would nest one block each.
+                let label = format!("'p{}", expr.index());
+                let mut out = format!("({label}: {{ ");
+                for [_, condition, then_expr] in arms {
+                    let condition = lower_parameter_default_condition(
+                        artifact,
+                        condition,
+                        parameter_fields,
+                        parameter_given,
+                    )?;
+                    let then_expr = lower_parameter_default_expr(
+                        artifact,
+                        then_expr,
+                        parameter_fields,
+                        parameter_given,
+                    )?;
+                    write!(out, "if {condition} {{ break {label} {then_expr}; }} ").unwrap();
+                }
+                let tail = lower_parameter_default_expr(
+                    artifact,
+                    tail,
+                    parameter_fields,
+                    parameter_given,
+                )?;
+                write!(out, "{tail} }})").unwrap();
+                return Ok(out);
+            }
             let condition = lower_parameter_default_condition(
                 artifact,
                 *condition,

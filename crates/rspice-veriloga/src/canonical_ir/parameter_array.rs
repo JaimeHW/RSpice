@@ -6,6 +6,8 @@ use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_int
 use crate::numeric_literal::{exact_integer_as_f64, parse_integer_literal};
 use crate::semantic::{MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK};
 
+use super::hir::conditional_chain;
+
 use super::{
     CanonicalValueType, CompilerPhase, ExprId, HirExprKind, HirExprRef, HirExpression,
     HirParamRange, HirParameter, HirParameterDimension, IrDiagnostic, MirParameterSlot,
@@ -653,17 +655,17 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                     _ => Err(format!("unsupported binary operator '{op}'")),
                 }
             }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                let condition = self.evaluate_at_depth(condition, next_depth)?;
-                if condition.is_truthy() {
-                    self.evaluate_at_depth(then_expr, next_depth)
-                } else {
-                    self.evaluate_at_depth(else_expr, next_depth)
+            HirExprKind::Conditional { .. } => {
+                // A right-nested chain is followed in a loop, and its
+                // else-branches continue the conditional's level, as the
+                // parser counts them: a chain has no length limit.
+                let (arms, tail) = conditional_chain(self.expressions, expression);
+                for [_, condition, then_expr] in arms {
+                    if self.evaluate_at_depth(condition, next_depth)?.is_truthy() {
+                        return self.evaluate_at_depth(then_expr, next_depth);
+                    }
                 }
+                self.evaluate_at_depth(tail, depth)
             }
             HirExprKind::Call { name, args } => match (name.as_str(), args.as_slice()) {
                 ("abs", [value]) => match self.evaluate_at_depth(*value, next_depth)? {

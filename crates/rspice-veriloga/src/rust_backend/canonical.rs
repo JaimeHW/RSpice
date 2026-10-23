@@ -69,8 +69,8 @@ use crate::canonical_ir::cfg_opt::{
 };
 use crate::canonical_ir::frequency::{self, DynamicPower, FrequencyError};
 use crate::canonical_ir::schedule::{
-    InvalidationClass, Stage, schedule_with_parameter_scopes, split, structural_guards,
-    worth_splitting,
+    InvalidationClass, Stage, reverse_postorder, schedule_with_parameter_scopes, split,
+    structural_guards, worth_splitting,
 };
 use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, CanonicalValueType, ExprId, HirAnalogOperator,
@@ -254,29 +254,13 @@ fn kernel_region_metrics(
     function: &CfgFunction,
     schedule: &crate::canonical_ir::schedule::Schedule,
 ) -> Vec<KernelRegionMetric> {
-    fn visit(
-        function: &CfgFunction,
-        block: BlockId,
-        visited: &mut HashSet<BlockId>,
-        postorder: &mut Vec<BlockId>,
-    ) {
-        if !visited.insert(block) {
-            return;
-        }
-        for successor in function.block(block).successors() {
-            visit(function, successor, visited, postorder);
-        }
-        postorder.push(block);
-    }
-
-    let mut postorder = Vec::new();
-    visit(
-        function,
-        function.entry,
-        &mut HashSet::new(),
-        &mut postorder,
-    );
-    postorder.reverse();
+    // Iterative: a right-nested `?:` chain is a path as long as the chain.
+    let successors = function
+        .blocks
+        .iter()
+        .map(|block| block.successors())
+        .collect::<Vec<_>>();
+    let postorder = reverse_postorder(&successors, function.entry, function.blocks.len());
     let mut definitions = vec![None; function.values.len()];
     for (block_index, block_id) in postorder.iter().enumerate() {
         let block = function.block(*block_id);
