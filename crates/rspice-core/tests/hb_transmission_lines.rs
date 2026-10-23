@@ -54,6 +54,62 @@ fn assert_complex_relative(actual: Complex64, expected: Complex64, tolerance: f6
     );
 }
 
+/// A one-offset PAC from VDRIVE to `output`: each diagonal PXF coefficient for
+/// sidebands -1..=1 must equal `transfer` at its sideband frequency.
+fn assert_pac_sidebands(
+    deck: &str,
+    output: &str,
+    transfer: fn(f64) -> Complex64,
+    tolerance: f64,
+    label: &str,
+) {
+    let result = engine()
+        .run_pac(
+            &parse(deck),
+            PacConfig::new()
+                .with_fundamental(F0)
+                .with_sweep(OFFSET, OFFSET, 1)
+                .with_sweep_type(PacSweepType::Linear)
+                .with_sidebands(-1, 1)
+                .with_input_source("VDRIVE")
+                .with_output_node(output),
+        )
+        .unwrap_or_else(|error| panic!("{label} PAC completes: {error:?}"));
+    for sideband in -1..=1 {
+        let actual = result
+            .result
+            .conversion_matrix
+            .get(0, sideband, sideband)
+            .unwrap_or_else(|error| panic!("{label} diagonal PXF coefficient: {error:?}"));
+        assert_complex_relative(
+            actual,
+            transfer(OFFSET + sideband as f64 * F0),
+            tolerance,
+            &format!("{label} PAC/PXF sideband {sideband}"),
+        );
+    }
+}
+
+/// PNoise at one offset: the RNOISE thermal contribution at `output` must be
+/// the matched source noise `4kT*Z0` times `power_transfer`, to 5e-8.
+fn assert_rnoise_pnoise(deck: &str, output: &str, power_transfer: f64, label: &str) {
+    let result = engine()
+        .run_pnoise(&parse(deck), F0, &[OFFSET], output, None, None, 0)
+        .unwrap_or_else(|error| panic!("{label} PNoise completes: {error:?}"));
+    let actual = result
+        .contributors
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("RNOISE thermal"))
+        .unwrap_or_else(|| panic!("{label} source resistor contributor is retained"))
+        .1[0];
+    let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * Z0 * power_transfer;
+    let relative = (actual - expected).abs() / expected;
+    assert!(
+        actual.is_finite() && relative <= 5.0e-8,
+        "{label} PNoise actual={actual:.17e}, expected={expected:.17e}, relative={relative:.3e}"
+    );
+}
+
 #[test]
 fn hb_lossless_delay_line_has_exact_dc_and_multi_harmonic_phase() {
     let result = engine()
@@ -75,31 +131,7 @@ fn hb_lossless_delay_line_has_exact_dc_and_multi_harmonic_phase() {
 
 #[test]
 fn pac_and_pxf_use_exact_delay_at_positive_and_negative_sidebands() {
-    let result = engine()
-        .run_pac(
-            &parse(scalar_deck()),
-            PacConfig::new()
-                .with_fundamental(F0)
-                .with_sweep(OFFSET, OFFSET, 1)
-                .with_sweep_type(PacSweepType::Linear)
-                .with_sidebands(-1, 1)
-                .with_input_source("VDRIVE")
-                .with_output_node("far"),
-        )
-        .expect("delay-line PAC completes");
-    for sideband in -1..=1 {
-        let actual = result
-            .result
-            .conversion_matrix
-            .get(0, sideband, sideband)
-            .expect("diagonal PXF coefficient is retained");
-        assert_complex_relative(
-            actual,
-            delay_transfer(OFFSET + sideband as f64 * F0),
-            5.0e-9,
-            &format!("PAC/PXF delay at sideband {sideband}"),
-        );
-    }
+    assert_pac_sidebands(scalar_deck(), "far", delay_transfer, 5.0e-9, "delay-line");
 }
 
 #[test]
@@ -109,21 +141,7 @@ fn pnoise_adjoint_transfers_matched_source_noise_without_line_loss() {
                 T1 near 0 far 0 Z0=50 TD=137n\n\
                 RLOAD far 0 50 NOISY=0\n\
                 .end\n";
-    let result = engine()
-        .run_pnoise(&parse(deck), F0, &[OFFSET], "far", None, None, 0)
-        .expect("delay-line PNoise completes");
-    let actual = result
-        .contributors
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("RNOISE thermal"))
-        .expect("source resistor contributor is retained")
-        .1[0];
-    let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * Z0 * 0.25;
-    let relative = (actual - expected).abs() / expected;
-    assert!(
-        actual.is_finite() && relative <= 5.0e-8,
-        "delay-line PNoise actual={actual:.17e}, expected={expected:.17e}, relative={relative:.3e}"
-    );
+    assert_rnoise_pnoise(deck, "far", 0.25, "delay-line");
 }
 
 fn ltra_transfer(frequency: f64) -> Complex64 {
@@ -173,31 +191,7 @@ fn hb_ltra_uses_exact_telegrapher_operator_at_dc_and_each_harmonic() {
 
 #[test]
 fn pac_and_pxf_use_exact_ltra_operator_at_each_sideband() {
-    let result = engine()
-        .run_pac(
-            &parse(ltra_deck()),
-            PacConfig::new()
-                .with_fundamental(F0)
-                .with_sweep(OFFSET, OFFSET, 1)
-                .with_sweep_type(PacSweepType::Linear)
-                .with_sidebands(-1, 1)
-                .with_input_source("VDRIVE")
-                .with_output_node("far"),
-        )
-        .expect("LTRA PAC completes");
-    for sideband in -1..=1 {
-        let actual = result
-            .result
-            .conversion_matrix
-            .get(0, sideband, sideband)
-            .expect("LTRA diagonal PXF coefficient is retained");
-        assert_complex_relative(
-            actual,
-            ltra_transfer(OFFSET + sideband as f64 * F0),
-            2.0e-8,
-            &format!("LTRA PAC/PXF sideband {sideband}"),
-        );
-    }
+    assert_pac_sidebands(ltra_deck(), "far", ltra_transfer, 2.0e-8, "LTRA");
 }
 
 #[test]
@@ -208,21 +202,7 @@ fn pnoise_adjoint_uses_exact_ltra_transfer() {
                 RLOAD far 0 75 NOISY=0\n\
                 .model line ltra r=10 l=2.5u g=0 c=1n len=1 rel=1\n\
                 .end\n";
-    let result = engine()
-        .run_pnoise(&parse(deck), F0, &[OFFSET], "far", None, None, 0)
-        .expect("LTRA PNoise completes");
-    let actual = result
-        .contributors
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("RNOISE thermal"))
-        .expect("LTRA source resistor contributor is retained")
-        .1[0];
-    let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * Z0 * ltra_transfer(OFFSET).norm_sqr();
-    let relative = (actual - expected).abs() / expected;
-    assert!(
-        actual.is_finite() && relative <= 5.0e-8,
-        "LTRA PNoise actual={actual:.17e}, expected={expected:.17e}, relative={relative:.3e}"
-    );
+    assert_rnoise_pnoise(deck, "far", ltra_transfer(OFFSET).norm_sqr(), "LTRA");
 }
 
 const LOSSLESS_CPL_DECK: &str = "exact lossless CPL\n\
@@ -272,31 +252,13 @@ fn lossless_cpl_retains_authored_zero_r_and_g_for_periodic_analysis() {
 
 #[test]
 fn pac_and_pxf_use_lossless_cpl_modal_delay_at_each_sideband() {
-    let result = engine()
-        .run_pac(
-            &parse(LOSSLESS_CPL_DECK),
-            PacConfig::new()
-                .with_fundamental(F0)
-                .with_sweep(OFFSET, OFFSET, 1)
-                .with_sweep_type(PacSweepType::Linear)
-                .with_sidebands(-1, 1)
-                .with_input_source("VDRIVE")
-                .with_output_node("far1"),
-        )
-        .expect("lossless CPL PAC completes");
-    for sideband in -1..=1 {
-        let actual = result
-            .result
-            .conversion_matrix
-            .get(0, sideband, sideband)
-            .expect("lossless CPL diagonal PXF coefficient is retained");
-        assert_complex_relative(
-            actual,
-            cpl_conductor1_transfer(OFFSET + sideband as f64 * F0),
-            2.0e-8,
-            &format!("lossless CPL PAC/PXF sideband {sideband}"),
-        );
-    }
+    assert_pac_sidebands(
+        LOSSLESS_CPL_DECK,
+        "far1",
+        cpl_conductor1_transfer,
+        2.0e-8,
+        "lossless CPL",
+    );
 }
 
 #[test]
@@ -314,21 +276,7 @@ fn pnoise_adjoint_uses_lossless_cpl_modal_operator() {
                 + g = 0 0 0\n\
                 + length = 1\n\
                 .end\n";
-    let result = engine()
-        .run_pnoise(&parse(deck), F0, &[OFFSET], "far1", None, None, 0)
-        .expect("lossless CPL PNoise completes");
-    let actual = result
-        .contributors
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("RNOISE thermal"))
-        .expect("lossless CPL source resistor contributor is retained")
-        .1[0];
-    let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * Z0 * 0.25;
-    let relative = (actual - expected).abs() / expected;
-    assert!(
-        actual.is_finite() && relative <= 5.0e-8,
-        "lossless CPL PNoise actual={actual:.17e}, expected={expected:.17e}, relative={relative:.3e}"
-    );
+    assert_rnoise_pnoise(deck, "far1", 0.25, "lossless CPL");
 }
 
 #[test]
