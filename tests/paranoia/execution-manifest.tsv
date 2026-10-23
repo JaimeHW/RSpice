@@ -57,8 +57,6 @@ xspice/bug-378-test-sequence.cir	expected_unsupported	typed XSPICE port %V witho
 # expansion creates two devices with the same canonical instance name.
 TransmissionLines/ltra5_1_line.sp	expected_unsupported	duplicate instance name `xrcv` redefinition
 TransmissionLines/txl4_1_line.sp	expected_unsupported	duplicate instance name `xrcv` redefinition
-inductive-systems/positive-definite-1.cir	expected_unsupported	division by zero during .param resolution
-inductive-systems/positive-definite-3.cir	expected_unsupported	division by zero during .param resolution
 #
 # ── Output-request and model-resolution refusals ─────────────────────────────
 various/i(xxx)_tests.cir	expected_refusal	B-source references branch current of a MOSFET
@@ -84,6 +82,14 @@ optran/F5TurboV2thermal-optran.cir	expected_refusal	VDMOS `thermal` instance key
 xspice/original-examples/bad_io.deck	expected_refusal	upstream negative test: port-count mismatch
 xspice/original-examples/bad_io_type.deck	expected_refusal	upstream negative test: port-type mismatch
 xspice/original-examples/bad_name.deck	expected_refusal	upstream negative test: unknown code model
+# The inductive-system decks couple inductors inside subcircuits, and each
+# instance's K resolves in that instance's parameter scope. A coefficient
+# outside [-1, 1] makes the inductance matrix non-physical: RSpice refuses
+# it, naming the instance and the value, as Spectre and HSPICE do. ngspice-47
+# only warns and runs these decks (their .oracle.out).
+inductive-systems/positive-definite-1.cir	expected_refusal	Xbad2.K12 = 2.01u / sqrt(1u * 4u) = 1.005 (Xbad4.K12 = -1.005) is outside [-1, 1]
+inductive-systems/positive-definite-2.cir	expected_refusal	Xbad6.K12 = 1.01 is outside [-1, 1]
+inductive-systems/positive-definite-3.cir	executes	each K resolves with Xgood1's inductances, not the subcircuit's zero defaults that divided by zero; every |k| is below 6e-4
 #
 # ── Convergence ──────────────────────────────────────────────────────────────
 control_structs/foreach_bjt_ft.sp	executes	six original ordered bias runs, complex current references and resolved plot vectors !control
