@@ -145,9 +145,11 @@ mod analog_events;
 mod analog_samples;
 pub(crate) mod checkpoint;
 pub(super) mod digital_edges;
+mod drive_edges;
 mod shared;
 mod standalone;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
+pub(crate) use drive_edges::DriveEdgeReport;
 use shared::MixedDigital;
 pub(crate) use shared::checkpoint as coordinator_checkpoint;
 pub(crate) use shared::{CoordinatorEquilibriumImage, MixedDigitalCoordinator, SharedTrialCursor};
@@ -1285,6 +1287,9 @@ struct MixedState {
     /// Not in a checkpoint: a resumed run takes the completions its
     /// checkpoint recorded rather than asking again.
     accepted_steps_sampled_holds: bool,
+    /// The last accepted edge of one of this module's own drives, which a
+    /// terminal failure just after it names (`mixed/drive_edges.rs`).
+    accepted_drive_edge: Option<drive_edges::DriveEdge>,
 }
 
 #[derive(Clone)]
@@ -1983,6 +1988,7 @@ impl MixedSignalHost {
                 accepted_time: 0.0,
                 started: false,
                 accepted_steps_sampled_holds: false,
+                accepted_drive_edge: None,
             },
             scratch: TrialScratch::default(),
             digital_started: false,
@@ -2087,6 +2093,7 @@ impl MixedSignalHost {
         self.state.accepted_time = 0.0;
         self.state.started = false;
         self.state.accepted_steps_sampled_holds = false;
+        self.state.accepted_drive_edge = None;
         self.digital_started = false;
         self.scratch.ledger.clear();
         Ok(())
@@ -4643,6 +4650,7 @@ impl MixedSignalHost {
         // with the trial's rollback image and asks the analog half whether it
         // raised `$discontinuity` at this candidate.
         let sampled_holds = self.steps_only_sampled_holds(&trial);
+        let drive_edge = self.drive_edge(&trial);
         if let Some(standalone) = &mut self.standalone {
             standalone.commit();
         }
@@ -4655,6 +4663,9 @@ impl MixedSignalHost {
         self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
         self.state.accepted_steps_sampled_holds = sampled_holds;
+        if drive_edge.is_some() {
+            self.state.accepted_drive_edge = drive_edge;
+        }
         self.state.initial_digital = None;
         std::mem::swap(
             &mut self.state.accepted_adc_transition_times,

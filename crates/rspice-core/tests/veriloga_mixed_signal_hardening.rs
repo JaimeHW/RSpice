@@ -2049,6 +2049,88 @@ fn a_newton_failure_at_an_ideal_dac_edge_names_the_edge_and_the_converter() {
     );
 }
 
+/// A `.va` module whose analog block reads its own `reg`: a D/A inside the
+/// module, with no converter, stepping 0 V to 3.3 V behind 20 ohm at 10 ns.
+const INTERNAL_STEP: &str = "`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module dstep(out);
+  inout out;
+  electrical out;
+  reg q;
+  initial begin q = 1'b0; #10 q = 1'b1; end
+  analog I(out) <+ (V(out) - (q ? 3.3 : 0.0)) / 20.0;
+endmodule
+";
+
+fn internal_step_deck(model: &ModelFile, load: &str) -> String {
+    format!(
+        "* an ideal step through a module's own D/A\n\
+         x1 out dstep\n\
+         {load}\n\
+         .va \"{}\" dstep\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **A Newton failure at a module's own D/A edge names the edge.** The analog
+/// block reads `q` at its left limit, so the solution leaving 10 ns is the
+/// first to see 3.3 V behind 20 ohm. Into `bq` (no current below 1 V, 1 A
+/// above it) that has no solution, so the first step after the edge fails
+/// however small it is. A diode would not do: `.options itl4=2` is raised to
+/// the 100 iterations ngspice's Newton never goes below (`niiter.c`), and a
+/// diode reaches its operating point well inside them. The failure names `q`
+/// with its values on either side of the edge, the edge time, the process
+/// writing it and the analog block reading it, as a failure after an inserted
+/// converter's edge does. The minimum step is the 1e-20 s floor a Verilog-A
+/// model sets, and the retry ladder cuts the step leaving the edge by eight
+/// until the next cut would pass it, so the failed step, 1 ps / 8^8, lies
+/// after the edge by more than one minimum step and no more than eight.
+#[test]
+fn a_newton_failure_at_a_modules_own_dac_edge_names_the_edge() {
+    let model = ModelFile::new("internal_step", INTERNAL_STEP);
+    let error = error_for(
+        &internal_step_deck(&model, "bq out 0 i = v(out) > 1 ? 1 : 0"),
+        20.0e-9,
+        1.0e-9,
+    );
+    let lowered = error.to_lowercase();
+    let file = model.file_name().to_lowercase();
+    for expected in [
+        format!("on net `x1.q` 0 -> 1 at t=1e-8s driven by x1.initial#0 (initial, {file}:7)"),
+        "into the analog block of x1, which reads it".to_owned(),
+    ] {
+        assert!(lowered.contains(&expected), "missing `{expected}`: {error}");
+    }
+    let edge = seconds_after(&error, "1 at t=");
+    let failed = seconds_after(&error, "the failed step to t=");
+    let minimum = 1.0e-20;
+    assert_eq!(edge, 10.0e-9, "{error}");
+    assert!(
+        failed - edge > minimum && failed - edge <= 8.0 * minimum,
+        "failed at {failed:e}, edge at {edge:e}: {error}"
+    );
+}
+
+/// The control: the same internal step into a resistor runs, to the
+/// Thevenin level, 3.3 V behind 20 ohm into 1 kohm.
+#[test]
+fn the_same_internal_step_into_a_solvable_load_runs() {
+    let model = ModelFile::new("internal_step_control", INTERNAL_STEP);
+    let result = run(&internal_step_deck(&model, "rl out 0 1k"), 20.0e-9, 1.0e-9);
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out is published");
+    let last = *result.voltages[out].last().expect("the run has points");
+    assert!(
+        (last - 3.3 * 1000.0 / 1020.0).abs() < 1.0e-9,
+        "out ends at {last}"
+    );
+}
+
 /// The control: the same ideal edge into a load that has a solution runs, to
 /// the Thevenin level the converter sets, 3.3 V behind 20 ohm into 1 kohm.
 #[test]

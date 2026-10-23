@@ -5,7 +5,10 @@
 //! first Newton solve after it is where a run fails, and the plain failure —
 //! "convergence failed at t" — names neither the edge nor the converter that
 //! made it. Both are in the accepted event state: the time each digital net
-//! last changed, its value, who drives it, and the converter reading it.
+//! last changed, its value, who drives it, and the converter reading it. A
+//! mixed module drives the circuit without a converter too, through a D/A
+//! bridge or a discrete value its analog block reads, and keeps the last
+//! accepted edge of those itself.
 //!
 //! Read only after recovery is exhausted, so nothing here can change a
 //! result.
@@ -80,7 +83,8 @@ impl ConverterLaw {
 impl CircuitData {
     /// The accepted digital edge a terminal failure at `time` followed, as a
     /// sentence, when one D/A converter's input changed no more than its own
-    /// delay and transition plus two steps before it.
+    /// delay and transition plus two steps before it, or a mixed module's own
+    /// drive no more than two steps before it.
     ///
     /// `step` is the failed step's size, and never less than the minimum
     /// step: the retry ladder ends a step or so above the floor, so the
@@ -119,6 +123,26 @@ impl CircuitData {
                     });
                 }
             });
+        }
+        // A mixed module's own drive — a D/A bridge, or a discrete value its
+        // analog block reads — has no event net; each module keeps its last
+        // accepted edge (`xspice/verilog/mixed/drive_edges.rs`). The later
+        // edge is the one the failure followed.
+        #[cfg(feature = "veriloga")]
+        if let Some(internal) = self
+            .mixed_signal_hosts
+            .iter()
+            .filter_map(|host| host.drive_edge_before_failure(time, step))
+            .reduce(|latest, next| {
+                if next.time > latest.time {
+                    next
+                } else {
+                    latest
+                }
+            })
+            .filter(|internal| found.as_ref().is_none_or(|edge| internal.time > edge.time))
+        {
+            return Some(internal_edge_sentence(time, &internal));
         }
         let edge = found?;
         let after = values.digital_values.get(&edge.node);
@@ -213,6 +237,28 @@ impl CircuitData {
         let module = record.map_or_else(|| converter.model_name(), |record| &record.module);
         format!("{} ({module}: {})", converter.name, parameters.join(", "))
     }
+}
+
+/// The sentence for a failure at `time` after a mixed module's own drive edge,
+/// worded as an inserted converter's is: the net with its values before and
+/// after, the edge time, who drove it, and what carried it into the analog
+/// circuit.
+#[cfg(feature = "veriloga")]
+fn internal_edge_sentence(time: Value, edge: &crate::xspice::verilog::DriveEdgeReport) -> String {
+    let mut sentence = format!(
+        "the failed step to t={time:e}s follows an accepted digital edge on net `{}` {} -> {} \
+         at t={:e}s driven by {}, into {}",
+        edge.net,
+        edge.before,
+        edge.after,
+        edge.time,
+        edge.drivers.join(", "),
+        edge.into,
+    );
+    if edge.ideal {
+        sentence.push_str("; the bridge's step is ideal, which no solver timestep can resolve");
+    }
+    sentence
 }
 
 /// A parameter value as an author would write it: `20`, `3.3`, `1e-12`.

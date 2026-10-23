@@ -37,6 +37,71 @@ pub(crate) struct ParticipantCheckpoint {
     dac_history: Vec<HistoryImage>,
     /// One entry per converted event port, in port order.
     port_history: Vec<HistoryImage>,
+    /// The last accepted edge of one of the module's own drives, which a
+    /// failure just after the resume point names; absent before any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    drive_edge: Option<DriveEdgeSection>,
+}
+
+/// The drive edge section, tagged with its own version: the drive (0 for a
+/// D/A bridge, 1 for a discrete read) and its index, the edge time's bits,
+/// and the values before and after as the diagnostic spells them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DriveEdgeSection {
+    version: u32,
+    drive: (u8, u64),
+    time: u64,
+    before: String,
+    after: String,
+}
+
+const DRIVE_EDGE_SECTION_VERSION: u32 = 1;
+
+impl DriveEdgeSection {
+    fn capture(edge: &super::drive_edges::DriveEdge) -> Self {
+        let drive = match edge.drive {
+            super::drive_edges::Drive::Bridge(index) => (0, index as u64),
+            super::drive_edges::Drive::Read(index) => (1, index as u64),
+        };
+        Self {
+            version: DRIVE_EDGE_SECTION_VERSION,
+            drive,
+            time: edge.time.to_bits(),
+            before: edge.before.clone(),
+            after: edge.after.clone(),
+        }
+    }
+
+    /// The edge, refused when this build cannot read the section, it names a
+    /// drive the module does not have, or it lies after the accepted time.
+    fn restore(
+        &self,
+        (bridges, reads): (usize, usize),
+        accepted: f64,
+    ) -> Result<super::drive_edges::DriveEdge, String> {
+        let refused = || "participant checkpoint drive edge section is not readable".to_string();
+        if self.version != DRIVE_EDGE_SECTION_VERSION || self.before.len() + self.after.len() > 256
+        {
+            return Err(refused());
+        }
+        let index = usize::try_from(self.drive.1).map_err(|_| refused())?;
+        let drive = match self.drive.0 {
+            0 if index < bridges => super::drive_edges::Drive::Bridge(index),
+            1 if index < reads => super::drive_edges::Drive::Read(index),
+            _ => return Err(refused()),
+        };
+        let time = f64::from_bits(self.time);
+        if !time.is_finite() || time <= 0.0 || time > accepted {
+            return Err(refused());
+        }
+        Ok(super::drive_edges::DriveEdge {
+            drive,
+            time,
+            before: self.before.clone(),
+            after: self.after.clone(),
+        })
+    }
 }
 
 /// Version 2 added `port_history`: a loop closed through a shared converter is
@@ -395,6 +460,11 @@ impl MixedSignalHost {
                 .filter(|(port, _)| port.converted_bit().is_some())
                 .map(|(_, history)| HistoryImage::capture(history))
                 .collect(),
+            drive_edge: self
+                .state
+                .accepted_drive_edge
+                .as_ref()
+                .map(DriveEdgeSection::capture),
         };
         self.participant_budget(&image, limits)?;
         image.inputs.restore(self.state.accepted_time)?;
@@ -582,6 +652,19 @@ impl MixedSignalHost {
         restored.state.accepted_tick = tick;
         restored.state.started = true;
         restored.state.accepted_steps_sampled_holds = false;
+        restored.state.accepted_drive_edge = image
+            .drive_edge
+            .as_ref()
+            .map(|section| {
+                section.restore(
+                    (
+                        restored.state.bridges.dac.len(),
+                        restored.discrete_inputs.len(),
+                    ),
+                    time,
+                )
+            })
+            .transpose()?;
         restored.state.initial_digital = None;
         restored.digital_started = true;
         restored.scratch = TrialScratch::default();

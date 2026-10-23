@@ -417,3 +417,101 @@ fn restored_discrete_inputs_are_checked_where_the_restored_view_determines_them(
             .is_none()
     );
 }
+
+/// The last edge of a module's own drive is accepted state. The acceptance
+/// whose settle stepped the D/A bridge records it, at that timepoint; a
+/// rejected trial and an acceptance that moves no drive leave it; a failure
+/// no more than two steps after it names it; and a checkpoint carries it.
+#[test]
+fn a_drive_edge_is_accepted_state_that_crosses_a_checkpoint() {
+    let (mut coordinator, mut host) = fixture();
+    step(&mut coordinator, &mut host, 0.0, &[0.0; 3]);
+    assert_eq!(host.state.accepted_drive_edge, None, "time zero is no edge");
+    step(&mut coordinator, &mut host, 1e-9, &[1.0, 1.0, 0.0]);
+    let edge = super::super::drive_edges::DriveEdge {
+        drive: super::super::drive_edges::Drive::Bridge(0),
+        time: 1e-9,
+        before: "0".into(),
+        after: "1".into(),
+    };
+    assert_eq!(host.state.accepted_drive_edge.as_ref(), Some(&edge));
+
+    let cursor = coordinator.open_trial(1.5e-9, false).unwrap();
+    host.begin_trial(
+        1.5e-9,
+        0.5e-9,
+        IntegrationCoefficients::backward_euler(0.5e-9).unwrap(),
+        false,
+        false,
+    )
+    .unwrap();
+    host.reject_trial().unwrap();
+    coordinator.rollback_trial(cursor);
+    assert_eq!(host.state.accepted_drive_edge.as_ref(), Some(&edge));
+    step(&mut coordinator, &mut host, 1.5e-9, &[1.0, 1.0, 5.0]);
+    assert_eq!(host.state.accepted_drive_edge.as_ref(), Some(&edge));
+
+    let report = host
+        .drive_edge_before_failure(1e-9 + 1.5e-12, 1e-12)
+        .expect("a failure within two steps after the edge names it");
+    assert_eq!(
+        (
+            report.net.as_str(),
+            report.before.as_str(),
+            report.after.as_str()
+        ),
+        ("dut.dac", "0", "1")
+    );
+    assert_eq!(report.time, 1e-9);
+    assert_eq!(
+        report.into,
+        "the D/A bridge of dut on `dac` (low=0, high=5, r=100)"
+    );
+    assert!(report.ideal);
+    // `initial dac=0` and the `always` both write the bridge's signal.
+    assert!(
+        report.drivers.len() == 2
+            && report.drivers[0].starts_with("dut.initial#")
+            && report.drivers[1].starts_with("dut.always#"),
+        "{:?}",
+        report.drivers
+    );
+    assert_eq!(host.drive_edge_before_failure(1e-9 + 3e-12, 1e-12), None);
+    assert_eq!(host.drive_edge_before_failure(1e-9, 1e-12), None);
+
+    let saved = host.participant_checkpoint(Default::default()).unwrap();
+    let digital = coordinator.checkpoint(Default::default()).unwrap();
+    let transported: ParticipantCheckpoint =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let (template, receiving) = fixture();
+    let resumed_coordinator = template
+        .restored_checkpoint(&digital, Default::default())
+        .unwrap();
+    let resumed = receiving
+        .restored_participant_checkpoint(&transported, &resumed_coordinator, Default::default())
+        .unwrap();
+    assert_eq!(resumed.state.accepted_drive_edge.as_ref(), Some(&edge));
+    assert_eq!(
+        resumed.drive_edge_before_failure(1e-9 + 1.5e-12, 1e-12),
+        Some(report),
+        "the resumed run names the edge as the saved one does"
+    );
+
+    // An image without the section, as an earlier build wrote it, resumes
+    // with no edge; one naming a drive the module lacks is refused.
+    let mut without = transported.clone();
+    without.drive_edge = None;
+    let resumed = receiving
+        .restored_participant_checkpoint(&without, &resumed_coordinator, Default::default())
+        .unwrap();
+    assert_eq!(resumed.state.accepted_drive_edge, None);
+    let mut foreign = transported;
+    if let Some(section) = foreign.drive_edge.as_mut() {
+        section.drive = (0, 1);
+    }
+    assert!(
+        receiving
+            .restored_participant_checkpoint(&foreign, &resumed_coordinator, Default::default())
+            .is_err()
+    );
+}
