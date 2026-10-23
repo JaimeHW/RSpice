@@ -74,7 +74,8 @@ fn compile(state: &AppState) -> Vec<crate::simulation::execution::PreparedTask> 
         .model_library_manager
         .seal_execution_sources()
         .expect("model sources seal");
-    SimulationController::build_queue_from_plan(state, &frozen, &sealed).expect("plan compiles")
+    SimulationController::build_queue_from_plan(&state.model, &frozen, &sealed)
+        .expect("plan compiles")
 }
 
 fn transient_digest(tasks: &[crate::simulation::execution::PreparedTask]) -> ContentDigest {

@@ -8,16 +8,16 @@ pub(super) type AnalysisInputs<'a> = rspice_simulation::analysis_preparation::An
     crate::state::AnalysisResult,
 >;
 
-pub(super) fn analysis_inputs(state: &AppState) -> AnalysisInputs<'_> {
+pub(super) fn analysis_inputs(model: &Model) -> AnalysisInputs<'_> {
     AnalysisInputs {
-        sim_setup: &state.model.sim_setup,
-        schematic: state.model.schematic.document(),
-        selected_components: &state.model.schematic.session.editor.selection.components,
-        selection_occurrence: state.model.workspace.content.active_occurrence(),
-        runs: &state.model.simulation.retained.runs,
-        active_run: state.model.simulation.active_run().map(|run| &run.data),
-        project_revision: state.model.workspace.content.project.revision(),
-        plan_payloads: &state.model.workspace.content.simulation_plan_payloads,
+        sim_setup: &model.sim_setup,
+        schematic: model.schematic.document(),
+        selected_components: &model.schematic.session.editor.selection.components,
+        selection_occurrence: model.workspace.content.active_occurrence(),
+        runs: &model.simulation.retained.runs,
+        active_run: model.simulation.active_run().map(|run| &run.data),
+        project_revision: model.workspace.content.project.revision(),
+        plan_payloads: &model.workspace.content.simulation_plan_payloads,
     }
 }
 
@@ -66,12 +66,12 @@ mod manifest_tests {
 
             let specs = [
                 rspice_simulation::analysis_preparation::analysis_draft_spec(
-                    &analysis_inputs(&state),
+                    &analysis_inputs(&state.model),
                     &AnalysisDraft::Noise(noise),
                 )
                 .unwrap(),
                 rspice_simulation::analysis_preparation::analysis_draft_spec(
-                    &analysis_inputs(&state),
+                    &analysis_inputs(&state.model),
                     &AnalysisDraft::Disto(disto),
                 )
                 .unwrap(),
@@ -121,7 +121,7 @@ mod manifest_tests {
         draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly;
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &AnalysisDraft::Noise(draft),
         )
         .expect("exact noise draft parses");
@@ -163,7 +163,7 @@ mod manifest_tests {
         draft.f2_over_f1 = "0.8".to_owned();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &AnalysisDraft::Disto(draft),
         )
         .expect("exact DISTO draft parses");
@@ -207,7 +207,7 @@ mod manifest_tests {
             state.model.sim_setup.tran.stop = "stale singleton".to_owned();
 
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &AnalysisDraft::Transient(draft),
             )
             .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
@@ -228,7 +228,7 @@ mod manifest_tests {
             draft.stop = typed.to_owned();
             assert!(
                 rspice_simulation::analysis_preparation::analysis_draft_spec(
-                    &analysis_inputs(&state),
+                    &analysis_inputs(&state.model),
                     &AnalysisDraft::Transient(draft)
                 )
                 .is_err(),
@@ -247,7 +247,7 @@ mod manifest_tests {
         ac.sweep = 2;
         state.model.sim_setup.ac.fstart = "stale singleton".to_owned();
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &AnalysisDraft::Ac(ac),
         )
         .expect("the authored AC draft builds its spec");
@@ -266,7 +266,7 @@ mod manifest_tests {
         dc.stop = "3".to_owned();
         state.model.sim_setup.dc.source = "stale singleton".to_owned();
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &AnalysisDraft::DcSweep(dc),
         )
         .expect("the authored DC draft builds its spec");
@@ -309,12 +309,12 @@ mod manifest_tests {
         state.model.sim_setup.optimization.fd_step = "not a number".to_owned();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &draft,
         )
         .expect("an authored optimization draft builds its spec");
         let line = rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &draft,
             &spec,
         )
@@ -349,7 +349,7 @@ mod manifest_tests {
         };
         invalid.min_step = "0.5".to_owned();
         let error = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &invalid_draft,
         )
         .expect_err("a smallest step above the first step is not a search");
@@ -369,7 +369,7 @@ mod manifest_tests {
             state.model.sim_setup.sp.do_noise = !requested;
             let draft = AnalysisDraft::SParameter(draft);
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &draft,
             )
             .unwrap();
@@ -377,7 +377,7 @@ mod manifest_tests {
                 matches!(&spec, AnalysisSpec::SParameter { do_noise, .. } if *do_noise == requested)
             );
             let line = rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &draft,
                 &spec,
             )
@@ -402,7 +402,7 @@ mod manifest_tests {
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&AppState::default()),
+                &analysis_inputs(&AppState::default().model),
                 &draft,
             )
             .expect("default draft parses");
@@ -436,7 +436,7 @@ mod manifest_tests {
             network.reltol = "2.5e-6".into();
             network.abstol = "7e-13".into();
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&AppState::default()),
+                &analysis_inputs(&AppState::default().model),
                 &draft,
             )
             .expect("periodic network draft parses");
@@ -535,7 +535,7 @@ mod manifest_tests {
         state.model.sim_setup.fourier.fundamental = "3k".into();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &draft,
         )
         .expect("Fourier spec builds");
@@ -549,7 +549,7 @@ mod manifest_tests {
         ));
         assert!(
             rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &draft,
                 &spec
             )
@@ -573,7 +573,7 @@ mod manifest_tests {
         state.model.sim_setup.envelope.carrier_tones = "not a frequency".into();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &draft,
         )
         .expect("Envelope spec builds");
@@ -595,7 +595,7 @@ mod manifest_tests {
         );
         assert!(
             rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &draft,
                 &spec
             )
@@ -614,7 +614,7 @@ mod manifest_tests {
         state.model.sim_setup.soa.stop_time = "not a time".into();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &draft,
         )
         .unwrap();
@@ -628,7 +628,7 @@ mod manifest_tests {
         ));
         assert!(
             rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &draft,
                 &spec
             )
@@ -646,7 +646,7 @@ mod manifest_tests {
         let pz_draft = AnalysisDraft::PoleZero(state.model.sim_setup.pz.clone());
         state.model.sim_setup.pz.input_pos.clear();
         let pz_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &pz_draft,
         )
         .unwrap();
@@ -656,7 +656,7 @@ mod manifest_tests {
         ));
         assert!(
             rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &pz_draft,
                 &pz_spec
             )
@@ -669,7 +669,7 @@ mod manifest_tests {
         let sens_draft = AnalysisDraft::Sensitivity(state.model.sim_setup.sens.clone());
         state.model.sim_setup.sens.output_expr.clear();
         let sens_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &sens_draft,
         )
         .unwrap();
@@ -679,7 +679,7 @@ mod manifest_tests {
         ));
         assert!(
             rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &sens_draft,
                 &sens_spec
             )
@@ -693,7 +693,7 @@ mod manifest_tests {
         let tf_draft = AnalysisDraft::TransferFunction(state.model.sim_setup.xf.clone());
         state.model.sim_setup.xf.input_source.clear();
         let tf_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &tf_draft,
         )
         .unwrap();
@@ -703,7 +703,7 @@ mod manifest_tests {
         ));
         assert!(
             rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-                &analysis_inputs(&state),
+                &analysis_inputs(&state.model),
                 &tf_draft,
                 &tf_spec
             )
@@ -722,7 +722,7 @@ mod manifest_tests {
         state.model.sim_setup.op.temperature_mode_idx = usize::MAX;
         let draft = AnalysisDraft::OperatingPoint(authored.clone());
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &draft,
         )
         .unwrap();
@@ -737,7 +737,7 @@ mod manifest_tests {
         authored.temperature_mode_idx = 2;
         authored.temperature = "-15".into();
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
+            &analysis_inputs(&state.model),
             &AnalysisDraft::OperatingPoint(authored),
         )
         .unwrap();

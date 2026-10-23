@@ -2208,10 +2208,6 @@ pub struct NetlistDocumentState {
     pub diagnostics: std::sync::Arc<NetlistDiagnosticCollection>,
     /// Result data version last reconciled with the editor baseline.
     seen_data_version: u64,
-    /// Run sequence the manual-run baseline was sealed with. This is the only
-    /// deck-to-run binding: the run's label, deck digest and revision are read
-    /// back off that run's own receipt rather than copied here.
-    pub last_run_id: Option<u64>,
     /// Working deck the run snapshot was opened from, so its comparison knows
     /// which revision to diff against once the snapshot itself is active.
     pub(crate) run_snapshot_return_document: ActiveNetlistDocument,

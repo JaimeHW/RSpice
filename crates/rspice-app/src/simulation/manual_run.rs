@@ -24,4 +24,8 @@ pub(crate) struct ManualRunHandoff {
     pub(crate) pending_run_buffer: Option<String>,
     /// Run id associated with `pending_run_buffer`.
     pub(crate) pending_manual_run_id: Option<u64>,
+    /// Run sequence the manual-run baseline was sealed with. This is the only
+    /// deck-to-run binding: the run's label, deck digest and revision are read
+    /// back off that run's own receipt rather than copied here.
+    pub(crate) last_run_id: Option<u64>,
 }

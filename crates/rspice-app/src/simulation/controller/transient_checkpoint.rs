@@ -13,32 +13,32 @@ impl SimulationController {
             })
     }
 
-    pub(super) fn publish_transient_checkpoint(&mut self, state: &mut AppState) {
+    pub(super) fn publish_transient_checkpoint(&mut self, model: &mut Model) {
         let Some(bytes) = self.runner.take_transient_checkpoint() else {
             return;
         };
-        self.accept_transient_checkpoint(state, bytes);
+        self.accept_transient_checkpoint(model, bytes);
     }
 
     pub(super) fn accept_transient_checkpoint(
         &mut self,
-        state: &mut AppState,
+        model: &mut Model,
         bytes: std::sync::Arc<[u8]>,
     ) {
         if self.current_transient_checkpoint_error.is_some() {
             return;
         }
-        if let Err(error) = self.retain_transient_checkpoint(state, bytes) {
+        if let Err(error) = self.retain_transient_checkpoint(model, bytes) {
             self.runner.abort();
             let message = format!("Could not retain transient checkpoint: {error}");
             self.current_transient_checkpoint_error = Some(message.clone());
-            self.run_line(state, LogSeverity::Error, message);
+            self.run_line(model, LogSeverity::Error, message);
         }
     }
 
     pub(super) fn retain_transient_checkpoint(
         &self,
-        state: &mut AppState,
+        model: &mut Model,
         bytes: std::sync::Arc<[u8]>,
     ) -> Result<(), String> {
         if !self.transient_checkpoint_capture_requested() {
@@ -60,8 +60,7 @@ impl SimulationController {
             &rspice_core::NoAbort,
         )
         .map_err(|error| error.to_string())?;
-        let run = state
-            .model
+        let run = model
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
@@ -97,8 +96,7 @@ impl SimulationController {
         partial.transient_checkpoint = Some(checkpoint);
         self.validate_analysis_retention(run, &partial)?;
         run.upsert_live_analysis(partial)?;
-        state
-            .model
+        model
             .simulation
             .select_latest_analysis_in_run_sequence(run_id);
         Ok(())

@@ -22,24 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::product::ContentDigest;
 use crate::state::ComponentType;
-use crate::workbench::app_state::{AppState, Model};
-
-impl AppState {
-    /// [`Model::active_plan_revision`].
-    pub(crate) fn active_plan_revision(
-        &self,
-    ) -> Option<(
-        crate::product::SimulationPlanId,
-        crate::product::ObjectRevision,
-    )> {
-        self.model.active_plan_revision()
-    }
-
-    /// [`Model::configured_topology_revision`].
-    pub(crate) fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
-        self.model.configured_topology_revision()
-    }
-}
+use crate::workbench::app_state::Model;
 
 impl Model {
     /// Plan identity and revision of the active analysis plan, if one is

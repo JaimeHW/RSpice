@@ -10,12 +10,12 @@ use super::*;
 impl SimulationController {
     /// Echo evaluated `.MEAS` results into the run's log, the way the CLI
     /// prints them — value lines for successes, warnings for failures.
-    fn echo_measurements(&self, state: &mut AppState, measurements: &[rspice_core::MeasureResult]) {
+    fn echo_measurements(&self, model: &mut Model, measurements: &[rspice_core::MeasureResult]) {
         if measurements.is_empty() {
             return;
         }
         self.run_line(
-            state,
+            model,
             LogSeverity::Info,
             format!("Measurements ({}):", measurements.len()),
         );
@@ -40,13 +40,13 @@ impl SimulationController {
                     ),
                 ),
             };
-            self.run_line(state, severity, line);
+            self.run_line(model, severity, line);
         }
     }
 
     pub(super) fn apply_result_side_effects(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         result: &crate::simulation::SimulationResult,
     ) {
         use crate::simulation::SimulationResult;
@@ -55,7 +55,7 @@ impl SimulationController {
             SimulationResult::Transient { measurements, .. } => {
                 self.invalidate_transient_post_views(state);
                 self.prime_transient_fft_source_selection(state);
-                self.echo_measurements(state, measurements);
+                self.echo_measurements(state.model_mut(), measurements);
             }
             SimulationResult::Stb {
                 response,
@@ -65,12 +65,12 @@ impl SimulationController {
                     response.bode_points.iter().map(|p| p.frequency).collect();
                 match SimulationResult::stb_waveforms(response) {
                     Ok(waveforms) => self.populate_ac_post_views(state, &frequencies, &waveforms),
-                    Err(error) => self.run_line(state, LogSeverity::Error, error),
+                    Err(error) => self.run_line(state.model_mut(), LogSeverity::Error, error),
                 }
                 for warning in &response.warnings {
-                    self.run_line(state, LogSeverity::Warning, warning.clone());
+                    self.run_line(state.model_mut(), LogSeverity::Warning, warning.clone());
                 }
-                self.echo_measurements(state, measurements);
+                self.echo_measurements(state.model_mut(), measurements);
             }
             SimulationResult::Ac {
                 frequencies,
@@ -85,7 +85,7 @@ impl SimulationController {
                 ..
             } => {
                 self.populate_ac_post_views(state, frequencies, waveforms);
-                self.echo_measurements(state, measurements);
+                self.echo_measurements(state.model_mut(), measurements);
             }
             SimulationResult::Qpnoise {
                 frequencies,
@@ -109,7 +109,7 @@ impl SimulationController {
             } => self.populate_ac_post_views(state, frequencies, waveforms),
             SimulationResult::DcSweep { measurements, .. }
             | SimulationResult::Noise { measurements, .. } => {
-                self.echo_measurements(state, measurements);
+                self.echo_measurements(state.model_mut(), measurements);
             }
             SimulationResult::DcOp(_)
             | SimulationResult::Pstb { .. }

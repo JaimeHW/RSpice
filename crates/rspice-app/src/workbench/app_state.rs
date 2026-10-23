@@ -25,6 +25,7 @@ mod model;
 mod model_access;
 pub(in crate::workbench) mod problems_view;
 mod rule_deck;
+mod run_access;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod schematic_preferences;
@@ -193,35 +194,23 @@ impl AppState {
         self.model.clear_project_design_history();
     }
 
+    /// [`Model::technology_inputs`].
     pub(crate) fn technology_inputs(
         &self,
     ) -> rspice_simulation::project_technology::ProjectTechnologyInputs<'_> {
-        rspice_simulation::project_technology::ProjectTechnologyInputs {
-            project: &self.model.workspace.content.project,
-            sim_setup: &self.model.sim_setup,
-            models: self.model.model_library_manager.catalog(),
-            resolutions: self.model.model_library_manager.resolution_records(),
-            registry: &self.model.pdk_config.technology_registry,
-            layouts: self.model.workspace.content.physical_layout_documents(),
-        }
+        self.model.technology_inputs()
     }
 
-    /// The chain the project's `.include` and `.lib` files resolve through:
-    /// its own search paths, then the library folders set in Preferences.
+    /// [`Model::include_search_chain`].
     pub(crate) fn include_search_chain(
         &self,
     ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
-        rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
-            &self.model.workspace.content.project,
-            self.library_folders(),
-        )
+        self.model.include_search_chain()
     }
 
-    /// The folders searched for includes after every project's own paths.
+    /// [`Model::library_folders`].
     pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
-        self.model
-            .preferences
-            .folders(crate::workbench::FolderListPreference::LibraryFolders)
+        self.model.library_folders()
     }
 
     /// Resolve the project-owned technology contract against both mutable
@@ -255,6 +244,7 @@ impl AppState {
 
     /// What the authored plan needs a project technology for, computed before
     /// any netlist exists.
+    #[cfg(test)]
     pub(crate) fn technology_demand(&self) -> rspice_simulation::preparation::TechnologyDemand {
         self.technology_inputs().technology_demand()
     }
@@ -1015,19 +1005,6 @@ impl AppState {
         text: impl Into<String>,
     ) -> u64 {
         self.model.record(severity, source, text)
-    }
-
-    /// [`Self::record`], with a place the Console row jumps to.
-    pub fn record_anchored(
-        &mut self,
-        severity: crate::diagnostics::LogSeverity,
-        source: crate::diagnostics::LogSource,
-        text: impl Into<String>,
-        anchor: crate::diagnostics::LogAnchor,
-    ) -> u64 {
-        self.model
-            .log_buffer
-            .log_anchored(severity, source, text, Some(anchor))
     }
 
     /// Report a failure of something the user asked for: a save, an open, an

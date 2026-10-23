@@ -236,7 +236,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 /// snapshot that cannot show a deck, and text without a run is a deck that
 /// cannot name what executed it.
 pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
-    let run_id = state.code.netlist.last_run_id?;
+    let run_id = state.runs.manual_run.last_run_id?;
     state
         .runs
         .manual_run
@@ -252,7 +252,7 @@ pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
 pub(crate) fn run_deck_snapshot_artifact_name(state: &AppState) -> String {
     format!(
         "run-{}.sp",
-        state.code.netlist.last_run_id.unwrap_or_default()
+        state.runs.manual_run.last_run_id.unwrap_or_default()
     )
 }
 
@@ -386,8 +386,8 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
         );
     }
     let run_id = state
-        .code
-        .netlist
+        .runs
+        .manual_run
         .last_run_id
         .ok_or_else(|| "No completed manual run owns a deck snapshot.".to_owned())?;
     let snapshot = state

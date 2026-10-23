@@ -198,8 +198,8 @@ fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
     let mut controller = SimulationController::new();
     controller.current_run_id = Some(run_sequence);
 
-    controller.publish_live_preview(&mut state);
-    controller.publish_live_preview(&mut state);
+    controller.publish_live_preview(&mut state.model);
+    controller.publish_live_preview(&mut state.model);
 
     let run = state
         .model
@@ -223,7 +223,7 @@ fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
     assert!(state.model.log_buffer.is_empty());
 
     controller.live_transient.clear();
-    controller.publish_live_preview(&mut state);
+    controller.publish_live_preview(&mut state.model);
     let run = state
         .model
         .simulation

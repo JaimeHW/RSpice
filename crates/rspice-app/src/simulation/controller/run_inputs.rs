@@ -67,9 +67,9 @@ pub(crate) const NETLIST_CHANGED_SINCE_VALIDATION: &str =
 /// State a refused dispatch: in full on the status bar, as the refusal of a
 /// gesture, and in the run status as the refusal for moved inputs it is, or
 /// as a blocked run.
-pub(super) fn state_refused_dispatch(state: &mut AppState, error: &PreparationError) {
+pub(super) fn state_refused_dispatch(state: &mut impl RunHost, error: &PreparationError) {
     state.prompt(error.to_string());
-    state.model.simulation.execution.status =
+    state.model_mut().simulation.execution.status =
         [DESIGN_CHANGED_SINCE_CHECK, NETLIST_CHANGED_SINCE_VALIDATION]
             .into_iter()
             .find(|status| error.message().starts_with(status))
@@ -204,7 +204,7 @@ impl<'a> LiveInputs<'a> {
     /// Read every input from the session, through the very view preparation
     /// borrows. The view is taken apart field by field, so an input added to
     /// it later does not compile until it is given an identity here.
-    fn of(state: &'a AppState) -> Self {
+    fn of(state: &'a impl RunHost) -> Self {
         let crate::simulation::execution::preparation::RunPreparationInputs {
             analysis,
             technology,
@@ -283,18 +283,19 @@ impl<'a> LiveInputs<'a> {
 impl RunInputIdentity {
     /// The identity of what preparing a run set reads, as the session holds
     /// it now.
-    pub(super) fn of_run_set(state: &AppState) -> Self {
+    pub(super) fn of_run_set(state: &impl RunHost) -> Self {
         let live = LiveInputs::of(state);
+        let model = state.model();
         let reads = KindReads::RunSet(Box::new(RunSetReads {
-            projection: projection_key(state),
-            topology: topology_revisions(state, live.schematic_topology_revision),
+            projection: projection_key(model),
+            topology: topology_revisions(model, live.schematic_topology_revision),
             design_management: live.design_management.clone(),
             configuration_sets: live.configuration_sets.clone(),
             stimulus_library: live.stimulus_library.cloned(),
             imported_checkpoints: live.imported_checkpoints.clone(),
             imported_transient_checkpoints: live.imported_transient_checkpoints.clone(),
-            operating_points: operating_point_reads(state),
-            checkpoint_resumes: checkpoint_resume_reads(state, &live)
+            operating_points: operating_point_reads(model),
+            checkpoint_resumes: checkpoint_resume_reads(model, &live)
                 .into_iter()
                 .map(CheckpointResume::held)
                 .collect(),
@@ -307,7 +308,7 @@ impl RunInputIdentity {
     /// The identity of what preparing the manual deck `snapshot` read, as the
     /// session holds it now: in the frame that prepared it.
     pub(super) fn of_manual_deck(
-        state: &AppState,
+        state: &impl RunHost,
         snapshot: &PreparedRunSnapshot,
     ) -> Result<Self, PreparationError> {
         let live = LiveInputs::of(state);
@@ -364,9 +365,13 @@ impl RunInputIdentity {
 
     /// The first input the session no longer holds as it was captured, named
     /// for the reader, or `None` when every one is unchanged.
-    fn moved_in(&self, state: &AppState, snapshot: &PreparedRunSnapshot) -> Option<&'static str> {
+    fn moved_in(
+        &self,
+        state: &impl RunHost,
+        snapshot: &PreparedRunSnapshot,
+    ) -> Option<&'static str> {
         self.first_moved(state, |live| match &self.0.reads {
-            KindReads::RunSet(reads) => reads.compared(state, live),
+            KindReads::RunSet(reads) => reads.compared(state.model(), live),
             KindReads::ManualDeck(reads) => reads.compared(state, live, snapshot),
         })
     }
@@ -376,16 +381,16 @@ impl RunInputIdentity {
     /// Run press asks of the pass in flight, by the comparison its dispatch
     /// will make. A manual deck's identity is taken once its deck is
     /// prepared, so it names nothing here.
-    pub(super) fn run_set_moved_in(&self, state: &AppState) -> Option<&'static str> {
+    pub(super) fn run_set_moved_in(&self, state: &impl RunHost) -> Option<&'static str> {
         let KindReads::RunSet(reads) = &self.0.reads else {
             return None;
         };
-        self.first_moved(state, |live| reads.compared(state, live))
+        self.first_moved(state, |live| reads.compared(state.model(), live))
     }
 
     fn first_moved(
         &self,
-        state: &AppState,
+        state: &impl RunHost,
         kind_reads: impl FnOnce(&LiveInputs<'_>) -> Compared,
     ) -> Option<&'static str> {
         let captured = &*self.0;
@@ -439,14 +444,14 @@ type Compared = (Vec<(bool, &'static str)>, Vec<(bool, &'static str)>);
 
 impl RunSetReads {
     /// A design whose key could not be taken is never confirmed unchanged.
-    fn compared(&self, state: &AppState, live: &LiveInputs<'_>) -> Compared {
+    fn compared(&self, model: &Model, live: &LiveInputs<'_>) -> Compared {
         let first = vec![
             (
-                self.projection.is_some() && self.projection == projection_key(state),
+                self.projection.is_some() && self.projection == projection_key(model),
                 "the design",
             ),
             (
-                self.topology == topology_revisions(state, live.schematic_topology_revision),
+                self.topology == topology_revisions(model, live.schematic_topology_revision),
                 "the design",
             ),
         ];
@@ -466,13 +471,13 @@ impl RunSetReads {
                 "the imported checkpoints",
             ),
             (
-                self.operating_points == operating_point_reads(state),
+                self.operating_points == operating_point_reads(model),
                 "the devices or results the operating point reports",
             ),
             (
                 CheckpointResume::all_resume_as(
                     &self.checkpoint_resumes,
-                    &checkpoint_resume_reads(state, live),
+                    &checkpoint_resume_reads(model, live),
                 ),
                 "the retained runs a checkpoint resumes from",
             ),
@@ -494,7 +499,7 @@ impl ManualDeckReads {
     /// from.
     fn compared(
         &self,
-        state: &AppState,
+        state: &impl RunHost,
         live: &LiveInputs<'_>,
         snapshot: &PreparedRunSnapshot,
     ) -> Compared {
@@ -530,20 +535,19 @@ impl ManualDeckReads {
 }
 
 /// The configured root's projection key; `None` when it cannot be taken.
-fn projection_key(state: &AppState) -> Option<rspice_design::projection::DesignProjectionKey> {
-    state.model.workspace.design_projection_key(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+fn projection_key(model: &Model) -> Option<rspice_design::projection::DesignProjectionKey> {
+    model.workspace.design_projection_key(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     )
 }
 
 /// The topology revision of every open schematic buffer and, last, of the
 /// open schematic: a run set's snapshot records them, and the projection key
 /// does not.
-fn topology_revisions(state: &AppState, open: u64) -> Vec<(String, u64)> {
-    let mut topology = state
-        .model
+fn topology_revisions(model: &Model, open: u64) -> Vec<(String, u64)> {
+    let mut topology = model
         .workspace
         .content
         .schematic_buffers
@@ -574,11 +578,11 @@ fn origin_identity(origin: Option<&Path>) -> Option<PathBuf> {
 /// the active run, and one of the readers of the retained runs. Everything
 /// else it reads is setup, held by the setup's own identity, so two equal
 /// lowerings under one setup read the same devices and the same evidence.
-fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> {
-    let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() else {
+fn operating_point_reads(model: &Model) -> Vec<Result<AnalysisSpec, String>> {
+    let Some(plan) = model.sim_setup.analysis_plan.as_ref() else {
         return Vec::new();
     };
-    let inputs = analysis_inputs(state);
+    let inputs = analysis_inputs(model);
     plan.instances()
         .iter()
         .filter_map(|instance| match instance.draft() {
@@ -602,12 +606,12 @@ fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> 
 /// nothing here unless it holds a checkpoint a draft resumes from, so a run
 /// prepared to resume is not expired by the run its own dispatch starts,
 /// though that run captures checkpoints of its own.
-fn checkpoint_resume_reads<'a>(state: &'a AppState, live: &LiveInputs<'a>) -> Vec<ResumeRead<'a>> {
-    let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() else {
+fn checkpoint_resume_reads<'a>(model: &'a Model, live: &LiveInputs<'a>) -> Vec<ResumeRead<'a>> {
+    let Some(plan) = model.sim_setup.analysis_plan.as_ref() else {
         return Vec::new();
     };
     // Every retained result, newest run first, as preparation offers them.
-    let runs = &state.model.simulation.retained.runs;
+    let runs = &model.simulation.retained.runs;
     let results = || {
         runs.iter()
             .flat_map(|run| run.analyses.iter().map(|analysis| &analysis.data))
@@ -1002,14 +1006,14 @@ impl RetainedRunInputs {
     /// moved leaves a run whose authorization has expired.
     pub(super) fn still_current(
         &self,
-        state: &AppState,
+        state: &impl RunHost,
         snapshot: &PreparedRunSnapshot,
     ) -> Result<(), PreparationError> {
         if !self.identity.describes(snapshot) {
             return Err(unaccounted_run());
         }
         self.refused_if_moved(
-            state,
+            state.model(),
             self.identity.moved_in(state, snapshot),
             snapshot.sealed_source_dependencies(),
         )
@@ -1021,7 +1025,7 @@ impl RetainedRunInputs {
     /// files its sources were routed to.
     fn refused_if_moved(
         &self,
-        state: &AppState,
+        model: &Model,
         moved: Option<&'static str>,
         dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
     ) -> Result<(), PreparationError> {
@@ -1033,8 +1037,8 @@ impl RetainedRunInputs {
             return refuse(PreparationStage::Authorization, &format!("{input} changed"));
         }
         if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
-            state.model.model_library_manager.catalog(),
-            &state.model.sim_setup.model_bindings,
+            model.model_library_manager.catalog(),
+            &model.sim_setup.model_bindings,
         ) {
             return refuse(PreparationStage::ModelBindings, &error);
         }
@@ -1090,9 +1094,9 @@ impl PreparedRunSetInputs {
     /// Refuse unless nothing the run set was prepared from has moved, as its
     /// dispatch refuses it, whether or not it has been dispatched since.
     /// Nothing is prepared.
-    pub(crate) fn still_current(&self, state: &AppState) -> Result<(), PreparationError> {
+    pub(crate) fn still_current(&self, state: &impl RunHost) -> Result<(), PreparationError> {
         self.inputs.refused_if_moved(
-            state,
+            state.model(),
             self.inputs.identity.run_set_moved_in(state),
             &self.sealed_source_dependencies,
         )
@@ -1116,7 +1120,7 @@ impl PreparedRunSetInputs {
     /// What a run set prepared from `state` would be retained with, for a
     /// test that builds a workflow's dispatch record and prepares no run. It
     /// holds no host file.
-    pub(crate) fn of_unprepared(state: &AppState) -> Self {
+    pub(crate) fn of_unprepared(state: &impl RunHost) -> Self {
         Self {
             inputs: Arc::new(RetainedRunInputs {
                 identity: RunInputIdentity::of_run_set(state),

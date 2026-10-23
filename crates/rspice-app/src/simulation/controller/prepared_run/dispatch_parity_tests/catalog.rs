@@ -66,7 +66,7 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
                     .sim_setup
                     .apply_analysis_draft_projection(instance.draft());
                 let displayed =
-                    controller.analysis_draft_directive(&projected, instance.draft())?;
+                    controller.analysis_draft_directive(&projected.model, instance.draft())?;
                 assert_eq!(task.queued_analysis().analysis_line, displayed, "{kind:?}");
             }
 

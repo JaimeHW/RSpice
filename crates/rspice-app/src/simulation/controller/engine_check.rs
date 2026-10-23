@@ -98,7 +98,7 @@ impl SimulationController {
     /// prepares it and then builds its decks. The retained run, and any
     /// pipeline still in flight, are dropped. Fails, starting nothing, when
     /// the configured root cannot be projected.
-    pub(crate) fn start_preflight(&mut self, state: &AppState) -> Result<(), PreparationError> {
+    pub(crate) fn start_preflight(&mut self, state: &impl RunHost) -> Result<(), PreparationError> {
         self.cancel_preflight();
         self.clear_prepared_run();
         let frozen = FrozenRunPreparation::freeze(state)?;
@@ -168,7 +168,7 @@ impl SimulationController {
     /// lands, and its dispatch would not refuse it. A rule deck or a waiver
     /// edited in flight moves no revision and drops no run, so only the
     /// inputs themselves say so.
-    pub(crate) fn preflight_is_current(&self, state: &AppState) -> bool {
+    pub(crate) fn preflight_is_current(&self, state: &impl RunHost) -> bool {
         self.preflight.as_ref().is_some_and(|pending| {
             pending.generation == self.retained_run_generation
                 && pending.identity.run_set_moved_in(state).is_none()

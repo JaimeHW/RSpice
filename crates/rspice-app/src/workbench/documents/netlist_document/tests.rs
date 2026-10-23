@@ -1220,7 +1220,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
     state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.code.netlist.active_document_initialized = true;
     state.runs.manual_run.last_run_buffer = Some(RAN.to_owned());
-    state.code.netlist.last_run_id = Some(3);
+    state.runs.manual_run.last_run_id = Some(3);
 
     assert!(open_run_deck_snapshot(&mut state));
     assert_eq!(
@@ -1254,7 +1254,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
     state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.code.netlist.active_document_initialized = true;
     state.runs.manual_run.last_run_buffer = Some(RAN.to_owned());
-    state.code.netlist.last_run_id = Some(3);
+    state.runs.manual_run.last_run_id = Some(3);
     assert!(open_run_deck_snapshot(&mut state));
 
     compare_run_deck_snapshot(&mut state).unwrap();
@@ -1282,7 +1282,7 @@ fn run_deck_snapshot_needs_both_the_run_and_its_deck() {
     assert!(run_deck_snapshot_run_id(&state).is_none());
     assert!(!open_run_deck_snapshot(&mut state));
 
-    state.code.netlist.last_run_id = Some(9);
+    state.runs.manual_run.last_run_id = Some(9);
     state.runs.manual_run.last_run_buffer = None;
     assert!(run_deck_snapshot_run_id(&state).is_none());
     assert!(!open_run_deck_snapshot(&mut state));

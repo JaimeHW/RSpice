@@ -42,7 +42,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     let selection = app.simulation_controller.effective_saved_outputs_preflight(
-        &app.state,
+        &app.state.model,
         &payload.saved_outputs,
         &payload.capture_groups,
     );

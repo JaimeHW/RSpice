@@ -63,7 +63,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     (_, controller.runner) = start_checkpoint_run(&source);
     wait_until_finished_unpolled(&controller.runner);
     let before = state.model.simulation.view.data_version;
-    controller.publish_monte_carlo_checkpoint(&mut state);
+    controller.publish_monte_carlo_checkpoint(&mut state.model);
     let live = state.model.simulation.active_analysis().unwrap();
     assert!(live.is_live_partial());
     assert!(!live.success);
@@ -141,7 +141,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         live_streaming_enabled: false,
         retain_failure_diagnostics: false,
     };
-    controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
+    controller.accept_monte_carlo_checkpoint(&mut state.model, bytes.clone());
     assert!(
         state
             .model
@@ -158,7 +158,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         .as_mut()
         .unwrap()
         .mc_checkpoint = None;
-    controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
+    controller.accept_monte_carlo_checkpoint(&mut state.model, bytes.clone());
     assert!(
         state
             .model
@@ -186,7 +186,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
     );
     let error = controller
         .retain_completed_analysis(
-            &mut state,
+            &mut state.model,
             controller.current_run_id,
             without_checkpoint,
             controller.current_provenance.clone().unwrap(),
@@ -202,7 +202,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
             .analyses
             .is_empty()
     );
-    controller.accept_monte_carlo_checkpoint(&mut state, bytes);
+    controller.accept_monte_carlo_checkpoint(&mut state.model, bytes);
     let retained = state.model.simulation.active_analysis().unwrap();
     assert!(retained.is_live_partial());
     assert_eq!(
@@ -224,7 +224,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
     let (request, bytes, _) = completed_checkpoint_fixture();
     let (mut controller, mut state) = controller_fixture(request);
-    controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
+    controller.accept_monte_carlo_checkpoint(&mut state.model, bytes.clone());
     let digest = state
         .model
         .simulation
@@ -255,7 +255,8 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
+    let queue =
+        SimulationController::build_queue_from_plan(&state.model, &frozen, &sealed).unwrap();
     let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
     let options = &task.queued_analysis().spec_options;
     assert_eq!(options.study_base.as_ref().unwrap().instance_id, op);
@@ -278,7 +279,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         "prepared bytes outlive retained history"
     );
     assert!(
-        SimulationController::build_queue_from_plan(&state, &frozen, &sealed)
+        SimulationController::build_queue_from_plan(&state.model, &frozen, &sealed)
             .unwrap_err()
             .iter()
             .any(|error| error.contains("no longer retained"))
@@ -291,7 +292,8 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         .imported_monte_carlo_checkpoints
         .insert("import.rspice-mc".into(), imported)
         .unwrap();
-    let imported = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
+    let imported =
+        SimulationController::build_queue_from_plan(&state.model, &frozen, &sealed).unwrap();
     let imported = imported
         .iter()
         .find(|task| task.instance_id() == mc)

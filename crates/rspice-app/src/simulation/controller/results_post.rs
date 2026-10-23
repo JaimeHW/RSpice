@@ -6,7 +6,7 @@
 
 use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
-use crate::state::{RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
+use crate::state::{RunEvent, SpecializedViewerCacheProvenance};
 
 use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 
@@ -16,14 +16,10 @@ const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
 impl SimulationController {
     pub(super) fn in_flight_specialized_viewer_provenance(
         &self,
-        state: &AppState,
+        model: &Model,
     ) -> Option<SpecializedViewerCacheProvenance> {
         let run_sequence = self.current_run_id?;
-        let run = state
-            .model
-            .simulation
-            .retained
-            .run_by_sequence(run_sequence)?;
+        let run = model.simulation.retained.run_by_sequence(run_sequence)?;
         let source_instance_id = self.current_provenance.as_ref()?.source_instance_id();
         Some(SpecializedViewerCacheProvenance::for_prepared_analysis(
             run.dataset_id,
@@ -33,7 +29,7 @@ impl SimulationController {
 
     pub(super) fn populate_transient_post_views(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         analysis: &crate::state::AnalysisResult,
     ) {
         self.transient_post.eye_loaded = None;
@@ -43,10 +39,11 @@ impl SimulationController {
             return;
         }
 
-        let preferred_fft_source = state.results.analysis.fft_state.selected_source.as_deref();
-        let Some((waveform_key, waveform)) =
-            Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_fft_source)
-        else {
+        let preferred_fft_source = state.viewer_reading().fft_source;
+        let Some((waveform_key, waveform)) = Self::fft_source_waveform_from_state(
+            &analysis.waveforms,
+            preferred_fft_source.as_deref(),
+        ) else {
             // A specialized viewer must never outlive the retained source it
             // claims to represent.  In particular, an analysis with no saved
             // transient outputs cannot keep an FFT derived from the engine's
@@ -66,13 +63,9 @@ impl SimulationController {
         state.apply_run_event(RunEvent::FftSourceChosen {
             source: waveform_key.clone(),
         });
-        let input_options = state
-            .results
-            .analysis
-            .fft_state
-            .input_options_for_waveform(time);
+        let input_options = state.fft_input_options(time);
 
-        let provenance = self.in_flight_specialized_viewer_provenance(state);
+        let provenance = self.in_flight_specialized_viewer_provenance(state.model());
         // Same builder as the lazy path in `transient_post`, at the same
         // reader-chosen bit period. Seeding the viewer eagerly must not mean
         // seeding it from a second, differently-behaved estimator.
@@ -97,7 +90,7 @@ impl SimulationController {
             input,
         });
         // The viewer holds a spectrum exactly when it accepted the input.
-        let availability = if state.results.analysis.fft_state.has_data() {
+        let availability = if state.viewer_reading().fft_has_data {
             DerivedViewAvailability::Ready
         } else {
             DerivedViewAvailability::Unavailable
@@ -131,7 +124,7 @@ impl SimulationController {
 
     pub(super) fn populate_ac_post_views(
         &self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         frequencies: &[f64],
         waveforms: &std::collections::HashMap<String, crate::simulation::SampledWaveform>,
     ) {
@@ -174,7 +167,7 @@ impl SimulationController {
             }
         }
 
-        let owner = self.in_flight_specialized_viewer_provenance(state);
+        let owner = self.in_flight_specialized_viewer_provenance(state.model());
         state.apply_run_event(RunEvent::FrequencyResponseReplaced {
             owner,
             bode: bode_data,

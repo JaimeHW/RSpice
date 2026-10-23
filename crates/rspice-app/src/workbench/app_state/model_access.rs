@@ -16,7 +16,6 @@ use super::diagnostic_store::listing::{ListingInputs, ListingSource};
 use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
 use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
 use super::{AppState, SlotFacts};
-use crate::product::ContentDigest;
 use crate::state::CellViewRef;
 use crate::time_compat::Instant;
 
@@ -48,11 +47,7 @@ impl AppState {
             .diagnostic_batch_standing(batch, self.slot_facts())
     }
 
-    pub(in crate::workbench) fn dispatch_inputs_at_press(&self) -> Result<ContentDigest, String> {
-        self.model.dispatch_inputs_at_press(self.slot_facts())
-    }
-
-    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn publish_run_failure(
         &mut self,
         analysis: &str,
@@ -65,7 +60,7 @@ impl AppState {
             .publish_run_failure(analysis, message, attribution, run_sequence, facts);
     }
 
-    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn publish_campaign_member_refusal(
         &mut self,
         campaign: crate::product::SimulationCampaignId,
@@ -85,13 +80,13 @@ impl AppState {
         );
     }
 
-    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn open_run_outcome(&mut self, run_sequence: u64) {
         let facts = self.slot_facts();
         self.model.open_run_outcome(run_sequence, facts);
     }
 
-    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(in crate::workbench) fn publish_dispatch_diagnostics(
         &mut self,
         report: &crate::state::PreflightReport,
@@ -100,7 +95,7 @@ impl AppState {
         self.model.publish_dispatch_diagnostics(report, facts);
     }
 
-    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn publish_run_notices(
         &mut self,
         analysis: &str,

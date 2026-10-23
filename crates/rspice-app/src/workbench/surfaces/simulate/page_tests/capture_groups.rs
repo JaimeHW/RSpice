@@ -176,7 +176,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::Ca
     let (outputs, reports, _, membership) = app
         .simulation_controller
         .effective_saved_outputs_preflight(
-            &app.state,
+            &app.state.model,
             &payload.saved_outputs,
             &payload.capture_groups,
         )
@@ -263,7 +263,7 @@ fn a_capture_group_override_reaches_the_effective_output_the_run_will_use() {
     let (outputs, _, _, _) = app
         .simulation_controller
         .effective_saved_outputs_preflight(
-            &app.state,
+            &app.state.model,
             &payload.saved_outputs,
             &payload.capture_groups,
         )
@@ -658,7 +658,7 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
         u64::try_from(app.state.model.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
     let flat: Vec<u64> = app
         .simulation_controller
-        .saved_outputs_preflight(&app.state, &payload.saved_outputs)
+        .saved_outputs_preflight(&app.state.model, &payload.saved_outputs)
         .iter()
         .filter_map(|report| match report.storage_estimate() {
             rspice_simulation::output_contract::SavedOutputStorageEstimate::ExactBytes(bytes) => {

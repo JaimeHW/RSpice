@@ -41,7 +41,8 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
             .model
             .sim_setup
             .apply_analysis_draft_projection(&draft);
-        let emitted = SimulationController::new().analysis_draft_directive(&projected, &draft);
+        let emitted =
+            SimulationController::new().analysis_draft_directive(&projected.model, &draft);
 
         assert_eq!(
             displayed,
@@ -290,7 +291,7 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
             .frozen_instance_projection(&frozen, instance)
             .expect("the instance projects");
         app.simulation_controller
-            .analysis_draft_directive(&projected, instance.draft())
+            .analysis_draft_directive(&projected.model, instance.draft())
             .expect("both instances are completely authored")
     };
 

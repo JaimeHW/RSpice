@@ -137,7 +137,7 @@ pub(super) fn projected_output_bytes_for(
 ) -> std::collections::HashMap<crate::product::SavedOutputId, Option<u64>> {
     app.simulation_controller
         .effective_saved_outputs_preflight(
-            &app.state,
+            &app.state.model,
             &payload.saved_outputs,
             &payload.capture_groups,
         )
@@ -165,7 +165,7 @@ fn registry(
     let outputs = &payload.saved_outputs;
     let reports = app
         .simulation_controller
-        .saved_outputs_preflight(&app.state, outputs);
+        .saved_outputs_preflight(&app.state.model, outputs);
     let query = app.state.simulate.saved_output_filter.clone();
     // Which group holds each output, and what it will cost. Both were readable
     // only after selecting a row, so the registry could not be scanned for the
@@ -1497,7 +1497,7 @@ fn storage_read(
     workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) {
     let selection = app.simulation_controller.effective_saved_outputs_preflight(
-        &app.state,
+        &app.state.model,
         &payload.saved_outputs,
         &payload.capture_groups,
     );

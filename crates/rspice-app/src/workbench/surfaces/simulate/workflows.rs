@@ -398,7 +398,7 @@ pub(super) fn saved_output_dialog(
     let candidate = saved_output_from_draft(app, &draft).ok();
     let preflight = candidate.as_ref().map(|output| {
         app.simulation_controller
-            .saved_output_preflight(&app.state, output)
+            .saved_output_preflight(&app.state.model, output)
     });
     let inferred_unit = candidate.as_ref().map_or_else(
         || inferred_output_unit(&draft.expression),
@@ -1261,7 +1261,7 @@ pub(super) fn validate_saved_output_draft(
     let output = saved_output_from_draft(app, draft)?;
     let report = app
         .simulation_controller
-        .saved_output_preflight(&app.state, &output);
+        .saved_output_preflight(&app.state.model, &output);
     if let SavedOutputSemanticStatus::Invalid { reason } = report.semantic_status() {
         return Err(reason.clone());
     }

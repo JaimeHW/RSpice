@@ -125,7 +125,7 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
     let restored: DcMismatchDraft = serde_json::from_value(saved.clone()).unwrap();
     assert_eq!(restored.moment_relative_tolerance, "2m");
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-        &analysis_inputs(&AppState::default()),
+        &analysis_inputs(&AppState::default().model),
         &AnalysisDraft::DcMismatch(restored),
     )
     .unwrap();
@@ -235,7 +235,7 @@ fn a_bare_dcmatch_card_reads_as_the_engine_defaults() {
         crate::simulation::plan::AnalysisKind::DcMismatch,
     );
     let authored = rspice_simulation::analysis_preparation::analysis_draft_spec(
-        &analysis_inputs(&state),
+        &analysis_inputs(&state.model),
         &draft,
     )
     .expect("a default DC mismatch draft builds a specification");

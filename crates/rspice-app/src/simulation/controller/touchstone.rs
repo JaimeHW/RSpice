@@ -59,18 +59,18 @@ impl SimulationController {
 
     pub(super) fn commit_touchstone_export(
         &self,
-        state: &mut AppState,
+        model: &mut Model,
         export_io: &(impl crate::workbench::workflows::export_workflow::ExportWorkflowIo + ?Sized),
         prepared: PreparedTouchstoneExport,
     ) {
         match export_io.write_new_text_file(&prepared.path, &prepared.contents) {
             Ok(()) => self.run_line(
-                state,
+                model,
                 LogSeverity::Info,
                 Self::touchstone_export_completed_message(&prepared.path),
             ),
             Err(error) => self.run_line(
-                state,
+                model,
                 LogSeverity::Warning,
                 format!("Touchstone export failed: {error}"),
             ),

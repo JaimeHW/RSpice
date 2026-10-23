@@ -438,8 +438,10 @@ fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
 fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusal() {
     let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
     let unnamed_deck =
-        crate::simulation::SimulationController::prepare_design_netlist_for_inspection(&app.state)
-            .expect("the design netlists");
+        crate::simulation::SimulationController::prepare_design_netlist_for_inspection(
+            &app.state.model,
+        )
+        .expect("the design netlists");
     assert!(!unnamed_deck.contains("CONNECTRULES"), "{unnamed_deck}");
 
     let options = crate::simulation::dialog::SimulationOptions {
@@ -452,9 +454,10 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
         .sim_setup
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .expect("the plan takes the block");
-    let deck =
-        crate::simulation::SimulationController::prepare_design_netlist_for_inspection(&app.state)
-            .expect("the design netlists");
+    let deck = crate::simulation::SimulationController::prepare_design_netlist_for_inspection(
+        &app.state.model,
+    )
+    .expect("the design netlists");
     assert!(deck.contains("+ CONNECTRULES=\"High\""), "{deck}");
 
     app.invalidate_simulation_preflight();

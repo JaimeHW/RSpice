@@ -1158,8 +1158,8 @@ fn ensure_plan_probe_output(
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )?
     .with_origin(crate::state::SavedOutputOrigin::SchematicProbe);
-    let preflight =
-        crate::simulation::SimulationController::new().saved_output_preflight(state, &output);
+    let preflight = crate::simulation::SimulationController::new()
+        .saved_output_preflight(&state.model, &output);
     if let rspice_simulation::output_contract::SavedOutputSemanticStatus::Invalid { reason } =
         preflight.semantic_status()
     {

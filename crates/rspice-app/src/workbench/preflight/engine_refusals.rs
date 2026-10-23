@@ -24,7 +24,7 @@ use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::NumericOverrideOption;
 use crate::state::{CellViewRef, Component, ViewType};
 use crate::state::{DrawnObject, PreflightIssue, PreflightRemediation};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 /// Row labels the Solver surface states as enforced contract. The refusal and
 /// the statement of the rule use one vocabulary.
@@ -39,13 +39,13 @@ const QUOTED_TASK_LIMIT: usize = 4;
 
 /// One blocker per object each refusal names.
 pub(super) fn engine_refusal_issues(
-    state: &AppState,
+    model: &Model,
     refusals: &[EngineRefusal],
 ) -> Vec<PreflightIssue> {
     if refusals.is_empty() {
         return Vec::new();
     }
-    let drawing = DrawnDesign::configured(state);
+    let drawing = DrawnDesign::configured(model);
     refusals
         .iter()
         .flat_map(|refusal| issues_for(refusal, &drawing))
@@ -279,17 +279,17 @@ impl DrawnDesign {
     /// Every occurrence of the configured root that draws a schematic. Empty
     /// when the configuration no longer projects, in which case every name is
     /// located in the deck.
-    fn configured(state: &AppState) -> Self {
-        let Ok(projection) = state.model.workspace.configuration_execution_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+    fn configured(model: &Model) -> Self {
+        let Ok(projection) = model.workspace.configuration_execution_projection(
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         ) else {
             return Self {
                 occurrences: Vec::new(),
             };
         };
-        let catalog = state.model.library_manager.catalog();
+        let catalog = model.library_manager.catalog();
         let schematic_of = |cell_view: &CellViewRef| {
             projection
                 .schematic_buffers()

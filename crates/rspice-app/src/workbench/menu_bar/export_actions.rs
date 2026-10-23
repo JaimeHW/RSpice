@@ -490,7 +490,7 @@ pub(crate) fn build_menu_netlist(
         .workspace
         .content
         .bind_generated_netlist_provenance(generation.netlist);
-    let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(state, &spice_netlist)
+    let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(&state.model, &spice_netlist)
         .map_err(|error| vec![error.to_string()])?;
     Ok(GeneratedNetlist {
         source: match format {

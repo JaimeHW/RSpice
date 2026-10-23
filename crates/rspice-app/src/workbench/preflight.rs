@@ -23,18 +23,17 @@
 mod engine_refusals;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::simulation::SimulationController;
 use crate::simulation::controller::{PreflightOutcome, PreflightVerdict};
 use crate::simulation::execution::PreparationError;
+use crate::simulation::{RunHost, SimulationController};
 use crate::state::{
     ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation, PreflightReport,
     PreparedPreflightContract,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_checks::CheckScope;
 
 use super::app_state::run_preflight::PreflightCheck;
-use super::state::Workspace;
 
 /// Run every local preflight check and the engine's build pass, retain the
 /// exact report for the current project revision, and publish what it found.
@@ -61,28 +60,27 @@ use super::state::Workspace;
 /// permit, the controller still refuses the snapshot if anything it was
 /// prepared from has moved. While the engine builds the decks, the run is
 /// queued when [`poll`] finds that they authorize it, and not before.
-pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController, queue: bool) {
+pub(crate) fn start(state: &mut impl RunHost, controller: &mut SimulationController, queue: bool) {
     if queue {
-        if state.model.simulation.execution.has_active_execution()
-            || state.model.simulation.execution.trigger_simulation
-        {
+        let execution = &state.model().simulation.execution;
+        if execution.has_active_execution() || execution.trigger_simulation {
             state.prompt("A simulation is already running or waiting to start.");
             return;
         }
 
         // A report retained while a check is building decks is the one that
         // check will replace, so it authorizes nothing.
-        if state.runs.preflight.checking.is_none() && queue_retained_run(state) {
+        if state.runs().preflight.checking.is_none() && queue_retained_run(state) {
             return;
         }
     }
 
-    if let Some(check) = &state.runs.preflight.checking {
+    if let Some(check) = &state.runs().preflight.checking {
         let revision = check.report.project_revision;
         if checks_the_design_as_it_stands(state, controller, &check.report) {
             // The decks being built are the ones this press would build. A
             // Run press during a check alone asks for the run it authorizes.
-            if let Some(check) = state.runs.preflight.checking.as_mut() {
+            if let Some(check) = state.runs_mut().preflight.checking.as_mut() {
                 check.queue |= queue;
             }
             return;
@@ -90,9 +88,9 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
         // The design has moved since that pass's press, so its verdict will
         // authorize nothing, and a press that joined it would be lost with
         // it. It stops, and this press checks the design as it stands.
-        state.runs.preflight.checking = None;
+        state.runs_mut().preflight.checking = None;
         controller.cancel_preflight();
-        state.record(
+        state.model_mut().record(
             LogSeverity::Info,
             LogSource::Studio,
             format!(
@@ -105,7 +103,7 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
     // the receipt it leaves current: the worker reads a frozen copy of the
     // inputs, and the store is the session's.
     if let Err(error) = ensure_configured_design_check(state) {
-        state.record(
+        state.model_mut().record(
             LogSeverity::Error,
             LogSource::Studio,
             format!("Design checks could not run: {error}"),
@@ -120,10 +118,14 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
         // authorized until the build says otherwise.
         match controller.start_preflight(state) {
             Ok(()) => {
-                state.runs.preflight.checking = Some(PreflightCheck {
+                let inputs_at_press = state
+                    .model()
+                    .dispatch_inputs_at_press(state.slot_facts())
+                    .ok();
+                state.runs_mut().preflight.checking = Some(PreflightCheck {
                     report,
                     queue,
-                    inputs_at_press: state.dispatch_inputs_at_press().ok(),
+                    inputs_at_press,
                 });
                 return;
             }
@@ -138,18 +140,19 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
 /// it inspected at its press has moved. What [`poll`] asks of its verdict
 /// before letting it authorize anything.
 fn checks_the_design_as_it_stands(
-    state: &AppState,
+    state: &impl RunHost,
     controller: &SimulationController,
     report: &PreflightReport,
 ) -> bool {
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    let model = state.model();
+    let (topology_root, topology_revision, topology_closure) = model.configured_topology_revision();
     controller.preflight_is_current(state)
         && report.is_current_for(
-            state.model.workspace.content.project.revision().get(),
+            model.workspace.content.project.revision().get(),
             &topology_root,
             topology_revision,
             &topology_closure,
-            state.active_plan_revision(),
+            model.active_plan_revision(),
         )
 }
 
@@ -192,12 +195,12 @@ fn contract_of(
 /// retained run, or another preparation replaced it — authorizes nothing. Its
 /// findings are still published, against the inputs as they stood at the
 /// press, so they read as stale rather than as current.
-pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) {
-    if state.runs.preflight.take_check_cancel_request() {
+pub(crate) fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
+    if state.runs_mut().preflight.take_check_cancel_request() {
         cancel(state, controller);
         return;
     }
-    let Some(check) = state.runs.preflight.checking.as_ref() else {
+    let Some(check) = state.runs_mut().preflight.checking.as_ref() else {
         // A pass whose state was dropped — a replaced session — has nothing
         // left to finish.
         controller.cancel_preflight();
@@ -206,8 +209,8 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
     if controller.preflight_stage().is_none() {
         // The controller dropped the worker: the design was replaced under it.
         let revision = check.report.project_revision;
-        state.runs.preflight.checking = None;
-        state.record(
+        state.runs_mut().preflight.checking = None;
+        state.model_mut().record(
             LogSeverity::Warning,
             LogSource::Studio,
             format!(
@@ -228,7 +231,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         mut report,
         queue,
         inputs_at_press,
-    }) = state.runs.preflight.checking.take()
+    }) = state.runs_mut().preflight.checking.take()
     else {
         return;
     };
@@ -243,7 +246,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
                     .into_iter()
                     .map(PreflightAdvisory::from),
             );
-            let refused = engine_refusals::engine_refusal_issues(state, &refusals);
+            let refused = engine_refusals::engine_refusal_issues(state.model(), &refusals);
             if refused.is_empty() {
                 report.prepared = Some(contract_of(*metadata));
             } else {
@@ -252,17 +255,18 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         }
         PreflightVerdict::NoVerdict => report.blockers.push(engine_refusals::no_verdict_issue()),
     }
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    let (topology_root, topology_revision, topology_closure) =
+        state.model().configured_topology_revision();
     // A rule deck or a waiver edited while the decks were built moves none
     // of those revisions, and the dispatch refuses the run over it. So a run
     // the pass would authorize is held to what its dispatch holds it to: the
     // inputs captured at the press, the design-check rules among them.
     let unedited = report.is_current_for(
-        state.model.workspace.content.project.revision().get(),
+        state.model().workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
-        state.active_plan_revision(),
+        state.model().active_plan_revision(),
     ) && (report.prepared.is_none() || controller.retained_run_is_current(state));
     if retained && unedited {
         conclude(state, controller, report, inputs_at_press, queue);
@@ -272,19 +276,19 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
             // prepared from has moved: it authorizes nothing now.
             controller.clear_prepared_run();
         }
-        conclude_stale(state, report, inputs_at_press);
+        conclude_stale(state.model_mut(), report, inputs_at_press);
     }
 }
 
 /// Stop the pass whose run the worker is preparing or checking. Nothing it
 /// found is published, and the run it was checking is not authorized.
-fn cancel(state: &mut AppState, controller: &mut SimulationController) {
-    let Some(check) = state.runs.preflight.checking.take() else {
+fn cancel(state: &mut impl RunHost, controller: &mut SimulationController) {
+    let Some(check) = state.runs_mut().preflight.checking.take() else {
         return;
     };
     controller.cancel_preflight();
     controller.clear_prepared_run();
-    state.record(
+    state.model_mut().record(
         LogSeverity::Warning,
         LogSource::Studio,
         format!(
@@ -299,17 +303,15 @@ fn cancel(state: &mut AppState, controller: &mut SimulationController) {
 /// queued. The report is not retained — whatever moved the run has already
 /// said what the session's report is.
 fn conclude_stale(
-    state: &mut AppState,
+    model: &mut Model,
     mut report: PreflightReport,
     inputs_at_press: Option<crate::product::ContentDigest>,
 ) {
     report.prepared = None;
     if let Some(inputs_at_press) = inputs_at_press {
-        state
-            .model
-            .publish_dispatch_diagnostics_against(&report, inputs_at_press);
+        model.publish_dispatch_diagnostics_against(&report, inputs_at_press);
     }
-    state.record(
+    model.record(
         LogSeverity::Warning,
         LogSource::Studio,
         format!(
@@ -326,7 +328,7 @@ fn conclude_stale(
 /// decided, and queue the run when the press asked for one and the report
 /// authorizes it.
 fn conclude(
-    state: &mut AppState,
+    state: &mut impl RunHost,
     controller: &mut SimulationController,
     report: PreflightReport,
     inputs_at_press: Option<crate::product::ContentDigest>,
@@ -335,10 +337,11 @@ fn conclude(
     if report.prepared.is_none() {
         controller.clear_prepared_run();
     }
-    let current_plan = state.active_plan_revision();
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    let current_plan = state.model().active_plan_revision();
+    let (topology_root, topology_revision, topology_closure) =
+        state.model().configured_topology_revision();
     let blocked = !report.is_runnable_for(
-        state.model.workspace.content.project.revision().get(),
+        state.model().workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -373,12 +376,17 @@ fn conclude(
     // Retained before its findings are published: the findings stand only
     // while the report they came from does, and that is part of what their
     // digest is taken over.
-    state.runs.preflight.report = Some(report.clone());
+    state.runs_mut().preflight.report = Some(report.clone());
     match inputs_at_press {
         Some(inputs_at_press) => state
-            .model
+            .model_mut()
             .publish_dispatch_diagnostics_against(&report, inputs_at_press),
-        None => state.publish_dispatch_diagnostics(&report),
+        None => {
+            let facts = state.slot_facts();
+            state
+                .model_mut()
+                .publish_dispatch_diagnostics(&report, facts);
+        }
     }
     // An event, at the severity of the pass rather than of its findings: the
     // findings are records on the Problems page, and this says the pass ran
@@ -388,7 +396,9 @@ fn conclude(
     } else {
         LogSeverity::Info
     };
-    state.record(severity, LogSource::Studio, message);
+    state
+        .model_mut()
+        .record(severity, LogSource::Studio, message);
 
     if blocked {
         state.show_problem_findings();
@@ -399,25 +409,30 @@ fn conclude(
 
 /// Queue a retained authorized report only while every revision it names is
 /// still current.
-fn queue_retained_run(state: &mut AppState) -> bool {
-    let project_revision = state.model.workspace.content.project.revision().get();
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
-    let current_plan = state.active_plan_revision();
-    let runnable = state.runs.preflight.report.as_ref().is_some_and(|report| {
-        report.is_runnable_for(
-            project_revision,
-            &topology_root,
-            topology_revision,
-            &topology_closure,
-            current_plan,
-        )
-    });
+fn queue_retained_run(state: &mut impl RunHost) -> bool {
+    let project_revision = state.model().workspace.content.project.revision().get();
+    let (topology_root, topology_revision, topology_closure) =
+        state.model().configured_topology_revision();
+    let current_plan = state.model().active_plan_revision();
+    let runnable = state
+        .runs_mut()
+        .preflight
+        .report
+        .as_ref()
+        .is_some_and(|report| {
+            report.is_runnable_for(
+                project_revision,
+                &topology_root,
+                topology_revision,
+                &topology_closure,
+                current_plan,
+            )
+        });
     if !runnable {
         return false;
     }
 
-    state.request_run_set_simulation();
-    state.workbench.activate(Workspace::Simulate);
+    state.queue_run_set();
     true
 }
 
@@ -426,15 +441,15 @@ fn queue_retained_run(state: &mut AppState) -> bool {
 /// the design rules from, and the page lists what it published, so the two
 /// cannot disagree; a design checked since its last edit is not checked
 /// again.
-fn ensure_configured_design_check(state: &mut AppState) -> Result<(), String> {
-    let root = state.model.workspace.content.simulation_root_reference();
-    state.ensure_design_check(root, CheckScope::Design)
+fn ensure_configured_design_check(state: &mut impl RunHost) -> Result<(), String> {
+    let root = state.model().workspace.content.simulation_root_reference();
+    state.ensure_design_check(root)
 }
 
 /// The report a pass over `state` collects, the configured design checked
 /// first as the pass checks it.
 #[cfg(test)]
-fn collect_report(state: &AppState) -> PreflightReport {
+fn collect_report(state: &impl RunHost) -> PreflightReport {
     let mut state = state.clone();
     let _ = ensure_configured_design_check(&mut state);
     collect(&state)
@@ -465,14 +480,14 @@ fn design_rule_blocker(
     })
 }
 
-fn collect(state: &AppState) -> PreflightReport {
+fn collect(state: &impl RunHost) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
-    let root_reference = state.model.workspace.content.simulation_root_reference();
-    let inspection = state.model.workspace.inspect_design_projection(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+    let root_reference = state.model().workspace.content.simulation_root_reference();
+    let inspection = state.model().workspace.inspect_design_projection(
+        &state.model().library_manager,
+        &state.model().workspace.content.active_view,
+        &state.model().schematic,
     );
     let execution_projection = inspection
         .clone()
@@ -564,7 +579,11 @@ fn collect(state: &AppState) -> PreflightReport {
     if execution_projection.is_ok() {
         // Check Design's own receipt for the configured design: the
         // configuration and the waivers the page states its findings under.
-        if let Some(result) = state.current_design_check(&root_reference, CheckScope::Design) {
+        if let Some(result) = state.model().current_design_check(
+            &root_reference,
+            CheckScope::Design,
+            state.slot_facts(),
+        ) {
             blockers.extend(design_rule_blocker(&root_reference, result));
         } else {
             blockers.push(PreflightIssue {
@@ -576,7 +595,7 @@ fn collect(state: &AppState) -> PreflightReport {
         }
     }
 
-    match state.model.sim_setup.stable_analysis_plan() {
+    match state.model().sim_setup.stable_analysis_plan() {
         Err(error) => blockers.push(PreflightIssue {
             check: "Analysis-instance plan".to_owned(),
             observed: error,
@@ -601,7 +620,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 .filter(|instance| instance.enabled())
             {
                 if let Some(error) = state
-                    .model
+                    .model()
                     .sim_setup
                     .analysis_draft_validation_error(instance.draft())
                 {
@@ -623,8 +642,8 @@ fn collect(state: &AppState) -> PreflightReport {
     // reported as its own row so the operator sees what to change. A plan
     // that needs none, on a project that has none, is not a finding at all:
     // reporting it made every clean pass without a technology a warning.
-    let demand = state.technology_demand();
-    match state.model.workspace.content.project.technology_binding() {
+    let demand = state.model().technology_inputs().technology_demand();
+    match state.model().workspace.content.project.technology_binding() {
         None if demand.is_empty() => {}
         None => blockers.extend(demand.reasons().iter().map(|reason| PreflightIssue {
             check: "Project technology contract".to_owned(),
@@ -634,7 +653,7 @@ fn collect(state: &AppState) -> PreflightReport {
         })),
         Some(binding) => {
             if state
-                .model
+                .model()
                 .workspace
                 .content
                 .project
@@ -652,7 +671,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 });
             }
             if let Err(error) = state
-                .model
+                .model()
                 .model_library_manager
                 .catalog()
                 .validate_attached_technology(Some(binding))
@@ -665,7 +684,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 });
             }
             if let Err(error) = state
-                .model
+                .model()
                 .pdk_config
                 .technology_registry
                 .validate_project_binding(binding)
@@ -684,13 +703,17 @@ fn collect(state: &AppState) -> PreflightReport {
 
     // An unmet demand already owns the missing reference section and carries the
     // only remediation that resolves it; a second row would contradict it.
-    if (state.project_technology_in_effect() || demand.is_empty())
+    if (state
+        .model()
+        .technology_inputs()
+        .project_technology_in_effect()
+        || demand.is_empty())
         && let Err(error) = state
-            .model
+            .model()
             .model_library_manager
-            .reference_process_model_cards(state.model.sim_setup.reference_pvt.process)
+            .reference_process_model_cards(state.model().sim_setup.reference_pvt.process)
     {
-        let process = state.model.sim_setup.reference_pvt.process;
+        let process = state.model().sim_setup.reference_pvt.process;
         // The check is asked of the whole closure and its answer is a sentence
         // about the closure, so the destination is resolved from what the
         // failure *names* — the process — rather than parsed back out of that
@@ -700,7 +723,7 @@ fn collect(state: &AppState) -> PreflightReport {
         // library the reader has to pick, because Corners & sections renders
         // from a selection and landing there with none is landing nowhere.
         let providers = state
-            .model
+            .model()
             .model_library_manager
             .libraries_declaring_process(process);
         let (required, remediation) = match providers.as_slice() {
@@ -726,12 +749,13 @@ fn collect(state: &AppState) -> PreflightReport {
         });
     }
 
-    advisories.extend(temperature_validity_advisories(state));
+    advisories.extend(temperature_validity_advisories(state.model()));
 
-    let simulation_plan = state.active_plan_revision();
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    let simulation_plan = state.model().active_plan_revision();
+    let (topology_root, topology_revision, topology_closure) =
+        state.model().configured_topology_revision();
     PreflightReport {
-        project_revision: state.model.workspace.content.project.revision().get(),
+        project_revision: state.model().workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -754,10 +778,9 @@ fn collect(state: &AppState) -> PreflightReport {
 /// Only the corner each library has *active* is checked here: that is the one
 /// a run expands. Every corner the project is authoring is checked on the
 /// Corners page, where authoring one is what a reader is doing.
-fn temperature_validity_advisories(state: &AppState) -> Vec<PreflightAdvisory> {
-    let requested = state.model.sim_setup.requested_temperatures_celsius();
-    state
-        .model
+fn temperature_validity_advisories(model: &Model) -> Vec<PreflightAdvisory> {
+    let requested = model.sim_setup.requested_temperatures_celsius();
+    model
         .model_library_manager
         .libraries_sorted()
         .into_iter()

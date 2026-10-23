@@ -273,7 +273,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
         // for.
         let run_id = match state.code.netlist.executed_deck_view {
             Some(selection) => selection.run_id,
-            None => state.code.netlist.last_run_id?,
+            None => state.runs.manual_run.last_run_id?,
         };
         (run_id, RunStripPhase::Snapshot)
     } else {
@@ -288,7 +288,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
         match state.runs.manual_run.pending_manual_run_id {
             Some(running) => (running, RunStripPhase::Running),
             None => {
-                let run_id = state.code.netlist.last_run_id?;
+                let run_id = state.runs.manual_run.last_run_id?;
                 let baseline = state.runs.manual_run.last_run_buffer.as_deref()?;
                 let phase = if working_deck_source(state) == baseline {
                     RunStripPhase::Current
@@ -1386,7 +1386,7 @@ mod tests {
         state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.code.netlist.active_document_initialized = true;
         state.runs.manual_run.last_run_buffer = Some(deck.to_owned());
-        state.code.netlist.last_run_id = Some(7);
+        state.runs.manual_run.last_run_id = Some(7);
         seal_manual_run(&mut state, 7, 0xAB, 4);
         state
     }
@@ -1569,7 +1569,7 @@ mod tests {
         app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.code.netlist.active_document_initialized = true;
         app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
-        app.state.code.netlist.last_run_id = Some(7);
+        app.state.runs.manual_run.last_run_id = Some(7);
         seal_manual_run(&mut app.state, 7, 0xAB, 4);
         match phase {
             RunStripPhase::Current => {}

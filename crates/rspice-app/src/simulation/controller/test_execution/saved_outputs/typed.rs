@@ -138,7 +138,7 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         _ => unreachable!("only controls without a lossless SPICE card use this fixture"),
     };
     let lowered = rspice_simulation::analysis_preparation::analysis_draft_spec(
-        &super::super::super::analysis_spec_build::analysis_inputs(&state),
+        &super::super::super::analysis_spec_build::analysis_inputs(&state.model),
         &draft,
     )
     .unwrap();

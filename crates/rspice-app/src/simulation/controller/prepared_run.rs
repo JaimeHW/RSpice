@@ -57,12 +57,12 @@ use rspice_simulation::project_veriloga::preparation::{
 /// it, so a file-backed source whose named table is not reachable runs from the
 /// copy its definition retains instead of being refused.
 fn project_netlist_source_data(
-    state: &AppState,
+    model: &Model,
 ) -> rspice_simulation::netlist_gen::NetlistSourceData<'_> {
     rspice_simulation::netlist_gen::NetlistSourceData {
         files: &crate::simulation::table_route::SourceFiles,
-        data_root: state.model.workspace.content.project.data_root(),
-        stimulus_library: Some(&state.model.workspace.content.stimulus_library),
+        data_root: model.workspace.content.project.data_root(),
+        stimulus_library: Some(&model.workspace.content.stimulus_library),
     }
 }
 
@@ -72,51 +72,38 @@ type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPr
     crate::state::AnalysisResult,
 >;
 
-pub(crate) fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
+pub(crate) fn run_preparation_inputs(state: &impl RunHost) -> RunPreparationInputs<'_> {
     run_preparation_inputs_reading(state, &crate::simulation::table_route::SourceFiles)
 }
 
 /// [`run_preparation_inputs`], with the data files read through `files`.
 fn run_preparation_inputs_reading<'a>(
-    state: &'a AppState,
+    state: &'a impl RunHost,
     files: &'a dyn rspice_simulation::netlist_gen::NetlistSourceHost,
 ) -> RunPreparationInputs<'a> {
+    let model = state.model();
     let schematic =
-        rspice_design::projection::ProjectionSource::projection_source(&state.model.schematic);
+        rspice_design::projection::ProjectionSource::projection_source(&model.schematic);
     RunPreparationInputs {
-        analysis: analysis_inputs(state),
-        technology: state.technology_inputs(),
-        libraries: state.model.library_manager.catalog(),
-        project_sources: &state.model.workspace.content.project_sources,
-        design_management: &state.model.workspace.content.design_management,
-        configuration_sets: &state.model.workspace.content.configuration_sets,
+        analysis: analysis_inputs(model),
+        technology: model.technology_inputs(),
+        libraries: model.library_manager.catalog(),
+        project_sources: &model.workspace.content.project_sources,
+        design_management: &model.workspace.content.design_management,
+        configuration_sets: &model.workspace.content.configuration_sets,
         source_data: rspice_simulation::netlist_gen::NetlistSourceData {
             files,
-            ..project_netlist_source_data(state)
+            ..project_netlist_source_data(model)
         },
         schematic_file: schematic.current_file,
         schematic_topology_revision: schematic.schematic.topology_version(),
-        imported_checkpoints: &state
-            .model
-            .simulation
-            .retained
-            .imported_monte_carlo_checkpoints,
-        imported_transient_checkpoints: &state
-            .model
-            .simulation
-            .retained
-            .imported_transient_checkpoints,
+        imported_checkpoints: &model.simulation.retained.imported_monte_carlo_checkpoints,
+        imported_transient_checkpoints: &model.simulation.retained.imported_transient_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-        max_parallel_workers: state.model.preferences.solver_worker_limit(),
-        library_folders: state.library_folders(),
-        compilation: state
-            .code
-            .code_workspace
-            .veriloga
-            .receipt
-            .as_ref()
-            .map(|receipt| &receipt.compilation),
-        design_checks: state.model.configured_root_design_check_config(),
+        max_parallel_workers: model.preferences.solver_worker_limit(),
+        library_folders: model.library_folders(),
+        compilation: state.veriloga_compilation(),
+        design_checks: model.configured_root_design_check_config(),
     }
 }
 
@@ -171,24 +158,23 @@ struct FrozenRunInputs {
 impl FrozenRunPreparation {
     /// Copy what preparing the run set reads. Fails as the synchronous path
     /// does when the configured root cannot be projected.
-    pub(crate) fn freeze(state: &AppState) -> Result<Self, PreparationError> {
-        let projection = state
-            .model
+    pub(crate) fn freeze(state: &impl RunHost) -> Result<Self, PreparationError> {
+        let model = state.model();
+        let projection = model
             .workspace
             .configuration_execution_projection(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
-                &state.model.schematic,
+                &model.library_manager,
+                &model.workspace.content.active_view,
+                &model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
             })?;
         let schematic =
-            rspice_design::projection::ProjectionSource::projection_source(&state.model.schematic);
-        let runs = state.model.simulation.retained.runs.to_vec();
-        let active_run = state.model.simulation.active_run().and_then(|active| {
-            state
-                .model
+            rspice_design::projection::ProjectionSource::projection_source(&model.schematic);
+        let runs = model.simulation.retained.runs.to_vec();
+        let active_run = model.simulation.active_run().and_then(|active| {
+            model
                 .simulation
                 .retained
                 .runs
@@ -198,68 +184,39 @@ impl FrozenRunPreparation {
         Ok(Self {
             projection,
             inputs: FrozenRunInputs {
-                sim_setup: SimulationSetup::clone(&state.model.sim_setup),
-                schematic: state.model.schematic.document().clone(),
+                sim_setup: SimulationSetup::clone(&model.sim_setup),
+                schematic: model.schematic.document().clone(),
                 schematic_file: schematic.current_file.map(std::path::Path::to_path_buf),
                 schematic_topology_revision: schematic.schematic.topology_version(),
-                selected_components: state
-                    .model
-                    .schematic
-                    .session
-                    .editor
-                    .selection
-                    .components
-                    .clone(),
-                selection_occurrence: state.model.workspace.content.active_occurrence().cloned(),
+                selected_components: model.schematic.session.editor.selection.components.clone(),
+                selection_occurrence: model.workspace.content.active_occurrence().cloned(),
                 runs,
                 active_run,
-                plan_payloads: state
-                    .model
-                    .workspace
-                    .content
-                    .simulation_plan_payloads
-                    .clone(),
-                project: state.model.workspace.content.project.clone(),
-                models: state.model.model_library_manager.catalog().clone(),
-                resolutions: state
-                    .model
-                    .model_library_manager
-                    .resolution_records()
-                    .clone(),
-                registry: state.model.pdk_config.technology_registry.clone(),
-                layouts: state
-                    .model
-                    .workspace
-                    .content
-                    .physical_layout_documents()
-                    .clone(),
-                libraries: state.model.library_manager.catalog().clone(),
-                project_sources: state.model.workspace.content.project_sources.clone(),
-                design_management: (*state.model.workspace.content.design_management).clone(),
-                configuration_sets: (*state.model.workspace.content.configuration_sets).clone(),
-                stimulus_library: state.model.workspace.content.stimulus_library.clone(),
-                imported_checkpoints: state
-                    .model
+                plan_payloads: model.workspace.content.simulation_plan_payloads.clone(),
+                project: model.workspace.content.project.clone(),
+                models: model.model_library_manager.catalog().clone(),
+                resolutions: model.model_library_manager.resolution_records().clone(),
+                registry: model.pdk_config.technology_registry.clone(),
+                layouts: model.workspace.content.physical_layout_documents().clone(),
+                libraries: model.library_manager.catalog().clone(),
+                project_sources: model.workspace.content.project_sources.clone(),
+                design_management: (*model.workspace.content.design_management).clone(),
+                configuration_sets: (*model.workspace.content.configuration_sets).clone(),
+                stimulus_library: model.workspace.content.stimulus_library.clone(),
+                imported_checkpoints: model
                     .simulation
                     .retained
                     .imported_monte_carlo_checkpoints
                     .clone(),
-                imported_transient_checkpoints: state
-                    .model
+                imported_transient_checkpoints: model
                     .simulation
                     .retained
                     .imported_transient_checkpoints
                     .clone(),
-                max_parallel_workers: state.model.preferences.solver_worker_limit(),
-                library_folders: state.library_folders().to_vec(),
-                compilation: state
-                    .code
-                    .code_workspace
-                    .veriloga
-                    .receipt
-                    .as_ref()
-                    .map(|receipt| receipt.compilation.clone()),
-                design_checks: state.model.configured_root_design_check_config(),
+                max_parallel_workers: model.preferences.solver_worker_limit(),
+                library_folders: model.library_folders().to_vec(),
+                compilation: state.veriloga_compilation().cloned(),
+                design_checks: model.configured_root_design_check_config(),
                 source_files: Default::default(),
             },
         })
@@ -425,15 +382,14 @@ impl RunWatch {
 }
 
 fn activate_campaign_plan(
-    state: &mut AppState,
+    model: &mut Model,
     plan_id: crate::product::SimulationPlanId,
 ) -> Result<String, String> {
-    let current_id = state.model.sim_setup.stable_analysis_plan()?.id();
+    let current_id = model.sim_setup.stable_analysis_plan()?.id();
     let plan_name = if current_id == plan_id {
-        state.model.sim_setup.active_plan_name().to_string()
+        model.sim_setup.active_plan_name().to_string()
     } else {
-        let stored = state
-            .model
+        let stored = model
             .sim_setup
             .inactive_plans()
             .iter()
@@ -448,28 +404,17 @@ fn activate_campaign_plan(
         stored.name().to_string()
     };
     if current_id != plan_id {
-        state
-            .model
-            .workspace
-            .content
-            .migrate_active_plan_data(current_id);
-        state
-            .model
-            .workspace
-            .content
-            .migrate_inactive_plan_data(plan_id);
-        state
-            .model
+        model.workspace.content.migrate_active_plan_data(current_id);
+        model.workspace.content.migrate_inactive_plan_data(plan_id);
+        model
             .sim_setup
             .activate_plan(plan_id)
             .map_err(|error| error.to_string())?;
-        state
-            .model
+        model
             .workspace
             .content
             .sync_legacy_specs_projection(plan_id);
-        state
-            .model
+        model
             .workspace
             .content
             .validate_simulation_configuration()
@@ -485,7 +430,7 @@ impl SimulationController {
     /// a child sheet or a different library view than the simulation root.
     pub(crate) fn effective_saved_outputs_preflight(
         &self,
-        state: &AppState,
+        model: &Model,
         explicit: &[crate::state::SavedOutput],
         groups: &[crate::state::CaptureGroup],
     ) -> Result<
@@ -497,14 +442,13 @@ impl SimulationController {
         ),
         PreparationError,
     > {
-        let selection_mode = state.model.sim_setup.save_policy.output_selection_mode;
-        let projection = state
-            .model
+        let selection_mode = model.sim_setup.save_policy.output_selection_mode;
+        let projection = model
             .workspace
             .configuration_execution_projection(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
-                &state.model.schematic,
+                &model.library_manager,
+                &model.workspace.content.active_view,
+                &model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
@@ -515,20 +459,19 @@ impl SimulationController {
                 "The configured simulation root is not materialized",
             )
         })?;
-        let plan = state
-            .model
+        let plan = model
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
         // Net names carry no data-file references, so the projection's own
         // extraction is the same answer as a data-root-bound generator.
         let nets = rspice_design::connectivity::summary::projection_nets(
-            state.model.library_manager.catalog(),
+            model.library_manager.catalog(),
             &projection,
             &projection.root().key(),
         );
         let occurrences =
-            projection_occurrence_nets(state.model.library_manager.catalog(), &projection, nets);
+            projection_occurrence_nets(model.library_manager.catalog(), &projection, nets);
         let (outputs, automatic_fallback, membership) = effective_plan_capture(
             selection_mode,
             explicit,
@@ -537,7 +480,7 @@ impl SimulationController {
             &occurrences,
             plan.id(),
         )?;
-        let reports = self.saved_outputs_preflight(state, &outputs);
+        let reports = self.saved_outputs_preflight(model, &outputs);
         Ok((outputs, reports, automatic_fallback, membership))
     }
 
@@ -551,15 +494,14 @@ impl SimulationController {
     /// ask the engine to inspect the exact current design without inventing a
     /// second model-resolution path.
     pub(crate) fn prepare_design_netlist_for_inspection(
-        state: &AppState,
+        model: &Model,
     ) -> Result<String, PreparationError> {
-        let projection = state
-            .model
+        let projection = model
             .workspace
             .configuration_execution_projection(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
-                &state.model.schematic,
+                &model.library_manager,
+                &model.workspace.content.active_view,
+                &model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
@@ -572,28 +514,23 @@ impl SimulationController {
             )
         })?;
         validate_projected_model_binding_authority(
-            state.model.model_library_manager.catalog(),
-            state.model.model_library_manager.resolution_records(),
-            state.model.library_manager.catalog(),
-            state.model.workspace.content.project.technology_binding(),
-            state
-                .model
-                .pdk_config
-                .technology_registry
-                .validated_packages(),
+            model.model_library_manager.catalog(),
+            model.model_library_manager.resolution_records(),
+            model.library_manager.catalog(),
+            model.workspace.content.project.technology_binding(),
+            model.pdk_config.technology_registry.validated_packages(),
             &projection,
         )?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-            state.model.library_manager.catalog(),
+            model.library_manager.catalog(),
             &projection,
         );
-        let source_data = project_netlist_source_data(state);
-        let plan = state
-            .model
+        let source_data = project_netlist_source_data(model);
+        let plan = model
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let payload = state.model.workspace.content.plan_data(plan.id()).ok_or_else(|| {
+        let payload = model.workspace.content.plan_data(plan.id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!(
@@ -627,26 +564,26 @@ impl SimulationController {
             ));
         }
 
-        let has_project_technology = state.project_technology_in_effect();
+        let has_project_technology = model.technology_inputs().project_technology_in_effect();
         let sealed_models = if has_project_technology {
-            state.seal_project_execution_model_sources()
+            model
+                .technology_inputs()
+                .seal_project_execution_model_sources()
         } else {
-            state
-                .model
+            model
                 .model_library_manager
-                .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
+                .seal_execution_sources_for_plan(&model.sim_setup.model_bindings)
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let model_cards = if has_project_technology {
             sealed_models
-                .reference_model_execution_plan(state.model.sim_setup.reference_pvt.process)
+                .reference_model_execution_plan(model.sim_setup.reference_pvt.process)
                 .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
                 .model_cards()
         } else {
             Vec::new()
         };
-        let generated_source = state
-            .model
+        let generated_source = model
             .workspace
             .content
             .bind_generated_netlist_provenance(generated.netlist);
@@ -658,7 +595,7 @@ impl SimulationController {
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
             .try_merge(prepared_model_library_veriloga_runtimes(
                 &sealed_models,
-                state.model.sim_setup.reference_pvt.process,
+                model.sim_setup.reference_pvt.process,
             )?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         for runtime in external_veriloga_runtimes.sources() {
@@ -670,12 +607,12 @@ impl SimulationController {
         }
         let source = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
             &source,
-            &state.model.sim_setup.options,
+            &model.sim_setup.options,
         );
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file(),
-            &state.include_search_chain(),
+            &model.include_search_chain(),
             Some(&sealed_models),
         )?;
         Ok(source)
@@ -685,16 +622,14 @@ impl SimulationController {
     /// its exports. Operand validation waits for preparation, where includes
     /// and model-owned parameters have been resolved into the execution deck.
     pub(crate) fn append_plan_measurements_to_generated_netlist(
-        state: &AppState,
+        model: &Model,
         source: &str,
     ) -> Result<String, PreparationError> {
-        let plan = state
-            .model
+        let plan = model
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let payload = state
-            .model
+        let payload = model
             .workspace
             .content
             .plan_data(plan.id())
@@ -728,7 +663,7 @@ impl SimulationController {
     /// is prepared again in the frame that starts it.
     pub(crate) fn validate_manual_deck_document(
         &mut self,
-        state: &AppState,
+        state: &impl RunHost,
     ) -> Result<PreparedRunMetadata, PreparationError> {
         self.clear_prepared_run();
         let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
@@ -755,7 +690,7 @@ impl SimulationController {
     /// Automation prepares through [`Self::prepare_run_set_for_evidence`].
     pub(crate) fn prepare_run_set_for_preflight(
         &mut self,
-        state: &AppState,
+        state: &impl RunHost,
     ) -> Result<PreparedRunMetadata, PreparationError> {
         let identity = super::run_inputs::RunInputIdentity::of_run_set(state);
         let files = super::run_inputs::RecordingSourceFiles::default();
@@ -779,7 +714,7 @@ impl SimulationController {
     /// holds.
     pub(crate) fn prepare_run_set_for_evidence(
         &mut self,
-        state: &AppState,
+        state: &impl RunHost,
     ) -> Result<(PreparedRunMetadata, super::PreparedRunSetInputs), PreparationError> {
         let metadata = self.prepare_run_set_for_preflight(state)?;
         let inputs = self
@@ -811,7 +746,7 @@ impl SimulationController {
     /// an earlier member is executing.
     pub(crate) fn prepare_and_start_campaign(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         name: &str,
         member_ids: &[crate::product::SimulationPlanId],
     ) -> Result<super::SimulationCampaignDispatchReceipt, String> {
@@ -849,7 +784,7 @@ impl SimulationController {
         let mut members = VecDeque::with_capacity(member_ids.len());
         let mut task_count = 0_usize;
         for plan_id in member_ids {
-            let plan_name = activate_campaign_plan(&mut frozen_state, plan_id)?;
+            let plan_name = activate_campaign_plan(frozen_state.model_mut(), plan_id)?;
             let snapshot =
                 Self::build_prepared_snapshot(&frozen_state, SimulationRunIntent::SimulateRunSet)
                     .map_err(|error| {
@@ -870,8 +805,8 @@ impl SimulationController {
         let campaign_id = crate::product::SimulationCampaignId::new();
         let member_count = members.len();
         self.clear_prepared_run();
-        state.runs.preflight.invalidate();
-        self.design_execution_epoch = state.model.design_execution_epoch;
+        state.runs_mut().preflight.invalidate();
+        self.design_execution_epoch = state.model().design_execution_epoch;
         self.active_campaign = Some(super::ActiveSimulationCampaign {
             id: campaign_id,
             name: name.to_owned(),
@@ -883,7 +818,7 @@ impl SimulationController {
             pending: members,
             started: crate::time_compat::Instant::now(),
         });
-        state.record(
+        state.model_mut().record(
             LogSeverity::Info,
             crate::diagnostics::LogSource::Run,
             format!("Campaign '{name}' queued: {member_count} plans, {task_count} analyses"),
@@ -898,7 +833,7 @@ impl SimulationController {
 
     pub(super) fn dispatch_next_campaign_member(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
     ) -> Result<(), String> {
         loop {
             let Some(mut campaign) = self.active_campaign.take() else {
@@ -917,7 +852,7 @@ impl SimulationController {
                 let completed = campaign
                     .completed_count
                     .saturating_sub(campaign.failed_count);
-                let summary = state.record(
+                let summary = state.model_mut().record(
                     severity,
                     crate::diagnostics::LogSource::Run,
                     format!(
@@ -925,11 +860,11 @@ impl SimulationController {
                         campaign.name, campaign.failed_count
                     ),
                 );
-                state.model.simulation.execution.status = format!("Campaign {outcome}");
+                state.model_mut().simulation.execution.status = format!("Campaign {outcome}");
                 // A campaign the reader cancelled is not news to them.
                 if !campaign.cancelled {
                     state
-                        .runs
+                        .runs_mut()
                         .run_watch
                         .campaign_outcome(CampaignOutcome::Finished {
                             name: campaign.name,
@@ -952,7 +887,7 @@ impl SimulationController {
                 Err(error) => {
                     let member_index = campaign.dispatched_count;
                     self.active_campaign = Some(campaign);
-                    let line = state.record(
+                    let line = state.model_mut().record(
                         LogSeverity::Error,
                         crate::diagnostics::LogSource::Run,
                         format!(
@@ -979,7 +914,7 @@ impl SimulationController {
             let dispatch = match dispatch {
                 Ok(dispatch) => dispatch,
                 Err(error) => {
-                    let line = state.record(
+                    let line = state.model_mut().record(
                         LogSeverity::Error,
                         crate::diagnostics::LogSource::Run,
                         format!("Campaign member '{member_name}' could not be authorized: {error}"),
@@ -1000,7 +935,7 @@ impl SimulationController {
             {
                 Ok(()) => return Ok(()),
                 Err(error) => {
-                    let line = state.record(
+                    let line = state.model_mut().record(
                         LogSeverity::Error,
                         crate::diagnostics::LogSource::Run,
                         format!("Campaign member '{member_name}' could not start: {error}"),
@@ -1029,7 +964,7 @@ impl SimulationController {
     /// will ever end for the shell to see.
     fn refuse_campaign_member(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         member_index: u32,
         member_name: &str,
         refusal: CampaignMemberRefusal,
@@ -1042,15 +977,17 @@ impl SimulationController {
             .expect("a member is refused while its campaign is installed");
         campaign.completed_count = campaign.completed_count.saturating_add(1);
         campaign.failed_count = campaign.failed_count.saturating_add(1);
-        state.publish_campaign_member_refusal(
+        let facts = state.slot_facts();
+        state.model_mut().publish_campaign_member_refusal(
             campaign.id,
             member_index,
             member_name,
             refusal,
             error,
+            facts,
         );
         state
-            .runs
+            .runs_mut()
             .run_watch
             .campaign_outcome(CampaignOutcome::MemberRefused {
                 campaign: campaign.name.clone(),
@@ -1060,7 +997,7 @@ impl SimulationController {
             });
     }
 
-    pub(super) fn complete_campaign_member(&mut self, state: &mut AppState, succeeded: bool) {
+    pub(super) fn complete_campaign_member(&mut self, state: &mut impl RunHost, succeeded: bool) {
         let Some(campaign) = self.active_campaign.as_mut() else {
             return;
         };
@@ -1069,13 +1006,13 @@ impl SimulationController {
             campaign.failed_count = campaign.failed_count.saturating_add(1);
         }
         if let Err(error) = self.dispatch_next_campaign_member(state) {
-            state.record(
+            state.model_mut().record(
                 LogSeverity::Error,
                 crate::diagnostics::LogSource::Run,
                 format!("Campaign stopped: {error}"),
             );
             self.active_campaign = None;
-            state.model.simulation.execution.status = "Campaign stopped".to_owned();
+            state.model_mut().simulation.execution.status = "Campaign stopped".to_owned();
         }
     }
 
@@ -1088,7 +1025,7 @@ impl SimulationController {
     /// Whether the run retained as checked would be dispatched as it stands:
     /// nothing it was prepared from has moved, judged as its dispatch judges
     /// it. `false` where no run is retained.
-    pub(crate) fn retained_run_is_current(&self, state: &AppState) -> bool {
+    pub(crate) fn retained_run_is_current(&self, state: &impl RunHost) -> bool {
         let (Some(inputs), Some(snapshot)) = (
             self.retained_run_inputs.as_ref(),
             self.run_authorization.retained_snapshot(),
@@ -1120,9 +1057,9 @@ impl SimulationController {
     /// nothing is prepared here.
     pub(super) fn consume_snapshot_for_dispatch(
         &mut self,
-        state: &AppState,
+        state: &impl RunHost,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
-        let intent = state.model.simulation.execution.run_intent;
+        let intent = state.model().simulation.execution.run_intent;
         let inputs = self.retained_run_inputs.take();
         self.run_authorization.consume(intent, |snapshot| {
             inputs
@@ -1132,7 +1069,7 @@ impl SimulationController {
     }
 
     fn build_prepared_snapshot(
-        state: &AppState,
+        state: &impl RunHost,
         intent: SimulationRunIntent,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         match intent {
@@ -1141,25 +1078,27 @@ impl SimulationController {
         }
     }
 
-    fn build_prepared_run_set(state: &AppState) -> Result<PreparedRunSnapshot, PreparationError> {
+    fn build_prepared_run_set(
+        state: &impl RunHost,
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
         Self::build_prepared_run_set_reading(state, &crate::simulation::table_route::SourceFiles)
     }
 
     /// [`Self::build_prepared_run_set`], with the data files read through
     /// `files`.
     fn build_prepared_run_set_reading(
-        state: &AppState,
+        state: &impl RunHost,
         files: &dyn rspice_simulation::netlist_gen::NetlistSourceHost,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         #[cfg(test)]
         thread_preparations::record(SimulationRunIntent::SimulateRunSet);
-        let execution_projection = state
-            .model
+        let model = state.model();
+        let execution_projection = model
             .workspace
             .configuration_execution_projection(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
-                &state.model.schematic,
+                &model.library_manager,
+                &model.workspace.content.active_view,
+                &model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
@@ -1171,7 +1110,7 @@ impl SimulationController {
     }
 
     fn build_prepared_manual_deck(
-        state: &AppState,
+        state: &impl RunHost,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         #[cfg(test)]
         thread_preparations::record(SimulationRunIntent::ManualDeck);
@@ -1185,44 +1124,40 @@ impl SimulationController {
 /// The deck a manual run is prepared from: the netlist document the session
 /// shows, the file it came from, and what composing it reads.
 pub(crate) fn manual_source_inputs(
-    state: &AppState,
+    state: &impl RunHost,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
-    if state.code.netlist.active_document_initialized
-        && state.code.netlist.active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-    {
+    let shown = state.netlist_shown();
+    let model = state.model();
+    if shown.settled && shown.comparison {
         return Err(PreparationError::new(
             PreparationStage::SourceChecks,
             "Generated comparison documents cannot be executed",
         ));
     }
-    let owned_active = state.code.netlist.active_document
-        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-        || (!state.code.netlist.active_document_initialized
-            && state.model.simulation.source.netlist_content.is_empty()
-            && state.model.workspace.content.netlist_source.is_some());
+    let owned_active = shown.owned_source
+        || (!shown.settled
+            && model.simulation.source.netlist_content.is_empty()
+            && model.workspace.content.netlist_source.is_some());
     let source = if owned_active {
-        state
-            .model
+        model
             .workspace
             .content
             .netlist_source
             .as_deref()
-            .unwrap_or(state.model.simulation.source.netlist_content.as_str())
+            .unwrap_or(model.simulation.source.netlist_content.as_str())
     } else {
-        state.model.simulation.source.netlist_content.as_str()
+        model.simulation.source.netlist_content.as_str()
     };
     let origin = if owned_active {
-        state.model.workspace.content.netlist_source_path.as_deref()
+        model.workspace.content.netlist_source_path.as_deref()
     } else {
-        state.model.schematic.session.current_file.as_deref()
+        model.schematic.session.current_file.as_deref()
     };
     Ok(
         crate::simulation::execution::preparation::ManualSourceInputs {
             source,
-            descriptor: state.model.workspace.content.netlist_descriptor.as_ref(),
-            generated_artifact: state
-                .model
+            descriptor: model.workspace.content.netlist_descriptor.as_ref(),
+            generated_artifact: model
                 .workspace
                 .content
                 .netlist_document
@@ -1247,30 +1182,22 @@ pub(crate) fn manual_source_inputs(
 /// corpus and this key is asked for on every frame the Bins & geometry page or
 /// the analysis editor paints. See that method for what the key covers and why
 /// the coverage is complete.
-pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product::ContentDigest {
-    let plan_identity = state.model.sim_setup.analysis_plan.as_ref().map_or_else(
+pub(crate) fn design_inspection_input_digest(model: &Model) -> crate::product::ContentDigest {
+    let plan_identity = model.sim_setup.analysis_plan.as_ref().map_or_else(
         || "none".to_owned(),
         |plan| format!("{}:{}", plan.id(), plan.revision().get()),
     );
-    let model_library_identity = state
-        .model
-        .model_library_manager
-        .design_inspection_catalog_key();
+    let model_library_identity = model.model_library_manager.design_inspection_catalog_key();
     let material = format!(
         "{}\0{}\0{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
-        state.model.design_execution_epoch,
-        state.model.workspace.content.project.revision().get(),
-        state
-            .model
-            .workspace
-            .content
-            .simulation_root_reference()
-            .key(),
-        state.model.workspace.content.active_view.key(),
+        model.design_execution_epoch,
+        model.workspace.content.project.revision().get(),
+        model.workspace.content.simulation_root_reference().key(),
+        model.workspace.content.active_view.key(),
         plan_identity,
-        state.model.sim_setup.reference_pvt.process,
-        state.model.sim_setup.reference_pvt.temperature_celsius,
-        state.model.sim_setup.options.to_spice_options(),
+        model.sim_setup.reference_pvt.process,
+        model.sim_setup.reference_pvt.temperature_celsius,
+        model.sim_setup.options.to_spice_options(),
         model_library_identity,
     );
     content_digest(
@@ -1281,13 +1208,13 @@ pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product
 
 #[cfg(test)]
 fn touchstone_export_policy<'a>(
-    state: &AppState,
+    model: &Model,
     tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
     source_path: Option<&Path>,
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
     crate::simulation::execution::preparation::touchstone_export_policy(
-        &state.model.sim_setup.sp,
-        state.model.schematic.document(),
+        &model.sim_setup.sp,
+        model.schematic.document(),
         tasks,
         source_path,
     )
@@ -1311,7 +1238,7 @@ impl SimulationController {
     /// is held for dispatch to ask again.
     pub(in crate::simulation::controller) fn retain_prepared_from(
         &mut self,
-        state: &AppState,
+        state: &impl RunHost,
         snapshot: PreparedRunSnapshot,
     ) -> Result<(), PreparationError> {
         let identity = match snapshot.intent() {

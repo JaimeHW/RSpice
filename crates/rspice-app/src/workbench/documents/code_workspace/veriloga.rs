@@ -934,7 +934,7 @@ fn start_veriloga_compile(
                     .ok()
             }
             crate::state::SimulationRunIntent::SimulateRunSet => {
-                SimulationController::prepare_design_netlist_for_inspection(state)
+                SimulationController::prepare_design_netlist_for_inspection(&state.model)
                     .ok()
                     .map(|netlist| {
                         use rspice_simulation::project_veriloga::preparation::{

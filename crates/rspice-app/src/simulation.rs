@@ -20,6 +20,7 @@ pub(crate) mod plan;
 pub(crate) use rspice_simulation::point_family;
 #[cfg(test)]
 pub(crate) mod results;
+mod run_host;
 #[cfg(test)]
 pub(crate) mod run_set_tests;
 pub(crate) use rspice_simulation::runner;
@@ -35,6 +36,7 @@ pub(crate) mod veriloga_tests;
 pub use config::AnalysisConfig;
 pub use controller::SimulationController;
 pub use rspice_simulation::results::{SampledWaveform, SimulationResult};
+pub(crate) use run_host::{NetlistShown, RunHost, ViewerReading};
 // Test-only aliases for private modules: execution reaches the bridge and
 // these helpers through their module paths.
 pub use runner::SimulationRunner;

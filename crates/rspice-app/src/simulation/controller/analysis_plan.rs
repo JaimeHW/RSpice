@@ -15,10 +15,10 @@ impl SimulationController {
     /// consult mutable draft rows after the task specs have been prepared.
     pub fn saved_output_preflight(
         &self,
-        state: &AppState,
+        model: &Model,
         output: &crate::state::SavedOutput,
     ) -> rspice_simulation::output_contract::SavedOutputPreflightReport {
-        self.saved_outputs_preflight(state, std::slice::from_ref(output))
+        self.saved_outputs_preflight(model, std::slice::from_ref(output))
             .pop()
             .expect("single-output preflight always returns one report")
     }
@@ -28,13 +28,13 @@ impl SimulationController {
     /// number of rows rendered by Simulation Studio.
     pub fn saved_outputs_preflight(
         &self,
-        state: &AppState,
+        model: &Model,
         outputs: &[crate::state::SavedOutput],
     ) -> Vec<rspice_simulation::output_contract::SavedOutputPreflightReport> {
         if outputs.is_empty() {
             return Vec::new();
         }
-        let plan = match Self::build_analysis_plan(&state.model.sim_setup) {
+        let plan = match Self::build_analysis_plan(&model.sim_setup) {
             Ok(plan) => plan,
             Err(errors) => {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
@@ -42,13 +42,14 @@ impl SimulationController {
         };
         // Rendering an output table is not authorization to run, so a project
         // without an attached technology compiles it from the model library.
-        let sealed_sources = if state.project_technology_in_effect() {
-            state.seal_project_execution_model_sources()
+        let sealed_sources = if model.technology_inputs().project_technology_in_effect() {
+            model
+                .technology_inputs()
+                .seal_project_execution_model_sources()
         } else {
-            state
-                .model
+            model
                 .model_library_manager
-                .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
+                .seal_execution_sources_for_plan(&model.sim_setup.model_bindings)
         };
         let sealed_models = match sealed_sources {
             Ok(sealed) => sealed,
@@ -56,7 +57,7 @@ impl SimulationController {
                 return invalid_saved_output_reports(outputs.len(), error);
             }
         };
-        let tasks = match Self::build_queue_from_plan(state, &plan, &sealed_models) {
+        let tasks = match Self::build_queue_from_plan(model, &plan, &sealed_models) {
             Ok(tasks) => tasks,
             Err(errors) => {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
@@ -83,25 +84,17 @@ impl SimulationController {
     }
 
     pub(super) fn build_queue_from_plan(
-        state: &AppState,
+        model: &Model,
         plan: &FrozenSimulationPlan,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<Vec<PreparedTask>, Vec<String>> {
         crate::simulation::execution::prepare_plan_tasks(
-            analysis_inputs(state),
+            analysis_inputs(model),
             plan,
             sealed_model_sources,
-            &state
-                .model
-                .simulation
-                .retained
-                .imported_monte_carlo_checkpoints,
-            &state
-                .model
-                .simulation
-                .retained
-                .imported_transient_checkpoints,
-            state.model.schematic.session.current_file.as_deref(),
+            &model.simulation.retained.imported_monte_carlo_checkpoints,
+            &model.simulation.retained.imported_transient_checkpoints,
+            model.schematic.session.current_file.as_deref(),
         )
     }
 }

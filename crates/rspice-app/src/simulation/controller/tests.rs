@@ -43,7 +43,7 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
     controller.current_run_id = Some(run_sequence);
     controller.current_provenance = Some(synthetic_result_provenance());
     let expected_owner = controller
-        .in_flight_specialized_viewer_provenance(&state)
+        .in_flight_specialized_viewer_provenance(&state.model)
         .expect("the active prepared analysis owns specialized-viewer caches");
     let valid_time = (0..17).map(|index| index as f64).collect::<Vec<_>>();
     let valid_values = (0..17)
@@ -304,7 +304,7 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
 
     assert!(
         !controller
-            .retain_completed_analysis(&mut state, Some(run_sequence), failed, provenance)
+            .retain_completed_analysis(&mut state.model, Some(run_sequence), failed, provenance)
             .expect("failed result is retained as failure evidence")
     );
     assert!(!controller.successful_analysis_instances.contains(&instance));
@@ -337,7 +337,7 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
     let failed = AnalysisResult::failed(1, AnalysisType::DcOp, "OP", "solver gave up")
         .with_provenance(synthetic_result_provenance());
     assert_eq!(
-        controller.seal_failed_run(&mut state, Some(run_sequence), Some(failed), None),
+        controller.seal_failed_run(&mut state.model, Some(run_sequence), Some(failed), None),
         Vec::<String>::new(),
         "the default save policy admits a failure record"
     );
@@ -362,7 +362,7 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
     let terminal = Some(SimulationRunLifecycle::Aborted);
     assert!(
         controller
-            .seal_failed_run(&mut state, Some(run_sequence), None, terminal)
+            .seal_failed_run(&mut state.model, Some(run_sequence), None, terminal)
             .is_empty()
     );
     assert_ne!(state.model.simulation.view.data_version, before);
@@ -383,7 +383,7 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
     for absent in [Some(run_sequence + 4_096), None] {
         assert!(
             controller
-                .seal_failed_run(&mut state, absent, None, None)
+                .seal_failed_run(&mut state.model, absent, None, None)
                 .is_empty()
         );
         assert_eq!(state.model.simulation.view.data_version, before);
@@ -494,7 +494,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     };
 
     let error = controller
-        .retain_completed_analysis(&mut state, Some(run_sequence), analysis, provenance)
+        .retain_completed_analysis(&mut state.model, Some(run_sequence), analysis, provenance)
         .expect_err("oversized evidence must not enter the retained run");
 
     assert!(error.contains("storage limit"));

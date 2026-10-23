@@ -210,7 +210,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
     for success in [false, true] {
         let (controller, mut state) = fixture();
         controller
-            .retain_transient_checkpoint(&mut state, bytes[0].clone())
+            .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
             .unwrap();
         let before = state.model.simulation.view.data_version;
         let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
@@ -222,7 +222,11 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
                 "#fff",
             )]);
         controller
-            .retain_live_transient_analysis(&mut state, controller.current_run_id.unwrap(), partial)
+            .retain_live_transient_analysis(
+                &mut state.model,
+                controller.current_run_id.unwrap(),
+                partial,
+            )
             .unwrap();
         assert_ne!(before, state.model.simulation.view.data_version);
         let retained = state.model.simulation.active_analysis().unwrap();
@@ -240,7 +244,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
 
         // A later checkpoint keeps the existing live output; a stale one cannot replace it.
         controller
-            .retain_transient_checkpoint(&mut state, bytes[1].clone())
+            .retain_transient_checkpoint(&mut state.model, bytes[1].clone())
             .unwrap();
         assert_eq!(
             state
@@ -254,7 +258,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         );
         assert!(
             controller
-                .retain_transient_checkpoint(&mut state, bytes[0].clone())
+                .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
                 .is_err()
         );
         let persisted = crate::io::capture_simulation_results(&state.model.simulation);
@@ -321,7 +325,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         run.analyses[0].validate_retained_evidence().unwrap();
         assert!(
             controller
-                .retain_transient_checkpoint(&mut state, bytes[1].clone())
+                .retain_transient_checkpoint(&mut state.model, bytes[1].clone())
                 .is_err()
         );
     }
@@ -338,7 +342,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         .max_external_data_bytes = 1;
     assert!(
         controller
-            .retain_transient_checkpoint(&mut state, bytes[0].clone())
+            .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
             .is_err()
     );
     controller.current_execution_limits = Some(ResourceLimits::default());
@@ -351,7 +355,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
     };
     assert!(
         controller
-            .retain_transient_checkpoint(&mut state, bytes[0].clone())
+            .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
             .is_err()
     );
     assert!(
@@ -390,7 +394,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         .clear();
     assert!(
         controller
-            .retain_transient_checkpoint(&mut state, bytes[0].clone())
+            .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
             .is_err()
     );
     controller
@@ -403,7 +407,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         .times
         .push(7e-9);
     controller
-        .retain_transient_checkpoint(&mut state, bytes[0].clone())
+        .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
         .unwrap();
     let retained = state.model.simulation.active_analysis().unwrap();
     for case in 0..3 {
@@ -422,7 +426,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         assert!(invalid.validate_retained_evidence().is_err());
     }
     let errors = controller.seal_failed_run(
-        &mut state,
+        &mut state.model,
         controller.current_run_id,
         None,
         Some(SimulationRunLifecycle::Aborted),
@@ -439,9 +443,9 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
     controller.runner = super::super::test_execution::start_manual_deck(DECK);
     super::super::test_execution::wait_until_finished_unpolled(&controller.runner);
     controller
-        .retain_transient_checkpoint(&mut state, bytes[0].clone())
+        .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
         .unwrap();
-    controller.accept_transient_checkpoint(&mut state, Arc::from(&b"corrupt"[..]));
+    controller.accept_transient_checkpoint(&mut state.model, Arc::from(&b"corrupt"[..]));
     controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Failed);
@@ -468,7 +472,7 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
     let bytes = images();
     let (controller, mut state) = fixture();
     controller
-        .retain_transient_checkpoint(&mut state, bytes[0].clone())
+        .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
         .unwrap();
     let evidence = state
         .model

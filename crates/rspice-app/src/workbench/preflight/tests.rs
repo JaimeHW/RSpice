@@ -6,9 +6,10 @@
 
 use super::*;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
-use crate::workbench::state::ConsolePage;
+use crate::workbench::state::{ConsolePage, Workspace};
 
 mod engine;
 mod pipeline;
@@ -309,12 +310,12 @@ fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
     // The reference point is inside the range, so nothing is said.
     state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
     assert!(
-        temperature_validity_advisories(&state).is_empty(),
+        temperature_validity_advisories(&state.model).is_empty(),
         "a corner that covers the run set is silent"
     );
 
     state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
-    let advisories = temperature_validity_advisories(&state);
+    let advisories = temperature_validity_advisories(&state.model);
     assert_eq!(advisories.len(), 1);
     assert!(
         advisories[0].message.contains("hot")
@@ -334,7 +335,7 @@ fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
 
     // The endpoint itself is qualified, which is the rule the corner owns.
     state.model.sim_setup.reference_pvt.temperature_celsius = 125.0;
-    assert!(temperature_validity_advisories(&state).is_empty());
+    assert!(temperature_validity_advisories(&state.model).is_empty());
 
     // And it is an advisory: the report it lands in blocks on nothing.
     state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
@@ -1487,7 +1488,7 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
         .expect("the fixture library is loaded");
     app.state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
-    let advisories = temperature_validity_advisories(&app.state);
+    let advisories = temperature_validity_advisories(&app.state.model);
     let remediation = advisories[0]
         .remediation
         .clone()

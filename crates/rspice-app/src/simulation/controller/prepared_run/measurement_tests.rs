@@ -203,7 +203,8 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         crate::workbench::menu_bar::build_menu_netlist(&state, crate::io::NetlistFormat::Spice)
             .unwrap()
             .source;
-    let inspection = SimulationController::prepare_design_netlist_for_inspection(&state).unwrap();
+    let inspection =
+        SimulationController::prepare_design_netlist_for_inspection(&state.model).unwrap();
     assert_ne!(
         baseline_generation,
         crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)

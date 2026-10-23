@@ -1415,7 +1415,7 @@ fn build_envelope_source_catalog(app: &AppState) -> EnvelopeSourceCatalog {
 }
 
 fn envelope_source_catalog_input_digest(app: &AppState) -> ContentDigest {
-    crate::simulation::controller::prepared_run::design_inspection_input_digest(app)
+    crate::simulation::controller::prepared_run::design_inspection_input_digest(&app.model)
 }
 
 fn build_envelope_source_catalog_with_digest(
@@ -1425,7 +1425,7 @@ fn build_envelope_source_catalog_with_digest(
     let catalog = (|| -> Result<(Vec<String>, String), String> {
         let source =
             crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
-                app,
+                &app.model,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -1494,7 +1494,7 @@ fn build_noise_domain_catalog_with_digest(
     let catalog = (|| -> Result<(Vec<String>, Vec<String>), String> {
         let source =
             crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
-                &app.state,
+                &app.state.model,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -1554,7 +1554,7 @@ fn tf_inference_catalog(ui: &Ui, app: &RSpiceApp) -> TfInferenceCatalog {
     let inference = (|| -> Result<TfRunConfig, String> {
         let source =
             crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
-                &app.state,
+                &app.state.model,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -2011,7 +2011,7 @@ fn plan_statement_for(
     let stored_plans = std::mem::take(&mut state.model.sim_setup.inactive_plans);
     let restore = state.model.sim_setup.clone();
     state.model.sim_setup.apply_analysis_draft_projection(draft);
-    let statement = controller.analysis_draft_directive(state, draft);
+    let statement = controller.analysis_draft_directive(&state.model, draft);
     state.model.sim_setup = restore;
     state.model.sim_setup.inactive_plans = stored_plans;
     statement

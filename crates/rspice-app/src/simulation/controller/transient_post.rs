@@ -5,10 +5,8 @@
 
 use super::*;
 use crate::state::{
-    ActiveViewer, AnalysisType, RunEvent, RunEventSink, SharedWaveformValues,
-    SpecializedViewerCacheProvenance,
+    ActiveViewer, AnalysisType, RunEvent, SharedWaveformValues, SpecializedViewerCacheProvenance,
 };
-use crate::workbench::app_state::AppState;
 use rspice_results_ui::eye_diagram::{
     EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
     estimate_unit_interval, fold_anchor,
@@ -90,7 +88,7 @@ pub(super) struct TransientPostCoordinator {
 impl SimulationController {
     pub(crate) fn ensure_transient_viewer_data(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         viewer: ActiveViewer,
     ) -> DerivedViewerLoadState {
         self.sync_transient_post_views(state);
@@ -101,15 +99,17 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn mark_transient_view_ready(&mut self, state: &mut AppState, viewer: ActiveViewer) {
-        let Some(analysis) = self.active_transient_analysis_key(state) else {
+    pub(crate) fn mark_transient_view_ready(
+        &mut self,
+        state: &mut impl RunHost,
+        viewer: ActiveViewer,
+    ) {
+        let Some(analysis) = self.active_transient_analysis_key(state.model()) else {
             return;
         };
 
         match viewer {
-            ActiveViewer::EyeDiagram
-                if state.results.analysis.eye_diagram_state.trace_count() > 0 =>
-            {
+            ActiveViewer::EyeDiagram if state.viewer_reading().eye_has_traces => {
                 state.apply_run_event(RunEvent::ViewerCacheConfirmed {
                     viewer,
                     owner: analysis,
@@ -119,7 +119,7 @@ impl SimulationController {
                     availability: DerivedViewAvailability::Ready,
                 });
             }
-            ActiveViewer::Fft if state.results.analysis.fft_state.has_data() => {
+            ActiveViewer::Fft if state.viewer_reading().fft_has_data => {
                 state.apply_run_event(RunEvent::ViewerCacheConfirmed {
                     viewer,
                     owner: analysis,
@@ -133,8 +133,8 @@ impl SimulationController {
         }
     }
 
-    pub(super) fn sync_transient_post_views(&mut self, state: &mut AppState) {
-        let active_analysis = self.active_transient_analysis_key(state);
+    pub(super) fn sync_transient_post_views(&mut self, state: &mut impl RunHost) {
+        let active_analysis = self.active_transient_analysis_key(state.model());
         self.cancel_stale_transient_task(DerivedViewKind::EyeDiagram, active_analysis);
         self.cancel_stale_transient_task(DerivedViewKind::Fft, active_analysis);
 
@@ -162,7 +162,7 @@ impl SimulationController {
         self.poll_transient_task(state, DerivedViewKind::Fft, active_analysis);
     }
 
-    pub(super) fn invalidate_transient_post_views(&mut self, state: &mut AppState) {
+    pub(super) fn invalidate_transient_post_views(&mut self, state: &mut impl RunHost) {
         self.cancel_task_slot(DerivedViewKind::EyeDiagram);
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
@@ -170,7 +170,7 @@ impl SimulationController {
         state.apply_run_event(RunEvent::TransientResultReplaced);
     }
 
-    pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut AppState) {
+    pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut impl RunHost) {
         let Some(source) = self.current_transient_waveform_source(state) else {
             return;
         };
@@ -179,27 +179,27 @@ impl SimulationController {
         });
     }
 
-    fn ensure_eye_diagram_data(&mut self, state: &mut AppState) -> DerivedViewerLoadState {
+    fn ensure_eye_diagram_data(&mut self, state: &mut impl RunHost) -> DerivedViewerLoadState {
         // The reader's bit period is checked before anything else, including
         // whether an eye is already loaded: an eye folded at the old period
         // is not this eye at a different zoom, it is a different measurement.
         // Editing the rate has to rebuild, not be swallowed by the
         // already-have-data shortcut below.
-        if let Some(analysis) = self.active_transient_analysis_key(state) {
+        if let Some(analysis) = self.active_transient_analysis_key(state.model()) {
             let requested = state.eye_timebase_for(analysis);
-            if !eye_matches_timebase(state, requested) {
+            if !eye_matches_timebase(state.viewer_reading().eye_timebase.as_ref(), requested) {
                 self.cancel_task_slot(DerivedViewKind::EyeDiagram);
                 self.transient_post.eye_loaded = None;
                 state.apply_run_event(RunEvent::EyeTimebaseChanged);
             }
         }
 
-        if state.results.analysis.eye_diagram_state.trace_count() > 0 {
+        if state.viewer_reading().eye_has_traces {
             self.mark_transient_view_ready(state, ActiveViewer::EyeDiagram);
             return DerivedViewerLoadState::Ready;
         }
 
-        let Some(active_analysis) = self.active_transient_analysis_key(state) else {
+        let Some(active_analysis) = self.active_transient_analysis_key(state.model()) else {
             return DerivedViewerLoadState::Unavailable;
         };
         if let Some(loaded) = self.transient_post.eye_loaded
@@ -231,13 +231,13 @@ impl SimulationController {
         DerivedViewerLoadState::Loading
     }
 
-    fn ensure_fft_data(&mut self, state: &mut AppState) -> DerivedViewerLoadState {
-        if state.results.analysis.fft_state.has_data() {
+    fn ensure_fft_data(&mut self, state: &mut impl RunHost) -> DerivedViewerLoadState {
+        if state.viewer_reading().fft_has_data {
             self.mark_transient_view_ready(state, ActiveViewer::Fft);
             return DerivedViewerLoadState::Ready;
         }
 
-        let Some(active_analysis) = self.active_transient_analysis_key(state) else {
+        let Some(active_analysis) = self.active_transient_analysis_key(state.model()) else {
             return DerivedViewerLoadState::Unavailable;
         };
         if let Some(loaded) = self.transient_post.fft_loaded
@@ -248,7 +248,7 @@ impl SimulationController {
                     // `has_data` was false above, so this marker became stale
                     // after an in-place viewer recompute or explicit clear.
                     state.apply_run_event(RunEvent::FftEmptied);
-                    if state.results.analysis.fft_state.last_error.is_some() {
+                    if state.viewer_reading().fft_failed {
                         self.transient_post.fft_loaded = Some(LoadedDerivedView {
                             analysis: active_analysis,
                             availability: DerivedViewAvailability::Unavailable,
@@ -288,7 +288,7 @@ impl SimulationController {
 
     fn poll_transient_task(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         view: DerivedViewKind,
         active_analysis: Option<SpecializedViewerCacheProvenance>,
     ) {
@@ -346,7 +346,7 @@ impl SimulationController {
                     input,
                 });
                 // The viewer holds a spectrum exactly when it accepted the input.
-                let available = state.results.analysis.fft_state.has_data();
+                let available = state.viewer_reading().fft_has_data;
                 self.transient_post.fft_loaded = Some(LoadedDerivedView {
                     analysis: message.analysis,
                     availability: if available {
@@ -436,31 +436,30 @@ impl SimulationController {
 
     fn active_transient_analysis_key(
         &self,
-        state: &AppState,
+        model: &Model,
     ) -> Option<SpecializedViewerCacheProvenance> {
-        let analysis = state.model.simulation.active_analysis()?;
+        let analysis = model.simulation.active_analysis()?;
         Self::analysis_supports_transient_derivation(analysis.analysis_type)
-            .then(|| state.model.active_specialized_viewer_cache_provenance())
+            .then(|| model.active_specialized_viewer_cache_provenance())
             .flatten()
     }
 
-    fn current_transient_waveform_source(&self, state: &AppState) -> Option<DerivedWaveformSource> {
-        let analysis = state.model.simulation.active_analysis()?;
-        let analysis_key = self.active_transient_analysis_key(state)?;
-        let preferred_source = state.results.analysis.fft_state.selected_source.as_deref();
+    fn current_transient_waveform_source(
+        &self,
+        state: &impl RunHost,
+    ) -> Option<DerivedWaveformSource> {
+        let analysis = state.model().simulation.active_analysis()?;
+        let analysis_key = self.active_transient_analysis_key(state.model())?;
+        let preferred_source = state.viewer_reading().fft_source;
         let (source_name, waveform) =
-            Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_source)?;
+            Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_source.as_deref())?;
 
         Some(DerivedWaveformSource {
             analysis: analysis_key,
             source_name,
             time: Arc::clone(&waveform.x),
             values: Arc::clone(&waveform.y),
-            fft_options: state
-                .results
-                .analysis
-                .fft_state
-                .input_options_for_waveform(&waveform.x),
+            fft_options: state.fft_input_options(&waveform.x),
             eye_timebase: state.eye_timebase_for(analysis_key),
         })
     }
@@ -482,13 +481,8 @@ impl SimulationController {
 /// agree at the stated rate) is an answer, not a request: keying on it would
 /// make every incoherent eye disagree with the rate that produced it and
 /// rebuild itself on every frame, forever.
-fn eye_matches_timebase(state: &AppState, requested: EyeTimebase) -> bool {
-    let Some(provenance) = state
-        .results
-        .analysis
-        .eye_diagram_state
-        .timebase_provenance()
-    else {
+fn eye_matches_timebase(loaded: Option<&EyeTimebaseProvenance>, requested: EyeTimebase) -> bool {
+    let Some(provenance) = loaded else {
         return true;
     };
     match (provenance, requested) {
@@ -1094,10 +1088,15 @@ mod tests {
             .eye_diagram_state
             .load_data_with_timebase(data.expect("folds"), Some(provenance));
 
-        assert!(eye_matches_timebase(&state, stated));
-        assert!(!eye_matches_timebase(&state, EyeTimebase::Auto));
+        let loaded = state
+            .results
+            .analysis
+            .eye_diagram_state
+            .timebase_provenance();
+        assert!(eye_matches_timebase(loaded, stated));
+        assert!(!eye_matches_timebase(loaded, EyeTimebase::Auto));
         assert!(!eye_matches_timebase(
-            &state,
+            loaded,
             EyeTimebase::Explicit {
                 unit_interval: 2e-9
             }
@@ -1130,16 +1129,21 @@ mod tests {
             .eye_diagram_state
             .load_data_with_timebase(data.expect("folds"), Some(provenance));
 
+        let loaded = state
+            .results
+            .analysis
+            .eye_diagram_state
+            .timebase_provenance();
         // Every frame asks the same question and must get the same answer.
         for frame in 0..3 {
             assert!(
-                eye_matches_timebase(&state, stated),
+                eye_matches_timebase(loaded, stated),
                 "the incoherent eye went stale against its own rate on frame {frame}"
             );
         }
         // A different rate is still a different measurement.
         assert!(!eye_matches_timebase(
-            &state,
+            loaded,
             EyeTimebase::Explicit {
                 unit_interval: 1e-9
             }

@@ -133,8 +133,9 @@ fn authoritative_bin_inspection(
     ui: &Ui,
     app: &ManagerRenderContext<'_>,
 ) -> Result<rspice_core::engine::ModelBinInspection, String> {
-    let input_digest =
-        crate::simulation::controller::prepared_run::design_inspection_input_digest(app.state);
+    let input_digest = crate::simulation::controller::prepared_run::design_inspection_input_digest(
+        &app.state.model,
+    );
     let cache_id = egui::Id::new("models-authoritative-bin-inspection");
     if let Some(cached) = ui
         .ctx()
@@ -146,7 +147,7 @@ fn authoritative_bin_inspection(
 
     let result = (|| {
         let source = crate::simulation::controller::SimulationController::
-            prepare_design_netlist_for_inspection(app.state)
+            prepare_design_netlist_for_inspection(&app.state.model)
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
         rspice_core::Engine::new(rspice_core::SimulationConfig::default())

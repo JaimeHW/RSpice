@@ -82,7 +82,7 @@ fn directive_for(kind: AnalysisKind) -> Result<String, String> {
     let controller = SimulationController::new();
     let draft = fixture_draft(kind);
     let state = engine_facing_state(&draft);
-    controller.analysis_draft_directive(&state, &draft)
+    controller.analysis_draft_directive(&state.model, &draft)
 }
 
 #[test]
@@ -173,7 +173,9 @@ fn transient_drafts_preserve_start_maximum_step_and_uic_in_the_engine_card() {
                     max_timestep.map_or_else(String::new, |value: f64| value.to_string());
                 tran.uic = uic;
                 let state = engine_facing_state(&draft);
-                let directive = controller.analysis_draft_directive(&state, &draft).unwrap();
+                let directive = controller
+                    .analysis_draft_directive(&state.model, &draft)
+                    .unwrap();
                 let parsed = parse_netlist(&format!("{FIXTURE_DECK}{directive}\n.end\n")).unwrap();
                 let [
                     AnalysisCommand::Tran {
@@ -273,7 +275,7 @@ fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
     );
 
     let directive = SimulationController::new()
-        .analysis_draft_directive(&state, &draft)
+        .analysis_draft_directive(&state.model, &draft)
         .expect("an inherited axis emits a card");
     assert_eq!(directive, ".step temp list -55 27 150");
 
@@ -339,11 +341,11 @@ fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
     let controller = SimulationController::new();
     let pac_state = engine_facing_state(&pac_draft);
     let pac_directive = controller
-        .analysis_draft_directive(&pac_state, &pac_draft)
+        .analysis_draft_directive(&pac_state.model, &pac_draft)
         .expect("a PAC draft emits a card");
     let pnoise_state = engine_facing_state(&pnoise_draft);
     let pnoise_directive = controller
-        .analysis_draft_directive(&pnoise_state, &pnoise_draft)
+        .analysis_draft_directive(&pnoise_state.model, &pnoise_draft)
         .expect("a PNoise draft emits a card");
 
     // A dependent card binds to the deck's one `.PSS`, so the seed is written
@@ -351,7 +353,7 @@ fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
     let pss_draft = fixture_draft(AnalysisKind::Pss);
     let pss_state = engine_facing_state(&pss_draft);
     let pss_directive = controller
-        .analysis_draft_directive(&pss_state, &pss_draft)
+        .analysis_draft_directive(&pss_state.model, &pss_draft)
         .expect("a PSS draft emits a card");
 
     let deck =
@@ -449,17 +451,17 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     let controller = SimulationController::new();
     let pxf_state = engine_facing_state(&pxf_draft);
     let pxf_directive = controller
-        .analysis_draft_directive(&pxf_state, &pxf_draft)
+        .analysis_draft_directive(&pxf_state.model, &pxf_draft)
         .expect("a PXF draft emits a card");
     let pstb_directive = controller
-        .analysis_draft_directive(&engine_facing_state(&pstb_draft), &pstb_draft)
+        .analysis_draft_directive(&engine_facing_state(&pstb_draft).model, &pstb_draft)
         .expect("a PSTB draft emits a card");
 
     // Both are dependent cards, so the deck carries the `.PSS` they bind to,
     // written by the same emitter rather than spelled here.
     let pss_draft = fixture_draft(AnalysisKind::Pss);
     let pss_directive = controller
-        .analysis_draft_directive(&engine_facing_state(&pss_draft), &pss_draft)
+        .analysis_draft_directive(&engine_facing_state(&pss_draft).model, &pss_draft)
         .expect("a PSS draft emits a card");
 
     let deck = format!("{FIXTURE_DECK}{pss_directive}\n{pxf_directive}\n{pstb_directive}\n.end\n");
@@ -597,7 +599,7 @@ fn a_periodic_small_signal_card_names_the_carrier_it_linearizes_around() {
     let mut deck = FIXTURE_DECK.to_owned();
     for draft in [&pss_draft, &pac_draft, &pxf_draft, &pnoise_draft] {
         let directive = controller
-            .analysis_draft_directive(&engine_facing_state(draft), draft)
+            .analysis_draft_directive(&engine_facing_state(draft).model, draft)
             .unwrap_or_else(|error| panic!("the draft emits a card: {error}"));
         deck.push_str(&directive);
         deck.push('\n');
@@ -670,7 +672,7 @@ fn the_pss_directive_carries_every_shooting_control_it_was_given() {
 
     let state = engine_facing_state(&draft);
     let directive = SimulationController::new()
-        .analysis_draft_directive(&state, &draft)
+        .analysis_draft_directive(&state.model, &draft)
         .expect("a fully configured PSS draft emits a card");
     for keyword in [
         "fund=",
@@ -765,7 +767,7 @@ fn an_autonomous_pss_round_trips_through_the_deck_reader_as_autonomous() {
         }
         let state = engine_facing_state(&draft);
         let directive = SimulationController::new()
-            .analysis_draft_directive(&state, &draft)
+            .analysis_draft_directive(&state.model, &draft)
             .expect("a PSS draft emits a card");
         assert_eq!(
             directive.contains("autonomous=yes"),
@@ -852,7 +854,7 @@ fn the_monte_carlo_directive_carries_only_the_parameters_it_was_given() {
         mc.vary_only = vary_only.to_owned();
         let state = engine_facing_state(&draft);
         SimulationController::new()
-            .analysis_draft_directive(&state, &draft)
+            .analysis_draft_directive(&state.model, &draft)
             .expect("a Monte Carlo draft emits a card")
     };
 
@@ -907,7 +909,7 @@ fn a_swept_sensitivity_card_carries_its_sweep() {
         edit(sens);
         let state = engine_facing_state(&draft);
         let directive = SimulationController::new()
-            .analysis_draft_directive(&state, &draft)
+            .analysis_draft_directive(&state.model, &draft)
             .expect("a sensitivity draft emits a card");
         let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
         let netlist = parse_netlist(&deck)
@@ -984,12 +986,14 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
     let state = engine_facing_state(&draft);
     let controller = SimulationController::new();
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-        &analysis_inputs(&state),
+        &analysis_inputs(&state.model),
         &draft,
     )
     .unwrap();
     let expected = spec.driven_qpss_config().unwrap();
-    let directive = controller.analysis_draft_directive(&state, &draft).unwrap();
+    let directive = controller
+        .analysis_draft_directive(&state.model, &draft)
+        .unwrap();
     let deck = format!(
         "QPSS integration\nVDRIVE in 0 AC .1\nR1 in out 1k\nR2 out 0 1k\nIDRIVE 0 out AC 1u\n{directive}\n.end\n"
     );

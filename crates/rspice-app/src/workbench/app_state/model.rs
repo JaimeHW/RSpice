@@ -87,6 +87,50 @@ impl Model {
     ) -> u64 {
         self.log_buffer.log(severity, source, text)
     }
+
+    /// [`Self::record`], with a place the Console row jumps to.
+    pub fn record_anchored(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+        anchor: crate::diagnostics::LogAnchor,
+    ) -> u64 {
+        self.log_buffer
+            .log_anchored(severity, source, text, Some(anchor))
+    }
+
+    /// What the project's technology contract is resolved against: the
+    /// project, its plan, both execution catalogs and the layouts.
+    pub(crate) fn technology_inputs(
+        &self,
+    ) -> rspice_simulation::project_technology::ProjectTechnologyInputs<'_> {
+        rspice_simulation::project_technology::ProjectTechnologyInputs {
+            project: &self.workspace.content.project,
+            sim_setup: &self.sim_setup,
+            models: self.model_library_manager.catalog(),
+            resolutions: self.model_library_manager.resolution_records(),
+            registry: &self.pdk_config.technology_registry,
+            layouts: self.workspace.content.physical_layout_documents(),
+        }
+    }
+
+    /// The chain the project's `.include` and `.lib` files resolve through:
+    /// its own search paths, then the library folders set in Preferences.
+    pub(crate) fn include_search_chain(
+        &self,
+    ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
+        rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
+            &self.workspace.content.project,
+            self.library_folders(),
+        )
+    }
+
+    /// The folders searched for includes after every project's own paths.
+    pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
+        self.preferences
+            .folders(crate::workbench::FolderListPreference::LibraryFolders)
+    }
 }
 
 /// What model code reads of the features' state.

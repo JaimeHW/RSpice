@@ -224,7 +224,7 @@ fn compiled_queue(
         .model_library_manager
         .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
         .map_err(|error| vec![error])?;
-    SimulationController::build_queue_from_plan(state, &plan, &sealed)
+    SimulationController::build_queue_from_plan(&state.model, &plan, &sealed)
 }
 
 /// Seal the receipt rows a compiled queue authenticates, which is the step

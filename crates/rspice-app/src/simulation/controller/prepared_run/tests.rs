@@ -454,7 +454,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     }];
 
     let prepared = touchstone_export_policy(
-        &state,
+        &state.model,
         &tasks,
         state.model.schematic.session.current_file.as_deref(),
     )
@@ -467,7 +467,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     disabled.touchstone_export = false;
     state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&disabled);
     let current = touchstone_export_policy(
-        &state,
+        &state.model,
         &tasks,
         state.model.schematic.session.current_file.as_deref(),
     )

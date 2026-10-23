@@ -5,7 +5,7 @@ use super::*;
 impl SimulationController {
     pub(super) fn accept_completion(
         &mut self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         export_io: &(impl ExportWorkflowIo + ?Sized),
         result: Result<crate::simulation::SimulationResult, SimulationError>,
     ) {
@@ -55,7 +55,7 @@ impl SimulationController {
                         .map(|started| started.elapsed()),
                     &sim_result,
                 );
-                self.run_line(state, LogSeverity::Info, figures);
+                self.run_line(state.model_mut(), LogSeverity::Info, figures);
 
                 // A short FFT record is a successful result with no
                 // spectrum. It is stated in the run's log as well as on the
@@ -64,7 +64,7 @@ impl SimulationController {
                     && let Some(notice) =
                         rspice_simulation::result_conversion::incomplete_history_notice(spectrum)
                 {
-                    self.run_line(state, LogSeverity::Warning, notice);
+                    self.run_line(state.model_mut(), LogSeverity::Warning, notice);
                 }
 
                 // Convert SimulationResult to AnalysisResult and add to run
@@ -78,7 +78,7 @@ impl SimulationController {
                             .map(|cfg| self.config_to_analysis_type(cfg))
                     })
                     .unwrap_or(AnalysisType::DcOp);
-                let target_run_id = self.target_run_id(state);
+                let target_run_id = self.target_run_id();
 
                 let produced_artifact = self.current_artifact_producer.as_ref()
                     .map_or(Ok(None), |producer| {
@@ -90,7 +90,7 @@ impl SimulationController {
                 let (produced_artifact, artifact_failure) = match produced_artifact {
                     Ok(artifact) => (artifact, None),
                     Err(message) => {
-                        self.run_line(state, LogSeverity::Error, message.clone());
+                        self.run_line(state.model_mut(), LogSeverity::Error, message.clone());
                         (None, Some(message))
                     }
                 };
@@ -104,7 +104,7 @@ impl SimulationController {
                         Ok(prepared) => prepared,
                         Err(error) => {
                             self.run_line(
-                                state,
+                                state.model_mut(),
                                 LogSeverity::Warning,
                                 format!("Touchstone export skipped: {error}"),
                             );
@@ -118,7 +118,7 @@ impl SimulationController {
                     .map(|yield_results| {
                         let provenance = target_run_id
                             .and_then(|run_sequence| {
-                                state.model.simulation.retained.run_by_sequence(run_sequence)
+                                state.model().simulation.retained.run_by_sequence(run_sequence)
                             })
                             .and_then(|run| {
                                 rspice_simulation::results::yield_provenance_from_monte_carlo_result(
@@ -140,7 +140,7 @@ impl SimulationController {
                 let testbench_verdict = testbench_errors(&sim_result);
                 let truncation_line = match sim_result.transient_convergence() {
                     Some(quality) if quality.has_lte_exceptions() => self.placed_run_line(
-                        state,
+                        state.model_mut(),
                         LogSeverity::Warning,
                         format!(
                             "{current_label}: accepted points exceeded the local truncation-error criterion. Review convergence details in the result inspector."
@@ -180,7 +180,8 @@ impl SimulationController {
                 // run's batch gets the conditions, one record each for the
                 // whole run.
                 if let Some(run_sequence) = target_run_id {
-                    state.publish_run_notices(
+                    let facts = state.slot_facts();
+                    state.model_mut().publish_run_notices(
                         &current_label,
                         notices,
                         solved_transient
@@ -188,13 +189,14 @@ impl SimulationController {
                             .map(|transient| (transient, truncation_line)),
                         &analysis_result.measurements,
                         run_sequence,
+                        facts,
                     );
                 }
                 let retention_error = analysis_result.error_message.clone();
                 if let Some(provenance) = self.current_provenance.take() {
                     let completed_instance = provenance.source_instance_id();
                     match self.retain_completed_analysis(
-                        state,
+                        state.model_mut(),
                         target_run_id,
                         analysis_result,
                         provenance,
@@ -205,13 +207,17 @@ impl SimulationController {
                                     .insert(completed_instance, artifact);
                             }
                             if let Some(prepared) = prepared_touchstone_export.take() {
-                                self.commit_touchstone_export(state, export_io, prepared);
+                                self.commit_touchstone_export(
+                                    state.model_mut(),
+                                    export_io,
+                                    prepared,
+                                );
                             }
                             if let Some((yield_results, provenance)) =
                                 prepared_yield_evidence.take()
                             {
                                 state
-                                    .model
+                                    .model_mut()
                                     .simulation
                                     .replace_yield_evidence(yield_results, provenance);
                             }
@@ -228,7 +234,7 @@ impl SimulationController {
                         Ok(false) if artifact_failed => {}
                         Ok(false) => {
                             self.run_line(
-                                state,
+                                state.model_mut(),
                                 LogSeverity::Error,
                                 format!(
                                     "{current_label} failed: {}",
@@ -240,31 +246,32 @@ impl SimulationController {
                         }
                         Err(error) => {
                             self.run_line(
-                                state,
+                                state.model_mut(),
                                 LogSeverity::Error,
                                 format!("{current_label}: the result was not kept: {error}"),
                             );
-                            let errors = self.seal_failed_run(state, target_run_id, None, None);
-                            self.report_seal_errors(state, errors);
+                            let errors =
+                                self.seal_failed_run(state.model_mut(), target_run_id, None, None);
+                            self.report_seal_errors(state.model_mut(), errors);
                             self.pending_analyses.clear();
                         }
                     }
                 } else {
                     self.run_line(
-                        state,
+                        state.model_mut(),
                         LogSeverity::Error,
                         format!(
                             "{current_label} finished without the task it belongs to; its result was not kept"
                         ),
                     );
-                    let errors = self.seal_failed_run(state, target_run_id, None, None);
-                    self.report_seal_errors(state, errors);
+                    let errors = self.seal_failed_run(state.model_mut(), target_run_id, None, None);
+                    self.report_seal_errors(state.model_mut(), errors);
                 }
 
                 // Display the just-completed analysis without rebuilding waveform buffers.
                 if let Some(run_id) = target_run_id {
                     state
-                        .model
+                        .model_mut()
                         .simulation
                         .select_latest_analysis_in_run_sequence(run_id);
                 }
@@ -327,9 +334,9 @@ impl SimulationController {
                     self.materialize_current_saved_outputs(&mut analysis);
                     analysis
                 });
-                self.seal_aborted_run(state, partial.take());
+                self.seal_aborted_run(state.model_mut(), partial.take());
                 if let Some(run_sequence) = self.current_run_id {
-                    super::run_lines::announce_run_end(state, run_sequence);
+                    super::run_lines::announce_run_end(state.model_mut(), run_sequence);
                 }
                 self.pending_analyses.clear();
                 self.successful_analysis_instances.clear();
@@ -356,11 +363,13 @@ impl SimulationController {
                 self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
                 self.current_analysis_idx = 0;
                 self.total_analyses = 0;
-                state.model.simulation.execution.active_execution = None;
-                state.model.simulation.execution.abort_request = None;
-                state.runs.manual_run.pending_manual_run_id = None;
-                state.runs.manual_run.pending_run_buffer = None;
-                state.model.simulation.execution.status = "Aborted".to_string();
+                let execution = &mut state.model_mut().simulation.execution;
+                execution.active_execution = None;
+                execution.abort_request = None;
+                let manual_run = &mut state.runs_mut().manual_run;
+                manual_run.pending_manual_run_id = None;
+                manual_run.pending_run_buffer = None;
+                state.model_mut().simulation.execution.status = "Aborted".to_string();
                 self.complete_campaign_member(state, false);
             }
             Err(e) => {
@@ -388,12 +397,20 @@ impl SimulationController {
                     &failed_label,
                     &console_line,
                     &attribution,
-                    self.target_run_id(state),
+                    self.target_run_id(),
                 );
                 // A clamp the analysis raised before it failed is part of
                 // the account of the failure.
-                if let Some(run_sequence) = self.target_run_id(state) {
-                    state.publish_run_notices(&failed_label, notices, None, &[], run_sequence);
+                if let Some(run_sequence) = self.target_run_id() {
+                    let facts = state.slot_facts();
+                    state.model_mut().publish_run_notices(
+                        &failed_label,
+                        notices,
+                        None,
+                        &[],
+                        run_sequence,
+                        facts,
+                    );
                 }
                 let failed_type = self
                     .current_spec
@@ -405,7 +422,7 @@ impl SimulationController {
                             .map(|cfg| self.config_to_analysis_type(cfg))
                     })
                     .unwrap_or(AnalysisType::DcOp);
-                let target_run_id = self.target_run_id(state);
+                let target_run_id = self.target_run_id();
                 let failed_analysis = if let Some(provenance) = self.current_provenance.take() {
                     let mut analysis = self.partial_failure_analysis(
                         failed_type,
@@ -424,7 +441,7 @@ impl SimulationController {
                     Some(analysis)
                 } else {
                     self.run_line(
-                        state,
+                        state.model_mut(),
                         LogSeverity::Error,
                         format!(
                             "{failed_label} finished without the task it belongs to; its result was not kept"
@@ -432,8 +449,9 @@ impl SimulationController {
                     );
                     None
                 };
-                let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
-                self.report_seal_errors(state, errors);
+                let errors =
+                    self.seal_failed_run(state.model_mut(), target_run_id, failed_analysis, None);
+                self.report_seal_errors(state.model_mut(), errors);
 
                 // Continue with remaining analyses (commercial behavior: don't abort batch)
                 if !self.pending_analyses.is_empty() {
@@ -443,7 +461,8 @@ impl SimulationController {
                     );
                     self.start_next_analysis(state);
                 } else {
-                    state.model.simulation.execution.status = "Completed with errors".to_string();
+                    state.model_mut().simulation.execution.status =
+                        "Completed with errors".to_string();
                     self.finish_simulation_batch(state);
                 }
             }
@@ -483,15 +502,18 @@ impl SimulationController {
     /// the run, as the CLI fails the run on the same records.
     fn fail_testbench_verdict(
         &self,
-        state: &mut AppState,
+        state: &mut impl RunHost,
         target_run_id: Option<u64>,
         analysis: &str,
         verdict: &str,
     ) {
-        let errors = self.seal_failed_run(state, target_run_id, None, None);
-        self.report_seal_errors(state, errors);
+        let errors = self.seal_failed_run(state.model_mut(), target_run_id, None, None);
+        self.report_seal_errors(state.model_mut(), errors);
         if let Some(run_sequence) = target_run_id {
-            state.publish_run_failure(analysis, verdict, None, run_sequence);
+            let facts = state.slot_facts();
+            state
+                .model_mut()
+                .publish_run_failure(analysis, verdict, None, run_sequence, facts);
         }
     }
 }

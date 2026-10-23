@@ -19,19 +19,15 @@ fn now_ms() -> u64 {
 /// A line whose run is gone goes to the session's log instead, so what it
 /// says is not lost with the run; it then has no place in the run's log.
 pub(super) fn write_run_line(
-    state: &mut AppState,
+    model: &mut Model,
     run_sequence: Option<u64>,
     severity: LogSeverity,
     message: impl Into<String>,
 ) -> Option<usize> {
     let message = message.into();
-    match run_sequence.and_then(|run_sequence| {
-        state
-            .model
-            .simulation
-            .retained
-            .run_by_sequence_mut(run_sequence)
-    }) {
+    match run_sequence
+        .and_then(|run_sequence| model.simulation.retained.run_by_sequence_mut(run_sequence))
+    {
         Some(run) => {
             // The run's own lines are never withheld.
             let position = run.log.lines().len();
@@ -44,7 +40,7 @@ pub(super) fn write_run_line(
             Some(position)
         }
         None => {
-            state.record(severity, LogSource::Run, message);
+            model.record(severity, LogSource::Run, message);
             None
         }
     }
@@ -54,22 +50,22 @@ impl SimulationController {
     /// Write one of the active run's own lines into its log.
     pub(super) fn run_line(
         &self,
-        state: &mut AppState,
+        model: &mut Model,
         severity: LogSeverity,
         message: impl Into<String>,
     ) {
-        write_run_line(state, self.current_run_id, severity, message);
+        write_run_line(model, self.current_run_id, severity, message);
     }
 
     /// Write one of the active run's own lines into its log, and say where
     /// it is there, for a finding the line states.
     pub(super) fn placed_run_line(
         &self,
-        state: &mut AppState,
+        model: &mut Model,
         severity: LogSeverity,
         message: impl Into<String>,
     ) -> Option<usize> {
-        write_run_line(state, self.current_run_id, severity, message)
+        write_run_line(model, self.current_run_id, severity, message)
     }
 
     /// The failure a failed run's end line quotes: the first error the run
@@ -98,13 +94,13 @@ impl SimulationController {
 /// 14:03:12 · desktop`. A field the run does not know is left out rather than
 /// written as a placeholder.
 pub(super) fn announce_run_start(
-    state: &mut AppState,
+    state: &mut impl RunHost,
     run_sequence: u64,
     design: Option<&str>,
     analyses: &[&str],
 ) {
     let Some(run) = state
-        .model
+        .model()
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -126,18 +122,18 @@ pub(super) fn announce_run_start(
             .map(|target| platform(target).to_owned()),
     );
     write_run_line(
-        state,
+        state.model_mut(),
         Some(run_sequence),
         LogSeverity::Info,
         header.join(" \u{b7} "),
     );
-    state.record_anchored(
+    state.model_mut().record_anchored(
         LogSeverity::Info,
         LogSource::Run,
         format!("Run {run_sequence} started: {}", analyses.join(", ")),
         LogAnchor::ResultRun { run_sequence },
     );
-    state.runs.run_watch.run_started(run_id);
+    state.runs_mut().run_watch.run_started(run_id);
 }
 
 /// Close a run's log with its summary and write the same line in the
@@ -146,13 +142,8 @@ pub(super) fn announce_run_start(
 /// Called once the run's lifecycle is terminal, which is when its elapsed
 /// time is sealed. The counts are the log's own Error and Warning lines,
 /// taken before the summary is added.
-pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
-    let Some(run) = state
-        .model
-        .simulation
-        .retained
-        .run_by_sequence_mut(run_sequence)
-    else {
+pub(super) fn announce_run_end(model: &mut Model, run_sequence: u64) {
+    let Some(run) = model.simulation.retained.run_by_sequence_mut(run_sequence) else {
         return;
     };
     let unix_ms = now_ms();
@@ -206,7 +197,7 @@ pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
         source: LogSource::Run,
         message: summary.clone(),
     });
-    state.record_anchored(
+    model.record_anchored(
         severity,
         LogSource::Run,
         summary,
@@ -346,13 +337,13 @@ mod tests {
             .expect("the run is interrupted");
         let interruption = "Interrupted: the design it was running was closed or replaced";
         write_run_line(
-            &mut state,
+            &mut state.model,
             Some(run_sequence),
             LogSeverity::Error,
             interruption,
         );
 
-        announce_run_end(&mut state, run_sequence);
+        announce_run_end(&mut state.model, run_sequence);
 
         let summary = state
             .model

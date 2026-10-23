@@ -49,7 +49,7 @@ fn touchstone_auto_export_uses_export_workflow_io() {
         .prepare_touchstone_export(&synthetic_sparameter_result(), 1)
         .expect("valid Touchstone export")
         .expect("enabled Touchstone export");
-    controller.commit_touchstone_export(&mut state, &export_io, prepared);
+    controller.commit_touchstone_export(&mut state.model, &export_io, prepared);
 
     assert!(export_io.writes.borrow().is_empty());
     let writes = export_io.create_only_writes.borrow();
@@ -122,7 +122,7 @@ fn the_exported_file_is_the_version_that_was_chosen() {
             .prepare_touchstone_export(&synthetic_sparameter_result(), 1)
             .expect("valid Touchstone export")
             .expect("enabled Touchstone export");
-        controller.commit_touchstone_export(&mut state, &export_io, prepared);
+        controller.commit_touchstone_export(&mut state.model, &export_io, prepared);
 
         let writes = export_io.create_only_writes.borrow();
         assert_eq!(writes.len(), 1);
@@ -1044,7 +1044,7 @@ fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
         Some(PathBuf::from("decks").join("bias.cir"));
 
     assert_eq!(
-        SimulationController::analysis_source_path(&state).as_deref(),
+        SimulationController::analysis_source_path(&state.model).as_deref(),
         Some(std::path::Path::new("decks").join("bias.cir").as_path())
     );
 }
@@ -1058,7 +1058,7 @@ fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
         Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
 
     assert!(
-        SimulationController::analysis_source_path(&state).is_none(),
+        SimulationController::analysis_source_path(&state.model).is_none(),
         "manual netlist text without an origin must not resolve includes from the schematic file"
     );
 }
@@ -1731,7 +1731,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
         .expect("the second project's catalogue imports");
 
     state.model.model_library_manager = first;
-    let before = prepared_run::design_inspection_input_digest(&state);
+    let before = prepared_run::design_inspection_input_digest(&state.model);
 
     state.model.model_library_manager = serde_json::from_str(
         &serde_json::to_string(&second).expect("a catalogue serializes into a project file"),
@@ -1747,7 +1747,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
         project_revision
     );
     assert_ne!(
-        prepared_run::design_inspection_input_digest(&state),
+        prepared_run::design_inspection_input_digest(&state.model),
         before,
         "a catalogue replaced wholesale presented a key this session had already \
          cached an answer against; the Bins & geometry page would go on stating the \
@@ -1939,7 +1939,7 @@ fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
         .to_string();
 
     controller.seal_aborted_run(
-        &mut state,
+        &mut state.model,
         Some(AnalysisResult::new(
             1,
             AnalysisType::Transient,

@@ -4,24 +4,24 @@ use super::*;
 use crate::state::MonteCarloCheckpointEvidence;
 
 impl SimulationController {
-    pub(super) fn publish_monte_carlo_checkpoint(&mut self, state: &mut AppState) {
+    pub(super) fn publish_monte_carlo_checkpoint(&mut self, model: &mut Model) {
         let Some(bytes) = self.runner.take_monte_carlo_checkpoint() else {
             return;
         };
-        self.accept_monte_carlo_checkpoint(state, bytes);
+        self.accept_monte_carlo_checkpoint(model, bytes);
     }
 
     pub(super) fn accept_monte_carlo_checkpoint(
         &mut self,
-        state: &mut AppState,
+        model: &mut Model,
         bytes: std::sync::Arc<[u8]>,
     ) {
-        if let Err(error) = self.retain_monte_carlo_checkpoint(state, bytes) {
+        if let Err(error) = self.retain_monte_carlo_checkpoint(model, bytes) {
             // A requested durable snapshot cannot silently become transient
             // data. Stop further work and preserve the last admitted journal.
             self.runner.abort();
             self.run_line(
-                state,
+                model,
                 LogSeverity::Error,
                 format!("Could not retain Monte Carlo checkpoint: {error}"),
             );
@@ -30,7 +30,7 @@ impl SimulationController {
 
     fn retain_monte_carlo_checkpoint(
         &self,
-        state: &mut AppState,
+        model: &mut Model,
         bytes: std::sync::Arc<[u8]>,
     ) -> Result<(), String> {
         if !matches!(self.current_spec, Some(AnalysisSpec::MonteCarlo { .. }))
@@ -51,8 +51,7 @@ impl SimulationController {
             .current_run_id
             .ok_or("checkpoint has no active simulation run")?;
         let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes)?;
-        let run = state
-            .model
+        let run = model
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
@@ -83,8 +82,7 @@ impl SimulationController {
         .with_provenance(provenance);
         self.validate_analysis_retention(run, &partial)?;
         run.upsert_live_analysis(partial)?;
-        state
-            .model
+        model
             .simulation
             .select_latest_analysis_in_run_sequence(run_id);
         Ok(())

@@ -342,7 +342,7 @@ fn projection(draft: &AnalysisDraft) -> String {
         state.model.sim_setup.clone_from(setup);
         apply_fixture_draft(state, draft);
         let spec = match rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(state),
+            &analysis_inputs(&state.model),
             draft,
         ) {
             Ok(spec) => spec,
@@ -350,7 +350,7 @@ fn projection(draft: &AnalysisDraft) -> String {
         };
 
         let command = rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
-            &analysis_inputs(state),
+            &analysis_inputs(&state.model),
             draft,
             &spec,
         );
@@ -867,7 +867,7 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
             .model_library_manager
             .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .expect("the fixture library seals");
-        SimulationController::build_queue_from_plan(state, &plan, &sealed)
+        SimulationController::build_queue_from_plan(&state.model, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
             .iter()
             .flat_map(|task| task.config_digest().as_bytes().to_vec())
@@ -1006,7 +1006,7 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
             .model_library_manager
             .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .expect("the fixture library seals");
-        SimulationController::build_queue_from_plan(state, &plan, &sealed)
+        SimulationController::build_queue_from_plan(&state.model, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
             .iter()
             .flat_map(|task| task.config_digest().as_bytes().to_vec())
@@ -1108,7 +1108,7 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
             .model_library_manager
             .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .expect("the fixture library seals");
-        SimulationController::build_queue_from_plan(state, &plan, &sealed)
+        SimulationController::build_queue_from_plan(&state.model, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
             .iter()
             .flat_map(|task| task.config_digest().as_bytes().to_vec())
@@ -1310,7 +1310,7 @@ fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
         let draft = AnalysisDraft::Hbnoise(setup.clone());
         assert_eq!(draft.manifest_configuration_error(), None);
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&engine_facing_state(&draft)),
+            &analysis_inputs(&engine_facing_state(&draft).model),
             &draft,
         )
         .unwrap();
