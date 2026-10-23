@@ -90,6 +90,11 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
             t.color.text_dim,
         );
     }
+    // The selection fill already shows which row a click chose; the ring is
+    // for a reader who tabbed here.
+    if theme::focus_is_visible(ui.ctx(), &response) {
+        theme::paint_focus_ring(ui, &response, row_geometry(rect).0);
+    }
     response
 }
 
