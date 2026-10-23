@@ -285,11 +285,11 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
         {
             return None;
         }
-        match state.manual_run.pending_manual_run_id {
+        match state.runs.manual_run.pending_manual_run_id {
             Some(running) => (running, RunStripPhase::Running),
             None => {
                 let run_id = state.code.netlist.last_run_id?;
-                let baseline = state.manual_run.last_run_buffer.as_deref()?;
+                let baseline = state.runs.manual_run.last_run_buffer.as_deref()?;
                 let phase = if working_deck_source(state) == baseline {
                     RunStripPhase::Current
                 } else {
@@ -1385,7 +1385,7 @@ mod tests {
         state.model.simulation.source.netlist_content = deck.to_owned();
         state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.code.netlist.active_document_initialized = true;
-        state.manual_run.last_run_buffer = Some(deck.to_owned());
+        state.runs.manual_run.last_run_buffer = Some(deck.to_owned());
         state.code.netlist.last_run_id = Some(7);
         seal_manual_run(&mut state, 7, 0xAB, 4);
         state
@@ -1428,7 +1428,7 @@ mod tests {
         state.model.workspace.content.netlist_source =
             Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
         seal_manual_run(&mut state, 8, 0xCD, 5);
-        state.manual_run.pending_manual_run_id = Some(8);
+        state.runs.manual_run.pending_manual_run_id = Some(8);
 
         let projection = run_strip_projection(&state).expect("an active run owns the strip");
         assert_eq!(projection.phase, RunStripPhase::Running);
@@ -1568,7 +1568,7 @@ mod tests {
         app.state.model.simulation.source.netlist_content = DECK.to_owned();
         app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.code.netlist.active_document_initialized = true;
-        app.state.manual_run.last_run_buffer = Some(DECK.to_owned());
+        app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
         app.state.code.netlist.last_run_id = Some(7);
         seal_manual_run(&mut app.state, 7, 0xAB, 4);
         match phase {
@@ -1586,7 +1586,7 @@ mod tests {
             }
             RunStripPhase::Running => {
                 seal_manual_run(&mut app.state, 8, 0xCD, 5);
-                app.state.manual_run.pending_manual_run_id = Some(8);
+                app.state.runs.manual_run.pending_manual_run_id = Some(8);
             }
         }
         assert_eq!(

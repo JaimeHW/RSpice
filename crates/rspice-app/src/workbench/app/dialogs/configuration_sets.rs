@@ -186,7 +186,7 @@ impl ConfigurationSetsDialogState {
 
 pub(crate) fn open_configuration_sets_dialog(state: &mut AppState) {
     // The command is greyed with no project open.
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         return;
     }
     let catalog = state.model.workspace.content.configuration_sets.clone();

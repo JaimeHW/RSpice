@@ -300,7 +300,7 @@ fn a_session_only_profile_migrates_into_the_file_once_and_loses_nothing() {
 
     let first = AppState::restore_with_store(Some(&storage), Some(store.clone()));
     assert_eq!(settings_of(&first), settings_of(&old));
-    assert_eq!(first.preferences_file.writes, 1);
+    assert_eq!(first.settings.preferences_file.writes, 1);
     let migrated = std::fs::read(&path).expect("the file was written");
 
     // The next launch restores a session that knows nothing of the file. The
@@ -308,7 +308,7 @@ fn a_session_only_profile_migrates_into_the_file_once_and_loses_nothing() {
     eframe::set_value(&mut storage, eframe::APP_KEY, &AppState::default());
     let second = AppState::restore_with_store(Some(&storage), Some(store));
     assert_eq!(settings_of(&second), settings_of(&old));
-    assert_eq!(second.preferences_file.writes, 0);
+    assert_eq!(second.settings.preferences_file.writes, 0);
     assert_eq!(std::fs::read(&path).unwrap(), migrated);
 }
 
@@ -356,7 +356,7 @@ fn an_unreadable_file_is_set_aside_and_named() {
 fn a_change_is_written_once_after_it_settles_not_every_frame() {
     let (path, store) = temp_store("debounce");
     let mut state = bound(&store);
-    assert_eq!(state.preferences_file.writes, 1, "the first file");
+    assert_eq!(state.settings.preferences_file.writes, 1, "the first file");
     let start = Instant::now();
     let at = |ms: u64| start + Duration::from_millis(ms);
 
@@ -374,17 +374,20 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
             "frame {frame} waits for the change to settle"
         );
     }
-    assert_eq!(state.preferences_file.writes, 1, "nothing while it moves");
+    assert_eq!(
+        state.settings.preferences_file.writes, 1,
+        "nothing while it moves"
+    );
 
     // It settles: frames without input write it once.
     let mut written_at = None;
     for frame in 30..120_u64 {
         let _ = state.persist_preferences_file_at(at(frame * 16), false);
-        if written_at.is_none() && state.preferences_file.writes == 2 {
+        if written_at.is_none() && state.settings.preferences_file.writes == 2 {
             written_at = Some(frame);
         }
     }
-    assert_eq!(state.preferences_file.writes, 2);
+    assert_eq!(state.settings.preferences_file.writes, 2);
     let settled = written_at.expect("written") * 16;
     assert!(
         (29 * 16 + 500..29 * 16 + 500 + 32).contains(&settled),
@@ -396,7 +399,7 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
     for frame in 120..400_u64 {
         let _ = state.persist_preferences_file_at(at(frame * 16), frame % 2 == 0);
     }
-    assert_eq!(state.preferences_file.writes, 2);
+    assert_eq!(state.settings.preferences_file.writes, 2);
     assert!(path.exists());
 }
 
@@ -407,7 +410,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
     let start = Instant::now();
     let at = |ms: u64| start + Duration::from_millis(ms);
     let _ = state.persist_preferences_file_at(at(0), false);
-    let looks = state.preferences_file.looks;
+    let looks = state.settings.preferences_file.looks;
 
     // A canvas drag or a hover: nothing but movement, every frame, for
     // under the idle second.
@@ -420,7 +423,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
             state.persist_preferences_file_at(at(frame * 16), input_can_change_a_setting(&hover));
     }
     assert_eq!(
-        state.preferences_file.looks, looks,
+        state.settings.preferences_file.looks, looks,
         "movement hashed nothing"
     );
 
@@ -432,7 +435,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
     }];
     let _ = state.persist_preferences_file_at(at(960), input_can_change_a_setting(&release));
     assert_eq!(
-        state.preferences_file.looks,
+        state.settings.preferences_file.looks,
         looks + 1,
         "a release is looked at"
     );
@@ -442,7 +445,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
     let before = fingerprint(
         &state.workbench,
         &state.platform,
-        &state.settings,
+        state.settings.browser_spoken_feedback,
         &mut state.model.preferences,
     );
     state
@@ -458,7 +461,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
         fingerprint(
             &state.workbench,
             &state.platform,
-            &state.settings,
+            state.settings.browser_spoken_feedback,
             &mut state.model.preferences,
         ),
         before
@@ -508,7 +511,7 @@ fn an_unbound_state_never_touches_the_disk() {
         None
     );
     state.flush_preferences_file();
-    assert_eq!(state.preferences_file.writes, 0);
+    assert_eq!(state.settings.preferences_file.writes, 0);
 }
 
 fn exported(label: &str) -> (AppState, Vec<u8>) {

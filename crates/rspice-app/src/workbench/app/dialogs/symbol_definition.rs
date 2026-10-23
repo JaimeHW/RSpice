@@ -69,7 +69,9 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         .library_manager
         .get_library(&target.library)
         .is_some_and(|library| !library.read_only);
-    if !state.project_lifecycle.is_open() || state.model.safe_mode.project_read_only() || !writable
+    if !state.platform.project_lifecycle.is_open()
+        || state.model.safe_mode.project_read_only()
+        || !writable
     {
         state.prompt("The symbol's parameter form cannot be edited: its library is read-only.");
         return;
@@ -127,7 +129,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
 }
 
 fn writable_library_name(state: &AppState) -> Option<String> {
-    if !state.project_lifecycle.is_open() || state.model.safe_mode.project_read_only() {
+    if !state.platform.project_lifecycle.is_open() || state.model.safe_mode.project_read_only() {
         return None;
     }
     state

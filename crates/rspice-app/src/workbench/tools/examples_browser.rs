@@ -41,7 +41,7 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
 
 /// Why Open is refused, if it is.
 fn open_refusal(state: &AppState) -> Option<&'static str> {
-    (state.project_lifecycle.is_open()
+    (state.platform.project_lifecycle.is_open()
         && crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state))
     .then_some("Save or close the open project first: an example replaces it")
 }

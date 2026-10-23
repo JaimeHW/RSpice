@@ -109,13 +109,13 @@ const APPLICATION_GATE: &[GateRow] = &[
         state.model.sim_setup.session.palette_open = true;
     }),
     ("tabbed_property_dialog", |state| {
-        state.tabbed_property_dialog.open = true;
+        state.design.tabbed_property_dialog.open = true;
     }),
     ("pdk_settings_dialog", |state| {
-        state.pdk_settings_dialog.open = true;
+        state.models.pdk_settings_dialog.open = true;
     }),
     ("model_browser_state", |state| {
-        state.model_browser_state.open = true;
+        state.models.model_browser_state.open = true;
     }),
 ];
 

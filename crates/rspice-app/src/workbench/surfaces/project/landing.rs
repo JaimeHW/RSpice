@@ -311,6 +311,7 @@ fn recent_projects(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<Landing
     rows_ui.set_clip_rect(rows_rect);
     let no_recents = app
         .state
+        .platform
         .recent_files
         .iter()
         .all(|recent| recent.kind != RecentKind::Project);
@@ -784,6 +785,7 @@ fn recent_project_rows(app: &RSpiceApp) -> Vec<RecentProjectRow> {
         .to_ascii_lowercase();
     let filter = app.state.project.project_launcher_filter;
     app.state
+        .platform
         .recent_files
         .iter()
         .filter(|recent| recent.kind == RecentKind::Project)
@@ -997,7 +999,7 @@ mod tests {
     #[test]
     fn landing_recents_share_search_pin_and_owner_authority_with_the_launcher() {
         let mut app = RSpiceApp::test_instance();
-        app.state.recent_files = vec![
+        app.state.platform.recent_files = vec![
             project_recent("C:/Engineering/afe.rspiceproj", true, Some("Analog Design")),
             project_recent("//lab/rf/rf_pa.rspiceproj", false, Some("RF Systems")),
         ];
@@ -1018,7 +1020,7 @@ mod tests {
     #[test]
     fn opening_schematics_never_pushes_a_project_off_the_start_page() {
         let mut app = RSpiceApp::test_instance();
-        app.state.recent_files.clear();
+        app.state.platform.recent_files.clear();
         let listed = app.state.model.preferences.recent_files_listed();
         let project =
             |index: usize| std::path::PathBuf::from(format!("C:/Work/p{index}.rspiceproj"));
@@ -1043,6 +1045,7 @@ mod tests {
         );
         let schematics = app
             .state
+            .platform
             .recent_files
             .iter()
             .filter(|recent| recent.kind == RecentKind::Schematic)
@@ -1053,7 +1056,7 @@ mod tests {
     #[test]
     fn landing_shared_filter_uses_portable_unc_identity() {
         let mut app = RSpiceApp::test_instance();
-        app.state.recent_files = vec![
+        app.state.platform.recent_files = vec![
             project_recent("C:/Engineering/afe.rspiceproj", false, None),
             project_recent("//lab/rf/rf_pa.rspiceproj", false, None),
         ];
@@ -1085,7 +1088,7 @@ mod tests {
             );
 
             assert!(!output.shapes.is_empty(), "{}x{}", size.x, size.y);
-            assert!(!app.state.project_lifecycle.is_open());
+            assert!(!app.state.platform.project_lifecycle.is_open());
         }
     }
 

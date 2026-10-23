@@ -248,7 +248,7 @@ fn symbol_refusal(name: &str, messages: &MessageCatalog) -> Option<String> {
 /// Whether Build settings has a profile to show: a Verilog-A view in front,
 /// with its source.
 pub(crate) fn veriloga_build_settings_available(app: &RSpiceApp) -> bool {
-    app.state.project_lifecycle.is_open()
+    app.state.platform.project_lifecycle.is_open()
         && app.state.model.workspace.content.active_view_type() == ViewType::VerilogA
         && app
             .state

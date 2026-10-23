@@ -167,6 +167,7 @@ impl AppState {
         // otherwise becomes `()` when the decoder visits it as an untyped
         // value, losing which browser backend owns the canonical project.
         let browser_receipt = self
+            .platform
             .browser_project_binding_receipt
             .as_ref()
             .map(serde_json::to_value)
@@ -199,18 +200,21 @@ impl AppState {
         state.serialize_field("library_manager", &self.model.library_manager)?;
         state.serialize_field("ui_session", &UiSessionWire::capture(self))?;
         state.serialize_field("workbench", &WorkbenchWireRef::capture(self))?;
-        state.serialize_field("recent_files", &self.recent_files)?;
-        state.serialize_field("license_key", &self.license_key)?;
+        state.serialize_field("recent_files", &self.platform.recent_files)?;
+        state.serialize_field("license_key", &self.cloud.license_key)?;
         state.serialize_field("execution_context_json", &execution_context_json)?;
         state.serialize_field(
             "native_project_binding_receipt",
-            &self.native_project_binding_receipt,
+            &self.platform.native_project_binding_receipt,
         )?;
         state.serialize_field("browser_project_binding_receipt", &browser_receipt)?;
         // After Close Project the workspace still holds a placeholder project.
         // Without this field a restart would open that placeholder as an
         // untitled project.
-        state.serialize_field("no_project_open", &!self.project_lifecycle.is_open())?;
+        state.serialize_field(
+            "no_project_open",
+            &!self.platform.project_lifecycle.is_open(),
+        )?;
         if !simulation_results.is_empty() {
             state.serialize_field("simulation_results", &simulation_results)?;
         }
@@ -363,14 +367,12 @@ impl<'de> serde::Deserialize<'de> for AppState {
             de.browser_project_binding_receipt,
             "browser project binding receipt",
         );
-        let mut state = Self {
-            recent_files: de.recent_files,
-            license_key: de.license_key,
-            license,
-            native_project_binding_receipt,
-            browser_project_binding_receipt,
-            ..Default::default()
-        };
+        let mut state = Self::default();
+        state.platform.recent_files = de.recent_files;
+        state.cloud.license_key = de.license_key;
+        state.cloud.license = license;
+        state.platform.native_project_binding_receipt = native_project_binding_receipt;
+        state.platform.browser_project_binding_receipt = browser_project_binding_receipt;
         // The code workspace `Default` prepared belongs to the bootstrapped
         // project it compiled; the restored project's starts empty.
         state.code.code_workspace = Default::default();
@@ -381,6 +383,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         de.workbench.scatter(&mut state);
         if de.no_project_open {
             state
+                .platform
                 .project_lifecycle
                 .close_restored_session(&mut state.model.project_open);
         }
@@ -722,7 +725,7 @@ mod tests {
                 accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
                 backend,
             };
-            state.browser_project_binding_receipt = Some(receipt.clone());
+            state.platform.browser_project_binding_receipt = Some(receipt.clone());
             let json = serde_json::to_string(&state).expect("JSON session serializes");
             let ron = ron::to_string(&state).expect("eframe RON session serializes");
             for (format, restored) in [
@@ -730,7 +733,7 @@ mod tests {
                 ("RON", ron::from_str::<AppState>(&ron).unwrap()),
             ] {
                 assert_eq!(
-                    restored.browser_project_binding_receipt.as_ref(),
+                    restored.platform.browser_project_binding_receipt.as_ref(),
                     Some(&receipt),
                     "{backend:?} authority must survive {format} session recovery"
                 );
@@ -750,7 +753,7 @@ mod tests {
             project_id: state.model.workspace.content.project.id().to_string(),
             accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
         };
-        state.native_project_binding_receipt = Some(receipt.clone());
+        state.platform.native_project_binding_receipt = Some(receipt.clone());
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let ron = ron::to_string(&state).expect("eframe RON session serializes");
@@ -759,7 +762,7 @@ mod tests {
             ron::from_str::<AppState>(&ron).unwrap(),
         ] {
             assert_eq!(
-                restored.native_project_binding_receipt.as_ref(),
+                restored.platform.native_project_binding_receipt.as_ref(),
                 Some(&receipt)
             );
         }
@@ -811,7 +814,7 @@ mod tests {
             assert!(migrate_legacy_browser_receipt(&migrated).is_none());
             let restored = AppState::from_session_ron(&legacy).unwrap();
             assert_eq!(
-                restored.browser_project_binding_receipt.as_ref(),
+                restored.platform.browser_project_binding_receipt.as_ref(),
                 Some(&receipt)
             );
             assert_eq!(
@@ -840,7 +843,7 @@ mod tests {
                     assert_ne!(corrupted, legacy);
                     assert!(migrate_legacy_browser_receipt(&corrupted).is_none());
                     let recovered = AppState::from_session_ron(&corrupted).unwrap();
-                    assert!(recovered.browser_project_binding_receipt.is_none());
+                    assert!(recovered.platform.browser_project_binding_receipt.is_none());
                     assert_eq!(
                         recovered.model.workspace.content.project.id(),
                         state.model.workspace.content.project.id()
@@ -921,8 +924,8 @@ mod tests {
                 .len(),
             1
         );
-        assert!(restored.native_project_binding_receipt.is_none());
-        assert!(restored.browser_project_binding_receipt.is_none());
+        assert!(restored.platform.native_project_binding_receipt.is_none());
+        assert!(restored.platform.browser_project_binding_receipt.is_none());
         let messages = restored
             .model
             .log_buffer
@@ -947,7 +950,7 @@ mod tests {
         closed.close_project_session();
         let ron = ron::to_string(&closed).expect("eframe RON session serializes");
         let restored = ron::from_str::<Box<AppState>>(&ron).expect("the session restores");
-        assert!(!restored.project_lifecycle.is_open());
+        assert!(!restored.platform.project_lifecycle.is_open());
         restored.assert_project_open_fact();
 
         let mut session = serde_json::to_value(AppState::default()).expect("session serializes");
@@ -959,7 +962,7 @@ mod tests {
         let older: AppState =
             serde_json::from_value(session).expect("a session without the field restores");
         assert!(
-            older.project_lifecycle.is_open(),
+            older.platform.project_lifecycle.is_open(),
             "sessions written before the field always had a project open"
         );
         older.assert_project_open_fact();
@@ -1129,6 +1132,7 @@ mod tests {
         state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
         state.workbench.theme.density = crate::ui::Density::Relaxed;
         state
+            .platform
             .recent_files
             .push(crate::services::recent_files::RecentFile {
                 kind: crate::services::recent_files::RecentKind::Project,
@@ -1163,7 +1167,7 @@ mod tests {
             serde_json::to_value(WorkbenchWireRef::capture(&state)).unwrap(),
             "the workbench restores as it was saved"
         );
-        assert_eq!(restored.recent_files, state.recent_files);
+        assert_eq!(restored.platform.recent_files, state.platform.recent_files);
         assert!(!restored.design.schematic_snap.enabled);
         assert_eq!(
             restored.design.schematic_routing_mode,

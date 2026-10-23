@@ -1103,45 +1103,45 @@ fn successful_manual_deck_run_promotes_pending_baseline() {
         "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
     let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
-    state.manual_run.pending_manual_run_id = Some(run_id);
-    state.manual_run.pending_run_buffer =
+    state.runs.manual_run.pending_manual_run_id = Some(run_id);
+    state.runs.manual_run.pending_run_buffer =
         Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string());
-    state.manual_run.edited_lines.insert(0);
+    state.runs.manual_run.edited_lines.insert(0);
 
     controller.finish_simulation_batch(&mut state);
 
     assert_eq!(
-        state.manual_run.last_run_buffer.as_deref(),
+        state.runs.manual_run.last_run_buffer.as_deref(),
         Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n")
     );
-    assert!((state.manual_run.last_run_params["r"] - 1e3).abs() < 1e-9);
-    assert!((state.manual_run.last_run_params["cl"] - 2e-12).abs() < 1e-21);
-    assert!(!state.manual_run.last_run_params.contains_key("expr"));
-    assert!(state.manual_run.pending_manual_run_id.is_none());
-    assert!(state.manual_run.pending_run_buffer.is_none());
-    assert!(state.manual_run.edited_lines.is_empty());
+    assert!((state.runs.manual_run.last_run_params["r"] - 1e3).abs() < 1e-9);
+    assert!((state.runs.manual_run.last_run_params["cl"] - 2e-12).abs() < 1e-21);
+    assert!(!state.runs.manual_run.last_run_params.contains_key("expr"));
+    assert!(state.runs.manual_run.pending_manual_run_id.is_none());
+    assert!(state.runs.manual_run.pending_run_buffer.is_none());
+    assert!(state.runs.manual_run.edited_lines.is_empty());
 }
 
 #[test]
 fn failed_manual_deck_run_keeps_previous_baseline() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
-    state.manual_run.last_run_buffer = Some("old\n.op\n.end\n".to_string());
+    state.runs.manual_run.last_run_buffer = Some("old\n.op\n.end\n".to_string());
     let run = state.model.simulation.start_run();
     let run_id = run.id;
     run.success = false;
     bind_test_run_running(&mut state, &mut controller, run_id);
-    state.manual_run.pending_manual_run_id = Some(run_id);
-    state.manual_run.pending_run_buffer = Some("new\n.op\n.end\n".to_string());
+    state.runs.manual_run.pending_manual_run_id = Some(run_id);
+    state.runs.manual_run.pending_run_buffer = Some("new\n.op\n.end\n".to_string());
 
     controller.finish_simulation_batch(&mut state);
 
     assert_eq!(
-        state.manual_run.last_run_buffer.as_deref(),
+        state.runs.manual_run.last_run_buffer.as_deref(),
         Some("old\n.op\n.end\n")
     );
-    assert!(state.manual_run.pending_manual_run_id.is_none());
-    assert!(state.manual_run.pending_run_buffer.is_none());
+    assert!(state.runs.manual_run.pending_manual_run_id.is_none());
+    assert!(state.runs.manual_run.pending_run_buffer.is_none());
 }
 
 #[test]
@@ -1571,17 +1571,17 @@ fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
     state.model.simulation.source.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
     let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
-    state.manual_run.pending_manual_run_id = Some(run_id);
-    state.manual_run.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
+    state.runs.manual_run.pending_manual_run_id = Some(run_id);
+    state.runs.manual_run.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
 
     controller.finish_simulation_batch(&mut state);
 
     assert_eq!(
-        state.manual_run.last_run_buffer.as_deref(),
+        state.runs.manual_run.last_run_buffer.as_deref(),
         Some("deck\n.op\nR1 out 0 1k\n.end\n")
     );
-    assert!(state.manual_run.edited_lines.contains(&2));
-    assert_eq!(state.manual_run.edited_lines.len(), 1);
+    assert!(state.runs.manual_run.edited_lines.contains(&2));
+    assert_eq!(state.runs.manual_run.edited_lines.len(), 1);
 }
 
 #[test]

@@ -44,7 +44,7 @@ pub(super) fn promotion_review_dialog(
                 .count()
         })
         .unwrap_or_default();
-    let project_writable = app.state.project_lifecycle.is_open()
+    let project_writable = app.state.platform.project_lifecycle.is_open()
         && !app.state.model.safe_mode.project_read_only()
         && app
             .state

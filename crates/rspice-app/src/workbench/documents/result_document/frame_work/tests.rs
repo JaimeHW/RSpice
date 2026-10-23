@@ -458,7 +458,7 @@ fn large_state() -> AppState {
             time, amplitude,
         ));
     }
-    state.analysis.eye_diagram_state.load_data(eye);
+    state.results.analysis.eye_diagram_state.load_data(eye);
 
     let samples: Vec<f64> = (0..FFT_SAMPLES)
         .map(|index| {
@@ -467,7 +467,7 @@ fn large_state() -> AppState {
                 + 0.1 * (2.0 * std::f64::consts::PI * 192.0 * t).sin()
         })
         .collect();
-    state.analysis.fft_state.load_data(
+    state.results.analysis.fft_state.load_data(
         rspice_results_ui::fft::FftData::from_time_domain_with_normalization(
             "V(n0)",
             &samples,
@@ -492,15 +492,14 @@ fn large_state() -> AppState {
             (frequency, real, imaginary)
         },
     );
-    state
-        .analysis
-        .nyquist_state
-        .load_data(rspice_results_ui::nyquist::NyquistData::from_arrays(
+    state.results.analysis.nyquist_state.load_data(
+        rspice_results_ui::nyquist::NyquistData::from_arrays(
             "Loop gain",
             &frequency,
             &real,
             &imaginary,
-        ));
+        ),
+    );
 
     // The reader has the envelope on: the drawn panes build it, and so does
     // the sheet bar's own gate before them.

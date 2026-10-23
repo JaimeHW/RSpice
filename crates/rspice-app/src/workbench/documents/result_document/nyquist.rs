@@ -14,6 +14,7 @@ use rspice_results_ui::nyquist::view::{
 /// The retained loop-gain locus.
 fn active_curve(state: &AppState) -> Option<&NyquistData> {
     state
+        .results
         .analysis
         .nyquist_state
         .curve()
@@ -58,7 +59,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // purely to release the borrow — meant every frame paid for a complete
     // copy of the locus before finding out the cache already held it.
     let prepared = if active_curve(state).is_some() {
-        let nyquist = &state.analysis.nyquist_state;
+        let nyquist = &state.results.analysis.nyquist_state;
         let points = nyquist
             .curve()
             .map(|curve| curve.points.as_slice())
@@ -79,6 +80,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     let source = prepared.as_ref().and_then(|(re, im, stats)| {
         state
+            .results
             .analysis
             .nyquist_state
             .curve()
@@ -138,6 +140,7 @@ mod tests {
     fn derived_stability_follows_the_retained_data_version() {
         let mut state = AppState::default();
         state
+            .results
             .analysis
             .nyquist_state
             .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[0.0], &[0.0]));
@@ -146,6 +149,7 @@ mod tests {
         assert_eq!(first.stability.min_distance, Some(1.0));
 
         state
+            .results
             .analysis
             .nyquist_state
             .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[-1.0], &[2.0]));

@@ -88,8 +88,13 @@ fn locus() -> NyquistData {
 /// effect shows against it.
 fn seeded() -> (AppState, SpecializedViewerCacheProvenance) {
     let mut state = AppState::default();
-    state.analysis.bode_plot_state.load_data(responses(1));
     state
+        .results
+        .analysis
+        .bode_plot_state
+        .load_data(responses(1));
+    state
+        .results
         .analysis
         .nyquist_state
         .load_data(NyquistData::from_arrays(
@@ -99,13 +104,15 @@ fn seeded() -> (AppState, SpecializedViewerCacheProvenance) {
             &[0.0, 0.25],
         ));
     state
+        .results
         .analysis
         .smith_chart_state
         .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
         .expect("valid Smith fixture");
-    state.analysis.eye_diagram_state.load_data(eye());
-    state.analysis.fft_state.window = WindowFunction::Rectangular;
+    state.results.analysis.eye_diagram_state.load_data(eye());
+    state.results.analysis.fft_state.window = WindowFunction::Rectangular;
     state
+        .results
         .analysis
         .fft_state
         .load_prepared_input(sine("V(old)"))
@@ -139,9 +146,9 @@ fn snapshot(state: &AppState, owner: SpecializedViewerCacheProvenance) -> String
         Some(found) if found == owner => "owner",
         Some(_) => "other",
     };
-    let authority = &state.analysis.cache_authority;
-    let fft = &state.analysis.fft_state;
-    let eye = &state.analysis.eye_diagram_state;
+    let authority = &state.results.analysis.cache_authority;
+    let fft = &state.results.analysis.fft_state;
+    let eye = &state.results.analysis.eye_diagram_state;
     format!(
         "authority bode={} nyquist={} smith={} fft={} eye={}\n\
          fft source={:?} cache={:?} data={} analysis={} error={} revision={}\n\
@@ -168,12 +175,13 @@ fn snapshot(state: &AppState, owner: SpecializedViewerCacheProvenance) -> String
         eye.timebase_provenance(),
         eye.data_revision(),
         state
+            .results
             .analysis
             .nyquist_state
             .curve()
             .map(|curve| (curve.name.as_str(), curve.points.len())),
-        state.analysis.bode_plot_state.data.response_count(),
-        state.analysis.smith_chart_state.traces.len(),
+        state.results.analysis.bode_plot_state.data.response_count(),
+        state.results.analysis.smith_chart_state.traces.len(),
     )
 }
 
@@ -283,7 +291,7 @@ fn a_prepared_fft_input_is_owned_only_when_the_viewer_accepts_it() {
     );
 
     let (mut state, owner) = seeded();
-    state.analysis.fft_state.window = WindowFunction::Hanning;
+    state.results.analysis.fft_state.window = WindowFunction::Hanning;
     state.apply_run_event(RunEvent::FftInputPrepared {
         owner: Some(owner),
         input: Ok(erased("V(out)")),

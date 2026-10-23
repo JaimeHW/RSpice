@@ -220,8 +220,8 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
             RetainedTrace::new("V(active)", time, values, "#00ffff"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
-    state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
-    state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
+    state.results.analysis.fft_state.selected_source = Some("V(active)".to_owned());
+    state.results.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "stale",
         &[9_999.0, 10_000.0],
         &[8_888.0, 7_777.0],
@@ -244,7 +244,7 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
     );
 
     state.model.simulation.view.data_version = 10_000;
-    state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
+    state.results.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "different stale cache",
         &[123_456.0],
         &[654_321.0],
@@ -273,7 +273,7 @@ fn fft_quick_view_reports_unqualified_retained_evidence_as_invalid() {
             RetainedTrace::new("V(unqualified)", time, vec![0.0; 16], "#00ffff"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
-    state.analysis.fft_state.selected_source = Some("V(unqualified)".to_owned());
+    state.results.analysis.fft_state.selected_source = Some("V(unqualified)".to_owned());
 
     assert!(matches!(
         resolve_quick_view(&state),
@@ -299,13 +299,17 @@ fn eye_quick_view_reconstructs_the_interactive_source_contract() {
             RetainedTrace::new("V(selected)", time.clone(), selected.clone(), "#00ffff"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Eye);
-    state.analysis.fft_state.selected_source = Some("|V(selected)|".to_owned());
+    state.results.analysis.fft_state.selected_source = Some("|V(selected)|".to_owned());
     let mut stale_eye = rspice_results_ui::eye_diagram::EyeData::new(99.0, 7);
     stale_eye.add_trace(rspice_results_ui::eye_diagram::EyeTrace::new(
         vec![0.0, 1.0],
         vec![9_999.0, 9_999.0],
     ));
-    state.analysis.eye_diagram_state.load_data(stale_eye);
+    state
+        .results
+        .analysis
+        .eye_diagram_state
+        .load_data(stale_eye);
 
     // This alternating stimulus has successive rising edges two time units apart.
     let period = 2.0;
@@ -361,8 +365,8 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             }],
         });
     let mut state = quick_view_state(analysis, ResultViewer::Hist);
-    state.analysis.histogram_state.bin_count = 5;
-    state.analysis.histogram_state.selected = Some("gain".to_owned());
+    state.results.analysis.histogram_state.bin_count = 5;
+    state.results.analysis.histogram_state.selected = Some("gain".to_owned());
     let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
 
     let resolved = resolve_quick_view(&state).unwrap();
@@ -420,12 +424,12 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     );
 
     for mode in rspice_results::histogram::HistogramDisplayMode::ALL {
-        state.analysis.histogram_state.mode = mode;
+        state.results.analysis.histogram_state.mode = mode;
         if mode == rspice_results::histogram::HistogramDisplayMode::Pdf {
             assert!(resolve_quick_view(&state).is_err());
-            state.analysis.histogram_state.custom_range = true;
-            state.analysis.histogram_state.custom_min = 0.0;
-            state.analysis.histogram_state.custom_max = 2.0;
+            state.results.analysis.histogram_state.custom_range = true;
+            state.results.analysis.histogram_state.custom_min = 0.0;
+            state.results.analysis.histogram_state.custom_max = 2.0;
         }
         let onscreen =
             crate::workbench::documents::result_document::active_histogram(&state).unwrap();
@@ -448,7 +452,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
                 .iter()
                 .any(|caption| caption.text.contains(mode.label()))
         );
-        state.analysis.histogram_state.custom_range = false;
+        state.results.analysis.histogram_state.custom_range = false;
     }
 }
 
@@ -682,7 +686,7 @@ fn the_printed_spectrum_is_in_decibels() {
     let analysis = AnalysisResult::new(8, AnalysisType::Transient, "Transient")
         .with_waveforms(vec![RetainedTrace::new("V(active)", time, values, "#0af")]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
-    state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
+    state.results.analysis.fft_state.selected_source = Some("V(active)".to_owned());
 
     let resolved = resolve_quick_view(&state).expect("the spectrum resolves");
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {

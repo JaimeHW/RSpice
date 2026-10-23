@@ -32,7 +32,7 @@ pub(crate) fn source_file_mutation_block_reason(
     app: &RSpiceApp,
     language: ProjectSourceLanguage,
 ) -> Option<&'static str> {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return Some("Open a project before changing project source files.");
     }
     if app.state.model.safe_mode.project_read_only() {
@@ -418,7 +418,7 @@ pub(crate) fn source_bundle_contains_document(
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return false;
     }
     app.state

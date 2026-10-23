@@ -241,7 +241,7 @@ fn prepare_pdk_configuration(
     ),
     Vec<String>,
 > {
-    if state.project_lifecycle.is_open() && state.model.safe_mode.project_read_only() {
+    if state.platform.project_lifecycle.is_open() && state.model.safe_mode.project_read_only() {
         return Err(vec![
             "PDK settings cannot change while the project is read-only.".to_owned(),
         ]);
@@ -307,7 +307,7 @@ fn publish_prepared_pdk_configuration_with_persistence(
         )]
     })?;
 
-    let publication = if state.project_lifecycle.is_open() {
+    let publication = if state.platform.project_lifecycle.is_open() {
         publish_model_library_set_candidate(state, candidate, "apply configured PDK model sources")
             .map(|_| ())
     } else {
@@ -638,7 +638,8 @@ impl RSpiceApp {
         ctx: &Context,
         config: crate::state::pdk_config::PdkConfig,
     ) {
-        if self.state.project_lifecycle.is_open() && self.state.model.safe_mode.project_read_only()
+        if self.state.platform.project_lifecycle.is_open()
+            && self.state.model.safe_mode.project_read_only()
         {
             emit_pdk_apply_messages(
                 &mut self.state,
@@ -864,7 +865,7 @@ impl RSpiceApp {
         self.pump_model_catalog_operations(ctx);
         let result = super::pdk_settings::render_pdk_settings_dialog(
             ctx,
-            &mut self.state.pdk_settings_dialog,
+            &mut self.state.models.pdk_settings_dialog,
         );
         match result {
             PdkSettingsDialogResult::Applied(config) => {
@@ -902,6 +903,7 @@ impl RSpiceApp {
 fn capture_native_model_import_authority(state: &AppState) -> NativeModelImportAuthority {
     NativeModelImportAuthority {
         project_id: state
+            .platform
             .project_lifecycle
             .is_open()
             .then(|| state.model.workspace.content.project.id().to_string()),
@@ -917,6 +919,7 @@ fn native_model_import_authority_is_current(
 ) -> bool {
     authority.project_id
         == state
+            .platform
             .project_lifecycle
             .is_open()
             .then(|| state.model.workspace.content.project.id().to_string())
@@ -1048,7 +1051,7 @@ fn publish_native_model_catalog_library(
             ]);
         }
     };
-    let revision = if state.project_lifecycle.is_open() {
+    let revision = if state.platform.project_lifecycle.is_open() {
         Some(
             publish_model_library_candidate(state, candidate, library_name, reason)
                 .map_err(|error| vec![error])?,
@@ -1453,6 +1456,7 @@ fn start_browser_model_import(
 ) -> Result<(), String> {
     let authority = BrowserModelImportAuthority {
         project_id: state
+            .platform
             .project_lifecycle
             .is_open()
             .then(|| state.model.workspace.content.project.id().to_string()),
@@ -1605,6 +1609,7 @@ impl RSpiceApp {
         let authority = BrowserModelImportAuthority {
             project_id: self
                 .state
+                .platform
                 .project_lifecycle
                 .is_open()
                 .then(|| self.state.model.workspace.content.project.id().to_string()),
@@ -1662,6 +1667,7 @@ fn poll_browser_model_hub_operations(
                 // stale by the project moving; a pack that landed on this
                 // machine landed regardless of what the project did.
                 let current = state
+                    .platform
                     .project_lifecycle
                     .is_open()
                     .then(|| state.model.workspace.content.project.id().to_string());
@@ -1710,6 +1716,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
         state.models.models_view.model_import_label = None;
         browser_model_import_worker::finish();
         let current_project_id = state
+            .platform
             .project_lifecycle
             .is_open()
             .then(|| state.model.workspace.content.project.id().to_string());
@@ -1792,7 +1799,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
             }
             let mut candidate = state.model.model_library_manager.clone();
             candidate.add_library(parsed.library);
-            if state.project_lifecycle.is_open() {
+            if state.platform.project_lifecycle.is_open() {
                 publish_model_library_candidate(
                     state,
                     candidate,

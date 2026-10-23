@@ -24,14 +24,16 @@ mod save_acceptance;
 /// baseline or binding, and publish the answer the way every transition does.
 impl AppState {
     pub(crate) fn open_project_session(&mut self) {
-        self.project_lifecycle.authority.open_session();
-        self.project_lifecycle
+        self.platform.project_lifecycle.authority.open_session();
+        self.platform
+            .project_lifecycle
             .publish_open(&mut self.model.project_open);
     }
 
     pub(crate) fn close_project_session(&mut self) {
-        self.project_lifecycle.authority.close_project();
-        self.project_lifecycle
+        self.platform.project_lifecycle.authority.close_project();
+        self.platform
+            .project_lifecycle
             .publish_open(&mut self.model.project_open);
     }
 }
@@ -196,6 +198,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     let baseline = snapshot(&state).expect("baseline");
     state.open_project_session();
     state
+        .platform
         .project_lifecycle
         .accept_project(baseline.clone(), None);
     let id = insert_configuration_root(
@@ -302,6 +305,7 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     let baseline = snapshot(&state).expect("baseline");
     state.open_project_session();
     state
+        .platform
         .project_lifecycle
         .accept_project(baseline.clone(), None);
 
@@ -400,6 +404,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
 
     working_state.open_project_session();
     working_state
+        .platform
         .project_lifecycle
         .accept_project(baseline, None);
     revert_document(&mut working_state, ProjectDocumentId::ProjectConfiguration)
@@ -478,7 +483,10 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
             crate::state::ViewType::VerilogA,
         ));
     state.open_project_session();
-    state.project_lifecycle.accept_project(baseline, None);
+    state
+        .platform
+        .project_lifecycle
+        .accept_project(baseline, None);
 
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert new cell configuration");
@@ -534,7 +542,10 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
         "module behavior(p, n); inout p, n; endmodule",
     );
     state.open_project_session();
-    state.project_lifecycle.accept_project(baseline, None);
+    state
+        .platform
+        .project_lifecycle
+        .accept_project(baseline, None);
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
         .expect("revert new view");
@@ -606,6 +617,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     let baseline = snapshot(&state).unwrap();
     state.open_project_session();
     state
+        .platform
         .project_lifecycle
         .accept_project(baseline.clone(), None);
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
@@ -630,20 +642,20 @@ fn lifecycle_epoch_advances_across_new_and_close() {
         project_id: state.model.workspace.content.project.id().to_string(),
         accepted_digest: crate::product::ContentDigest::from_bytes([0x44; 32]),
     };
-    state.native_project_binding_receipt = Some(receipt.clone());
-    let initial = state.project_lifecycle.authority.epoch();
+    state.platform.native_project_binding_receipt = Some(receipt.clone());
+    let initial = state.platform.project_lifecycle.authority.epoch();
     reset_for_new_project(&mut state);
     state.assert_project_open_fact();
-    let after_new = state.project_lifecycle.authority.epoch();
-    assert!(state.native_project_binding_receipt.is_none());
-    state.native_project_binding_receipt = Some(receipt);
+    let after_new = state.platform.project_lifecycle.authority.epoch();
+    assert!(state.platform.native_project_binding_receipt.is_none());
+    state.platform.native_project_binding_receipt = Some(receipt);
     mark_project_closed(&mut state);
     state.assert_project_open_fact();
-    let after_close = state.project_lifecycle.authority.epoch();
+    let after_close = state.platform.project_lifecycle.authority.epoch();
 
     assert!(after_new > initial);
     assert!(after_close > after_new);
-    assert!(state.native_project_binding_receipt.is_none());
+    assert!(state.platform.native_project_binding_receipt.is_none());
 }
 
 /// Model code reads whether a project is open from its own copy, so every
@@ -669,6 +681,7 @@ fn the_model_reads_the_open_project_every_transition_leaves() {
     state.assert_project_open_fact();
 
     state
+        .platform
         .project_lifecycle
         .close_restored_session(&mut state.model.project_open);
     assert!(!state.model.project_open.is_open());
@@ -807,6 +820,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     .expect("establish canonical binding");
     let canonical = normalize_native_path(&path).expect("normalize fixture");
     let receipt = state
+        .platform
         .native_project_binding_receipt
         .clone()
         .expect("successful save records receipt");
@@ -822,7 +836,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut exact = serde_json::from_str::<Box<AppState>>(&session).expect("restore exact session");
     initialize_from_session(exact.as_mut());
     assert_eq!(canonical_native_path(&exact), Some(canonical.clone()));
-    assert!(exact.project_lifecycle.accepted().is_some());
+    assert!(exact.platform.project_lifecycle.accepted().is_some());
 
     let mut same_project =
         Box::new(crate::io::load_project_file(&canonical).expect("load fixture"));
@@ -840,10 +854,16 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut digest_conflict =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore conflicted session");
     initialize_from_session(digest_conflict.as_mut());
-    assert!(digest_conflict.project_lifecycle.accepted().is_none());
+    assert!(
+        digest_conflict
+            .platform
+            .project_lifecycle
+            .accepted()
+            .is_none()
+    );
     assert!(canonical_native_path(&digest_conflict).is_none());
     assert_eq!(
-        digest_conflict.native_project_binding_receipt,
+        digest_conflict.platform.native_project_binding_receipt,
         Some(receipt.clone()),
         "conflict evidence must be retained"
     );
@@ -863,7 +883,13 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut identity_conflict =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore identity-conflict session");
     initialize_from_session(identity_conflict.as_mut());
-    assert!(identity_conflict.project_lifecycle.accepted().is_none());
+    assert!(
+        identity_conflict
+            .platform
+            .project_lifecycle
+            .accepted()
+            .is_none()
+    );
     assert!(canonical_native_path(&identity_conflict).is_none());
 
     std::fs::write(&canonical, &accepted_bytes).expect("restore exact fixture bytes");
@@ -876,14 +902,14 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut legacy =
         serde_json::from_value::<Box<AppState>>(legacy_value).expect("restore legacy session");
     initialize_from_session(legacy.as_mut());
-    assert!(legacy.project_lifecycle.accepted().is_none());
+    assert!(legacy.platform.project_lifecycle.accepted().is_none());
     assert!(canonical_native_path(&legacy).is_none());
 
     std::fs::remove_file(&canonical).expect("remove canonical fixture");
     let mut missing =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore missing session");
     initialize_from_session(missing.as_mut());
-    assert!(missing.project_lifecycle.accepted().is_none());
+    assert!(missing.platform.project_lifecycle.accepted().is_none());
     assert!(canonical_native_path(&missing).is_none());
     remove_project_artifacts(&path);
 }
@@ -1135,6 +1161,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
     assert_eq!(
         state
+            .platform
             .project_lifecycle
             .accepted()
             .expect("accepted save")
@@ -1145,6 +1172,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
     assert_eq!(
         state
+            .platform
             .project_lifecycle
             .accepted()
             .expect("accepted save")
@@ -1250,6 +1278,7 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
     );
     assert!(
         state
+            .platform
             .project_lifecycle
             .authority
             .registry()
@@ -1372,7 +1401,7 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
     )
     .expect("save source");
     let source_id = state.model.workspace.content.project.id();
-    let source_receipt = state.native_project_binding_receipt.clone();
+    let source_receipt = state.platform.native_project_binding_receipt.clone();
     state
         .model
         .schematic
@@ -1381,7 +1410,10 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
     save_project_copy_native(&mut state, &copy).expect("save independent copy");
 
     assert_eq!(state.model.workspace.content.project.id(), source_id);
-    assert_eq!(state.native_project_binding_receipt, source_receipt);
+    assert_eq!(
+        state.platform.native_project_binding_receipt,
+        source_receipt
+    );
     assert_eq!(
         canonical_native_path(&state),
         Some(normalize_native_path(&source).expect("normalize source"))
@@ -1493,11 +1525,13 @@ fn deleted_source_allows_recovery_copy_but_unreadable_canonical_path_is_rejected
     std::fs::write(&unreadable, b"not a project").expect("create unreadable canonical");
     let unreadable = normalize_native_path(&unreadable).expect("normalize unreadable path");
     let mut unreadable_state = AppState::default();
-    unreadable_state.project_lifecycle.unreadable_native_binding =
-        Some(persistence::UnreadableNativeBinding {
-            canonical_path: unreadable.clone(),
-            reason: "invalid project bytes".to_owned(),
-        });
+    unreadable_state
+        .platform
+        .project_lifecycle
+        .unreadable_native_binding = Some(persistence::UnreadableNativeBinding {
+        canonical_path: unreadable.clone(),
+        reason: "invalid project bytes".to_owned(),
+    });
     let before = std::fs::read(&unreadable).expect("capture unreadable bytes");
     let error = save_project_copy_native(&mut unreadable_state, &unreadable)
         .expect_err("Save Copy cannot overwrite remembered unreadable authority");
@@ -1632,6 +1666,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
 
     assert!(
         !state
+            .platform
             .project_lifecycle
             .authority
             .registry()
@@ -1639,6 +1674,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
     );
     assert!(
         !state
+            .platform
             .project_lifecycle
             .authority
             .registry()
@@ -1651,6 +1687,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
     );
     assert_eq!(
         state
+            .platform
             .project_lifecycle
             .accepted()
             .expect("accepted save")

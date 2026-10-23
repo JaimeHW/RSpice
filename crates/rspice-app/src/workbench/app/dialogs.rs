@@ -65,7 +65,7 @@ impl RSpiceApp {
     pub(in crate::workbench) fn process_model_browser_dialog(&mut self, ctx: &Context) {
         let _ = crate::properties::model_browser::render_model_browser(
             ctx,
-            &mut self.state.model_browser_state,
+            &mut self.state.models.model_browser_state,
             &self.state.model.model_library_manager,
         );
     }

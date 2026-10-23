@@ -547,12 +547,9 @@ pub(super) fn ac_complex_trace(app: &RSpiceApp) -> (Vec<f64>, Vec<f64>, Vec<f64>
 pub(super) fn derive_nyquist(app: &mut RSpiceApp) {
     let (frequency, real, imaginary) = ac_complex_trace(app);
     let provenance = in_flight_cache_provenance(app);
-    app.state
-        .analysis
-        .nyquist_state
-        .load_data(rspice_results::nyquist::NyquistData::from_arrays(
-            "V(out)", &frequency, &real, &imaginary,
-        ));
+    app.state.results.analysis.nyquist_state.load_data(
+        rspice_results::nyquist::NyquistData::from_arrays("V(out)", &frequency, &real, &imaginary),
+    );
     app.state
         .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
 }

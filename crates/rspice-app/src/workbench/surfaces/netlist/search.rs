@@ -231,7 +231,7 @@ fn netlist_search_documents(
                         state,
                     ),
                     source: state
-                        .manual_run
+                        .runs.manual_run
                         .last_run_buffer
                         .as_deref()
                         .unwrap_or_default(),

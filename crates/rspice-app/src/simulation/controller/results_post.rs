@@ -43,7 +43,7 @@ impl SimulationController {
             return;
         }
 
-        let preferred_fft_source = state.analysis.fft_state.selected_source.as_deref();
+        let preferred_fft_source = state.results.analysis.fft_state.selected_source.as_deref();
         let Some((waveform_key, waveform)) =
             Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_fft_source)
         else {
@@ -66,7 +66,11 @@ impl SimulationController {
         state.apply_run_event(RunEvent::FftSourceChosen {
             source: waveform_key.clone(),
         });
-        let input_options = state.analysis.fft_state.input_options_for_waveform(time);
+        let input_options = state
+            .results
+            .analysis
+            .fft_state
+            .input_options_for_waveform(time);
 
         let provenance = self.in_flight_specialized_viewer_provenance(state);
         // Same builder as the lazy path in `transient_post`, at the same
@@ -93,7 +97,7 @@ impl SimulationController {
             input,
         });
         // The viewer holds a spectrum exactly when it accepted the input.
-        let availability = if state.analysis.fft_state.has_data() {
+        let availability = if state.results.analysis.fft_state.has_data() {
             DerivedViewAvailability::Ready
         } else {
             DerivedViewAvailability::Unavailable
@@ -363,6 +367,7 @@ mod nyquist_scope_tests {
         controller.populate_ac_post_views(&mut state, &frequencies, &waveforms);
 
         let curve = state
+            .results
             .analysis
             .nyquist_state
             .curve()
@@ -388,10 +393,10 @@ mod nyquist_scope_tests {
 
         controller.populate_ac_post_views(&mut state, &frequencies, &waveforms);
 
-        assert!(state.analysis.nyquist_state.is_empty());
-        assert!(state.analysis.cache_authority.nyquist.is_none());
+        assert!(state.results.analysis.nyquist_state.is_empty());
+        assert!(state.results.analysis.cache_authority.nyquist.is_none());
         // The Bode sheet still receives every complex response.
-        assert!(!state.analysis.bode_plot_state.is_empty());
+        assert!(!state.results.analysis.bode_plot_state.is_empty());
     }
 
     /// And an analysis whose kind cannot be resolved gets no locus either:
@@ -404,6 +409,6 @@ mod nyquist_scope_tests {
 
         controller.populate_ac_post_views(&mut state, &frequencies, &waveforms);
 
-        assert!(state.analysis.nyquist_state.is_empty());
+        assert!(state.results.analysis.nyquist_state.is_empty());
     }
 }

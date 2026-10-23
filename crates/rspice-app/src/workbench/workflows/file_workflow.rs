@@ -222,7 +222,7 @@ pub(crate) fn apply_loaded_schematic(
 ) -> bool {
     // Inside a project a schematic file is added to it, never poured over
     // the cell view the user has open.
-    if state.project_lifecycle.is_open() {
+    if state.platform.project_lifecycle.is_open() {
         return match import_loaded_schematic_as_cell_view(state, schematic, origin) {
             Ok(reference) => {
                 state.record(
@@ -354,14 +354,14 @@ fn prepare_loaded_schematic(
 ) -> SchematicState {
     match origin {
         SchematicLoadOrigin::PersistentPath(_) => {
-            state.browser_schematic_save_name = None;
+            state.platform.browser_schematic_save_name = None;
             schematic
         }
         #[cfg(any(test, target_arch = "wasm32"))]
         SchematicLoadOrigin::BrowserImport(name) => {
             let mut schematic = schematic;
             schematic.session.current_file = None;
-            state.browser_schematic_save_name = Some(name.to_string());
+            state.platform.browser_schematic_save_name = Some(name.to_string());
             schematic
         }
     }
@@ -419,7 +419,7 @@ fn schematic_save_dialog_default_name(state: &AppState) -> Option<String> {
         .current_file
         .as_deref()
         .and_then(file_name_string)
-        .or_else(|| state.browser_schematic_save_name.clone())
+        .or_else(|| state.platform.browser_schematic_save_name.clone())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -528,7 +528,7 @@ pub(crate) fn save_schematic_to_path_with_io(
                 state.model.schematic.session.current_file = Some(path.to_path_buf());
             }
             if saved_path_is_reopenable {
-                state.browser_schematic_save_name = None;
+                state.platform.browser_schematic_save_name = None;
                 state.model.schematic.session.is_dirty = false;
                 // Retire only the checkpoint whose writer lease and committed
                 // identity prove this process owns these exact bytes. Foreign,
@@ -562,7 +562,7 @@ pub(crate) fn save_schematic_to_path_with_io(
                     format!("Saved schematic {}.", path.display()),
                 );
             } else {
-                state.browser_schematic_save_name = file_name_string(path);
+                state.platform.browser_schematic_save_name = file_name_string(path);
                 state.record(
                     LogSeverity::Info,
                     LogSource::Studio,
@@ -745,7 +745,7 @@ mod tests {
         assert!(imported);
         assert!(state.model.schematic.session.current_file.is_none());
         assert!(!state.model.simulation.retained.has_results());
-        assert!(state.recent_files.is_empty());
+        assert!(state.platform.recent_files.is_empty());
         assert!(state.model.log_buffer.entries().any(|entry| {
             entry
                 .message
@@ -768,10 +768,10 @@ mod tests {
         assert!(imported);
         assert!(state.model.schematic.session.current_file.is_none());
         assert_eq!(
-            state.browser_schematic_save_name.as_deref(),
+            state.platform.browser_schematic_save_name.as_deref(),
             Some("browser-filter.rsch")
         );
-        assert!(state.recent_files.is_empty());
+        assert!(state.platform.recent_files.is_empty());
     }
 
     #[test]
@@ -799,10 +799,10 @@ mod tests {
         );
         assert!(state.model.schematic.session.current_file.is_none());
         assert_eq!(
-            state.browser_schematic_save_name.as_deref(),
+            state.platform.browser_schematic_save_name.as_deref(),
             Some("browser-save.rsch")
         );
-        assert!(state.recent_files.is_empty());
+        assert!(state.platform.recent_files.is_empty());
     }
 
     fn seed_stale_design_execution_context(state: &mut AppState) {
@@ -815,24 +815,24 @@ mod tests {
             .runs
             .push(crate::state::SimulationRun::new(1));
         state.model.simulation.view.active_run_idx = Some(0);
-        state.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
-        state.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
-        state.manual_run.pending_manual_run_id = Some(1);
+        state.runs.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
+        state.runs.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
+        state.runs.manual_run.pending_manual_run_id = Some(1);
         state.code.netlist.rerun_queued = true;
-        state.manual_run.edited_lines.insert(3);
-        state.analysis.histogram_state.selected = Some("old measurement".to_owned());
+        state.runs.manual_run.edited_lines.insert(3);
+        state.results.analysis.histogram_state.selected = Some("old measurement".to_owned());
     }
 
     fn assert_design_execution_context_cleared(state: &AppState) {
         assert!(state.model.workspace.content.netlist_source.is_none());
         assert!(state.model.simulation.source.netlist_content.is_empty());
         assert!(!state.model.simulation.retained.has_results());
-        assert!(state.manual_run.last_run_buffer.is_none());
-        assert!(state.manual_run.pending_run_buffer.is_none());
-        assert!(state.manual_run.pending_manual_run_id.is_none());
+        assert!(state.runs.manual_run.last_run_buffer.is_none());
+        assert!(state.runs.manual_run.pending_run_buffer.is_none());
+        assert!(state.runs.manual_run.pending_manual_run_id.is_none());
         assert!(!state.code.netlist.rerun_queued);
-        assert!(state.manual_run.edited_lines.is_empty());
-        assert_eq!(state.analysis.histogram_state.selected, None);
+        assert!(state.runs.manual_run.edited_lines.is_empty());
+        assert_eq!(state.results.analysis.histogram_state.selected, None);
     }
 
     fn open_default_symbol_view(state: &mut AppState) -> CellViewRef {
@@ -1040,12 +1040,12 @@ mod tests {
         assert!(saved);
         assert!(state.model.schematic.session.current_file.is_none());
         assert_eq!(
-            state.browser_schematic_save_name.as_deref(),
+            state.platform.browser_schematic_save_name.as_deref(),
             Some("browser-save.rsch")
         );
         assert!(state.model.schematic.session.is_dirty);
         assert!(state.model.workspace.any_dirty());
-        assert!(state.recent_files.is_empty());
+        assert!(state.platform.recent_files.is_empty());
     }
 
     /// Projects and files ▸ Keep a backup when saving: a second save copies

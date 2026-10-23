@@ -515,11 +515,11 @@ impl RSpiceApp {
 
         // A license file on disk wins over (or backfills) the session copy.
         #[cfg(not(target_arch = "wasm32"))]
-        if state.license.is_none()
+        if state.cloud.license.is_none()
             && let Some((key, info)) = crate::services::license::load_stored()
         {
-            state.license_key = Some(key);
-            state.license = Some(info);
+            state.cloud.license_key = Some(key);
+            state.cloud.license = Some(info);
         }
 
         // Load symbol library
@@ -1211,13 +1211,13 @@ impl eframe::App for RSpiceApp {
 
 impl RSpiceApp {
     fn process_exit_request(&mut self, ctx: &Context) {
-        if !self.state.exit_requested {
+        if !self.state.shell.exit_requested {
             return;
         }
 
         log::info!("application exit requested — closing viewport");
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        self.state.exit_requested = false;
+        self.state.shell.exit_requested = false;
     }
 
     /// Toggle the console panel between expanded and collapsed.
@@ -2021,17 +2021,17 @@ mod tests {
         assert!(state.application_modal_open());
         state.model.sim_setup.session.palette_open = false;
 
-        state.tabbed_property_dialog.open = true;
+        state.design.tabbed_property_dialog.open = true;
         assert!(state.application_modal_open());
-        state.tabbed_property_dialog.open = false;
+        state.design.tabbed_property_dialog.open = false;
 
-        state.pdk_settings_dialog.open = true;
+        state.models.pdk_settings_dialog.open = true;
         assert!(state.application_modal_open());
-        state.pdk_settings_dialog.open = false;
+        state.models.pdk_settings_dialog.open = false;
 
-        state.model_browser_state.open = true;
+        state.models.model_browser_state.open = true;
         assert!(state.application_modal_open());
-        state.model_browser_state.open = false;
+        state.models.model_browser_state.open = false;
 
         state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
         state.code.netlist.find.open = true;

@@ -561,7 +561,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 
     let model = AccountConsoleModel::project(
-        app.state.license.as_ref(),
+        app.state.cloud.license.as_ref(),
         app.cloud_account.snapshot(),
         app.cloud_account.availability(),
     );
@@ -1630,7 +1630,7 @@ mod tests {
             CloudAccountAvailability::Native,
             snapshot,
         );
-        app.state.license = Some(sample_license());
+        app.state.cloud.license = Some(sample_license());
         app.state
             .workbench
             .navigate(account_route(), RouteTransitionSource::User)

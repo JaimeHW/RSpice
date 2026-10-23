@@ -34,7 +34,12 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
             let candidate = snapshot(&state).unwrap();
             let (bytes, _) =
                 rspice_project::persistence::serialized_project(&candidate.file).unwrap();
-            let accepted_digest = state.project_lifecycle.binding().unwrap().accepted_digest;
+            let accepted_digest = state
+                .platform
+                .project_lifecycle
+                .binding()
+                .unwrap()
+                .accepted_digest;
             if later_change == 1 {
                 state
                     .model
@@ -107,7 +112,12 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         .unwrap();
         let saved_document = active_document(&state);
         let previous_generation = accepted_generation(&state);
-        let previous_digest = state.project_lifecycle.binding().unwrap().accepted_digest;
+        let previous_digest = state
+            .platform
+            .project_lifecycle
+            .binding()
+            .unwrap()
+            .accepted_digest;
         state
             .model
             .schematic
@@ -150,13 +160,18 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
             previous_generation + 1,
             "an invalid newer draft must not discard an acknowledged save"
         );
-        let accepted = state.project_lifecycle.accepted().unwrap();
+        let accepted = state.platform.project_lifecycle.accepted().unwrap();
         assert_eq!(
             accepted.fingerprints().unwrap().content_digest(),
             candidate_content
         );
         assert_eq!(
-            state.project_lifecycle.binding().unwrap().accepted_digest,
+            state
+                .platform
+                .project_lifecycle
+                .binding()
+                .unwrap()
+                .accepted_digest,
             digest
         );
         assert_eq!(
@@ -177,6 +192,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         assert!(state.model.schematic.session.is_dirty);
         assert!(
             state
+                .platform
                 .project_lifecycle
                 .authority
                 .registry()
@@ -196,6 +212,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         refresh_registry(&mut state).unwrap();
         assert!(
             !state
+                .platform
                 .project_lifecycle
                 .authority
                 .registry()
@@ -219,6 +236,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
 fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     let mut state = AppState::default();
     state
+        .platform
         .project_lifecycle
         .accept_project(snapshot(&state).unwrap(), None);
     refresh_registry(&mut state).unwrap();
@@ -255,6 +273,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     assert!(state.model.workspace.content.project_sources_dirty);
     assert!(
         state
+            .platform
             .project_lifecycle
             .authority
             .registry()
@@ -264,6 +283,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     );
     assert!(
         state
+            .platform
             .project_lifecycle
             .authority
             .registry()
@@ -305,6 +325,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     assert!(!state.model.workspace.content.project_sources_dirty);
     assert!(
         state
+            .platform
             .project_lifecycle
             .authority
             .registry()

@@ -90,7 +90,7 @@ impl InspectorHost for ReportHost<'_> {
 
 impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
     fn project_open(&self) -> bool {
-        self.0.state.project_lifecycle.is_open()
+        self.0.state.platform.project_lifecycle.is_open()
     }
     fn synchronize_selection(&mut self) {
         synchronize_report_selection(&mut self.0.state);

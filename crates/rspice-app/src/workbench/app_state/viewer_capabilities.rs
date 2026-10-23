@@ -25,7 +25,7 @@ pub(crate) struct SpecializedViewerCacheAuthority {
 }
 
 /// Analysis viewer state grouped behind a dedicated workspace surface.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AnalysisWorkspaceState {
     /// Bode viewer state
     pub(crate) bode_plot_state: rspice_results_ui::bode::BodePlotState,
@@ -131,7 +131,7 @@ impl AppState {
         });
         self.code.netlist = Default::default();
         *self.model.netlist_artifacts = Default::default();
-        *self.manual_run = Default::default();
+        *self.runs.manual_run = Default::default();
         self.code.code_workspace = Default::default();
         self.code.netlist_open_documents.clear();
         self.results.results_seen_version = 0;
@@ -166,12 +166,13 @@ impl AppState {
 
     /// Clear transient-derived viewer caches without disturbing AC/RF state.
     pub fn clear_transient_specialized_viewer_data(&mut self) {
-        self.analysis.fft_state.clear();
-        self.analysis
+        self.results.analysis.fft_state.clear();
+        self.results
+            .analysis
             .eye_diagram_state
             .load_data(rspice_results_ui::eye_diagram::EyeData::default());
-        self.analysis.cache_authority.fft = None;
-        self.analysis.cache_authority.eye = None;
+        self.results.analysis.cache_authority.fft = None;
+        self.results.analysis.cache_authority.eye = None;
     }
 
     /// Clear all specialized (non-waveform) viewer data caches.
@@ -180,13 +181,14 @@ impl AppState {
     /// cached analysis-specific visualizations.
     pub fn clear_specialized_viewer_data(&mut self) {
         self.clear_transient_specialized_viewer_data();
-        self.analysis.histogram_state.clear_selection();
-        self.analysis
+        self.results.analysis.histogram_state.clear_selection();
+        self.results
+            .analysis
             .bode_plot_state
             .load_data(rspice_results_ui::bode::BodeData::new());
-        self.analysis.nyquist_state.clear();
-        self.analysis.smith_chart_state.clear_traces();
-        self.analysis.cache_authority = Default::default();
+        self.results.analysis.nyquist_state.clear();
+        self.results.analysis.smith_chart_state.clear_traces();
+        self.results.analysis.cache_authority = Default::default();
     }
 
     /// Exact immutable result currently selected in the Results workspace.
@@ -297,13 +299,15 @@ impl AppState {
     fn clear_specialized_viewer_cache(&mut self, viewer: ActiveViewer) {
         match viewer {
             ActiveViewer::BodePlot => self
+                .results
                 .analysis
                 .bode_plot_state
                 .load_data(rspice_results_ui::bode::BodeData::new()),
-            ActiveViewer::Nyquist => self.analysis.nyquist_state.clear(),
-            ActiveViewer::SmithChart => self.analysis.smith_chart_state.clear_traces(),
-            ActiveViewer::Fft => self.analysis.fft_state.clear(),
+            ActiveViewer::Nyquist => self.results.analysis.nyquist_state.clear(),
+            ActiveViewer::SmithChart => self.results.analysis.smith_chart_state.clear_traces(),
+            ActiveViewer::Fft => self.results.analysis.fft_state.clear(),
             ActiveViewer::EyeDiagram => self
+                .results
                 .analysis
                 .eye_diagram_state
                 .load_data(rspice_results_ui::eye_diagram::EyeData::default()),
@@ -317,11 +321,11 @@ impl AppState {
         viewer: ActiveViewer,
     ) -> Option<SpecializedViewerCacheProvenance> {
         match viewer {
-            ActiveViewer::BodePlot => self.analysis.cache_authority.bode,
-            ActiveViewer::Nyquist => self.analysis.cache_authority.nyquist,
-            ActiveViewer::SmithChart => self.analysis.cache_authority.smith,
-            ActiveViewer::Fft => self.analysis.cache_authority.fft,
-            ActiveViewer::EyeDiagram => self.analysis.cache_authority.eye,
+            ActiveViewer::BodePlot => self.results.analysis.cache_authority.bode,
+            ActiveViewer::Nyquist => self.results.analysis.cache_authority.nyquist,
+            ActiveViewer::SmithChart => self.results.analysis.cache_authority.smith,
+            ActiveViewer::Fft => self.results.analysis.cache_authority.fft,
+            ActiveViewer::EyeDiagram => self.results.analysis.cache_authority.eye,
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => None,
         }
     }
@@ -331,11 +335,11 @@ impl AppState {
         viewer: ActiveViewer,
     ) -> &mut Option<SpecializedViewerCacheProvenance> {
         match viewer {
-            ActiveViewer::BodePlot => &mut self.analysis.cache_authority.bode,
-            ActiveViewer::Nyquist => &mut self.analysis.cache_authority.nyquist,
-            ActiveViewer::SmithChart => &mut self.analysis.cache_authority.smith,
-            ActiveViewer::Fft => &mut self.analysis.cache_authority.fft,
-            ActiveViewer::EyeDiagram => &mut self.analysis.cache_authority.eye,
+            ActiveViewer::BodePlot => &mut self.results.analysis.cache_authority.bode,
+            ActiveViewer::Nyquist => &mut self.results.analysis.cache_authority.nyquist,
+            ActiveViewer::SmithChart => &mut self.results.analysis.cache_authority.smith,
+            ActiveViewer::Fft => &mut self.results.analysis.cache_authority.fft,
+            ActiveViewer::EyeDiagram => &mut self.results.analysis.cache_authority.eye,
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => {
                 panic!("this viewer does not own mutable cache provenance")
             }
@@ -349,11 +353,11 @@ impl AppState {
 
     fn specialized_viewer_cache_has_data(&self, viewer: ActiveViewer) -> bool {
         match viewer {
-            ActiveViewer::BodePlot => !self.analysis.bode_plot_state.is_empty(),
-            ActiveViewer::Nyquist => !self.analysis.nyquist_state.is_empty(),
-            ActiveViewer::SmithChart => !self.analysis.smith_chart_state.traces.is_empty(),
-            ActiveViewer::Fft => self.analysis.fft_state.has_data(),
-            ActiveViewer::EyeDiagram => self.analysis.eye_diagram_state.trace_count() > 0,
+            ActiveViewer::BodePlot => !self.results.analysis.bode_plot_state.is_empty(),
+            ActiveViewer::Nyquist => !self.results.analysis.nyquist_state.is_empty(),
+            ActiveViewer::SmithChart => !self.results.analysis.smith_chart_state.traces.is_empty(),
+            ActiveViewer::Fft => self.results.analysis.fft_state.has_data(),
+            ActiveViewer::EyeDiagram => self.results.analysis.eye_diagram_state.trace_count() > 0,
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => false,
         }
     }
@@ -364,7 +368,7 @@ impl AppState {
             ActiveViewer::Waveform => ViewerCapability::available("Always available"),
             ActiveViewer::SmithChart => {
                 if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.analysis.smith_chart_state.traces.is_empty()
+                    || self.results.analysis.smith_chart_state.traces.is_empty()
                 {
                     ViewerCapability::unavailable(
                         "Requires retained S-parameter traces and per-port reference impedances",
@@ -377,7 +381,7 @@ impl AppState {
             }
             ActiveViewer::EyeDiagram => {
                 if self.specialized_viewer_cache_matches_active(viewer)
-                    && self.analysis.eye_diagram_state.trace_count() > 0
+                    && self.results.analysis.eye_diagram_state.trace_count() > 0
                 {
                     ViewerCapability::available("Active analysis eye traces loaded")
                 } else if self.active_analysis_supports_eye_diagram() {
@@ -397,7 +401,7 @@ impl AppState {
             }
             ActiveViewer::BodePlot => {
                 if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.analysis.bode_plot_state.is_empty()
+                    || self.results.analysis.bode_plot_state.is_empty()
                 {
                     ViewerCapability::unavailable("Requires AC/transfer-function response data")
                 } else {
@@ -406,7 +410,7 @@ impl AppState {
             }
             ActiveViewer::Nyquist => {
                 if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.analysis.nyquist_state.is_empty()
+                    || self.results.analysis.nyquist_state.is_empty()
                 {
                     // The sheet takes a retained loop-gain contour and nothing
                     // else — an AC node response is not a loop gain, and the
@@ -421,8 +425,9 @@ impl AppState {
                 }
             }
             ActiveViewer::Fft => {
-                let has_spectrum = self.analysis.fft_state.has_data()
+                let has_spectrum = self.results.analysis.fft_state.has_data()
                     && self
+                        .results
                         .analysis
                         .fft_state
                         .data
@@ -541,9 +546,10 @@ mod tests {
 
         let mut bode = BodeData::new();
         bode.add_response();
-        state.analysis.bode_plot_state.load_data(bode);
+        state.results.analysis.bode_plot_state.load_data(bode);
 
         state
+            .results
             .analysis
             .nyquist_state
             .load_data(NyquistData::from_arrays(
@@ -554,6 +560,7 @@ mod tests {
             ));
 
         state
+            .results
             .analysis
             .smith_chart_state
             .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
@@ -561,9 +568,9 @@ mod tests {
 
         let mut eye = EyeData::new(1e-9, 2);
         eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
-        state.analysis.eye_diagram_state.load_data(eye);
+        state.results.analysis.eye_diagram_state.load_data(eye);
 
-        state.analysis.fft_state.load_data(
+        state.results.analysis.fft_state.load_data(
             FftData::from_time_domain_with_normalization(
                 "old fft",
                 &[
@@ -687,13 +694,13 @@ mod tests {
     fn clearing_fft_authority_preserves_samples_and_other_viewer_owners() {
         let mut state = AppState::default();
         seed_result_viewers(&mut state);
-        let bode_authority = state.analysis.cache_authority.bode;
+        let bode_authority = state.results.analysis.cache_authority.bode;
 
         state.clear_fft_viewer_cache_authority();
 
-        assert_eq!(state.analysis.cache_authority.fft, None);
-        assert_eq!(state.analysis.cache_authority.bode, bode_authority);
-        assert!(state.analysis.fft_state.has_data());
+        assert_eq!(state.results.analysis.cache_authority.fft, None);
+        assert_eq!(state.results.analysis.cache_authority.bode, bode_authority);
+        assert!(state.results.analysis.fft_state.has_data());
     }
 
     #[test]
@@ -765,13 +772,13 @@ mod tests {
         }
 
         state.synchronize_specialized_viewer_cache_authority();
-        assert!(state.analysis.bode_plot_state.is_empty());
-        assert!(state.analysis.nyquist_state.is_empty());
-        assert!(state.analysis.smith_chart_state.traces.is_empty());
-        assert!(!state.analysis.fft_state.has_data());
-        assert_eq!(state.analysis.eye_diagram_state.trace_count(), 0);
+        assert!(state.results.analysis.bode_plot_state.is_empty());
+        assert!(state.results.analysis.nyquist_state.is_empty());
+        assert!(state.results.analysis.smith_chart_state.traces.is_empty());
+        assert!(!state.results.analysis.fft_state.has_data());
+        assert_eq!(state.results.analysis.eye_diagram_state.trace_count(), 0);
         assert_eq!(
-            state.analysis.cache_authority,
+            state.results.analysis.cache_authority,
             SpecializedViewerCacheAuthority::default()
         );
     }

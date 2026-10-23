@@ -561,7 +561,7 @@ fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(
         app.state.workbench.results_split_visible(
-            app.state.project_lifecycle.is_open(),
+            app.state.platform.project_lifecycle.is_open(),
             app.state
                 .model
                 .simulation

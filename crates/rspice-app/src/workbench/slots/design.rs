@@ -209,6 +209,11 @@ pub(crate) struct DesignState {
     pub placement_query: String,
     /// One-frame request to focus the component chooser filter.
     pub focus_placement_search: bool,
+    /// Tabbed property dialog state (commercial-grade property editing).
+    /// Boxed: the dialog's tabs carry their drafts.
+    pub(crate) tabbed_property_dialog: Box<crate::properties::TabbedPropertyDialogState>,
+    /// Property registry (component property schemas)
+    pub(crate) property_registry: crate::properties::PropertyEditorSchema,
 }
 
 impl DesignState {

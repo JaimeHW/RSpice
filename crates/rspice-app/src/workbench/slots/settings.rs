@@ -25,4 +25,16 @@ pub(crate) struct SettingsState {
     /// Browser-only opt-in for egui's Web Speech interaction feedback.
     /// Native assistive technology is negotiated automatically by AccessKit.
     pub browser_spoken_feedback: bool,
+
+    /// Canonical device-local shortcut-library CAS authority. The recoverable
+    /// eframe session copy never replaces this owner after startup.
+    pub(crate) shortcut_library_persistence: crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime,
+    /// UI transaction paired with the single browser shortcut-library CAS.
+    pub(crate) shortcut_library_publication_continuation: Option<
+        crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPublicationContinuation,
+    >,
+    /// Where the preferences file lives and what has been written to it.
+    /// Unbound in a default state, so nothing but a launch touches the disk.
+    pub(crate) preferences_file:
+        Box<crate::workbench::app_state::session::preferences_file::PreferencesFileRuntime>,
 }

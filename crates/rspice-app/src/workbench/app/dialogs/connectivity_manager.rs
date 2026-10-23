@@ -253,7 +253,7 @@ enum ConnectivityBodyAction {
 
 pub(crate) fn open_connectivity_manager(state: &mut AppState) {
     // The command is greyed with no project open.
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         return;
     }
     if !matches!(

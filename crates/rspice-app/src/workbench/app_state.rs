@@ -99,65 +99,11 @@ pub struct AppState {
     pub(crate) models: Box<ModelsState>,
     /// What watching the simulations in flight keeps between frames.
     pub(crate) runs: Box<RunsState>,
-    /// The deck a manual-deck run started from and the baseline the last one
-    /// left. Runtime only, and boxed so a moved state stays the same size.
-    pub(crate) manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
-    /// Transactional document registry, accepted project baseline, and
-    /// canonical persistence identity. Runtime-only apart from whether a
-    /// project is open; session recovery keeps the working set separately and
-    /// reconstructs this boundary at startup.
-    pub(crate) project_lifecycle:
-        Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
-    /// Tabbed property dialog state (commercial-grade property editing)
-    pub(crate) tabbed_property_dialog: crate::properties::TabbedPropertyDialogState,
-    /// Property registry (component property schemas)
-    pub(crate) property_registry: crate::properties::PropertyEditorSchema,
-    /// Calculator panel state
-    pub(crate) calculator_panel: session::calculator::CalculatorPanel,
-    /// PDK Settings dialog state
-    pub(crate) pdk_settings_dialog: session::pdk_settings::PdkSettingsDialogState,
-    /// Standalone model browser state (for Tools menu access)
-    pub(crate) model_browser_state: crate::properties::model_browser::ModelBrowserState,
-    /// Flag to signal that application exit has been requested (after confirmation)
-    pub(crate) exit_requested: bool,
-    /// Recently opened/saved schematic and project files, most recent first
-    /// (persisted across sessions). The projects are the start page's recent
-    /// list; the schematics are what crash recovery scans.
-    pub(crate) recent_files: Vec<RecentFile>,
-    /// Browser-only suggested filename for the next schematic download.
-    pub(crate) browser_schematic_save_name: Option<String>,
-    /// Browser-only suggested filename for the next project download.
-    pub(crate) browser_project_save_name: Option<String>,
-    /// Exact native canonical-file authority saved with the working session.
-    /// A restored pathname alone never grants ordinary Save authority.
-    pub(crate) native_project_binding_receipt:
-        Option<crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt>,
-    /// Exact browser canonical-binding authority saved with the working-set
-    /// session.  The binding UUID is opaque and intentionally independent of
-    /// the logical project UUID. Runtime file handles are never serialized.
-    pub(crate) browser_project_binding_receipt:
-        Option<crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt>,
-    /// The activated license key as pasted (persisted; re-verified on load).
-    pub(crate) license_key: Option<String>,
-    /// The verified grant behind `license_key` (derived, never persisted).
-    pub(crate) license: Option<crate::services::license::LicenseInfo>,
-    /// Specialized analysis viewer state grouped by analysis workspace.
-    pub(crate) analysis: viewer_capabilities::AnalysisWorkspaceState,
     /// Canonical workbench navigation and responsive layout state.
     pub(crate) workbench: Box<crate::workbench::WorkbenchState>,
     /// Runtime-only chord/prefix authority. Partial sequences are never
     /// serialized or restored across application sessions.
     pub(crate) shortcut_resolver: session::shortcuts::ShortcutResolverState,
-    /// Canonical device-local shortcut-library CAS authority. The recoverable
-    /// eframe session copy never replaces this owner after startup.
-    pub(crate) shortcut_library_persistence:
-        session::shortcut_library::ShortcutLibraryPersistenceRuntime,
-    /// UI transaction paired with the single browser shortcut-library CAS.
-    pub(crate) shortcut_library_publication_continuation:
-        Option<session::shortcut_library::ShortcutLibraryPublicationContinuation>,
-    /// Where the preferences file lives and what has been written to it.
-    /// Unbound in a default state, so nothing but a launch touches the disk.
-    pub(crate) preferences_file: Box<session::preferences_file::PreferencesFileRuntime>,
 }
 
 impl Default for AppState {
@@ -173,7 +119,7 @@ impl AppState {
     pub(crate) fn assert_project_open_fact(&self) {
         debug_assert_eq!(
             self.model.project_open.is_open(),
-            self.project_lifecycle.is_open(),
+            self.platform.project_lifecycle.is_open(),
             "the model's project-open fact disagrees with the project lifecycle"
         );
     }
@@ -840,9 +786,9 @@ impl AppState {
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
                 && self.code.netlist.application_modal_open())
             || self.model.sim_setup.session.palette_open
-            || self.tabbed_property_dialog.open
-            || self.pdk_settings_dialog.open
-            || self.model_browser_state.open
+            || self.design.tabbed_property_dialog.open
+            || self.models.pdk_settings_dialog.open
+            || self.models.model_browser_state.open
             || browser_file_operation_open
     }
 
@@ -1226,6 +1172,7 @@ impl AppState {
     /// capped at Projects and files ▸ Recent projects listed).
     pub(crate) fn remember_recent_file(&mut self, kind: RecentKind, path: &std::path::Path) {
         let previous = self
+            .platform
             .recent_files
             .iter()
             .find(|recent| recent.path == path)
@@ -1241,8 +1188,10 @@ impl AppState {
             owner: previous.as_ref().and_then(|recent| recent.owner.clone()),
             tags: previous.map_or_else(Vec::new, |recent| recent.tags),
         };
-        self.recent_files.retain(|recent| recent.path != entry.path);
-        self.recent_files.insert(0, entry);
+        self.platform
+            .recent_files
+            .retain(|recent| recent.path != entry.path);
+        self.platform.recent_files.insert(0, entry);
         self.trim_recent_files();
     }
 
@@ -1254,7 +1203,7 @@ impl AppState {
     pub(crate) fn trim_recent_files(&mut self) {
         let listed = self.model.preferences.recent_files_listed();
         let (mut projects, mut schematics) = (0, 0);
-        self.recent_files.retain(|recent| {
+        self.platform.recent_files.retain(|recent| {
             let kept = match recent.kind {
                 RecentKind::Project => &mut projects,
                 RecentKind::Schematic => &mut schematics,
@@ -1272,6 +1221,7 @@ impl AppState {
         pinned: bool,
     ) -> bool {
         let Some(recent) = self
+            .platform
             .recent_files
             .iter_mut()
             .find(|recent| recent.kind == RecentKind::Project && recent.path == path)
@@ -1329,14 +1279,14 @@ mod tests {
         let mut state = AppState::default();
         let path = std::path::Path::new("C:/Engineering/afe.rspiceproj");
         state.remember_recent_file(RecentKind::Project, path);
-        state.recent_files[0].pinned = true;
-        state.recent_files[0].owner = Some("Analog Design".to_owned());
-        state.recent_files[0].tags = vec!["afe".to_owned(), "release".to_owned()];
-        let first_timestamp = state.recent_files[0].opened_at_unix_ms;
+        state.platform.recent_files[0].pinned = true;
+        state.platform.recent_files[0].owner = Some("Analog Design".to_owned());
+        state.platform.recent_files[0].tags = vec!["afe".to_owned(), "release".to_owned()];
+        let first_timestamp = state.platform.recent_files[0].opened_at_unix_ms;
 
         state.remember_recent_file(RecentKind::Project, path);
 
-        let recent = &state.recent_files[0];
+        let recent = &state.platform.recent_files[0];
         assert!(recent.pinned);
         assert_eq!(recent.owner.as_deref(), Some("Analog Design"));
         assert_eq!(recent.tags, ["afe", "release"]);
@@ -1353,9 +1303,9 @@ mod tests {
 
         assert!(state.set_recent_project_pinned(project, true));
         assert!(!state.set_recent_project_pinned(schematic, true));
-        assert_eq!(state.recent_files[0].path, schematic);
-        assert_eq!(state.recent_files[1].path, project);
-        assert!(state.recent_files[1].pinned);
+        assert_eq!(state.platform.recent_files[0].path, schematic);
+        assert_eq!(state.platform.recent_files[1].path, project);
+        assert!(state.platform.recent_files[1].pinned);
     }
 
     /// The list keeps as many projects as Recent projects listed asks,
@@ -1368,7 +1318,11 @@ mod tests {
         for index in 0..10 {
             state.remember_recent_file(RecentKind::Project, &path(index));
         }
-        assert_eq!(state.recent_files.len(), 8, "the shipped count is 8");
+        assert_eq!(
+            state.platform.recent_files.len(),
+            8,
+            "the shipped count is 8"
+        );
 
         state
             .model
@@ -1378,7 +1332,7 @@ mod tests {
         for index in 10..20 {
             state.remember_recent_file(RecentKind::Project, &path(index));
         }
-        assert_eq!(state.recent_files.len(), 12);
+        assert_eq!(state.platform.recent_files.len(), 12);
 
         state
             .model
@@ -1387,6 +1341,7 @@ mod tests {
             .expect("5 is an offered count");
         state.trim_recent_files();
         let kept = state
+            .platform
             .recent_files
             .iter()
             .map(|recent| recent.path.clone())

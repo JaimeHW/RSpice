@@ -687,7 +687,7 @@ pub(super) fn publish_model_hub_output(
         part_id,
         placement,
     } = part;
-    if state.project_lifecycle.is_open() {
+    if state.platform.project_lifecycle.is_open() {
         let published = publish_model_library_candidate(
             state,
             *candidate,

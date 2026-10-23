@@ -159,7 +159,7 @@ impl RSpiceApp {
         // A never-saved project has no baseline to compare against, so all of
         // it is unsaved: the summary says that once, rather than listing the
         // configuration record that stands in for the whole project.
-        let never_saved = self.state.project_lifecycle.accepted().is_none();
+        let never_saved = self.state.platform.project_lifecycle.accepted().is_none();
         let mut unsaved: Vec<(WorkbenchIcon, String)> = if never_saved {
             Vec::new()
         } else {

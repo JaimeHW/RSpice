@@ -200,7 +200,7 @@ enum HistoryAction {
 
 pub(crate) fn open_project_revision_history(state: &mut AppState) {
     // The command is greyed with no project open.
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         return;
     }
     if let Err(error) = state

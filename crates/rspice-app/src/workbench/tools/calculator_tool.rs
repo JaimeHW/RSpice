@@ -68,8 +68,10 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let (panel, simulation) =
-                (&mut app.state.calculator_panel, &app.state.model.simulation);
+            let (panel, simulation) = (
+                &mut app.state.results.calculator_panel,
+                &app.state.model.simulation,
+            );
             panel.show_body(ui, simulation);
         });
 
@@ -77,6 +79,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
     // so a number can never be read against the wrong run.
     let hint = app
         .state
+        .results
         .calculator_panel
         .context_hint(&app.state.model.simulation);
     ui.painter().hline(
@@ -98,7 +101,14 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if Button::new("Plot")
                         .accent()
-                        .enabled(!app.state.calculator_panel.expression.trim().is_empty())
+                        .enabled(
+                            !app.state
+                                .results
+                                .calculator_panel
+                                .expression
+                                .trim()
+                                .is_empty(),
+                        )
                         .show(ui)
                         .on_disabled_hover_text("Enter an expression first")
                         .clicked()
@@ -106,12 +116,14 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
                         plot_expression(app);
                     }
                     if Button::new("Evaluate").show(ui).clicked() {
-                        let (panel, simulation) =
-                            (&mut app.state.calculator_panel, &app.state.model.simulation);
+                        let (panel, simulation) = (
+                            &mut app.state.results.calculator_panel,
+                            &app.state.model.simulation,
+                        );
                         panel.evaluate(simulation);
                     }
                     if Button::new("Clear").ghost().show(ui).clicked() {
-                        app.state.calculator_panel.clear();
+                        app.state.results.calculator_panel.clear();
                     }
                 });
             });
@@ -124,7 +136,13 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
 /// The tool stays open: plotting is a step in composing an expression, not
 /// the end of the task.
 fn plot_expression(app: &mut RSpiceApp) {
-    let expression = app.state.calculator_panel.expression.trim().to_owned();
+    let expression = app
+        .state
+        .results
+        .calculator_panel
+        .expression
+        .trim()
+        .to_owned();
     if expression.is_empty() {
         return;
     }
@@ -144,9 +162,10 @@ fn plot_expression(app: &mut RSpiceApp) {
         analysis,
     );
     app.state
+        .results
         .calculator_panel
         .evaluate(&app.state.model.simulation);
-    if let Some(Err(error)) = app.state.calculator_panel.outcome.as_ref() {
+    if let Some(Err(error)) = app.state.results.calculator_panel.outcome.as_ref() {
         app.state
             .prompt(format!("Expression was not plotted: {error}"));
         return;
@@ -211,7 +230,7 @@ mod tests {
         app.state.model.simulation.retained.runs = vec![run].into();
         assert!(app.state.model.simulation.select_run(0));
         app.state.results.waveform_calculator_dialog = true;
-        app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();
+        app.state.results.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
         plot_expression(&mut app);
         assert_eq!(app.state.prompt_text(), Some("Plotted V(out)/V(in)"));
@@ -251,7 +270,7 @@ mod tests {
     #[test]
     fn an_empty_expression_plots_nothing() {
         let mut app = crate::workbench::RSpiceApp::test_instance();
-        app.state.calculator_panel.expression = "   ".to_owned();
+        app.state.results.calculator_panel.expression = "   ".to_owned();
 
         plot_expression(&mut app);
 

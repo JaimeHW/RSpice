@@ -614,13 +614,13 @@ fn fft_spectrum_csv(
         displayed.dataset_id,
         displayed_analysis,
     );
-    if state.analysis.cache_authority.fft != Some(expected_authority) {
+    if state.results.analysis.cache_authority.fft != Some(expected_authority) {
         return Err(
             "FFT spectrum export is unavailable because the derived spectrum does not belong to the displayed result"
                 .to_owned(),
         );
     }
-    let fft = &state.analysis.fft_state;
+    let fft = &state.results.analysis.fft_state;
     if !fft.has_data() {
         return Err(fft.last_error.as_ref().map_or_else(
             || {
@@ -663,7 +663,7 @@ fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
 }
 
 fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
-    let eye = &state.analysis.eye_diagram_state;
+    let eye = &state.results.analysis.eye_diagram_state;
     if eye.data.traces.is_empty() {
         return None;
     }

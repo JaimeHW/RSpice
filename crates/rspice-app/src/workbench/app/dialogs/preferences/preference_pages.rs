@@ -1450,6 +1450,7 @@ mod tests {
         assert_eq!(app.state.model.preferences.shortcuts(), &shipped);
         assert_eq!(
             app.state
+                .settings
                 .shortcut_library_persistence
                 .persisted()
                 .expect("volatile shortcut snapshot")

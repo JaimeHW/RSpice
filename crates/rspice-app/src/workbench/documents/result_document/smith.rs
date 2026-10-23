@@ -117,19 +117,19 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
         return true;
     }
     let Some(run) = state.model.simulation.active_run() else {
-        state.analysis.smith_chart_state.clear_traces();
+        state.results.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
     let Some(analysis) = state.model.simulation.active_analysis() else {
-        state.analysis.smith_chart_state.clear_traces();
+        state.results.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
     if !structure_is_renderable(analysis)
         || !super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
     {
-        state.analysis.smith_chart_state.clear_traces();
+        state.results.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     }
@@ -148,7 +148,7 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
     let reference_impedances_ohm = reference_impedances_ohm.clone();
     waveforms.sort_by(|left, right| left.name.cmp(&right.name));
 
-    state.analysis.smith_chart_state.clear_traces();
+    state.results.analysis.smith_chart_state.clear_traces();
     for waveform in waveforms {
         let Some(identity) = trace_identity(&waveform.name) else {
             continue;
@@ -168,6 +168,7 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
             continue;
         };
         if state
+            .results
             .analysis
             .smith_chart_state
             .load_sparam_data(
@@ -179,12 +180,12 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
             )
             .is_err()
         {
-            state.analysis.smith_chart_state.clear_traces();
+            state.results.analysis.smith_chart_state.clear_traces();
             state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
             return false;
         }
     }
-    if state.analysis.smith_chart_state.traces.is_empty() {
+    if state.results.analysis.smith_chart_state.traces.is_empty() {
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     }
@@ -222,7 +223,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }
             hasher.finish()
         });
-    let smith = &state.analysis.smith_chart_state;
+    let smith = &state.results.analysis.smith_chart_state;
     let mut traces = Vec::new();
     for (index, trace) in smith
         .traces
@@ -281,7 +282,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let presentation = state.result_presentation_policy();
     view::right_panel(
         ui,
-        &state.analysis.smith_chart_state,
+        &state.results.analysis.smith_chart_state,
         state
             .results
             .results
@@ -360,13 +361,17 @@ mod tests {
 
         assert!(synchronize_active_analysis(&mut state));
         draw(&mut state);
-        let first = state.analysis.smith_chart_state.traces[0].points[0].s.re;
+        let first = state.results.analysis.smith_chart_state.traces[0].points[0]
+            .s
+            .re;
         assert!((first - 0.1).abs() < 1.0e-12, "{first}");
 
         assert!(state.model.simulation.select_analysis(1));
         assert!(synchronize_active_analysis(&mut state));
         draw(&mut state);
-        let second = state.analysis.smith_chart_state.traces[0].points[0].s.re;
+        let second = state.results.analysis.smith_chart_state.traces[0].points[0]
+            .s
+            .re;
         assert!((second + 0.6).abs() < 1.0e-12, "{second}");
 
         // The cached component array has to have moved with the selection.

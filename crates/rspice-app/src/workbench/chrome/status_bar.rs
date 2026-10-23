@@ -246,7 +246,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
                             && !app.state.model.simulation.execution.has_active_execution();
                         let can_open = availability == EngineAvailability::Ready
-                            && app.state.project_lifecycle.is_open()
+                            && app.state.platform.project_lifecycle.is_open()
                             && app
                                 .state
                                 .model.simulation
@@ -540,7 +540,7 @@ fn engineering_context_summary(
     app: &RSpiceApp,
     results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
 ) -> String {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return "No project loaded".to_owned();
     }
     match app.state.workbench.workspace {
@@ -662,7 +662,7 @@ fn sheet_position_summary(
 }
 
 fn selection_summary(app: &RSpiceApp) -> String {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return "No engineering object selected".to_owned();
     }
     if app.state.workbench.workspace == Workspace::Results {

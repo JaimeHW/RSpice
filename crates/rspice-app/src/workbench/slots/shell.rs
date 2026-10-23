@@ -11,4 +11,6 @@ pub(crate) struct ShellState {
     pub shortcuts_filter: String,
     /// Versioned help, migration, diagnostics, support, and notices manager.
     pub(crate) help_center: crate::workbench::app::dialogs::help::HelpCenterDialogState,
+    /// Flag to signal that application exit has been requested (after confirmation)
+    pub(crate) exit_requested: bool,
 }

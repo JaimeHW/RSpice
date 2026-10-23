@@ -169,7 +169,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
 /// mismatched retained bytes, or a partial source closure must never expose an
 /// editor command that can only fail after navigation.
 fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return Err("open a project before editing a device model");
     }
     let library_name = app
@@ -220,7 +220,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
 /// project-owned revision. Mutation authority and editor lifecycle checks live
 /// here so every command surface exposes the same fail-closed availability.
 fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return Err("open a project before creating an editable model copy");
     }
     let library_name = app
@@ -502,7 +502,7 @@ impl Command {
         {
             return;
         }
-        if self.requires_open_project() && !app.state.project_lifecycle.is_open() {
+        if self.requires_open_project() && !app.state.platform.project_lifecycle.is_open() {
             return;
         }
         if let Some(request) = self.source_editor_request()
@@ -528,7 +528,7 @@ impl Command {
         }
         match self {
             Self::OpenWorkspace(workspace) => {
-                if workspace_available(app.state.project_lifecycle.is_open(), workspace) {
+                if workspace_available(app.state.platform.project_lifecycle.is_open(), workspace) {
                     activate_workspace(app, workspace);
                 }
             }
@@ -1240,8 +1240,8 @@ impl Command {
                     app.state.workbench.close_drawer();
                 } else if app.state.design.object_properties.open {
                     app.state.design.object_properties.close();
-                } else if app.state.tabbed_property_dialog.open {
-                    app.state.tabbed_property_dialog.attempt_close();
+                } else if app.state.design.tabbed_property_dialog.open {
+                    app.state.design.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results
                     && app.state.results.results.session.cursors.any()
                 {
@@ -1457,7 +1457,7 @@ impl Command {
                 activate_workspace(app, Workspace::Simulate);
                 app.state.simulate.simulation_page = page;
             }
-            Self::ModelBrowser => app.state.model_browser_state.open = true,
+            Self::ModelBrowser => app.state.models.model_browser_state.open = true,
             // Disabled, with the reason, while nothing can be copied.
             Self::ModelCreateProjectCopy => {
                 if let Ok((library_name, model_name)) = selected_model_for_project_copy(app) {
@@ -1526,6 +1526,7 @@ impl Command {
             }
             Self::PdkSettings => app
                 .state
+                .models
                 .pdk_settings_dialog
                 .open(app.state.model.pdk_config.clone()),
             Self::StimulusNewDefinition => {

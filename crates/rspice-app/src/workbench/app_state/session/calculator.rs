@@ -78,7 +78,7 @@ impl CalcResult {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct CalculatorPanel {
     /// Current expression text.
     pub expression: String,

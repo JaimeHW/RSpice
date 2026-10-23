@@ -405,7 +405,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         };
                         let primary_ready = source_exists
                             || generated_ready
-                            || app.state.project_lifecycle.is_open();
+                            || app.state.platform.project_lifecycle.is_open();
                         let primary = ui
                             .add_enabled_ui(primary_ready, |ui| {
                                 ui.add_sized(
@@ -569,7 +569,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         };
                         let primary_ready = source_exists
                             || generated_ready
-                            || app.state.project_lifecycle.is_open();
+                            || app.state.platform.project_lifecycle.is_open();
                         let response = ui
                             .add_enabled(
                                 primary_ready,

@@ -438,7 +438,7 @@ pub(crate) fn open_design_management_on(state: &mut AppState, tab: DesignManagem
 
 fn open_design_management_dialog_state(state: &mut AppState) {
     // The command is greyed with no project open.
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         return;
     }
     if !matches!(

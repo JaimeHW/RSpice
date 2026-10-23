@@ -217,7 +217,7 @@ fn standalone_schematic_save_remains_available_without_a_project() {
     );
 
     app.state.model.schematic.session.current_file = None;
-    app.state.browser_schematic_save_name = Some("browser-import.rsch".to_owned());
+    app.state.platform.browser_schematic_save_name = Some("browser-import.rsch".to_owned());
     assert!(Command::Save.is_enabled(&app));
     assert_eq!(
         Command::Save.availability(&app),

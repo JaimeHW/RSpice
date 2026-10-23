@@ -69,7 +69,11 @@ const BAND_FOOT: f32 = 2.0;
 /// must agree to the pixel, because the stage gives the band exactly this and
 /// a row the painter added that this did not count is a row under the seam.
 pub(super) fn content_height(ui: &Ui, state: &AppState, stage: &Stage, width: f32) -> f32 {
-    let Some(sheet) = state.property_registry.get(stage.working.component_type()) else {
+    let Some(sheet) = state
+        .design
+        .property_registry
+        .get(stage.working.component_type())
+    else {
         return 0.0;
     };
     let bias = bias_height(ui, state, sheet, bias_width(width).unwrap_or(width));
@@ -96,7 +100,11 @@ fn bias_width(width: f32) -> Option<f32> {
 }
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let Some(sheet) = state.property_registry.get(stage.working.component_type()) else {
+    let Some(sheet) = state
+        .design
+        .property_registry
+        .get(stage.working.component_type())
+    else {
         return;
     };
     let band = ui.available_rect_before_wrap();

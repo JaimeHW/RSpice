@@ -188,7 +188,7 @@ fn no_project_app() -> RSpiceApp {
         crate::workbench::workflows::project_workflow::close_project_discard(&mut app.state),
         "an idle test instance closes its project"
     );
-    assert!(!app.state.project_lifecycle.is_open());
+    assert!(!app.state.platform.project_lifecycle.is_open());
     app
 }
 

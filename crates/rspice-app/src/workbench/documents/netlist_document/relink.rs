@@ -138,7 +138,7 @@ pub(crate) fn commit_dependency_relink(
     candidate.model.simulation.source.netlist_content = source;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     candidate.code.netlist.completion_open = false;
-    candidate.manual_run.edited_lines.clear();
+    candidate.runs.manual_run.edited_lines.clear();
     invalidate_source_evidence(&mut candidate);
     state.commit_candidate(candidate);
     Ok(())

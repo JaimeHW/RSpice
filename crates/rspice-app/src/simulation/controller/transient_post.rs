@@ -107,7 +107,9 @@ impl SimulationController {
         };
 
         match viewer {
-            ActiveViewer::EyeDiagram if state.analysis.eye_diagram_state.trace_count() > 0 => {
+            ActiveViewer::EyeDiagram
+                if state.results.analysis.eye_diagram_state.trace_count() > 0 =>
+            {
                 state.apply_run_event(RunEvent::ViewerCacheConfirmed {
                     viewer,
                     owner: analysis,
@@ -117,7 +119,7 @@ impl SimulationController {
                     availability: DerivedViewAvailability::Ready,
                 });
             }
-            ActiveViewer::Fft if state.analysis.fft_state.has_data() => {
+            ActiveViewer::Fft if state.results.analysis.fft_state.has_data() => {
                 state.apply_run_event(RunEvent::ViewerCacheConfirmed {
                     viewer,
                     owner: analysis,
@@ -192,7 +194,7 @@ impl SimulationController {
             }
         }
 
-        if state.analysis.eye_diagram_state.trace_count() > 0 {
+        if state.results.analysis.eye_diagram_state.trace_count() > 0 {
             self.mark_transient_view_ready(state, ActiveViewer::EyeDiagram);
             return DerivedViewerLoadState::Ready;
         }
@@ -230,7 +232,7 @@ impl SimulationController {
     }
 
     fn ensure_fft_data(&mut self, state: &mut AppState) -> DerivedViewerLoadState {
-        if state.analysis.fft_state.has_data() {
+        if state.results.analysis.fft_state.has_data() {
             self.mark_transient_view_ready(state, ActiveViewer::Fft);
             return DerivedViewerLoadState::Ready;
         }
@@ -246,7 +248,7 @@ impl SimulationController {
                     // `has_data` was false above, so this marker became stale
                     // after an in-place viewer recompute or explicit clear.
                     state.apply_run_event(RunEvent::FftEmptied);
-                    if state.analysis.fft_state.last_error.is_some() {
+                    if state.results.analysis.fft_state.last_error.is_some() {
                         self.transient_post.fft_loaded = Some(LoadedDerivedView {
                             analysis: active_analysis,
                             availability: DerivedViewAvailability::Unavailable,
@@ -344,7 +346,7 @@ impl SimulationController {
                     input,
                 });
                 // The viewer holds a spectrum exactly when it accepted the input.
-                let available = state.analysis.fft_state.has_data();
+                let available = state.results.analysis.fft_state.has_data();
                 self.transient_post.fft_loaded = Some(LoadedDerivedView {
                     analysis: message.analysis,
                     availability: if available {
@@ -445,7 +447,7 @@ impl SimulationController {
     fn current_transient_waveform_source(&self, state: &AppState) -> Option<DerivedWaveformSource> {
         let analysis = state.model.simulation.active_analysis()?;
         let analysis_key = self.active_transient_analysis_key(state)?;
-        let preferred_source = state.analysis.fft_state.selected_source.as_deref();
+        let preferred_source = state.results.analysis.fft_state.selected_source.as_deref();
         let (source_name, waveform) =
             Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_source)?;
 
@@ -455,6 +457,7 @@ impl SimulationController {
             time: Arc::clone(&waveform.x),
             values: Arc::clone(&waveform.y),
             fft_options: state
+                .results
                 .analysis
                 .fft_state
                 .input_options_for_waveform(&waveform.x),
@@ -480,7 +483,12 @@ impl SimulationController {
 /// make every incoherent eye disagree with the rate that produced it and
 /// rebuild itself on every frame, forever.
 fn eye_matches_timebase(state: &AppState, requested: EyeTimebase) -> bool {
-    let Some(provenance) = state.analysis.eye_diagram_state.timebase_provenance() else {
+    let Some(provenance) = state
+        .results
+        .analysis
+        .eye_diagram_state
+        .timebase_provenance()
+    else {
         return true;
     };
     match (provenance, requested) {
@@ -638,8 +646,9 @@ mod tests {
     }
 
     fn seed_fft(state: &mut AppState, analysis: SpecializedViewerCacheProvenance) {
-        state.analysis.fft_state.window = WindowFunction::Rectangular;
+        state.results.analysis.fft_state.window = WindowFunction::Rectangular;
         state
+            .results
             .analysis
             .fft_state
             .load_prepared_input(PreparedFftInput {
@@ -686,11 +695,11 @@ mod tests {
 
         controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(analysis));
 
-        assert!(!state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.source_cache.is_none());
-        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(!state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.source_cache.is_none());
+        assert!(state.results.analysis.cache_authority.fft.is_none());
         assert!(matches!(
-            state.analysis.fft_state.last_error,
+            state.results.analysis.fft_state.last_error,
             Some(FftFailure::Input(FftInputError::LengthMismatch {
                 time_count: 17,
                 value_count: 16
@@ -725,10 +734,10 @@ mod tests {
 
         controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(active));
 
-        assert!(state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.source_cache.is_some());
-        assert!(state.analysis.fft_state.last_error.is_none());
-        assert_eq!(state.analysis.cache_authority.fft, Some(active));
+        assert!(state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.source_cache.is_some());
+        assert!(state.results.analysis.fft_state.last_error.is_none());
+        assert_eq!(state.results.analysis.cache_authority.fft, Some(active));
         assert!(controller.transient_post.fft_loaded.is_none());
     }
 
@@ -752,7 +761,13 @@ mod tests {
         let active = state.active_specialized_viewer_cache_provenance().unwrap();
         assert_ne!(active, stale);
         seed_fft(&mut state, active);
-        let retained = state.analysis.fft_state.source_cache.clone().unwrap();
+        let retained = state
+            .results
+            .analysis
+            .fft_state
+            .source_cache
+            .clone()
+            .unwrap();
 
         sender
             .send(DerivedViewTaskResult {
@@ -771,10 +786,16 @@ mod tests {
         assert!(cancelled.load(Ordering::Relaxed));
         assert!(controller.transient_post.fft_task.is_none());
         assert!(controller.transient_post.fft_loaded.is_none());
-        assert_eq!(state.analysis.cache_authority.fft, Some(active));
-        assert!(state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.last_error.is_none());
-        let current = state.analysis.fft_state.source_cache.as_ref().unwrap();
+        assert_eq!(state.results.analysis.cache_authority.fft, Some(active));
+        assert!(state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.last_error.is_none());
+        let current = state
+            .results
+            .analysis
+            .fft_state
+            .source_cache
+            .as_ref()
+            .unwrap();
         assert_eq!(current.name, retained.name);
         assert_eq!(current.sample_rate, retained.sample_rate);
         assert!(Arc::ptr_eq(&current.samples, &retained.samples));
@@ -803,9 +824,9 @@ mod tests {
                 })
                 .is_err()
         );
-        assert!(state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.last_error.is_none());
-        assert_eq!(state.analysis.cache_authority.fft, Some(analysis));
+        assert!(state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.last_error.is_none());
+        assert_eq!(state.results.analysis.cache_authority.fft, Some(analysis));
         assert!(controller.transient_post.fft_loaded.is_none());
     }
 
@@ -820,13 +841,13 @@ mod tests {
 
         controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(analysis));
 
-        assert!(!state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.source_cache.is_none());
+        assert!(!state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.source_cache.is_none());
         assert_eq!(
-            state.analysis.fft_state.last_error,
+            state.results.analysis.fft_state.last_error,
             Some(FftFailure::WorkerDisconnected)
         );
-        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(state.results.analysis.cache_authority.fft.is_none());
         assert_eq!(
             controller.transient_post.fft_loaded,
             Some(LoadedDerivedView {
@@ -844,11 +865,12 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        state.analysis.fft_state.window = WindowFunction::Rectangular;
+        state.results.analysis.fft_state.window = WindowFunction::Rectangular;
         let mut samples = vec![0.0; 16];
         samples[0] = 1.0;
         samples[1] = f64::from_bits(1);
         state
+            .results
             .analysis
             .fft_state
             .load_prepared_input(PreparedFftInput {
@@ -866,25 +888,29 @@ mod tests {
             controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
             DerivedViewerLoadState::Ready
         );
-        assert!(state.analysis.cache_authority.fft.is_some());
+        assert!(state.results.analysis.cache_authority.fft.is_some());
 
         assert!(matches!(
-            state.analysis.fft_state.set_window(WindowFunction::Hanning),
+            state
+                .results
+                .analysis
+                .fft_state
+                .set_window(WindowFunction::Hanning),
             Err(FftFailure::Build(FftBuildError::ErasedWindowedSample {
                 index: 1,
                 ..
             }))
         ));
-        assert!(!state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.last_error.is_some());
+        assert!(!state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.last_error.is_some());
 
         assert_eq!(
             controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
             DerivedViewerLoadState::Unavailable
         );
-        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(state.results.analysis.cache_authority.fft.is_none());
         assert!(matches!(
-            state.analysis.fft_state.last_error,
+            state.results.analysis.fft_state.last_error,
             Some(FftFailure::Build(FftBuildError::ErasedWindowedSample {
                 index: 1,
                 ..
@@ -900,8 +926,9 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        state.analysis.fft_state.window = WindowFunction::Rectangular;
+        state.results.analysis.fft_state.window = WindowFunction::Rectangular;
         state
+            .results
             .analysis
             .fft_state
             .load_prepared_input(PreparedFftInput {
@@ -921,25 +948,25 @@ mod tests {
             controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
             DerivedViewerLoadState::Ready
         );
-        assert!(state.analysis.cache_authority.fft.is_some());
+        assert!(state.results.analysis.cache_authority.fft.is_some());
 
-        state.analysis.fft_state.num_harmonics = 0;
+        state.results.analysis.fft_state.num_harmonics = 0;
         assert!(matches!(
-            state.analysis.fft_state.recompute_from_source(),
+            state.results.analysis.fft_state.recompute_from_source(),
             Err(FftFailure::Analysis(
                 SpectrumAnalysisError::InvalidHarmonicOrder { value: 0, .. }
             ))
         ));
-        assert!(!state.analysis.fft_state.has_data());
-        assert!(state.analysis.fft_state.source_cache.is_some());
+        assert!(!state.results.analysis.fft_state.has_data());
+        assert!(state.results.analysis.fft_state.source_cache.is_some());
 
         assert_eq!(
             controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
             DerivedViewerLoadState::Unavailable
         );
-        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(state.results.analysis.cache_authority.fft.is_none());
         assert!(matches!(
-            state.analysis.fft_state.last_error,
+            state.results.analysis.fft_state.last_error,
             Some(FftFailure::Analysis(
                 SpectrumAnalysisError::InvalidHarmonicOrder { value: 0, .. }
             ))
@@ -1056,6 +1083,7 @@ mod tests {
         };
         let (data, provenance) = build_eye_from_waveform(&time, &signal, stated);
         state
+            .results
             .analysis
             .eye_diagram_state
             .load_data_with_timebase(data.expect("folds"), Some(provenance));
@@ -1091,6 +1119,7 @@ mod tests {
             }
         );
         state
+            .results
             .analysis
             .eye_diagram_state
             .load_data_with_timebase(data.expect("folds"), Some(provenance));

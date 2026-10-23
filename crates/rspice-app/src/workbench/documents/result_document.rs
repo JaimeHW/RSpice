@@ -2758,6 +2758,7 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             let hint = match viewer {
                 ActiveViewer::Fft => app
                     .state
+                    .results
                     .analysis
                     .fft_state
                     .last_error

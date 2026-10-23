@@ -23,6 +23,7 @@ impl SheetBarHost for Host<'_> {
     }
     fn fft_summary(&self) -> Option<String> {
         self.0
+            .results
             .analysis
             .fft_state
             .data

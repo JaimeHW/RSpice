@@ -12,7 +12,7 @@ impl Command {
         {
             return false;
         }
-        if self.requires_open_project() && !state.project_lifecycle.is_open() {
+        if self.requires_open_project() && !state.platform.project_lifecycle.is_open() {
             return false;
         }
         if let Some(request) = self.source_editor_request()
@@ -22,27 +22,27 @@ impl Command {
         }
         match self {
             Self::OpenWorkspace(workspace) => {
-                workspace_available(state.project_lifecycle.is_open(), workspace)
+                workspace_available(state.platform.project_lifecycle.is_open(), workspace)
             }
             Self::Save => {
-                state.project_lifecycle.is_open()
+                state.platform.project_lifecycle.is_open()
                     || state.model.schematic.session.current_file.is_some()
-                    || state.browser_schematic_save_name.is_some()
+                    || state.platform.browser_schematic_save_name.is_some()
             }
-            Self::SaveAs => state.project_lifecycle.is_open(),
+            Self::SaveAs => state.platform.project_lifecycle.is_open(),
             Self::SaveAll => {
-                state.project_lifecycle.is_open()
+                state.platform.project_lifecycle.is_open()
                     && crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
             }
             Self::RevertActiveDocument => {
-                state.project_lifecycle.accepted().is_some()
+                state.platform.project_lifecycle.accepted().is_some()
                     && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
                     && !state.model.simulation.execution.has_active_execution()
             }
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
-            Self::CloseProject => state.project_lifecycle.is_open(),
+            Self::CloseProject => state.platform.project_lifecycle.is_open(),
             // Each is enabled exactly where its dialog could create something.
             Self::NewView => state.new_view_target().is_some(),
             Self::NewVerilogADevice => crate::workbench::app::new_veriloga_device_available(state),
@@ -50,7 +50,7 @@ impl Command {
                 !state.model.simulation.execution.has_active_execution()
             }
             Self::ImportNetlist => {
-                state.project_lifecycle.is_open()
+                state.platform.project_lifecycle.is_open()
                     && !state.model.safe_mode.project_read_only()
                     && !state.model.simulation.execution.has_active_execution()
             }
@@ -273,26 +273,26 @@ impl Command {
                     && crate::workbench::app::create_hierarchy_available(state)
             }
             Self::ConnectivityManager => {
-                active_schematic_editor(app) && state.project_lifecycle.is_open()
+                active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
             }
             Self::DesignManagement => {
                 active_schematic_editor(app)
-                    && state.project_lifecycle.is_open()
+                    && state.platform.project_lifecycle.is_open()
                     && !state.schematic_edit_read_only()
             }
             Self::SelectionBulkEdit => {
-                active_schematic_editor(app) && state.project_lifecycle.is_open()
+                active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
             }
             Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
                     && Self::last_repeatable(app).is_some_and(|command| command.is_enabled(app))
             }
-            Self::ConfigurationSets | Self::RuleSetup => state.project_lifecycle.is_open(),
+            Self::ConfigurationSets | Self::RuleSetup => state.platform.project_lifecycle.is_open(),
             Self::ReviewComments => {
-                active_schematic_editor(app) && state.project_lifecycle.is_open()
+                active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
             }
-            Self::RevisionHistory => state.project_lifecycle.is_open(),
+            Self::RevisionHistory => state.platform.project_lifecycle.is_open(),
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.design.symbol.editor.effective_selection();
@@ -362,7 +362,7 @@ impl Command {
                     .is_empty()
             }
             Self::ToggleResultsSplit => {
-                state.project_lifecycle.is_open()
+                state.platform.project_lifecycle.is_open()
                     && state.workbench.supports_results_split()
                     && state.model.simulation.retained.has_retained_result_dataset()
             }
@@ -592,10 +592,10 @@ impl Command {
                 state.workbench.workspace == Workspace::Results && state.model.simulation.retained.has_results()
             }
             Self::DatasetManifestBrowser => {
-                state.project_lifecycle.is_open() && !state.model.simulation.retained.runs.is_empty()
+                state.platform.project_lifecycle.is_open() && !state.model.simulation.retained.runs.is_empty()
             }
             Self::CreateResultDocument => {
-                state.project_lifecycle.is_open() && state.model.simulation.retained.has_results()
+                state.platform.project_lifecycle.is_open() && state.model.simulation.retained.has_results()
             }
             Self::CompareResultDatasets => {
                 crate::workbench::documents::result_document::compare_available(state)
@@ -613,7 +613,7 @@ impl Command {
                     .is_some_and(|draft| {
                         draft.is_dirty()
                             && !state.model.safe_mode.project_read_only()
-                            && state.project_lifecycle.is_open()
+                            && state.platform.project_lifecycle.is_open()
                             && state
                                 .models
                                 .model_editor
@@ -656,7 +656,7 @@ impl Command {
                 .draft
                 .as_ref()
                 .is_some_and(|draft| {
-                    state.project_lifecycle.is_open()
+                    state.platform.project_lifecycle.is_open()
                         && !state.model.safe_mode.project_read_only()
                         && !draft.definition_is_dirty()
                         && draft
@@ -733,7 +733,7 @@ impl Command {
             // surface the reader is standing on: they exist precisely to be
             // taken from somewhere else.
             Self::OpenRunInResults => {
-                state.project_lifecycle.is_open()
+                state.platform.project_lifecycle.is_open()
                     && state
                         .model.simulation
                         .active_run()

@@ -181,7 +181,7 @@ fn record_import_failure(state: &mut AppState, error: &str) {
 }
 
 fn result_import_block_reason(state: &AppState) -> Option<String> {
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         return Some("Open a project before importing a result dataset.".to_owned());
     }
     if state.model.safe_mode.project_read_only() {

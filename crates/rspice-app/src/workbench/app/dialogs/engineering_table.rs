@@ -509,7 +509,7 @@ impl RSpiceApp {
                 dataset,
             ),
             EngineeringViewScope::Project => {
-                if !self.state.project_lifecycle.is_open() {
+                if !self.state.platform.project_lifecycle.is_open() {
                     Err("Open a project before saving a project-scoped table view.".to_owned())
                 } else {
                     let result = self
@@ -954,7 +954,7 @@ impl RSpiceApp {
                 .engineering_table_views
                 .import_view(source, scope, &dataset),
             EngineeringViewScope::Project => {
-                if !self.state.project_lifecycle.is_open() {
+                if !self.state.platform.project_lifecycle.is_open() {
                     Err("Open a project before importing a project-scoped view.".to_owned())
                 } else {
                     let result = self

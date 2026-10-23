@@ -569,7 +569,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let governance_write_allowed = state.project_lifecycle.is_open()
+                    let governance_write_allowed = state.platform.project_lifecycle.is_open()
                         && !state.model.safe_mode.project_read_only()
                         && !state.model.simulation.execution.has_active_execution();
                     let rollback = Button::new("Rollback\u{2026}")

@@ -331,8 +331,9 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
     let mut state = state_with_typed_result(transient);
-    state.analysis.fft_state.normalization = SpectrumNormalization::Peak;
+    state.results.analysis.fft_state.normalization = SpectrumNormalization::Peak;
     state
+        .results
         .analysis
         .fft_state
         .load_data(rspice_results_ui::fft::spectrum_fixture(
@@ -385,7 +386,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
                 }],
             }),
     );
-    state.analysis.histogram_state.bin_count = 1;
+    state.results.analysis.histogram_state.bin_count = 1;
     let run = &mut state.model.simulation.retained.runs[0];
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
@@ -412,7 +413,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     );
     drop(files);
     for mode in rspice_results::histogram::HistogramDisplayMode::ALL {
-        state.analysis.histogram_state.mode = mode;
+        state.results.analysis.histogram_state.mode = mode;
         let export = histogram_bins_csv(&state).unwrap();
         assert!(
             export
@@ -444,7 +445,7 @@ fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
     let mut state = state_with_typed_result(transient);
     // A data-only partial transaction must not count as an exportable FFT.
-    state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
+    state.results.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "partial",
         &[0.0, 1.0e3, 2.0e3],
         &[1.0, 0.5, 0.25],
@@ -472,6 +473,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
             .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
         let mut state = state_with_typed_result(transient);
         state
+            .results
             .analysis
             .fft_state
             .load_data(rspice_results_ui::fft::spectrum_fixture(

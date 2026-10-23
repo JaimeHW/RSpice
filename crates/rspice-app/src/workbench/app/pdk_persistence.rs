@@ -373,7 +373,7 @@ impl RSpiceApp {
                             model_libraries,
                             loaded,
                         } = *settings;
-                        let publication = if self.state.project_lifecycle.is_open() {
+                        let publication = if self.state.platform.project_lifecycle.is_open() {
                             publish_model_library_set_candidate(
                                 &mut self.state,
                                 model_libraries,

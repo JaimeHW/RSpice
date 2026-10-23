@@ -205,29 +205,16 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         sheets: Box::default(),
         models: Box::default(),
         runs: Box::default(),
-        manual_run: Box::default(),
-        project_lifecycle: Box::default(),
-        tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
-        property_registry: crate::properties::PropertyEditorSchema::new(),
-        calculator_panel: super::calculator::CalculatorPanel::new(),
-        pdk_settings_dialog: super::pdk_settings::PdkSettingsDialogState::new(),
-        model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
-        exit_requested: false,
-        recent_files: Vec::new(),
-        browser_schematic_save_name: None,
-        browser_project_save_name: None,
-        native_project_binding_receipt: None,
-        browser_project_binding_receipt: None,
-        license_key: None,
-        license: None,
-        analysis,
         workbench: Box::default(),
-        shortcut_resolver: crate::workbench::app_state::session::shortcuts::ShortcutResolverState::default(),
-        shortcut_library_persistence:
-            crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::default(),
-        shortcut_library_publication_continuation: None,
-        preferences_file: Box::default(),
+        shortcut_resolver:
+            crate::workbench::app_state::session::shortcuts::ShortcutResolverState::default(),
     };
+    // The slots derive their `Default`; these are the values a new session
+    // was always built with, set where they always were.
+    state.design.property_registry = crate::properties::PropertyEditorSchema::new();
+    state.results.calculator_panel = super::calculator::CalculatorPanel::new();
+    *state.models.pdk_settings_dialog = super::pdk_settings::PdkSettingsDialogState::new();
+    *state.results.analysis = analysis;
     state.design.schematic_snap.grid_size = snap_grid_size;
     if let Some((manifest, runtime_snapshot)) = automation {
         state.code.code_workspace.automation.manifest = Some(manifest);

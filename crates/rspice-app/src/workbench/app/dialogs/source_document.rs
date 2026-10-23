@@ -46,7 +46,7 @@ use crate::ui::widgets::{
 ///
 pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
     let Some(language) = visible_language(state) else {
-        if !state.project_lifecycle.is_open() {
+        if !state.platform.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
         state.code.code_workspace.source_document_dialog = true;
@@ -70,7 +70,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
     match visible_language(state) {
-        None => state.project_lifecycle.is_open(),
+        None => state.platform.project_lifecycle.is_open(),
         Some(language) => state
             .model
             .workspace

@@ -132,7 +132,7 @@ impl AppState {
             Ok(startup) => self.install_shortcut_library_startup(startup),
             Err(error) => {
                 self.record_shortcut_library_unavailable(&error);
-                self.shortcut_library_persistence =
+                self.settings.shortcut_library_persistence =
                     ShortcutLibraryPersistenceRuntime::Unavailable(error.to_string());
             }
         }
@@ -146,7 +146,7 @@ impl AppState {
     ) {
         *self.model.preferences.shortcut_profiles_mut() = persisted.library().clone();
         self.shortcut_resolver.reset();
-        self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(persisted),
             publication_completion,
             #[cfg(test)]
@@ -162,15 +162,17 @@ impl AppState {
         candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         ctx: &egui::Context,
     ) -> Result<ShortcutLibraryPublication, String> {
-        if let Some(reason) = self.shortcut_library_persistence.blocked_reason() {
+        if let Some(reason) = self.settings.shortcut_library_persistence.blocked_reason() {
             return Err(reason);
         }
         let predecessor = self
+            .settings
             .shortcut_library_persistence
             .persisted()
             .cloned()
             .ok_or_else(|| {
-                self.shortcut_library_persistence
+                self.settings
+                    .shortcut_library_persistence
                     .blocked_reason()
                     .unwrap_or_else(|| "shortcut library storage is unavailable".to_owned())
             })?;
@@ -183,7 +185,7 @@ impl AppState {
 
         #[cfg(test)]
         if matches!(
-            self.shortcut_library_persistence,
+            self.settings.shortcut_library_persistence,
             ShortcutLibraryPersistenceRuntime::Ready {
                 volatile_test: true,
                 ..
@@ -194,7 +196,7 @@ impl AppState {
                 PersistedShortcutProfileLibrary::test_snapshot(candidate.clone(), generation);
             *self.model.preferences.shortcut_profiles_mut() = candidate.clone();
             self.shortcut_resolver.reset();
-            self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+            self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
                 persisted: Box::new(persisted),
                 publication_completion: None,
                 volatile_test: true,
@@ -223,10 +225,11 @@ impl AppState {
                 ctx,
             )
             .map_err(|error| error.to_string())?;
-            self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Publishing {
-                predecessor: Box::new(predecessor),
-                token,
-            };
+            self.settings.shortcut_library_persistence =
+                ShortcutLibraryPersistenceRuntime::Publishing {
+                    predecessor: Box::new(predecessor),
+                    token,
+                };
             Ok(ShortcutLibraryPublication::Pending)
         }
     }
@@ -236,7 +239,7 @@ impl AppState {
     pub(crate) fn take_shortcut_library_publication_completion(
         &mut self,
     ) -> Option<Result<(), String>> {
-        match &mut self.shortcut_library_persistence {
+        match &mut self.settings.shortcut_library_persistence {
             ShortcutLibraryPersistenceRuntime::Ready {
                 publication_completion,
                 ..
@@ -252,7 +255,7 @@ impl AppState {
 
     #[must_use]
     pub(crate) fn shortcut_library_publication_completion_pending(&self) -> bool {
-        match &self.shortcut_library_persistence {
+        match &self.settings.shortcut_library_persistence {
             ShortcutLibraryPersistenceRuntime::Ready {
                 publication_completion,
                 ..
@@ -268,7 +271,7 @@ impl AppState {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn cancel_pending_shortcut_library_publication(&mut self) -> bool {
-        let (predecessor, token) = match &self.shortcut_library_persistence {
+        let (predecessor, token) = match &self.settings.shortcut_library_persistence {
             ShortcutLibraryPersistenceRuntime::Publishing { predecessor, token } => {
                 (predecessor.clone(), *token)
             }
@@ -279,7 +282,7 @@ impl AppState {
         ) {
             return false;
         }
-        self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: predecessor,
             publication_completion: None,
             #[cfg(test)]
@@ -290,7 +293,7 @@ impl AppState {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn poll_shortcut_library_persistence(&mut self) {
-        let (token, predecessor) = match &self.shortcut_library_persistence {
+        let (token, predecessor) = match &self.settings.shortcut_library_persistence {
             ShortcutLibraryPersistenceRuntime::Initializing(token) => (*token, None),
             ShortcutLibraryPersistenceRuntime::Publishing { predecessor, token } => {
                 (*token, Some(predecessor.clone()))
@@ -320,13 +323,13 @@ impl AppState {
                         let message = format!(
                             "RSpice cannot tell whether the last shortcut change was saved, so shortcuts are read-only until RSpice reloads them: {error}"
                         );
-                        self.shortcut_library_persistence =
+                        self.settings.shortcut_library_persistence =
                             ShortcutLibraryPersistenceRuntime::CommitInDoubt {
                                 publication_completion: Some(Err(message.clone())),
                                 message,
                             };
                     } else {
-                        self.shortcut_library_persistence =
+                        self.settings.shortcut_library_persistence =
                             ShortcutLibraryPersistenceRuntime::Ready {
                                 persisted: predecessor,
                                 publication_completion: Some(Err(error.to_string())),
@@ -336,7 +339,7 @@ impl AppState {
                     }
                 } else {
                     self.record_shortcut_library_unavailable(&error);
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Unavailable(error.to_string());
                 }
             }
@@ -353,17 +356,17 @@ impl AppState {
                     ..
                 } => self.install_persisted_shortcut_library(*persisted, None),
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Missing => {
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Incompatible(raw) => {
                     self.record_shortcut_library_unreadable("comes from an incompatible RSpice version", raw.reason());
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Corrupt(raw) => {
                     self.record_shortcut_library_unreadable("is damaged", raw.reason());
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
                 }
             },
@@ -373,21 +376,21 @@ impl AppState {
                     self.install_persisted_shortcut_library(*persisted, None);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::InitializationStarted(token) => {
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Initializing(token);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Missing => {
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Incompatible(raw) => {
                     self.record_shortcut_library_unreadable("comes from an incompatible RSpice version", raw.reason());
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Corrupt(raw) => {
                     self.record_shortcut_library_unreadable("is damaged", raw.reason());
-                    self.shortcut_library_persistence =
+                    self.settings.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
                 }
             },
@@ -420,7 +423,7 @@ impl AppState {
     }
 
     fn report_shortcut_library_persistence_state(&self) {
-        if let Some(persisted) = self.shortcut_library_persistence.persisted() {
+        if let Some(persisted) = self.settings.shortcut_library_persistence.persisted() {
             debug_assert_eq!(
                 persisted.library(),
                 self.model.preferences.shortcut_profiles(),
@@ -430,16 +433,16 @@ impl AppState {
         }
         #[cfg(target_arch = "wasm32")]
         if matches!(
-            self.shortcut_library_persistence,
+            self.settings.shortcut_library_persistence,
             ShortcutLibraryPersistenceRuntime::Initializing(_)
                 | ShortcutLibraryPersistenceRuntime::Publishing { .. }
         ) {
-            if let Some(reason) = self.shortcut_library_persistence.blocked_reason() {
+            if let Some(reason) = self.settings.shortcut_library_persistence.blocked_reason() {
                 log::debug!("Shortcut library persistence transition: {reason}");
             }
             return;
         }
-        if let Some(reason) = self.shortcut_library_persistence.blocked_reason() {
+        if let Some(reason) = self.settings.shortcut_library_persistence.blocked_reason() {
             log::warn!("Shortcut library mutations are unavailable: {reason}");
         }
     }
@@ -447,7 +450,7 @@ impl AppState {
     #[cfg(test)]
     pub(crate) fn enable_volatile_test_shortcut_persistence(&mut self) {
         let library = self.model.preferences.shortcut_profiles().clone();
-        self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(PersistedShortcutProfileLibrary::test_snapshot(library, 1)),
             publication_completion: None,
             volatile_test: true,
@@ -478,11 +481,12 @@ mod tests {
         let mut state = AppState::default();
         state.enable_volatile_test_shortcut_persistence();
         let predecessor = state
+            .settings
             .shortcut_library_persistence
             .persisted()
             .expect("volatile predecessor")
             .clone();
-        state.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        state.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(predecessor),
             publication_completion: Some(Ok(())),
             volatile_test: true,

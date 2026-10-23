@@ -412,7 +412,7 @@ pub(super) fn append_review_evidence(
 }
 
 fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return Err("Measurement correlation requires an open project".to_owned());
     }
     if app.state.model.safe_mode.project_read_only() {

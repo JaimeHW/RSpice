@@ -988,7 +988,7 @@ impl Command {
         {
             return CommandAvailability::Disabled("project operation is still in progress");
         }
-        if self.requires_open_project() && !app.state.project_lifecycle.is_open() {
+        if self.requires_open_project() && !app.state.platform.project_lifecycle.is_open() {
             return CommandAvailability::Disabled("no project is open");
         }
         if self.mutates_window_session() && app.state.application_modal_open() {

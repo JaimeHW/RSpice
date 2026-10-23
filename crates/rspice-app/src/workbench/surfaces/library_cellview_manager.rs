@@ -183,7 +183,7 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
     );
     // An open, writable project is the ordinary case and the chip has nothing
     // to add to it. The other two say what the reader cannot do here.
-    let access = if !app.state.project_lifecycle.is_open() {
+    let access = if !app.state.platform.project_lifecycle.is_open() {
         Some(("closed", None))
     } else if app.state.model.safe_mode.project_read_only() {
         Some(("safe-mode read only", Some(Problem::Warning)))
@@ -637,7 +637,7 @@ fn action_buttons(
 }
 
 fn project_write_block_reason(app: &RSpiceApp) -> Option<&'static str> {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         Some("Open a project before authoring symbols.")
     } else if app.state.model.safe_mode.project_read_only() {
         Some("The project is read-only in local safe mode.")

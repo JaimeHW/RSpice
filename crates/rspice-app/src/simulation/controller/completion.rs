@@ -358,8 +358,8 @@ impl SimulationController {
                 self.total_analyses = 0;
                 state.model.simulation.execution.active_execution = None;
                 state.model.simulation.execution.abort_request = None;
-                state.manual_run.pending_manual_run_id = None;
-                state.manual_run.pending_run_buffer = None;
+                state.runs.manual_run.pending_manual_run_id = None;
+                state.runs.manual_run.pending_run_buffer = None;
                 state.model.simulation.execution.status = "Aborted".to_string();
                 self.complete_campaign_member(state, false);
             }

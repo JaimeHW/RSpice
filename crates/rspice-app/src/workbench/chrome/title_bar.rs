@@ -549,7 +549,7 @@ fn paint_title_context(
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let dirty = app.state.project_lifecycle.is_open()
+    let dirty = app.state.platform.project_lifecycle.is_open()
         && (app.state.model.schematic.session.is_dirty || app.state.model.workspace.any_dirty());
     let cell = active_title_cell(app);
     let full = title_context_text(app, compact);
@@ -602,7 +602,7 @@ fn paint_title_context(
     );
     ui.ctx().accesskit_node_builder(status.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        if app.state.project_lifecycle.is_open() {
+        if app.state.platform.project_lifecycle.is_open() {
             node.set_label(format!(
                 "Active project: {}; {}; {}",
                 app.state.model.workspace.content.project.display_name(),
@@ -629,7 +629,7 @@ const UNSAVED_TITLE_MARKER: &str = "*";
 /// against a function the application never called and the shipped title read
 /// "Untitled Project" with nothing open.
 fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return if compact {
             "No project open"
         } else {
@@ -697,7 +697,7 @@ fn ellipsize_to_width(
 }
 
 fn active_title_cell(app: &RSpiceApp) -> String {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return "No project open".to_owned();
     }
     match app.state.workbench.workspace {
@@ -921,6 +921,7 @@ fn account_initials(app: &RSpiceApp) -> Option<String> {
     });
     let license_identity = app
         .state
+        .cloud
         .license
         .as_ref()
         .map(|license| license.licensed_to.trim().to_owned());

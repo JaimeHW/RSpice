@@ -50,7 +50,7 @@ impl RSpiceApp {
         let dialog = &mut self.state.cloud.license_dialog;
         dialog.open = true;
         dialog.text.clear();
-        dialog.phase = match &self.state.license {
+        dialog.phase = match &self.state.cloud.license {
             Some(info) => LicensePhase::Verified(info.clone()),
             None => LicensePhase::Entry,
         };
@@ -60,7 +60,7 @@ impl RSpiceApp {
         if !self.state.cloud.license_dialog.open {
             return;
         }
-        let already_active = self.state.license.is_some()
+        let already_active = self.state.cloud.license.is_some()
             && matches!(
                 self.state.cloud.license_dialog.phase,
                 LicensePhase::Verified(_)
@@ -188,12 +188,12 @@ impl RSpiceApp {
                 format!("The license is active for this session but could not be saved: {error}"),
             );
         }
-        self.state.license_key = Some(key);
+        self.state.cloud.license_key = Some(key);
         let message = format!(
             "License activated: {} updates are available until {}.",
             info.tier, info.updates_until
         );
-        self.state.license = Some(info);
+        self.state.cloud.license = Some(info);
         self.state.cloud.license_dialog.open = false;
         self.state
             .record(LogSeverity::Info, LogSource::Studio, message);
@@ -204,8 +204,8 @@ impl RSpiceApp {
         if let Some(path) = license::license_file_path() {
             let _ = std::fs::remove_file(path);
         }
-        self.state.license_key = None;
-        self.state.license = None;
+        self.state.cloud.license_key = None;
+        self.state.cloud.license = None;
         self.state.cloud.license_dialog.open = false;
         self.state.record(
             LogSeverity::Info,

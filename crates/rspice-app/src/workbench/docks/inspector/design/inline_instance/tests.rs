@@ -283,6 +283,7 @@ fn direct_property_dialog_open_captures_the_committed_inline_value() {
         editor
             .app
             .state
+            .design
             .tabbed_property_dialog
             .component_baseline
             .as_ref()

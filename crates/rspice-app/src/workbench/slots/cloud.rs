@@ -20,6 +20,11 @@ pub(crate) struct CloudState {
     /// One-shot request raised by a completed close-to-mirror transaction;
     /// the live-session engine consumes it to start mirroring the host.
     pub(crate) live_mirror_entry_pending: bool,
+
+    /// The activated license key as pasted (persisted; re-verified on load).
+    pub(crate) license_key: Option<String>,
+    /// The verified grant behind `license_key` (derived, never persisted).
+    pub(crate) license: Option<crate::services::license::LicenseInfo>,
 }
 
 impl CloudState {

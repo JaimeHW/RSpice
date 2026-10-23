@@ -27,12 +27,12 @@ fn transient_specialized_views_never_outlive_their_retained_source() {
     ]);
 
     controller.populate_transient_post_views(&mut state, &retained);
-    assert!(state.analysis.fft_state.has_data());
+    assert!(state.results.analysis.fft_state.has_data());
 
     let no_outputs = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     controller.populate_transient_post_views(&mut state, &no_outputs);
-    assert!(!state.analysis.fft_state.has_data());
-    assert!(state.analysis.cache_authority.fft.is_none());
+    assert!(!state.results.analysis.fft_state.has_data());
+    assert!(state.results.analysis.cache_authority.fft.is_none());
 }
 
 #[test]
@@ -53,8 +53,11 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
         crate::state::RetainedTrace::new("V(out)", valid_time.clone(), valid_values, "#ffffff"),
     ]);
     controller.populate_transient_post_views(&mut state, &valid);
-    assert!(state.analysis.fft_state.has_data());
-    assert_eq!(state.analysis.cache_authority.fft, Some(expected_owner));
+    assert!(state.results.analysis.fft_state.has_data());
+    assert_eq!(
+        state.results.analysis.cache_authority.fft,
+        Some(expected_owner)
+    );
     assert!(controller.transient_post.fft_loaded.is_some_and(|loaded| {
         loaded.analysis == expected_owner
             && matches!(
@@ -68,9 +71,9 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
     ]);
     controller.populate_transient_post_views(&mut state, &malformed);
 
-    assert!(!state.analysis.fft_state.has_data());
-    assert!(state.analysis.fft_state.source_cache.is_none());
-    assert!(state.analysis.cache_authority.fft.is_none());
+    assert!(!state.results.analysis.fft_state.has_data());
+    assert!(state.results.analysis.fft_state.source_cache.is_none());
+    assert!(state.results.analysis.cache_authority.fft.is_none());
     assert!(controller.transient_post.fft_loaded.is_some_and(|loaded| {
         loaded.analysis == expected_owner
             && matches!(
@@ -79,7 +82,7 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
             )
     }));
     assert!(matches!(
-        state.analysis.fft_state.last_error,
+        state.results.analysis.fft_state.last_error,
         Some(rspice_results_ui::fft::FftFailure::Input(
             rspice_results_ui::fft::FftInputError::LengthMismatch {
                 time_count: 17,
@@ -617,7 +620,7 @@ fn a_schematic_run_retains_the_deck_it_executed() {
         executed.deck
     );
     assert!(
-        state.manual_run.last_run_buffer.is_none(),
+        state.runs.manual_run.last_run_buffer.is_none(),
         "and nobody typed it, so there is no manual baseline to be current with"
     );
 }

@@ -173,6 +173,7 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
 
     let source_paths = app
         .state
+        .platform
         .recent_files
         .iter()
         .filter(|recent| recent.kind == RecentKind::Schematic)
@@ -859,7 +860,7 @@ pub(crate) fn start_local_safe_mode(
     let preserved_session = serde_json::to_string(&app.state)
         .map_err(|error| format!("The current session could not be protected: {error}"))?;
 
-    if options.isolate_prior_documents && app.state.project_lifecycle.is_open() {
+    if options.isolate_prior_documents && app.state.platform.project_lifecycle.is_open() {
         app.state.project.begin_project_close(
             crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
         );
@@ -1000,7 +1001,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
         writeln!(
             snapshot,
             "project_open={}",
-            state.project_lifecycle.is_open()
+            state.platform.project_lifecycle.is_open()
         )
         .expect("String writes cannot fail");
         writeln!(snapshot).expect("String writes cannot fail");

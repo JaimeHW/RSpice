@@ -121,14 +121,14 @@ pub(super) fn populated_session() -> AppState {
 
     // Authority over the canonical project, on each host.
     let project_id = state.model.workspace.content.project.id().to_string();
-    state.native_project_binding_receipt = Some(
+    state.platform.native_project_binding_receipt = Some(
         crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             project_id: project_id.clone(),
             accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
         },
     );
-    state.browser_project_binding_receipt = Some(
+    state.platform.browser_project_binding_receipt = Some(
         crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt {
             binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
             project_id,
@@ -138,6 +138,7 @@ pub(super) fn populated_session() -> AppState {
         },
     );
     state
+        .platform
         .recent_files
         .push(crate::services::recent_files::RecentFile {
             kind: crate::services::recent_files::RecentKind::Project,
@@ -147,7 +148,7 @@ pub(super) fn populated_session() -> AppState {
             owner: Some("Analog team".to_owned()),
             tags: vec!["afe".to_owned()],
         });
-    state.license_key = Some("RSPICE-SESSION-FIXTURE".to_owned());
+    state.cloud.license_key = Some("RSPICE-SESSION-FIXTURE".to_owned());
 
     populate_ui_session(&mut state);
     populate_workbench(&mut state, operating_point);
@@ -434,7 +435,7 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
         restored.model.workspace.content.project.name(),
         "Precision AFE"
     );
-    assert!(!restored.project_lifecycle.is_open());
+    assert!(!restored.platform.project_lifecycle.is_open());
     assert_eq!(restored.model.simulation.retained.run_count(), 1);
     assert!(
         restored.models.model_editor.draft.is_some(),

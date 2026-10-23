@@ -15,7 +15,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .plot_view(ResultViewer::Fft, 0);
     let out = view::show(
         ui,
-        &mut state.analysis.fft_state,
+        &mut state.results.analysis.fft_state,
         &mut state.results.results.session.fft_series,
         plot_view,
         &mut state.results.results.session.cache,
@@ -53,7 +53,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let presentation = state.result_presentation_policy();
     view::right_panel(
         ui,
-        &state.analysis.fft_state,
+        &state.results.analysis.fft_state,
         &mut state.results.results.session.fft_series,
         &state.model.preferences.quantity_presentation_policy(),
         usize::from(presentation.displayed_significant_digits().get()),

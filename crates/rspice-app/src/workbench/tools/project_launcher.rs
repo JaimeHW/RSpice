@@ -525,7 +525,7 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
     // With nothing open, every workspace but the no-project landing would
     // present the bootstrap placeholder as the reader's work, so a dismissal
     // never returns to one.
-    let project_open = app.state.project_lifecycle.is_open();
+    let project_open = app.state.platform.project_lifecycle.is_open();
     if project_open
         && app
             .state
@@ -1359,6 +1359,7 @@ fn project_entries(app: &RSpiceApp) -> Vec<ProjectEntry> {
     let filter = app.state.project.project_launcher_filter;
     let mut entries = app
         .state
+        .platform
         .recent_files
         .iter()
         .filter(|recent| recent.kind == RecentKind::Project)

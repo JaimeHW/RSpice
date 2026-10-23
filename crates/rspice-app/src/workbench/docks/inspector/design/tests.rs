@@ -1029,12 +1029,13 @@ fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
     let mut committed = subject.clone();
     committed.params = "td=-1e-9".to_owned();
     let sheet = state
+        .design
         .property_registry
         .get(committed.kind)
         .expect("a PWL source has a registered property sheet");
     let values = crate::properties::property_bridge::collect_properties_from_component(
         &committed,
-        &state.property_registry,
+        &state.design.property_registry,
     );
     let editor =
         crate::properties::property_bridge::source_commit_refusal(&committed, &values, sheet)

@@ -59,7 +59,7 @@ pub(crate) struct CodeCommandContext {
 /// page, or a Verilog-A cell view the Design workspace is showing.
 #[must_use]
 pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         return None;
     }
     match app.state.workbench.workspace {
@@ -90,7 +90,7 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
 #[must_use]
 pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandContext> {
     if app.state.model.safe_mode.project_read_only()
-        || !app.state.project_lifecycle.is_open()
+        || !app.state.platform.project_lifecycle.is_open()
         || app.state.model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
         || app.state.code.code_workspace.veriloga.pending.is_some()
     {
@@ -115,7 +115,7 @@ pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandCon
 pub(crate) fn veriloga_compile_refusal(app: &RSpiceApp) -> &'static str {
     if app.state.model.safe_mode.project_read_only() {
         "the project is open read-only"
-    } else if !app.state.project_lifecycle.is_open() {
+    } else if !app.state.platform.project_lifecycle.is_open() {
         "no project is open"
     } else if app.state.model.workspace.content.active_view_type()
         != crate::state::ViewType::VerilogA
@@ -261,7 +261,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             ActiveNetlistDocument::RunSnapshot => {
                 let run_id =
                     crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state)?;
-                let snapshot = state.manual_run.last_run_buffer.as_deref()?;
+                let snapshot = state.runs.manual_run.last_run_buffer.as_deref()?;
                 if state.model.simulation.source.netlist_content != snapshot {
                     return None;
                 }

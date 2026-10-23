@@ -600,7 +600,7 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
         });
 
         assert!(
-            state.tabbed_property_dialog.open || state.design.object_properties.open,
+            state.design.tabbed_property_dialog.open || state.design.object_properties.open,
             "{key:?} should activate the focused Object properties row"
         );
         assert!(

@@ -28,6 +28,12 @@ pub(crate) struct ModelsState {
     /// model-library domain.
     pub model_correlation:
         crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
+    /// PDK Settings dialog state. Boxed: it carries a whole PDK configuration
+    /// working copy and its original.
+    pub(crate) pdk_settings_dialog:
+        Box<crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogState>,
+    /// Standalone model browser state (for Tools menu access)
+    pub(crate) model_browser_state: crate::properties::model_browser::ModelBrowserState,
 }
 
 impl ModelsState {

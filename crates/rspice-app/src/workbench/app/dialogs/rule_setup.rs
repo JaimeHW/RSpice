@@ -39,7 +39,7 @@ pub(crate) struct RuleSetupDialogState {
 }
 
 pub(crate) fn open_rule_setup(state: &mut AppState) {
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         state.prompt("Design rule setup requires an open project.");
         return;
     }

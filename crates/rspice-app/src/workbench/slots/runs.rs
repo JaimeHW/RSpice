@@ -14,4 +14,7 @@ pub(crate) struct RunsState {
     /// Mockup-specified simulation-preflight workflow. Validation reports are
     /// revision-bound runtime evidence and therefore never serialized.
     pub preflight: crate::workbench::app_state::run_preflight::PreflightDialogState,
+    /// The deck a manual-deck run started from and the baseline the last one
+    /// left. Runtime only, and boxed so a moved state stays the same size.
+    pub(crate) manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
 }

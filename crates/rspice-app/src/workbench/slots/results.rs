@@ -48,4 +48,10 @@ pub(crate) struct ResultsState {
     /// this transaction explicitly commits.
     pub result_import:
         crate::workbench::documents::result_document::import::ResultImportDialogState,
+    /// Calculator panel state
+    pub(crate) calculator_panel: crate::workbench::app_state::session::calculator::CalculatorPanel,
+    /// Specialized analysis viewer state grouped by analysis workspace.
+    /// Boxed: six viewers' state and their caches.
+    pub(crate) analysis:
+        Box<crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState>,
 }

@@ -412,7 +412,7 @@ impl LiveSessionEngine {
         if guest.mirroring {
             return;
         }
-        if state.project_lifecycle.is_open() {
+        if state.platform.project_lifecycle.is_open() {
             state.project.begin_project_close(
                 crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
             );

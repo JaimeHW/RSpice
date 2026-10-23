@@ -134,7 +134,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // snapshot.
     // Every section below projects an open project's state, so showing them here
     // would dress the bootstrap placeholder up as the reader's own work.
-    if !app.state.project_lifecycle.is_open() {
+    if !app.state.platform.project_lifecycle.is_open() {
         landing::show(ui, app);
         show_technology_attachment_dialog(&ctx, app);
         return;

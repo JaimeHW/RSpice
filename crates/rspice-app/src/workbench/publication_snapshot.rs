@@ -1383,6 +1383,7 @@ fn publication_contract_display(
 /// contract's canonical form.
 fn effective_deck(state: &AppState) -> Option<NetlistSection> {
     let raw = state
+        .runs
         .manual_run
         .last_run_buffer
         .as_deref()

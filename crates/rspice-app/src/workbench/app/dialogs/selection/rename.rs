@@ -148,7 +148,7 @@ pub(crate) fn rename_selection_available(state: &AppState) -> bool {
 pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
     if state.design.rename_selection.open
         || state.design.object_properties.open
-        || state.tabbed_property_dialog.open
+        || state.design.tabbed_property_dialog.open
         || state.schematic_edit_read_only()
     {
         return false;

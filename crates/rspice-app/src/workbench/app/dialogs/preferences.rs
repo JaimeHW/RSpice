@@ -95,12 +95,16 @@ impl RSpiceApp {
             #[cfg(target_arch = "wasm32")]
             if editor_publication_pending
                 && matches!(
-                    self.state.shortcut_library_publication_continuation,
+                    self.state
+                        .settings
+                        .shortcut_library_publication_continuation,
                     Some(ShortcutLibraryPublicationContinuation::Editor)
                 )
                 && self.state.cancel_pending_shortcut_library_publication()
             {
-                self.state.shortcut_library_publication_continuation = None;
+                self.state
+                    .settings
+                    .shortcut_library_publication_continuation = None;
                 close_editor = true;
             }
             if close_editor {
@@ -353,7 +357,9 @@ impl RSpiceApp {
                 {
                     let cancelled = self.state.cancel_pending_shortcut_library_publication();
                     if cancelled {
-                        self.state.shortcut_library_publication_continuation = None;
+                        self.state
+                            .settings
+                            .shortcut_library_publication_continuation = None;
                         self.state
                             .settings
                             .shortcut_portability
@@ -402,6 +408,7 @@ impl RSpiceApp {
     ) {
         if self
             .state
+            .settings
             .shortcut_library_publication_continuation
             .is_some()
         {
@@ -422,10 +429,13 @@ impl RSpiceApp {
             Ok(ShortcutLibraryPublication::Pending) => {
                 debug_assert!(
                     self.state
+                        .settings
                         .shortcut_library_publication_continuation
                         .is_none()
                 );
-                self.state.shortcut_library_publication_continuation = Some(continuation);
+                self.state
+                    .settings
+                    .shortcut_library_publication_continuation = Some(continuation);
             }
             Err(error) => self
                 .state
@@ -530,6 +540,7 @@ impl RSpiceApp {
     fn finish_shortcut_library_publication(&mut self) {
         if self
             .state
+            .settings
             .shortcut_library_publication_continuation
             .is_none()
         {
@@ -553,6 +564,7 @@ impl RSpiceApp {
         };
         let continuation = self
             .state
+            .settings
             .shortcut_library_publication_continuation
             .take()
             .expect("completion owner was checked above");
@@ -1055,6 +1067,7 @@ mod tests {
         assert_eq!(app.state.model.preferences.shortcuts(), &candidate);
         assert_eq!(
             app.state
+                .settings
                 .shortcut_library_persistence
                 .persisted()
                 .expect("volatile canonical shortcut snapshot")
@@ -1075,7 +1088,7 @@ mod tests {
         candidate
             .policies_mut()
             .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
-        app.state.shortcut_library_persistence =
+        app.state.settings.shortcut_library_persistence =
             crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::Unavailable(
                 "simulated canonical storage failure".to_owned(),
             );
@@ -1092,6 +1105,7 @@ mod tests {
         assert!(app.state.settings.shortcut_policy_candidate.is_none());
         assert!(
             app.state
+                .settings
                 .shortcut_library_publication_continuation
                 .is_none()
         );

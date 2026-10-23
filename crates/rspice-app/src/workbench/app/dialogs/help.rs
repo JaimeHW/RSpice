@@ -229,7 +229,7 @@ impl RSpiceApp {
             return;
         }
 
-        let license = license_state(self.state.license.as_ref());
+        let license = license_state(self.state.cloud.license.as_ref());
         let copyright = format!("\u{a9} {}", copyright_holder());
         let mut notices = false;
         let choice = Dialog::new("About RSpice", "Close")
@@ -646,7 +646,7 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
             "host": if cfg!(target_arch = "wasm32") { "browser" } else { "desktop" },
         },
         "session": {
-            "project_open": app.state.project_lifecycle.is_open(),
+            "project_open": app.state.platform.project_lifecycle.is_open(),
             "workspace": app.state.workbench.workspace.label(),
             "open_documents": documents.iter().filter(|document| document.open).count(),
             "dirty_documents": documents.iter().filter(|document| document.dirty).count(),
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn about_states_the_build_engine_and_license_in_words() {
         let mut app = RSpiceApp::test_instance();
-        assert!(app.state.license.is_none());
+        assert!(app.state.cloud.license.is_none());
         Command::About.execute(&mut app);
         let shown = shown_nodes(&mut app, RSpiceApp::render_about_dialog);
         let texts: Vec<&str> = shown.iter().map(|shown| shown.text.as_str()).collect();

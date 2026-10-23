@@ -22,8 +22,8 @@ pub fn render_property_dialog(
     ctx: &egui::Context,
     state: &mut AppState,
 ) -> ComponentPropertyDialogResult {
-    if state.tabbed_property_dialog.open {
-        state.tabbed_property_dialog.session_error = component_property_session_error(state);
+    if state.design.tabbed_property_dialog.open {
+        state.design.tabbed_property_dialog.session_error = component_property_session_error(state);
         refresh_source_contract_advisories(state);
     }
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
@@ -31,9 +31,9 @@ pub fn render_property_dialog(
     let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
         ctx,
-        &mut state.tabbed_property_dialog,
+        &mut state.design.tabbed_property_dialog,
         &editor_context,
-        &state.property_registry,
+        &state.design.property_registry,
         &state.model.model_library_manager,
         quantity_policy,
         number_locale,
@@ -43,20 +43,29 @@ pub fn render_property_dialog(
     if matches!(
         result,
         ComponentPropertyDialogResult::Applied | ComponentPropertyDialogResult::AppliedAndClose
-    ) && let Some(comp_id) = state.tabbed_property_dialog.component_id
+    ) && let Some(comp_id) = state.design.tabbed_property_dialog.component_id
     {
         let close_after_commit = result == ComponentPropertyDialogResult::AppliedAndClose;
         if let Some(error) = component_property_session_error(state) {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.session_error = Some(error);
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.session_error = Some(error);
             return ComponentPropertyDialogResult::None;
         }
-        let committed = state.tabbed_property_dialog.draft.take_prepared_commit();
+        let committed = state
+            .design
+            .tabbed_property_dialog
+            .draft
+            .take_prepared_commit();
         let committed_names: Vec<String> = committed.keys().cloned().collect();
         // The bridge serializes the full component property map. Merge the
         // validated delta onto the last committed baseline so a rejected
         // partial field cannot erase an unrelated existing parameter.
-        let mut values = state.tabbed_property_dialog.draft.original_values.clone();
+        let mut values = state
+            .design
+            .tabbed_property_dialog
+            .draft
+            .original_values
+            .clone();
         values.extend(committed);
         let Some(component) = state
             .model
@@ -66,8 +75,8 @@ pub fn render_property_dialog(
             .iter()
             .find(|c| c.id == comp_id)
         else {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.session_error = Some(
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.session_error = Some(
                 "The selected component no longer exists. Close and reopen Object properties."
                     .to_owned(),
             );
@@ -77,42 +86,43 @@ pub fn render_property_dialog(
         if let Err(error) = crate::properties::property_bridge::apply_properties_to_component(
             &mut candidate,
             &values,
-            &state.property_registry,
+            &state.design.property_registry,
         ) {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.draft.commit_error = Some(format!(
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.draft.commit_error = Some(format!(
                 "The component was not changed: {error} Correct its Parameters text in the inspector."
             ));
             return ComponentPropertyDialogResult::None;
         }
         if let Err(error) = validate_component_identity(state, comp_id, &candidate) {
-            state.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.open = true;
             state
+                .design
                 .tabbed_property_dialog
                 .draft
                 .validation_errors
                 .insert("name".to_owned(), error);
-            state.tabbed_property_dialog.draft.commit_error =
+            state.design.tabbed_property_dialog.draft.commit_error =
                 Some("Correct the instance reference before applying.".to_owned());
             return ComponentPropertyDialogResult::None;
         }
         if let Err(error) = validate_model_binding_authority(state, &candidate, &values) {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.draft.commit_error =
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The model binding was not changed: {error}"));
             return ComponentPropertyDialogResult::None;
         }
-        let Some(property_sheet) = state.property_registry.get(candidate.kind) else {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.draft.commit_error = Some(
+        let Some(property_sheet) = state.design.property_registry.get(candidate.kind) else {
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.draft.commit_error = Some(
                 "The component was not changed because its property schema is unavailable."
                     .to_owned(),
             );
             return ComponentPropertyDialogResult::None;
         };
         if let Err(error) = validate_component_contract(&candidate, &values, property_sheet) {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.draft.commit_error =
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The component was not changed: {error}"));
             return ComponentPropertyDialogResult::None;
         }
@@ -122,8 +132,8 @@ pub fn render_property_dialog(
                 .schematic
                 .validate_edited_port_contract(comp_id, &candidate)
         {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.draft.commit_error =
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The interface contract was not changed: {error}."));
             return ComponentPropertyDialogResult::None;
         }
@@ -133,8 +143,8 @@ pub fn render_property_dialog(
         if let Err(error) =
             state.edit_component_transaction(&expected, candidate, "edit properties")
         {
-            state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.draft.commit_error =
+            state.design.tabbed_property_dialog.open = true;
+            state.design.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The component was not changed: {error}"));
             return ComponentPropertyDialogResult::None;
         }
@@ -144,8 +154,8 @@ pub fn render_property_dialog(
 
         // The mockup primary closes after the exact transaction completes.
         if close_after_commit {
-            state.tabbed_property_dialog.close();
-        } else if state.tabbed_property_dialog.open {
+            state.design.tabbed_property_dialog.close();
+        } else if state.design.tabbed_property_dialog.open {
             let component = state
                 .model
                 .schematic
@@ -156,26 +166,32 @@ pub fn render_property_dialog(
                 .expect("committed component retains its identity");
             let values = crate::properties::property_bridge::collect_properties_from_component(
                 component,
-                &state.property_registry,
+                &state.design.property_registry,
             );
-            state.tabbed_property_dialog.component_baseline = Some(component.clone());
-            state.tabbed_property_dialog.component_name = Some(component.name.clone());
-            state.tabbed_property_dialog.source = Some(
+            state.design.tabbed_property_dialog.component_baseline = Some(component.clone());
+            state.design.tabbed_property_dialog.component_name = Some(component.name.clone());
+            state.design.tabbed_property_dialog.source = Some(
                 crate::workbench::app::schematic_editor_request_source(state),
             );
             state
+                .design
                 .tabbed_property_dialog
                 .draft
                 .mark_fields_applied(committed_names);
-            state.tabbed_property_dialog.draft.rebase_applied_values(
-                values,
-                state
-                    .property_registry
-                    .get(component.kind)
-                    .expect("validated schema"),
-                quantity_policy,
-                number_locale,
-            );
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .rebase_applied_values(
+                    values,
+                    state
+                        .design
+                        .property_registry
+                        .get(component.kind)
+                        .expect("validated schema"),
+                    quantity_policy,
+                    number_locale,
+                );
         }
     }
 
@@ -191,8 +207,8 @@ pub fn render_property_dialog(
             } else {
                 StimulusLinkMode::Extract
             };
-            if let Some(component_id) = state.tabbed_property_dialog.component_id {
-                state.tabbed_property_dialog.close();
+            if let Some(component_id) = state.design.tabbed_property_dialog.component_id {
+                state.design.tabbed_property_dialog.close();
                 if let Err(refusal) = open_stimulus_link(state, component_id, mode) {
                     state.prompt(refusal);
                 }
@@ -204,7 +220,7 @@ pub fn render_property_dialog(
                 .stimulus
                 .as_ref()
                 .and_then(|stimulus| stimulus.definition.clone());
-            state.tabbed_property_dialog.close();
+            state.design.tabbed_property_dialog.close();
             if let Some(definition) = definition {
                 open_stimulus_definition(state, &definition);
             }
@@ -216,7 +232,7 @@ pub fn render_property_dialog(
                 .as_ref()
                 .and_then(|stimulus| stimulus.definition.clone());
             if let (Some(component_id), Some(definition)) =
-                (state.tabbed_property_dialog.component_id, definition)
+                (state.design.tabbed_property_dialog.component_id, definition)
             {
                 match commit_readoption(state, component_id, &definition) {
                     Ok(line) => {
@@ -224,11 +240,11 @@ pub fn render_property_dialog(
                         // Reopened rather than patched in place: the copy is a
                         // whole new card, and the draft the reader was typing
                         // into describes the one it replaced.
-                        state.tabbed_property_dialog.close();
+                        state.design.tabbed_property_dialog.close();
                         crate::workbench::app::open_property_editor(state, component_id);
                     }
                     Err(refusal) => {
-                        state.tabbed_property_dialog.draft.commit_error = Some(refusal);
+                        state.design.tabbed_property_dialog.draft.commit_error = Some(refusal);
                     }
                 }
             }
@@ -236,8 +252,8 @@ pub fn render_property_dialog(
         _ => {}
     }
 
-    if !state.tabbed_property_dialog.open {
-        state.property_registry.clear_cell_instance_sheet();
+    if !state.design.tabbed_property_dialog.open {
+        state.design.property_registry.clear_cell_instance_sheet();
     }
 
     result
@@ -418,6 +434,7 @@ fn validate_component_contract(
 /// editor is open — which is why it is not keyed on a revision.
 fn refresh_source_contract_advisories(state: &mut AppState) {
     let advisories = state
+        .design
         .tabbed_property_dialog
         .component_id
         .and_then(|component_id| {
@@ -430,11 +447,11 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
                 .find(|component| component.id == component_id)
         })
         .and_then(|component| {
-            let sheet = state.property_registry.get(component.kind)?;
+            let sheet = state.design.property_registry.get(component.kind)?;
             Some(
                 crate::properties::property_bridge::component_source_contract(
                     component,
-                    &state.tabbed_property_dialog.draft.values,
+                    &state.design.tabbed_property_dialog.draft.values,
                     sheet,
                 )
                 .into_iter()
@@ -443,7 +460,7 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
             )
         })
         .unwrap_or_default();
-    state.tabbed_property_dialog.source_advisories = advisories;
+    state.design.tabbed_property_dialog.source_advisories = advisories;
 }
 
 fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
@@ -458,7 +475,7 @@ fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
 }
 
 fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
-    let Some(component_id) = state.tabbed_property_dialog.component_id else {
+    let Some(component_id) = state.design.tabbed_property_dialog.component_id else {
         return ComponentPropertyContext::default();
     };
     let Some(component) = state
@@ -563,7 +580,7 @@ fn model_is_component_value(kind: ComponentType) -> bool {
 }
 
 fn component_property_session_error(state: &AppState) -> Option<String> {
-    let dialog = &state.tabbed_property_dialog;
+    let dialog = &state.design.tabbed_property_dialog;
     if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
@@ -872,20 +889,21 @@ mod tests {
             state.model.schematic.init_undo_history();
             open_property_editor(&mut state, 44);
             assert_eq!(
-                state.tabbed_property_dialog.source,
+                state.design.tabbed_property_dialog.source,
                 Some(crate::workbench::app::schematic_editor_request_source(
                     &state
                 ))
             );
             assert!(component_property_session_error(&state).is_none());
             state
+                .design
                 .tabbed_property_dialog
                 .draft
                 .set_value("r", PropertyValue::Expression("2k".to_owned()));
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
                 render_property_dialog(ctx, &mut state);
             });
-            assert!(state.tabbed_property_dialog.session_error.is_none());
+            assert!(state.design.tabbed_property_dialog.session_error.is_none());
             match change {
                 "project" => state.model.workspace.content.project = Default::default(),
                 "view" => {
@@ -962,7 +980,7 @@ mod tests {
                     },
                     "component-properties test".to_owned(),
                 ),
-                "missing" => state.tabbed_property_dialog.source = None,
+                "missing" => state.design.tabbed_property_dialog.source = None,
                 "object" => {
                     state.model.schematic.document_mut_for_test().components[0].name =
                         "R2".to_owned()
@@ -973,7 +991,7 @@ mod tests {
                 component_property_session_error(&state).is_some(),
                 "{change}"
             );
-            let source = state.tabbed_property_dialog.source.clone();
+            let source = state.design.tabbed_property_dialog.source.clone();
             let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
             let versions = (
                 state.model.schematic.content_version(),
@@ -984,19 +1002,22 @@ mod tests {
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 render_property_dialog(ctx, &mut state);
             });
-            assert!(state.tabbed_property_dialog.open, "{change}");
+            assert!(state.design.tabbed_property_dialog.open, "{change}");
             assert!(
-                state.tabbed_property_dialog.session_error.is_some(),
+                state.design.tabbed_property_dialog.session_error.is_some(),
                 "{change}"
             );
-            assert_eq!(state.tabbed_property_dialog.source, source, "{change}");
             assert_eq!(
-                state.tabbed_property_dialog.draft.values["r"],
+                state.design.tabbed_property_dialog.source, source,
+                "{change}"
+            );
+            assert_eq!(
+                state.design.tabbed_property_dialog.draft.values["r"],
                 PropertyValue::Expression("2k".to_owned()),
                 "{change}"
             );
             assert!(
-                state.tabbed_property_dialog.draft.is_modified("r"),
+                state.design.tabbed_property_dialog.draft.is_modified("r"),
                 "{change}"
             );
             assert!(
@@ -1028,10 +1049,12 @@ mod tests {
         let plan = add_current_output(&mut state);
         open_property_editor(&mut state, 44);
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("r", PropertyValue::Expression("2k".to_owned()));
@@ -1043,8 +1066,8 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
 
-        assert!(!state.tabbed_property_dialog.open);
-        assert!(state.tabbed_property_dialog.source.is_none());
+        assert!(!state.design.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.source.is_none());
         assert_eq!(state.model.schematic.document().components[0].name, "R99");
         assert_eq!(state.model.schematic.document().components[0].value, "2k");
         assert_eq!(
@@ -1115,12 +1138,14 @@ mod tests {
             .simulation_plan_payloads
             .clone();
         open_property_editor(&mut state, 44);
-        let opened_source = state.tabbed_property_dialog.source.clone();
+        let opened_source = state.design.tabbed_property_dialog.source.clone();
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("r", PropertyValue::Expression("2k".to_owned()));
@@ -1135,13 +1160,26 @@ mod tests {
             state.model.workspace.content.simulation_plan_payloads,
             payloads
         );
-        assert!(state.tabbed_property_dialog.open);
-        assert!(state.tabbed_property_dialog.draft.commit_error.is_some());
-        assert_eq!(state.tabbed_property_dialog.source, opened_source);
-        assert!(state.tabbed_property_dialog.draft.is_modified("name"));
-        assert!(state.tabbed_property_dialog.draft.is_modified("r"));
+        assert!(state.design.tabbed_property_dialog.open);
+        assert!(
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .commit_error
+                .is_some()
+        );
+        assert_eq!(state.design.tabbed_property_dialog.source, opened_source);
+        assert!(
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .is_modified("name")
+        );
+        assert!(state.design.tabbed_property_dialog.draft.is_modified("r"));
         assert_eq!(
-            state.tabbed_property_dialog.draft.values["name"],
+            state.design.tabbed_property_dialog.draft.values["name"],
             PropertyValue::String("R99".to_owned())
         );
         assert!(!state.model.schematic.can_undo());
@@ -1165,10 +1203,12 @@ mod tests {
                 .clone();
             open_property_editor(&mut state, 44);
             state
+                .design
                 .tabbed_property_dialog
                 .draft
                 .set_value("name", PropertyValue::String("R99".to_owned()));
             state
+                .design
                 .tabbed_property_dialog
                 .draft
                 .set_value("r", PropertyValue::Expression("2k".to_owned()));
@@ -1183,19 +1223,26 @@ mod tests {
                 state.model.workspace.content.simulation_plan_payloads,
                 payloads
             );
-            assert!(state.tabbed_property_dialog.open);
+            assert!(state.design.tabbed_property_dialog.open);
             assert!(
                 state
+                    .design
                     .tabbed_property_dialog
                     .draft
                     .commit_error
                     .as_ref()
-                    .or(state.tabbed_property_dialog.session_error.as_ref())
+                    .or(state.design.tabbed_property_dialog.session_error.as_ref())
                     .unwrap()
                     .contains("Parameters")
             );
-            assert!(state.tabbed_property_dialog.draft.is_modified("name"));
-            assert!(state.tabbed_property_dialog.draft.is_modified("r"));
+            assert!(
+                state
+                    .design
+                    .tabbed_property_dialog
+                    .draft
+                    .is_modified("name")
+            );
+            assert!(state.design.tabbed_property_dialog.draft.is_modified("r"));
             assert!(!state.model.schematic.can_undo());
             assert!(state.project_undo_sequence().is_none());
         }
@@ -1208,6 +1255,7 @@ mod tests {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
@@ -1218,8 +1266,8 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        assert!(!state.tabbed_property_dialog.open);
-        assert!(state.tabbed_property_dialog.source.is_none());
+        assert!(!state.design.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.source.is_none());
         assert_eq!(state.model.schematic.document().components[0].name, "R1");
     }
 
@@ -1228,6 +1276,7 @@ mod tests {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
         let captured_epoch = state
+            .design
             .tabbed_property_dialog
             .source
             .as_ref()
@@ -1250,10 +1299,11 @@ mod tests {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
-        state.tabbed_property_dialog.model_browser.open = true;
+        state.design.tabbed_property_dialog.model_browser.open = true;
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
@@ -1262,8 +1312,8 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
 
-        assert!(!state.tabbed_property_dialog.model_browser.open);
-        assert!(state.tabbed_property_dialog.open);
+        assert!(!state.design.tabbed_property_dialog.model_browser.open);
+        assert!(state.design.tabbed_property_dialog.open);
         assert_eq!(state.model.schematic.document().components[0].name, "R1");
     }
 
@@ -1274,6 +1324,7 @@ mod tests {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
         let original = state
+            .design
             .tabbed_property_dialog
             .draft
             .numeric_text_draft("r")
@@ -1299,11 +1350,16 @@ mod tests {
         );
         let expected = format!("{original}1e");
         assert_eq!(
-            state.tabbed_property_dialog.draft.numeric_text_draft("r"),
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .numeric_text_draft("r"),
             Some(expected.as_str())
         );
         assert!(
             state
+                .design
                 .tabbed_property_dialog
                 .draft
                 .validation_errors
@@ -1314,7 +1370,11 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
         assert_eq!(
-            state.tabbed_property_dialog.draft.numeric_text_draft("r"),
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .numeric_text_draft("r"),
             Some(expected.as_str())
         );
     }
@@ -1334,12 +1394,14 @@ mod tests {
             .document_policy
             .property_commit = PropertyCommitPolicy::ApplyValidFields;
         open_property_editor(&mut state, 44);
-        let opened_source = state.tabbed_property_dialog.source.clone();
+        let opened_source = state.design.tabbed_property_dialog.source.clone();
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("name", PropertyValue::String(" R99 ".to_owned()));
         state
+            .design
             .tabbed_property_dialog
             .draft
             .update_numeric_text_draft(
@@ -1356,23 +1418,35 @@ mod tests {
         });
 
         // The valid name is held back with the invalid multiplier.
-        assert!(state.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.open);
         assert_eq!(state.model.schematic.document().components[0].name, "R1");
         assert_eq!(state.model.schematic.document().components[0].params, "");
         assert_eq!(state.model.schematic.history().undo_count(), 0);
-        assert_eq!(state.tabbed_property_dialog.source, opened_source);
+        assert_eq!(state.design.tabbed_property_dialog.source, opened_source);
         assert_eq!(
-            state.tabbed_property_dialog.draft.numeric_text_draft("m"),
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .numeric_text_draft("m"),
             Some("0")
         );
-        assert!(state.tabbed_property_dialog.draft.is_modified("m"));
-        assert!(state.tabbed_property_dialog.draft.is_modified("name"));
+        assert!(state.design.tabbed_property_dialog.draft.is_modified("m"));
+        assert!(
+            state
+                .design
+                .tabbed_property_dialog
+                .draft
+                .is_modified("name")
+        );
 
         state
+            .design
             .tabbed_property_dialog
             .draft
             .update_numeric_text_draft("m", "2".to_owned(), None);
         state
+            .design
             .tabbed_property_dialog
             .draft
             .set_value("m", PropertyValue::number(2.0));
@@ -1383,8 +1457,8 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
 
-        assert!(!state.tabbed_property_dialog.open);
-        assert!(state.tabbed_property_dialog.source.is_none());
+        assert!(!state.design.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.source.is_none());
         assert_eq!(state.model.schematic.document().components[0].name, "R99");
         assert_eq!(state.model.schematic.document().components[0].params, "m=2");
     }

@@ -35,7 +35,7 @@ use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::time_compat::Instant;
 use crate::ui::Theme;
 use crate::workbench::app_state::AppState;
-use crate::workbench::slots::{PlatformState, SettingsState};
+use crate::workbench::slots::PlatformState;
 use crate::workbench::{UserPreferences, WorkbenchState};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -116,13 +116,13 @@ impl<'a> Values<'a> {
     fn of(
         workbench: &WorkbenchState,
         platform: &PlatformState,
-        settings: &SettingsState,
+        browser_spoken_feedback: bool,
         preferences: &'a UserPreferences,
     ) -> Self {
         Self {
             theme: workbench.theme,
             autosave_minutes: platform.autosave_minutes,
-            browser_spoken_feedback: settings.browser_spoken_feedback,
+            browser_spoken_feedback,
             preferences,
         }
     }
@@ -334,7 +334,7 @@ fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
 fn fingerprint(
     workbench: &WorkbenchState,
     platform: &PlatformState,
-    settings: &SettingsState,
+    browser_spoken_feedback: bool,
     preferences: &mut UserPreferences,
 ) -> u64 {
     struct HashWriter(std::hash::DefaultHasher);
@@ -356,7 +356,7 @@ fn fingerprint(
     // was hashed before the failure is as good an observation as any.
     let _ = serde_json::to_writer(
         &mut writer,
-        &Values::of(workbench, platform, settings, preferences),
+        &Values::of(workbench, platform, browser_spoken_feedback, preferences),
     );
     *preferences.shortcut_profiles_mut() = shortcuts;
     writer.0.finish()
@@ -552,21 +552,21 @@ impl AppState {
     /// when it carried nothing, is written as the first one.
     fn bind_preferences_file(&mut self, store: PreferencesStore) {
         let read = store.read();
-        self.preferences_file.store = Some(store.clone());
+        self.settings.preferences_file.store = Some(store.clone());
         match read {
             Ok(None) => self.write_preferences_file(),
             Ok(Some(bytes)) => {
                 match parse(&bytes, MAX_FILE_BYTES).and_then(|value| decode(value, false)) {
                     Ok(settings) => {
                         self.apply_personal_settings(settings);
-                        self.preferences_file.written = encode_bytes(
+                        self.settings.preferences_file.written = encode_bytes(
                             &Values::of(
                                 &self.workbench,
                                 &self.platform,
-                                &self.settings,
+                                self.settings.browser_spoken_feedback,
                                 &self.model.preferences,
                             ),
-                            &self.preferences_file.envelope,
+                            &self.settings.preferences_file.envelope,
                         )
                         .ok();
                     }
@@ -574,7 +574,7 @@ impl AppState {
                 }
             }
             Err(error) => {
-                self.preferences_file.write_withheld = true;
+                self.settings.preferences_file.write_withheld = true;
                 self.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -586,10 +586,10 @@ impl AppState {
                 );
             }
         }
-        self.preferences_file.observed = fingerprint(
+        self.settings.preferences_file.observed = fingerprint(
             &self.workbench,
             &self.platform,
-            &self.settings,
+            self.settings.browser_spoken_feedback,
             &mut self.model.preferences,
         );
     }
@@ -615,7 +615,7 @@ impl AppState {
                 self.write_preferences_file();
             }
             Err(error) => {
-                self.preferences_file.write_withheld = true;
+                self.settings.preferences_file.write_withheld = true;
                 self.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -639,7 +639,7 @@ impl AppState {
         self.settings.browser_spoken_feedback = settings.browser_spoken_feedback;
         *self.model.preferences = settings.preferences;
         *self.model.preferences.shortcut_profiles_mut() = shortcuts;
-        self.preferences_file.envelope = settings.envelope;
+        self.settings.preferences_file.envelope = settings.envelope;
     }
 
     /// Notice a preference change and write it once it settles.
@@ -657,7 +657,7 @@ impl AppState {
     /// [`Self::persist_preferences_file`] at `now`. Returns how long until a
     /// pending write is due.
     fn persist_preferences_file_at(&mut self, now: Instant, had_input: bool) -> Option<Duration> {
-        let runtime = &mut *self.preferences_file;
+        let runtime = &mut *self.settings.preferences_file;
         if runtime.store.is_none() || runtime.write_withheld {
             return None;
         }
@@ -675,7 +675,7 @@ impl AppState {
             let observed = fingerprint(
                 &self.workbench,
                 &self.platform,
-                &self.settings,
+                self.settings.browser_spoken_feedback,
                 &mut self.model.preferences,
             );
             if observed != runtime.observed {
@@ -694,18 +694,18 @@ impl AppState {
 
     /// Write any change not yet in the file now, rather than when it settles.
     pub(in crate::workbench) fn flush_preferences_file(&mut self) {
-        self.preferences_file.write_due = None;
-        self.preferences_file.observed = fingerprint(
+        self.settings.preferences_file.write_due = None;
+        self.settings.preferences_file.observed = fingerprint(
             &self.workbench,
             &self.platform,
-            &self.settings,
+            self.settings.browser_spoken_feedback,
             &mut self.model.preferences,
         );
         self.write_preferences_file();
     }
 
     fn write_preferences_file(&mut self) {
-        let runtime = &mut *self.preferences_file;
+        let runtime = &mut *self.settings.preferences_file;
         let Some(store) = runtime.store.as_ref() else {
             return;
         };
@@ -716,7 +716,7 @@ impl AppState {
             &Values::of(
                 &self.workbench,
                 &self.platform,
-                &self.settings,
+                self.settings.browser_spoken_feedback,
                 &self.model.preferences,
             ),
             &runtime.envelope,
@@ -755,10 +755,10 @@ impl AppState {
             &Values::of(
                 &self.workbench,
                 &self.platform,
-                &self.settings,
+                self.settings.browser_spoken_feedback,
                 &self.model.preferences,
             ),
-            &self.preferences_file.envelope,
+            &self.settings.preferences_file.envelope,
         )?;
         let shortcuts = serde_json::to_value(self.model.preferences.shortcut_profiles())
             .map_err(|error| format!("the keyboard shortcuts could not be encoded: {error}"))?;
@@ -851,7 +851,7 @@ impl AppState {
     pub(in crate::workbench) fn show_preferences_file(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let folder = match self.preferences_file.store.as_ref() {
+            let folder = match self.settings.preferences_file.store.as_ref() {
                 Some(PreferencesStore::File(path)) => {
                     path.parent().map(std::path::Path::to_path_buf)
                 }

@@ -72,7 +72,7 @@ fn selected_instances(state: &AppState) -> Option<Vec<u64>> {
         .filter(|component| selection.has_component(component.id))
         .filter(|component| {
             component.kind != ComponentType::CellInstance
-                && state.property_registry.get(component.kind).is_some()
+                && state.design.property_registry.get(component.kind).is_some()
         })
         .map(|component| component.id)
         .collect();
@@ -118,7 +118,7 @@ fn instances<'a>(state: &'a AppState, ids: &[u64]) -> Vec<&'a Component> {
 /// order, each with the value they agree on if they do.
 fn shared_fields(state: &AppState, ids: &[u64]) -> Vec<SharedField> {
     let components = instances(state, ids);
-    let registry = &state.property_registry;
+    let registry = &state.design.property_registry;
     let Some(sheet) = components
         .first()
         .and_then(|first| registry.get(first.kind))
@@ -201,7 +201,7 @@ pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, Str
     if edited.is_empty() {
         return Ok(0);
     }
-    let registry = &state.property_registry;
+    let registry = &state.design.property_registry;
     let mut edits = Vec::new();
     for expected in instances(state, &form.ids) {
         let sheet = registry.get(expected.kind);
@@ -340,7 +340,7 @@ mod tests {
             .iter()
             .find(|component| component.id == id)
             .expect("the instance");
-        collect_properties_from_component(component, &state.property_registry)
+        collect_properties_from_component(component, &state.design.property_registry)
             .get(key)
             .map(property_value_to_string)
     }

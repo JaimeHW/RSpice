@@ -173,7 +173,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
 
     state.workbench.project_review_dialog.close();
     assert!(close_project_discard(&mut state));
-    assert!(!state.project_lifecycle.is_open());
+    assert!(!state.platform.project_lifecycle.is_open());
     state.assert_project_open_fact();
     assert!(!state.project.project_launcher_open);
     assert_eq!(
@@ -224,11 +224,14 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
 
     let mut kept = reopened("kept.rspiceproj", 0);
     apply_startup_project_choice(&mut kept);
-    assert!(kept.project_lifecycle.is_open(), "Reopen last project");
+    assert!(
+        kept.platform.project_lifecycle.is_open(),
+        "Reopen last project"
+    );
 
     let mut closed = reopened("closed.rspiceproj", 1);
     apply_startup_project_choice(&mut closed);
-    assert!(!closed.project_lifecycle.is_open());
+    assert!(!closed.platform.project_lifecycle.is_open());
     assert_eq!(
         closed.workbench.workspace,
         crate::workbench::state::Workspace::Project
@@ -240,7 +243,10 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
         .schematic
         .add_component(ComponentType::Resistor, Point::new(3, 8));
     apply_startup_project_choice(&mut edited);
-    assert!(edited.project_lifecycle.is_open(), "unsaved changes stay");
+    assert!(
+        edited.platform.project_lifecycle.is_open(),
+        "unsaved changes stay"
+    );
 
     drop((kept, closed, edited));
     let _ = std::fs::remove_dir_all(&folder);
@@ -270,7 +276,7 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
             .expect("the startup choice has two options");
         open_session_project(&mut restored);
         assert!(
-            !restored.project_lifecycle.is_open(),
+            !restored.platform.project_lifecycle.is_open(),
             "On startup choice {choice} opened a project"
         );
         assert!(!restored.project.project_launcher_open);
@@ -333,12 +339,24 @@ fn a_saved_project_comes_back_through_its_session() {
     };
 
     let reopened = restart(&session("reopened.rspiceproj", false), 0);
-    assert!(reopened.project_lifecycle.is_open(), "Reopen last project");
-    assert!(reopened.project_lifecycle.accepted().is_some());
-    assert!(reopened.project_lifecycle.canonical_native_path().is_some());
+    assert!(
+        reopened.platform.project_lifecycle.is_open(),
+        "Reopen last project"
+    );
+    assert!(reopened.platform.project_lifecycle.accepted().is_some());
+    assert!(
+        reopened
+            .platform
+            .project_lifecycle
+            .canonical_native_path()
+            .is_some()
+    );
 
     let edited = restart(&session("edited.rspiceproj", true), 1);
-    assert!(edited.project_lifecycle.is_open(), "unsaved changes stay");
+    assert!(
+        edited.platform.project_lifecycle.is_open(),
+        "unsaved changes stay"
+    );
     assert_eq!(edited.model.schematic.document().components.len(), 1);
     assert!(edited.model.log_buffer.entries().any(|entry| {
         entry.message == "The last project was reopened because it has unsaved changes."
@@ -401,7 +419,7 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
         .begin_project_close(ProjectCloseDestination::LiveMirror);
 
     assert!(close_project_discard(&mut state));
-    assert!(!state.project_lifecycle.is_open());
+    assert!(!state.platform.project_lifecycle.is_open());
     assert!(!state.project.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
@@ -429,7 +447,7 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
         apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
         LiveProjectApply::Applied
     ));
-    assert!(guest.project_lifecycle.is_open());
+    assert!(guest.platform.project_lifecycle.is_open());
     assert_eq!(
         guest.model.workspace.content.project.id(),
         host.model.workspace.content.project.id()
@@ -544,12 +562,13 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
     state.model.simulation.view.active_analysis_idx = Some(0);
     state.model.simulation.retained.next_run_id = 2;
 
-    state.analysis.histogram_state.selected = Some("old measurement".to_owned());
+    state.results.analysis.histogram_state.selected = Some("old measurement".to_owned());
     let mut bode = BodeData::new();
     bode.add_response();
-    state.analysis.bode_plot_state.load_data(bode);
+    state.results.analysis.bode_plot_state.load_data(bode);
 
     state
+        .results
         .analysis
         .nyquist_state
         .load_data(NyquistData::from_arrays(
@@ -560,6 +579,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         ));
 
     state
+        .results
         .analysis
         .smith_chart_state
         .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
@@ -567,9 +587,9 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
 
     let mut eye = EyeData::new(1e-9, 2);
     eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
-    state.analysis.eye_diagram_state.load_data(eye);
+    state.results.analysis.eye_diagram_state.load_data(eye);
 
-    state.analysis.fft_state.load_data(
+    state.results.analysis.fft_state.load_data(
         FftData::from_time_domain_with_normalization(
             "old fft",
             &[
@@ -612,7 +632,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
 }
 
 fn assert_specialized_viewer_caches_cleared(state: &AppState) {
-    assert_eq!(state.analysis.histogram_state.selected, None);
+    assert_eq!(state.results.analysis.histogram_state.selected, None);
     for viewer in [
         ActiveViewer::SmithChart,
         ActiveViewer::EyeDiagram,
@@ -652,7 +672,7 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
     );
     assert!(state.model.workspace.content.project.path.is_none());
     assert!(!state.model.simulation.retained.has_results());
-    assert!(state.recent_files.is_empty());
+    assert!(state.platform.recent_files.is_empty());
     assert!(state.model.log_buffer.entries().any(|entry| {
         entry
             .message
@@ -674,10 +694,10 @@ fn browser_import_keeps_project_filename_as_save_suggestion_without_native_path(
     assert!(imported);
     assert!(state.model.workspace.content.project.path.is_none());
     assert_eq!(
-        state.browser_project_save_name.as_deref(),
+        state.platform.browser_project_save_name.as_deref(),
         Some("browser-import.rspiceproj")
     );
-    assert!(state.recent_files.is_empty());
+    assert!(state.platform.recent_files.is_empty());
 }
 
 #[test]
@@ -717,13 +737,13 @@ fn project_import_clears_stale_specialized_viewer_caches_without_results() {
 fn create_new_project_clears_stale_specialized_viewer_caches() {
     let mut state = AppState::default();
     seed_specialized_viewer_caches(&mut state);
-    state.browser_project_save_name = Some("previous-project.rspiceproj".to_owned());
+    state.platform.browser_project_save_name = Some("previous-project.rspiceproj".to_owned());
 
     create_new_project(&mut state);
 
     assert_specialized_viewer_caches_cleared(&state);
     assert!(
-        state.browser_project_save_name.is_none(),
+        state.platform.browser_project_save_name.is_none(),
         "a new browser project must not inherit the previous canonical suggestion"
     );
 }
@@ -1236,7 +1256,7 @@ fn browser_import_restores_project_simulation_results_and_skips_recents() {
     );
     assert_eq!(state.model.simulation.view.waveforms.len(), 1);
     assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
-    assert!(state.recent_files.is_empty());
+    assert!(state.platform.recent_files.is_empty());
 }
 
 #[test]
@@ -2118,6 +2138,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     ));
     assert!(names_renamed(
         state
+            .platform
             .recent_files
             .first()
             .map(|recent| recent.path.as_path())
@@ -2131,6 +2152,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     ));
     assert!(names_renamed(
         restored
+            .platform
             .recent_files
             .first()
             .map(|recent| recent.path.as_path())

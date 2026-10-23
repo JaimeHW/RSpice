@@ -1,4 +1,5 @@
-//! What a new session opens on, for the workbench fields the slots now own.
+//! What a new session opens on, for the workbench and application-state
+//! fields the slots now own.
 //!
 //! These fields were initialized by hand in the workbench's `Default`. The
 //! slots derive theirs, except `SimulateState`, so each value a hand-written
@@ -43,4 +44,26 @@ fn moved_workbench_fields_keep_the_defaults_the_workbench_gave_them() {
         ModelsState::default().models_page,
         crate::state::ModelsPage::Models
     );
+}
+
+/// The application state's constructor wrote these by hand before the slots
+/// owned them; a new state still starts from each value it chose.
+#[test]
+fn moved_application_fields_keep_the_values_a_new_state_gave_them() {
+    let state = AppState::default();
+    assert!(!state.shell.exit_requested);
+    assert!(state.platform.recent_files.is_empty());
+    assert_eq!(state.platform.browser_schematic_save_name, None);
+    assert_eq!(state.platform.browser_project_save_name, None);
+    assert_eq!(state.platform.native_project_binding_receipt, None);
+    assert_eq!(state.platform.browser_project_binding_receipt, None);
+    assert_eq!(state.cloud.license_key, None);
+    assert_eq!(state.cloud.license, None);
+    assert!(
+        state
+            .settings
+            .shortcut_library_publication_continuation
+            .is_none()
+    );
+    assert!(!state.models.pdk_settings_dialog.open);
 }

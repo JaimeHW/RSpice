@@ -55,7 +55,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.workbench.coarse_pointer,
         chrome::document_bar::is_visible(app),
         chrome::sheet_strip::is_visible(&app.state),
-        app.state.project_lifecycle.is_open(),
+        app.state.platform.project_lifecycle.is_open(),
         context_docks_enabled,
         &app.state.workbench,
     );
@@ -682,7 +682,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.workbench.coarse_pointer,
         chrome::document_bar::is_visible(app),
         chrome::sheet_strip::is_visible(&app.state),
-        app.state.project_lifecycle.is_open(),
+        app.state.platform.project_lifecycle.is_open(),
         context_docks_enabled,
         &app.state.workbench,
     );

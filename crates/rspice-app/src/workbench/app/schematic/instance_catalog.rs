@@ -268,6 +268,7 @@ fn primitive_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
                 .collect::<Vec<_>>();
             let primary = crate::properties::property_bridge::get_primary_property_name(entry.kind);
             let parameters = state
+                .design
                 .property_registry
                 .get(entry.kind)
                 .map(|sheet| {

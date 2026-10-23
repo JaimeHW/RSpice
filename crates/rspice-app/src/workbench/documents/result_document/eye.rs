@@ -12,7 +12,8 @@ use rspice_results_ui::eye_diagram::view;
 pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     let owner = state.active_specialized_viewer_cache_provenance();
     let timebase = owner.map(|owner| state.eye_timebase_for(owner));
-    let requested = view::inline_actions(ui, &mut state.analysis.eye_diagram_state, timebase);
+    let requested =
+        view::inline_actions(ui, &mut state.results.analysis.eye_diagram_state, timebase);
     if let Some(owner) = owner
         && let Some(timebase) = requested
     {
@@ -22,6 +23,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
 
 fn selected_source(state: &AppState) -> &str {
     state
+        .results
         .analysis
         .fft_state
         .selected_source
@@ -30,11 +32,15 @@ fn selected_source(state: &AppState) -> &str {
 }
 
 pub fn unavailable_hint(state: &AppState) -> Option<String> {
-    view::unavailable_hint(&state.analysis.eye_diagram_state, selected_source(state))
+    view::unavailable_hint(
+        &state.results.analysis.eye_diagram_state,
+        selected_source(state),
+    )
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let source = state
+        .results
         .analysis
         .fft_state
         .selected_source
@@ -47,7 +53,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .plot_view(ResultViewer::Eye, 0);
     let out = view::show(
         ui,
-        &state.analysis.eye_diagram_state,
+        &state.results.analysis.eye_diagram_state,
         source,
         plot_view,
         &mut state.results.results.session.eye_texture,
@@ -72,7 +78,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     view::right_panel(
         ui,
-        &state.analysis.eye_diagram_state,
+        &state.results.analysis.eye_diagram_state,
         selected_source(state),
     );
 }
@@ -94,7 +100,7 @@ mod tests {
                 vec![0.0, 1.0, 0.0, f64::from(trace) * 0.1],
             ));
         }
-        state.analysis.eye_diagram_state.load_data(data);
+        state.results.analysis.eye_diagram_state.load_data(data);
 
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);

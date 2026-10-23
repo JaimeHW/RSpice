@@ -220,7 +220,7 @@ fn replace_with_new_project(
             .migrate_active_plan_data(plan_id);
     }
     state.model.model_library_manager = model_library_manager;
-    state.browser_project_save_name = None;
+    state.platform.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
     Ok(model_restore_errors)
 }
@@ -302,7 +302,7 @@ fn project_save_dialog_default_name(state: &AppState) -> String {
         .path
         .as_deref()
         .and_then(file_name_string)
-        .or_else(|| state.browser_project_save_name.clone())
+        .or_else(|| state.platform.browser_project_save_name.clone())
         .unwrap_or_else(|| "untitled.rspiceproj".to_string())
 }
 
@@ -409,7 +409,7 @@ fn save_native_scope(
             let canonical =
                 crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
                     .unwrap_or_else(|| path.to_path_buf());
-            state.browser_project_save_name = None;
+            state.platform.browser_project_save_name = None;
             state.remember_recent_file(
                 crate::services::recent_files::RecentKind::Project,
                 &canonical,
@@ -684,7 +684,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         ) {
             Ok(()) => {
                 accept_browser_canonical_display_name(
-                    &mut state.browser_project_save_name,
+                    &mut state.platform.browser_project_save_name,
                     project_copy,
                     &display_name,
                 );
@@ -749,7 +749,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         ) {
             Ok(()) => {
                 accept_browser_canonical_display_name(
-                    &mut state.browser_project_save_name,
+                    &mut state.platform.browser_project_save_name,
                     project_copy,
                     &display_name,
                 );
@@ -995,7 +995,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> bool {
 /// clean, idle project closes at once. Either way the close leaves the
 /// application on the no-project landing, not in the project launcher.
 pub(crate) fn request_close_project(state: &mut AppState) -> bool {
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         lifecycle_error(
             state,
             ProjectLifecycleError::NoProject,
@@ -1038,12 +1038,13 @@ pub(crate) fn open_session_project(state: &mut AppState) {
 /// storage answers, so there is nothing settled to close here.
 #[cfg(not(target_arch = "wasm32"))]
 fn apply_startup_project_choice(state: &mut AppState) {
-    if state.model.preferences.reopen_last_project() || !state.project_lifecycle.is_open() {
+    if state.model.preferences.reopen_last_project() || !state.platform.project_lifecycle.is_open()
+    {
         return;
     }
     if closing_loses_nothing(state) {
         close_project_discard(state);
-    } else if state.project_lifecycle.accepted().is_some() {
+    } else if state.platform.project_lifecycle.accepted().is_some() {
         state.record(
             LogSeverity::Info,
             LogSource::Studio,
@@ -1090,7 +1091,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
         ),
     };
     state.model.model_library_manager = model_library_manager;
-    state.browser_project_save_name = None;
+    state.platform.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     emit_session_model_restore_errors(state, "project close", model_restore_errors);
     let destination = state.project.take_project_close_destination();
@@ -1239,18 +1240,18 @@ fn apply_loaded_project_authorized(
     match origin {
         #[cfg(not(target_arch = "wasm32"))]
         ProjectLoadOrigin::PersistentPath(_) => {
-            state.browser_project_save_name = None;
+            state.platform.browser_project_save_name = None;
         }
         ProjectLoadOrigin::LiveSession(_) => {
             // The host's on-disk location is meaningless on this machine and
             // must never become a save target here.
             project.file.workspace.project.path = None;
-            state.browser_project_save_name = None;
+            state.platform.browser_project_save_name = None;
         }
         #[cfg(any(test, target_arch = "wasm32"))]
         ProjectLoadOrigin::BrowserImport(name) | ProjectLoadOrigin::BrowserCanonical(name) => {
             project.file.workspace.project.path = None;
-            state.browser_project_save_name = Some(name.to_string());
+            state.platform.browser_project_save_name = Some(name.to_string());
         }
     }
     let mut accepted_baseline = project.clone();

@@ -71,8 +71,8 @@ fn distribution() -> (AppState, String) {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::ResultDataset(dataset));
-    state.analysis.histogram_state.selected = Some("gain".to_owned());
-    state.analysis.histogram_state.bin_count = 5;
+    state.results.analysis.histogram_state.selected = Some("gain".to_owned());
+    state.results.analysis.histogram_state.bin_count = 5;
     state.results.results.session.viewer = ResultViewer::Hist;
     let key = format!(
         "project:{}:result-dataset:{}",
@@ -116,7 +116,7 @@ fn setup(
 fn histogram_publication_renders_every_mode_after_worker_transfer() {
     let (mut state, key) = distribution();
     for mode in HistogramDisplayMode::ALL {
-        state.analysis.histogram_state.mode = mode;
+        state.results.analysis.histogram_state.mode = mode;
         state
             .results
             .results

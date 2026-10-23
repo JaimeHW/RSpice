@@ -47,7 +47,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
 }
 
 pub(crate) fn can_open(state: &AppState) -> bool {
-    state.project_lifecycle.is_open()
+    state.platform.project_lifecycle.is_open()
 }
 
 pub(crate) fn can_save_document(state: &AppState) -> bool {
@@ -1260,13 +1260,13 @@ fn selected_page_id(state: &AppState, document: &ReportDocument) -> Option<Repor
 }
 
 fn report_mutation_allowed(state: &AppState) -> bool {
-    state.project_lifecycle.is_open()
+    state.platform.project_lifecycle.is_open()
         && !state.model.safe_mode.project_read_only()
         && !crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
 }
 
 fn report_mutation_block_reason(state: &AppState) -> &'static str {
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         "Open a project before changing its report document."
     } else if state.model.safe_mode.project_read_only() {
         "Report changes are unavailable because the active project is read-only."

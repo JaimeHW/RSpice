@@ -1161,7 +1161,7 @@ fn editor_commit_rejects_generated_artifact_mutation() {
     );
     assert!(!state.model.workspace.content.netlist_source_dirty);
     assert_eq!(state.code.netlist.revision, 4);
-    assert!(state.manual_run.edited_lines.is_empty());
+    assert!(state.runs.manual_run.edited_lines.is_empty());
 }
 
 #[test]
@@ -1195,5 +1195,5 @@ fn editor_commit_updates_only_an_existing_owned_source() {
     assert!(state.model.workspace.content.netlist_source_dirty);
     assert_eq!(state.code.netlist.revision, 10);
     assert_eq!(state.code.netlist.last_edit_time, 7.25);
-    assert!(state.manual_run.edited_lines.contains(&1));
+    assert!(state.runs.manual_run.edited_lines.contains(&1));
 }

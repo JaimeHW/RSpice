@@ -114,7 +114,7 @@ impl RSpiceApp {
                     crate::workbench::workflows::project_workflow::save_all_for_continuation(
                         &mut self.state,
                     )
-                } else if self.state.project_lifecycle.is_open() {
+                } else if self.state.platform.project_lifecycle.is_open() {
                     crate::workbench::workflows::project_workflow::save_active_for_continuation(
                         &mut self.state,
                     )
@@ -328,7 +328,7 @@ impl RSpiceApp {
             }
             ConfirmationAction::Exit => {
                 // Signal exit request - this will be handled by the frame update
-                self.state.exit_requested = true;
+                self.state.shell.exit_requested = true;
             }
         }
     }
@@ -360,7 +360,7 @@ impl RSpiceApp {
         use crate::services::recent_files::RecentKind;
 
         if !path.exists() {
-            self.state.recent_files.retain(|r| r.path != path);
+            self.state.platform.recent_files.retain(|r| r.path != path);
             self.state.record(
                 LogSeverity::Error,
                 LogSource::Studio,
@@ -410,7 +410,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn action_file_save(&mut self) -> bool {
-        if self.state.project_lifecycle.is_open() {
+        if self.state.platform.project_lifecycle.is_open() {
             return crate::workbench::workflows::project_workflow::save_project(&mut self.state);
         }
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
@@ -708,6 +708,7 @@ mod tests {
             &target_project,
         );
         let project_recent = project_source
+            .platform
             .recent_files
             .iter()
             .find(|recent| recent.path == target_project)
@@ -787,6 +788,7 @@ mod tests {
             &target_schematic,
         );
         let schematic_recent = schematic_source
+            .platform
             .recent_files
             .iter()
             .find(|recent| recent.path == target_schematic)
@@ -889,7 +891,7 @@ mod tests {
         let project_id = state.model.workspace.content.project.id();
         state.model.simulation.execution.is_running = true;
         assert!(!crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
-        assert!(state.project_lifecycle.is_open());
+        assert!(state.platform.project_lifecycle.is_open());
         assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(matches!(
             state.workbench.project_review_dialog.request.as_ref(),
@@ -899,7 +901,7 @@ mod tests {
         // Cancel closes only the review; every project-owned draft remains.
         state.workbench.project_review_dialog.close();
         assert!(state.workbench.project_review_dialog.request.is_none());
-        assert!(state.project_lifecycle.is_open());
+        assert!(state.platform.project_lifecycle.is_open());
         assert_eq!(
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
@@ -930,7 +932,7 @@ mod tests {
         assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
 
         assert!(state.workbench.project_review_dialog.request.is_none());
-        assert!(!state.project_lifecycle.is_open());
+        assert!(!state.platform.project_lifecycle.is_open());
         assert!(!state.project.project_launcher_open);
         assert_eq!(
             state.workbench.workspace,
@@ -971,7 +973,7 @@ mod tests {
 
         app.begin_close_project_after_save();
 
-        assert!(!app.state.project_lifecycle.is_open());
+        assert!(!app.state.platform.project_lifecycle.is_open());
         // Saving first changes nothing about where the close lands.
         assert!(!app.state.project.project_launcher_open);
         assert_eq!(
@@ -1040,7 +1042,7 @@ mod tests {
 
         app.begin_close_project_after_save();
 
-        assert!(app.state.project_lifecycle.is_open());
+        assert!(app.state.platform.project_lifecycle.is_open());
         assert_eq!(app.state.model.schematic.document().components.len(), 1);
         assert!(matches!(
             app.state.workbench.project_review_dialog.request.as_ref(),

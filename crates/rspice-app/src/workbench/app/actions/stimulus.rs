@@ -490,12 +490,12 @@ pub(crate) fn contract_findings(
     record: &StimulusDefinition,
 ) -> Vec<crate::state::SourceContractFinding> {
     let component = record.transient_component();
-    let Some(sheet) = state.property_registry.get(component.kind) else {
+    let Some(sheet) = state.design.property_registry.get(component.kind) else {
         return Vec::new();
     };
     let values = crate::properties::property_bridge::collect_properties_from_component(
         &component,
-        &state.property_registry,
+        &state.design.property_registry,
     );
     crate::properties::property_bridge::component_source_contract(&component, &values, sheet)
 }

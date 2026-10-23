@@ -144,7 +144,7 @@ enum ReviewAction {
 
 pub(crate) fn open_design_review_comments(state: &mut AppState) {
     // The command is greyed without an open project and a schematic editor.
-    if !state.project_lifecycle.is_open()
+    if !state.platform.project_lifecycle.is_open()
         || !matches!(
             state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
@@ -277,7 +277,7 @@ impl RSpiceApp {
     fn review_actor(&self) -> String {
         crate::workbench::user_identity::user_display_name(
             self.cloud_account.snapshot(),
-            self.state.license.as_ref(),
+            self.state.cloud.license.as_ref(),
         )
     }
 
@@ -1350,7 +1350,7 @@ mod tests {
             crate::services::license::parse_and_verify(crate::services::license::SAMPLE_KEY)
                 .expect("signed sample license");
         let holder = license.licensed_to.clone();
-        app.state.license = Some(license);
+        app.state.cloud.license = Some(license);
         app.state
             .model
             .schematic

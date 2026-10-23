@@ -1005,7 +1005,7 @@ pub(crate) fn open_netlist_dependency_from_root(
     state.model.simulation.source.netlist_content = source;
     state.code.netlist.requested_line = None;
     state.code.netlist.cursor_line = 0;
-    state.manual_run.edited_lines.clear();
+    state.runs.manual_run.edited_lines.clear();
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
@@ -2331,8 +2331,8 @@ pub fn prepare(state: &mut AppState) {
         return;
     }
     state.code.netlist.seen_data_version = data_version;
-    if let Some(baseline) = state.manual_run.last_run_buffer.as_deref() {
-        state.manual_run.edited_lines = baseline::changed_lines_against_baseline(
+    if let Some(baseline) = state.runs.manual_run.last_run_buffer.as_deref() {
+        state.runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
             &state.model.simulation.source.netlist_content,
             baseline,
         );
@@ -2340,10 +2340,10 @@ pub fn prepare(state: &mut AppState) {
 }
 
 pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
-    let Some(baseline) = state.manual_run.last_run_buffer.as_deref() else {
+    let Some(baseline) = state.runs.manual_run.last_run_buffer.as_deref() else {
         return;
     };
-    state.manual_run.edited_lines = baseline::changed_lines_against_baseline(
+    state.runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
         &state.model.simulation.source.netlist_content,
         baseline,
     );

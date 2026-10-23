@@ -433,7 +433,7 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
             if state.settings.shortcut_editor.persistence_pending {
                 #[cfg(target_arch = "wasm32")]
                 if state.cancel_pending_shortcut_library_publication() {
-                    state.shortcut_library_publication_continuation = None;
+                    state.settings.shortcut_library_publication_continuation = None;
                     state.settings.shortcut_editor.close_and_discard();
                 } else {
                     state.settings.shortcut_editor.error_summary = Some(
@@ -1238,7 +1238,11 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
             Some(format!("Shortcut profile was not saved: {error}"));
         return;
     }
-    if state.shortcut_library_publication_continuation.is_some() {
+    if state
+        .settings
+        .shortcut_library_publication_continuation
+        .is_some()
+    {
         state.complete_shortcut_library_publication(
             super::ShortcutLibraryPublicationContinuation::Editor,
             Err("another shortcut-library publication is awaiting acknowledgement".to_owned()),
@@ -1253,7 +1257,7 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
             ),
         Ok(super::ShortcutLibraryPublication::Pending) => {
             state.settings.shortcut_editor.persistence_pending = true;
-            state.shortcut_library_publication_continuation =
+            state.settings.shortcut_library_publication_continuation =
                 Some(super::ShortcutLibraryPublicationContinuation::Editor);
         }
         Err(error) => state.complete_shortcut_library_publication(

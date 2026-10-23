@@ -131,8 +131,8 @@ fn captured_results_run(state: &AppState) -> Option<&SimulationRun> {
 fn capture_results_quick_view_presentation(
     state: &AppState,
 ) -> Result<ResultsQuickViewPresentation, HardcopySourceError> {
-    let fft = &state.analysis.fft_state;
-    let histogram = &state.analysis.histogram_state;
+    let fft = &state.results.analysis.fft_state;
+    let histogram = &state.results.analysis.histogram_state;
     let view = state
         .results
         .results
@@ -885,7 +885,7 @@ fn quick_result_availability(
             analysis.family_metadata.as_ref(),
             Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. })
                 if rspice_results_ui::histogram::state::measurement_index(
-                    state.analysis.histogram_state.selected.as_deref(), 0,
+                    state.results.analysis.histogram_state.selected.as_deref(), 0,
                     &variables.iter().map(|variable| variable.name.as_str()).collect::<Vec<_>>(),
                 ).and_then(|index| variables.get(index))
                     .is_some_and(|variable| !variable.samples.is_empty())

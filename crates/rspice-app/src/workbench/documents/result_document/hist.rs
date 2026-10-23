@@ -283,7 +283,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     let analysis = dataset
         .zip(state.model.simulation.active_analysis())
         .map(|(dataset, analysis)| super::AnalysisPresentationKey::new(dataset, analysis));
-    let settings = &state.analysis.histogram_state;
+    let settings = &state.results.analysis.histogram_state;
     let bin_count = settings.bin_count.clamp(1, 1000);
     let range = settings
         .custom_range
@@ -448,7 +448,7 @@ pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<Histogram
 fn selected_histogram_name(state: &AppState) -> Option<String> {
     let names = histogram_names(state);
     let index = rspice_results_ui::histogram::state::measurement_index(
-        state.analysis.histogram_state.selected.as_deref(),
+        state.results.analysis.histogram_state.selected.as_deref(),
         0,
         &names,
     )?;
@@ -461,7 +461,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .into_iter()
         .map(str::to_owned)
         .collect();
-    if view::controls(ui, &mut state.analysis.histogram_state, &names) {
+    if view::controls(ui, &mut state.results.analysis.histogram_state, &names) {
         state
             .results
             .results
@@ -541,7 +541,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let current_range = active_histogram(state).map(|histogram| histogram.range());
-    if view::range_controls(ui, &mut state.analysis.histogram_state, current_range) {
+    if view::range_controls(
+        ui,
+        &mut state.results.analysis.histogram_state,
+        current_range,
+    ) {
         state
             .results
             .results

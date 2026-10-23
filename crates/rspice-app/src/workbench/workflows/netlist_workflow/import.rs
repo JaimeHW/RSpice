@@ -102,7 +102,7 @@ fn install_imported_netlist(
         return Err(ImportFailure::Failed(format!("{display_name} is empty")));
     }
 
-    if !state.project_lifecycle.is_open() {
+    if !state.platform.project_lifecycle.is_open() {
         return Err(ImportFailure::Refused(
             "SPICE deck import needs an open project.",
         ));
@@ -143,7 +143,7 @@ fn install_imported_netlist(
     candidate.model.design_execution_epoch = candidate.model.design_execution_epoch.wrapping_add(1);
     candidate.code.netlist = Default::default();
     *candidate.model.netlist_artifacts = Default::default();
-    *candidate.manual_run = Default::default();
+    *candidate.runs.manual_run = Default::default();
     candidate.code.netlist_open_documents.clear();
     let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();
@@ -208,7 +208,7 @@ pub(super) fn netlist_import_start_block_reason(
     if state.model.simulation.execution.has_active_execution() {
         return Some("a simulation execution still owns the project");
     }
-    if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.is_open() {
+    if mode == NetlistImportMode::ImportIntoProject && !state.platform.project_lifecycle.is_open() {
         return Some("no project is open");
     }
     if mode == NetlistImportMode::ImportIntoProject && state.model.safe_mode.project_read_only() {

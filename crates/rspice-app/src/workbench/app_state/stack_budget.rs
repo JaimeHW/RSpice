@@ -61,8 +61,8 @@ fn held<T>(_field: fn(&crate::workbench::app_state::AppState) -> &T) -> usize {
     size_of::<T>()
 }
 
-/// The inline fields only. The boxed sub-states (the feature slots,
-/// `workbench`, `project_lifecycle`) contribute pointer size by construction
+/// The inline fields only. The boxed sub-states (the feature slots and
+/// `workbench`) contribute pointer size by construction
 /// and can never explain inline growth, so listing them would only add the
 /// upward module references this layer is retiring.
 fn field_sizes() -> Vec<(&'static str, usize)> {
@@ -70,37 +70,10 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
     vec![
         ("model", size_of::<a::Model>()),
         ("shell", held(|state| &state.shell)),
-        (
-            "tabbed_property_dialog",
-            size_of::<crate::properties::TabbedPropertyDialogState>(),
-        ),
-        (
-            "property_registry",
-            size_of::<crate::properties::PropertyEditorSchema>(),
-        ),
-        (
-            "calculator_panel",
-            size_of::<a::session::calculator::CalculatorPanel>(),
-        ),
-        (
-            "pdk_settings_dialog",
-            size_of::<a::session::pdk_settings::PdkSettingsDialogState>(),
-        ),
-        (
-            "model_browser_state",
-            size_of::<crate::properties::model_browser::ModelBrowserState>(),
-        ),
-        (
-            "analysis",
-            size_of::<a::viewer_capabilities::AnalysisWorkspaceState>(),
-        ),
+        ("problems_view", held(|state| &state.problems_view)),
         (
             "shortcut_resolver",
             size_of::<a::session::shortcuts::ShortcutResolverState>(),
-        ),
-        (
-            "shortcut_library_persistence",
-            size_of::<a::session::shortcut_library::ShortcutLibraryPersistenceRuntime>(),
         ),
     ]
 }

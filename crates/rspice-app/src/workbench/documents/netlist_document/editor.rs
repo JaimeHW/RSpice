@@ -131,7 +131,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
 
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
     let diagnostics = Arc::clone(&state.code.netlist.diagnostics);
-    let edited_lines = state.manual_run.edited_lines.clone();
+    let edited_lines = state.runs.manual_run.edited_lines.clone();
     let cross_probe_line = (state.code.netlist.active_document
         == super::ActiveNetlistDocument::Generated)
         .then_some(state.code.netlist.cross_probe_line)
@@ -433,7 +433,7 @@ fn commit_owned_source_edit(
     let netlist = &mut state.code.netlist;
     netlist.last_edit_time = now;
     if netlist.active_dependency_identity.is_none() {
-        state.manual_run.edited_lines.insert(cursor_line);
+        state.runs.manual_run.edited_lines.insert(cursor_line);
     }
     true
 }

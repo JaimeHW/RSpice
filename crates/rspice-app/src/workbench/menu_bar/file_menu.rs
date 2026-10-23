@@ -67,7 +67,7 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::Open => {
             // Inside a project the file is imported as a new cell view and
             // nothing open is replaced, so there is nothing to save first.
-            if !state.project_lifecycle.is_open()
+            if !state.platform.project_lifecycle.is_open()
                 && require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen)
             {
                 return;
@@ -78,7 +78,7 @@ pub(crate) fn dispatch_file_menu_action(
             );
         }
         FileMenuAction::Save => {
-            if state.project_lifecycle.is_open() {
+            if state.platform.project_lifecycle.is_open() {
                 let _ = crate::workbench::workflows::project_workflow::save_project(state);
             } else {
                 let _ = crate::workbench::workflows::file_actions::action_file_save_with_io(
@@ -149,7 +149,7 @@ fn request_exit(state: &mut AppState) {
             .confirmation_dialog
             .show(ConfirmationAction::Exit);
     } else if !require_save_confirmation_if_dirty(state, ConfirmationAction::Exit) {
-        state.exit_requested = true;
+        state.shell.exit_requested = true;
     }
 }
 

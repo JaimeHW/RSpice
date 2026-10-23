@@ -18,7 +18,10 @@ impl RunEventSink for AppState {
         match event {
             RunEvent::TransientResultReplaced => self.clear_transient_specialized_viewer_data(),
             RunEvent::FftSourceChosen { source } => {
-                self.analysis.fft_state.set_selected_source(Some(source));
+                self.results
+                    .analysis
+                    .fft_state
+                    .set_selected_source(Some(source));
             }
             RunEvent::EyeFolded {
                 owner,
@@ -29,7 +32,8 @@ impl RunEventSink for AppState {
                 // The provenance is recorded either way: when nothing could be
                 // folded it is the only thing the sheet can tell the reader
                 // about why.
-                self.analysis
+                self.results
+                    .analysis
                     .eye_diagram_state
                     .load_data_with_timebase(eye.unwrap_or_default(), Some(timebase));
                 if folded && let Some(owner) = owner {
@@ -37,19 +41,22 @@ impl RunEventSink for AppState {
                 }
             }
             RunEvent::EyeTimebaseChanged => {
-                self.analysis
+                self.results
+                    .analysis
                     .eye_diagram_state
                     .load_data_with_timebase(EyeData::default(), None);
                 self.clear_specialized_viewer_cache_authority(ActiveViewer::EyeDiagram);
             }
             RunEvent::EyeOutdated => {
-                self.analysis
+                self.results
+                    .analysis
                     .eye_diagram_state
                     .load_data(EyeData::default());
             }
             RunEvent::FftInputPrepared { owner, input } => match input {
                 Ok(prepared) => {
                     if self
+                        .results
                         .analysis
                         .fft_state
                         .load_prepared_input(prepared)
@@ -63,15 +70,15 @@ impl RunEventSink for AppState {
                     }
                 }
                 Err(error) => {
-                    self.analysis.fft_state.record_input_error(error);
+                    self.results.analysis.fft_state.record_input_error(error);
                     self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
                 }
             },
             RunEvent::FftWorkerLost => {
-                self.analysis.fft_state.record_worker_disconnect();
+                self.results.analysis.fft_state.record_worker_disconnect();
                 self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
             }
-            RunEvent::FftOutdated => self.analysis.fft_state.clear(),
+            RunEvent::FftOutdated => self.results.analysis.fft_state.clear(),
             RunEvent::FftEmptied => {
                 self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
             }
@@ -86,17 +93,20 @@ impl RunEventSink for AppState {
                 self.clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
                 self.clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
                 self.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
-                self.analysis.nyquist_state.clear();
-                self.analysis.smith_chart_state.clear_traces();
+                self.results.analysis.nyquist_state.clear();
+                self.results.analysis.smith_chart_state.clear_traces();
                 if let Some(locus) = loop_gain {
-                    self.analysis.nyquist_state.load_data(locus);
+                    self.results.analysis.nyquist_state.load_data(locus);
                 }
-                let loaded_nyquist = !self.analysis.nyquist_state.is_empty();
+                let loaded_nyquist = !self.results.analysis.nyquist_state.is_empty();
                 let has_bode = bode.response_count() > 0;
                 if has_bode {
-                    self.analysis.bode_plot_state.load_data(bode);
+                    self.results.analysis.bode_plot_state.load_data(bode);
                 } else {
-                    self.analysis.bode_plot_state.load_data(BodeData::new());
+                    self.results
+                        .analysis
+                        .bode_plot_state
+                        .load_data(BodeData::new());
                 }
                 if let Some(owner) = owner {
                     if has_bode {

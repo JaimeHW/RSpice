@@ -80,7 +80,7 @@ impl CheckAndSaveValidationReport {
         let mut findings = BTreeMap::<String, CheckAndSaveFinding>::new();
         let mut dependencies = BTreeMap::<String, ContentDigest>::new();
 
-        if !state.project_lifecycle.is_open() {
+        if !state.platform.project_lifecycle.is_open() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -803,7 +803,7 @@ fn component_property_findings(
     if component.kind != crate::state::ComponentType::CellInstance {
         return validate_component_properties(
             component,
-            state.property_registry.get(component.kind),
+            state.design.property_registry.get(component.kind),
         );
     }
     let sheet = match authoritative_component_property_sheet(state, component) {
@@ -1256,6 +1256,7 @@ mod tests {
         let state = crate::workbench::examples::hierarchy_reference::build().state;
         assert!(
             state
+                .design
                 .property_registry
                 .get(ComponentType::CellInstance)
                 .is_none()

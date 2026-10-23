@@ -1423,7 +1423,7 @@ fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs()
         .expect("imported canonical source must satisfy project persistence invariants");
     assert!(state.model.simulation.retained.has_results());
     assert_eq!(state.model.simulation.retained.runs.len(), 1);
-    assert!(state.recent_files.is_empty());
+    assert!(state.platform.recent_files.is_empty());
 }
 
 #[test]

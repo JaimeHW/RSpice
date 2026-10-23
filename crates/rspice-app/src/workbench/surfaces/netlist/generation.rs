@@ -63,7 +63,7 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
             ActiveNetlistDocument::GeneratedDiff => {
                 Some(app.state.code.netlist.generated_diff_source.clone())
             }
-            ActiveNetlistDocument::RunSnapshot => app.state.manual_run.last_run_buffer.clone(),
+            ActiveNetlistDocument::RunSnapshot => app.state.runs.manual_run.last_run_buffer.clone(),
         });
     if let Some(projected) = projected
         && app.state.model.simulation.source.netlist_content != projected

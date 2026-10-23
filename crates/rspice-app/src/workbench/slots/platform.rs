@@ -21,6 +21,29 @@ pub(crate) struct PlatformState {
     /// The scanned native checkpoint catalog the Project Launcher's recovery
     /// page lists. Runtime state, never project or user preferences.
     pub(crate) recovery_catalog: crate::workbench::lifecycle::recovery::RecoveryCatalog,
+    /// Transactional document registry, accepted project baseline, and
+    /// canonical persistence identity. Runtime-only apart from whether a
+    /// project is open; session recovery keeps the working set separately and
+    /// reconstructs this boundary at startup.
+    pub(crate) project_lifecycle:
+        Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
+    /// Recently opened/saved schematic and project files, most recent first
+    /// (persisted across sessions). The projects are the start page's recent
+    /// list; the schematics are what crash recovery scans.
+    pub(crate) recent_files: Vec<crate::services::recent_files::RecentFile>,
+    /// Browser-only suggested filename for the next schematic download.
+    pub(crate) browser_schematic_save_name: Option<String>,
+    /// Browser-only suggested filename for the next project download.
+    pub(crate) browser_project_save_name: Option<String>,
+    /// Exact native canonical-file authority saved with the working session.
+    /// A restored pathname alone never grants ordinary Save authority.
+    pub(crate) native_project_binding_receipt:
+        Option<crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt>,
+    /// Exact browser canonical-binding authority saved with the working-set
+    /// session.  The binding UUID is opaque and intentionally independent of
+    /// the logical project UUID. Runtime file handles are never serialized.
+    pub(crate) browser_project_binding_receipt:
+        Option<crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt>,
 }
 
 impl Default for PlatformState {
@@ -33,6 +56,12 @@ impl Default for PlatformState {
             autosave_failing: false,
             session_kept: Default::default(),
             recovery_catalog: Default::default(),
+            project_lifecycle: Box::default(),
+            recent_files: Vec::new(),
+            browser_schematic_save_name: None,
+            browser_project_save_name: None,
+            native_project_binding_receipt: None,
+            browser_project_binding_receipt: None,
         }
     }
 }

@@ -633,6 +633,7 @@ fn a_laptop_stage_shows_every_field_without_scrolling() {
         let stage = resolve(&mut app.state).expect("stage");
         let sheet = app
             .state
+            .design
             .property_registry
             .get(stage.working.component_type())
             .expect("sheet");

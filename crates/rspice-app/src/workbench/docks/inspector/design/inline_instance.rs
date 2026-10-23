@@ -120,7 +120,7 @@ fn source_contract_rejection(
     field: &InlineEditField,
     typed_value: Option<&PropertyValue>,
 ) -> Option<String> {
-    let sheet = state.property_registry.get(component.kind)?;
+    let sheet = state.design.property_registry.get(component.kind)?;
     if matches!(field, InlineEditField::Instance) {
         // The reference designator is not a waveform field, and re-reading the
         // contract on a rename would refuse a rename for a value the rename
@@ -129,7 +129,7 @@ fn source_contract_rejection(
     }
     let mut values = crate::properties::property_bridge::collect_properties_from_component(
         component,
-        &state.property_registry,
+        &state.design.property_registry,
     );
     // The edited field is presented as the *typed* value it commits as, which
     // is what the modal editor's own commit hands the gate. Without this the

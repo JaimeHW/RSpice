@@ -176,7 +176,7 @@ pub(crate) fn authoritative_component_property_sheet(
     if component.kind == ComponentType::CellInstance {
         authoritative_cell_instance_sheet(state, component)
     } else {
-        Ok(state.property_registry.get(component.kind).cloned())
+        Ok(state.design.property_registry.get(component.kind).cloned())
     }
 }
 
@@ -471,7 +471,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
                 if component.kind == ComponentType::CellInstance {
                     authoritative_cell_instance_sheet(state, component).is_ok()
                 } else {
-                    state.property_registry.get(component.kind).is_some()
+                    state.design.property_registry.get(component.kind).is_some()
                 }
             });
     }
@@ -565,7 +565,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
 /// component's registry sheet and current values. Refused on read-only
 /// views — the editor is an edit path.
 pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
-    if state.tabbed_property_dialog.open
+    if state.design.tabbed_property_dialog.open
         || state.design.object_properties.open
         || state.design.rename_selection.open
     {
@@ -592,38 +592,43 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
     if component_type == ComponentType::CellInstance {
         match authoritative_cell_instance_sheet(state, &component) {
             Ok(Some(sheet)) => {
-                if let Err(error) = state.property_registry.install_cell_instance_sheet(sheet) {
-                    state.property_registry.clear_cell_instance_sheet();
+                if let Err(error) = state
+                    .design
+                    .property_registry
+                    .install_cell_instance_sheet(sheet)
+                {
+                    state.design.property_registry.clear_cell_instance_sheet();
                     log::warn!("Cannot open model-bound instance properties: {error}");
                     return;
                 }
             }
             Ok(None) => {
                 if let Err(error) = state
+                    .design
                     .property_registry
                     .install_cell_instance_sheet(cell_instance_identity_sheet())
                 {
-                    state.property_registry.clear_cell_instance_sheet();
+                    state.design.property_registry.clear_cell_instance_sheet();
                     log::warn!("Cannot open cell-instance identity properties: {error}");
                     return;
                 }
             }
             Err(error) => {
-                state.property_registry.clear_cell_instance_sheet();
+                state.design.property_registry.clear_cell_instance_sheet();
                 log::warn!("Cannot load model-bound instance properties: {error}");
                 return;
             }
         }
     } else {
-        state.property_registry.clear_cell_instance_sheet();
+        state.design.property_registry.clear_cell_instance_sheet();
     }
     let properties = crate::properties::property_bridge::collect_properties_from_component(
         &component,
-        &state.property_registry,
+        &state.design.property_registry,
     );
     let component_name = component.name.clone();
-    if let Some(sheet) = state.property_registry.get(component_type) {
-        state.tabbed_property_dialog.open_for_component(
+    if let Some(sheet) = state.design.property_registry.get(component_type) {
+        state.design.tabbed_property_dialog.open_for_component(
             component_id,
             component_name,
             component_type,
@@ -692,7 +697,7 @@ pub(in crate::workbench) fn stimulus_preview_timing(state: &AppState) -> Preview
 /// buses, taps, and wire-resolved named nets use the topology-aware generic
 /// transaction specified by the workbench mockup.
 pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
-    if state.tabbed_property_dialog.open
+    if state.design.tabbed_property_dialog.open
         || state.design.object_properties.open
         || state.design.rename_selection.open
     {
@@ -732,7 +737,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         .single_component()
     {
         open_property_editor(state, component_id);
-        return state.tabbed_property_dialog.open;
+        return state.design.tabbed_property_dialog.open;
     }
     let source = crate::workbench::app::schematic_editor_request_source(state);
     if let Some(label_id) = state
@@ -1069,14 +1074,14 @@ mod tests {
             state.model.schematic.document_mut_for_test().components[1].params =
                 format!("w={width} l=180n");
             for owner in [None, Some(1), Some(2)] {
-                state.tabbed_property_dialog.close();
-                state.property_registry.clear_cell_instance_sheet();
+                state.design.tabbed_property_dialog.close();
+                state.design.property_registry.clear_cell_instance_sheet();
                 if let Some(owner) = owner {
                     open_property_editor(&mut state, owner);
-                    assert!(state.tabbed_property_dialog.open);
+                    assert!(state.design.tabbed_property_dialog.open);
                 }
                 let original = state.model.schematic.document().components.clone();
-                let draft = state.tabbed_property_dialog.draft.values.clone();
+                let draft = state.design.tabbed_property_dialog.draft.values.clone();
                 let report = CheckAndSaveValidationReport::validate(&state).unwrap();
                 let errors = report
                     .blockers()
@@ -1091,7 +1096,7 @@ mod tests {
                     assert!(errors.is_empty(), "owner {owner:?}: {errors:?}");
                 }
                 assert_eq!(state.model.schematic.document().components, original);
-                assert_eq!(state.tabbed_property_dialog.draft.values, draft);
+                assert_eq!(state.design.tabbed_property_dialog.draft.values, draft);
             }
         }
 
@@ -1298,10 +1303,10 @@ mod tests {
 
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
-        assert!(state.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.open);
         assert!(!state.design.object_properties.open);
         assert_eq!(
-            state.tabbed_property_dialog.draft.component_type,
+            state.design.tabbed_property_dialog.draft.component_type,
             Some(ComponentType::Port)
         );
     }
@@ -1392,7 +1397,7 @@ mod tests {
             Some(crate::workbench::state::Drawer::Inspector)
         );
         assert!(!state.design.object_properties.open);
-        assert!(!state.tabbed_property_dialog.open);
+        assert!(!state.design.tabbed_property_dialog.open);
     }
 
     #[test]
@@ -1504,12 +1509,13 @@ mod tests {
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 44);
 
-        assert!(state.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.open);
         assert_eq!(
-            state.tabbed_property_dialog.draft.component_type,
+            state.design.tabbed_property_dialog.draft.component_type,
             Some(ComponentType::CellInstance)
         );
         let sheet = state
+            .design
             .property_registry
             .get(ComponentType::CellInstance)
             .expect("transaction-scoped cell schema");
@@ -1522,14 +1528,14 @@ mod tests {
             Some(PropertyType::Number)
         );
         assert_eq!(
-            state.tabbed_property_dialog.draft.values.get("w"),
+            state.design.tabbed_property_dialog.draft.values.get("w"),
             Some(&PropertyValue::Number {
                 value: 2e-6,
                 unit: Some("m".to_owned()),
             })
         );
         assert!(matches!(
-            state.tabbed_property_dialog.draft.values.get("name"),
+            state.design.tabbed_property_dialog.draft.values.get("name"),
             Some(PropertyValue::String(name)) if name == "M44"
         ));
     }
@@ -1570,9 +1576,10 @@ mod tests {
 
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 9);
-        assert!(state.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.open);
 
         let sheet = state
+            .design
             .property_registry
             .get(ComponentType::CellInstance)
             .expect("declared cell contract");
@@ -1624,12 +1631,12 @@ mod tests {
             open_property_editor(&mut state, index as u64 + 1);
 
             assert!(
-                state.tabbed_property_dialog.open,
+                state.design.tabbed_property_dialog.open,
                 "{} did not open a component editor",
                 kind.display_name()
             );
             assert_eq!(
-                state.tabbed_property_dialog.draft.component_type,
+                state.design.tabbed_property_dialog.draft.component_type,
                 Some(kind)
             );
         }
@@ -1658,10 +1665,11 @@ mod tests {
             .selection
             .select_only_component(1);
         open_property_editor(&mut state, 1);
-        assert!(state.tabbed_property_dialog.open);
-        state.tabbed_property_dialog.close();
+        assert!(state.design.tabbed_property_dialog.open);
+        state.design.tabbed_property_dialog.close();
         assert!(
             state
+                .design
                 .property_registry
                 .get(ComponentType::CellInstance)
                 .is_some()
@@ -1689,14 +1697,15 @@ mod tests {
             .select_only_component(2);
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 2);
-        assert!(state.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.open);
         let legacy_sheet = state
+            .design
             .property_registry
             .get(ComponentType::CellInstance)
             .expect("legacy identity form");
         assert!(legacy_sheet.get("name").is_some());
         assert!(legacy_sheet.get("w").is_none());
-        state.tabbed_property_dialog.close();
+        state.design.tabbed_property_dialog.close();
 
         let mut review = model_bound_definition();
         review.identity.cell = "review_only".to_owned();
@@ -1723,8 +1732,9 @@ mod tests {
             .select_only_component(3);
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 3);
-        assert!(state.tabbed_property_dialog.open);
+        assert!(state.design.tabbed_property_dialog.open);
         let review_sheet = state
+            .design
             .property_registry
             .get(ComponentType::CellInstance)
             .expect("review identity form");

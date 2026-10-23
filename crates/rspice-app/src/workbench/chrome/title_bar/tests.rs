@@ -1304,7 +1304,7 @@ fn the_account_button_shows_a_person_until_an_identity_names_someone() {
         "no initials without an identity: {texts:?}"
     );
 
-    app.state.license = Some(crate::services::license::LicenseInfo {
+    app.state.cloud.license = Some(crate::services::license::LicenseInfo {
         licensed_to: "Ada Lovelace".to_owned(),
         tier: String::new(),
         updates_until: String::new(),

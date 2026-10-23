@@ -27,7 +27,10 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
                 "#ffffff",
             )];
         let baseline = snapshot(&state).unwrap();
-        state.project_lifecycle.accept_project(baseline, None);
+        state
+            .platform
+            .project_lifecycle
+            .accept_project(baseline, None);
         assert!(!has_unsaved_changes(&state));
         let work = WorkCounts::reset();
         registry::RESULT_FINGERPRINT_PASSES.with(|passes| passes.set(0));
@@ -53,6 +56,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
             crate::io::capture_simulation_results(&state.model.simulation);
         assert_eq!(
             state
+                .platform
                 .project_lifecycle
                 .authority
                 .working_fingerprints(
@@ -124,12 +128,14 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
     for (index, edit) in edits.into_iter().enumerate() {
         let mut state = base.clone();
         let before = state
+            .platform
             .project_lifecycle
             .result_cache
             .capture(&state.model.simulation);
         let frozen = serde_json::to_vec(&before).unwrap();
         edit(&mut state.model.simulation);
         let cached = state
+            .platform
             .project_lifecycle
             .result_cache
             .capture(&state.model.simulation);
@@ -152,6 +158,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
         assert!(
             cached.shares_content_with(
                 &state
+                    .platform
                     .project_lifecycle
                     .result_cache
                     .capture(&state.model.simulation)
@@ -165,7 +172,10 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     let (mut state, _) = super::durable_content::retained_results();
     let baseline = snapshot(&state).unwrap();
     let retained = baseline.file.simulation_results.clone();
-    state.project_lifecycle.accept_project(baseline, None);
+    state
+        .platform
+        .project_lifecycle
+        .accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
     state.model.simulation.execution.progress = 0.75;
     state.model.simulation.execution.status = "runtime status".to_owned();
@@ -227,13 +237,17 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
         )
         .unwrap();
     let baseline = snapshot(&state).unwrap();
-    state.project_lifecycle.accept_project(baseline, None);
+    state
+        .platform
+        .project_lifecycle
+        .accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
     state.results.results.session.markers[0].x = -0.0;
     assert!(has_unsaved_changes(&state));
     let current = snapshot(&state).unwrap();
     assert_eq!(
         state
+            .platform
             .project_lifecycle
             .authority
             .working_fingerprints(
