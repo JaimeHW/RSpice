@@ -1471,29 +1471,30 @@ mod tests {
     }
 
     /// A model the compiler accepted with a caveat says so in the run's log:
-    /// an analog `$strobe` is parsed and dropped, and the author must not be
-    /// left believing the model prints.
+    /// a variable read before it is assigned keeps its value from the last
+    /// accepted point, and the author must be told it does.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_verilog_a_compiler_warning_reaches_the_run_log() {
         let directory =
             std::env::temp_dir().join(format!("rspice_runner_va_log_{}", std::process::id()));
         std::fs::create_dir_all(&directory).expect("create the model directory");
-        let model = directory.join("strober.va");
+        let model = directory.join("keeper.va");
         std::fs::write(
             &model,
-            "module strober(p, n);\n\
+            "module keeper(p, n);\n\
              \x20 inout p, n;\n\
              \x20 electrical p, n;\n\
+             \x20 integer steps;\n\
              \x20 analog begin\n\
+             \x20   steps = steps + 1;\n\
              \x20   I(p, n) <+ V(p, n) / 1000.0;\n\
-             \x20   $strobe(\"v=%g\", V(p, n));\n\
              \x20 end\n\
              endmodule\n",
         )
         .expect("write the model");
         let deck = format!(
-            "* compiler warning run log\nV1 a 0 1\nR1 a p 1k\nx1 p 0 strober\n.va \"{}\" strober\n.end\n",
+            "* compiler warning run log\nV1 a 0 1\nR1 a p 1k\nx1 p 0 keeper\n.va \"{}\" keeper\n.end\n",
             model.display().to_string().replace('\\', "/")
         );
         let lines = engine_log_of_run(
@@ -1508,7 +1509,7 @@ mod tests {
         );
         let finding = lines
             .iter()
-            .find(|line| line.message.contains("[VA-SEM-NO-EFFECT-SYSTEM-TASK]"))
+            .find(|line| line.message.contains("[VA-SEM-RETAINED-VARIABLE]"))
             .unwrap_or_else(|| {
                 panic!(
                     "the compiler's finding is not in the log: {:?}",
@@ -1520,7 +1521,13 @@ mod tests {
             finding.severity,
             rspice_vocabulary::diagnostics::LogSeverity::Warning
         );
-        assert!(finding.message.contains("'$strobe'"), "{}", finding.message);
+        assert!(
+            finding
+                .message
+                .contains("Module `keeper` has 1 variable read before it is assigned"),
+            "{}",
+            finding.message
+        );
     }
 
     /// A one-tone nonlinear HB solve traces its Newton iterations when the

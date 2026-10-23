@@ -111,29 +111,44 @@ fn execution_and_argument_boundaries_publish_structured_categories() {
     );
 }
 
-/// An HDL option whose behaviour has not landed is a typed capability refusal
-/// in the browser too, with its token as a field and text that names the
-/// feature rather than a plan lane.
+/// A capability the engine refuses is a typed refusal in the browser too, with
+/// its token as a field and text that names the feature rather than a plan
+/// lane. A coupled (CPL) line has no small-signal load, so AC refuses it.
 #[test]
-fn an_unsupported_hdl_option_is_a_typed_capability_refusal() {
+fn a_capability_refusal_is_typed_in_the_browser() {
     let error = run_ac_document_detailed(
-        "unlanded hdl option\nV1 1 0 1 AC 1\nR1 1 0 1k\n.options hdl_path_delays=0\n.END\n",
+        "ac over a coupled line\n\
+         V1 in 0 DC 1 AC 1\n\
+         R1 in a 50\n\
+         P1 a b 0 c d 0 cpl_model\n\
+         .model cpl_model CPL\n+ R = 0.1 0 0.1\n+ L = 1e-6 0 1e-6\n+ G = 0 0 0\n\
+         + C = 1e-10 0 1e-10\n+ length = 0.1\n\
+         R2 c 0 50\n\
+         R3 b 0 50\n\
+         R4 d 0 50\n\
+         .END\n",
         &[1_000.0],
     )
-    .expect_err("an unlanded HDL option must be refused");
+    .expect_err("a coupled line has no small-signal load");
     assert_eq!(error.code, "unsupported_capability", "{error:?}");
     assert_eq!(error.category, "capability");
-    assert_eq!(error.capability.as_deref(), Some("hdl.option.path_delays"));
+    assert_eq!(
+        error.capability.as_deref(),
+        Some("analysis.ac.device.coupled_transmission_line")
+    );
     assert!(
         error
             .message
-            .contains("`.options hdl_path_delays=0` is not supported yet"),
+            .contains("does not support coupled multiconductor (CPL) transmission lines"),
         "{}",
         error.message
     );
     assert!(!error.message.contains("lane"), "{}", error.message);
     let serialized = serde_json::to_value(&error).expect("the refusal serializes");
-    assert_eq!(serialized["capability"], "hdl.option.path_delays");
+    assert_eq!(
+        serialized["capability"],
+        "analysis.ac.device.coupled_transmission_line"
+    );
 }
 
 #[test]

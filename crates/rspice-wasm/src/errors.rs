@@ -81,8 +81,9 @@ pub struct WasmError {
     pub missing_dependency: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
-    /// The dotted token of a capability refusal (`hdl.option.path_delays`,
-    /// `analysis.hb.device`), which automation branches on.
+    /// The dotted token of a capability refusal
+    /// (`analysis.ac.device.coupled_transmission_line`, `analysis.hb.device`),
+    /// which automation branches on.
     #[serde(default)]
     pub capability: Option<String>,
     pub unresolved_output_symbols: Vec<WasmUnresolvedOutputSymbol>,
