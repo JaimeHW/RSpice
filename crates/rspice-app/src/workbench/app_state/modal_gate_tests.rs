@@ -137,6 +137,22 @@ fn each_term_of_the_application_gate_makes_it_modal_on_its_own() {
     }
 }
 
+/// The dialog gate is the narrower of the two: apart from its own row, no
+/// term of the application gate opens it, so a dialog the workbench opens
+/// over one of them still opens.
+#[test]
+fn the_application_gate_alone_leaves_the_dialog_gate_shut() {
+    for (term, open) in APPLICATION_GATE {
+        let mut state = AppState::default();
+        open(&mut state);
+        assert_eq!(
+            state.dialog_modal_open(),
+            *term == "dialogs",
+            "`{term}` opens the dialog gate exactly when it is one of its terms"
+        );
+    }
+}
+
 /// Drawn while open, and not a term of the gate today: a keystroke still
 /// reaches the document beneath. This records the gate as it stands rather
 /// than ruling on each row; changing one is a behaviour change.
