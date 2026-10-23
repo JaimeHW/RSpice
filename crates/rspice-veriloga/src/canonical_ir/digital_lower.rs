@@ -462,7 +462,8 @@ fn lower_with_analog_variables(
             .signals
             .iter()
             .flat_map(AnalyzedDigitalSignal::elaboration_expressions)
-            .chain(digital.paths.iter().flat_map(|path| &path.delays)),
+            .chain(digital.paths.iter().flat_map(|path| &path.delays))
+            .chain(digital.timing_checks.iter().flat_map(|check| &check.limits)),
     )?;
     let instance_constants = digital
         .instances
@@ -478,7 +479,13 @@ fn lower_with_analog_variables(
                     .signals
                     .iter()
                     .flat_map(|signal| signal.declared.elaboration_expressions())
-                    .chain(instance.paths.iter().flat_map(|path| &path.delays)),
+                    .chain(instance.paths.iter().flat_map(|path| &path.delays))
+                    .chain(
+                        instance
+                            .timing_checks
+                            .iter()
+                            .flat_map(|check| &check.limits),
+                    ),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;

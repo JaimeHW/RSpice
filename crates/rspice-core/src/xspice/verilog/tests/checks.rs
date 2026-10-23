@@ -216,6 +216,49 @@ fn a_violation_toggles_its_notifier() {
     assert_eq!(warnings(&report), expected);
 }
 
+const SPECPARAM_LIMITS: &str = r#"`timescale 1ns/1ns
+module n(input d, input c);
+  specify
+    specparam tsu = 3.0, th = 2;
+    $setup(d, posedge c, tsu);
+    $hold(posedge c, d, th);
+  endspecify
+endmodule
+module t;
+  reg d, c;
+  n u(d, c);
+  initial begin
+    d = 0; c = 0;
+    #8 d = 1;
+    #2 c = 1;
+    #5 c = 0;
+    #2 d = 0;
+    #3 c = 1;
+    #5 c = 0;
+    #5 c = 1;
+    #1 d = 1;
+    #4 c = 0;
+    #5 c = 1;
+    #2 d = 0;
+    #5 $finish;
+  end
+endmodule
+"#;
+
+/// Section 15.2: a limit is a constant expression, and a specparam read only
+/// by a timing check is one. With `$setup` -3 < rel < 0 and `$hold`
+/// 0 <= rel < 2: `d` at 8 is 2 before the edge at 10 and fails `$setup`;
+/// `d` at 17 is 3 before the edge at 20 and passes; `d` at 31 is 1 after the
+/// edge at 30 and fails `$hold`; `d` at 42 is 2 after the edge at 40 and
+/// passes.
+#[test]
+fn a_specparam_names_a_timing_check_limit() {
+    let report = bench(SPECPARAM_LIMITS, &[]);
+    let mut expected = violations("$setup(d, posedge c, 3)", &[10]);
+    expected.extend(violations("$hold(posedge c, d, 2)", &[31]));
+    assert_eq!(warnings(&report), expected);
+}
+
 const CONDITIONS: &str = r#"`timescale 1ns/1ns
 module cnd(input d, input c, input e);
   specify
