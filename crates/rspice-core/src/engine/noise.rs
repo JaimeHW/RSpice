@@ -5955,6 +5955,20 @@ Q1 C B 0 QN
         fstop: 1e5,
     };
 
+    /// `DEC 5 10 100Meg`, the BSIM3/BSIM4 decks' sweep.
+    const DEC5_10_100MEG: NoiseSweepGrid = NoiseSweepGrid {
+        points_per_decade: 5,
+        fstart: 10.0,
+        fstop: 1e8,
+    };
+
+    /// `DEC 5 100k 10Meg`, the VBIC resistance and DTEMP decks' sweep.
+    const DEC5_100K_10MEG: NoiseSweepGrid = NoiseSweepGrid {
+        points_per_decade: 5,
+        fstart: 1e5,
+        fstop: 1e7,
+    };
+
     fn assert_onoise_matches(
         deck: &str,
         oracle_table: &str,
@@ -6184,11 +6198,7 @@ Q1 C B 0 QN
             BSIM4_FNOI1_TNOI0_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-2,
             "bsim4-fnoi1-tnoi0",
         );
@@ -6202,11 +6212,7 @@ Q1 C B 0 QN
             BSIM4_FNOI0_TNOI0_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-2,
             "bsim4-fnoi0-tnoi0",
         );
@@ -6220,11 +6226,7 @@ Q1 C B 0 QN
             BSIM4_TNOI2_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-2,
             "bsim4-tnoi2",
         );
@@ -6242,11 +6244,7 @@ Q1 C B 0 QN
             BSIM4_TNOI1_SERIES_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-4,
             "bsim4-tnoi1-series",
         );
@@ -6264,11 +6262,7 @@ Q1 C B 0 QN
             BSIM4_RDSMOD1_TNOI1_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-4,
             "bsim4-rdsmod1-tnoi1",
         );
@@ -6285,11 +6279,7 @@ Q1 C B 0 QN
             BSIM4_RBODYMOD1_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-4,
             "bsim4-rbodymod1",
         );
@@ -6449,11 +6439,7 @@ Q1 C B 0 QN
             BSIM3_NOIMOD1_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-2,
             "bsim3-noimod1",
         );
@@ -6520,11 +6506,7 @@ Q1 C B 0 QN
             &shifted_oracle,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-2,
             "bsim3-shifted-grid",
         );
@@ -6538,11 +6520,7 @@ Q1 C B 0 QN
             BSIM3_NOIMOD2_ORACLE,
             "out",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e8,
-            },
+            DEC5_10_100MEG,
             5e-2,
             "bsim3-noimod2",
         );
@@ -6560,11 +6538,7 @@ Q1 C B 0 QN
             VBIC_DTEMP_NOISE_ORACLE,
             "c",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 1e5,
-                fstop: 1e7,
-            },
+            DEC5_100K_10MEG,
             1e-2,
             "vbic-dtemp",
         );
@@ -6679,11 +6653,7 @@ R2 OUT 0 1k
             RES_FLICKER_ORACLE,
             "out",
             "V1",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e5,
-            },
+            DEC5_10_100K,
             5e-3,
             "res-flicker",
         );
@@ -6700,11 +6670,7 @@ R2 OUT 0 1k
             RES_QUIET_ORACLE,
             "out",
             "V1",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e5,
-            },
+            DEC5_10_100K,
             5e-3,
             "res-quiet",
         );
@@ -6728,11 +6694,7 @@ R2 OUT 0 1k
             JFET_DTEMP_NOISE_ORACLE,
             "d",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 10.0,
-                fstop: 1e5,
-            },
+            DEC5_10_100K,
             1e-2,
             "jfet-dtemp",
         );
@@ -7500,11 +7462,7 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
             RB_NOISE_ORACLE,
             "c",
             "VIN",
-            NoiseSweepGrid {
-                points_per_decade: 5,
-                fstart: 1e5,
-                fstop: 1e7,
-            },
+            DEC5_100K_10MEG,
             5e-3,
             "VBIC parasitic resistance",
         );
