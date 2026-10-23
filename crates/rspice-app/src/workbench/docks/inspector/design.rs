@@ -7,10 +7,12 @@
 //! fact the open design cannot supply.
 
 mod component;
+mod model_evidence;
 
 pub(crate) use component::{analysis_soa_display, apply_bound_model_choice};
 
 use component::*;
+use model_evidence::{ComponentModelEvidence, component_model_evidence};
 
 use std::collections::{HashMap, HashSet};
 
@@ -41,7 +43,7 @@ use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
 
-use super::{ComponentModelEvidence, component_model_evidence, muted_inspector_copy};
+use super::muted_inspector_copy;
 use rspice_ui_kit::panels::{
     panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
     section_header_explained,

@@ -1888,7 +1888,7 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
     "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_group",
-    "rspice-app/src/workbench/docks/inspector.rs::trace_colour_row",
+    "rspice-app/src/workbench/docks/inspector/results.rs::trace_colour_row",
     "rspice-app/src/workbench/docks/navigator/design.rs::tabs",
     "rspice-app/src/workbench/surfaces/design/layout_editor.rs::show_canvas",
     "rspice-app/src/workbench/surfaces/model_editor.rs::dialog_subheading",

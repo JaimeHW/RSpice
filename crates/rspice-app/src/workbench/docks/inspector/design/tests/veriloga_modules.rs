@@ -99,7 +99,7 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
     );
     assert_eq!(row("vmax").hint, "computed");
 
-    let evidence = super::super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state, &component);
     let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
     assert!(
         painted.lines().any(|line| line == "S") && painted.lines().any(|line| line == "V"),
@@ -220,7 +220,7 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
             .all(|row| !row.undeclared)
     );
 
-    let evidence = super::super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state, &component);
     let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
     assert!(
         painted.contains(UNDECLARED_PARAMETER_NOTE)
@@ -300,7 +300,7 @@ fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
 fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     let (mut app, component) = app_with_owned_veriloga_instance();
 
-    let evidence = super::super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state, &component);
     assert_eq!(evidence.model.as_deref(), Some("amp"));
     assert_eq!(evidence.problem, None, "a current compile says nothing");
 
@@ -353,7 +353,7 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
             "module amp(p, n);\nendmodule\n".to_owned(),
         )
         .expect("the edit applies");
-    let evidence = super::super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::super::component_model_evidence(&app.state, &component);
     assert_eq!(
         evidence.problem.as_ref().map(|(problem, _)| *problem),
         Some(Problem::Warning)

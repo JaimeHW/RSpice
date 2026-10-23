@@ -1475,7 +1475,7 @@ fn bound_model_choices_offer_a_binned_family_once() {
         owned(&[("nch", "nch · 2 bins"), ("nch_hv", "nch_hv")]),
         "once the family is bound, no bin is offered beside it"
     );
-    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let evidence = super::component_model_evidence(&app.state, &component);
     assert_eq!(evidence.model.as_deref(), Some("nch"));
     assert!(evidence.problem.is_none(), "{:?}", evidence.problem);
 }
@@ -2036,7 +2036,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
 
     // Two providers and no decision: nothing resolves it, so the row says so
     // and there is nowhere to jump.
-    let contested = super::super::component_model_evidence(&state, &component);
+    let contested = super::component_model_evidence(&state, &component);
     let (problem, text) = contested
         .problem
         .expect("an unresolved contest is a problem");
@@ -2060,7 +2060,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
             "Test selects the executable provider.",
         )
         .expect("two providers accept a project-global decision");
-    let resolved = super::super::component_model_evidence(&state, &component);
+    let resolved = super::component_model_evidence(&state, &component);
     assert_eq!(
         resolved.problem, None,
         "a recorded decision resolves the reference"

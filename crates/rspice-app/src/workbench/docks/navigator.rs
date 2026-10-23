@@ -3,6 +3,7 @@
 mod design;
 mod symbol;
 
+mod models;
 mod netlist;
 mod project;
 mod rail;
@@ -15,6 +16,7 @@ pub(super) mod stimulus;
 mod verify;
 mod veriloga;
 
+use models::models;
 use netlist::*;
 use project::project;
 use results::results;
