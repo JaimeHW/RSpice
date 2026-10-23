@@ -757,6 +757,7 @@ fn project_pss_data(
         // event schedule that reached it.
         events: Default::default(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
     })
 }
 
@@ -1059,6 +1060,7 @@ fn run_envelope(
         events: Default::default(),
         // The service transient does not collect HDL output.
         hdl_output: Vec::new(),
+        checks: Default::default(),
     })
 }
 

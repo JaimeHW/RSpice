@@ -55,4 +55,6 @@ pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 47;
 /// 35: SOA reporting views retain the complete observation history.
 /// 36: remove Reliability result payloads.
 /// 37: transient results and live suffixes retain singular voltage histories.
-pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 37;
+/// 38: operating-point, DC and transient results carry the HDL severity
+///     records and `.ASSERT` reports of their run.
+pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 38;

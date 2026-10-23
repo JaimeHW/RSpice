@@ -298,6 +298,7 @@ fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
             branch_currents: HashMap::from([("V1".to_owned(), -0.001)]),
             device_report: None,
+            checks: Default::default(),
         })),
     };
     let mut transport = WorkerResponseTransport::from_response(response.clone()).unwrap();

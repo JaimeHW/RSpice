@@ -668,6 +668,7 @@ pub(in crate::runner) mod tests {
         let result = SimulationResult::Transient {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
+            checks: Default::default(),
             time: produced.time,
             waveforms: HashMap::new(),
             measurements: Vec::new(),

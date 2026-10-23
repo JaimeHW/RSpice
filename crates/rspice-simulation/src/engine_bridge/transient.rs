@@ -79,20 +79,8 @@ impl EngineBridge {
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         let prepared_netlist = netlist_for_transient_config(netlist, config, abort)?;
         let netlist = prepared_netlist.as_ref();
-        let engine = self.engine_for_netlist(netlist);
-        // Collect what the deck's HDL designs print for the result, on an
-        // engine that shares this one's metrics and diagnostics.
-        let hdl_output = std::sync::Arc::new(HdlOutputCapture {
-            forward: engine.config().hdl.output.clone(),
-            ..HdlOutputCapture::default()
-        });
-        let engine = {
-            let mut capturing = engine.config().clone();
-            capturing.hdl.output = Some(hdl_output.clone());
-            engine
-                .try_resolved_with_config(capturing)
-                .map_err(|error| self.translate_error(error.into()))?
-        };
+        // Collect what the deck's HDL designs print for the result.
+        let (engine, hdl_output) = self.capturing_hdl_output(&self.engine_for_netlist(netlist))?;
         let tran_result = if let Some(execution) = checkpoint {
             use rspice_core::engine::{
                 TransientCheckpointEncoding, TransientCheckpointStart, TransientCheckpointStream,
@@ -180,17 +168,24 @@ impl EngineBridge {
                 abort,
             )
             .map_err(|error| self.translate_error(error))?;
+        // Assertions observe the whole accepted trajectory, as the core's
+        // own post-processing evaluates them, not the authored output window.
+        let assertions =
+            rspice_core::analysis::evaluate_tran_assertions(netlist, &tran_result, abort)
+                .map_err(|error| self.translate_error(error))?;
 
         let mut converted =
             convert_transient_result(netlist, tran_result, config.start_time, abort)?;
         if let SimulationResult::Transient {
             convergence: slot,
             hdl_output: records,
+            checks,
             ..
         } = &mut converted
         {
             *slot = Some(std::sync::Arc::new(convergence));
             *records = hdl_output.collector.take();
+            *checks = crate::results::SimulationChecks::new(records, assertions);
         }
         Ok(converted)
     }
@@ -416,24 +411,8 @@ fn convert_transient_result(
         events,
         spectra,
         hdl_output: Vec::new(),
+        checks: Default::default(),
     })
-}
-
-/// The run's HDL output (design P2 section 4.3): kept, bounded, for the
-/// result, and still handed to whatever sink the caller installed.
-#[derive(Debug, Default)]
-struct HdlOutputCapture {
-    collector: rspice_core::config::HdlOutputCollector,
-    forward: Option<std::sync::Arc<dyn rspice_core::config::HdlOutputSink>>,
-}
-
-impl rspice_core::config::HdlOutputSink for HdlOutputCapture {
-    fn emit(&self, record: &rspice_core::config::HdlOutputRecord) {
-        self.collector.emit(record);
-        if let Some(forward) = &self.forward {
-            forward.emit(record);
-        }
-    }
 }
 
 fn validate_transient_result_shape(

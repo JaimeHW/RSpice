@@ -158,6 +158,7 @@ fn transient_convergence_survives_worker_round_trip() {
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -221,6 +222,7 @@ fn a_testbench_error_crosses_the_worker_and_its_other_output_does_not() {
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: vec![record(HdlSeverity::Info, "checking out\n"), error.clone()],
+        checks: Default::default(),
         time: vec![0.0, 2e-9],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -236,6 +238,142 @@ fn a_testbench_error_crosses_the_worker_and_its_other_output_does_not() {
     assert_eq!(hdl_output, vec![error]);
 }
 
+/// A run's checks cross the worker whole, on each result that carries them:
+/// every severity record, not only the errors, and every assertion report
+/// field for field.
+#[test]
+fn checks_cross_the_worker_field_for_field() {
+    use rspice_core::analysis::{AssertViolation, AssertionReport};
+    use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+    use rspice_core::netlist::{AssertAnalysis, AssertLevel, NetlistSourceLocation};
+
+    let checks = |analysis, point| crate::results::SimulationChecks {
+        hdl: vec![HdlOutputRecord {
+            point,
+            tick: 99_000_000,
+            seconds: 99e-6,
+            stream: HdlStream::Diagnostic {
+                severity: HdlSeverity::Warning,
+            },
+            text: "step out of window\n".to_owned(),
+            origin: HdlOrigin {
+                scope: "tb_ldo".to_owned(),
+                file: "tb_ldo.vams".to_owned(),
+                line: 40,
+            },
+        }],
+        assertions: vec![
+            AssertionReport {
+                name: "a".to_owned(),
+                analysis,
+                target: "V(out)".to_owned(),
+                instance: None,
+                level: AssertLevel::Error,
+                message: Some("settled too high".to_owned()),
+                origin: NetlistSourceLocation {
+                    path: Some("decks/rc.cir".into()),
+                    line: 7,
+                },
+                violations: vec![AssertViolation {
+                    start: Some(6.931_471_805_599_453e-7),
+                    end: None,
+                    extreme: Some(0.864_664_716_763_387_3),
+                    at: Some(2e-6),
+                }],
+                unknown_stretches: 2,
+                error: None,
+            },
+            AssertionReport {
+                name: "mpsat".to_owned(),
+                analysis,
+                target: "@mp[vds]".to_owned(),
+                instance: Some("mp".to_owned()),
+                level: AssertLevel::Notice,
+                message: None,
+                origin: NetlistSourceLocation::in_memory(3),
+                violations: Vec::new(),
+                unknown_stretches: 0,
+                error: Some("mp publishes no vds".to_owned()),
+            },
+        ],
+    };
+
+    let expected = checks(AssertAnalysis::Op, HdlPoint::OperatingPoint);
+    let restored = round_trip_result(SimulationResult::DcOp(Box::new(DcOpResult {
+        mna_node_names: vec!["out".to_owned()],
+        mna_branch_names: vec!["V1".to_owned()],
+        mna_solution: vec![1.2, -0.01],
+        node_voltages: HashMap::from([("out".to_string(), 1.2)]),
+        branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
+        checks: expected.clone(),
+        ..Default::default()
+    })));
+    assert_eq!(restored.checks(), Some(&expected));
+
+    let expected = checks(AssertAnalysis::Dc, HdlPoint::DcSweep { value: 0.5 });
+    let mut sweep = crate::engine_bridge::nested_dc_tests::solve(
+        crate::engine_bridge::nested_dc_tests::nested_config(),
+    );
+    let SimulationResult::DcSweep { checks: slot, .. } = &mut sweep else {
+        panic!("a DC sweep");
+    };
+    *slot = expected.clone();
+    assert_eq!(round_trip_result(sweep).checks(), Some(&expected));
+
+    let expected = checks(AssertAnalysis::Tran, HdlPoint::Transient { time: 99e-6 });
+    let restored = round_trip_result(SimulationResult::Transient {
+        spectra: Vec::new(),
+        hdl_output: expected.hdl.clone(),
+        checks: expected.clone(),
+        time: vec![0.0, 2e-6],
+        waveforms: HashMap::new(),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: None,
+        events: Default::default(),
+    });
+    assert_eq!(restored.checks(), Some(&expected));
+}
+
+/// A non-finite violation would cross the JSON envelope as nothing at all, so
+/// the worker refuses it.
+#[test]
+fn a_non_finite_assertion_value_is_refused_at_the_worker_boundary() {
+    let report = rspice_core::analysis::AssertionReport {
+        name: "a".to_owned(),
+        analysis: rspice_core::netlist::AssertAnalysis::Tran,
+        target: "V(out)".to_owned(),
+        instance: None,
+        level: rspice_core::netlist::AssertLevel::Error,
+        message: None,
+        origin: rspice_core::netlist::NetlistSourceLocation::in_memory(2),
+        violations: vec![rspice_core::analysis::AssertViolation {
+            start: Some(0.0),
+            end: None,
+            extreme: Some(f64::INFINITY),
+            at: Some(0.0),
+        }],
+        unknown_stretches: 0,
+        error: None,
+    };
+    let response = WorkerResponse::from_result_for_transfer(
+        72,
+        Ok(SimulationResult::Transient {
+            spectra: Vec::new(),
+            hdl_output: Vec::new(),
+            checks: crate::results::SimulationChecks::new(&[], vec![report]),
+            time: vec![0.0, 1e-9],
+            waveforms: HashMap::new(),
+            measurements: Vec::new(),
+            periodic_state: None,
+            convergence: None,
+            events: Default::default(),
+        }),
+    );
+    let error = WorkerResponseTransport::from_response(response).unwrap_err();
+    assert!(error.contains("non-finite violation"), "{error}");
+}
+
 #[test]
 fn worker_result_round_trip() {
     let dc_op = SimulationResult::DcOp(Box::new(DcOpResult {
@@ -247,6 +385,7 @@ fn worker_result_round_trip() {
         node_voltages: HashMap::from([("out".to_string(), 1.2)]),
         branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
         device_report: None,
+        checks: Default::default(),
     }));
     let dc_op = round_trip_result(dc_op);
     match dc_op {
@@ -261,6 +400,7 @@ fn worker_result_round_trip() {
     let transient = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -737,6 +877,7 @@ fn convergence_source_evidence_survives_derived_worker_transports() {
         SimulationResult::Transient {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
+            checks: Default::default(),
             time: vec![0.6, 1.0],
             waveforms: HashMap::new(),
             measurements: Vec::new(),
@@ -792,6 +933,7 @@ fn convergence_worker_transport_rejects_inline_and_malformed_quality_buffers() {
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -956,6 +1098,7 @@ fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
         events: Default::default(),
         spectra: vec![std::sync::Arc::clone(&recorded)],
         hdl_output: Vec::new(),
+        checks: Default::default(),
     };
     let SimulationResult::Transient {
         spectra: restored, ..
@@ -1197,6 +1340,7 @@ fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
         let display = SimulationResult::Transient {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
+            checks: Default::default(),
             time,
             waveforms,
             measurements: Vec::new(),

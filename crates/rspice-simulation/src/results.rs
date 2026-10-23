@@ -3,6 +3,7 @@
 use rspice_results::safety::{SoAEvaluation, SoAViolation};
 use std::collections::HashMap;
 
+mod checks;
 mod measurements;
 mod qpac;
 mod qpnoise;
@@ -14,6 +15,7 @@ pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod units_tests;
 mod yield_input;
+pub use checks::SimulationChecks;
 pub use yield_input::yield_provenance_from_monte_carlo_result;
 
 pub use rspice_results::fft::recorded::RecordedFftSpectrum;
@@ -63,6 +65,8 @@ pub enum SimulationResult {
         waveforms: HashMap<String, SampledWaveform>,
         /// Evaluated `.MEAS DC` results.
         measurements: Vec<rspice_core::MeasureResult>,
+        /// The HDL severity records and `.ASSERT DC` reports of the sweep.
+        checks: SimulationChecks,
     },
 
     /// Transient analysis results
@@ -106,6 +110,10 @@ pub enum SimulationResult {
         /// that crossed the browser worker keeps only its `$error` and
         /// `$fatal` records: the rest streamed to the run log as it ran.
         hdl_output: Vec<rspice_core::config::HdlOutputRecord>,
+        /// The HDL severity records and `.ASSERT TRAN` reports of the solve,
+        /// the assertions evaluated over its whole accepted trajectory. Empty
+        /// for a PSS rebuild and the other analyses that reuse this shape.
+        checks: SimulationChecks,
     },
 
     /// AC analysis results
@@ -410,6 +418,9 @@ pub struct DcOpResult {
     /// small-signal parameters with regions, in netlist order) — the data
     /// behind the OP inspector.
     pub device_report: Option<rspice_core::circuit::DeviceOpReport>,
+
+    /// The HDL severity records and `.ASSERT OP` reports of the solve.
+    pub checks: SimulationChecks,
 }
 
 /// Monte Carlo samples and their per-variable statistics.
@@ -436,6 +447,16 @@ pub struct MonteCarloVariableResult {
 }
 
 impl SimulationResult {
+    /// What the run's checks reported, on the results that carry them: an
+    /// operating point, a DC sweep and a transient.
+    pub fn checks(&self) -> Option<&SimulationChecks> {
+        match self {
+            Self::DcOp(result) => Some(&result.checks),
+            Self::DcSweep { checks, .. } | Self::Transient { checks, .. } => Some(checks),
+            _ => None,
+        }
+    }
+
     pub fn transient_convergence(
         &self,
     ) -> Option<&std::sync::Arc<rspice_results::convergence_quality::TransientConvergenceEvidence>>

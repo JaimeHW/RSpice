@@ -167,6 +167,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 if let Some(report) = dc_result.device_report {
                     result = result.with_device_op(report);
                 }
+                result.checks = dc_result.checks.into_run_checks();
                 result
             }
 
@@ -235,12 +236,16 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 // transient's own retained result and digest are unchanged.
                 spectra: _,
                 // The HDL transcript is the run's console, not part of the
-                // retained result document or its digest.
+                // retained result document or its digest; its severity
+                // records are kept with the checks.
                 hdl_output: _,
+                checks,
             } => {
-                let result = AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
-                    .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
-                    .with_measurements(measurements);
+                let mut result =
+                    AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
+                        .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
+                        .with_measurements(measurements);
+                result.checks = checks.into_run_checks();
                 let event_payload = transient_events_payload(events);
                 match (periodic_state, event_payload) {
                     (Some(_), Some(_)) => AnalysisResult::failed(
@@ -470,7 +475,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 sweep_var,
                 waveforms,
                 measurements,
-                ..
+                checks,
             } => {
                 if evidence
                     .as_ref()
@@ -512,6 +517,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                             self.build_waveforms_with_shared_x_owned(sweep_values, waveforms),
                         )
                         .with_measurements(measurements);
+                result.checks = checks.into_run_checks();
                 result.result_payload =
                     evidence.map(|evidence| AnalysisResultPayload::DcSweep { evidence });
                 if let Err(error) = result.validate_retained_evidence() {
@@ -927,6 +933,7 @@ mod convergence_conversion_tests {
             let result = crate::results::SimulationResult::Transient {
                 spectra: Vec::new(),
                 hdl_output: Vec::new(),
+                checks: Default::default(),
                 time: time.clone(),
                 waveforms: HashMap::from([(
                     "V(out)".to_owned(),
@@ -1048,6 +1055,7 @@ mod waveform_unit_conversion_tests {
         let sim_result = crate::results::SimulationResult::Transient {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
+            checks: Default::default(),
             time: vec![0.0, 1.0],
             waveforms: HashMap::from([
                 (
@@ -1173,6 +1181,7 @@ mod waveform_unit_conversion_tests {
             crate::results::SimulationResult::Transient {
                 spectra: Vec::new(),
                 hdl_output: Vec::new(),
+                checks: Default::default(),
                 time: vec![0.0, 1.0],
                 waveforms: HashMap::from([("V(env)".to_owned(), waveform)]),
                 measurements: Vec::new(),

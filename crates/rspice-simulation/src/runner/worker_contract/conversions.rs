@@ -966,6 +966,7 @@ pub(super) fn simulation_result_from_worker_pss(
         convergence: Default::default(),
         events: TransientEventHistory::default(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
     }
 }
 

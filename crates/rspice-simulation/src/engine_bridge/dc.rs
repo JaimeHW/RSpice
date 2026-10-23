@@ -109,7 +109,8 @@ impl EngineBridge {
             })?;
         }
         apply_startup_policy(&mut execution_netlist, config);
-        let engine = configured_op_engine(self, &execution_netlist, config)?;
+        let (engine, hdl_output) =
+            self.capturing_hdl_output(&configured_op_engine(self, &execution_netlist, config)?)?;
         let previous_solution = if config.initial_guess.uses_previous_state() {
             let previous = config.previous_state.as_ref().ok_or_else(|| {
                 SimulationError::InvalidConfig(
@@ -185,6 +186,16 @@ impl EngineBridge {
         result.configuration = config.clone();
         result.validated_startup_directives = validated_startup_directives;
         ensure_not_aborted(abort)?;
+        // The device forms read the whole report, whatever this request
+        // retains of it.
+        result.checks = crate::results::SimulationChecks::new(
+            &hdl_output.collector.take(),
+            rspice_core::analysis::evaluate_op_assertions(
+                &execution_netlist,
+                &core_result,
+                &device_report,
+            ),
+        );
         let device_report = filter_device_report(device_report, config);
         if !device_report.is_empty() {
             result.device_report = Some(device_report);
@@ -200,13 +211,14 @@ impl EngineBridge {
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
-        let engine = self.engine_for_netlist(netlist);
+        let (engine, hdl_output) = self.capturing_hdl_output(&self.engine_for_netlist(netlist))?;
         let nested_cfg = nested_dc_sweep_config(config);
         ensure_not_aborted(abort)?;
         let nested_cfg = nested_cfg?;
         let mut sweep_values = Vec::new();
         let mut waveforms = HashMap::new();
         let mut measurements = Vec::new();
+        let mut assertions = Vec::new();
         let mut evidence = DcSweepEvidence {
             source: config.source.clone(),
             direction: if matches!(
@@ -248,6 +260,15 @@ impl EngineBridge {
                 return Err(SimulationError::SolverError(
                     "Nested DC result does not cover the requested axis grid".into(),
                 ));
+            }
+            // Assertions check every solved point in solve order, across the
+            // whole family.
+            if !netlist.assertions.is_empty() {
+                let solved = points
+                    .iter()
+                    .map(|point| (point.sweep_value, point.result.clone()))
+                    .collect::<Vec<_>>();
+                assertions = rspice_core::analysis::evaluate_dc_assertions(netlist, &solved);
             }
             let mut points = points.into_iter();
             ensure_not_aborted(abort)?;
@@ -370,6 +391,7 @@ impl EngineBridge {
 
             validate_dc_sweep_results(&sweep_results, "bidirectional DC sweep")?;
             ensure_not_aborted(abort)?;
+            assertions = rspice_core::analysis::evaluate_dc_assertions(netlist, &sweep_results);
             if sweep_results.len() != turnaround * 2 + 1 {
                 return Err(SimulationError::SolverError(format!(
                     "bidirectional DC sweep solved {} points for a {}-point retrace",
@@ -476,6 +498,7 @@ impl EngineBridge {
             validate_dc_sweep_results(&sweep_results, "DC sweep")?;
             ensure_not_aborted(abort)?;
             measurements = rspice_core::analysis::evaluate_dc_measurements(netlist, &sweep_results);
+            assertions = rspice_core::analysis::evaluate_dc_assertions(netlist, &sweep_results);
             ensure_not_aborted(abort)?;
 
             sweep_values.reserve(sweep_results.len());
@@ -556,6 +579,7 @@ impl EngineBridge {
             sweep_values,
             waveforms,
             measurements,
+            checks: crate::results::SimulationChecks::new(&hdl_output.collector.take(), assertions),
         })
     }
 }

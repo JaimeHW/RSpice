@@ -1001,6 +1001,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
         Ok(crate::simulation::SimulationResult::Transient {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
+            checks: Default::default(),
             time,
             waveforms,
             measurements: Vec::new(),
@@ -1082,6 +1083,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
             sweep_values,
             waveforms,
             measurements: Vec::new(),
+            checks: Default::default(),
         }),
     );
 
@@ -1299,6 +1301,7 @@ fn browser_worker_transfer_protocol_matches_rust_transport() {
 
 mod autonomous_periodic;
 mod periodic_port_noise;
+mod run_checks;
 mod run_log;
 
 mod pvt_family;

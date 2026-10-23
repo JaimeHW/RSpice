@@ -176,6 +176,7 @@ fn an_authored_fourier_run_reports_every_output() {
     let transient = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
         time: time.clone(),
         waveforms: HashMap::from([
             (
@@ -303,6 +304,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
     let transient = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "out".to_owned(),
@@ -386,6 +388,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
         waveforms,
         spectra: Vec::new(),
         hdl_output: Vec::new(),
+        checks: Default::default(),
         measurements: Vec::new(),
         periodic_state: None,
         convergence: None,

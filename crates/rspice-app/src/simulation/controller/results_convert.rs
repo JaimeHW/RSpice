@@ -177,6 +177,7 @@ mod floquet_payload_conversion_tests {
         SimulationResult::Transient {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
+            checks: Default::default(),
             time: vec![0.0, 1.0],
             waveforms: HashMap::from([("V(out)".to_owned(), display)]),
             measurements: Vec::new(),

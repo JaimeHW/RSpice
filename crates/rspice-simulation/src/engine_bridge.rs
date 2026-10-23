@@ -16,6 +16,9 @@ use rspice_simulation_contract::config::AnalysisConfig;
 #[cfg(test)]
 mod ac_grid_tests;
 mod ac_noise;
+mod checks;
+#[cfg(test)]
+mod checks_tests;
 mod dc;
 mod error;
 #[cfg(test)]

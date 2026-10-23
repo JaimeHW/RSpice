@@ -95,6 +95,12 @@ pub(super) fn validate_worker_response_before_transport(
             _ => {}
         }
         validate_worker_measurements(result)?;
+        if let WorkerSimulationResult::DcOp { checks, .. }
+        | WorkerSimulationResult::DcSweep { checks, .. }
+        | WorkerSimulationResult::Transient { checks, .. } = result.as_ref()
+        {
+            checks.validate()?;
+        }
         monte_carlo::validate(result)?;
 
         if let WorkerSimulationResult::DcSweep {
@@ -1170,6 +1176,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
         device_report: Option<WorkerDeviceOpReport>,
+        #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
+        checks: WorkerChecks,
     },
     DcSweep {
         sweep_var: String,
@@ -1177,6 +1185,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
         evidence: Option<WorkerDcSweepEvidence>,
+        #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
+        checks: WorkerChecks,
     },
     Transient {
         time: WorkerF64Series,
@@ -1198,6 +1208,9 @@ pub(crate) enum WorkerSimulationResultTransport {
         /// they are a few lines of text, with no samples to buffer.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         testbench_errors: Vec<rspice_core::config::HdlOutputRecord>,
+        /// The checks ride the JSON envelope too.
+        #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
+        checks: WorkerChecks,
     },
     Fft {
         spectrum: WorkerRecordedFftSpectrumTransport,

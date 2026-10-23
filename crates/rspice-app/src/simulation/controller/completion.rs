@@ -639,6 +639,7 @@ mod tests {
             &export_io,
             Ok(crate::simulation::SimulationResult::Transient {
                 spectra: Vec::new(),
+                checks: Default::default(),
                 hdl_output: vec![
                     record(HdlStream::Stdout, "edge 1\n"),
                     record(

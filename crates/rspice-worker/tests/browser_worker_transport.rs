@@ -16,7 +16,7 @@ extern "C" {
 /// answers with. The worker-contract tests in `rspice-simulation` pin both to
 /// the Rust transport constants, so a protocol bump fails natively first.
 const REQUEST_PROTOCOL: u8 = 47;
-const RESPONSE_PROTOCOL: u8 = 37;
+const RESPONSE_PROTOCOL: u8 = 38;
 
 /// One analysis request as the browser host transfers it: the shipping
 /// default execution resource policy, no dependencies and no buffers.
@@ -515,4 +515,76 @@ fn a_sealed_vcd_dump_travels_with_the_request_and_replays_in_the_worker() {
     let unsealed = run(&request);
     let failure = unsealed["outcome"]["Failure"].to_string();
     assert!(failure.contains("clk.vcd"), "{unsealed}");
+}
+
+/// A transient's `.ASSERT` report crosses the worker exactly: the report the
+/// core run publishes in this runtime, field for field and bit for bit. RC,
+/// τ = 1 µs: `V(out)` rises through 0.5 V at τ·ln 2 and stays above it.
+#[wasm_bindgen_test]
+fn a_transient_assertion_report_crosses_the_worker_exactly() {
+    const RC: &str = "* rc\nV1 in 0 PWL(0 0 1p 1)\nR1 in out 1k\nC1 out 0 1n\n\
+                      .options reltol=1e-6\n.tran 10n 2u\n\
+                      .ASSERT a EXPR='V(out)' MAX=0.5 LEVEL=ERROR MESSAGE='settled too high'\n.end\n";
+    let request = worker_request(
+        10,
+        serde_json::json!({"Transient": {
+            "stop_time": 2e-6, "step_time": 10e-9, "start_time": 0.0,
+            "max_timestep": null, "uic": false
+        }}),
+        RC,
+    );
+    let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
+    let response = structured_clone(&response);
+    assert_eq!(
+        response_protocol(&response),
+        Some(f64::from(RESPONSE_PROTOCOL))
+    );
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let crossed = metadata["outcome"]["Success"]["Transient"]["checks"]["assertions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"));
+
+    let netlist = rspice_core::Netlist::parse(RC).unwrap();
+    let max_step =
+        rspice_core::execution::resolve_transient_maximum_step(10e-9, 2e-6, None, None).unwrap();
+    let result = rspice_core::Engine::default()
+        .resolved_for_netlist(&netlist)
+        .run_tran_with_abort(&netlist, 2e-6, max_step, &rspice_core::NoAbort)
+        .unwrap();
+    let expected =
+        rspice_core::analysis::evaluate_tran_assertions(&netlist, &result, &rspice_core::NoAbort)
+            .unwrap();
+    let ([crossed], [report]) = (crossed.as_slice(), expected.as_slice()) else {
+        panic!("one report each: {crossed:?} {expected:?}");
+    };
+    assert_eq!(crossed["name"], report.name.as_str());
+    assert_eq!(crossed["analysis"], "tran");
+    assert_eq!(crossed["target"], report.target.as_str());
+    assert_eq!(crossed["level"], "error");
+    assert_eq!(crossed["message"], "settled too high");
+    assert_eq!(crossed["line"].as_u64(), Some(report.origin.line as u64));
+    assert_eq!(crossed["unknown_stretches"], 0);
+    assert!(crossed.get("instance").is_none() && crossed.get("error").is_none());
+    let [violation] = report.violations.as_slice() else {
+        panic!("one violation: {report:?}");
+    };
+    let bits = |value: &serde_json::Value| value.as_f64().map(f64::to_bits);
+    let [moved] = crossed["violations"].as_array().unwrap().as_slice() else {
+        panic!("one crossed violation: {crossed}");
+    };
+    assert_eq!(bits(&moved["start"]), violation.start.map(f64::to_bits));
+    assert_eq!(bits(&moved["extreme"]), violation.extreme.map(f64::to_bits));
+    assert_eq!(bits(&moved["at"]), violation.at.map(f64::to_bits));
+    assert!(
+        moved["end"].is_null() && violation.end.is_none(),
+        "open at the stop time"
+    );
+    let start = violation.start.unwrap();
+    assert!(
+        (start - 1e-6 * std::f64::consts::LN_2).abs() < 0.05e-9,
+        "{start:e}"
+    );
 }

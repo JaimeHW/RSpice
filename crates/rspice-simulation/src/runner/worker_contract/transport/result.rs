@@ -17,7 +17,9 @@ impl WorkerSimulationResultTransport {
                 node_voltages,
                 branch_currents,
                 device_report,
+                checks,
             } => Self::DcOp {
+                checks,
                 configuration: WorkerOpConfigTransport::from_config(configuration, buffers),
                 validated_startup_directives,
                 mna_node_names,
@@ -37,6 +39,7 @@ impl WorkerSimulationResultTransport {
                 sweep_values,
                 waveforms,
                 measurements,
+                checks,
             } => Self::DcSweep {
                 evidence: evidence
                     .map(|evidence| WorkerDcSweepEvidence::from_evidence(evidence, buffers)),
@@ -44,6 +47,7 @@ impl WorkerSimulationResultTransport {
                 sweep_values: WorkerF64Series::from_vec(sweep_values, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
+                checks,
             },
             WorkerSimulationResult::Transient {
                 time,
@@ -53,7 +57,9 @@ impl WorkerSimulationResultTransport {
                 events,
                 spectra,
                 testbench_errors,
+                checks,
             } => Self::Transient {
+                checks,
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
@@ -346,6 +352,7 @@ impl WorkerSimulationResultTransport {
                 node_voltages,
                 branch_currents,
                 device_report,
+                checks,
             } => {
                 let configuration = configuration.into_config(buffers)?;
                 let mna_solution = mna_solution.into_vec(buffers)?;
@@ -373,6 +380,7 @@ impl WorkerSimulationResultTransport {
                     node_voltages,
                     branch_currents,
                     device_report,
+                    checks,
                 })
             }
             Self::DcSweep {
@@ -381,6 +389,7 @@ impl WorkerSimulationResultTransport {
                 sweep_values,
                 waveforms,
                 measurements,
+                checks,
             } => {
                 dc_sweep::validate_dc_transport_size(&sweep_values, &waveforms, evidence.as_ref())?;
                 Ok(WorkerSimulationResult::DcSweep {
@@ -391,6 +400,7 @@ impl WorkerSimulationResultTransport {
                     sweep_values: sweep_values.into_vec(buffers)?,
                     waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                     measurements,
+                    checks,
                 })
             }
             Self::Transient {
@@ -401,7 +411,9 @@ impl WorkerSimulationResultTransport {
                 events,
                 spectra,
                 testbench_errors,
+                checks,
             } => Ok(WorkerSimulationResult::Transient {
+                checks,
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,

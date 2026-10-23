@@ -10,6 +10,8 @@
 use crate::monte_carlo_checkpoint::validate_worker_request_checkpoint_lengths;
 
 mod analysis;
+mod checks;
+pub(crate) use checks::WorkerChecks;
 mod monte_carlo_checkpoint;
 pub(crate) use monte_carlo_checkpoint::*;
 mod conversions;
@@ -543,6 +545,8 @@ pub(crate) enum WorkerSimulationResult {
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
         device_report: Option<WorkerDeviceOpReport>,
+        #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
+        checks: WorkerChecks,
     },
     DcSweep {
         sweep_var: String,
@@ -550,6 +554,8 @@ pub(crate) enum WorkerSimulationResult {
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
         evidence: Option<rspice_results::dc_sweep::DcSweepEvidence>,
+        #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
+        checks: WorkerChecks,
     },
     Transient {
         time: Vec<f64>,
@@ -569,6 +575,9 @@ pub(crate) enum WorkerSimulationResult {
         /// without the field reads as a testbench that reported no error.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         testbench_errors: Vec<rspice_core::config::HdlOutputRecord>,
+        /// The HDL severity records and `.ASSERT` reports, whole.
+        #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
+        checks: WorkerChecks,
     },
     /// One recorded `.FFT` spectrum, selected from the transient that computed
     /// it. The task runs no solve, so no netlist and no time axis cross here.
@@ -1068,6 +1077,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 node_voltages: result.node_voltages,
                 branch_currents: result.branch_currents,
                 device_report: result.device_report.map(WorkerDeviceOpReport::from),
+                checks: result.checks.into(),
             }),
             SimulationResult::DcSweep {
                 evidence,
@@ -1075,12 +1085,14 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 sweep_values,
                 waveforms,
                 measurements,
+                checks,
             } => Ok(Self::DcSweep {
                 evidence: evidence.map(std::sync::Arc::unwrap_or_clone),
                 sweep_var,
                 sweep_values,
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
+                checks: checks.into(),
             }),
             SimulationResult::Fft {
                 spectrum,
@@ -1098,6 +1110,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 events,
                 spectra,
                 hdl_output,
+                checks,
             } => match periodic_state {
                 Some(operating_point) => {
                     if convergence.is_some() {
@@ -1126,6 +1139,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     events: events.into(),
                     spectra: worker_recorded_fft::worker_spectra(spectra),
                     testbench_errors: testbench_errors(hdl_output),
+                    checks: checks.into(),
                 }),
             },
             SimulationResult::Ac {
@@ -1463,6 +1477,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 node_voltages,
                 branch_currents,
                 device_report,
+                checks,
             } => Self::DcOp(Box::new(DcOpResult {
                 configuration,
                 validated_startup_directives,
@@ -1472,6 +1487,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 node_voltages,
                 branch_currents,
                 device_report: device_report.map(rspice_core::circuit::DeviceOpReport::from),
+                checks: checks.into(),
             })),
             WorkerSimulationResult::DcSweep {
                 evidence,
@@ -1479,12 +1495,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 sweep_values,
                 waveforms,
                 measurements,
+                checks,
             } => Self::DcSweep {
                 evidence: evidence.map(std::sync::Arc::new),
                 sweep_var,
                 sweep_values,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
+                checks: checks.into(),
             },
             WorkerSimulationResult::Transient {
                 time,
@@ -1494,6 +1512,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 events,
                 spectra,
                 testbench_errors,
+                checks,
             } => Self::Transient {
                 time,
                 waveforms: waveform_map(waveforms),
@@ -1503,6 +1522,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 events: events.into(),
                 spectra: worker_recorded_fft::recorded_spectra(spectra),
                 hdl_output: testbench_errors,
+                checks: checks.into(),
             },
             WorkerSimulationResult::Fft {
                 spectrum,

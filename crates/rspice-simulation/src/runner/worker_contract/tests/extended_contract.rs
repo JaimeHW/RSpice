@@ -989,6 +989,7 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
         node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
         branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
         device_report: None,
+        checks: Default::default(),
     }));
 
     let restored = round_trip_result(result);
