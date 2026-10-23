@@ -6,13 +6,18 @@
 //! * **Combinational** (section 8.2): a continuous assignment of the output
 //!   from a selection over the table's rows, `x` when no row matches.
 //! * **Sequential** (sections 8.3-8.5): the state is a variable of the
-//!   instantiating module that one process updates in a loop, and a continuous
-//!   assignment drives the output from it. The process compares each input
-//!   with the value it last saw, one input at a time, so every change it acts
-//!   on is one edge on one input (section 8.4). It tries the level rows first,
-//!   which dominate (section 8.8), then that input's edge rows, and takes `x`
-//!   when neither matches. It compares before it first waits, so a change made
-//!   at time zero before it runs is still seen, as the `x` to value edge it is.
+//!   instantiating module, and a continuous assignment drives the output from
+//!   it. Each input has a process of its own that waits on that input alone
+//!   and compares it with the value the primitive last took from it, so every
+//!   change it acts on is one edge on one input (section 8.4). Two inputs that
+//!   change in one step wake their processes in the order the changes were
+//!   made, and each reads the other inputs as the primitive last took them,
+//!   which are the values they had when its own change arrived: an input
+//!   change is an event of its own, in turn (section 8.6). A process tries the
+//!   level rows first, which dominate (section 8.8), then its input's edge
+//!   rows, and takes `x` when neither matches. It compares before it first
+//!   waits, so a change made at time zero before it runs is still seen, as the
+//!   `x` to value edge it is.
 //!
 //! An input reads `z` as `x` (section 8.1.5), and `initial` (section 8.5)
 //! gives the state its starting value.
@@ -616,7 +621,8 @@ impl UdpDefinition {
     }
 
     /// The next state after input `changed` moved from `previous` to
-    /// `current`, the other inputs reading `seen`.
+    /// `current`, the other inputs reading `seen`: the values the primitive
+    /// took from them, every change delivered before this one included.
     fn next_state(
         &self,
         build: &Build,
@@ -839,13 +845,7 @@ fn instantiate(
         let state_value = build.name(&state);
         let current_value = build.name(&current);
         let seen_values: Vec<Expression> = seen.iter().map(|name| build.name(name)).collect();
-        let mut statements = Vec::new();
         for (k, input) in inputs.iter().enumerate() {
-            // `z` reads as `x`: `v ^ 1'b0` is `v` for a known value.
-            statements.push(build.assign(
-                &current,
-                build.binary(BinaryOp::BitXor, input.clone(), build.bit('0')),
-            ));
             let next = primitive.next_state(
                 &build,
                 k,
@@ -853,67 +853,72 @@ fn instantiate(
                 &seen_values,
                 &state_value,
             );
-            statements.push(DigitalStatement::Conditional(DigitalConditional {
-                condition: build.identical(current_value.clone(), seen_values[k].clone(), true),
-                then_branch: Box::new(build.block(vec![
-                    build.assign(&state, next),
-                    build.assign(&seen[k], current_value.clone()),
-                ])),
-                else_branch: None,
-                span,
-            }));
-        }
-        let terms: Vec<EventTerm> = inputs
-            .iter()
-            .filter(|input| !is_literal(input))
-            .map(|input| EventTerm {
-                edge: None,
-                signal: input.clone(),
-                span,
-            })
-            .collect();
-        let mut body = Vec::new();
-        // The `initial` value is set as an inactive event at time zero, after
-        // every process has started (section 8.5), so one waiting on the
-        // output sees it arrive, as Icarus Verilog schedules it.
-        if let Some(value) = primitive.initial {
-            body.push(DigitalStatement::Timing(DigitalTiming {
-                control: TimingControl::Delay(DelayControl {
-                    value: Expression::Number(NumberLit {
-                        value: 0.0,
-                        raw: "0".into(),
+            let statements = vec![
+                // `z` reads as `x`: `v ^ 1'b0` is `v` for a known value.
+                build.assign(
+                    &current,
+                    build.binary(BinaryOp::BitXor, input.clone(), build.bit('0')),
+                ),
+                DigitalStatement::Conditional(DigitalConditional {
+                    condition: build.identical(current_value.clone(), seen_values[k].clone(), true),
+                    then_branch: Box::new(build.block(vec![
+                        build.assign(&state, next),
+                        build.assign(&seen[k], current_value.clone()),
+                    ])),
+                    else_branch: None,
+                    span,
+                }),
+            ];
+            let mut body = Vec::new();
+            // The `initial` value is set as an inactive event at time zero,
+            // after every process has started (section 8.5), so one waiting on
+            // the output sees it arrive, as Icarus Verilog schedules it. Every
+            // input's process waits for it, so the first changes they compare
+            // still meet the state it sets, in input order.
+            if let Some(value) = primitive.initial {
+                body.push(DigitalStatement::Timing(DigitalTiming {
+                    control: TimingControl::Delay(DelayControl {
+                        value: Expression::Number(NumberLit {
+                            value: 0.0,
+                            raw: "0".into(),
+                            span,
+                        }),
                         span,
                     }),
+                    statement: (k == 0).then(|| Box::new(build.assign(&state, build.bit(value)))),
                     span,
-                }),
-                statement: Some(Box::new(build.assign(&state, build.bit(value)))),
-                span,
-            }));
-        }
-        if terms.is_empty() {
-            body.extend(statements);
-        } else {
-            statements.push(DigitalStatement::Timing(DigitalTiming {
-                control: TimingControl::Event(EventControl {
-                    repeat: None,
-                    sensitivity: Sensitivity::Explicit(terms),
+                }));
+            }
+            if is_literal(input) {
+                body.extend(statements);
+            } else {
+                let mut statements = statements;
+                statements.push(DigitalStatement::Timing(DigitalTiming {
+                    control: TimingControl::Event(EventControl {
+                        repeat: None,
+                        sensitivity: Sensitivity::Explicit(vec![EventTerm {
+                            edge: None,
+                            signal: input.clone(),
+                            span,
+                        }]),
+                        span,
+                    }),
+                    statement: None,
                     span,
-                }),
-                statement: None,
+                }));
+                body.push(DigitalStatement::Forever(DigitalForever {
+                    body: Box::new(build.block(statements)),
+                    span,
+                }));
+            }
+            module.digital_processes.push(DigitalProcess {
+                id: DigitalProcessId(*next_process),
+                kind: DigitalProcessKind::Initial,
+                body: build.block(body),
                 span,
-            }));
-            body.push(DigitalStatement::Forever(DigitalForever {
-                body: Box::new(build.block(statements)),
-                span,
-            }));
+            });
+            *next_process += 1;
         }
-        module.digital_processes.push(DigitalProcess {
-            id: DigitalProcessId(*next_process),
-            kind: DigitalProcessKind::Initial,
-            body: build.block(body),
-            span,
-        });
-        *next_process += 1;
         state_value
     } else {
         primitive.combinational(&build, &inputs)
