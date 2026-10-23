@@ -1758,7 +1758,8 @@ pub(super) fn parse_pspice_u_device(
                 "the PSpice U-device '{name}' is an FSTIM, which replays a PSpice stimulus \
                  file, a format RSpice does not read; write the waveform as a VCD file and \
                  replay it with a d_vcd code model (.model <name> d_vcd (file=\"...\" \
-                 signals=\"...\")), or inline it as a STIM U-device"
+                 signals=\"...\")), write it as an HSPICE vector file and drive it with a \
+                 .VEC card (.vec '<file>'), or inline it as a STIM U-device"
             ),
         }),
         _ => Err(ParseError::Syntax {

@@ -232,8 +232,11 @@ fn a_pspice_file_stimulus_is_refused_naming_the_vcd_stimulus_instead() {
     assert_eq!(*capability, "netlist.pspice.u.fstim");
     assert_eq!(origin.line, 3, "the refusal must name the authoring line");
     assert!(
-        detail.contains("'U1'") && detail.contains("FSTIM") && detail.contains("d_vcd"),
-        "the refusal must name the device and the d_vcd alternative: {detail}"
+        detail.contains("'U1'")
+            && detail.contains("FSTIM")
+            && detail.contains("d_vcd")
+            && detail.contains(".VEC card (.vec '<file>')"),
+        "the refusal must name the device and the d_vcd and .VEC alternatives: {detail}"
     );
 }
 
