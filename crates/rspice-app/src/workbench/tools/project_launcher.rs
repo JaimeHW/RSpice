@@ -28,13 +28,13 @@ use crate::ui::widgets::{
 };
 use crate::workbench::RSpiceApp;
 
+use crate::workbench::app_state::services_access::open_comparison;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, painted_label};
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
-    discard_checkpoint, open_comparison, open_diagnostics_folder,
-    recovery_replacement_block_reason, refresh_catalog_if_requested, software_rendering_supported,
-    start_local_safe_mode,
+    discard_checkpoint, open_diagnostics_folder, recovery_replacement_block_reason,
+    refresh_catalog_if_requested, software_rendering_supported,
 };
 use crate::workbench::state::{
     ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort, Workspace,
@@ -314,7 +314,11 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
         return;
     }
 
-    refresh_catalog_if_requested(app);
+    refresh_catalog_if_requested(
+        &mut app.state.platform,
+        &app.state.model,
+        app.file_workflow_io.as_ref(),
+    );
 
     let screen = ctx.content_rect();
     let layout = LauncherLayout::resolve(screen);
@@ -480,29 +484,34 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     app.state.platform.recovery_catalog.request_refresh();
                 }
             }
-            LauncherAction::Recover(candidate) => match open_comparison(app, &candidate) {
+            LauncherAction::Recover(candidate) => match open_comparison(&mut app.state, &candidate)
+            {
                 Ok(()) => dismiss_launcher(app),
                 Err(error) => app.state.platform.recovery_catalog.warning(error),
             },
             LauncherAction::RequestDiscard(candidate) => {
                 app.state.platform.recovery_catalog.pending_discard = Some(candidate);
             }
-            LauncherAction::OpenDiagnosticsFolder => match open_diagnostics_folder(&app.state) {
-                Ok(path) => app
-                    .state
-                    .prompt(format!("Opened diagnostic folder: {}", path.display())),
-                Err(error) => {
-                    app.state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Diagnostic folder could not be opened: {error}"),
-                    );
+            LauncherAction::OpenDiagnosticsFolder => {
+                match open_diagnostics_folder(&app.state.model, &app.state.platform) {
+                    Ok(path) => app
+                        .state
+                        .prompt(format!("Opened diagnostic folder: {}", path.display())),
+                    Err(error) => {
+                        app.state.record(
+                            LogSeverity::Error,
+                            LogSource::Studio,
+                            format!("Diagnostic folder could not be opened: {error}"),
+                        );
+                    }
                 }
-            },
-            LauncherAction::StartSafeMode(options) => match start_local_safe_mode(app, options) {
-                Ok(()) => app.state.project.project_launcher_open = false,
-                Err(error) => app.state.platform.recovery_catalog.warning(error),
-            },
+            }
+            LauncherAction::StartSafeMode(options) => {
+                match start_local_safe_mode(&mut app.state, options) {
+                    Ok(()) => app.state.project.project_launcher_open = false,
+                    Err(error) => app.state.platform.recovery_catalog.warning(error),
+                }
+            }
         }
     }
     if !app.state.project.project_launcher_open {

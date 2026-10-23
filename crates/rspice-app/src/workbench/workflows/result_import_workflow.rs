@@ -1135,7 +1135,7 @@ mod tests {
         let mut state = AppState::default();
         let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("project snapshot");
-        crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+        crate::workbench::app_state::services_access::accept_loaded_project(
             &mut state, baseline, None,
         );
         state

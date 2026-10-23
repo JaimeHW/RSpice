@@ -24,12 +24,10 @@ use crate::state::{
     Cell, CellViewRef, Library, LibraryManager, OpenCellView, ProjectWorkspace, SchematicState,
     View, ViewType,
 };
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{Model, PlatformState, SimSetupState};
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 use crate::state::write_policy::LocalSafeModeOptions;
-use crate::workbench::state::Workspace;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::recovery_checkpoint::{
@@ -166,42 +164,35 @@ impl RecoveryCatalog {
 
 /// Refresh once when the launcher opens, enters Recovery, or completes a
 /// destructive checkpoint action. Parsing never occurs in every paint frame.
-pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
-    if !app.state.platform.recovery_catalog.refresh_requested {
+pub(crate) fn refresh_catalog_if_requested(
+    platform: &mut PlatformState,
+    model: &Model,
+    io: &(impl FileWorkflowIo + ?Sized),
+) {
+    if !platform.recovery_catalog.refresh_requested {
         return;
     }
 
-    let source_paths = app
-        .state
-        .platform
+    let source_paths = platform
         .recent_files
         .iter()
         .filter(|recent| recent.kind == RecentKind::Schematic)
         .map(|recent| recent.path.clone())
         .collect::<Vec<_>>();
-    let mut live_paths = app
-        .state
-        .model
+    let mut live_paths = model
         .workspace
         .content
         .schematic_buffers
         .keys()
-        .filter_map(|key| {
-            app.state
-                .model
-                .workspace
-                .session
-                .schematic_sessions
-                .get(key)
-        })
+        .filter_map(|key| model.workspace.session.schematic_sessions.get(key))
         .filter_map(|session| session.current_file.clone())
         .collect::<Vec<_>>();
-    if let Some(path) = app.state.model.schematic.session.current_file.clone() {
+    if let Some(path) = model.schematic.session.current_file.clone() {
         live_paths.push(path);
     }
 
-    let candidates = discover_candidates(&source_paths, &live_paths, app.file_workflow_io.as_ref());
-    let catalog = &mut app.state.platform.recovery_catalog;
+    let candidates = discover_candidates(&source_paths, &live_paths, io);
+    let catalog = &mut platform.recovery_catalog;
     let previous = catalog.selected_checkpoint.clone();
     catalog.candidates = candidates;
     catalog.selected_checkpoint = previous
@@ -533,9 +524,9 @@ fn matches_documented_pristine_plan(
 }
 
 fn pristine_execution_context(
-    identity_source: &crate::workbench::app_state::SimSetupState,
+    identity_source: &SimSetupState,
 ) -> Result<ProjectExecutionContext, String> {
-    let mut pristine = crate::workbench::app_state::SimSetupState::new();
+    let mut pristine = SimSetupState::new();
     let source_plan = identity_source.stable_analysis_plan().ok();
     let documented_plan = pristine.stable_analysis_plan().ok();
     if source_plan
@@ -554,45 +545,42 @@ fn pristine_execution_context(
     .map_err(|error| format!("pristine simulation/model state is invalid: {error}"))
 }
 
-fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences, String> {
-    let current_execution = crate::io::capture_execution_context(
-        &state.model.sim_setup,
-        &state.model.model_library_manager,
-    )
-    .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
+fn project_owned_differences(model: &Model) -> Result<ProjectOwnedDifferences, String> {
+    let current_execution =
+        crate::io::capture_execution_context(&model.sim_setup, &model.model_library_manager)
+            .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
     let current_execution = canonical_execution_context(&current_execution)?;
 
-    let current_results = crate::io::capture_simulation_results(&state.model.simulation);
+    let current_results = crate::io::capture_simulation_results(&model.simulation);
     current_results
         .validate()
         .map_err(|error| format!("current simulation results are invalid: {error}"))?;
 
-    let (saved_execution, saved_results) =
-        if let Some(project_path) = state.model.workspace.content.project.path.as_deref() {
-            let project = crate::io::load_project_file(project_path).map_err(|error| {
-                format!(
-                    "saved project snapshot '{}' could not be loaded: {error}",
-                    project_path.display()
-                )
-            })?;
-            if let Some(warning) = project.file.simulation_results_warning.as_deref() {
-                return Err(format!(
-                    "saved project result snapshot could not be verified: {warning}"
-                ));
-            }
-            let execution = match project.file.execution_context.as_ref() {
-                Some(context) => canonical_execution_context(context)?,
-                None => canonical_execution_context(&pristine_execution_context(
-                    &state.model.sim_setup,
-                )?)?,
-            };
-            (execution, project.file.simulation_results)
-        } else {
-            (
-                canonical_execution_context(&pristine_execution_context(&state.model.sim_setup)?)?,
-                ProjectSimulationResults::default(),
+    let (saved_execution, saved_results) = if let Some(project_path) =
+        model.workspace.content.project.path.as_deref()
+    {
+        let project = crate::io::load_project_file(project_path).map_err(|error| {
+            format!(
+                "saved project snapshot '{}' could not be loaded: {error}",
+                project_path.display()
             )
+        })?;
+        if let Some(warning) = project.file.simulation_results_warning.as_deref() {
+            return Err(format!(
+                "saved project result snapshot could not be verified: {warning}"
+            ));
+        }
+        let execution = match project.file.execution_context.as_ref() {
+            Some(context) => canonical_execution_context(context)?,
+            None => canonical_execution_context(&pristine_execution_context(&model.sim_setup)?)?,
         };
+        (execution, project.file.simulation_results)
+    } else {
+        (
+            canonical_execution_context(&pristine_execution_context(&model.sim_setup)?)?,
+            ProjectSimulationResults::default(),
+        )
+    };
 
     Ok(ProjectOwnedDifferences {
         execution_or_models: current_execution != saved_execution,
@@ -603,21 +591,21 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
 /// Explain why replacing the active project with a recovery comparison would
 /// destroy state that cannot be reconstructed from its saved project (or from
 /// the documented pristine state of an unsaved project).
-pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<String> {
-    if state.model.schematic.session.is_dirty || state.model.workspace.any_dirty() {
+pub(crate) fn recovery_replacement_block_reason(model: &Model) -> Option<String> {
+    if model.schematic.session.is_dirty || model.workspace.any_dirty() {
         return Some(
             "Recovery comparison is blocked because the current design has unsaved changes. Save or close the current project before opening recovery work."
                 .to_owned(),
         );
     }
-    if state.model.simulation.execution.has_active_execution() {
+    if model.simulation.execution.has_active_execution() {
         return Some(
             "Recovery comparison is blocked because a simulation run is active. Stop the run, then save or close the current project before opening recovery work."
                 .to_owned(),
         );
     }
 
-    let differences = match project_owned_differences(state) {
+    let differences = match project_owned_differences(model) {
         Ok(differences) => differences,
         Err(error) => {
             return Some(format!(
@@ -636,7 +624,7 @@ pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<Stri
     if differences.results {
         changed.push("simulation result history or selection");
     }
-    let baseline = if state.model.workspace.content.project.path.is_some() {
+    let baseline = if model.workspace.content.project.path.is_some() {
         "the last saved project snapshot"
     } else {
         "pristine unsaved-project defaults"
@@ -647,13 +635,23 @@ pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<Stri
     ))
 }
 
+/// A recovery comparison read and built, ready to replace the open work, with
+/// the note about its baseline to log once it has.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn open_comparison(
-    app: &mut RSpiceApp,
+pub(crate) struct PreparedComparison {
+    workspace: ComparisonWorkspace,
+    baseline_notice: Option<String>,
+}
+
+/// Read a recovery checkpoint and build the comparison it opens as, refusing
+/// when opening it would destroy work the open project cannot rebuild.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn prepare_comparison(
+    model: &Model,
     candidate: &RecoveryCandidate,
-) -> Result<(), String> {
+) -> Result<PreparedComparison, String> {
     validate_candidate_path(candidate)?;
-    if let Some(reason) = recovery_replacement_block_reason(&app.state) {
+    if let Some(reason) = recovery_replacement_block_reason(model) {
         return Err(reason);
     }
 
@@ -679,33 +677,37 @@ pub(crate) fn open_comparison(
             Some(format!("Saved recovery baseline is unavailable: {error}")),
         ),
     };
-    let comparison = build_comparison_workspace(&candidate.display_name, baseline, recovered)?;
-
-    app.state.replace_project_execution_context(format!(
-        "Opened recovery comparison for '{}'; the saved project and checkpoint are unchanged.",
-        candidate.display_name
-    ));
-    app.state.model.library_manager = comparison.libraries;
-    app.state.model.workspace = comparison.workspace;
-    app.state.model.schematic = comparison.active;
-    app.state.bump_active_schematic_epoch();
-    app.state.model.sim_setup = crate::workbench::app_state::SimSetupState::new();
-    app.state.model.model_library_manager =
-        crate::workbench::app_state::default_model_library_manager();
-    app.state.workbench.activate(Workspace::Design);
-    if let Some(notice) = baseline_notice {
-        app.state
-            .record(LogSeverity::Warning, LogSource::Studio, notice);
-    }
-    Ok(())
+    let workspace = build_comparison_workspace(&candidate.display_name, baseline, recovered)?;
+    Ok(PreparedComparison {
+        workspace,
+        baseline_notice,
+    })
 }
 
+/// Put the comparison's libraries, workspace and design in place of the open
+/// ones, and hand back the note about its baseline.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn install_comparison_design(
+    model: &mut Model,
+    comparison: PreparedComparison,
+) -> Option<String> {
+    model.library_manager = comparison.workspace.libraries;
+    model.workspace = comparison.workspace.workspace;
+    model.schematic = comparison.workspace.active;
+    comparison.baseline_notice
+}
+
+/// A comparison runs on the pristine simulation plan and model libraries.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn reset_comparison_execution(model: &mut Model) {
+    model.sim_setup = SimSetupState::new();
+    model.model_library_manager = crate::workbench::app_state::default_model_library_manager();
+}
+
+/// Why a recovery comparison cannot open here.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn open_comparison(
-    _app: &mut RSpiceApp,
-    _candidate: &RecoveryCandidate,
-) -> Result<(), String> {
-    Err("Native recovery checkpoints are unavailable in this browser".to_owned())
+pub(crate) fn comparison_unavailable() -> String {
+    "Native recovery checkpoints are unavailable in this browser".to_owned()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -836,14 +838,13 @@ pub(crate) fn discard_checkpoint(candidate: &RecoveryCandidate) -> Result<String
     }
 }
 
-/// Enter the safe-mode subset the current runtime can enforce. The exact
-/// pre-safe-mode session is serialized before any state is replaced and is
-/// used by AppState persistence until this process exits.
-pub(crate) fn start_local_safe_mode(
-    app: &mut RSpiceApp,
+/// Refuse a safe-mode start this launch cannot honour: one already started,
+/// one isolating nothing, or one asking for a renderer that cannot change now.
+pub(crate) fn check_safe_mode_start(
+    model: &Model,
     options: LocalSafeModeOptions,
 ) -> Result<(), String> {
-    if app.state.model.safe_mode.active {
+    if model.safe_mode.active {
         return Err("Safe mode is already active for this launch".to_owned());
     }
     if !options.has_effect() {
@@ -855,32 +856,24 @@ pub(crate) fn start_local_safe_mode(
                 .to_owned(),
         );
     }
+    Ok(())
+}
 
-    app.state.sync_active_schematic_to_workspace();
-    let preserved_session = serde_json::to_string(&app.state)
-        .map_err(|error| format!("The current session could not be protected: {error}"))?;
-
-    if options.isolate_prior_documents && app.state.platform.project_lifecycle.is_open() {
-        if !crate::workbench::workflows::project_workflow::close_project_discard(
-            &mut app.state,
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
-        ) {
-            return Err("The current project could not be isolated safely".to_owned());
-        }
-    } else if options.isolate_prior_documents {
-        app.state.project.project_launcher_open = false;
-    }
-    if options.reset_layout {
-        app.state.workbench.reset_layout();
-    }
-    app.state
-        .model
-        .safe_mode
-        .activate(options, preserved_session);
+/// Hold the session kept from before safe mode, which persistence uses until
+/// this process exits, and block project writes when asked.
+pub(crate) fn activate_safe_mode(
+    model: &mut Model,
+    options: LocalSafeModeOptions,
+    preserved_session: String,
+) {
+    model.safe_mode.activate(options, preserved_session);
     if options.open_project_read_only {
-        app.state.model.schematic.session.read_only = true;
+        model.schematic.session.read_only = true;
     }
-    app.state.workbench.activate(Workspace::Project);
+}
+
+/// Say which isolations safe mode enforces for this launch.
+pub(crate) fn record_safe_mode_started(model: &mut Model, options: LocalSafeModeOptions) {
     let mut enforced = Vec::new();
     if options.disable_third_party_extensions {
         enforced.push("third-party extensions disabled");
@@ -897,7 +890,7 @@ pub(crate) fn start_local_safe_mode(
     if options.open_project_read_only {
         enforced.push("project writes blocked");
     }
-    app.state.record(
+    model.record(
         LogSeverity::Warning,
         LogSource::Studio,
         format!(
@@ -905,7 +898,6 @@ pub(crate) fn start_local_safe_mode(
             enforced.join(", ")
         ),
     );
-    Ok(())
 }
 
 /// eframe chooses its adapter before the application and launcher are created.
@@ -945,11 +937,11 @@ pub(crate) fn diagnostics_directory() -> Option<PathBuf> {
     not(target_arch = "wasm32"),
     any(target_os = "windows", target_os = "macos", target_os = "linux")
 ))]
-fn session_log_text(state: &AppState, home: Option<&str>) -> String {
+fn session_log_text(model: &Model, home: Option<&str>) -> String {
     use std::fmt::Write as _;
 
     let mut text = String::new();
-    for entry in state.model.log_buffer.entries() {
+    for entry in model.log_buffer.entries() {
         writeln!(
             text,
             "{} [{}] [{}] {}",
@@ -965,7 +957,10 @@ fn session_log_text(state: &AppState, home: Option<&str>) -> String {
 
 /// Write an explicit, privacy-reviewable diagnostic snapshot and reveal its
 /// directory using the host desktop's file-manager API.
-pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, String> {
+pub(crate) fn open_diagnostics_folder(
+    model: &Model,
+    platform: &PlatformState,
+) -> Result<PathBuf, String> {
     #[cfg(all(
         not(target_arch = "wasm32"),
         any(target_os = "windows", target_os = "macos", target_os = "linux")
@@ -996,18 +991,18 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
             std::env::consts::ARCH
         )
         .expect("String writes cannot fail");
-        writeln!(snapshot, "safe_mode={}", state.model.safe_mode.active)
+        writeln!(snapshot, "safe_mode={}", model.safe_mode.active)
             .expect("String writes cannot fail");
         writeln!(
             snapshot,
             "project_open={}",
-            state.platform.project_lifecycle.is_open()
+            platform.project_lifecycle.is_open()
         )
         .expect("String writes cannot fail");
         writeln!(snapshot).expect("String writes cannot fail");
         writeln!(snapshot, "Session log").expect("String writes cannot fail");
         snapshot.push_str(&session_log_text(
-            state,
+            model,
             crate::diagnostics::home_directory().as_deref(),
         ));
 
@@ -1028,7 +1023,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
         any(target_os = "windows", target_os = "macos", target_os = "linux")
     )))]
     {
-        let _ = state;
+        let _ = (model, platform);
         Err("Opening a diagnostic folder is unavailable on this platform".to_owned())
     }
 }
@@ -1073,6 +1068,7 @@ mod tests {
         Component, ComponentType, DocumentationShape, DocumentationShapeGeometry, Junction,
         NetLabel, Point, Wire,
     };
+    use crate::workbench::app_state::AppState;
 
     /// The diagnostic folder is as private as the support bundle.
     #[test]
@@ -1088,7 +1084,7 @@ mod tests {
             r"Opened project amp (C:\Users\James\designs\amp.rspiceproj).",
         );
 
-        let text = session_log_text(&state, Some(r"C:\Users\James"));
+        let text = session_log_text(&state.model, Some(r"C:\Users\James"));
 
         assert!(
             text.trim_end()
@@ -1223,7 +1219,7 @@ mod tests {
     #[test]
     fn replacement_guard_blocks_nondefault_unsaved_execution_and_results() {
         let pristine = AppState::default();
-        assert_eq!(recovery_replacement_block_reason(&pristine), None);
+        assert_eq!(recovery_replacement_block_reason(&pristine.model), None);
 
         let mut changed_plan = pristine.clone();
         let transient = changed_plan
@@ -1245,7 +1241,7 @@ mod tests {
                 draft.stop = "25u".to_owned();
             })
             .expect("transient edit commits");
-        let reason = recovery_replacement_block_reason(&changed_plan)
+        let reason = recovery_replacement_block_reason(&changed_plan.model)
             .expect("changed unsaved simulation plan must block replacement");
         assert!(reason.contains("simulation plan or model-library bindings"));
         assert!(reason.contains("pristine unsaved-project defaults"));
@@ -1261,7 +1257,7 @@ mod tests {
             .expect("synthetic historical result has valid unattributed legacy provenance");
         changed_results.model.simulation.retained.runs.push(run);
         changed_results.model.simulation.retained.next_run_id = 1;
-        let reason = recovery_replacement_block_reason(&changed_results)
+        let reason = recovery_replacement_block_reason(&changed_results.model)
             .expect("unsaved result history must block replacement");
         assert!(reason.contains("simulation result history or selection"));
     }
@@ -1295,7 +1291,7 @@ mod tests {
         };
         assert_eq!(draft.stop, "41u");
 
-        let reason = recovery_replacement_block_reason(&restored)
+        let reason = recovery_replacement_block_reason(&restored.model)
             .expect("a nondefault initial draft must block destructive replacement");
         assert!(reason.contains("simulation plan or model-library bindings"));
         assert!(reason.contains("pristine unsaved-project defaults"));
@@ -1313,7 +1309,7 @@ mod tests {
                 &project_path
             )
         );
-        assert_eq!(recovery_replacement_block_reason(&state), None);
+        assert_eq!(recovery_replacement_block_reason(&state.model), None);
 
         let transient = state
             .model
@@ -1334,7 +1330,7 @@ mod tests {
                 draft.stop = "17u".to_owned();
             })
             .expect("transient edit commits");
-        let reason = recovery_replacement_block_reason(&state)
+        let reason = recovery_replacement_block_reason(&state.model)
             .expect("execution state changed after save must block replacement");
         assert!(reason.contains("last saved project snapshot"));
         assert!(reason.contains("simulation plan or model-library bindings"));

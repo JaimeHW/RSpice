@@ -806,7 +806,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
     ("documents/result_document", "app_state", 36),
-    ("lifecycle/recovery", "app_state", 6),
+    ("lifecycle/recovery", "app_state", 4),
     ("documents/netlist_document", "app_state", 2),
     ("lifecycle/project_lifecycle", "app_state", 3),
     ("hardcopy_adapters/sources", "app_state", 2),
@@ -815,8 +815,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // gating methods that query a module above; `-> app` also counts the
     // session wire naming the bulk-edit filters it keeps, which live with the
     // dialog that edits them. `-> slots` is the feature slots the state
-    // holds, and the session wire and preferences file reading what they
-    // keep of them; slots rank with the dialog types they name.
+    // holds, the platform state it names for the services below it, and the
+    // session wire reading what it keeps of them; slots rank with the dialog
+    // types they name.
     ("app_state", "app", 4),
     ("app_state", "slots", 3),
     ("app_state", "workflows/file_workflow", 1),
@@ -827,7 +828,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/code_workspace", "app", 5),
     ("documents/model_editor", "app", 1),
     ("documents/result_document", "app", 3),
-    ("lifecycle/recovery", "app", 1),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
@@ -881,7 +881,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ),
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
-    ("lifecycle/recovery", "workflows/project_workflow", 2),
+    ("lifecycle/recovery", "workflows/project_workflow", 1),
     // The live-session engine closes the project through the project
     // workflow, which ranks above the application that owns the engine.
     ("live_session", "workflows/project_workflow", 5),

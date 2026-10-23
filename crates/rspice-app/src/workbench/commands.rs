@@ -500,8 +500,9 @@ impl Command {
         }
         // Both guards are also `is_enabled`'s, so the command is drawn
         // disabled and a shortcut for it is silent, as in any desktop app.
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
-            && self.blocked_by_project_operation()
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(
+            &app.state.platform,
+        ) && self.blocked_by_project_operation()
         {
             return;
         }

@@ -108,7 +108,7 @@ impl RecoverySnapshot {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn storage_location(state: &AppState) -> String {
-    crate::workbench::lifecycle::project_checkpoint::storage_location(state)
+    crate::workbench::lifecycle::project_checkpoint::storage_location(&state.model)
         .map_or_else(|error| error, |path| path.display().to_string())
 }
 
@@ -677,7 +677,7 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let result = crate::workbench::lifecycle::project_checkpoint::list(state);
+        let result = crate::workbench::lifecycle::project_checkpoint::list(&state.model);
         let recovery = &mut state.project.project_checkpoint_recovery;
         recovery.initialized = true;
         match result {
@@ -698,7 +698,7 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
         state.project.project_checkpoint_recovery.loading = true;
         let queued_project_id = project_id;
         let repaint = ctx.clone();
-        crate::workbench::lifecycle::project_checkpoint::start_list(state, move |result| {
+        crate::workbench::lifecycle::project_checkpoint::start_list(&state.model, move |result| {
             BROWSER_RECOVERY_CATALOG_COMPLETIONS.with(|queue| {
                 queue
                     .borrow_mut()

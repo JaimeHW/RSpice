@@ -8,7 +8,7 @@
 //! application holds it inline, so moving a state carries what it carried
 //! before these fields were gathered here.
 
-use crate::state::notices::NoticeQueue;
+use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
 
 use super::design_history::ProjectDesignHistory;
@@ -130,6 +130,37 @@ impl Model {
     pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
         self.preferences
             .folders(crate::workbench::FolderListPreference::LibraryFolders)
+    }
+
+    /// Report a failure of something the user asked for, as
+    /// [`AppState::report_failure`](super::AppState::report_failure) states it.
+    pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.report(NoticeKind::Error, title.into(), detail.into());
+    }
+
+    /// Report something that completed, but not the way the user asked, as
+    /// [`AppState::report_warning`](super::AppState::report_warning) states it.
+    pub(crate) fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.report(NoticeKind::Warning, title.into(), detail.into());
+    }
+
+    /// The line is written first, so its identity is the one the toast offers;
+    /// the toast itself is raised by the shell's next
+    /// [`AppState::drain_notices`](super::AppState::drain_notices).
+    fn report(&mut self, kind: NoticeKind, title: String, detail: String) {
+        use crate::diagnostics::{LogSeverity, LogSource};
+
+        let severity = match kind {
+            NoticeKind::Error => LogSeverity::Error,
+            NoticeKind::Warning => LogSeverity::Warning,
+        };
+        let log_id = self.record(severity, LogSource::Studio, format!("{title}: {detail}"));
+        self.notices.push(Notice {
+            kind,
+            title,
+            detail,
+            log_id,
+        });
     }
 }
 

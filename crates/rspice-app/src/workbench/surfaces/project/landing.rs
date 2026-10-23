@@ -59,7 +59,11 @@ enum LandingAction {
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    crate::workbench::lifecycle::recovery::refresh_catalog_if_requested(app);
+    crate::workbench::lifecycle::recovery::refresh_catalog_if_requested(
+        &mut app.state.platform,
+        &app.state.model,
+        app.file_workflow_io.as_ref(),
+    );
 
     let mut action = None;
     egui::Frame::new()

@@ -848,9 +848,11 @@ fn netlist_transactions_keep_an_export_in_flight() {
 #[cfg(not(target_arch = "wasm32"))]
 fn reverting_a_document_keeps_an_export_in_flight() {
     use crate::state::{Point, Wire};
+    use crate::workbench::app_state::services_access::{
+        accept_loaded_project, confirm_revert_active_document,
+    };
     use crate::workbench::lifecycle::project_lifecycle::{
-        accept_loaded_project, confirm_revert_active_document, prepare_revert_active_document,
-        snapshot,
+        prepare_revert_active_document, snapshot,
     };
 
     let mut app = export_open_on_a_netlist_owned_project();

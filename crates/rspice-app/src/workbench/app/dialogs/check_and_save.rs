@@ -456,7 +456,8 @@ impl RSpiceApp {
         if original_journal.is_empty()
             && let Some(accepted) =
                 crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(
-                    &self.state,
+                    &self.state.model,
+                    &self.state.platform,
                 )
             && let Err(error) = self.state.model.schematic.seed_accepted_revision_baseline(
                 &accepted,

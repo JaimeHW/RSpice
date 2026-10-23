@@ -502,9 +502,7 @@ fn generated_fst() -> Vec<u8> {
 fn event_source_fst_import_keeps_detected_format_through_project_reload() {
     let mut state = AppState::default();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
-        &mut state, project, None,
-    );
+    crate::workbench::app_state::services_access::accept_loaded_project(&mut state, project, None);
     apply_imported_result_dataset(&mut state, "capture.fst", &generated_fst()).unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();

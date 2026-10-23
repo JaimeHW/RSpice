@@ -135,7 +135,7 @@ mod tests {
         let prepared = encode_result_vcd(&analysis).unwrap();
         let mut state = AppState::default();
         let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-        crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+        crate::workbench::app_state::services_access::accept_loaded_project(
             &mut state, baseline, None,
         );
         stage_imported_result_dataset(&mut state, "roundtrip.vcd", &prepared.bytes).unwrap();

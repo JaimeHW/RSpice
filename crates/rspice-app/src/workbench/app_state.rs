@@ -29,6 +29,7 @@ mod run_access;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod schematic_preferences;
+pub(crate) mod services_access;
 pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;
 #[cfg(test)]
@@ -40,10 +41,10 @@ pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
-use crate::state::notices::{Notice, NoticeKind};
+use crate::state::notices::NoticeKind;
 use crate::workbench::slots::{
-    CloudState, CodeState, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState,
-    ResultsState, RunsState, SettingsState, SheetsState, ShellState, SimulateState,
+    CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
+    RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
@@ -57,6 +58,8 @@ pub(crate) use diagnostic_store::DiagnosticStore;
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
 pub(crate) use model::{Model, SlotFacts};
+// The platform services' own state, which they name beside the model.
+pub(in crate::workbench) use crate::workbench::slots::PlatformState;
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
@@ -1011,13 +1014,13 @@ impl AppState {
     /// export. The Console keeps the line; the toast says it now and offers
     /// that line, so the mirrored copy of it is the same notice, not another.
     pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.report(NoticeKind::Error, title.into(), detail.into());
+        self.model.report_failure(title, detail);
     }
 
     /// [`Self::report_failure`] for something that completed, but not the way
     /// the user asked: saved as a download, not kept for the next session.
     pub(crate) fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.report(NoticeKind::Warning, title.into(), detail.into());
+        self.model.report_warning(title, detail);
     }
 
     /// Bring the reader to the findings a pass or a check just filed: the
@@ -1029,24 +1032,6 @@ impl AppState {
         self.workbench.console_visible = true;
         self.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
         self.problems_view.clear_filters();
-    }
-
-    /// The line is written first, so its identity is the one the toast offers;
-    /// the toast itself is raised by the shell's next [`Self::drain_notices`].
-    fn report(&mut self, kind: NoticeKind, title: String, detail: String) {
-        use crate::diagnostics::{LogSeverity, LogSource};
-
-        let severity = match kind {
-            NoticeKind::Error => LogSeverity::Error,
-            NoticeKind::Warning => LogSeverity::Warning,
-        };
-        let log_id = self.record(severity, LogSource::Studio, format!("{title}: {detail}"));
-        self.model.notices.push(Notice {
-            kind,
-            title,
-            detail,
-            log_id,
-        });
     }
 
     /// Raise every reported notice as a toast, in the order reported.
@@ -1371,7 +1356,7 @@ mod tests {
             .expect("attach project variable to active plan");
         let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("valid callback baseline");
-        crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+        crate::workbench::app_state::services_access::accept_loaded_project(
             &mut state, baseline, None,
         );
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));

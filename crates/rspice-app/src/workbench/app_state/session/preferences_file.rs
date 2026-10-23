@@ -34,8 +34,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::time_compat::Instant;
 use crate::ui::Theme;
-use crate::workbench::app_state::AppState;
-use crate::workbench::slots::PlatformState;
+use crate::workbench::app_state::{AppState, PlatformState};
 use crate::workbench::{UserPreferences, WorkbenchSession};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

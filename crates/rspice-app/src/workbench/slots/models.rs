@@ -63,4 +63,10 @@ impl ModelsState {
         self.model_editor = crate::workbench::documents::model_editor::ModelEditorState::default();
         self.model_editor_recovery = None;
     }
+
+    /// The open project is being replaced or closed: the model editor and its
+    /// recovery copy belong to the project going away.
+    pub(crate) fn on_project_changed(&mut self) {
+        self.clear_project_model_editor();
+    }
 }

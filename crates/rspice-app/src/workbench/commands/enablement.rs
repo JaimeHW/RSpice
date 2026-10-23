@@ -7,7 +7,7 @@ use super::*;
 impl Command {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
             && self.blocked_by_project_operation()
         {
             return false;

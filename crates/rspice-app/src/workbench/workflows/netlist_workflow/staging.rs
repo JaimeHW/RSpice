@@ -228,7 +228,7 @@ pub(super) fn stage_netlist_import(
     };
 
     if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
         record_import_failure(
             state,
             &format!(
@@ -242,7 +242,7 @@ pub(super) fn stage_netlist_import(
         state,
         transaction,
     ) {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
         state.prompt(format!(
             "{} was cancelled because the project changed: {error}",
             mode.dialog_title()
@@ -262,7 +262,7 @@ pub(super) fn stage_netlist_import(
     let (source, encoding) = match decode_import_bytes(&bytes) {
         Ok(decoded) => decoded,
         Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
             record_import_failure(state, &error);
             return false;
         }
@@ -667,7 +667,7 @@ pub(super) fn stage_netlist_bundle_import(
     let bundle = match parse_generated_netlist_bundle(&bytes) {
         Ok(bundle) => bundle,
         Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
             state.record(
                 LogSeverity::Error,
                 LogSource::Netlist,
@@ -1018,7 +1018,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
         }
     };
     let mut committed = state.clone();
-    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed);
+    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed.platform);
     if !apply_netlist_import_result(
         &mut committed,
         mode,
@@ -1066,7 +1066,7 @@ pub(super) fn commit_owned_netlist_profile_review(
     }
 
     let mut committed = state.clone();
-    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed);
+    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed.platform);
     let Some(descriptor) = committed
         .model
         .workspace
@@ -1111,7 +1111,7 @@ pub(super) fn commit_owned_netlist_profile_review(
 
 pub(crate) fn cancel_staged_netlist_import(state: &mut AppState) {
     if state.code.netlist.import_review.take().is_some() {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
     }
 }
 

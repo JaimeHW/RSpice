@@ -151,9 +151,10 @@ impl RSpiceApp {
         self.state.shell.help_center.disclosure_reviewed = reviewed;
         if open_folder {
             #[cfg(not(target_arch = "wasm32"))]
-            if let Err(error) =
-                crate::workbench::lifecycle::recovery::open_diagnostics_folder(&self.state)
-            {
+            if let Err(error) = crate::workbench::lifecycle::recovery::open_diagnostics_folder(
+                &self.state.model,
+                &self.state.platform,
+            ) {
                 self.state.prompt(format!(
                     "The session log folder could not be opened: {error}"
                 ));

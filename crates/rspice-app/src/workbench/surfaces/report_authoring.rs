@@ -1262,7 +1262,7 @@ fn selected_page_id(state: &AppState, document: &ReportDocument) -> Option<Repor
 fn report_mutation_allowed(state: &AppState) -> bool {
     state.platform.project_lifecycle.is_open()
         && !state.model.safe_mode.project_read_only()
-        && !crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
+        && !crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
 }
 
 fn report_mutation_block_reason(state: &AppState) -> &'static str {
@@ -1270,7 +1270,8 @@ fn report_mutation_block_reason(state: &AppState) -> &'static str {
         "Open a project before changing its report document."
     } else if state.model.safe_mode.project_read_only() {
         "Report changes are unavailable because the active project is read-only."
-    } else if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state) {
+    } else if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
+    {
         "Wait for the current project operation to finish before changing the report."
     } else {
         "Report changes are unavailable in the current application state."

@@ -168,4 +168,10 @@ impl ProjectState {
     pub(crate) fn open_examples(&mut self) {
         self.examples_selection = Some(0);
     }
+
+    /// The open project is being replaced or closed: a Check and save review
+    /// belongs to the project going away.
+    pub(crate) fn on_project_changed(&mut self) {
+        self.check_and_save.close();
+    }
 }

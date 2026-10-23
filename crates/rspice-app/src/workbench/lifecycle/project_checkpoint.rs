@@ -16,7 +16,9 @@ use uuid::Uuid;
 
 use crate::io::ProjectSnapshot;
 use crate::product::ContentDigest;
-use crate::workbench::app_state::AppState;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::lifecycle::project_lifecycle::LifecycleSourceMut;
+use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, Model};
 
 const MANIFEST_SCHEMA_VERSION: u16 = 1;
 #[cfg(not(target_arch = "wasm32"))]
@@ -185,7 +187,7 @@ pub(crate) fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpoint
 
 pub(crate) fn matches_current_state(
     summary: &ProjectCheckpointSummary,
-    state: &AppState,
+    state: &dyn LifecycleSource,
 ) -> Result<bool, String> {
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project checkpoint comparison failed: {error}"))?;
@@ -200,7 +202,7 @@ pub(crate) fn matches_current_state(
 }
 
 fn prepare_checkpoint(
-    state: &AppState,
+    state: &dyn LifecycleSource,
     reason: ProjectCheckpointReason,
 ) -> Result<(ProjectCheckpointManifest, String), String> {
     let created_unix_ms = crate::time_compat::checked_unix_time_ms()
@@ -236,15 +238,16 @@ fn prepare_checkpoint(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn create(
-    state: &mut AppState,
+    state: &mut dyn LifecycleSourceMut,
     reason: ProjectCheckpointReason,
 ) -> Result<ProjectCheckpointSummary, String> {
+    let state = &mut state.lifecycle_parts();
     let (manifest, serialized) = prepare_checkpoint(state, reason)?;
-    let summary = publish_native(state, &manifest, serialized.as_bytes())?;
+    let summary = publish_native(state.model, &manifest, serialized.as_bytes())?;
     // Retention runs only after the new manifest is committed and verified.
     // A cleanup failure never invalidates the newly created recovery point.
-    if let Err(error) = prune_retention(state, &manifest.project_id) {
-        state.record(
+    if let Err(error) = prune_retention(state.model, &manifest.project_id) {
+        state.model.record(
             crate::diagnostics::LogSeverity::Warning,
             crate::diagnostics::LogSource::Studio,
             format!("The project checkpoint was created, but older checkpoints were not all removed: {error}"),
@@ -255,7 +258,7 @@ pub(crate) fn create(
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn start_create(
-    state: &AppState,
+    state: &dyn LifecycleSource,
     reason: ProjectCheckpointReason,
     complete: impl FnOnce(Result<ProjectCheckpointSummary, String>) + 'static,
 ) -> Result<(), String> {
@@ -290,9 +293,9 @@ pub(crate) fn start_create(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn list(state: &AppState) -> Result<ProjectCheckpointCatalog, String> {
-    let project_id = state.model.workspace.content.project.id().to_string();
-    list_native(state, &project_id)
+pub(crate) fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
+    let project_id = model.workspace.content.project.id().to_string();
+    list_native(model, &project_id)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -426,18 +429,14 @@ fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
 
 /// Where this project's checkpoints are kept, as the reader would look for them.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn storage_location(state: &AppState) -> Result<PathBuf, String> {
-    checkpoint_directory(
-        state,
-        &state.model.workspace.content.project.id().to_string(),
-    )
+pub(crate) fn storage_location(model: &Model) -> Result<PathBuf, String> {
+    checkpoint_directory(model, &model.workspace.content.project.id().to_string())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn checkpoint_directory(state: &AppState, project_id: &str) -> Result<PathBuf, String> {
+fn checkpoint_directory(model: &Model, project_id: &str) -> Result<PathBuf, String> {
     let _ = project_id;
-    let base = state
-        .model
+    let base = model
         .workspace
         .content
         .project
@@ -465,11 +464,11 @@ fn checkpoint_directory(state: &AppState, project_id: &str) -> Result<PathBuf, S
 
 #[cfg(not(target_arch = "wasm32"))]
 fn publish_native(
-    state: &AppState,
+    model: &Model,
     manifest: &ProjectCheckpointManifest,
     bytes: &[u8],
 ) -> Result<ProjectCheckpointSummary, String> {
-    let directory = checkpoint_directory(state, &manifest.project_id)?;
+    let directory = checkpoint_directory(model, &manifest.project_id)?;
     std::fs::create_dir_all(&directory).map_err(|error| {
         format!(
             "project checkpoint directory '{}' could not be created: {error}",
@@ -544,8 +543,8 @@ fn publish_private_file(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn list_native(state: &AppState, project_id: &str) -> Result<ProjectCheckpointCatalog, String> {
-    let directory = checkpoint_directory(state, project_id)?;
+fn list_native(model: &Model, project_id: &str) -> Result<ProjectCheckpointCatalog, String> {
+    let directory = checkpoint_directory(model, project_id)?;
     let entries = match std::fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -648,8 +647,8 @@ fn read_snapshot_bytes(summary: &ProjectCheckpointSummary) -> Result<Vec<u8>, St
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn prune_retention(state: &AppState, project_id: &str) -> Result<(), String> {
-    let catalog = list_native(state, project_id)?;
+fn prune_retention(model: &Model, project_id: &str) -> Result<(), String> {
+    let catalog = list_native(model, project_id)?;
     let mut failures = Vec::new();
     for checkpoint in catalog
         .checkpoints
@@ -789,10 +788,10 @@ fn visit_browser_checkpoint_record(
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn start_list(
-    state: &AppState,
+    model: &Model,
     complete: impl FnOnce(Result<ProjectCheckpointCatalog, String>) + 'static,
 ) {
-    let project_id = state.model.workspace.content.project.id().to_string();
+    let project_id = model.workspace.content.project.id().to_string();
     let prefix = browser_project_prefix(&project_id);
     let accumulator = std::rc::Rc::new(std::cell::RefCell::new(BrowserCheckpointAccumulator {
         project_id,
@@ -859,6 +858,7 @@ pub(crate) fn start_recovery_copy_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn checkpoint_clock_failure_precedes_publication() {
@@ -1160,7 +1160,7 @@ mod tests {
                 0o600
             );
         }
-        let listed = list(&state).expect("checkpoint catalog reads");
+        let listed = list(&state.model).expect("checkpoint catalog reads");
         assert_eq!(listed.checkpoints.len(), 1);
         assert!(listed.quarantined.is_empty());
         assert_eq!(
@@ -1203,7 +1203,7 @@ mod tests {
         let ProjectCheckpointLocator::Native { snapshot, .. } = &checkpoint.locator;
         std::fs::write(snapshot, b"corrupt checkpoint").expect("corrupt owned snapshot");
 
-        let catalog = list(&state).expect("catalog returns quarantine diagnostics");
+        let catalog = list(&state.model).expect("catalog returns quarantine diagnostics");
         assert!(catalog.checkpoints.is_empty());
         assert_eq!(catalog.quarantined.len(), 1);
         assert!(

@@ -595,7 +595,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
                 .unwrap();
         }
         if change == "close" {
-            crate::workbench::lifecycle::project_lifecycle::close_active_document(&mut state)
+            crate::workbench::app_state::services_access::close_active_document(&mut state)
                 .unwrap();
             assert!(
                 !state

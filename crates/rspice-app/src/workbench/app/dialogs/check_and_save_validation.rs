@@ -72,11 +72,11 @@ pub(crate) struct CheckAndSaveValidationReport {
 
 impl CheckAndSaveValidationReport {
     pub(crate) fn collect(state: &AppState) -> Result<Self, String> {
-        let effective_scope = effective_save_scope(state, SaveScope::ActiveDocument);
+        let effective_scope = effective_save_scope(&state.platform, SaveScope::ActiveDocument);
         let active_view = state.model.workspace.content.active_schematic_reference();
         let project_id = state.model.workspace.content.project.id().to_string();
         let project_revision = state.model.workspace.content.project.revision().get();
-        let accepted_generation = accepted_generation(state);
+        let accepted_generation = accepted_generation(&state.platform);
         let mut findings = BTreeMap::<String, CheckAndSaveFinding>::new();
         let mut dependencies = BTreeMap::<String, ContentDigest>::new();
 
@@ -107,7 +107,7 @@ impl CheckAndSaveValidationReport {
                 "The active schematic or its owning library is read-only.",
             );
         }
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state) {
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform) {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -730,7 +730,7 @@ impl CheckAndSaveValidationReport {
     pub(crate) fn source_is_current(&self, state: &AppState) -> bool {
         self.project_id == state.model.workspace.content.project.id().to_string()
             && self.project_revision == state.model.workspace.content.project.revision().get()
-            && self.accepted_generation == accepted_generation(state)
+            && self.accepted_generation == accepted_generation(&state.platform)
             && self.design_execution_epoch == state.model.design_execution_epoch
             && self.active_schematic_epoch == state.model.active_schematic_epoch
             && self.active_topology_version == state.model.schematic.topology_version()
@@ -1092,7 +1092,7 @@ impl DesignCheckPlan {
             .filter(|binding| binding.status.is_resolved())
             .map(|binding| binding.reference.key().to_ascii_lowercase())
             .collect::<std::collections::HashSet<_>>();
-        let mut keys = match effective_save_scope(state, SaveScope::ActiveDocument) {
+        let mut keys = match effective_save_scope(&state.platform, SaveScope::ActiveDocument) {
             SaveScope::ActiveDocument => vec![active_view.key()],
             SaveScope::AllDocuments => state
                 .model

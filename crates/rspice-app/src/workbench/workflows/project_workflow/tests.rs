@@ -463,7 +463,8 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
     assert!(guest.model.workspace.content.project.path.is_none());
     #[cfg(not(target_arch = "wasm32"))]
     assert!(
-        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest).is_none()
+        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest.platform)
+            .is_none()
     );
 }
 
@@ -2142,7 +2143,8 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
             .is_some_and(|name| name == "renamed.rspiceproj")
     };
     assert!(names_renamed(
-        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state).as_deref()
+        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state.platform)
+            .as_deref()
     ));
     assert!(names_renamed(
         state.model.workspace.content.project.path.as_deref()

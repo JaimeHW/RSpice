@@ -172,7 +172,7 @@ pub(super) fn recovery_page(
             .as_ref()
             .is_some_and(|candidate| candidate.integrity.is_recoverable());
         let replacement_block_reason = recoverable
-            .then(|| recovery_replacement_block_reason(&app.state))
+            .then(|| recovery_replacement_block_reason(&app.state.model))
             .flatten();
         let response = Button::new("Open recovery comparison")
             .accent()
@@ -485,6 +485,42 @@ pub(super) fn recovery_contract_row(ui: &mut Ui, label: &str, value: &str, layou
         ui.cursor().top(),
         Stroke::new(1.0, t.color.border),
     );
+}
+
+/// Enter the safe-mode subset the current runtime can enforce. The exact
+/// pre-safe-mode session is serialized before any state is replaced and is
+/// used by AppState persistence until this process exits.
+pub(super) fn start_local_safe_mode(
+    state: &mut crate::workbench::app_state::AppState,
+    options: LocalSafeModeOptions,
+) -> Result<(), String> {
+    use crate::workbench::lifecycle::recovery as services;
+
+    services::check_safe_mode_start(&state.model, options)?;
+
+    state.sync_active_schematic_to_workspace();
+    let preserved_session = serde_json::to_string(&*state)
+        .map_err(|error| format!("The current session could not be protected: {error}"))?;
+
+    if options.isolate_prior_documents && state.platform.project_lifecycle.is_open() {
+        if !crate::workbench::workflows::project_workflow::close_project_discard(
+            state,
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        ) {
+            return Err("The current project could not be isolated safely".to_owned());
+        }
+    } else if options.isolate_prior_documents {
+        state.project.project_launcher_open = false;
+    }
+    if options.reset_layout {
+        state.workbench.reset_layout();
+    }
+    services::activate_safe_mode(&mut state.model, options, preserved_session);
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Project);
+    services::record_safe_mode_started(&mut state.model, options);
+    Ok(())
 }
 
 pub(super) fn safe_mode_page(

@@ -8,6 +8,13 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, ViewType};
+use crate::workbench::app_state::{
+    AppState,
+    services_access::{
+        accept_loaded_project, close_active_document, confirm_revert_active_document,
+        initialize_from_session, mark_project_closed, reset_for_new_project, revert_document,
+    },
+};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::native::NativeProjectStorage;
 
@@ -835,7 +842,10 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
 
     let mut exact = serde_json::from_str::<Box<AppState>>(&session).expect("restore exact session");
     initialize_from_session(exact.as_mut());
-    assert_eq!(canonical_native_path(&exact), Some(canonical.clone()));
+    assert_eq!(
+        canonical_native_path(&exact.platform),
+        Some(canonical.clone())
+    );
     assert!(exact.platform.project_lifecycle.accepted().is_some());
 
     let mut same_project =
@@ -861,7 +871,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
             .accepted()
             .is_none()
     );
-    assert!(canonical_native_path(&digest_conflict).is_none());
+    assert!(canonical_native_path(&digest_conflict.platform).is_none());
     assert_eq!(
         digest_conflict.platform.native_project_binding_receipt,
         Some(receipt.clone()),
@@ -890,7 +900,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
             .accepted()
             .is_none()
     );
-    assert!(canonical_native_path(&identity_conflict).is_none());
+    assert!(canonical_native_path(&identity_conflict.platform).is_none());
 
     std::fs::write(&canonical, &accepted_bytes).expect("restore exact fixture bytes");
     let mut legacy_value =
@@ -903,14 +913,14 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
         serde_json::from_value::<Box<AppState>>(legacy_value).expect("restore legacy session");
     initialize_from_session(legacy.as_mut());
     assert!(legacy.platform.project_lifecycle.accepted().is_none());
-    assert!(canonical_native_path(&legacy).is_none());
+    assert!(canonical_native_path(&legacy.platform).is_none());
 
     std::fs::remove_file(&canonical).expect("remove canonical fixture");
     let mut missing =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore missing session");
     initialize_from_session(missing.as_mut());
     assert!(missing.platform.project_lifecycle.accepted().is_none());
-    assert!(canonical_native_path(&missing).is_none());
+    assert!(canonical_native_path(&missing.platform).is_none());
     remove_project_artifacts(&path);
 }
 
@@ -1072,7 +1082,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
     );
 
     assert_eq!(
-        accepted_active_schematic(&state)
+        accepted_active_schematic(&state.model, &state.platform)
             .expect("accepted active design")
             .session
             .editor
@@ -1415,7 +1425,7 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
         source_receipt
     );
     assert_eq!(
-        canonical_native_path(&state),
+        canonical_native_path(&state.platform),
         Some(normalize_native_path(&source).expect("normalize source"))
     );
     assert!(has_unsaved_changes(&state));

@@ -34,7 +34,9 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
                     transaction,
                 )
             {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                    &mut state.platform,
+                );
                 state.prompt(format!(
                     "{} was cancelled because the project changed: {error}",
                     mode.dialog_title()
@@ -48,7 +50,7 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
             stage_netlist_import(state, transaction, mode, bytes, Some(path), display_name)
         }
         Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
             if error != "cancelled" {
                 record_import_failure(state, &error);
             }
@@ -359,7 +361,7 @@ pub(super) fn start_browser_netlist_import(
         crate::workbench::browser::file_import::BrowserTextImportKind::Netlist,
     )
     .inspect_err(|_| {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
     })?;
 
     crate::workbench::browser::file_import::pick_text_file(
@@ -392,7 +394,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
     };
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-            state,
+            &mut state.platform,
             completion.transaction,
         );
         return false;
@@ -402,7 +404,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
         completion.transaction,
     ) {
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-            state,
+            &mut state.platform,
             completion.transaction,
         );
         state.prompt(format!(
@@ -423,7 +425,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
         ),
         BrowserNetlistImportResult::Failed(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                state,
+                &mut state.platform,
                 completion.transaction,
             );
             record_import_failure(state, &error);
@@ -431,7 +433,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
         }
         BrowserNetlistImportResult::Cancelled => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                state,
+                &mut state.platform,
                 completion.transaction,
             );
             false

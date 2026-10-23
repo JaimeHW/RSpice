@@ -522,8 +522,9 @@ fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() 
 /// edited library would move the saved file while every document read clean.
 #[test]
 fn an_extraction_leaves_the_project_with_unsaved_changes() {
+    use crate::workbench::app_state::services_access::accept_loaded_project;
     use crate::workbench::lifecycle::project_lifecycle::{
-        ProjectDocumentId, accept_loaded_project, dirty_documents, has_unsaved_changes, snapshot,
+        ProjectDocumentId, dirty_documents, has_unsaved_changes, snapshot,
     };
 
     let (mut app, id) = fixture();

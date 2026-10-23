@@ -111,7 +111,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         )
         .unwrap();
         let saved_document = active_document(&state);
-        let previous_generation = accepted_generation(&state);
+        let previous_generation = accepted_generation(&state.platform);
         let previous_digest = state
             .platform
             .project_lifecycle
@@ -156,7 +156,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         finish_successful_save(&mut state, candidate, binding, scope);
 
         assert_eq!(
-            accepted_generation(&state),
+            accepted_generation(&state.platform),
             previous_generation + 1,
             "an invalid newer draft must not discard an acknowledged save"
         );

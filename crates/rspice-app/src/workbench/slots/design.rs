@@ -232,4 +232,20 @@ impl DesignState {
         self.set_grid_style(next);
         next
     }
+
+    /// The project's stimulus library went away or went back to its accepted
+    /// revision: when the project closes, or its library is reverted.
+    ///
+    /// The selection may name a definition the library no longer holds, and a
+    /// selection that resolves to nothing leaves the workspace on an empty
+    /// stage with a name in the dock. The drafts belonged to the revisions now
+    /// gone; the close guard has already named every unapplied one, so what is
+    /// left is bookkeeping. Keeping one would leave the instrument editing a
+    /// record whose saved side no longer exists, and Apply would publish it as
+    /// a revision of a definition the library does not hold.
+    pub(crate) fn on_project_changed(&mut self) {
+        self.selected_stimulus_definition = None;
+        self.stimulus_editor.clear();
+        self.stimulus_browser.clear();
+    }
 }

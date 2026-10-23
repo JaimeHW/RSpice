@@ -725,7 +725,7 @@ fn session_restore_reopens_the_veriloga_tab_in_design() {
 
     let mut restored = AppState::restore_eframe_session(&storage).expect("the session restores");
     restored.restore_active_schematic_from_workspace();
-    crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut restored);
+    crate::workbench::app_state::services_access::initialize_from_session(&mut restored);
     let mut reopened = RSpiceApp::test_instance();
     reopened.state = restored;
 
