@@ -26,10 +26,13 @@ use std::path::{Path, PathBuf};
 use egui::accesskit::{Node, NodeId, TreeUpdate};
 use egui::{Pos2, Rect, Vec2};
 
-use super::RSpiceApp;
+use super::veriloga_design_tests::{add_veriloga_cell, open_in_design};
+use super::{AppState, RSpiceApp};
 use crate::state::{
-    AnalysisResult, AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle,
+    AnalysisResult, AnalysisType, Cell, CellViewRef, Point, RetainedTrace, SimulationRun,
+    SimulationRunLifecycle, SymbolDocument, SymbolEditorMetadata, SymbolShape, View, ViewType,
 };
+use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::state::{Drawer, Workspace};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
@@ -146,6 +149,33 @@ fn scenes() -> Vec<Scene> {
             .holding(move |app| app.state.workbench.current_route().surface_id() == surface),
         );
     }
+    for (view_type, open) in [
+        (ViewType::Symbol, open_a_symbol_view as fn(&mut AppState)),
+        (ViewType::VerilogA, open_a_veriloga_view),
+    ] {
+        let name = format!("{view_type:?}").to_lowercase();
+        scenes.push(
+            Scene::new(format!("design-{name}-view"), DESKTOP, move |app| {
+                app.state.open_project_session();
+                open(&mut app.state);
+            })
+            .holding(move |app| {
+                app.state.workbench.workspace == Workspace::Design
+                    && app.state.model.workspace.content.active_view_type() == view_type
+            }),
+        );
+    }
+    scenes.push(
+        Scene::new("netlist-automation-page", DESKTOP, |app| {
+            app.state.open_project_session();
+            app.state.workbench.activate(Workspace::Netlist);
+            app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+        })
+        .holding(|app| {
+            app.state.workbench.workspace == Workspace::Netlist
+                && app.state.code.code_workspace.page == CodeWorkspacePage::Automation
+        }),
+    );
     scenes.push(Scene::new("phone", PHONE, |app| on_a_phone(app, None)));
     for drawer in [Drawer::Navigator, Drawer::Inspector, Drawer::Workspaces] {
         let name = format!("{drawer:?}").to_lowercase();
@@ -188,6 +218,41 @@ fn retain_one_run(app: &mut RSpiceApp) {
     );
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
+}
+
+/// A symbol cellview open in Design, holding one circle so its canvas has a
+/// shape to draw.
+fn open_a_symbol_view(state: &mut AppState) {
+    let library = state.model.workspace.content.active_view.library.clone();
+    let mut cell = Cell::new("buffer");
+    cell.add_view(View::new("symbol", ViewType::Symbol));
+    state
+        .model
+        .library_manager
+        .get_library_mut(&library)
+        .expect("the open project has its active view's library")
+        .add_cell(cell);
+    state.open_workspace_view(CellViewRef::new(&library, "buffer", "symbol"));
+    let document = SymbolDocument {
+        body: vec![SymbolShape::Circle {
+            center: Point::origin(),
+            radius: 10,
+        }],
+        ..Default::default()
+    };
+    state
+        .store_active_symbol_editor_bundle(
+            &document,
+            &SymbolEditorMetadata::for_document(&document),
+        )
+        .expect("the symbol view takes its document");
+    state.workbench.activate(Workspace::Design);
+}
+
+/// A Verilog-A cellview open in Design, its one-file bundle in the editor.
+fn open_a_veriloga_view(state: &mut AppState) {
+    let (reference, _) = add_veriloga_cell(state, "gain", "model.va", "gain");
+    open_in_design(state, &reference);
 }
 
 fn on_a_phone(app: &mut RSpiceApp, drawer: Option<Drawer>) {
