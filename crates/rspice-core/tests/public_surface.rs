@@ -362,8 +362,8 @@ use rspice_core::analysis::harmonic_balance::{
 // `netlist::AssertSample`, one instant of the sampled check
 // (`AssertCheck::Sampled`) a vector file's expected output becomes. The
 // census is 5,463, with no slack.
-// Deleting public items nothing used brings it to 5,360, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5360;
+// Deleting public items nothing used brings it to 5,350, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5350;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

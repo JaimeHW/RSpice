@@ -308,7 +308,6 @@ fn selected_veriloga_module_needs_no_separate_alias() {
         deck_path(&model)
     );
     let netlist = Netlist::parse_validated(&deck).unwrap();
-    assert!(netlist.lint_unknown_references().is_empty());
     let result = Engine::default().run_dc_op(&netlist).unwrap();
     assert!((node_voltage(&result, "a") - 1.0).abs() < 1e-8);
     let _ = std::fs::remove_file(model);
@@ -326,7 +325,6 @@ fn inferred_veriloga_module_name_survives_hierarchy_flattening() {
             deck_path(&model)
         );
         let netlist = Netlist::parse_validated(&deck).unwrap();
-        assert!(netlist.lint_unknown_references().is_empty());
         let result = Engine::default()
             .run_dc_op(&netlist)
             .expect("the compiled module name is an external device inside a subcircuit");

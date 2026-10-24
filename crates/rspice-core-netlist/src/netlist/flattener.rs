@@ -6185,12 +6185,6 @@ mod tests {
                 "external discovery\n{include}\nX1 a 0 Missing\nD1 a 0 MissingDiode\n.end\n"
             ))
             .unwrap();
-            let diagnostics = netlist.lint_unknown_references();
-            assert!(diagnostics.iter().any(|item| item.element == "D1"));
-            assert_eq!(
-                diagnostics.iter().any(|item| item.element == "X1"),
-                !deferred
-            );
             let result = flattener.flatten(&netlist);
             if deferred {
                 assert_eq!(result.unwrap().len(), 2);

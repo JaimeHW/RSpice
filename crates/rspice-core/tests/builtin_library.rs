@@ -258,7 +258,6 @@ fn foundation_mosfet_conducts() {
         "* foundation mosfet\nV1 d 0 5\nV2 g 0 3\nM1 d g 0 0 RSPICE_NMOS\n.op\n.end\n",
     )
     .expect("deck parses");
-    assert_eq!(netlist.lint_unknown_references(), Vec::new());
     let result = Engine::new(SimulationConfig::default())
         .run_dc_op(&netlist)
         .expect("operating point converges");
@@ -277,7 +276,6 @@ fn foundation_opamp_subcircuit_is_an_implicit_fallback() {
         "* foundation opamp follower\nV1 in 0 0.1\nX1 in out out RSPICE_OPAMP\nR1 out 0 10k\n.op\n.end\n",
     )
     .expect("deck parses");
-    assert_eq!(netlist.lint_unknown_references(), Vec::new());
     let result = Engine::new(SimulationConfig::default())
         .run_dc_op(&netlist)
         .expect("operating point converges");

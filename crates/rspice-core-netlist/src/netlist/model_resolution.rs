@@ -2,9 +2,8 @@
 //!
 //! The circuit builder rejects a device whose model name resolves to nothing
 //! at bind time — the "references unknown model" family of diagnostics. An
-//! editor wants that answer before a run, and the raw source-map lint is not
-//! it: it reads the deck text, so it reports elements inside subcircuits
-//! nobody instantiates, and its allow-list admits names no bind path accepts.
+//! editor wants that answer before a run, and the deck text cannot give it:
+//! the text also holds elements inside subcircuits nobody instantiates.
 //!
 //! This module asks the builder's question against the builder's inputs: the
 //! flattened instantiated topology, and the top-level `.MODEL` cards plus the
@@ -12,10 +11,7 @@
 //! whether a card's type suits the element that names it stays the builder's
 //! job, because only the builder knows what it is about to construct.
 //!
-//! The per-family fallbacks live in [`FamilyRule`]. [`builtin_model_names`]
-//! is their union, for the lint that has no element family in hand; deriving
-//! both from one table is what keeps the lint from drifting away from the
-//! builder a second time.
+//! The per-family fallbacks live in [`FamilyRule`].
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -54,7 +50,7 @@ pub struct UnresolvedDeviceModelReference {
 /// | XSPICE code model | required | built-in code-model names |
 ///
 /// A Verilog-A module named by a `.VERILOGA` directive resolves for every
-/// family, matching the source-map lint.
+/// family.
 ///
 /// The check is deliberately one-sided: it never reports a name the builder
 /// accepts, and where the builder rejects a resolvable-looking name for a
@@ -89,35 +85,6 @@ pub fn unresolved_device_model_references(
         });
     }
     Ok(unresolved)
-}
-
-/// Every model name the builder resolves without a `.MODEL` card.
-///
-/// The union of the [`FamilyRule`] fallbacks. The source-map lint works from
-/// deck text and never knows which family a reference belongs to, so the union
-/// is the strongest allow-list it can apply;
-/// [`unresolved_device_model_references`] applies the exact per-family form.
-pub(super) fn builtin_model_names() -> &'static HashSet<String> {
-    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
-    NAMES.get_or_init(|| {
-        let mut names = HashSet::new();
-        for bare_type in BARE_MOS_TYPES
-            .iter()
-            .chain(BARE_JFET_TYPES)
-            .chain(BARE_MESFET_TYPES)
-        {
-            names.insert((*bare_type).to_string());
-        }
-        names.extend(builtin_diode_model_names().iter().cloned());
-        names.extend(builtin_bjt_model_names().iter().cloned());
-        names.extend(builtin_mos_model_names().iter().cloned());
-        names.extend(builtin_jfet_model_names().iter().cloned());
-        names.extend(builtin_mesfet_model_names().iter().cloned());
-        for code_model in crate::codemodels::BUILTIN_MODEL_NAMES {
-            names.insert(code_model.to_ascii_uppercase());
-        }
-        names
-    })
 }
 
 /// Type names a MOSFET accepts in place of a card.
