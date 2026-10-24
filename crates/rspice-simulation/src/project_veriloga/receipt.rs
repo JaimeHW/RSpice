@@ -28,16 +28,8 @@ pub struct ProjectCompileReceipt {
 }
 
 impl ProjectCompileReceipt {
-    pub fn from_report(
-        token: VerilogASourceOperationToken,
-        report: &RuntimeCompileReport,
-        bundle: Option<&ProjectSourceBundle>,
-    ) -> Result<(Self, Vec<ProjectCompileDiagnostic>), String> {
-        Self::from_report_against(token, report, bundle, None, DigitalDelaySelect::Typ)
-    }
-
-    /// [`Self::from_report`] for a report compiled against `cells` and
-    /// under `delay_select`.
+    /// The receipt for a report compiled against `cells` and under
+    /// `delay_select`.
     pub fn from_report_against(
         token: VerilogASourceOperationToken,
         report: &RuntimeCompileReport,

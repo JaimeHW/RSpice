@@ -117,24 +117,6 @@ impl PreparedVerilogARuntime {
 
     /// Seal compiled artifacts under a caller-supplied source identity.
     /// The host must validate live project or catalog authority before calling.
-    pub fn try_from_runtime_report(
-        source_key: String,
-        source_digest: rspice_vocabulary::product::ContentDigest,
-        module_name: &str,
-        report: &rspice_veriloga::RuntimeCompileReport,
-        netlist_alias: impl Into<String>,
-    ) -> Result<Self, PreparedRuntimeError> {
-        Self::seal(
-            source_key,
-            source_digest,
-            module_name,
-            netlist_alias.into(),
-            report,
-            None,
-            DigitalDelaySelect::Typ,
-        )
-    }
-
     pub fn try_from_virtual_compilation(
         source_key: String,
         source_digest: rspice_vocabulary::product::ContentDigest,

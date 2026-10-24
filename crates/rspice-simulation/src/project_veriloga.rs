@@ -24,15 +24,8 @@ pub enum ProjectVerilogACompileError {
     Virtual(Box<rspice_veriloga::VirtualRuntimeCompileFailure>),
 }
 
-/// Compile the selected source closure using its authored build policy.
-pub fn compile_project_bundle_source(
-    bundle: &ProjectSourceBundle,
-    selected_module: Option<&str>,
-) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
-    compile_project_bundle_source_against(bundle, selected_module, None, DigitalDelaySelect::Typ)
-}
-
-/// [`compile_project_bundle_source`] offering the design `cells` as leaves
+/// Compile the selected source closure using its authored build policy,
+/// offering the design `cells` as leaves
 /// (`rspice_veriloga::CompilerOptions::external_cells`) and keeping the
 /// `delay_select` value of each min:typ:max expression
 /// (`rspice_veriloga::CompilerOptions::delay_select`): the cells and the
