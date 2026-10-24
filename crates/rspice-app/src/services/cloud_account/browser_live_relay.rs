@@ -15,6 +15,7 @@ use rspice_cloud_client::contract::LIVE_SESSION_PROTOCOL;
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;
 
+use super::contract_mapping::session_over_message;
 use super::{CloudAccountCommand, LiveRelayClosure, MAX_LIVE_RELAY_WIRE_BYTES};
 use crate::services::live_protocol::{LiveFrame, LiveFrameClass, MAX_LIVE_FRAME_BYTES};
 
@@ -341,13 +342,4 @@ fn closure_from_close(code: u16, reason: &str) -> LiveRelayClosure {
         1002 | 1003 | 1009 => LiveRelayClosure::Rejected,
         _ => LiveRelayClosure::Interrupted,
     }
-}
-
-fn session_over_message(reason: &str) -> String {
-    match reason {
-        "removed from the live session" => "The host removed you from this live session.",
-        "live session expired" => "This live session reached its maximum duration and ended.",
-        _ => "This live session has ended.",
-    }
-    .to_owned()
 }

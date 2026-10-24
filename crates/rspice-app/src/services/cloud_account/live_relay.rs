@@ -19,6 +19,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
+use super::contract_mapping::session_over_message;
 use super::{CloudAccountCommand, LiveRelayClosure, MAX_LIVE_RELAY_WIRE_BYTES};
 use crate::services::live_protocol::{LiveFrame, LiveFrameClass, MAX_LIVE_FRAME_BYTES};
 
@@ -238,16 +239,6 @@ fn closure_from_close(frame: Option<&CloseFrame>) -> LiveRelayClosure {
         CloseCode::Policy | CloseCode::Unsupported | CloseCode::Size => LiveRelayClosure::Rejected,
         _ => LiveRelayClosure::Interrupted,
     }
-}
-
-/// Presentation-safe reading of the relay's deliberate close reasons.
-fn session_over_message(reason: &str) -> String {
-    match reason {
-        "removed from the live session" => "The host removed you from this live session.",
-        "live session expired" => "This live session reached its maximum duration and ended.",
-        _ => "This live session has ended.",
-    }
-    .to_owned()
 }
 
 #[cfg(test)]

@@ -20,6 +20,7 @@ mod browser_executor;
 #[cfg(target_arch = "wasm32")]
 mod browser_live_relay;
 pub(crate) mod config;
+mod contract_mapping;
 #[cfg(not(target_arch = "wasm32"))]
 mod executor;
 #[cfg(not(target_arch = "wasm32"))]

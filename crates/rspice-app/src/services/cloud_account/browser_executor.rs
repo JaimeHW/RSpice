@@ -12,21 +12,24 @@ use crate::time_compat::Instant;
 
 use futures_util::{FutureExt as _, pin_mut, select};
 use rspice_cloud_client::contract::{
-    Entitlement, LiveSession, LiveSessionAdmission, LiveSessionCapability, LiveSessionPolicy,
+    Entitlement, LiveSession, LiveSessionAdmission, LiveSessionCapability,
     LiveSessionTicketProtocol, UpdateLiveSessionParticipantRequest,
 };
-use rspice_cloud_client::{
-    BearerToken, ClientConfig, CloudClient, CloudError, IdempotencyKey, PageRequest,
-};
+use rspice_cloud_client::{BearerToken, ClientConfig, CloudClient, CloudError, PageRequest};
 
 use super::config::CloudAccountConfig;
+use super::contract_mapping::{
+    LiveSessionReadFailure, contract_policy, create_live_session, entitlement_summary,
+    issue_live_session_ticket, join_live_session, live_session_error_message, live_session_summary,
+    read_live_session,
+};
 use super::{
     CloudAccountCommand, CloudAccountEvent, CloudAccountEventReceiver, CloudAccountEventSender,
     CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary, LIVE_RELAY_INBOUND_QUEUE_CAPACITY,
-    LIVE_RELAY_OUTBOUND_QUEUE_CAPACITY, LiveParticipantSummary, LiveRelayClosure, LiveRelayPort,
-    LiveRelayPortReceiver, LiveRelayPortSender, LiveSessionPolicySummary, LiveSessionState,
-    LiveSessionSummary, PrincipalSummary, PublishState, WorkspaceSummary, browser_live_relay,
-    client_retry_delay, cloud_account_event_mailbox, live_relay_port_mailbox, oidc,
+    LIVE_RELAY_OUTBOUND_QUEUE_CAPACITY, LiveRelayClosure, LiveRelayPort, LiveRelayPortReceiver,
+    LiveRelayPortSender, LiveSessionPolicySummary, LiveSessionState, PrincipalSummary,
+    PublishState, WorkspaceSummary, browser_live_relay, client_retry_delay,
+    cloud_account_event_mailbox, live_relay_port_mailbox, oidc,
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -39,8 +42,6 @@ const LIVE_SESSION_POLL_PERIOD: Duration = Duration::from_secs(5);
 const PKCE_RECORD_MAX_AGE_SECONDS: i64 = 10 * 60;
 const MAX_PKCE_RECORD_BYTES: usize = 8 * 1024;
 const PKCE_STORAGE_KEY: &str = "rspice.cloud.oidc.pending.v1";
-const LIVE_SESSION_UNREACHABLE: &str = "The live-session service could not be reached.";
-
 pub(super) fn spawn(
     configuration: CloudAccountConfig,
     repaint: Option<egui::Context>,
@@ -1084,154 +1085,6 @@ async fn bootstrap_reads(
         entitlements: entitlements.iter().map(entitlement_summary).collect(),
         workspaces,
     })
-}
-
-async fn create_live_session(
-    cloud: &CloudClient,
-    access: &str,
-    create_key: &str,
-    policy: LiveSessionPolicy,
-    circuit_id: Option<uuid::Uuid>,
-    client_instance_id: uuid::Uuid,
-) -> Result<rspice_cloud_client::contract::CreatedLiveSession, String> {
-    let token = BearerToken::new(access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
-    let key = IdempotencyKey::new(create_key).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
-    cloud
-        .create_live_session_idempotent(&token, &key, policy, circuit_id, client_instance_id)
-        .await
-        .map(rspice_cloud_client::CloudResponse::into_body)
-        .map_err(|error| live_session_error_message(&error))
-}
-
-async fn join_live_session(
-    cloud: &CloudClient,
-    access: &str,
-    code: &str,
-    client_instance_id: uuid::Uuid,
-) -> Result<rspice_cloud_client::contract::JoinedLiveSession, String> {
-    let token = BearerToken::new(access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
-    cloud
-        .join_live_session(&token, code, client_instance_id)
-        .await
-        .map(rspice_cloud_client::CloudResponse::into_body)
-        .map_err(|error| live_session_error_message(&error))
-}
-
-async fn issue_live_session_ticket(
-    cloud: &CloudClient,
-    access: &str,
-    session_id: uuid::Uuid,
-    client_instance_id: uuid::Uuid,
-) -> Result<LiveSessionTicketProtocol, String> {
-    let token = BearerToken::new(access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
-    cloud
-        .issue_live_session_ticket(&token, session_id, client_instance_id)
-        .await
-        .map(rspice_cloud_client::CloudResponse::into_body)
-        .map_err(|error| live_session_error_message(&error))
-}
-
-enum LiveSessionReadFailure {
-    Gone,
-    Transient,
-}
-
-async fn read_live_session(
-    cloud: &CloudClient,
-    access: &str,
-    session_id: uuid::Uuid,
-) -> Result<LiveSession, LiveSessionReadFailure> {
-    let token = BearerToken::new(access).map_err(|_| LiveSessionReadFailure::Transient)?;
-    match cloud.get_live_session(&token, session_id).await {
-        Ok(response) => Ok(response.into_body()),
-        Err(CloudError::Problem { details, .. }) if matches!(details.status, 403 | 404 | 410) => {
-            Err(LiveSessionReadFailure::Gone)
-        }
-        Err(_) => Err(LiveSessionReadFailure::Transient),
-    }
-}
-
-fn contract_policy(policy: LiveSessionPolicySummary) -> LiveSessionPolicy {
-    LiveSessionPolicy {
-        default_capability: if policy.guests_edit {
-            LiveSessionCapability::Edit
-        } else {
-            LiveSessionCapability::View
-        },
-        approve_joins: policy.approve_joins,
-        allow_save_copy: policy.allow_save_copy,
-    }
-}
-
-fn live_session_summary(
-    session: &LiveSession,
-    self_principal: Option<uuid::Uuid>,
-    hosting: bool,
-    join_code: Option<String>,
-) -> LiveSessionSummary {
-    let participants: Vec<LiveParticipantSummary> = session
-        .participants
-        .iter()
-        .map(|participant| {
-            let is_host = participant.principal_id == session.host_principal_id;
-            LiveParticipantSummary {
-                principal_id: participant.principal_id.to_string(),
-                display_name: participant.display_name.clone(),
-                is_host,
-                is_self: self_principal.is_some_and(|own| own == participant.principal_id),
-                editor: is_host || participant.capability == LiveSessionCapability::Edit,
-                pending: participant.admission == LiveSessionAdmission::Pending,
-                joined_at: participant.joined_at.clone(),
-            }
-        })
-        .collect();
-    let editor = hosting
-        || participants
-            .iter()
-            .any(|participant| participant.is_self && participant.editor);
-    LiveSessionSummary {
-        session_id: session.id.to_string(),
-        join_code,
-        hosting,
-        editor,
-        policy: LiveSessionPolicySummary {
-            guests_edit: session.policy.default_capability == LiveSessionCapability::Edit,
-            approve_joins: session.policy.approve_joins,
-            allow_save_copy: session.policy.allow_save_copy,
-        },
-        participants,
-        started_at: session.created_at.clone(),
-        relay_connected: false,
-        notice: None,
-    }
-}
-
-fn live_session_error_message(error: &CloudError) -> String {
-    match error {
-        CloudError::Problem { details, .. } => details.title.clone(),
-        _ => LIVE_SESSION_UNREACHABLE.to_owned(),
-    }
-}
-
-fn entitlement_summary(entitlement: &Entitlement) -> EntitlementSummary {
-    EntitlementSummary {
-        status: entitlement.status.as_str().to_owned(),
-        granted_features: granted_features(&entitlement.features),
-        valid_until: entitlement.valid_until.clone(),
-    }
-}
-
-fn granted_features(features: &serde_json::Value) -> Vec<String> {
-    let Some(map) = features.as_object() else {
-        return Vec::new();
-    };
-    let mut granted: Vec<String> = map
-        .iter()
-        .filter(|(_, value)| value.as_bool() == Some(true))
-        .map(|(name, _)| name.clone())
-        .collect();
-    granted.sort();
-    granted
 }
 
 fn now_rfc3339() -> Option<String> {
