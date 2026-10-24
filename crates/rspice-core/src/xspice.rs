@@ -70,7 +70,8 @@ mod resource_transaction;
 // writers are this module's `instance` and `event` (rank 9) and
 // `circuit::external_models` (rank 10); a counter module above either would be
 // an upward edge from both.
-pub(crate) mod settle_cost;
+#[doc(hidden)]
+pub mod settle_cost;
 // The one statement of where inside an accepted analog step a voltage crossed
 // a logic threshold. Read by the Xyce DIG code models and by the mixed
 // Verilog-AMS interleave, which have no context type in common — hence a

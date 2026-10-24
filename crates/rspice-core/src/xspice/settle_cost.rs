@@ -65,30 +65,32 @@ use std::sync::Arc;
 /// Every field is monotonically increasing from the last [`reset`]. Read one
 /// with [`counts`].
 ///
-/// The *readers* are `#[cfg(test)]` — this type, [`reset`] and [`counts`] —
-/// while the writers below are not. That split is deliberate and it is the
-/// only one: the increments ship, so the build a ratchet measures is the build
-/// that runs, and a `make_mut` added on a hot path is counted wherever it is
-/// added rather than only under a test cfg. Nothing outside a test has any use
-/// for the total, so exporting a getter into release builds would be dead
+/// The *readers* are test-only — this type, [`reset`] and [`counts`] compile
+/// under `cfg(test)`, and under the `test-support` feature for the engine's
+/// tests — while the writers below are not. That split is deliberate and it is
+/// the only one: the increments ship, so the build a ratchet measures is the
+/// build that runs, and a `make_mut` added on a hot path is counted wherever it
+/// is added rather than only under a test cfg. Nothing outside a test has any
+/// use for the total, so exporting a getter into release builds would be dead
 /// code, and this crate does not ship dead code.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct XspiceSettleCounts {
+#[doc(hidden)]
+pub struct XspiceSettleCounts {
     /// Instances the settle loop actually evaluated.
     ///
     /// Counted where the loop commits to running an instance — past the
     /// dirty-dispatch skip check, before the `make_mut` that unshares it. An
     /// instance the dispatch skipped is not counted, which is the whole point:
     /// this number is what the dispatch did *not* avoid.
-    pub(crate) instance_evaluations: u64,
+    pub instance_evaluations: u64,
     /// Deep copies of an instance cell taken by `SharedXspiceInstance`.
-    pub(crate) instance_deep_copies: u64,
+    pub instance_deep_copies: u64,
     /// Deep copies of the six resolved event-value maps taken by
     /// `SharedXspiceEventValues`.
-    pub(crate) event_values_deep_copies: u64,
+    pub event_values_deep_copies: u64,
     /// Deep copies of the event scheduler taken by `SharedXspiceEventQueue`.
-    pub(crate) event_queue_deep_copies: u64,
+    pub event_queue_deep_copies: u64,
     /// Deep copies of a mixed Verilog-AMS module's analog device, digital host
     /// or bridge table taken by the trial rollback cells in
     /// `xspice::verilog::mixed`.
@@ -104,7 +106,7 @@ pub(crate) struct XspiceSettleCounts {
     /// `xspice::verilog`, which is a `veriloga` module, so a build without that
     /// feature has nothing that can move this number and `-D warnings` says so.
     #[cfg(feature = "veriloga")]
-    pub(crate) mixed_trial_deep_copies: u64,
+    pub mixed_trial_deep_copies: u64,
     /// Whole-circuit nonlinear device images captured by
     /// `CircuitData::nonlinear_state_snapshot` and its trial variant.
     ///
@@ -117,10 +119,10 @@ pub(crate) struct XspiceSettleCounts {
     /// a point they intend to discard. The XSPICE trial stamp did not: it
     /// evaluated code models only, and undid them with an image of everything.
     /// Counting the captures is what keeps that from coming back.
-    pub(crate) device_state_snapshots: u64,
+    pub device_state_snapshots: u64,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl XspiceSettleCounts {
     /// Deep copies of the event world, which the two cells describe together.
     ///
@@ -130,7 +132,8 @@ impl XspiceSettleCounts {
     /// produces. They are ratcheted as a sum for the same reason they are
     /// captured as a unit — a change that moves a copy from one cell to the
     /// other has not made anything cheaper.
-    pub(crate) fn event_world_deep_copies(&self) -> u64 {
+    #[doc(hidden)]
+    pub fn event_world_deep_copies(&self) -> u64 {
         self.event_values_deep_copies + self.event_queue_deep_copies
     }
 }
@@ -177,7 +180,8 @@ fn bump(cell: &Cell<u64>) {
 
 /// Record that the settle loop evaluated one instance.
 #[inline]
-pub(crate) fn note_instance_evaluation() {
+#[doc(hidden)]
+pub fn note_instance_evaluation() {
     COUNTERS.with(|counters| bump(&counters.instance_evaluations));
 }
 
@@ -208,7 +212,8 @@ pub(crate) fn note_mixed_trial_deep_copy() {
 
 /// Record that a whole-circuit nonlinear device image was captured.
 #[inline]
-pub(crate) fn note_device_state_snapshot() {
+#[doc(hidden)]
+pub fn note_device_state_snapshot() {
     COUNTERS.with(|counters| bump(&counters.device_state_snapshots));
 }
 
@@ -219,8 +224,9 @@ pub(crate) fn note_device_state_snapshot() {
 /// `-1` the tests share a thread and run in sequence, so a reset immediately
 /// before the run still leaves the run alone in the window; under the default
 /// each test owns its thread and its counters outright.
-#[cfg(test)]
-pub(crate) fn reset() {
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub fn reset() {
     COUNTERS.with(|counters| {
         counters.instance_evaluations.set(0);
         counters.instance_deep_copies.set(0);
@@ -233,8 +239,9 @@ pub(crate) fn reset() {
 }
 
 /// This thread's tally since the last [`reset`].
-#[cfg(test)]
-pub(crate) fn counts() -> XspiceSettleCounts {
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub fn counts() -> XspiceSettleCounts {
     COUNTERS.with(|counters| XspiceSettleCounts {
         instance_evaluations: counters.instance_evaluations.get(),
         instance_deep_copies: counters.instance_deep_copies.get(),

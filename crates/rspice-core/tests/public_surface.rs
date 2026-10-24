@@ -454,8 +454,13 @@ const MAX_PUBLIC_ITEMS: usize = 5313;
 // drive the inputs through `VectorFile::input_sources`, check the outputs
 // through `VectorFile::output_checks`, report under
 // `VectorFileReference::report_name`, and name the line a refusal comes from
-// through `VectorFileError`. The census is 1,324, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1324;
+// through `VectorFileError`. The census was 1,324, with no slack.
+// The settle-cost counters add six, so that the XSPICE code models can move
+// into a crate of their own below the engine: the circuit's settle loop bumps
+// two of them, and the counter type, its event-world sum, `reset` and
+// `counts` are what the engine's settle ratchets read, so they compile under
+// `test-support` as well as `cfg(test)`. The census is 1,330, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1330;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
