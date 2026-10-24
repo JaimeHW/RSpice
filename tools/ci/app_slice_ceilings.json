@@ -47,14 +47,7 @@
     "simulate->results": 9
   },
   "lower->upper": {
-    "framework->cloud": 22,
-    "framework->code": 11,
-    "framework->design": 8,
-    "framework->hardcopy": 6,
-    "framework->results": 14,
-    "framework->session": 654,
-    "framework->sheets": 7,
-    "framework->shell": 16,
+    "framework->session": 490,
     "model->design": 2,
     "model->session": 6,
     "run->code": 2,
@@ -64,8 +57,8 @@
     "services->shell": 1
   },
   "whole-app": {
-    "&RSpiceApp params outside shell": 290,
-    "&mut RSpiceApp params outside shell": 616,
+    "&RSpiceApp params outside shell": 285,
+    "&mut RSpiceApp params outside shell": 610,
     "impl AppState methods outside session": 241,
     "impl RSpiceApp methods outside shell": 207
   }

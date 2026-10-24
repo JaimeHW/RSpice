@@ -164,9 +164,9 @@ SLICE_RULES = [
     (W + r"docks", "framework"),
     (W + r"commands/code_context", "code"),
     (W + r"commands/result_navigation", "results"),
-    (W + r"commands\.rs$", "shell"),
-    (W + r"commands/tests", "shell"),
-    (W + r"commands", "framework"),
+    # The legacy command enum, its tables and its dispatcher: the shell's
+    # fallback for every key no registered feature owns.
+    (W + r"commands(\.rs$|/)", "shell"),
     (W + r"dispatch\.rs$", "shell"),
     (W + r"shell_host(\.rs$|/)", "shell"),
     (W + r"menu_bar/export_actions", "hardcopy"),
