@@ -42,7 +42,6 @@ impl CodeOffset {
         Self(offset)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn as_usize(self) -> usize {
         self.0
     }
@@ -587,7 +586,6 @@ impl NativeModel {
         .expect("publish native test model")
     }
 
-    #[allow(dead_code)]
     fn validate_entry_offsets(
         entries: &NativeEntryOffsets,
         entry_starts: &NativeEntryStarts,
@@ -686,7 +684,6 @@ impl NativeModel {
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn validate_entry_start(offset: CodeOffset, image_len: usize) -> JitResult<()> {
         if offset.0 >= image_len {
             return Err(JitError::ExecutableMemory {
@@ -700,7 +697,6 @@ impl NativeModel {
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn validate_entry_offset(
         offset: CodeOffset,
         entry_starts: &NativeEntryStarts,

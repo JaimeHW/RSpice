@@ -7937,10 +7937,6 @@ mod tests {
             "dynamic read fast path should use one scaled indexed LEA for variable address formation"
         );
         assert!(
-            !contains_bytes(&bytes, &dynamic_variable_shift_add_address_bytes(1)),
-            "dynamic read fast path should not use the old shift/add address sequence"
-        );
-        assert!(
             contains_bytes(&bytes, &sub_r64_imm32_bytes(Gpr::R10, 1)),
             "dynamic read fast path should subtract small lower bounds as an imm32"
         );
@@ -14038,19 +14034,6 @@ mod tests {
             Gpr::R10,
             super::byte_disp(base).expect("dynamic address test index fits disp32"),
         );
-        encoder.into_bytes()
-    }
-
-    fn dynamic_variable_shift_add_address_bytes(base: usize) -> Vec<u8> {
-        let base_disp = super::byte_disp(base).expect("dynamic address test index fits disp32");
-        let mut encoder = X64Encoder::new();
-        encoder.mov_r64_r64(Gpr::Rax, Gpr::R10);
-        encoder.shl_r64_imm8(Gpr::Rax, 3);
-        encoder.mov_r64_r64(Gpr::R11, entry_vars_arg_reg());
-        if base_disp != 0 {
-            encoder.add_r64_imm32(Gpr::R11, base_disp);
-        }
-        encoder.add_r64_r64(Gpr::Rax, Gpr::R11);
         encoder.into_bytes()
     }
 

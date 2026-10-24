@@ -27,7 +27,6 @@ pub(crate) enum Gpr {
     R14,
 }
 
-#[allow(dead_code)]
 impl Gpr {
     fn code(self) -> u8 {
         match self {
@@ -166,7 +165,6 @@ impl Rel32Patch {
     }
 }
 
-#[allow(dead_code)]
 impl X64Encoder {
     pub fn new() -> Self {
         Self { bytes: Vec::new() }
@@ -197,6 +195,7 @@ impl X64Encoder {
         self.bytes[start..patch.next_instruction_offset].copy_from_slice(&value.to_le_bytes());
     }
 
+    #[cfg(test)]
     pub fn mov_eax_imm32(&mut self, value: u32) {
         self.emit_u8(0xB8);
         self.emit_all(&value.to_le_bytes());
@@ -275,24 +274,6 @@ impl X64Encoder {
         self.emit_r64_imm32(0b101, reg, value);
     }
 
-    pub(crate) fn and_r64_imm32(&mut self, reg: Gpr, value: i32) {
-        self.emit_r64_imm32(0b100, reg, value);
-    }
-
-    pub(crate) fn or_r64_imm32(&mut self, reg: Gpr, value: i32) {
-        self.emit_r64_imm32(0b001, reg, value);
-    }
-
-    pub(crate) fn xor_r64_imm32(&mut self, reg: Gpr, value: i32) {
-        self.emit_r64_imm32(0b110, reg, value);
-    }
-
-    pub(crate) fn add_r64_r64(&mut self, dst: Gpr, src: Gpr) {
-        self.emit_rex(true, src.code(), 0, dst.code());
-        self.emit_u8(0x01);
-        self.emit_modrm(0b11, src.code(), dst.code());
-    }
-
     pub(crate) fn sub_r64_r64(&mut self, dst: Gpr, src: Gpr) {
         self.emit_rex(true, src.code(), 0, dst.code());
         self.emit_u8(0x29);
@@ -309,13 +290,6 @@ impl X64Encoder {
         self.emit_rex(true, src.code(), 0, dst.code());
         self.emit_u8(0x31);
         self.emit_modrm(0b11, src.code(), dst.code());
-    }
-
-    pub(crate) fn shl_r64_imm8(&mut self, reg: Gpr, value: u8) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_all(&[0xC1]);
-        self.emit_modrm(0b11, 0b100, reg.code());
-        self.emit_u8(value);
     }
 
     pub(crate) fn lea_r64_base_index_scale8_disp32(
@@ -422,13 +396,6 @@ impl X64Encoder {
         self.emit_rex(false, src.code(), 0, base.code());
         self.emit_all(&[0x0F, 0x7F]);
         self.emit_base_disp32_modrm(src.code(), base.code(), disp);
-    }
-
-    pub(crate) fn mov_m8_base_disp32_imm8(&mut self, base: Gpr, disp: i32, value: u8) {
-        self.emit_rex_for_byte_operands(false, 0, 0, base.code(), false, true);
-        self.emit_u8(0xC6);
-        self.emit_base_disp32_modrm(0, base.code(), disp);
-        self.emit_u8(value);
     }
 
     pub(crate) fn movsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
@@ -571,14 +538,6 @@ impl X64Encoder {
         self.emit_sse_reg_rip_disp32(0xF2, 0x58, dst, disp)
     }
 
-    pub(crate) fn addsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
-        self.emit_sse_reg_base_disp32(0xF2, 0x58, dst, base, disp);
-    }
-
-    pub fn addsd_xmm0_xmm1(&mut self) {
-        self.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
-    }
-
     pub(crate) fn subsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x5C, dst, src);
     }
@@ -591,24 +550,12 @@ impl X64Encoder {
         self.emit_sse_reg_base_disp32(0xF2, 0x5C, dst, base, disp);
     }
 
-    pub fn subsd_xmm0_xmm1(&mut self) {
-        self.subsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
-    }
-
     pub(crate) fn mulsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x59, dst, src);
     }
 
     pub(crate) fn mulsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
         self.emit_sse_reg_rip_disp32(0xF2, 0x59, dst, disp)
-    }
-
-    pub(crate) fn mulsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
-        self.emit_sse_reg_base_disp32(0xF2, 0x59, dst, base, disp);
-    }
-
-    pub fn mulsd_xmm0_xmm1(&mut self) {
-        self.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
 
     pub(crate) fn divsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
@@ -621,10 +568,6 @@ impl X64Encoder {
 
     pub(crate) fn divsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
         self.emit_sse_reg_base_disp32(0xF2, 0x5E, dst, base, disp);
-    }
-
-    pub fn divsd_xmm0_xmm1(&mut self) {
-        self.divsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
 
     pub(crate) fn minsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
@@ -822,25 +765,6 @@ mod tests {
     }
 
     #[test]
-    fn encodes_scalar_f64_register_ops() {
-        let mut encoder = X64Encoder::new();
-
-        encoder.addsd_xmm0_xmm1();
-        encoder.subsd_xmm0_xmm1();
-        encoder.mulsd_xmm0_xmm1();
-        encoder.divsd_xmm0_xmm1();
-        encoder.ret();
-
-        assert_eq!(
-            encoder.into_bytes(),
-            [
-                0xF2, 0x0F, 0x58, 0xC1, 0xF2, 0x0F, 0x5C, 0xC1, 0xF2, 0x0F, 0x59, 0xC1, 0xF2, 0x0F,
-                0x5E, 0xC1, 0xC3,
-            ]
-        );
-    }
-
-    #[test]
     fn encodes_windows_param_load_leaf() {
         let mut encoder = X64Encoder::new();
         encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rcx, 16);
@@ -878,17 +802,13 @@ mod tests {
         encoder.cmp_r64_imm32(Gpr::R10, 128);
         encoder.mov_r64_imm32(Gpr::Rdx, -2);
         encoder.mov_r64_imm32(Gpr::R13, -129);
-        encoder.and_r64_imm32(Gpr::R10, 7);
-        encoder.or_r64_imm32(Gpr::R11, -1);
-        encoder.xor_r64_imm32(Gpr::Rdx, 128);
 
         assert_eq!(
             encoder.into_bytes(),
             [
                 0x48, 0x83, 0xC2, 24, 0x49, 0x83, 0xC5, 0xF8, 0x49, 0x83, 0xEA, 1, 0x49, 0x83,
                 0xFB, 1, 0x48, 0x81, 0xC2, 128, 0, 0, 0, 0x49, 0x81, 0xFA, 128, 0, 0, 0, 0x48,
-                0xC7, 0xC2, 0xFE, 0xFF, 0xFF, 0xFF, 0x49, 0xC7, 0xC5, 0x7F, 0xFF, 0xFF, 0xFF, 0x49,
-                0x83, 0xE2, 7, 0x49, 0x83, 0xCB, 0xFF, 0x48, 0x81, 0xF2, 128, 0, 0, 0,
+                0xC7, 0xC2, 0xFE, 0xFF, 0xFF, 0xFF, 0x49, 0xC7, 0xC5, 0x7F, 0xFF, 0xFF, 0xFF,
             ]
         );
     }
@@ -994,7 +914,6 @@ mod tests {
         encoder.mulsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
         encoder.divsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
         encoder.movsd_m64_base_disp32_xmm(Gpr::Rdx, 16, Xmm::Xmm1);
-        encoder.mulsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rdx, 16);
         encoder.ret();
 
         assert_eq!(
@@ -1002,7 +921,7 @@ mod tests {
             [
                 0x66, 0x0F, 0x57, 0xC0, 0xF2, 0x0F, 0x10, 0xC8, 0xF2, 0x0F, 0x58, 0xC8, 0xF2, 0x0F,
                 0x5C, 0xC8, 0xF2, 0x0F, 0x59, 0xC8, 0xF2, 0x0F, 0x5E, 0xC8, 0xF2, 0x0F, 0x11, 0x4A,
-                16, 0xF2, 0x0F, 0x59, 0x4A, 16, 0xC3,
+                16, 0xC3,
             ]
         );
     }
@@ -1249,7 +1168,6 @@ mod tests {
     fn encodes_limit_state_sequence_primitives() {
         let mut encoder = X64Encoder::new();
 
-        encoder.mov_m8_base_disp32_imm8(Gpr::R10, 16, 1);
         encoder.btc_r64_imm8(Gpr::R11, 63);
         encoder.cmp_r64_imm32(Gpr::R11, 1);
         let branch = encoder.jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
@@ -1257,14 +1175,13 @@ mod tests {
         encoder.subsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
         encoder.minsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rsp, 0);
         encoder.maxsd_xmm_m64_base_disp32(Xmm::Xmm2, Gpr::Rsp, 8);
-        encoder.addsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
 
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x41, 0xC6, 0x42, 16, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x83, 0xFB, 1, 0x0F,
-                0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x48, 24, 0xF2, 0x0F, 0x5D, 0x0C, 0x24, 0xF2,
-                0x0F, 0x5F, 0x54, 0x24, 8, 0xF2, 0x0F, 0x58, 0x48, 24,
+                0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x83, 0xFB, 1, 0x0F, 0x86, 0, 0, 0, 0, 0xF2,
+                0x0F, 0x5C, 0x48, 24, 0xF2, 0x0F, 0x5D, 0x0C, 0x24, 0xF2, 0x0F, 0x5F, 0x54, 0x24,
+                8,
             ]
         );
     }

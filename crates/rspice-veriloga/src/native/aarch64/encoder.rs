@@ -294,11 +294,6 @@ impl A64Encoder {
         self.variable_shift_x(0x9AC0_2000, destination, value, count)
     }
 
-    #[cfg(test)]
-    pub(crate) fn asrv_x(&mut self, destination: XReg, value: XReg, count: XReg) -> JitResult<()> {
-        self.variable_shift_x(0x9AC0_2800, destination, value, count)
-    }
-
     fn variable_shift_x(
         &mut self,
         opcode: u32,
@@ -409,17 +404,6 @@ impl A64Encoder {
     ) -> JitResult<()> {
         require_general_register(destination, "LDRB destination")?;
         self.load_store_unsigned(0x3940_0000, reg(destination), base, byte_offset, 1)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn strb_w_unsigned(
-        &mut self,
-        source: XReg,
-        base: XReg,
-        byte_offset: usize,
-    ) -> JitResult<()> {
-        require_general_register(source, "STRB source")?;
-        self.load_store_unsigned(0x3900_0000, reg(source), base, byte_offset, 1)
     }
 
     fn load_store_unsigned(
@@ -589,16 +573,6 @@ impl A64Encoder {
 
     pub(crate) fn fdiv_d(&mut self, destination: DReg, left: DReg, right: DReg) {
         self.fp_binary(0x1E60_1800, destination, left, right);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fmax_d(&mut self, destination: DReg, left: DReg, right: DReg) {
-        self.fp_binary(0x1E60_4800, destination, left, right);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fmin_d(&mut self, destination: DReg, left: DReg, right: DReg) {
-        self.fp_binary(0x1E60_5800, destination, left, right);
     }
 
     fn fp_binary(&mut self, opcode: u32, destination: DReg, left: DReg, right: DReg) {
@@ -1059,16 +1033,8 @@ mod tests {
             .lslv_x(XReg::X9, XReg::X10, XReg::X11)
             .expect("encode LSLV");
         encoder
-            .asrv_x(XReg::X12, XReg::X13, XReg::X14)
-            .expect("encode ASRV");
-        encoder
             .fcvtzs_x_d(XReg::X15, DReg::D16)
             .expect("encode FCVTZS");
-        encoder.fmax_d(DReg::D0, DReg::D1, DReg::D2);
-        encoder.fmin_d(DReg::D3, DReg::D4, DReg::D5);
-        encoder
-            .strb_w_unsigned(XReg::X6, XReg::X7, 8)
-            .expect("encode STRB");
 
         assert_eq!(
             words(&encoder.into_bytes()),
@@ -1087,11 +1053,7 @@ mod tests {
                 0xAA05_0083,
                 0xCA08_00E6,
                 0x9ACB_2149,
-                0x9ACE_29AC,
                 0x9E78_020F,
-                0x1E62_4820,
-                0x1E65_5883,
-                0x3900_20E6,
             ]
         );
     }
