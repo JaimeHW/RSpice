@@ -6,6 +6,18 @@
 use super::super::{GovernedSheetPageAuthority, SchematicPageSetupAuthority};
 use super::*;
 
+/// The active document as File > Print opens it: the dialog's own source
+/// selection, resolved through the retained path its worker runs.
+fn resolve_active_source(app: &RSpiceApp) -> Result<ResolvedHardcopyDocument, String> {
+    let (source_key, scope) = active_retained_source_selection(app)?;
+    crate::workbench::hardcopy_adapters::sources::resolve_retained_hardcopy_source(
+        &app.state,
+        &source_key,
+        scope,
+    )
+    .map_err(|error| error.to_string())
+}
+
 #[test]
 fn governed_design_print_selects_the_active_sheet_identity() {
     let mut app = RSpiceApp::test_instance();
@@ -254,11 +266,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
             sheet_revision: catalog.find(sheet_id).unwrap().revision(),
         }),
     };
-    let resolved =
-        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
-            &app.state,
-        )
-        .expect("active governed sheet resolves");
+    let resolved = resolve_active_source(&app).expect("active governed sheet resolves");
     let format = SchematicSheetFormat::try_custom(
         "Review board",
         304_800,
@@ -326,11 +334,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved =
-        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
-            &app.state,
-        )
-        .expect("legacy schematic resolves");
+    let resolved = resolve_active_source(&app).expect("legacy schematic resolves");
     let policy_before = app.state.model.schematic.document().document_policy;
     let format = SchematicSheetFormat::try_custom(
         "Custom",
@@ -380,11 +384,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved =
-        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
-            &app.state,
-        )
-        .expect("legacy schematic resolves");
+    let resolved = resolve_active_source(&app).expect("legacy schematic resolves");
     let authority = SchematicPageSetupAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
         governed_sheet: None,
@@ -513,11 +513,7 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved =
-        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
-            &app.state,
-        )
-        .expect("active schematic resolves");
+    let resolved = resolve_active_source(&app).expect("active schematic resolves");
     app.state
         .hardcopy
         .hardcopy
@@ -562,11 +558,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved =
-        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
-            &app.state,
-        )
-        .expect("active schematic resolves");
+    let resolved = resolve_active_source(&app).expect("active schematic resolves");
     app.state
         .hardcopy
         .hardcopy
@@ -780,11 +772,7 @@ fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved =
-        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
-            &app.state,
-        )
-        .expect("active schematic resolves");
+    let resolved = resolve_active_source(&app).expect("active schematic resolves");
     apply_open_resolved(&mut app, HardcopyWorkflow::Export, resolved).expect("dialog opens");
     app
 }

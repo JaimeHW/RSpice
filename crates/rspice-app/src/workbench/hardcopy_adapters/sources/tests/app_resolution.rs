@@ -20,8 +20,17 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
         .documents
         .activate(WorkspaceDocumentId::CellView(reference.clone()));
 
-    let first = resolve_active_app_hardcopy_source(&state).unwrap();
-    let second = resolve_active_app_hardcopy_source(&state).unwrap();
+    let source_key = format!(
+        "project:{}:cell-view:{}",
+        state.model.workspace.content.project.id().as_uuid(),
+        state.model.workspace.content.active_key()
+    );
+    let first =
+        resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::ActiveDocument)
+            .unwrap();
+    let second =
+        resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::ActiveDocument)
+            .unwrap();
     assert_eq!(
         first.authority().document_id(),
         second.authority().document_id()
@@ -303,14 +312,6 @@ fn printed_wire_ids(resolved: &ResolvedHardcopyDocument) -> Vec<Vec<u64>> {
     }
 }
 
-fn resolve_prepared(
-    state: &AppState,
-    source_key: &str,
-    scope: HardcopyScope,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    prepare_retained_hardcopy_resolution(state, source_key, scope)?.resolve_owned()
-}
-
 #[test]
 fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
     let (mut state, base_key, [first, second]) = two_sheets_drawn_at_the_same_place();
@@ -329,14 +330,15 @@ fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
         ]
     );
     assert!(matches!(
-        resolve_prepared(&state, &base_key, HardcopyScope::ActiveDocument),
+        resolve_retained_hardcopy_source(&state, &base_key, HardcopyScope::ActiveDocument),
         Err(HardcopySourceError::UnsupportedScope(
             HardcopyScope::ActiveDocument
         ))
     ));
     assert_eq!(
         printed_wire_ids(
-            &resolve_prepared(&state, &base_key, HardcopyScope::AllSheetsOrPanes).unwrap()
+            &resolve_retained_hardcopy_source(&state, &base_key, HardcopyScope::AllSheetsOrPanes)
+                .unwrap()
         ),
         [vec![11], vec![22]]
     );
@@ -344,14 +346,16 @@ fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
         let sheet_key = format!("{base_key}:sheet:{sheet}");
         assert_eq!(
             printed_wire_ids(
-                &resolve_prepared(&state, &sheet_key, HardcopyScope::CurrentSheet).unwrap()
+                &resolve_retained_hardcopy_source(&state, &sheet_key, HardcopyScope::CurrentSheet)
+                    .unwrap()
             ),
             [[wire]]
         );
     }
     assert_eq!(
         printed_wire_ids(
-            &resolve_prepared(&state, &base_key, HardcopyScope::CurrentSheet).unwrap()
+            &resolve_retained_hardcopy_source(&state, &base_key, HardcopyScope::CurrentSheet)
+                .unwrap()
         ),
         [[11]]
     );
@@ -367,7 +371,8 @@ fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
         .unwrap();
     assert_eq!(
         printed_wire_ids(
-            &resolve_prepared(&state, &base_key, HardcopyScope::CurrentSheet).unwrap()
+            &resolve_retained_hardcopy_source(&state, &base_key, HardcopyScope::CurrentSheet)
+                .unwrap()
         ),
         [[22]]
     );
@@ -382,13 +387,15 @@ fn a_selection_prints_only_what_is_selected_on_the_active_sheet() {
     selection.wires.insert(11);
     selection.wires.insert(22);
     assert_eq!(
-        printed_wire_ids(&resolve_prepared(&state, &base_key, HardcopyScope::Selection).unwrap()),
+        printed_wire_ids(
+            &resolve_retained_hardcopy_source(&state, &base_key, HardcopyScope::Selection).unwrap()
+        ),
         [[11]]
     );
 }
 
 #[test]
-fn global_app_resolver_rejects_stale_results_registry() {
+fn a_results_document_that_is_no_longer_retained_is_not_printed() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
     run.lifecycle = SimulationRunLifecycle::Completed;
@@ -405,16 +412,24 @@ fn global_app_resolver_rejects_stale_results_registry() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::ResultDataset(DatasetId::new()));
+    let active_run_key = format!(
+        "project:{}:result-dataset:{}",
+        state.model.workspace.content.project.id().as_uuid(),
+        state.model.simulation.active_run().unwrap().dataset_id
+    );
 
-    let error = resolve_active_app_hardcopy_source(&state).unwrap_err();
-    assert!(matches!(
-        error,
-        HardcopySourceError::StaleActiveDocumentAuthority(_)
-    ));
+    assert!(!active_app_hardcopy_source_available(&state));
+    let error = resolve_retained_hardcopy_source(
+        &state,
+        &active_run_key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .unwrap_err();
+    assert!(matches!(error, HardcopySourceError::SourceNotRetained(_)));
 }
 
 #[test]
-fn global_app_resolver_does_not_guess_a_background_design_document() {
+fn print_does_not_guess_a_background_design_document() {
     let mut state = AppState::default();
     state
         .model
@@ -422,9 +437,12 @@ fn global_app_resolver_does_not_guess_a_background_design_document() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::new(0, 0), Point::new(10, 0)));
-    let error = resolve_active_app_hardcopy_source(&state).unwrap_err();
-    assert!(matches!(
-        error,
-        HardcopySourceError::NoActiveDocumentAuthority("design")
-    ));
+    assert!(
+        state
+            .workbench
+            .documents
+            .active(Workspace::Design)
+            .is_none()
+    );
+    assert!(!active_app_hardcopy_source_available(&state));
 }

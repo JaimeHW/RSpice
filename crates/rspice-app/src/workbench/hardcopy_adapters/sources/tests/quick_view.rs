@@ -146,7 +146,7 @@ fn noise_quick_view_rejects_contributor_only_evidence() {
     assert!(!quick_result_availability(&state, run).is_available());
     assert!(matches!(
         resolve_quick_view(&state),
-        Err(HardcopySourceError::UnretainedResult(reason))
+        Err(HardcopySourceError::UnavailableRetainedSource { reason, .. })
             if reason.contains("no saved analysis has results")
     ));
 }

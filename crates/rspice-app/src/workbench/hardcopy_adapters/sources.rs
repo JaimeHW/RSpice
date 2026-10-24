@@ -7,44 +7,28 @@
 //! No type in this module contains pixels, an egui paint command, or a screen
 //! rectangle.
 
-#[cfg(test)]
-mod documents;
 mod noise;
 mod quick_view_overlay;
 mod report_inventory;
-#[cfg(test)]
-mod results;
 
-#[cfg(test)]
-pub use documents::*;
 pub(crate) use rspice_hardcopy::sources::*;
 // Module-private: `noise` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
 use noise::*;
 use quick_view_overlay::*;
-#[cfg(test)]
-pub(crate) use results::*;
-#[cfg(test)]
-use rspice_hardcopy::sources::resolve_semantic_source as finish_resolved;
-#[cfg(test)]
-pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
-#[cfg(test)]
-pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 
 #[cfg(test)]
 use crate::state::{
     DrawingSheetTitleFieldId, RetainedTrace, SchematicSheetFormat, SchematicState, Selection,
     SymbolDocument, Wire,
 };
-#[cfg(test)]
-use rspice_design::symbol_resolver::SymbolResolver;
 
 use uuid::Uuid;
 
 use crate::product::DatasetId;
 #[cfg(test)]
-use crate::product::{ContentDigest, ObjectRevision, ProjectId};
+use crate::product::{ContentDigest, ObjectRevision};
 #[cfg(test)]
 use crate::results::report_document::{
     FigureSizing, ReportBlockKind, ReportReferenceCurrentness, ReportReferenceMode,
@@ -70,8 +54,6 @@ use rspice_hardcopy_contract::sources::{
     HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
     MAX_HARDCOPY_SOURCE_SET_MEMBERS,
 };
-#[cfg(test)]
-use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 /// Cheap, semantic-free descriptor used by command enablement and the
 /// hardcopy dialog's document/scope selectors. Building this value never
@@ -90,25 +72,6 @@ impl RetainedHardcopySourceDescriptor {
     pub fn supports_scope(&self, scope: &HardcopyScope) -> bool {
         self.allowed_scopes.contains(scope)
     }
-}
-
-#[cfg(test)]
-pub struct SymbolHardcopySource<'a> {
-    pub identity: HardcopySourceIdentity,
-    pub document: &'a SymbolDocument,
-    pub selection: Option<&'a SymbolSelection>,
-    pub scope: HardcopyScope,
-}
-
-/// The document shown by the Results workspace quick-view. The adapter reads
-/// the selected retained dataset and the exact active specialized result
-/// state; it never samples the screen or depends on the viewer's paint cache.
-#[cfg(test)]
-pub(crate) struct ResultsQuickViewHardcopySource<'a> {
-    pub source_key: String,
-    pub project_id: ProjectId,
-    pub state: &'a AppState,
-    pub scope: HardcopyScope,
 }
 
 /// The retained run a quick-view capture is taken from.
@@ -1191,155 +1154,6 @@ fn visualization_document_pane_availability(
     RetainedHardcopySourceAvailability::Available
 }
 
-/// Resolve the one application document that owns the current route.
-///
-/// This is the sole AppState integration boundary for File > Print and page
-/// preview. Every branch verifies the stable open-document selection before
-/// borrowing engineering content; background buffers and most-recent results
-/// are never substituted for an absent or stale active authority.
-// The fail-closed single-route compatibility boundary. Nothing in the
-// application reaches it; the hardcopy tests do.
-#[cfg(test)]
-pub(crate) fn resolve_active_app_hardcopy_source(
-    state: &AppState,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let project_id = state.model.workspace.content.project.id();
-    match state.workbench.current_route().surface_id() {
-        SurfaceId::Design => {
-            let active = state
-                .workbench
-                .documents
-                .active(Workspace::Design)
-                .ok_or(HardcopySourceError::NoActiveDocumentAuthority("design"))?;
-            match active {
-                WorkspaceDocumentId::CellView(reference)
-                    if reference == &state.model.workspace.content.active_view => {}
-                _ => {
-                    return Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
-                        "the Design workspace's active document is not the active view {}",
-                        state.model.workspace.content.active_display_path()
-                    )));
-                }
-            }
-            let identity = active_cell_view_identity(state)?;
-            match state.model.workspace.content.active_view_type() {
-                ViewType::Schematic | ViewType::Testbench => {
-                    let resolver = SymbolResolver::new(
-                        state.model.library_manager.catalog(),
-                        &state.model.workspace.content.schematic_buffers,
-                    );
-                    resolve_schematic_source(SchematicHardcopySource {
-                        identity,
-                        schematic: state.model.schematic.editor_ref().design,
-                        selection: None,
-                        expected_topology_version: state.model.schematic.topology_version(),
-                        symbol_resolver: Some(&resolver),
-                        sheet_catalog: None,
-                        sheet_id: None,
-                        project_default_drawing_sheet: Some(
-                            &state
-                                .model
-                                .workspace
-                                .content
-                                .design_management
-                                .drawing_sheet_settings()
-                                .default_format,
-                        ),
-                        project_title_block_field_values: Some(
-                            &state
-                                .model
-                                .workspace
-                                .content
-                                .design_management
-                                .drawing_sheet_settings()
-                                .title_block_field_values,
-                        ),
-                        scope: HardcopyScope::ActiveDocument,
-                    })
-                }
-                ViewType::Symbol => {
-                    let document = state.load_active_symbol_document().map_err(|reason| {
-                        HardcopySourceError::StaleActiveDocumentAuthority(reason)
-                    })?;
-                    resolve_symbol_source(SymbolHardcopySource {
-                        identity,
-                        document: &document,
-                        selection: None,
-                        scope: HardcopyScope::ActiveDocument,
-                    })
-                }
-                view_type => Err(HardcopySourceError::UnsupportedDocument(format!(
-                    "the active {} view cannot be printed",
-                    view_type.display_name()
-                ))),
-            }
-        }
-        SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
-            Some(WorkspaceDocumentId::ResultDataset(_)) => {
-                let run = active_terminal_run(state)?;
-                require_active_result_document(state, run.dataset_id)?;
-                resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
-                    source_key: format!(
-                        "project:{}:result-dataset:{}",
-                        project_id.as_uuid(),
-                        run.dataset_id
-                    ),
-                    project_id,
-                    state,
-                    scope: HardcopyScope::ActivePlotDocument,
-                })
-            }
-            Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
-                let (document, page, pane) =
-                    active_visualization_document_pane(state, *document_id).ok_or(
-                        HardcopySourceError::NoActiveDocumentAuthority("result document pane"),
-                    )?;
-                resolve_visualization_document_source(
-                    visualization_document_pane_source_key(project_id, document.id(), pane.id),
-                    project_id,
-                    document,
-                    page.id,
-                    pane.id,
-                    false,
-                    HardcopyScope::ActivePlotDocument,
-                )
-            }
-            _ => Err(HardcopySourceError::StaleActiveDocumentAuthority(
-                "the Results workspace has no printable document open".to_owned(),
-            )),
-        },
-        SurfaceId::ReportAuthoring => {
-            let document_id = state.hardcopy.report_authoring.selected_document.ok_or(
-                HardcopySourceError::NoActiveDocumentAuthority("report document"),
-            )?;
-            let matching = state
-                .model
-                .workspace
-                .content
-                .report_documents
-                .iter()
-                .filter(|document| document.id() == document_id)
-                .collect::<Vec<_>>();
-            let [document] = matching.as_slice() else {
-                return if matching.is_empty() {
-                    Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
-                        "selected report {document_id} is not retained"
-                    )))
-                } else {
-                    Err(HardcopySourceError::AmbiguousActiveSource(format!(
-                        "report {document_id}"
-                    )))
-                };
-            };
-            report_inventory::resolve(state, document, HardcopyScope::CompleteReport)
-        }
-        surface => Err(HardcopySourceError::UnsupportedDocument(format!(
-            "surface {} does not own a printable engineering document",
-            surface.as_str()
-        ))),
-    }
-}
-
 fn active_cell_view_identity(
     state: &AppState,
 ) -> Result<HardcopySourceIdentity, HardcopySourceError> {
@@ -1388,49 +1202,12 @@ fn require_active_result_document(
 }
 
 #[cfg(test)]
-fn selected_symbol_document(
-    document: &SymbolDocument,
-    selection: &SymbolSelection,
-) -> Result<SymbolDocument, HardcopySourceError> {
-    if selection.is_empty() {
-        return Err(HardcopySourceError::EmptySelection);
-    }
-    let pins = document
-        .pins
-        .iter()
-        .filter(|pin| selection.pins.contains(&pin.name))
-        .cloned()
-        .collect();
-    let body = document
-        .body
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| selection.shapes.contains(index))
-        .map(|(_, shape)| shape.clone())
-        .collect();
-    let selected = SymbolDocument {
-        pins,
-        body,
-        origin: document.origin,
-        // Anchor handles are not selectable symbol objects. Collapse them to
-        // the origin so an unrelated label anchor cannot enlarge a selection
-        // hardcopy extent.
-        name_anchor: document.origin,
-        value_anchor: document.origin,
-        // A printed selection is a drawing; the waivers stored with the
-        // symbol are decisions about its findings and print nothing.
-        waivers: rspice_design::drc::DrcWaivers::default(),
-    };
-    if selected.pins.is_empty() && selected.body.is_empty() {
-        return Err(HardcopySourceError::EmptySelection);
-    }
-    Ok(selected)
-}
-
-#[cfg(test)]
 mod test_support;
 #[cfg(test)]
-pub(crate) use test_support::resolve_retained_hardcopy_source;
+pub(crate) use test_support::{
+    resolve_blank_schematic_sheet, resolve_blank_schematic_sheet_with_format,
+    resolve_retained_hardcopy_source,
+};
 #[cfg(test)]
 mod tests;
 

@@ -53,13 +53,29 @@ fn quick_view_state(analysis: AnalysisResult, viewer: ResultViewer) -> AppState 
     state
 }
 
+/// The active run printed as File > Print takes it from the Results
+/// workspace: its dataset open as the Results document, resolved through the
+/// retained path the dialog's worker runs.
 fn resolve_quick_view(state: &AppState) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
-        source_key: "results-quick-view".to_owned(),
-        project_id: state.model.workspace.content.project.id(),
-        state,
-        scope: HardcopyScope::ActivePlotDocument,
-    })
+    let dataset_id = state
+        .model
+        .simulation
+        .active_run()
+        .ok_or_else(|| {
+            HardcopySourceError::UnretainedResult("no active result dataset is selected".to_owned())
+        })?
+        .dataset_id;
+    let mut shown = state.clone();
+    shown.workbench.workspace = Workspace::Results;
+    shown
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
+    let source_key = format!(
+        "project:{}:result-dataset:{dataset_id}",
+        shown.model.workspace.content.project.id().as_uuid()
+    );
+    resolve_retained_hardcopy_source(&shown, &source_key, HardcopyScope::ActivePlotDocument)
 }
 
 fn report_with_block(kind: ReportBlockKind) -> ReportDocument {
@@ -343,13 +359,9 @@ fn symbol_scene_retains_negative_authored_coordinates_and_deterministic_extent()
         }],
         ..SymbolDocument::default()
     };
-    let resolved = resolve_symbol_source(SymbolHardcopySource {
-        identity: identity("symbol"),
-        document: &document,
-        selection: None,
-        scope: HardcopyScope::ActiveDocument,
-    })
-    .unwrap();
+    let resolved =
+        resolve_symbol_document(identity("symbol"), document, HardcopyScope::ActiveDocument)
+            .unwrap();
     assert!(resolved.bounds().minimum.x_um < 0);
     assert_eq!(
         resolved.content_extent().width().micrometres(),
@@ -1569,13 +1581,7 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
     state.model.simulation.view.data_version = 9;
     state.results.results.session.viewer = ResultViewer::Waves;
 
-    let resolved = resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
-        source_key: "results-quick-view".to_owned(),
-        project_id: state.model.workspace.content.project.id(),
-        state: &state,
-        scope: HardcopyScope::ActivePlotDocument,
-    })
-    .unwrap();
+    let resolved = resolve_quick_view(&state).unwrap();
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected semantic plot")
     };
@@ -1621,7 +1627,7 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
     );
     assert!(matches!(
         resolve_quick_view(&stale),
-        Err(HardcopySourceError::UnretainedResult(_))
+        Err(HardcopySourceError::UnavailableRetainedSource { .. })
     ));
 
     let complex = AnalysisResult::new(10, AnalysisType::Ac, "AC").with_waveforms(vec![
@@ -1653,7 +1659,7 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
     let smith = quick_view_state(complex, ResultViewer::Smith);
     assert!(matches!(
         resolve_quick_view(&smith),
-        Err(HardcopySourceError::UnretainedResult(_))
+        Err(HardcopySourceError::UnavailableRetainedSource { .. })
     ));
 }
 
