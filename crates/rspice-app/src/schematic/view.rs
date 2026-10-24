@@ -96,25 +96,10 @@ pub(super) fn schematic_design_view(
     )
 }
 
-/// Compose the editor's resolved symbols from the current app-owned sources.
+/// Compose the editor's resolved symbols from the current app-owned sources,
+/// as the model composes them.
 pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolContext {
-    let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
-        state.model.library_manager.catalog(),
-        &state.model.workspace.content.schematic_buffers,
-    );
-    SchematicSymbolContext::new(
-        state.model.schematic.document(),
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .pending_library_cell
-            .as_ref()
-            .map(|pending| &pending.binding),
-        &resolver,
-        symbol_context_revision(state),
-    )
+    state.model.schematic_symbol_context()
 }
 
 /// The resolved symbols a frame paints and hit-tests with.

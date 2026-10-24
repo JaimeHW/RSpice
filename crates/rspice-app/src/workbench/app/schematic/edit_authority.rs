@@ -5,7 +5,6 @@
 //! a different document, view, grid policy, selection, or geometry revision.
 
 use rspice_schematic_editor::requests::EditorRequestSource;
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::state::{SchematicDocumentPolicy, SchematicSnapshot, Selection};
 
@@ -151,27 +150,7 @@ pub(crate) fn schematic_editor_request_source(state: &impl AsRef<Model>) -> Edit
     }
 }
 
+/// [`Model::symbol_context_revision`] for any holder of the model.
 pub(crate) fn symbol_context_revision(state: &impl AsRef<Model>) -> u64 {
-    let model = state.as_ref();
-    let mut hasher = DefaultHasher::new();
-    model.library_manager.revision().hash(&mut hasher);
-    model
-        .workspace
-        .content
-        .schematic_buffers
-        .len()
-        .hash(&mut hasher);
-    let mut folded_xor = 0_u64;
-    let mut folded_sum = 0_u64;
-    for (key, buffer) in &model.workspace.content.schematic_buffers {
-        let mut entry = DefaultHasher::new();
-        key.hash(&mut entry);
-        buffer.topology_version().hash(&mut entry);
-        let entry = entry.finish();
-        folded_xor ^= entry;
-        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
-    }
-    folded_xor.hash(&mut hasher);
-    folded_sum.hash(&mut hasher);
-    hasher.finish()
+    state.as_ref().symbol_context_revision()
 }
