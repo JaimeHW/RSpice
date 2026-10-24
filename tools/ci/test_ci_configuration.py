@@ -1700,6 +1700,16 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo check --locked -p rspice-worker --bin rspice-worker --target wasm32-unknown-unknown",
             workflow,
         )
+        # The simulation crate's tests, with and without the browser worker:
+        # a test that names a native-only item breaks only the wasm32 build.
+        self.assertIn(
+            "cargo check --locked -p rspice-simulation --tests --target wasm32-unknown-unknown",
+            workflow,
+        )
+        self.assertIn(
+            "cargo check --locked -p rspice-simulation --features browser-worker --tests --target wasm32-unknown-unknown",
+            workflow,
+        )
         self.assertIn(
             "cargo build --locked -p rspice-wasm --lib --target wasm32-unknown-unknown --release",
             workflow,

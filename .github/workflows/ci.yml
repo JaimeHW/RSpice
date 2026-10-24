@@ -708,7 +708,7 @@ jobs:
   wasm:
     name: Check (wasm32)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -730,6 +730,12 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-worker --bin rspice-worker --target wasm32-unknown-unknown
+      - name: Check rspice-simulation tests
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo check --locked -p rspice-simulation --tests --target wasm32-unknown-unknown
+          cargo check --locked -p rspice-simulation --features browser-worker --tests --target wasm32-unknown-unknown
       - name: Check standalone engineering formats
         run: |
           for features in "" table-schema native-bundle result-csv result-vcd result-digital \
