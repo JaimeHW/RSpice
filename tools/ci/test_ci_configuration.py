@@ -1567,9 +1567,26 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo test --locked -p rspice-core --lib --features veriloga-model-diode-cmc,"
             "veriloga-model-r2-cmc,veriloga-model-vbic13,veriloga-model-vbic13-4t,"
             "veriloga-builtins-noise\n",
+            "cargo test --locked -p rspice-core --lib --features veriloga-model-ekv-va,"
+            "veriloga-builtins-noise\n",
             "cargo test --locked -p rspice-core --lib --features veriloga-model-ekv-va\n",
         ):
             self.assertIn(build, nightly)
+        # The EKV 2.6 noise oracle compiles only where the generated EKV
+        # carries its noise; some build must carry both.
+        builds = [
+            {feature.strip() for feature in line.split("--features ", 1)[1].split(",")}
+            for line in nightly.splitlines()
+            if "-p rspice-core --lib --features " in line
+        ]
+        self.assertTrue(
+            any({"veriloga-model-ekv-va", "veriloga-builtins-noise"} <= build for build in builds),
+            "no nightly rspice-core build carries the generated EKV with its noise",
+        )
+        self.assertIn(
+            "fn ekv26_noise_sources_match_xyce26_equation_oracle",
+            read_text("crates/rspice-core/src/engine/noise.rs"),
+        )
 
     def test_windows_ci_runs_native_veriloga_jit_tests(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
