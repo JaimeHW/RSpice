@@ -2758,7 +2758,7 @@ enum GeneratedDerivativeAxis {
 
 pub struct GeneratedStamper<'a> {
     matrix: GeneratedMatrixTarget<'a>,
-    cache: Option<&'a GeneratedStaticStampCache>,
+    cache: &'a GeneratedStaticStampCache,
     rhs: Option<&'a mut [Value]>,
     /// Device-local terminal currents accumulated from the exact flow
     /// contributions emitted by generated code. The slice may cover only the
@@ -2809,25 +2809,6 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
-    pub fn new(
-        matrix: &'a mut StaticMatrix,
-        rhs: &'a mut [Value],
-        voltages: &'a [Value],
-        num_nodes: usize,
-    ) -> Self {
-        Self {
-            matrix: GeneratedMatrixTarget::Static { matrix },
-            cache: None,
-            rhs: Some(rhs),
-            terminal_currents: None,
-            voltages,
-            num_nodes,
-            saw_non_finite_matrix: false,
-            saw_non_finite_rhs: false,
-        }
-    }
-
-    #[inline]
     pub fn new_with_static_cache(
         matrix: &'a mut StaticMatrix,
         rhs: &'a mut [Value],
@@ -2837,7 +2818,7 @@ impl<'a> GeneratedStamper<'a> {
     ) -> Self {
         Self {
             matrix: GeneratedMatrixTarget::Static { matrix },
-            cache: Some(cache),
+            cache,
             rhs: Some(rhs),
             terminal_currents: None,
             voltages,
@@ -2866,7 +2847,7 @@ impl<'a> GeneratedStamper<'a> {
     ) -> Self {
         Self {
             matrix: GeneratedMatrixTarget::Static { matrix },
-            cache: Some(cache),
+            cache,
             rhs: Some(rhs),
             terminal_currents: Some(terminal_currents),
             voltages,
@@ -2885,7 +2866,7 @@ impl<'a> GeneratedStamper<'a> {
     ) -> Self {
         Self {
             matrix: GeneratedMatrixTarget::AcReal { matrix },
-            cache: Some(cache),
+            cache,
             rhs: None,
             terminal_currents: None,
             voltages,
@@ -2908,82 +2889,17 @@ impl<'a> GeneratedStamper<'a> {
         derivative_scale: Value,
     ) {
         self.observe_terminal_current_pair(pos, neg, value);
-        if let Some(cache) = self.cache {
-            let pos_axis = pos.and_then(|node| cache.node_axis(node));
-            let neg_axis = neg.and_then(|node| cache.node_axis(node));
-            if pos_axis.is_none() && neg_axis.is_none() {
-                return;
-            }
-
-            let needs_rhs = self.rhs.is_some();
-            let mut equivalent = value;
-            let width = cache.axis_count();
-            let slots_ready = width != 0 && cache.slots.len() == width * width;
-            for (node, derivative) in node_derivative_indices
-                .iter()
-                .copied()
-                .zip(node_derivatives.iter().copied())
-            {
-                let derivative = derivative_scale * derivative;
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.node_axis(node) else {
-                    continue;
-                };
-                if needs_rhs {
-                    equivalent -= derivative * self.axis_value_cached(cache, col_axis);
-                }
-                self.add_current_derivative_axis_pair_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    pos_axis,
-                    neg_axis,
-                    col_axis,
-                    derivative,
-                );
-            }
-            for (branch, derivative) in branch_derivative_indices
-                .iter()
-                .copied()
-                .zip(branch_derivatives.iter().copied())
-            {
-                let derivative = derivative_scale * derivative;
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.branch_axis(branch) else {
-                    continue;
-                };
-                if needs_rhs {
-                    equivalent -= derivative * self.axis_value_cached(cache, col_axis);
-                }
-                self.add_current_derivative_axis_pair_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    pos_axis,
-                    neg_axis,
-                    col_axis,
-                    derivative,
-                );
-            }
-
-            if needs_rhs {
-                self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
-            }
-            return;
-        }
-
-        let pos_axis = pos.and_then(|node| self.node_axis_local(node));
-        let neg_axis = neg.and_then(|node| self.node_axis_local(node));
+        let cache = self.cache;
+        let pos_axis = pos.and_then(|node| cache.node_axis(node));
+        let neg_axis = neg.and_then(|node| cache.node_axis(node));
         if pos_axis.is_none() && neg_axis.is_none() {
             return;
         }
 
         let needs_rhs = self.rhs.is_some();
         let mut equivalent = value;
+        let width = cache.axis_count();
+        let slots_ready = width != 0 && cache.slots.len() == width * width;
         for (node, derivative) in node_derivative_indices
             .iter()
             .copied()
@@ -2993,12 +2909,21 @@ impl<'a> GeneratedStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
+            let Some(col_axis) = cache.node_axis(node) else {
+                continue;
+            };
             if needs_rhs {
-                equivalent -= derivative * self.node_value_local(node);
+                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
             }
-            if let Some(col_axis) = self.node_axis_local(node) {
-                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative);
-            }
+            self.add_current_derivative_axis_pair_cached(
+                cache,
+                slots_ready,
+                width,
+                pos_axis,
+                neg_axis,
+                col_axis,
+                derivative,
+            );
         }
         for (branch, derivative) in branch_derivative_indices
             .iter()
@@ -3009,16 +2934,25 @@ impl<'a> GeneratedStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
+            let Some(col_axis) = cache.branch_axis(branch) else {
+                continue;
+            };
             if needs_rhs {
-                equivalent -= derivative * self.branch_value_local(branch);
+                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
             }
-            if let Some(col_axis) = self.branch_axis_local(branch) {
-                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative);
-            }
+            self.add_current_derivative_axis_pair_cached(
+                cache,
+                slots_ready,
+                width,
+                pos_axis,
+                neg_axis,
+                col_axis,
+                derivative,
+            );
         }
 
         if needs_rhs {
-            self.add_current_rhs_axis_pair(pos_axis, neg_axis, equivalent);
+            self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
         }
     }
 
@@ -3117,63 +3051,13 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivative_indices: [usize; BRANCH_COUNT],
         branch_derivatives: [Value; BRANCH_COUNT],
     ) {
-        if let Some(cache) = self.cache {
-            let Some(row_axis) = cache.branch_axis(branch_index) else {
-                return;
-            };
-            let mut equivalent = value;
-            let width = cache.axis_count();
-            let slots_ready = width != 0 && cache.slots.len() == width * width;
-            for (node, derivative) in node_derivative_indices
-                .iter()
-                .copied()
-                .zip(node_derivatives.iter().copied())
-            {
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.node_axis(node) else {
-                    continue;
-                };
-                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
-                self.add_real_axis_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    row_axis,
-                    col_axis,
-                    -derivative,
-                );
-            }
-            for (branch, derivative) in branch_derivative_indices
-                .iter()
-                .copied()
-                .zip(branch_derivatives.iter().copied())
-            {
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.branch_axis(branch) else {
-                    continue;
-                };
-                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
-                self.add_real_axis_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    row_axis,
-                    col_axis,
-                    -derivative,
-                );
-            }
-            self.add_potential_rhs_axis_cached(cache, row_axis, equivalent);
-            return;
-        }
-
-        let Some(row_axis) = self.branch_axis_local(branch_index) else {
+        let cache = self.cache;
+        let Some(row_axis) = cache.branch_axis(branch_index) else {
             return;
         };
         let mut equivalent = value;
+        let width = cache.axis_count();
+        let slots_ready = width != 0 && cache.slots.len() == width * width;
         for (node, derivative) in node_derivative_indices
             .iter()
             .copied()
@@ -3182,10 +3066,11 @@ impl<'a> GeneratedStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
-            equivalent -= derivative * self.node_value_local(node);
-            if let Some(col_axis) = self.node_axis_local(node) {
-                self.add_real_axis(row_axis, col_axis, -derivative);
-            }
+            let Some(col_axis) = cache.node_axis(node) else {
+                continue;
+            };
+            equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+            self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, -derivative);
         }
         for (branch, derivative) in branch_derivative_indices
             .iter()
@@ -3195,12 +3080,13 @@ impl<'a> GeneratedStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
-            equivalent -= derivative * self.branch_value_local(branch);
-            if let Some(col_axis) = self.branch_axis_local(branch) {
-                self.add_real_axis(row_axis, col_axis, -derivative);
-            }
+            let Some(col_axis) = cache.branch_axis(branch) else {
+                continue;
+            };
+            equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+            self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, -derivative);
         }
-        self.add_potential_rhs_axis(row_axis, equivalent);
+        self.add_potential_rhs_axis_cached(cache, row_axis, equivalent);
     }
 
     #[inline]
@@ -3213,13 +3099,6 @@ impl<'a> GeneratedStamper<'a> {
             && let Some(slot) = rhs.get_mut(row)
         {
             *slot += equivalent;
-        }
-    }
-
-    #[inline]
-    fn add_potential_rhs_axis(&mut self, row_axis: usize, equivalent: Value) {
-        if let Some(row) = self.axis_matrix_index_local(row_axis) {
-            self.add_potential_rhs(row, equivalent);
         }
     }
 
@@ -3242,14 +3121,6 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
-    fn node_value_local(&self, node_index: usize) -> Value {
-        self.node_axis_local(node_index)
-            .and_then(|axis| self.axis_matrix_index_local(axis))
-            .and_then(|index| self.voltages.get(index).copied())
-            .unwrap_or(0.0)
-    }
-
-    #[inline]
     fn branch_value_local(&self, branch_index: usize) -> Value {
         self.branch_axis_local(branch_index)
             .and_then(|axis| self.axis_matrix_index_local(axis))
@@ -3268,22 +3139,17 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn node_axis_local(&self, node_index: usize) -> Option<usize> {
-        self.static_cache()?.node_axis(node_index)
+        self.cache.node_axis(node_index)
     }
 
     #[inline]
     fn branch_axis_local(&self, branch_index: usize) -> Option<usize> {
-        self.static_cache()?.branch_axis(branch_index)
+        self.cache.branch_axis(branch_index)
     }
 
     #[inline]
     fn axis_matrix_index_local(&self, axis: usize) -> Option<usize> {
-        self.static_cache()?.axis_matrix_index(axis)
-    }
-
-    #[inline]
-    fn static_cache(&self) -> Option<&GeneratedStaticStampCache> {
-        self.cache
+        self.cache.axis_matrix_index(axis)
     }
 
     #[inline]
@@ -3383,86 +3249,15 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
-    fn add_current_derivative_axis_pair(
-        &mut self,
-        pos_axis: Option<usize>,
-        neg_axis: Option<usize>,
-        col_axis: usize,
-        derivative: Value,
-    ) {
-        if derivative == 0.0 {
-            return;
-        }
-        if let Some(cache) = self.cache {
-            let width = cache.axis_count();
-            let slots_ready = width != 0 && cache.slots.len() == width * width;
-            self.add_current_derivative_axis_pair_cached(
-                cache,
-                slots_ready,
-                width,
-                pos_axis,
-                neg_axis,
-                col_axis,
-                derivative,
-            );
-            return;
-        }
-        if let Some(row_axis) = pos_axis {
-            self.add_real_axis(row_axis, col_axis, derivative);
-        }
-        if let Some(row_axis) = neg_axis {
-            self.add_real_axis(row_axis, col_axis, -derivative);
-        }
-    }
-
-    #[inline]
-    fn add_current_rhs_axis_pair(
-        &mut self,
-        pos_axis: Option<usize>,
-        neg_axis: Option<usize>,
-        equivalent: Value,
-    ) {
-        if let Some(cache) = self.cache {
-            self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
-            return;
-        }
-        let pos_row = pos_axis.and_then(|axis| self.axis_matrix_index_local(axis));
-        let neg_row = neg_axis.and_then(|axis| self.axis_matrix_index_local(axis));
-        self.add_current_rhs_pair(pos_row, neg_row, equivalent);
-    }
-
-    #[inline]
     fn add_real_axis(&mut self, row_axis: usize, col_axis: usize, value: Value) {
         self.observe_matrix_value(value);
         if value == 0.0 {
             return;
         }
-        if let Some(cache) = self.cache {
-            let width = cache.axis_count();
-            let slots_ready = width != 0 && cache.slots.len() == width * width;
-            self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, value);
-            return;
-        }
-
-        let Some(row) = self.axis_matrix_index_local(row_axis) else {
-            return;
-        };
-        let Some(col) = self.axis_matrix_index_local(col_axis) else {
-            return;
-        };
-        match &mut self.matrix {
-            GeneratedMatrixTarget::Static { matrix } => {
-                if let Some(index) = self
-                    .cache
-                    .and_then(|cache| cache.slot_for_axes(row_axis, col_axis))
-                {
-                    matrix.stamp_direct(index, value);
-                } else {
-                    matrix.add(row, col, value);
-                }
-            }
-            GeneratedMatrixTarget::AcReal { matrix } => matrix.add_real(row, col, value),
-        }
+        let cache = self.cache;
+        let width = cache.axis_count();
+        let slots_ready = width != 0 && cache.slots.len() == width * width;
+        self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, value);
     }
 
     #[inline]
@@ -3473,10 +3268,7 @@ impl<'a> GeneratedStamper<'a> {
         }
         match &mut self.matrix {
             GeneratedMatrixTarget::Static { matrix } => {
-                if let Some(index) = self
-                    .cache
-                    .and_then(|cache| cache.slot_for_matrix_indices(row, col))
-                {
+                if let Some(index) = self.cache.slot_for_matrix_indices(row, col) {
                     matrix.stamp_direct(index, value);
                 } else {
                     matrix.add(row, col, value);
@@ -3489,7 +3281,7 @@ impl<'a> GeneratedStamper<'a> {
 
 pub struct GeneratedReactiveStamper<'a> {
     matrix: &'a mut ComplexMatrix,
-    cache: Option<&'a GeneratedStaticStampCache>,
+    cache: &'a GeneratedStaticStampCache,
     nodes: &'a [usize],
     branches: &'a [usize],
     num_nodes: usize,
@@ -3648,10 +3440,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
 
     #[inline]
     fn add_frequency<const REAL: bool>(&mut self, row: usize, col: usize, value: Value) {
-        if let Some(index) = self
-            .cache
-            .and_then(|cache| cache.slot_for_matrix_indices(row, col))
-        {
+        if let Some(index) = self.cache.slot_for_matrix_indices(row, col) {
             if REAL {
                 self.matrix.stamp_direct_real(index, value);
             } else {
@@ -3665,18 +3454,6 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
-    pub fn new(matrix: &'a mut ComplexMatrix, num_nodes: usize, omega: Value) -> Self {
-        Self {
-            matrix,
-            cache: None,
-            nodes: &[],
-            branches: &[],
-            num_nodes,
-            omega,
-        }
-    }
-
-    #[inline]
     pub fn new_with_static_cache(
         matrix: &'a mut ComplexMatrix,
         num_nodes: usize,
@@ -3685,7 +3462,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
     ) -> Self {
         Self {
             matrix,
-            cache: Some(cache),
+            cache,
             nodes: &[],
             branches: &[],
             num_nodes,
@@ -3704,7 +3481,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
     ) -> Self {
         Self {
             matrix,
-            cache: Some(cache),
+            cache,
             nodes,
             branches,
             num_nodes,
@@ -3723,76 +3500,34 @@ impl<'a> GeneratedReactiveStamper<'a> {
         branch_derivatives: &[Value],
         derivative_scale: Value,
     ) {
-        if let Some(cache) = self.cache {
-            let pos_axis = pos.and_then(|node| cache.node_axis(node));
-            let neg_axis = neg.and_then(|node| cache.node_axis(node));
-            if pos_axis.is_none() && neg_axis.is_none() {
-                return;
-            }
-
-            let derivative_scale = arithmetic::ScaledValue::new(self.omega)
-                .multiply(arithmetic::ScaledValue::new(derivative_scale));
-            let width = cache.axis_count();
-            let slots_ready = width != 0 && cache.slots.len() == width * width;
-            for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
-                let derivative = derivative_scale.multiply_binary64(derivative);
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.node_axis(node) else {
-                    continue;
-                };
-                self.add_current_reactive_derivative_axis_pair_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    pos_axis,
-                    neg_axis,
-                    col_axis,
-                    derivative,
-                );
-            }
-            for (branch, derivative) in branches
-                .iter()
-                .copied()
-                .zip(branch_derivatives.iter().copied())
-            {
-                let derivative = derivative_scale.multiply_binary64(derivative);
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.branch_axis(branch) else {
-                    continue;
-                };
-                self.add_current_reactive_derivative_axis_pair_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    pos_axis,
-                    neg_axis,
-                    col_axis,
-                    derivative,
-                );
-            }
-            return;
-        }
-
-        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
-        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
-        if pos_row.is_none() && neg_row.is_none() {
+        let cache = self.cache;
+        let pos_axis = pos.and_then(|node| cache.node_axis(node));
+        let neg_axis = neg.and_then(|node| cache.node_axis(node));
+        if pos_axis.is_none() && neg_axis.is_none() {
             return;
         }
 
         let derivative_scale = arithmetic::ScaledValue::new(self.omega)
             .multiply(arithmetic::ScaledValue::new(derivative_scale));
+        let width = cache.axis_count();
+        let slots_ready = width != 0 && cache.slots.len() == width * width;
         for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
             let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
-            if let Some(col) = self.node_matrix_index_local(node) {
-                self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
-            }
+            let Some(col_axis) = cache.node_axis(node) else {
+                continue;
+            };
+            self.add_current_reactive_derivative_axis_pair_cached(
+                cache,
+                slots_ready,
+                width,
+                pos_axis,
+                neg_axis,
+                col_axis,
+                derivative,
+            );
         }
         for (branch, derivative) in branches
             .iter()
@@ -3803,28 +3538,18 @@ impl<'a> GeneratedReactiveStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
-            if let Some(col) = self.branch_matrix_index_local(branch) {
-                self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
-            }
-        }
-    }
-
-    #[inline]
-    fn add_current_reactive_derivative_pair(
-        &mut self,
-        pos_row: Option<usize>,
-        neg_row: Option<usize>,
-        col: usize,
-        derivative: Value,
-    ) {
-        if derivative == 0.0 {
-            return;
-        }
-        if let Some(row) = pos_row {
-            self.add_imag(row, col, derivative);
-        }
-        if let Some(row) = neg_row {
-            self.add_imag(row, col, -derivative);
+            let Some(col_axis) = cache.branch_axis(branch) else {
+                continue;
+            };
+            self.add_current_reactive_derivative_axis_pair_cached(
+                cache,
+                slots_ready,
+                width,
+                pos_axis,
+                neg_axis,
+                col_axis,
+                derivative,
+            );
         }
     }
 
@@ -3885,21 +3610,6 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
-    fn add_imag(&mut self, row: usize, col: usize, value: Value) {
-        if value == 0.0 {
-            return;
-        }
-        if let Some(index) = self
-            .cache
-            .and_then(|cache| cache.slot_for_matrix_indices(row, col))
-        {
-            self.matrix.stamp_direct_imag(index, value);
-        } else {
-            self.matrix.add_imag(row, col, value);
-        }
-    }
-
-    #[inline]
     pub fn stamp_potential_reactive_indexed_dense_local(
         &mut self,
         branch: usize,
@@ -3908,61 +3618,27 @@ impl<'a> GeneratedReactiveStamper<'a> {
         branches: &[usize],
         branch_derivatives: &[Value],
     ) {
-        if let Some(cache) = self.cache {
-            let Some(row_axis) = cache.branch_axis(branch) else {
-                return;
-            };
-            let width = cache.axis_count();
-            let slots_ready = width != 0 && cache.slots.len() == width * width;
-            for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.node_axis(node) else {
-                    continue;
-                };
-                self.add_imag_axis_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    row_axis,
-                    col_axis,
-                    -self.omega * derivative,
-                );
-            }
-            for (branch, derivative) in branches
-                .iter()
-                .copied()
-                .zip(branch_derivatives.iter().copied())
-            {
-                if derivative == 0.0 {
-                    continue;
-                }
-                let Some(col_axis) = cache.branch_axis(branch) else {
-                    continue;
-                };
-                self.add_imag_axis_cached(
-                    cache,
-                    slots_ready,
-                    width,
-                    row_axis,
-                    col_axis,
-                    -self.omega * derivative,
-                );
-            }
-            return;
-        }
-
-        let Some(row) = self.branch_matrix_index_local(branch) else {
+        let cache = self.cache;
+        let Some(row_axis) = cache.branch_axis(branch) else {
             return;
         };
+        let width = cache.axis_count();
+        let slots_ready = width != 0 && cache.slots.len() == width * width;
         for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
             if derivative == 0.0 {
                 continue;
             }
-            if let Some(col) = self.node_matrix_index_local(node) {
-                self.add_imag(row, col, -self.omega * derivative);
-            }
+            let Some(col_axis) = cache.node_axis(node) else {
+                continue;
+            };
+            self.add_imag_axis_cached(
+                cache,
+                slots_ready,
+                width,
+                row_axis,
+                col_axis,
+                -self.omega * derivative,
+            );
         }
         for (branch, derivative) in branches
             .iter()
@@ -3972,9 +3648,17 @@ impl<'a> GeneratedReactiveStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
-            if let Some(col) = self.branch_matrix_index_local(branch) {
-                self.add_imag(row, col, -self.omega * derivative);
-            }
+            let Some(col_axis) = cache.branch_axis(branch) else {
+                continue;
+            };
+            self.add_imag_axis_cached(
+                cache,
+                slots_ready,
+                width,
+                row_axis,
+                col_axis,
+                -self.omega * derivative,
+            );
         }
     }
 
@@ -4102,6 +3786,7 @@ mod fixed_lane_tests {
     fn frequency_coefficients_keep_multiplicity_inside_the_range_boundary() {
         let structure = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let mut matrix = ComplexMatrix::from_real_structure(&structure);
+        let cache = GeneratedStaticStampCache::default();
         for (coefficient, scale, omega, ddt, idt, expected) in [
             (1e200, 1e-200, 1e200, 1, 0, 1e200),
             (1e-200, 1e200, 1e-200, 1, 0, 1e-200),
@@ -4116,7 +3801,14 @@ mod fixed_lane_tests {
         ] {
             let ctx =
                 GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
-            let stamper = GeneratedReactiveStamper::new(&mut matrix, 1, omega);
+            let stamper = GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                &mut matrix,
+                &[],
+                &[],
+                1,
+                omega,
+                &cache,
+            );
             let actual = stamper
                 .scaled_frequency_coefficient(&ctx, coefficient, scale, ddt, idt)
                 .expect("the fully scaled coefficient is finite");
@@ -4135,9 +3827,16 @@ mod fixed_lane_tests {
             let ctx =
                 GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
             assert!(
-                GeneratedReactiveStamper::new(&mut matrix, 1, omega)
-                    .scaled_frequency_coefficient(&ctx, 1.0, scale, ddt, idt)
-                    .is_none()
+                GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                    &mut matrix,
+                    &[],
+                    &[],
+                    1,
+                    omega,
+                    &cache
+                )
+                .scaled_frequency_coefficient(&ctx, 1.0, scale, ddt, idt)
+                .is_none()
             );
             assert!(matches!(
                 ctx.take_evaluation_error(),
@@ -4200,6 +3899,7 @@ mod fixed_lane_tests {
     fn frequency_coefficients_preserve_phase_and_extreme_scaled_results() {
         let structure = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let mut matrix = ComplexMatrix::from_real_structure(&structure);
+        let cache = GeneratedStaticStampCache::default();
         let ctx = GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
         for (coefficient, omega, ddt, idt, expected) in [
             (2.0, 4.0, 1, 0, 8.0),
@@ -4217,7 +3917,14 @@ mod fixed_lane_tests {
             (0.0, 1e200, 2, 0, 0.0),
             (2.0, 0.0, 2, 0, 0.0),
         ] {
-            let stamper = GeneratedReactiveStamper::new(&mut matrix, 1, omega);
+            let stamper = GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                &mut matrix,
+                &[],
+                &[],
+                1,
+                omega,
+                &cache,
+            );
             let actual = stamper
                 .scaled_frequency_coefficient(&ctx, coefficient, 1.0, ddt, idt)
                 .unwrap();
@@ -4233,6 +3940,7 @@ mod fixed_lane_tests {
     fn frequency_coefficients_report_singular_or_invalid_inputs() {
         let structure = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let mut matrix = ComplexMatrix::from_real_structure(&structure);
+        let cache = GeneratedStaticStampCache::default();
         for (coefficient, omega, ddt, idt) in [
             (1.0, 0.0, 0, 1),
             (1.0, 0.0, 1, 1),
@@ -4245,7 +3953,14 @@ mod fixed_lane_tests {
         ] {
             let ctx =
                 GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
-            let stamper = GeneratedReactiveStamper::new(&mut matrix, 1, omega);
+            let stamper = GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                &mut matrix,
+                &[],
+                &[],
+                1,
+                omega,
+                &cache,
+            );
             assert!(
                 stamper
                     .scaled_frequency_coefficient(&ctx, coefficient, 1.0, ddt, idt)
@@ -5328,7 +5043,16 @@ mod fixed_lane_tests {
                 );
                 stamper.stamp_inactive_potential_branch_local(0);
             } else {
-                let mut stamper = GeneratedStamper::new(&mut matrix, &mut stamp_rhs, &voltages, 0);
+                // An unlinked cache has no slots, so the stamp takes the
+                // matrix-index fallback.
+                let unlinked = GeneratedStaticStampCache::default();
+                let mut stamper = GeneratedStamper::new_with_static_cache(
+                    &mut matrix,
+                    &mut stamp_rhs,
+                    &voltages,
+                    0,
+                    &unlinked,
+                );
                 stamper.stamp_inactive_potential_branch(1);
             }
             let solution = matrix.solve(&[2.5]).expect("unit diagonal solves");
