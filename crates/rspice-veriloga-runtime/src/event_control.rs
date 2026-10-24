@@ -504,7 +504,13 @@ fn evaluate_generated_cross_impl(
 }
 
 /// Evaluate a generated timer and return its event level and next exact event.
-/// This matches the portable VM's endpoint and coalescing rules.
+///
+/// A non-positive period denotes a one-shot timer. The event is level-true
+/// throughout repeated Newton evaluations of the same candidate timepoint,
+/// but is excluded once that timepoint becomes the lower endpoint of the next
+/// step. `time_tol` is an event-coalescing tolerance, while a small
+/// scale-aware floating-point tolerance protects endpoint comparisons. The
+/// portable VM evaluates its timers through this function too.
 pub fn evaluate_generated_timer(
     start_time: Value,
     period: Value,

@@ -12,6 +12,7 @@ use std::fmt::Write;
 
 use super::CanonicalNoiseSourcePlan;
 use super::digital::CanonicalDigitalPlan;
+use super::mir::is_ground_name;
 use super::{
     CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, CanonicalValueType, CompilerPhase,
     HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution, HirContributionKind,
@@ -917,14 +918,6 @@ fn canonical_branch_label(
     };
 
     format!("{},{}", endpoint_name(pos_node), endpoint_name(neg_node)).into()
-}
-
-fn is_ground_name(name: &str, hir: &HirModel) -> bool {
-    name == "0"
-        || hir
-            .ground_nodes
-            .iter()
-            .any(|ground| ground.as_str() == name)
 }
 
 fn artifact_error(message: impl Into<String>) -> IrDiagnostic {

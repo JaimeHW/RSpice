@@ -20,6 +20,7 @@ use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, ExprId, HirExprKind, HirPort, MirParameterSlot,
 };
 
+use super::canonical::unsupported;
 use super::emit::compact_generated_indentation;
 use super::expr::{comparison_operator, format_f64, negate_condition};
 
@@ -27,14 +28,6 @@ use super::{GeneratedRustDevice, RustBackendError, RustTranspileOptions};
 
 /// How many packed scratch workspaces a generated device keeps pooled.
 pub(super) const MAX_CACHED_SCRATCH_WORKSPACES: usize = 2;
-
-fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> RustBackendError {
-    RustBackendError::unsupported(
-        artifact.metadata.source_package.as_str(),
-        artifact.mir.module_name.as_str(),
-        feature,
-    )
-}
 
 pub(super) fn generate_mod_file() -> String {
     [

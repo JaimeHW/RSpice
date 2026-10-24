@@ -8897,7 +8897,7 @@ fn constant_truthy(value: f64) -> bool {
     value != 0.0
 }
 
-fn constant_compare(op: CompareOp, left: f64, right: f64) -> bool {
+pub(crate) fn constant_compare(op: CompareOp, left: f64, right: f64) -> bool {
     match op {
         CompareOp::Gt => left > right,
         CompareOp::Lt => left < right,
@@ -9251,7 +9251,7 @@ fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: Node
     value
 }
 
-fn format_current_pair(pos: usize, neg: usize) -> String {
+pub(crate) fn format_current_pair(pos: usize, neg: usize) -> String {
     format!(
         "{},{}",
         format_current_endpoint(pos),

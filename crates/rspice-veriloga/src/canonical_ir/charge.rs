@@ -540,7 +540,11 @@ fn zero_constant(function: &mut CfgFunction) -> ValueId {
     )
 }
 
-fn push_value(function: &mut CfgFunction, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
+pub(crate) fn push_value(
+    function: &mut CfgFunction,
+    value_type: CfgValueType,
+    kind: CfgValueKind,
+) -> ValueId {
     let id = ValueId::from(function.values.len());
     function.values.push(CfgValue {
         id,

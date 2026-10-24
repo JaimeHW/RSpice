@@ -601,7 +601,7 @@ fn canonical_branch_label(
     format!("{},{}", endpoint_name(pos_node), endpoint_name(neg_node)).into()
 }
 
-fn is_ground_name(name: &str, hir: &HirModel) -> bool {
+pub(super) fn is_ground_name(name: &str, hir: &HirModel) -> bool {
     name == "0"
         || hir
             .ground_nodes

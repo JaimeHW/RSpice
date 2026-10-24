@@ -1313,6 +1313,9 @@ mod tests {
     };
     use crate::device::VerilogADevice;
     use crate::jit::cfg_plan_builder::build_default_model_plan_reported;
+    use crate::jit::plan_builder::{
+        bytecode_assignment_step_reads_current, mark_bytecode_assignment_targets,
+    };
     use crate::jit::plan_program::{BlockProgram, PlanProgram};
     use crate::native::EvalContext;
     use crate::native::bench::count_assignment_steps;
@@ -6261,53 +6264,6 @@ endmodule
         let mut post_targets = vec![false; num_variables];
         mark_bytecode_assignment_targets(&steps[split..], &mut post_targets);
         (steps[..split].to_vec(), post_targets)
-    }
-
-    fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
-        match step {
-            AssignmentStep::Initialization { .. } => false,
-            AssignmentStep::Task(task) => task.expressions().any(bytecode_program_reads_current),
-            AssignmentStep::Assign(assignment) => {
-                bytecode_program_reads_current(&assignment.program)
-            }
-            AssignmentStep::AssignIndexed { index, value, .. } => {
-                bytecode_program_reads_current(index) || bytecode_program_reads_current(value)
-            }
-            AssignmentStep::Loop { condition, body } => {
-                bytecode_program_reads_current(condition)
-                    || body.iter().any(bytecode_assignment_step_reads_current)
-            }
-        }
-    }
-
-    fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
-        program
-            .instructions
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
-    }
-
-    fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
-        for step in steps {
-            match step {
-                AssignmentStep::Initialization { .. } => {}
-                AssignmentStep::Task(_) => {}
-                AssignmentStep::Assign(assignment) => {
-                    if let Some(target) = targets.get_mut(assignment.var_index) {
-                        *target = true;
-                    }
-                }
-                AssignmentStep::AssignIndexed { base, len, .. } => {
-                    let end = base.saturating_add(*len).min(targets.len());
-                    for target in targets.iter_mut().take(end).skip(*base) {
-                        *target = true;
-                    }
-                }
-                AssignmentStep::Loop { body, .. } => {
-                    mark_bytecode_assignment_targets(body, targets);
-                }
-            }
-        }
     }
 
     fn preallocate_native_benchmark_context(context: &mut VmContext, model: &CompiledModel) {

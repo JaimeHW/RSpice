@@ -5955,7 +5955,7 @@ impl VerilogADevice {
             // BSIM4rdsMod derived from the rdsmod parameter); run the
             // evaluation stream once so those variables hold their values.
             // Node voltages are irrelevant to instance-static expressions.
-            Self::execute_assignment_programs(&mut bytecode_vm, model)?;
+            Self::run_assignment_pass(&mut bytecode_vm, model)?;
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = match &program.static_condition {
                     Some(condition) => {
@@ -8059,19 +8059,6 @@ impl VerilogADevice {
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
     /// must not hang the Newton loop)
     const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
-
-    /// Execute assignment programs and update VM variable storage.
-    #[cfg(all(
-        not(feature = "native"),
-        not(all(feature = "wasm-jit", target_arch = "wasm32"))
-    ))]
-    fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
-        if vm.context.variables.len() < model.num_variables {
-            vm.context.variables.resize(model.num_variables, 0.0);
-        }
-
-        Self::execute_assignment_steps(vm, &model.assignment_steps)
-    }
 
     /// Execute a sequence of evaluation steps (assignments and runtime
     /// loops), recursively.

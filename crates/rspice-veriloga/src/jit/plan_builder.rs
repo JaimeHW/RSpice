@@ -9,7 +9,7 @@ use super::current_dependencies::JitCurrentDependencies as NativeCurrentDependen
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, EntryKind, NativeIdentifierIndex,
     NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe, canonical_state_site_scan,
-    canonical_table_lookup_slots_for_equation, constant_dynamic_variable_slot,
+    canonical_table_lookup_slots_for_equation, constant_dynamic_variable_slot, format_current_pair,
     native_op_stack_effect, pair_canonical_state_slots,
 };
 #[cfg(feature = "native")]
@@ -2593,7 +2593,7 @@ fn mark_assignment_targets_after_a_current_read(
     }
 }
 
-fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
+pub(crate) fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
     match step {
         AssignmentStep::Initialization { .. } => false,
         AssignmentStep::Task(task) => task.expressions().any(bytecode_program_reads_current),
@@ -2615,7 +2615,7 @@ fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
         .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
 }
 
-fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
+pub(crate) fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
     for step in steps {
         match step {
             AssignmentStep::Initialization { .. } => {}
@@ -4822,22 +4822,6 @@ fn current_pair_unavailable(model: &CompiledModel, pos: usize, neg: usize) -> Ji
             format_current_pair(pos, neg)
         )
         .into(),
-    }
-}
-
-fn format_current_pair(pos: usize, neg: usize) -> String {
-    format!(
-        "{},{}",
-        format_current_endpoint(pos),
-        format_current_endpoint(neg)
-    )
-}
-
-fn format_current_endpoint(endpoint: usize) -> String {
-    if endpoint == CURRENT_PAIR_GROUND {
-        "ground".to_string()
-    } else {
-        endpoint.to_string()
     }
 }
 

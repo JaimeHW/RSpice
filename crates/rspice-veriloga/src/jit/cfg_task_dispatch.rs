@@ -2,10 +2,10 @@
 //! dispatch permission as the calls. Shared numerical work remains unconditional.
 
 use crate::canonical_ir::cfg::{
-    CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgValue, CfgValueKind, CfgValueType,
-    is_leaf_kind,
+    CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgValueKind, CfgValueType, is_leaf_kind,
 };
 use crate::canonical_ir::cfg_opt::prune_to_outputs_with_tracking;
+use crate::canonical_ir::charge::push_value;
 use crate::canonical_ir::{BlockId, ValueId};
 use std::collections::{HashMap, HashSet};
 
@@ -44,17 +44,17 @@ pub(super) fn guard_task_only_computations(function: &mut CfgFunction, outputs: 
     }) {
         return;
     }
-    let enabled = new_value(
+    let enabled = push_value(
         function,
         CfgValueType::Boolean,
         CfgValueKind::AnalogTasksEnabled,
     );
-    let zero = new_value(
+    let zero = push_value(
         function,
         CfgValueType::Real,
         CfgValueKind::RealConstant(0.0),
     );
-    let false_value = new_value(
+    let false_value = push_value(
         function,
         CfgValueType::Boolean,
         CfgValueKind::BooleanConstant(false),
@@ -218,17 +218,17 @@ fn guard_unobserved_loops(
     if candidates.is_empty() {
         return Vec::new();
     }
-    let enabled = new_value(
+    let enabled = push_value(
         function,
         CfgValueType::Boolean,
         CfgValueKind::AnalogTasksEnabled,
     );
-    let zero = new_value(
+    let zero = push_value(
         function,
         CfgValueType::Real,
         CfgValueKind::RealConstant(0.0),
     );
-    let false_value = new_value(
+    let false_value = push_value(
         function,
         CfgValueType::Boolean,
         CfgValueKind::BooleanConstant(false),
@@ -250,7 +250,7 @@ fn guard_unobserved_loops(
         let dispatch = BlockId::from(function.blocks.len());
         let mut params = Vec::new();
         for original in function.block(header).params.clone() {
-            params.push(new_value(
+            params.push(push_value(
                 function,
                 function.value(original).value_type,
                 CfgValueKind::BlockParameter,
@@ -325,16 +325,6 @@ fn data_dependencies(function: &CfgFunction, roots: &[ValueId]) -> Vec<bool> {
         pending.extend_from_slice(&incoming[usize::from(value)]);
     }
     live
-}
-
-fn new_value(function: &mut CfgFunction, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
-    let id = ValueId::from(function.values.len());
-    function.values.push(CfgValue {
-        id,
-        value_type,
-        kind,
-    });
-    id
 }
 
 /// Existing task bodies are already unreachable when the journal is absent.

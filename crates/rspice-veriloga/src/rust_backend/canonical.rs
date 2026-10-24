@@ -5810,7 +5810,10 @@ fn operator_spelling(
     }
 }
 
-fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> RustBackendError {
+pub(super) fn unsupported(
+    artifact: &CanonicalIrArtifact,
+    feature: impl Into<String>,
+) -> RustBackendError {
     RustBackendError::unsupported(
         artifact.metadata.source_package.as_str(),
         artifact.mir.module_name.as_str(),

@@ -74,8 +74,8 @@ use crate::canonical_ir::CfgScalar;
 use crate::integer_runtime::{integer_binary, real_to_integer};
 use crate::jit::assignment::NativeAssignment;
 use crate::jit::expr::{
-    BinaryMathOp, CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, UnaryMathOp,
-    VoltageNode, native_op_name, runtime_integer_operation,
+    BinaryMathOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, UnaryMathOp, VoltageNode,
+    constant_compare, native_op_name, runtime_integer_operation,
 };
 use crate::jit::plan_program::PlanProgram;
 use crate::jit::ssa::{self, Terminator};
@@ -599,12 +599,16 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::Sqrt => Self::unary(stack, name, S::sqrt)?,
             NativeOp::Compare(op) => {
                 Self::binary(stack, name, |left, right| {
-                    S::from_f64(f64::from(u8::from(compare(op, left.real(), right.real()))))
+                    S::from_f64(f64::from(u8::from(constant_compare(
+                        op,
+                        left.real(),
+                        right.real(),
+                    ))))
                 })?;
             }
             NativeOp::CompareConst(op, value) => {
                 Self::unary(stack, name, |x| {
-                    S::from_f64(f64::from(u8::from(compare(op, x.real(), value))))
+                    S::from_f64(f64::from(u8::from(constant_compare(op, x.real(), value))))
                 })?;
             }
             NativeOp::Logical(LogicalOp::Not) => {
@@ -807,17 +811,6 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
 /// Verilog-A truthiness: anything but an exact zero, NaN included.
 fn truthy<S: CfgScalar>(value: S) -> bool {
     value.real() != 0.0
-}
-
-fn compare(op: CompareOp, left: f64, right: f64) -> bool {
-    match op {
-        CompareOp::Gt => left > right,
-        CompareOp::Lt => left < right,
-        CompareOp::Ge => left >= right,
-        CompareOp::Le => left <= right,
-        CompareOp::Eq => left == right,
-        CompareOp::Ne => left != right,
-    }
 }
 
 /// `min`/`max` as the backend selects them.
