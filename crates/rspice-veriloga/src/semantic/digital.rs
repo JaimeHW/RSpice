@@ -788,6 +788,7 @@ impl SemanticAnalyzer {
             return;
         }
         self.digital_selector_constants = self.digital_constants(module);
+        self.check_port_declarations(module);
 
         let mut signals = self.collect_digital_signals(module);
         // IEEE 1364-2005 section 6.1.3: a net delay is the net's own.
@@ -3086,6 +3087,7 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
         procedural: bool,
     ) -> bool {
+        self.check_declared_before(name, span, signals, index);
         match self.resolve_digital_name(name, index) {
             // A process-local is a variable of the process, so a procedural
             // assignment writes it and a continuous one cannot reach it at all.
@@ -3420,6 +3422,8 @@ impl SemanticAnalyzer {
                         },
                         identifier.span,
                     );
+                } else {
+                    self.check_declared_before(&identifier.name, identifier.span, signals, index);
                 }
             }
             Expression::Digital(digital) => {

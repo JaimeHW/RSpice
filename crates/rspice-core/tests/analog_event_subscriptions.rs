@@ -908,8 +908,8 @@ module observer(a,ok,done,r);
  input a; electrical a;
  output ok,done; reg ok=1,done=0;
  output r; wreal r;
- assign r=sampled;
  real derived,sampled,observed; integer count=0;
+ assign r=sampled;
  analog derived=2*V(a);
  always @(absdelta(V(a),0.125,1p,1u)) begin
    sampled=V(a); observed=derived; count=count+1;

@@ -1491,7 +1491,10 @@ fn the_backend_refusal_names_the_first_digital_construct() {
     for (section, keyword) in [
         ("    reg q;\n     always @(p) q <= 1'b1;", "reg"),
         ("    wire y;\n     assign y = 1'b1;", "wire"),
-        ("    always @(p) q = 1'b1;\n     reg q;", "always"),
+        (
+            "    always @(p) begin : b reg r; r = 1'b1; end\n     reg q;",
+            "always",
+        ),
     ] {
         let error = compile_error(&digital_module(section), None);
         let message = error.to_string();
@@ -4520,6 +4523,82 @@ fn routine_ports_and_fork_declarations_follow_ieee_1364() {
     assert!(routine.variables.is_empty() && routine.digital_variables.is_empty());
     assert_eq!(routine.arguments[0].ty.kind, DigitalRoutineValueKind::Real);
     assert!(routine.arguments[1].ty.range.is_some());
+}
+
+/// IEEE 1364-2005 section 12.3.3 declares every port of the list of ports and
+/// gives a port's two declarations one range, and section 4.5 declares a name
+/// implicitly only as a net and only where no declaration precedes it, so a
+/// name used above its declaration is undeclared there.
+#[test]
+fn ports_and_names_are_declared_as_ieee_1364_declares_them() {
+    for (source, expected) in [
+        (
+            "module m(x); output [3:0] x; reg [7:0] x; initial x = 0; endmodule",
+            "declared with range [3:0] and redeclared with range [7:0]",
+        ),
+        (
+            "module m(x); output x; reg [7:0] x; initial x = 0; endmodule",
+            "declared without a range and redeclared with range [7:0]",
+        ),
+        (
+            "module m(x); output [7:0] x; reg x; initial x = 0; endmodule",
+            "declared with range [7:0] and redeclared without a range",
+        ),
+        (
+            "module m(x); output [31:0] x; integer x; initial x = 0; endmodule",
+            "redeclared as an `integer`, which has no range",
+        ),
+        (
+            "module m(t); time t; output [63:0] t; initial t = 0; endmodule",
+            "redeclared as a `time`, which has no range",
+        ),
+        (
+            "module m(x); reg [3:0] x; input [1:0] x; wire y = x[0]; endmodule",
+            "declared with range [1:0] and redeclared with range [3:0]",
+        ),
+        (
+            "module m(a, b); input a; wire c = a; endmodule",
+            "Port 'b' has no direction declaration",
+        ),
+        (
+            "module m; initial v = 1; reg v; endmodule",
+            "`v` is used before its declaration",
+        ),
+        (
+            "module m; initial $display(w); localparam w = 8'hAA; endmodule",
+            "`w` is used before its declaration",
+        ),
+        (
+            "module m; assign w = 1; wire [7:0] w; endmodule",
+            "`w` is used before its declaration",
+        ),
+        (
+            "module m; wire o; assign o = ~i; assign i = 1'b0; endmodule",
+            "`i` is used before its declaration",
+        ),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect_err("the form must be rejected")
+            .to_string();
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+    for source in [
+        "module m(x); output [3:0] x; reg [3:0] x; initial x = 0; endmodule",
+        "module m(x); parameter N = 4; output [N-1:0] x; reg [3:0] x; initial x = 0; endmodule",
+        "module m(x); output x; integer x; initial x = 0; endmodule",
+        "module m(t); output t; time t; initial t = 0; endmodule",
+        "module m(t); output [63:0] t; reg [63:0] t; initial t = 0; endmodule",
+        "module m(y, a); output y; assign y = a; input a; endmodule",
+        "module m; wire o; assign i = 1'b0; assign o = ~i; endmodule",
+        "module m; reg v; initial begin : b reg w; w = v; end endmodule",
+    ] {
+        if let Err(error) =
+            VerilogACompiler::new(CompilerOptions::default()).compile_canonical_ir(source)
+        {
+            panic!("{source}: {error}");
+        }
+    }
 }
 
 /// IEEE 1364-2005 section 5.2.1: `+:` and `-:` are one token each, select at

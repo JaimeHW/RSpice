@@ -392,6 +392,7 @@ mod bounded_loop;
 mod builtin_limiters;
 use builtin_limiters::{BUILTIN_LIMITER_NAMES, BuiltinLimiter};
 mod constant_dependencies;
+mod declaration_rules;
 pub(crate) mod defparam;
 mod digital;
 mod digital_elaborate;

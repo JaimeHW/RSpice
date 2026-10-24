@@ -399,6 +399,22 @@ pub enum SemanticErrorKind {
     )]
     PortWithoutDirection { name: smol_str::SmolStr },
 
+    /// A port whose direction declaration and net or variable declaration
+    /// state different ranges.
+    ///
+    /// IEEE 1364-2005 section 12.3.3: "the range specification between the
+    /// two declarations of a port shall be identical."
+    #[error(
+        "Port '{name}' is declared {ranges}; IEEE 1364-2005 section 12.3.3 makes the ranges \
+         of a port's two declarations identical"
+    )]
+    PortRangeMismatch {
+        name: smol_str::SmolStr,
+        /// "<port range> and redeclared <declared range>", in one field so
+        /// that the error stays small.
+        ranges: String,
+    },
+
     /// A configuration or library map that binds no cell, or binds one two
     /// ways (IEEE 1364-2005 clause 13).
     #[error("Library binding error: {0}")]
@@ -490,6 +506,7 @@ impl SemanticErrorKind {
             Self::UnpackedPortArray { .. } => "VA-SEM-UNPACKED-PORT-ARRAY",
             Self::VariableInputPort { .. } => "VA-SEM-VARIABLE-INPUT-PORT",
             Self::PortWithoutDirection { .. } => "VA-SEM-PORT-WITHOUT-DIRECTION",
+            Self::PortRangeMismatch { .. } => "VA-SEM-PORT-RANGE-MISMATCH",
             Self::LibraryBinding(_) => "VA-SEM-LIBRARY-BINDING",
             Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
             Self::InvalidAssignment(_) => "VA-SEM-INVALID-ASSIGNMENT",

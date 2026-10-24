@@ -197,7 +197,7 @@ fn two_drivers_and_a_controlling_value_follow_the_four_state_tables() {
 const SWAP: &str = "\
 module swap(clk, rst, x, y);
   input clk, rst;
-  output x, y;
+  output [3:0] x, y;
   wire clk, rst;
   reg [3:0] x, y;
   always @(posedge clk) begin
