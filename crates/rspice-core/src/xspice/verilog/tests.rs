@@ -1557,6 +1557,40 @@ fn a_testbench_prints_what_icarus_prints() {
     assert_eq!(finish.origin.scope, "tb");
 }
 
+/// IEEE 1364-2005 sections 12.4 and 17.1.1.6: a generate block is a scope,
+/// so `%m` in a process written inside one names it. An unnamed block is
+/// `genblk<n>`, `<n>` numbering the generate constructs of its scope from 1
+/// in source order (section 12.4.3).
+#[test]
+fn hierarchical_name_format_names_generate_blocks() {
+    let report = bench(
+        "module main;\n\
+         \x20 parameter foo = 2;\n\
+         \x20 genvar i;\n\
+         \x20 generate\n\
+         \x20   for (i = 0; i < 2; i = i + 1) begin : L\n\
+         \x20     if (1) begin\n\
+         \x20       initial #(20 + i) $display(\"%m\");\n\
+         \x20     end\n\
+         \x20     initial #(10 + i) $display(\"%m\");\n\
+         \x20   end\n\
+         \x20   if (foo == 2) begin\n\
+         \x20     initial #30 $display(\"%m\");\n\
+         \x20   end\n\
+         \x20   case (foo)\n\
+         \x20     2: begin : X initial #40 $display(\"%m\"); end\n\
+         \x20   endcase\n\
+         \x20 endgenerate\n\
+         \x20 initial begin : B $display(\"%m\"); end\n\
+         endmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "main.B\nmain.L[0]\nmain.L[1]\nmain.L[0].genblk1\nmain.L[1].genblk1\nmain.genblk2\nmain.X\n"
+    );
+}
+
 /// IEEE 1364-2005 section 17.1.3: `$monitor` prints at the end of a step in
 /// which one of its arguments changed value, `$time` excepted. A change of
 /// `bs` that leaves `bs[1]` as it was prints nothing.

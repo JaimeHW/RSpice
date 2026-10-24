@@ -560,6 +560,9 @@ pub struct AnalyzedDigitalProcess {
     /// it verbatim is what lets that wave see the suspension points the author
     /// wrote.
     pub body: DigitalStatement,
+    /// The generate blocks it was written in; see
+    /// [`crate::ast::DigitalProcess::generate_scope`].
+    pub generate_scope: Option<SmolStr>,
     pub span: Span,
 }
 
@@ -2447,6 +2450,7 @@ impl SemanticAnalyzer {
             sensitivity,
             implicit_sensitivity,
             body: process.body.clone(),
+            generate_scope: process.generate_scope.clone(),
             span: process.span,
         }
     }

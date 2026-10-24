@@ -889,6 +889,12 @@ impl Unroller<'_> {
                 copy.id = DigitalProcessId(*self.next_process_id);
                 *self.next_process_id += 1;
             }
+            // The enclosing generate blocks, which `%m` names (section
+            // 12.4): the prefix that qualifies the block's declarations.
+            let scope = self.scope_prefix.trim_end_matches('.');
+            if !scope.is_empty() {
+                copy.generate_scope = Some(scope.into());
+            }
             self.substitute_statement(&mut copy.body);
             out.digital_processes.push(copy);
         }

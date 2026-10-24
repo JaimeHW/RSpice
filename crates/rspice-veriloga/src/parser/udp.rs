@@ -931,6 +931,7 @@ fn instantiate(
                 id: DigitalProcessId(*next_process),
                 kind: DigitalProcessKind::Initial,
                 body: build.block(body),
+                generate_scope: None,
                 span,
             });
             *next_process += 1;

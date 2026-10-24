@@ -2266,6 +2266,13 @@ fn lower_process(
     };
 
     lowerer.process = Some(id);
+    // IEEE 1364-2005 section 12.4: each generate block the process was
+    // written in is a scope, which `%m` names: `main.L[0].genblk1`.
+    if let Some(path) = &process.generate_scope {
+        for name in path.split('.') {
+            lowerer.enter_scope(&SmolStr::from(name), DigitalScopeKind::Block);
+        }
+    }
     let kind = match process.kind {
         AstKind::Always => DigitalProcessKind::Always,
         AstKind::Initial => DigitalProcessKind::Initial,

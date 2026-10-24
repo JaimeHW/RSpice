@@ -1338,6 +1338,7 @@ impl Parser<'_> {
             id,
             kind,
             body,
+            generate_scope: None,
             span: start.extend(self.previous_span()),
         })
     }

@@ -2862,6 +2862,10 @@ pub struct DigitalProcess {
     /// Statement the process executes, exactly as written. A process opening
     /// with a timing control has that control as its outermost node.
     pub body: DigitalStatement,
+    /// The generate blocks the process was written in, below its module, as
+    /// `%m` names them: `L[0].genblk1` (IEEE 1364-2005 section 12.4). `None`
+    /// for a process written in the module itself.
+    pub generate_scope: Option<SmolStr>,
     pub span: Span,
 }
 
