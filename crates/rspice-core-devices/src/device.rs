@@ -1,7 +1,7 @@
 //! Device models module
 //!
 //! Provides behavioral models for circuit components, organized into:
-//! - `passive/` - Resistors, capacitors, inductors
+//! - `passive/` - Capacitors, inductors
 //! - `semiconductor/` - Diodes, BJTs
 //! - `mosfet/` - MOSFETs, VDMOSFETs, JFETs, BSIM4, EKV
 //! - `veriloga/` - Verilog-A compiled models (optional feature)
@@ -18,7 +18,6 @@ mod cpl_native;
 pub mod memristor_pem;
 pub mod memristor_team;
 pub mod pwl_file;
-mod sources;
 mod stamp_error;
 mod switch;
 pub mod thermal;
@@ -38,7 +37,7 @@ pub use mosfet::{
 #[doc(hidden)]
 pub use mosfet::{B3SoiDdNodes, B3SoiPdNodes, MosBodyJunctionModel};
 pub use passive::{
-    Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
+    Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer,
     SaturableInductor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
 };
 pub use semiconductor::{Bjt, BjtType, Diode, DiodeLevel};
@@ -71,7 +70,6 @@ pub use memristor_team::{
 };
 #[doc(hidden)]
 pub use memristor_team::{XyceTeamResistanceNoiseCheckpoint, XyceTeamResistanceNoiseRuntime};
-pub use sources::{CurrentSource, VoltageSource};
 pub use stamp_error::{NonFiniteTrialError, StampError};
 #[doc(hidden)]
 pub use switch::{AcceptedSwitchCheckpoint, SwitchCheckpointKind};
@@ -287,52 +285,11 @@ impl XyceMemristor {
     }
 }
 
-/// A device instance in the circuit
-// The MOSFET variant dwarfs the passives, but nothing holds a collection of
-// these: the circuit stores devices in typed per-family columns (`Capacitors`,
-// `Bjts`, `Mosfets`, ...) and this enum exists as a public, one-at-a-time
-// description at the API boundary. Boxing the variant would change the shape
-// of a public enum to save padding on a value that is never held in bulk.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
-pub enum Device {
-    Resistor(Resistor),
-    Capacitor(Capacitor),
-    Inductor(Inductor),
-    SaturableInductor(SaturableInductor),
-    VoltageSource(VoltageSource),
-    CurrentSource(CurrentSource),
-    Diode(Diode),
-    Bjt(Bjt),
-    Mosfet(Mosfet),
-    Vdmos(Vdmos),
-    Jfet(Jfet),
-}
-
-impl Device {
-    /// Get the device name
-    pub fn name(&self) -> &str {
-        match self {
-            Device::Resistor(d) => &d.name,
-            Device::Capacitor(d) => &d.name,
-            Device::Inductor(d) => &d.name,
-            Device::SaturableInductor(d) => &d.name,
-            Device::VoltageSource(d) => &d.name,
-            Device::CurrentSource(d) => &d.name,
-            Device::Diode(d) => &d.name,
-            Device::Bjt(d) => &d.name,
-            Device::Mosfet(d) => &d.name,
-            Device::Vdmos(d) => &d.name,
-            Device::Jfet(d) => &d.name,
-        }
-    }
-}
-
 /// Every capability this engine build offers a distributed model pack.
 ///
 /// A pack declares what it needs in `requires.capabilities`; a client installs
 /// it only when that set is a subset of this one. The vocabulary is lowercase
-/// kebab case and deliberately coarser than [`Device`]: it names what a pack
+/// kebab case and deliberately coarse: it names what a pack
 /// author must be able to rely on, not how this engine happens to implement
 /// it, so an internal refactor never invalidates a published pack.
 ///
@@ -367,46 +324,6 @@ pub const fn engine_capabilities() -> &'static [&'static str] {
 #[must_use]
 pub fn engine_supports_capability(capability: &str) -> bool {
     engine_capabilities().contains(&capability)
-}
-
-/// Device model parameters
-#[derive(Debug, Clone)]
-pub struct DeviceModel {
-    pub name: String,
-    pub model_type: ModelType,
-    pub params: std::collections::HashMap<String, Value>,
-}
-
-/// Types of device models
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelType {
-    Resistor,
-    Capacitor,
-    Inductor,
-    SaturableInductor,
-    Diode,
-    NpnBjt,
-    PnpBjt,
-    Nmos,
-    Pmos,
-    NVdmos,
-    PVdmos,
-    Njf,
-    Pjf,
-}
-
-impl DeviceModel {
-    pub fn new(name: String, model_type: ModelType) -> Self {
-        Self {
-            name,
-            model_type,
-            params: std::collections::HashMap::new(),
-        }
-    }
-
-    pub fn get_param(&self, key: &str, default: Value) -> Value {
-        self.params.get(key).copied().unwrap_or(default)
-    }
 }
 
 #[cfg(test)]

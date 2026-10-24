@@ -653,7 +653,7 @@ impl Mosfet {
             && self.vbs == self.eval_vbs
     }
 
-    /// Set model parameters from a DeviceModel, deriving NSUB-dependent
+    /// Set model parameters from a model card, deriving NSUB-dependent
     /// parameters at the card's TNOM (27 C when the card names none).
     #[cfg(any(test, feature = "test-support"))]
     #[doc(hidden)]
@@ -667,7 +667,7 @@ impl Mosfet {
         self.with_params_at_tnom(params, tnom_kelvin)
     }
 
-    /// Set model parameters from a DeviceModel whose nominal temperature is
+    /// Set model parameters from a model card whose nominal temperature is
     /// `tnom_kelvin` (the model TNOM, else `.options tnom`). Berkeley MOS
     /// derives PHI, GAMMA and VTO from NSUB at that temperature
     /// (`mos1temp.c`/`mos2temp.c`/`mos3temp.c`/`mos6temp.c`/`mos9temp.c`).

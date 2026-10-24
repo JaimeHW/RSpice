@@ -58,12 +58,6 @@ impl NonlinearConvergenceCriteria {
     }
 }
 
-/// Trait for devices that contribute to the conductance matrix (linear elements)
-pub trait LinearDevice {
-    /// Stamp the device into the conductance matrix
-    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, rhs: &mut [Value]);
-}
-
 /// Trait for devices that require Newton-Raphson iteration (nonlinear elements)
 pub trait NonlinearDevice {
     /// Update the device state based on current node voltages

@@ -1715,7 +1715,7 @@ impl Bjt {
         self.cth = self.thermal_capacitance();
     }
 
-    /// Set model parameters from a DeviceModel
+    /// Set model parameters from a model card
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         let mut has_vaf = false;
         let mut has_var = false;

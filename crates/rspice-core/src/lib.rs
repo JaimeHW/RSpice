@@ -148,7 +148,7 @@ pub use abort_signal::{
 };
 pub use analysis::{DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::CircuitData;
-pub use device::{Device, DeviceModel, engine_capabilities, engine_supports_capability};
+pub use device::{engine_capabilities, engine_supports_capability};
 pub use engine::{
     ContinuationAid, ContinuationFailure, ContinuationStage, ConvergenceConfig, ConvergencePreset,
     DampingStrategy, ElaborationError, ElaborationErrorKind, Engine, EngineHealthReport,

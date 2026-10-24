@@ -1,12 +1,11 @@
 //! Passive component device models
 //!
-//! Includes resistors, capacitors, inductors, and coupled inductors.
+//! Includes capacitors, inductors, and coupled inductors.
 
 mod capacitor;
 mod coupled_inductors;
 mod inductor;
 mod jiles_atherton;
-mod resistor;
 mod saturable_inductor;
 
 pub use capacitor::{
@@ -19,5 +18,4 @@ pub use inductor::Inductor;
 pub use jiles_atherton::{JilesAthertonInductor, JilesAthertonParams};
 #[doc(hidden)]
 pub use jiles_atherton::{XyceCoreStep, XyceCoreTrial};
-pub use resistor::Resistor;
 pub use saturable_inductor::SaturableInductor;
