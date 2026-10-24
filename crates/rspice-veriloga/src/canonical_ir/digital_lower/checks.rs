@@ -32,21 +32,22 @@ pub(super) fn lower_timing_checks(
     // its copy drives.
     let mut copies = Vec::with_capacity(checks.len());
     for check in checks {
+        let condition = |condition: Option<&crate::ast::TimingCheckCondition>| {
+            condition
+                .map(|condition| {
+                    Ok::<_, DigitalLoweringDiagnostic>(DigitalCheckCondition {
+                        signal: resolve(&condition.signal.name, condition.signal.span)?,
+                        enabling: condition.enabling,
+                        unknown_enables: condition.unknown_enables,
+                    })
+                })
+                .transpose()
+        };
         let event = |event: &TimingCheckEvent| -> Result<_, DigitalLoweringDiagnostic> {
             Ok(DigitalCheckEvent {
                 signal: resolve(&event.terminal.name, event.terminal.span)?,
                 edges: event.edges,
-                condition: event
-                    .condition
-                    .as_ref()
-                    .map(|condition| {
-                        Ok::<_, DigitalLoweringDiagnostic>(DigitalCheckCondition {
-                            signal: resolve(&condition.signal.name, condition.signal.span)?,
-                            enabling: condition.enabling,
-                            unknown_enables: condition.unknown_enables,
-                        })
-                    })
-                    .transpose()?,
+                condition: condition(event.condition.as_ref())?,
             })
         };
         let signed = matches!(
@@ -135,6 +136,8 @@ pub(super) fn lower_timing_checks(
             limit_zeroed,
             delays: [0, 0],
             limits_inconsistent: false,
+            timestamp_condition: condition(check.timestamp_condition.as_ref())?,
+            timecheck_condition: condition(check.timecheck_condition.as_ref())?,
             notifier: check
                 .notifier
                 .as_ref()

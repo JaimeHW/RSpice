@@ -1191,6 +1191,14 @@ pub struct DigitalTimingCheck {
     /// 15.5.1), which the host warns of.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub limits_inconsistent: bool,
+    /// `$setuphold`'s and `$recrem`'s timestamp and timecheck conditions
+    /// (section 15.5.2): an event records its tick only while the first
+    /// holds, and checks the other event's last tick only while the second
+    /// does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp_condition: Option<DigitalCheckCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timecheck_condition: Option<DigitalCheckCondition>,
     /// The `reg` toggled on each violation (section 15.5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifier: Option<DigitalSignalId>,

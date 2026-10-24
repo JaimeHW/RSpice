@@ -508,6 +508,7 @@ impl Parser<'_> {
             _ => &["notifier"],
         };
         let (mut notifier, mut delayed_reference, mut delayed_data) = (None, None, None);
+        let (mut timestamp_condition, mut timecheck_condition) = (None, None);
         for slot in optional {
             if !self.match_token(TokenKind::Comma) {
                 break;
@@ -526,12 +527,15 @@ impl Parser<'_> {
                 "delayed data" => {
                     delayed_data = Some(self.parse_specify_terminal("delayed data")?);
                 }
+                // A.7.5.2: `stamptime_condition` and `checktime_condition`
+                // are mintypmax expressions.
                 condition => {
-                    return Err(refusal(
-                        "`specify` timing check",
-                        format!("`{name}` with a {condition} (IEEE 1364-2005 section 15.5.2)"),
-                        self.current_span(),
-                    ));
+                    let parsed = Self::timing_check_condition(&self.parse_mintypmax_expression()?)?;
+                    if condition == "timestamp condition" {
+                        timestamp_condition = Some(parsed);
+                    } else {
+                        timecheck_condition = Some(parsed);
+                    }
                 }
             }
         }
@@ -587,6 +591,8 @@ impl Parser<'_> {
             data,
             limits,
             notifier,
+            timestamp_condition,
+            timecheck_condition,
             delayed_reference,
             delayed_data,
             span,

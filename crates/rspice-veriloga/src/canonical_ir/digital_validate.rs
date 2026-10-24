@@ -1878,15 +1878,17 @@ impl CanonicalDigitalPlan {
                 self.signal(signal)
                     .is_some_and(|signal: &DigitalSignal| !signal.kind.is_real())
             };
+            let scalar = |condition: &super::digital::DigitalCheckCondition| {
+                self.signal(condition.signal)
+                    .is_some_and(|signal| !signal.kind.is_real() && signal.width == 1)
+            };
             if !std::iter::once(&check.reference)
                 .chain(&check.data)
                 .all(|event| {
-                    four_state(event.signal)
-                        && event.condition.is_none_or(|condition| {
-                            self.signal(condition.signal)
-                                .is_some_and(|signal| !signal.kind.is_real() && signal.width == 1)
-                        })
+                    four_state(event.signal) && event.condition.as_ref().is_none_or(scalar)
                 })
+                || !check.timestamp_condition.iter().all(scalar)
+                || !check.timecheck_condition.iter().all(scalar)
                 || check.notifier.is_some_and(|notifier| {
                     !self.signal(notifier).is_some_and(|signal| {
                         !signal.kind.is_real() && signal.procedurally_assignable
@@ -1915,12 +1917,17 @@ impl CanonicalDigitalPlan {
                         && (before.saturating_neg()..=after)
                             .contains(&reference.saturating_sub(data))
                 }
-                None => check.delays == [0, 0],
+                None => {
+                    check.delays == [0, 0]
+                        && check.timestamp_condition.is_none()
+                        && check.timecheck_condition.is_none()
+                }
             };
             if !fits {
                 return Err(error(
                     "digital timing check delays its delayed signals by a negative amount, or so \
-                     that a limit stays negative between them",
+                     that a limit stays negative between them, or is neither `$setuphold` nor \
+                     `$recrem` and has delays or timestamp and timecheck conditions",
                 ));
             }
         }

@@ -512,8 +512,9 @@ use super::*;
 // signals a waveform cannot place.
 //
 // Version 175 follows the schema to 184, whose timing checks carry their
-// delayed signals' delays computed across the checks sharing them. A
-// version-174 record refused a delayed net two checks name.
+// delayed signals' delays computed across the checks sharing them, and
+// their timestamp and timecheck conditions. A version-174 record refused a
+// delayed net two checks name, and both conditions.
 pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 175;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";

@@ -2694,6 +2694,12 @@ pub struct SpecifyTimingCheck {
     pub limits: Vec<Expression>,
     /// The `reg` the check toggles on a violation (section 15.5).
     pub notifier: Option<SpecifyTerminal>,
+    /// `$setuphold`'s and `$recrem`'s timestamp and timecheck conditions
+    /// (sections 15.2.3, 15.2.6 and 15.5.2): an event records its time only
+    /// while the first holds, and checks against the other event's time
+    /// only while the second does.
+    pub timestamp_condition: Option<TimingCheckCondition>,
+    pub timecheck_condition: Option<TimingCheckCondition>,
     /// `$setuphold`'s and `$recrem`'s delayed reference and data nets
     /// (section 15.8), each driven by a delayed copy of its signal.
     pub delayed_reference: Option<SpecifyTerminal>,

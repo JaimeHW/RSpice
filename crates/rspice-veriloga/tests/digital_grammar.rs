@@ -4772,14 +4772,6 @@ fn specify_items_outside_paths_are_refused() {
             "Unsupported `specify` timing check: `$fullskew`",
         ),
         (
-            "$setuphold(posedge c, a, 1, 1, , c);",
-            "`$setuphold` with a timestamp condition",
-        ),
-        (
-            "$recrem(posedge c, a, 1, 1, , , c);",
-            "`$recrem` with a timecheck condition",
-        ),
-        (
             "$hold(posedge c &&& (a & c), a, 1);",
             "a condition other than a scalar signal",
         ),

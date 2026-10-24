@@ -1347,6 +1347,63 @@ endmodule
         }
     }
 
+    /// IEEE 1364-2005 sections 15.5.1 and 15.5.2: an image taken inside the
+    /// windows of two `$setuphold` checks that share the delayed clock `dk`
+    /// resumes both. The second check's setup of -4 delays `dk` by 4, so the
+    /// edge of `k` at 10 reaches `dk` at 14; the image carries that path's
+    /// source change and both checks' last event ticks. The first check's
+    /// timestamp and timecheck condition `s` holds throughout: `d` at 13
+    /// (rel 3, inside (2, 6)) violates it, and `e` at 15 (rel 5, inside
+    /// (4, 8)) the second.
+    #[test]
+    fn host_checkpoint_resumes_shared_and_conditioned_checks_mid_window() {
+        const CHECKS: &str = "`timescale 1ns/1ns\nmodule c(input d, input e, input k, input s);\n  \
+             wire dk, dd, de;\n  specify\n    $setuphold(posedge k, d, -2, 6, , s, s, dk, dd);\n    \
+             $setuphold(posedge k, e, -4, 8, , , , dk, de);\n  endspecify\nendmodule\n";
+        let mut original = host(CHECKS);
+        original.start().unwrap();
+        for (name, value) in [("s", 1), ("e", 0), ("d", 0), ("k", 0)] {
+            force(&mut original, name, 1, value, 1);
+        }
+        force(&mut original, "k", 1, 1, 10);
+        original.advance_to(11).unwrap();
+        assert!(original.drain_hdl_output().is_empty());
+        let saved = transport(&image(&original));
+        let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
+        assert_eq!(
+            section,
+            json!({"version": 1, "path_changes": [10], "checks": [
+                {"reference": 10, "data": 1},
+                {"reference": 10, "data": 1},
+            ]})
+        );
+        let mut restored = host(CHECKS);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            let dk = |host: &DigitalHost| host.read(signal(host, "dk")).unwrap().spelling();
+            force(host, "d", 1, 1, 13);
+            assert_eq!(dk(host), "0");
+            host.advance_to(14).unwrap();
+            assert_eq!(dk(host), "1");
+            force(host, "e", 1, 1, 15);
+            let warnings: Vec<String> = host
+                .drain_hdl_output()
+                .into_iter()
+                .map(|record| record.text)
+                .collect();
+            assert_eq!(
+                warnings,
+                [
+                    "$setuphold(posedge k, d, -2, 6) violated at 13 ns",
+                    "$setuphold(posedge k, e, -4, 8) violated at 15 ns",
+                ]
+            );
+        }
+    }
+
     /// `hdl_path_delays=no`: a host that leaves its module paths out writes
     /// no `specify` section, and a host restored from its image, like one
     /// started anew from it, leaves them out as well: `y` follows `a` 3

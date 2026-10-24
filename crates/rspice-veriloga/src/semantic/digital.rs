@@ -1842,9 +1842,14 @@ impl SemanticAnalyzer {
                         event.terminal.span,
                     ));
                 }
-                if let Some(condition) = &event.condition
-                    && signal(&condition.signal.name).is_none_or(|found| found.width != 1)
-                {
+            }
+            let conditions = std::iter::once(&check.reference)
+                .chain(&check.data)
+                .filter_map(|event| event.condition.as_ref())
+                .chain(&check.timestamp_condition)
+                .chain(&check.timecheck_condition);
+            for condition in conditions {
+                if signal(&condition.signal.name).is_none_or(|found| found.width != 1) {
                     problems.push((
                         format!(
                             "`{name}` condition signal `{}` is no scalar signal of module `{}`; \

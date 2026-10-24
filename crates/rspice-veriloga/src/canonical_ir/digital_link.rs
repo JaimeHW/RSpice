@@ -550,20 +550,23 @@ pub fn link_digital_plans(
         }
         for check in &source.delays.checks {
             let signal = |id: DigitalSignalId| layout.map.signals[usize::from(id)];
+            let condition = |condition: Option<super::digital::DigitalCheckCondition>| {
+                condition.map(|condition| super::digital::DigitalCheckCondition {
+                    signal: signal(condition.signal),
+                    ..condition
+                })
+            };
             let event =
                 |event: &super::digital::DigitalCheckEvent| super::digital::DigitalCheckEvent {
                     signal: signal(event.signal),
-                    condition: event.condition.map(|condition| {
-                        super::digital::DigitalCheckCondition {
-                            signal: signal(condition.signal),
-                            ..condition
-                        }
-                    }),
+                    condition: condition(event.condition),
                     ..*event
                 };
             plan.delays.checks.push(super::digital::DigitalTimingCheck {
                 reference: event(&check.reference),
                 data: check.data.as_ref().map(event),
+                timestamp_condition: condition(check.timestamp_condition),
+                timecheck_condition: condition(check.timecheck_condition),
                 notifier: check.notifier.map(signal),
                 ..check.clone()
             });

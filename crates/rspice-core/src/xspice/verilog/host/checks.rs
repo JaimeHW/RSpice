@@ -36,11 +36,22 @@
 //! on any change of the terminal when it names no edge. It counts only while
 //! its `&&&` condition holds (section 15.6).
 //!
+//! `$setuphold` and `$recrem` take a timestamp and a timecheck condition
+//! (sections 15.2.3, 15.2.6 and 15.5.2). Of their pair of checks, the data
+//! event is the timestamp event of `$setup` and `$removal` and the reference
+//! event their timecheck event; `$hold` and `$recovery` take them the other
+//! way round. Here that is: an event records its tick only while the
+//! timestamp condition holds, and checks the other event's last tick only
+//! while the timecheck condition does. Like `&&&`, each is read when the
+//! event occurs.
+//!
 //! A violation writes a warning record and toggles the check's notifier
 //! (section 15.5): `x` to 0, 0 to 1, 1 to 0, and `z` stays `z`.
 
 use super::*;
-use rspice_veriloga::canonical_ir::digital::{DigitalCheckEvent, DigitalTimingCheckKind as Kind};
+use rspice_veriloga::canonical_ir::digital::{
+    DigitalCheckCondition, DigitalCheckEvent, DigitalTimingCheckKind as Kind,
+};
 use rspice_veriloga::four_state::FourStateBit;
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +69,9 @@ struct Check {
     /// `$removal`, `$recovery` and `$recrem`.
     window: Option<Window>,
     limits: [i64; 2],
+    /// `$setuphold`'s and `$recrem`'s timestamp and timecheck conditions.
+    timestamp: Option<DigitalCheckCondition>,
+    timecheck: Option<DigitalCheckCondition>,
     notifier: Option<DigitalSignalId>,
     label: String,
 }
@@ -157,12 +171,15 @@ enum Pass {
     Data,
 }
 
-/// Which of a check's events one transition is.
+/// Which of a check's events one transition is, and whether its timestamp
+/// and timecheck conditions hold.
 #[derive(Clone, Copy)]
 struct Events {
     reference: bool,
     data: bool,
     trailing: bool,
+    stamps: bool,
+    checks: bool,
 }
 
 impl TimingChecks {
@@ -207,6 +224,8 @@ impl TimingChecks {
                 trailing: (check.kind == Kind::NoChange).then(|| opposite(check.reference)),
                 window: Window::of(check.kind, limits, delays),
                 limits,
+                timestamp: check.timestamp_condition,
+                timecheck: check.timecheck_condition,
                 notifier: check.notifier,
                 label: check.label.clone(),
             });
@@ -268,6 +287,8 @@ impl TimingChecks {
                             .trailing
                             .as_ref()
                             .is_some_and(|event| counts(event, transition, store)),
+                        stamps: holds(check.timestamp.as_ref(), store),
+                        checks: holds(check.timecheck.as_ref(), store),
                     };
                     if step(check, &mut self.states[index], events, tick, pass) {
                         violations.push(Violation {
@@ -332,16 +353,20 @@ fn counts(
             from != to && edges & (1 << super::paths::transition_index(from, to)) != 0
         }
     };
-    // Section 15.6 and OVI Verilog LRM 1.0 B.9.10: `x` or `z` on the
-    // conditioning signal enables the check only through `==` or `!=`.
-    changed
-        && event.condition.is_none_or(|condition| {
-            match store.value(condition.signal).map(|value| value.bit(0)) {
-                Some(FourStateBit::Zero) => !condition.enabling,
-                Some(FourStateBit::One) => condition.enabling,
-                _ => condition.unknown_enables,
-            }
-        })
+    changed && holds(event.condition.as_ref(), store)
+}
+
+/// Whether `condition` holds, or there is none. Section 15.6 and OVI Verilog
+/// LRM 1.0 B.9.10: `x` or `z` on the conditioning signal enables the check
+/// only through `==` or `!=`.
+fn holds(condition: Option<&DigitalCheckCondition>, store: &DigitalSignalStore) -> bool {
+    condition.is_none_or(|condition| {
+        match store.value(condition.signal).map(|value| value.bit(0)) {
+            Some(FourStateBit::Zero) => !condition.enabling,
+            Some(FourStateBit::One) => condition.enabling,
+            _ => condition.unknown_enables,
+        }
+    })
 }
 
 /// One check's response to its events at `tick` in one pass; whether it is
@@ -352,14 +377,14 @@ fn step(check: &Check, state: &mut CheckState, events: Events, tick: u64, pass: 
     };
     let [limit, second] = check.limits;
     match pass {
-        Pass::Reference if events.reference => match check.kind {
+        Pass::Reference if events.reference && events.checks => match check.kind {
             Kind::Period => since(state.reference).is_some_and(|gap| gap < limit),
             Kind::NoChange => since(state.data).is_some_and(|gap| gap < limit),
             _ => check
                 .window
                 .is_some_and(|window| since(state.data).is_some_and(|gap| window.holds(-gap))),
         },
-        Pass::Stamp => {
+        Pass::Stamp if events.stamps => {
             if events.reference {
                 state.reference = Some(tick);
             }
@@ -371,7 +396,7 @@ fn step(check: &Check, state: &mut CheckState, events: Events, tick: u64, pass: 
             }
             false
         }
-        Pass::Data if events.data => match check.kind {
+        Pass::Data if events.data && events.checks => match check.kind {
             Kind::Skew => since(state.reference).is_some_and(|gap| gap > limit),
             Kind::Width => {
                 since(state.reference.take()).is_some_and(|width| second < width && width < limit)
@@ -390,7 +415,7 @@ fn step(check: &Check, state: &mut CheckState, events: Events, tick: u64, pass: 
                 .window
                 .is_some_and(|window| since(state.reference).is_some_and(|gap| window.holds(gap))),
         },
-        Pass::Reference | Pass::Data => false,
+        Pass::Reference | Pass::Stamp | Pass::Data => false,
     }
 }
 

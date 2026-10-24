@@ -484,6 +484,74 @@ endmodule
     assert_eq!(warnings(&report), expected);
 }
 
+/// Sections 15.2.3 and 15.5.2: with a setup limit of -2 the window is (2, 6)
+/// after the edge, so the edge is the hold check's timestamp event. At the
+/// edge at 10 the timestamp condition `s` is 0, so the edge records no time
+/// and `d` at 13 (rel 3) has no edge to violate. With `s` at 1 the edge at
+/// 20 records its time, and `d` at 23 (rel 3) violates.
+#[test]
+fn a_false_timestamp_condition_records_no_reference_edge() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module ts(input d, input clk, input s);
+  specify $setuphold(posedge clk, d, -2, 6, , s, ); endspecify
+endmodule
+module t;
+  reg d, clk, s;
+  ts u(d, clk, s);
+  initial begin
+    d = 0; clk = 0; s = 0;
+    #10 clk = 1;
+    #3 d = 1;
+    #2 clk = 0; s = 1;
+    #5 clk = 1;
+    #3 d = 0;
+    #5 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        warnings(&report),
+        violations("$setuphold(posedge clk, d, -2, 6)", &[23])
+    );
+}
+
+/// Sections 15.2.6 and 15.5.2: a removal limit of -2 with a recovery limit
+/// of 6 leaves the window (2, 6) after the edge at 10, and the data event is
+/// the recovery check's timecheck event. With the timecheck condition `k` at
+/// 0, `d` at 13 (rel 3) checks nothing; with `k` back at 1, `d` at 15 (rel
+/// 5) violates against the same edge.
+#[test]
+fn a_false_timecheck_condition_checks_no_data_edge() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module tc(input d, input clk, input k);
+  specify $recrem(posedge clk, d, 6, -2, , , k); endspecify
+endmodule
+module t;
+  reg d, clk, k;
+  tc u(d, clk, k);
+  initial begin
+    d = 0; clk = 0; k = 1;
+    #10 clk = 1;
+    #2 k = 0;
+    #1 d = 1;
+    #1 k = 1;
+    #1 d = 0;
+    #5 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        warnings(&report),
+        violations("$recrem(posedge clk, d, 6, -2)", &[15])
+    );
+}
+
 /// A negative limit whose window is empty (setup -3 with hold 2) is taken as
 /// 0, as the commercial simulators take it, and the run warns of it at its
 /// start. The window is then [0, 2): `d` 1 after the edge at 10 violates.
