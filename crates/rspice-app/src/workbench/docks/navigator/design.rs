@@ -279,7 +279,7 @@ fn panel_tabs_content_rect(rect: egui::Rect) -> egui::Rect {
     )
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     tabs(ui, &mut app.state);
     match app.state.design.design_panel {
         DesignPanel::Navigator => navigator(ui, app),

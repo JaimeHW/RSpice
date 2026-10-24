@@ -298,7 +298,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
 // Entry point
 // =============================================================================
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(session) = app.state.workbench.inline_edit.session()
         && (session.authority != app.state.inline_edit_authority()
             || app.state.schematic_edit_read_only()

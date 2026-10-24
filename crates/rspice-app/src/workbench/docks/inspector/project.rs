@@ -13,7 +13,7 @@ use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{property_row, property_row_problem};
 use super::super::super::state::{ProjectPage, Workspace};
 
-pub(super) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.project.project_page {
         ProjectPage::Overview => project_overview(ui, app),
         ProjectPage::Library => project_library(ui, app),

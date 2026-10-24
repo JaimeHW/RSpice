@@ -11,7 +11,7 @@ use super::super::super::design_system::{property_row, section_header};
 use super::super::super::state::VerificationPage;
 use super::flow_row;
 
-pub(super) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
         .workbench

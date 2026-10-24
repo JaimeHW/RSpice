@@ -26,7 +26,7 @@ fn declared(ui: &mut Ui, label: &str, value: &str) {
     property_row(ui, label, value);
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some(library) = app
         .state
         .model

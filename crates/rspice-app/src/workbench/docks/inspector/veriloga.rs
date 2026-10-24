@@ -10,7 +10,7 @@ use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::code_workspace::{self, VerilogAInspectorAction};
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let action = match code_workspace::selected_veriloga_source(app) {
         Ok(selected) => code_workspace::show_veriloga_inspector(
             ui,

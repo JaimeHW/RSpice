@@ -52,7 +52,7 @@ pub(super) fn result_browser_facets_stack(available_width: f32) -> bool {
     available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
 }
 
-pub(super) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     if !app
         .state
         .results

@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
     // "Model ownership" titled a page index. Nothing under it is about who
     // owns a model.
     section_header(ui, "Pages", None);

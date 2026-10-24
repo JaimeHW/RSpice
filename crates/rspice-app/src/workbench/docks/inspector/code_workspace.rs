@@ -11,7 +11,7 @@ use crate::workbench::{AppState, MessageId, RSpiceApp};
 
 use super::super::super::design_system::{WorkbenchIcon, property_row, property_row_problem};
 
-pub(super) fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.code.code_workspace.page
         == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     {

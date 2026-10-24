@@ -10,7 +10,7 @@ use super::super::super::design_system::{WorkbenchIcon, section_header};
 use super::super::super::state::ProjectPage;
 use super::{muted, nav_row};
 
-pub(super) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()
         .auto_shrink([false, true])
         .show(ui, |ui| match app.state.project.project_page {

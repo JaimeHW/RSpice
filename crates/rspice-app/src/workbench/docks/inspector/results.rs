@@ -21,7 +21,7 @@ use super::super::super::design_system::{
 use super::super::super::state::Workspace;
 use super::{compact_readout, result_authority, run_details};
 
-pub(super) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected_trace = app
         .state
         .results

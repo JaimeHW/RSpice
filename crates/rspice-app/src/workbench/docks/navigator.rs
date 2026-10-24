@@ -1,39 +1,34 @@
 //! Workspace-aware navigation tree.
 
-mod design;
-mod symbol;
+pub(in crate::workbench) mod design;
+pub(in crate::workbench) mod symbol;
 
-mod models;
-mod netlist;
-mod project;
+pub(in crate::workbench) mod models;
+pub(in crate::workbench) mod netlist;
+pub(in crate::workbench) mod project;
 mod rail;
-mod results;
+pub(in crate::workbench) mod results;
 mod results_actions;
 mod results_rows;
-mod simulate;
-mod source_bundle;
-pub(super) mod stimulus;
-mod verify;
-mod veriloga;
+pub(in crate::workbench) mod simulate;
+pub(in crate::workbench) mod source_bundle;
+pub(in crate::workbench) mod stimulus;
+pub(in crate::workbench) mod verify;
+pub(in crate::workbench) mod veriloga;
 
-use models::models;
 use netlist::*;
-use project::project;
-use results::results;
-use simulate::simulate;
-use verify::verify;
 
 use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::state::ViewType;
 use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::host::{Host, Point};
 use crate::workbench::framework::requests::{FocusNavigatorSearch, Outbox, Request};
 
 use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, section_header};
-use super::super::state::{ProjectPage, VerificationPage, Workspace};
+use super::super::state::{VerificationPage, Workspace};
 use crate::state::ModelsPage;
 use crate::ui::widgets::paint_problem_mark;
 
@@ -72,69 +67,32 @@ fn panel_search_field_width(available_width: f32) -> f32 {
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.spacing_mut().item_spacing.y = 0.0;
+    let workspace = app.state.workbench.workspace;
+    let section = app.navigator_section(workspace);
+    // Canonical navigator order: header, search, then the workspace's own
+    // navigator, which may lead with tabs of its own (the Code workspace's
+    // page tabs, then the page's outline).
     header(ui, app);
-    if app.state.workbench.workspace == Workspace::Netlist {
-        use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-        // Canonical code navigator order: header, search, page tabs, outline.
-        // The outline belongs to the page: an automation pipeline and a SPICE
-        // deck are different objects and read differently, so neither borrows
-        // the other's tree.
-        workspace_search(ui, app, Workspace::Netlist);
-        code_workspace_pages(ui, app);
-        match app.state.code.code_workspace.page {
-            CodeWorkspacePage::Netlist => netlist(ui, app),
-            CodeWorkspacePage::Automation => source_bundle::automation(ui, app),
-        }
-        return;
+    if section.container_draws_search {
+        workspace_search(ui, app, workspace, section.placeholder);
     }
-    match app.state.workbench.workspace {
-        // A symbol cellview is a design document with its own structure:
-        // an ordered pin contract instead of a hierarchy of instances.
-        Workspace::Design
-            if app.state.model.workspace.content.active_view_type() == ViewType::Symbol =>
+    if workspace == Workspace::Verify {
+        let scroll_bar_visibility = if verification_navigator_requires_scroll(ui.available_height())
         {
-            symbol::show(ui, app);
-        }
-        Workspace::Design
-            if app.state.model.workspace.content.active_view_type() == ViewType::VerilogA =>
-        {
-            veriloga::show(ui, app);
-        }
-        Workspace::Design => design::show(ui, app),
-        // The data browser leads with its tab band and owns the search below
-        // it, because the query and the kind/sort facets filter the tab that
-        // is showing — a search above the tabs would read as filtering all
-        // three at once.
-        Workspace::Results => results(ui, app),
-        workspace => {
-            workspace_search(ui, app, workspace);
-            match workspace {
-                Workspace::Project => project(ui, app),
-                Workspace::Simulate => simulate(ui, app),
-                Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-                Workspace::Verify => {
-                    let scroll_bar_visibility =
-                        if verification_navigator_requires_scroll(ui.available_height()) {
-                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible
-                        } else {
-                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
-                        };
-                    ScrollArea::vertical()
-                        .id_salt("workbench.verify.navigator")
-                        .auto_shrink([false, false])
-                        .scroll_bar_visibility(scroll_bar_visibility)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            verify(ui, app);
-                        });
-                }
-                Workspace::Models => models(ui, app),
-                Workspace::Netlist | Workspace::Design | Workspace::Results => {
-                    unreachable!("handled above")
-                }
-            }
-        }
+            egui::scroll_area::ScrollBarVisibility::AlwaysVisible
+        } else {
+            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+        };
+        ScrollArea::vertical()
+            .id_salt("workbench.verify.navigator")
+            .auto_shrink([false, false])
+            .scroll_bar_visibility(scroll_bar_visibility)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                app.contribute(Point::Navigator(workspace), ui);
+            });
+    } else {
+        app.contribute(Point::Navigator(workspace), ui);
     }
 }
 
@@ -149,27 +107,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let title = match app.state.workbench.workspace {
-        Workspace::Project => match app.state.project.project_page {
-            ProjectPage::Overview | ProjectPage::Library => "Project",
-            ProjectPage::Configuration => "Configurations",
-            ProjectPage::Dependencies => "Dependencies",
-            ProjectPage::Recovery => "Recovery",
-        },
-        Workspace::Design => "Design navigator",
-        Workspace::Simulate => "Simulation setup",
-        Workspace::Stimulus => "Library browser",
-        Workspace::Results => "Data browser",
-        Workspace::Verify => "Verification flows",
-        Workspace::Models => "Library browser",
-        Workspace::Netlist => {
-            use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-            match app.state.code.code_workspace.page {
-                CodeWorkspacePage::Netlist => "Netlist outline",
-                CodeWorkspacePage::Automation => "Scripts",
-            }
-        }
-    };
+    let title = app.navigator_section(app.state.workbench.workspace).title;
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -194,22 +132,12 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> bool {
-    let placeholder = match workspace {
-        Workspace::Project => match app.state.project.project_page {
-            ProjectPage::Overview | ProjectPage::Library => "Filter libraries, cells, views…",
-            ProjectPage::Configuration => "Filter configurations…",
-            ProjectPage::Dependencies => "Filter dependencies…",
-            ProjectPage::Recovery => "Filter checkpoints…",
-        },
-        Workspace::Design => "Find instance, net or port…",
-        Workspace::Simulate => "Filter setup…",
-        Workspace::Stimulus => "Search definitions…",
-        Workspace::Results => "Find signal, expression or run…",
-        Workspace::Verify => "Filter flows, specs or samples…",
-        Workspace::Models => "Search model, device or library…",
-        Workspace::Netlist => "Find symbol or line…",
-    };
+fn workspace_search(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    workspace: Workspace,
+    placeholder: &'static str,
+) -> bool {
     let mut focus =
         search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.state.workbench.outbox);
     panel_search(

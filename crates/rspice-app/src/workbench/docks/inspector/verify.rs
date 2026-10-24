@@ -17,7 +17,7 @@ use super::compact_readout;
 /// run's definition and worst samples, a corner run that failed, and the
 /// tuning session's uncommitted or invalid values. The other pages already
 /// show everything there is to say about them.
-pub(super) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.simulate.verification_page {
         VerificationPage::Yield => yield_details(ui, app),
         VerificationPage::Corners => {

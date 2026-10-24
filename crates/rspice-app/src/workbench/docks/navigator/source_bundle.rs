@@ -55,7 +55,7 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     show_rail(ui, app, rail);
 }
 
-pub(super) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::RSpiceAutomation;
     let rail = Rail {
         id_salt: "workbench.automation.navigator",

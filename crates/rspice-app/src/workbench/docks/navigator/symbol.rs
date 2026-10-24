@@ -15,7 +15,7 @@ use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, section_header};
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let ports = app.state.active_symbol_ports();
     // A document that will not load says why. The navigator must not invent
     // a structure for one it cannot read.

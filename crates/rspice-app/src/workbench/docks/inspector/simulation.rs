@@ -84,7 +84,7 @@ fn run_outcome(
     }
 }
 
-pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected = app
         .state
         .model

@@ -29,7 +29,7 @@ const NETLIST_OUTLINE_CARET_SIZE: f32 = 9.0;
 /// Indent of a declaration under its group, past the guide line.
 const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 
-pub(super) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     let t = Tokens::get(ui.ctx());
@@ -105,7 +105,7 @@ pub(super) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         netlist_diff(ui, app);
         return;

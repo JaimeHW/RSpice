@@ -11,7 +11,7 @@ use super::*;
 
 use crate::workbench::documents::code_workspace;
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Err(error) = code_workspace::selected_veriloga_source(app) {
         // The editor states the same refusal; the panel must not list the
         // files of a bundle the view does not own.

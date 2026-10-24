@@ -2,8 +2,8 @@
 
 mod console;
 mod drawers;
-mod inspector;
-mod navigator;
+pub(super) mod inspector;
+pub(super) mod navigator;
 
 pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_details};
 pub(crate) use inspector::{

@@ -48,12 +48,12 @@ pub(super) fn publish_source_editor(
     }
 }
 
-pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
+pub(in crate::workbench) fn prepare_workspace(app: &mut RSpiceApp) {
     generation::reconcile_documents(app);
     crate::workbench::documents::netlist_document::prepare(&mut app.state);
 }
 
-pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     handle_netlist_file_drop(ui.ctx(), app);
     let toolbar = toolbar::code_toolbar(ui, app);
     // The strip aligns to the toolbar's own content rect, so the two rows keep

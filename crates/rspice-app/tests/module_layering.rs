@@ -729,6 +729,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // it, through the project workflow; its test runs the plan through the
     // preflight the frame runs.
     "tools/examples_browser",
+    // The shell's host: which owner draws at each contribution point the
+    // docks and surfaces leave to one. It names every owner it resolves to,
+    // so it ranks above all of them; the containers reach it only through
+    // the framework's trait.
+    "shell_host",
     // The frame is painted last and may reach anything below it.
     "frame",
 ];

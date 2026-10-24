@@ -79,7 +79,7 @@ struct Row<'a> {
     curve: &'a Result<WaveformTrace, String>,
 }
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     if state.model.workspace.content.stimulus_library.is_empty() {
         show_empty(ui, state);
         return;

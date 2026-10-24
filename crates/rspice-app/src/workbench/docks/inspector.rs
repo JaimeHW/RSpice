@@ -1,28 +1,23 @@
 //! Context inspector with authoritative object and provenance details.
 
-mod code_workspace;
-mod design;
+pub(in crate::workbench) mod code_workspace;
+pub(in crate::workbench) mod design;
 mod executed_deck;
-mod models;
-mod project;
+pub(in crate::workbench) mod models;
+pub(in crate::workbench) mod project;
 mod result_authority;
-mod results;
+pub(in crate::workbench) mod results;
 /// Visible to the dock layer: the data browser opens it from a run's row, and
 /// the frame draws it whichever dock is showing.
 pub(super) mod run_details;
-mod simulation;
+pub(in crate::workbench) mod simulation;
 /// Visible to the dock layer so the library browser's own gate can render this
 /// pane beside it: the two docks state the same counts about the same design,
 /// and a review that only ever opened one of them would not see them disagree.
-pub(super) mod stimulus;
-mod symbol;
-mod verify;
-mod veriloga;
-
-use code_workspace::code_workspace_inspector;
-use project::project;
-use results::results;
-use verify::verify;
+pub(in crate::workbench) mod stimulus;
+pub(in crate::workbench) mod symbol;
+pub(in crate::workbench) mod verify;
+pub(in crate::workbench) mod veriloga;
 
 /// The SOA verdict the Verify flow states is the one an instance's Checks row
 /// states, read the same way.
@@ -35,10 +30,11 @@ use egui::{ScrollArea, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::{AppState, MessageId, RSpiceApp};
+use crate::workbench::framework::host::{Host, Point};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::PANEL_HEADER_H;
-use super::super::state::{ProjectPage, VerificationPage, Workspace};
+use super::super::state::Workspace;
 
 const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
 
@@ -269,36 +265,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 /// The inspected subject's sections, laid out on the panel body.
 fn inspector_body(ui: &mut Ui, app: &mut RSpiceApp) {
-    if split_selected_trace_is_inspected(app) {
-        results(ui, app);
-        return;
-    }
-    match app.state.workbench.workspace {
-        Workspace::Project => project(ui, app),
-        // A symbol cellview is edited against its pin contract, not against a
-        // schematic selection.
-        Workspace::Design
-            if app.state.model.workspace.content.active_view_type()
-                == crate::state::ViewType::Symbol =>
-        {
-            symbol::show(ui, &mut app.state);
-        }
-        // A Verilog-A module is inspected for what it compiles to, not for a
-        // schematic selection it does not have.
-        Workspace::Design
-            if app.state.model.workspace.content.active_view_type()
-                == crate::state::ViewType::VerilogA =>
-        {
-            veriloga::show(ui, app);
-        }
-        Workspace::Design => design::show(ui, app),
-        Workspace::Simulate => simulation::simulate(ui, app),
-        Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-        Workspace::Results => results(ui, app),
-        Workspace::Verify => verify(ui, app),
-        Workspace::Models => models::show(ui, app),
-        Workspace::Netlist => code_workspace_inspector(ui, app),
-    }
+    let scope = app.inspector_scope(app.state.workbench.workspace);
+    app.contribute(Point::Inspector(scope), ui);
 }
 
 fn inspector_scroll_identity(app: &RSpiceApp) -> String {
@@ -315,24 +283,6 @@ fn inspector_scroll_identity(app: &RSpiceApp) -> String {
     )
 }
 
-fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
-    app.state.workbench.workspace == Workspace::Design
-        && app.state.workbench.results_split_visible(
-            app.state.platform.project_lifecycle.is_open(),
-            app.state
-                .model
-                .simulation
-                .retained
-                .has_retained_result_dataset(),
-        )
-        && app
-            .state
-            .results
-            .results
-            .valid_selected_trace(&app.state.model.simulation)
-            .is_some()
-}
-
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
@@ -344,43 +294,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let messages = app.state.workbench.messages();
-    let title = if split_selected_trace_is_inspected(app) {
-        "Result details".to_owned()
-    } else {
-        match app.state.workbench.workspace {
-            Workspace::Project => match app.state.project.project_page {
-                ProjectPage::Overview => "Project overview".to_owned(),
-                ProjectPage::Library => "Cell view".to_owned(),
-                ProjectPage::Configuration => "Configuration".to_owned(),
-                ProjectPage::Dependencies => "Dependency".to_owned(),
-                ProjectPage::Recovery => "Checkpoint".to_owned(),
-            },
-            Workspace::Verify
-                if app.state.simulate.verification_page == VerificationPage::Yield =>
-            {
-                "Yield details".to_owned()
-            }
-            Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
-            Workspace::Netlist => match app.state.code.code_workspace.page {
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
-                    messages.text(MessageId::CodeInspectorNetlistTitle)
-                }
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
-                    messages.text(MessageId::CodeInspectorAutomationTitle)
-                }
-            },
-            // A result sheet's context panel is named by the sheet it is
-            // reading, the way every other workspace names its subject.
-            Workspace::Results => {
-                format!(
-                    "{} details",
-                    app.state.results.results.session.viewer.tab_label()
-                )
-            }
-            _ => app.state.workbench.workspace.inspector_title().to_owned(),
-        }
-    };
+    let title = app.inspector_title(app.inspector_scope(app.state.workbench.workspace));
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &title)
     });

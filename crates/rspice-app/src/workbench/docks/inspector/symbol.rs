@@ -6,7 +6,7 @@ use rspice_schematic_editor::symbol_editor::inspector::{self, SymbolInspectorReq
 use rspice_schematic_editor::symbol_editor::interaction::SymbolEditCapabilities;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     let ports = state.active_symbol_ports();
     let Ok(document) = state.load_active_symbol_document() else {
         muted_inspector_copy(

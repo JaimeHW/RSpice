@@ -1,20 +1,20 @@
 //! Canonical task-owner surfaces.
 
-mod automation;
-mod design;
-mod library_cellview_manager;
-mod model_correlation;
+pub(super) mod automation;
+pub(super) mod design;
+pub(super) mod library_cellview_manager;
+pub(super) mod model_correlation;
 mod model_correlation_controller;
-mod model_editor;
-mod models;
-mod netlist;
-mod pdk_technology_admin;
-mod project;
+pub(super) mod model_editor;
+pub(super) mod models;
+pub(super) mod netlist;
+pub(super) mod pdk_technology_admin;
+pub(super) mod project;
 pub(crate) mod report_authoring;
-mod results;
-mod simulate;
-mod stimulus;
-mod verify;
+pub(super) mod results;
+pub(super) mod simulate;
+pub(super) mod stimulus;
+pub(super) mod verify;
 mod veriloga;
 
 /// The simulation plan workflows are opened from global chrome, so the frame
@@ -26,9 +26,8 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::host::{Host, Point};
 use crate::workbench::framework::requests::Drain;
-
-use super::state::Workspace;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The page that draws a source editor publishes it again below; whatever
@@ -50,48 +49,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+/// The stage of the workspace that is showing, drawn by whoever owns it.
 fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
-        report_authoring::show(ui, app);
-        return;
-    }
-    if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor {
-        model_editor::show(ui, app);
-        return;
-    }
-    if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelCorrelation {
-        model_correlation::show(ui, app);
-        return;
-    }
-    if app.state.workbench.current_route().surface_id() == super::SurfaceId::PdkTechnologyAdmin {
-        pdk_technology_admin::show(ui, app);
-        return;
-    }
-    if app.state.workbench.current_route().surface_id() == super::SurfaceId::LibraryCellviewManager
-    {
-        library_cellview_manager::show(ui, app);
-        return;
-    }
-    match app.state.workbench.workspace {
-        Workspace::Project => project::show(ui, app),
-        Workspace::Design => design::show(ui, app),
-        Workspace::Simulate => simulate::show(ui, app),
-        Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-        Workspace::Results => results::show(ui, app),
-        Workspace::Verify => verify::show(ui, app),
-        Workspace::Models => models::show(ui, app),
-        Workspace::Netlist => {
-            netlist::prepare_workspace(app);
-            match app.state.code.code_workspace.page {
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
-                    netlist::show_prepared(ui, app)
-                }
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
-                    automation::show(ui, app)
-                }
-            }
-        }
-    }
+    let workspace = app.state.workbench.workspace;
+    app.contribute(Point::Surface(workspace), ui);
 }
 
 fn split_results_is_visible(app: &RSpiceApp) -> bool {
@@ -152,7 +113,7 @@ fn show_split_with_results(ui: &mut Ui, app: &mut RSpiceApp) {
     results.set_clip_rect(results_rect);
     results.set_min_size(results_rect.size());
     results.set_max_size(results_rect.size());
-    crate::workbench::documents::result_document::show_compact_split(&mut results, app);
+    app.contribute(Point::SplitResults, &mut results);
 }
 
 fn register_results_split_region(ui: &mut Ui, results_rect: Rect) {

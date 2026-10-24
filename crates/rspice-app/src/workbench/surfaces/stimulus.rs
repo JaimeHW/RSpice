@@ -200,7 +200,7 @@ const IDENTITY_HEIGHT: f32 = 36.0;
 const PROOF_MINIMUM_HEIGHT: f32 = 120.0;
 const SEAM: f32 = 1.0;
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     if state.model.workspace.content.stimulus_library.is_empty() {
         show_empty(ui, state);
         return;

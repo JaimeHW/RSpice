@@ -60,6 +60,7 @@ mod preferences;
 mod preflight;
 pub(crate) mod publication_snapshot;
 pub(crate) mod routing;
+mod shell_host;
 pub(crate) mod shortcuts;
 pub(crate) mod simulation_analysis_tabs;
 pub(crate) mod slots;

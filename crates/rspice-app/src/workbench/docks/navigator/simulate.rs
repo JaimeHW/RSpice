@@ -38,7 +38,7 @@ const NAV_AXIS_VALUE_LIMIT: usize = 5;
 const SIMULATION_CREATOR_GAP: f32 = 6.0;
 const SIMULATION_CREATOR_EXTRA_HEIGHT: f32 = 8.0;
 
-pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     let enabled = app.state.model.sim_setup.enabled_analysis_instance_count();
     let total = app
         .state
