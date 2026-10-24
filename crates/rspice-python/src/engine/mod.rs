@@ -680,8 +680,15 @@ impl PyEngine {
     ) -> PyResult<(PyTransientResult, PyTransientCheckpoint)> {
         let max_step = solver_window(stop_time, max_step)?;
         let engine = self.engine_for_netlist(&netlist.inner);
+        // A run the design finished has no checkpoint to return.
         let (result, checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_tran_checkpointed_with_abort(&netlist.inner, stop_time, max_step, abort)
+            let (result, end) = engine.run_tran_checkpointed_with_abort(
+                &netlist.inner,
+                stop_time,
+                max_step,
+                abort,
+            )?;
+            Ok((result, end.into_checkpoint()?))
         })?;
         Ok((
             PyTransientResult::new(result),
@@ -724,13 +731,14 @@ impl PyEngine {
         let max_step = max_step.unwrap_or((stop_time - checkpoint.inner.time) / 50.0);
         let engine = self.engine_for_netlist(&netlist.inner);
         let (result, next_checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_tran_resume_with_abort(
+            let (result, end) = engine.run_tran_resume_with_abort(
                 &netlist.inner,
                 &checkpoint.inner,
                 stop_time,
                 max_step,
                 abort,
-            )
+            )?;
+            Ok((result, end.into_checkpoint()?))
         })?;
         Ok((
             PyTransientResult::new(result),

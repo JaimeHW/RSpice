@@ -920,6 +920,7 @@ fn a_resumed_transient_reports_the_terminal_current_at_its_first_point() {
     let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 150e-9, 2e-9)
         .expect("first window runs");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, 300e-9, 2e-9)
         .expect("resumed window runs");

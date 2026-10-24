@@ -112,6 +112,8 @@ fn directory_for(circuit: &str, test: &str) -> Directory {
         .run_tran_checkpointed(&writer, *stop, max_step)
         .expect("the transient checkpoints");
     checkpoint
+        .into_checkpoint()
+        .expect("the transient reaches its stop time")
         .save(&directory.0.join(CHECKPOINT))
         .expect("the checkpoint saves");
     directory

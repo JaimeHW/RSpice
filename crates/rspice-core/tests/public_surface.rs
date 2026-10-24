@@ -343,7 +343,13 @@ use rspice_core::analysis::harmonic_balance::{
 // spelling of them (`HdlSourceDocument` and the types it holds), which the
 // transient payload's `hdlSources` carries to the app and the bindings. The
 // census is 5,453, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5453;
+// `engine::TransientEnd` and its `into_checkpoint` add two: how a
+// checkpointed or resumed transient ended, at its stop time with the
+// checkpoint that extends it or at a model's `$finish`, `$stop` or `$fatal`
+// with none, which `Engine::run_tran_checkpointed` and `run_tran_resume`
+// return and the CLI's `--checkpoint`, the Python bindings and the PSS and HB
+// continuations read. The census is 5,455, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5455;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

@@ -132,9 +132,11 @@ fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
             }
         }
         let (first, checkpoint) = engine.run_tran_checkpointed(&source, 1e-9, 4e-12).unwrap();
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (continued, final_checkpoint) = engine
             .run_tran_resume(&source, &checkpoint, 2e-9, 4e-12)
             .unwrap();
+        let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
         assert_eq!(continued.time.first(), first.time.last());
         assert_eq!(final_checkpoint.time, 2e-9);
         let compressed = engine
@@ -197,6 +199,7 @@ fn gp_zero_phase_preserves_transient_and_checkpoint_behavior() {
             );
             let a = engine.run_tran(&a, 2e-9, 4e-12).unwrap();
             let (b, checkpoint) = engine.run_tran_checkpointed(&b, 2e-9, 4e-12).unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             assert_eq!(a.time, b.time);
             assert_eq!(a.voltages, b.voltages);
             assert_eq!(a.branch_currents, b.branch_currents);

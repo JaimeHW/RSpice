@@ -847,7 +847,7 @@ pub(super) fn run_transient(
         };
         pb.finish_and_clear();
         match run {
-            Ok((segment, checkpoint)) => {
+            Ok((segment, end)) => {
                 let result = match segment {
                     SegmentResult::Full(result) => *result,
                     SegmentResult::Compressed(compressed) => {
@@ -868,21 +868,33 @@ pub(super) fn run_transient(
                         expand_compressed(*compressed, "checkpoint segment")?
                     }
                 };
-                if let Some(ref checkpoint_path) = checkpoint_path {
-                    super::restart::publish_checkpoint(
-                        ctx,
-                        &checkpoint,
-                        checkpoint_path,
-                        rspice_core::engine::TransientCheckpointEncoding::Unpacked,
-                        &progress_abort,
-                    )?;
-                    if !ctx.quiet {
-                        crate::console::line(format_args!(
-                            "  Checkpoint saved (t={:.6e}s): {}",
-                            checkpoint.time,
-                            checkpoint_path.display()
-                        ))?;
+                match (&end, checkpoint_path.as_deref()) {
+                    (rspice_core::engine::TransientEnd::Checkpoint(checkpoint), Some(path)) => {
+                        super::restart::publish_checkpoint(
+                            ctx,
+                            checkpoint,
+                            path,
+                            rspice_core::engine::TransientCheckpointEncoding::Unpacked,
+                            &progress_abort,
+                        )?;
+                        if !ctx.quiet {
+                            crate::console::line(format_args!(
+                                "  Checkpoint saved (t={:.6e}s): {}",
+                                checkpoint.time,
+                                path.display()
+                            ))?;
+                        }
                     }
+                    // A finished run has nothing left to resume.
+                    (rspice_core::engine::TransientEnd::Finished(finish), Some(path)) => {
+                        if !ctx.quiet {
+                            crate::console::line(format_args!(
+                                "  No checkpoint saved to {}: {finish}, which completes the run",
+                                path.display()
+                            ))?;
+                        }
+                    }
+                    (_, None) => {}
                 }
                 Ok(result)
             }

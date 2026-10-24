@@ -467,6 +467,7 @@ mod mixed {
             let (_, checkpoint) = engine
                 .run_tran_checkpointed(&netlist, stop, 10e-9)
                 .expect("checkpoints");
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
                 .run_tran_resume(&netlist, &checkpoint, 4.5e-6, 10e-9)
                 .expect("resumes");
@@ -485,6 +486,7 @@ mod mixed {
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 1.5e-6, 10e-9)
             .expect("checkpoints");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let saved = checkpoint
             .to_bytes(TransientCheckpointEncoding::Unpacked)
             .expect("serializes");
@@ -529,6 +531,7 @@ mod mixed {
         let (_, checkpoint) = Engine::default()
             .run_tran_checkpointed(&netlist, 1e-6, 0.1e-6)
             .expect("checkpoints");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         assert!(checkpoint.to_text().ends_with("\nvcd_files 0\n"));
     }
 }

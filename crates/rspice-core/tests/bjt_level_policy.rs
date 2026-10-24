@@ -4422,6 +4422,8 @@ fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history(
                             engine.run_tran_checkpointed(&actual, 50e-9, 5e-9).unwrap();
                         let checkpoint = TransientCheckpoint::from_bytes(
                             &checkpoint
+                                .into_checkpoint()
+                                .unwrap()
                                 .to_bytes(TransientCheckpointEncoding::Packed)
                                 .unwrap(),
                         )

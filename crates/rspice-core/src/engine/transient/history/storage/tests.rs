@@ -44,6 +44,7 @@ fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() 
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1e-10, 1e-12)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let encoded = checkpoint.to_text();
     let mut limited_config = SimulationConfig::default();
     limited_config.resource_limits.max_transport_history_bytes = 0;

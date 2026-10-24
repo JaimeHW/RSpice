@@ -116,6 +116,7 @@ fn gp_cancelled_continuation_preserves_checkpoint_and_future_continuation() {
             ..SimulationConfig::default()
         });
         let (_, checkpoint) = engine.run_tran_checkpointed(&source, 1e-9, 4e-12).unwrap();
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let encoded = checkpoint.to_text();
         let (baseline, final_checkpoint) = engine
             .run_tran_resume(&source, &checkpoint, 2e-9, 4e-12)
@@ -134,6 +135,8 @@ fn gp_cancelled_continuation_preserves_checkpoint_and_future_continuation() {
         assert_eq!(baseline.step_sizes, reused.step_sizes);
         assert_eq!(baseline.voltages, reused.voltages);
         assert_eq!(baseline.branch_currents, reused.branch_currents);
-        assert_eq!(final_checkpoint.to_text(), reused_checkpoint.to_text());
+        let text =
+            |end: rspice_core::engine::TransientEnd| end.into_checkpoint().unwrap().to_text();
+        assert_eq!(text(final_checkpoint), text(reused_checkpoint));
     }
 }

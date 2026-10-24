@@ -706,6 +706,9 @@ impl XyceTestRunner {
                 abort,
             )
             .map_err(|error| format!("{LABEL} {:?} restart failed: {error}", spec.case))?;
+        let final_checkpoint = final_checkpoint
+            .into_checkpoint()
+            .map_err(|error| format!("{LABEL} {:?} restart ended: {error}", spec.case))?;
         Self::bug456_require_result_horizon(
             &format!("{:?} restart", spec.case),
             &restart_result,

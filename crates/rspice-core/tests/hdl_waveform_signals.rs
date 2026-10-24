@@ -187,6 +187,7 @@ fn a_resumed_run_continues_the_esave_traces_exactly() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, seam, step)
         .expect("the first part checkpoints");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, stop, step)
         .expect("the rest resumes");

@@ -111,6 +111,7 @@ fn controlled_current_drive_preserves_line_waves_and_current_observations_on_res
             let (_, checkpoint) = engine
                 .run_tran_checkpointed(&source, 1.2e-9, 2e-12)
                 .unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
                 .run_tran_resume(&source, &checkpoint, 2.5e-9, 2e-12)
                 .unwrap();
@@ -166,6 +167,7 @@ fn smooth_behavioral_drive_preserves_matched_line_delay_and_continuation() {
         let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
         let result = engine.run_tran(&deck, 2.5e-9, 2e-12).unwrap();
         let (_, checkpoint) = engine.run_tran_checkpointed(&deck, 1.2e-9, 2e-12).unwrap();
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
             .run_tran_resume(&deck, &checkpoint, 2.5e-9, 2e-12)
             .unwrap();
@@ -243,6 +245,7 @@ fn loaded_lossless_line_preserves_dc_bias_through_startup_and_resume() {
             let (first, checkpoint) = engine
                 .run_tran_checkpointed(&deck, 0.75e-6, 0.125e-6)
                 .unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
             let (resumed, _) = engine
                 .run_tran_resume(&deck, &checkpoint, 3.25e-6, 0.125e-6)

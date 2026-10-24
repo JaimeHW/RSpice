@@ -2132,7 +2132,9 @@ impl Engine {
             .checkpoint
             .bind_authenticated_synthetic_origin_max_step(max_step)
             .map_err(SimulationError::Circuit)?;
-        engine.run_tran_resume_with_abort(netlist, &checkpoint, tstop, max_step, abort)
+        let (result, end) =
+            engine.run_tran_resume_with_abort(netlist, &checkpoint, tstop, max_step, abort)?;
+        Ok((result, end.into_checkpoint()?))
     }
 
     /// Refuse any orbit whose state the shooting period map cannot carry.

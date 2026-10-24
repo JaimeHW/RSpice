@@ -286,6 +286,7 @@ fn gp_current_controlled_sources_preserve_finite_currents_impulses_and_restart()
             let (_, checkpoint) = engine
                 .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
                 .unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
                 .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
                 .unwrap();
@@ -342,6 +343,7 @@ fn gp_current_controlled_impulse_drives_the_independent_rc_response_after_restar
                 let (_, checkpoint) = engine
                     .run_tran_checkpointed(&source, 0.4e-9, 1e-12)
                     .unwrap();
+                let checkpoint = checkpoint.into_checkpoint().unwrap();
                 let (resumed, _) = engine
                     .run_tran_resume(&source, &checkpoint, 2e-9, 1e-12)
                     .unwrap();

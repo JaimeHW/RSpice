@@ -552,7 +552,7 @@ fn a_checkpoint_file_linearizes_like_the_live_state_it_holds() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&writer, stop, max_step)
         .expect("the diode-RC transient checkpoints");
-    let checkpoint = through_a_file(&checkpoint, "diode_rc");
+    let checkpoint = through_a_file(&checkpoint.into_checkpoint().unwrap(), "diode_rc");
 
     let reader = parse(&DIODE_RC.replace("actimes=20u", "checkpoint=\"diode_rc.rspice-tran\""));
     let result = engine
@@ -644,6 +644,7 @@ fn an_ac_sensitivity_at_a_state_follows_the_state_through_the_perturbation() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&writer, stop, max_step)
         .expect("the diode-RC transient checkpoints");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let at_checkpoint = parse(&deck(
         1.0e4,
         ".sens v(out) r1 ac lin 1 100k 100k checkpoint=\"s.rspice-tran\"",
@@ -1022,6 +1023,7 @@ mod edge_tick {
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&writer, stop, max_step)
             .expect("the clocked deck checkpoints on the clock's edge");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let checkpoint = through_a_file(&checkpoint, "edge");
         let reader = parse(&deck(
             &module,

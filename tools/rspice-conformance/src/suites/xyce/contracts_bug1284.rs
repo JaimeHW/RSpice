@@ -318,6 +318,9 @@ impl XyceTestRunner {
                         &abort,
                     )
                     .map_err(|error| format!("{LABEL} {label} resume failed: {error}"))?;
+                let final_checkpoint = final_checkpoint
+                    .into_checkpoint()
+                    .map_err(|error| format!("{LABEL} {label} resume ended: {error}"))?;
                 Self::bug1284_require_result_horizon(label, &result, checkpoint.time, FINAL_STOP)?;
                 if final_checkpoint.time.to_bits() != FINAL_STOP.to_bits() {
                     return Err(format!(

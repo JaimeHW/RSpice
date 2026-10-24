@@ -12,6 +12,7 @@ fn public_resume_preserves_record_limit_identity_and_the_input_checkpoint() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1e-10, 1e-12)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (baseline, _) = engine
         .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
         .unwrap();

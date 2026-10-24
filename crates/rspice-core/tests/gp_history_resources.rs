@@ -199,6 +199,7 @@ fn restoration_obeys_the_new_budget_without_mutating_the_input_checkpoint() {
     let config = SimulationConfig::default();
     let engine = Engine::new(config.clone());
     let (_, checkpoint) = engine.run_tran_checkpointed(&netlist, 1e-9, 1e-12).unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let encoded = checkpoint.to_text();
     let (baseline, _) = engine
         .run_tran_resume(&netlist, &checkpoint, 2e-9, 1e-12)

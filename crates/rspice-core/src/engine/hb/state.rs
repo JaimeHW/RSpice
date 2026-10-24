@@ -997,13 +997,14 @@ impl Engine {
             .checkpoint
             .bind_authenticated_synthetic_origin_max_step(max_step)
             .map_err(SimulationError::Circuit)?;
-        engine.run_tran_resume_with_abort(
+        let (result, end) = engine.run_tran_resume_with_abort(
             netlist,
             &checkpoint,
             state.time_origin() + duration,
             max_step,
             abort,
-        )
+        )?;
+        Ok((result, end.into_checkpoint()?))
     }
 
     pub(in crate::engine::hb) fn hb_attach_periodic_state(

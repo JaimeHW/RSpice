@@ -111,6 +111,7 @@ fn gp_behavioral_prescribed_forcing_has_physical_event_equations() {
                 let (_, checkpoint) = engine
                     .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
                     .unwrap();
+                let checkpoint = checkpoint.into_checkpoint().unwrap();
                 let (resumed, _) = engine
                     .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
                     .unwrap();

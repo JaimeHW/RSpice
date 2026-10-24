@@ -117,6 +117,7 @@ fn checkpoint_state_version_and_provenance_fail_closed() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&deck, 1.0e-9, 0.25e-9)
         .expect("TEAM RTN checkpoint captures");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let text = checkpoint.to_text();
 
     let bad_version = text.replacen(

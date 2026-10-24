@@ -943,6 +943,7 @@ fn a_checkpoint_across_a_converter_resumes_or_refuses_by_name() {
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, stop, 1e-9)
             .expect("checkpoints");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
             .run_tran_resume(&netlist, &checkpoint, 400e-9, 1e-9)
             .expect("resumes");
@@ -1150,6 +1151,7 @@ fn a_checkpoint_inside_a_pending_deadline_resumes_onto_the_uninterrupted_run() {
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, stop, 10e-9)
             .expect("checkpoints");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
             .run_tran_resume(&netlist, &checkpoint, 4e-6, 10e-9)
             .expect("resumes");
@@ -1200,6 +1202,7 @@ fn a_checkpoint_just_before_a_deadline_resumes_onto_the_uninterrupted_run() {
             let (_, checkpoint) = engine
                 .run_tran_checkpointed(&netlist, stop, 10e-9)
                 .expect("checkpoints");
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
                 .run_tran_resume(&netlist, &checkpoint, 4e-6, 10e-9)
                 .unwrap_or_else(|error| panic!("resumes from {stop:e} (stock {stock}): {error}"));
@@ -1225,6 +1228,7 @@ fn an_image_without_the_model_breakpoints_resumes_only_stock_converters() {
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 1e-6, 10e-9)
             .expect("checkpoints");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let text = String::from_utf8(
             checkpoint
                 .to_bytes(TransientCheckpointEncoding::Unpacked)
@@ -1494,6 +1498,7 @@ fn r2e_ramps_each_edge_and_resumes_inside_a_ramp() {
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 150e-9, 1e-9)
             .expect("checkpoints inside the rise");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let text = String::from_utf8(
             checkpoint
                 .to_bytes(TransientCheckpointEncoding::Unpacked)

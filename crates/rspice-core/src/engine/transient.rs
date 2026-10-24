@@ -1033,6 +1033,48 @@ pub struct ScheduledTransientCheckpoint {
     pub checkpoint: TransientCheckpoint,
 }
 
+/// How a checkpointed or resumed transient ended.
+///
+/// A run that reaches its stop time ends with the checkpoint a later resume
+/// extends it from. A model that ends the run first, with `$finish`, `$stop`
+/// or `$fatal`, completes it at that point instead, as it completes a plain
+/// run: nothing is left to resume, so no checkpoint is taken after the
+/// finish. Checkpoints published before it stay valid, and a resume from one
+/// reproduces the finish. A `$fatal`'s own record is what fails such a run.
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "returned once, by value, as the checkpoint itself was"
+)]
+pub enum TransientEnd {
+    /// The run reached its stop time; resuming this checkpoint extends it.
+    Checkpoint(TransientCheckpoint),
+    /// The design finished the run: who, where and at which accepted point.
+    Finished(crate::ModelFinish),
+}
+
+impl TransientEnd {
+    /// The checkpoint that extends the run, or, for a run the design
+    /// finished, the refusal any resume of it gives.
+    pub fn into_checkpoint(self) -> Result<TransientCheckpoint, SimulationError> {
+        match self {
+            Self::Checkpoint(checkpoint) => Ok(checkpoint),
+            Self::Finished(finish) => Err(finished_run_refusal(&finish)),
+        }
+    }
+}
+
+/// A finished run has no continuation: the refusal names when it ended.
+fn finished_run_refusal(finish: &crate::ModelFinish) -> SimulationError {
+    let at = match finish.point {
+        crate::ModelFinishPoint::Transient { time } => format!("at {time:e} s"),
+        _ => "before its first time step".to_string(),
+    };
+    SimulationError::Circuit(format!(
+        "the run already finished {at}; there is nothing left to resume ({finish})"
+    ))
+}
+
 #[derive(Debug, Clone, Copy)]
 enum DerivedTransientBranchCurrentKind {
     LinearResistor,
@@ -1146,6 +1188,10 @@ struct ScheduledCheckpointPoint<'a> {
     cursor: &'a mut usize,
     checkpoint_netlist: &'a Netlist,
     accepted_time: Value,
+    /// A model has finished the run: a point accepted after its `$finish`,
+    /// `$stop` or `$fatal` has nothing left to resume, so it takes no
+    /// checkpoint.
+    design_finished: bool,
 }
 
 /// The identity a scheduled checkpoint is stamped with.
@@ -3479,7 +3525,9 @@ impl Engine {
 
     /// Run a transient and additionally return the end-of-run state
     /// checkpoint, for segmented long simulations: save it, then extend
-    /// later with [`Engine::run_tran_resume`].
+    /// later with [`Engine::run_tran_resume`]. A model that ends the run with
+    /// `$finish`, `$stop` or `$fatal` completes it there, and the run ends
+    /// [`TransientEnd::Finished`], with no checkpoint to extend.
     ///
     /// Refused before any solver work when an owner of this deck's accepted
     /// state is not checkpointable, naming every such owner: the only consumer
@@ -3492,7 +3540,7 @@ impl Engine {
         netlist: &Netlist,
         tstop: Value,
         max_step: Value,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         self.run_tran_checkpointed_with_abort(netlist, tstop, max_step, &NoAbort)
     }
 
@@ -3503,7 +3551,7 @@ impl Engine {
         tstop: Value,
         max_step: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
         self.run_tran_checkpointed_with_startup_mode_and_abort(
             netlist,
@@ -3522,7 +3570,7 @@ impl Engine {
         tstop: Value,
         max_step: Value,
         startup_mode: TransientStartupMode,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         self.run_tran_checkpointed_with_startup_mode_and_abort(
             netlist,
             tstop,
@@ -3540,7 +3588,7 @@ impl Engine {
         max_step: Value,
         startup_mode: TransientStartupMode,
         abort: &dyn AbortSignal,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
@@ -3571,10 +3619,10 @@ impl Engine {
     fn require_retained_final_checkpoint(
         (result, checkpoint, _): (
             TransientResult,
-            Option<TransientCheckpoint>,
+            Option<TransientEnd>,
             Vec<ScheduledTransientCheckpoint>,
         ),
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         checkpoint.map_or_else(
             || {
                 Err(SimulationError::Circuit(
@@ -3679,13 +3727,17 @@ impl Engine {
     /// checkpoint time, which is its first sample whether or not the grid names
     /// it. See that field for what a seam off the grid costs a point-for-point
     /// comparison, and how to place the checkpoint so it does not.
+    ///
+    /// A checkpoint taken before a model's `$finish`, `$stop` or `$fatal`
+    /// resumes to that finish, and the resumed run ends
+    /// [`TransientEnd::Finished`].
     pub fn run_tran_resume(
         &self,
         netlist: &Netlist,
         checkpoint: &TransientCheckpoint,
         tstop: Value,
         max_step: Value,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         self.run_tran_resume_with_abort(netlist, checkpoint, tstop, max_step, &NoAbort)
     }
 
@@ -3697,7 +3749,7 @@ impl Engine {
         tstop: Value,
         max_step: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         self.run_tran_resume_validated(
             netlist,
             checkpoint,
@@ -3723,7 +3775,7 @@ impl Engine {
         checkpoint: &TransientCheckpoint,
         tstop: Value,
         max_step: Value,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         self.run_tran_restart_resume_with_abort(netlist, checkpoint, tstop, max_step, &NoAbort)
     }
 
@@ -3735,7 +3787,7 @@ impl Engine {
         tstop: Value,
         max_step: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         self.run_tran_resume_validated(
             netlist,
             checkpoint,
@@ -3754,7 +3806,7 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
         validation: ResumeValidation,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         if !tstop.is_finite() || tstop <= checkpoint.time {
             return Err(SimulationError::Circuit(format!(
@@ -4325,7 +4377,11 @@ impl Engine {
             cursor,
             checkpoint_netlist,
             accepted_time,
+            design_finished,
         } = point;
+        if design_finished {
+            return Ok(());
+        }
         self.ensure_result_values(
             retained_result_values.saturating_add(*retained_scheduled_checkpoint_values),
         )?;
@@ -4494,7 +4550,7 @@ impl Engine {
     ) -> Result<
         (
             TransientResult,
-            Option<TransientCheckpoint>,
+            Option<TransientEnd>,
             Vec<ScheduledTransientCheckpoint>,
         ),
         SimulationError,
@@ -4520,7 +4576,7 @@ impl Engine {
     ) -> Result<
         (
             TransientResult,
-            Option<TransientCheckpoint>,
+            Option<TransientEnd>,
             Vec<ScheduledTransientCheckpoint>,
         ),
         SimulationError,
@@ -4609,7 +4665,7 @@ impl Engine {
     ) -> Result<
         (
             TransientResult,
-            Option<TransientCheckpoint>,
+            Option<TransientEnd>,
             Vec<ScheduledTransientCheckpoint>,
         ),
         SimulationError,
@@ -4641,7 +4697,7 @@ impl Engine {
     ) -> Result<
         (
             TransientResult,
-            Option<TransientCheckpoint>,
+            Option<TransientEnd>,
             Vec<ScheduledTransientCheckpoint>,
         ),
         SimulationError,
@@ -4867,7 +4923,11 @@ impl Engine {
                             .map_or(0, TransientCheckpoint::retained_value_count),
                     ),
             )?;
-            return Ok((result, final_checkpoint, scheduled_checkpoints));
+            return Ok((
+                result,
+                final_checkpoint.map(TransientEnd::Checkpoint),
+                scheduled_checkpoints,
+            ));
         }
         Self::ensure_supported_transient_dynamic_charges(&circuit)?;
         let hinted_max_step = circuit
@@ -6981,6 +7041,9 @@ impl Engine {
                 cursor: &mut scheduled_checkpoint_cursor,
                 checkpoint_netlist,
                 accepted_time: resume_time,
+                design_finished: abort
+                    .model_control()
+                    .is_some_and(|control| control.is_finished()),
             },
             ScheduledCheckpointIdentity {
                 fingerprint,
@@ -11737,6 +11800,9 @@ impl Engine {
                             cursor: &mut scheduled_checkpoint_cursor,
                             checkpoint_netlist,
                             accepted_time: t,
+                            design_finished: abort
+                                .model_control()
+                                .is_some_and(|control| control.is_finished()),
                         },
                         ScheduledCheckpointIdentity {
                             fingerprint,
@@ -12565,6 +12631,9 @@ impl Engine {
                     cursor: &mut scheduled_checkpoint_cursor,
                     checkpoint_netlist,
                     accepted_time: t,
+                    design_finished: abort
+                        .model_control()
+                        .is_some_and(|control| control.is_finished()),
                 },
                 ScheduledCheckpointIdentity {
                     fingerprint,
@@ -12743,7 +12812,16 @@ impl Engine {
                 scheduled_checkpoint_times[scheduled_checkpoint_cursor]
             )));
         }
-        let final_checkpoint = if final_checkpoint_retention.is_retained() {
+        // A run a model ended with `$finish`, `$stop` or `$fatal` is complete
+        // at the finish: nothing is left to resume, so it takes no checkpoint
+        // after it, and the HDL host would refuse one.
+        let design_finish = final_checkpoint_retention
+            .is_retained()
+            .then(|| abort.model_control().and_then(|control| control.finish()))
+            .flatten();
+        let final_checkpoint = if final_checkpoint_retention.is_retained()
+            && design_finish.is_none()
+        {
             self.ensure_transport_history_copy(&bjt_history, retained_scheduled_transport_bytes)?;
             let final_runtime_resume_blockers =
                 Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count);
@@ -12857,7 +12935,11 @@ impl Engine {
                         .map_or(0, TransientCheckpoint::retained_value_count),
                 ),
         )?;
-        Ok((result, final_checkpoint, scheduled_checkpoints))
+        let end = match (final_checkpoint, design_finish) {
+            (Some(checkpoint), _) => Some(TransientEnd::Checkpoint(checkpoint)),
+            (None, finish) => finish.map(TransientEnd::Finished),
+        };
+        Ok((result, end, scheduled_checkpoints))
     }
 
     /// Run transient analysis with waveform compression
@@ -12979,8 +13061,8 @@ impl Engine {
         startup_mode: TransientStartupMode,
         compression: CompressionConfig,
         abort: &dyn AbortSignal,
-    ) -> Result<(TransientResultCompressed, TransientCheckpoint), SimulationError> {
-        let (result, checkpoint) = self.run_tran_checkpointed_with_startup_mode_and_abort(
+    ) -> Result<(TransientResultCompressed, TransientEnd), SimulationError> {
+        let (result, end) = self.run_tran_checkpointed_with_startup_mode_and_abort(
             netlist,
             tstop,
             max_step,
@@ -12989,7 +13071,7 @@ impl Engine {
         )?;
         let compressed =
             self.compress_published_transient(netlist, &result, &compression, abort)?;
-        Ok((compressed, checkpoint))
+        Ok((compressed, end))
     }
 
     /// Resume from an exact checkpoint while independently compressing the
@@ -13002,12 +13084,12 @@ impl Engine {
         max_step: Value,
         compression: CompressionConfig,
         abort: &dyn AbortSignal,
-    ) -> Result<(TransientResultCompressed, TransientCheckpoint), SimulationError> {
-        let (result, next_checkpoint) =
+    ) -> Result<(TransientResultCompressed, TransientEnd), SimulationError> {
+        let (result, end) =
             self.run_tran_resume_with_abort(netlist, checkpoint, tstop, max_step, abort)?;
         let compressed =
             self.compress_published_transient(netlist, &result, &compression, abort)?;
-        Ok((compressed, next_checkpoint))
+        Ok((compressed, end))
     }
 }
 
@@ -14501,6 +14583,7 @@ D1 D 0 DMOD
         let (first, final_checkpoint) = engine
             .run_tran_checkpointed(&netlist, 1.0e-9, 1.0e-9)
             .expect("first v20 junction segment solves");
+        let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
         let final_history = final_checkpoint.accepted_junction_transient_history();
         assert_eq!(final_history.bjt_history.accepted_dt_prev.to_bits(), 0);
         assert_eq!(final_history.diode_history.accepted_dt_prev.to_bits(), 0);
@@ -14627,6 +14710,7 @@ D1 D 0 DMOD
         let (resumed, resumed_final) = engine
             .run_tran_resume(&netlist, &serialized, 1.0e-9, 0.25e-9)
             .expect("promoted BJT checkpoint resumes");
+        let resumed_final = resumed_final.into_checkpoint().unwrap();
         match resumed_final.accepted_integration_runtime() {
             AcceptedIntegrationRuntime::RestartNormalized(runtime) => assert!(
                 runtime.accepted_interval_count
@@ -15127,6 +15211,7 @@ D1 D 0 DMOD
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&deck, 1.0e-9, 0.25e-9)
             .expect("bounded TEAM RTN checkpoint captures");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let hostile = checkpoint.to_text().replacen(
             "xyce_team_resistance_noise_states 1",
             &format!("xyce_team_resistance_noise_states {}", usize::MAX),
@@ -15865,6 +15950,7 @@ D1 D 0 DMOD
         let (first, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 0.05, 1.0e-3)
             .expect("first segment solves");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
             .run_tran_resume(&netlist, &checkpoint, 0.1, 1.0e-3)
             .expect("resumed segment solves");
@@ -15912,6 +15998,7 @@ D1 D 0 DMOD
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&first, 20.0e-6, 1.0e-6)
             .expect("checkpoint-writer segment solves");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
 
         let exact_error = engine
             .run_tran_resume(&restarted, &checkpoint, 50.0e-6, 1.0e-6)
@@ -16999,6 +17086,8 @@ D1 D 0 DMOD
             )
             .expect("compressed first segment solves");
         assert_eq!(compressed_checkpoint, first_checkpoint);
+        let first_checkpoint = first_checkpoint.into_checkpoint().unwrap();
+        let compressed_checkpoint = compressed_checkpoint.into_checkpoint().unwrap();
         assert_eq!(first_compressed.input_points, first_full.time.len());
         for output_time in [0.0, 500.0e-6] {
             assert!(
@@ -18225,6 +18314,7 @@ D1 D 0 DMOD
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 0.4, 1.0)
             .expect("checkpoint seam lands on the explicit breakpoint");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         assert!((checkpoint.time - 0.4).abs() <= 1.0e-12);
         let (resumed, _) = engine
             .run_tran_resume(&netlist, &checkpoint, 1.0, 1.0)

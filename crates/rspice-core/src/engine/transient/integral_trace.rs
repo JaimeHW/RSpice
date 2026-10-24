@@ -163,6 +163,7 @@ mod tests {
             let (_, checkpoint) = engine
                 .run_tran_checkpointed(&netlist, period, period / 64.0)
                 .unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let mut circuit = engine.build_circuit(&netlist).unwrap();
             checkpoint.inject(&mut circuit).unwrap();
             for (row, actual) in trace

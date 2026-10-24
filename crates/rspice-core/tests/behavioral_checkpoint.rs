@@ -27,6 +27,7 @@ fn capacitor_fixture() -> (Engine, Netlist, TransientCheckpoint) {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 400e-6, 2e-6)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(checkpoint.capability().is_resumable());
     (engine, netlist, checkpoint)
 }
@@ -246,6 +247,7 @@ fn fixture() -> (Engine, Netlist, TransientCheckpoint) {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 400e-6, 10e-6)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(checkpoint.capability().is_resumable());
     (engine, netlist, checkpoint)
 }

@@ -182,6 +182,9 @@ fn a_saved_checkpoint_carries_the_header_its_documentation_names() {
     let (_, checkpoint) = Engine::new(SimulationConfig::default())
         .run_tran_checkpointed_with_abort(&netlist, 1.0e-6, 50.0e-9, &NoAbort)
         .expect("the checkpoint fixture solves its first segment");
+    let checkpoint = checkpoint
+        .into_checkpoint()
+        .expect("the fixture reaches its stop time");
     let text = checkpoint
         .to_text_with_abort(&NoAbort)
         .expect("an uncancelled checkpoint serializes");

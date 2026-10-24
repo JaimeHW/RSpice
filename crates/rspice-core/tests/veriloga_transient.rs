@@ -136,6 +136,7 @@ endmodule
     let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 0.75e-6, 1.0e-8)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, 1.5e-6, 1.0e-8)
@@ -1142,10 +1143,13 @@ endmodule
     }
 }
 
+/// A model's `$finish` completes a checkpointed run at the finish: it takes
+/// no checkpoint after it, which a resume would carry past the finish, and a
+/// schedule keeps only the checkpoints captured before it.
 #[test]
-fn transient_finish_keeps_checkpoint_state_and_stops_future_captures() {
-    use rspice_core::engine::TransientStartupMode;
-    use rspice_core::{NoAbort, SimulationOutcome};
+fn transient_finish_completes_the_run_and_stops_future_captures() {
+    use rspice_core::engine::{TransientEnd, TransientStartupMode};
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
     let model = write_model(
         "checkpoint_finish",
         r#"
@@ -1173,18 +1177,22 @@ endmodule
         })
         .unwrap();
     let SimulationOutcome::Finished {
-        result: Some((result, checkpoint)),
-        ..
+        result: Some((result, TransientEnd::Finished(end))),
+        finish,
     } = final_capture
     else {
-        panic!("finish must retain the final checkpoint");
+        panic!("finish must complete the checkpointed run, got {final_capture:?}");
     };
-    assert_eq!(checkpoint.time, 2e-6);
-    assert_eq!(
-        TransientCheckpoint::from_text(&checkpoint.to_text())
-            .unwrap()
-            .time,
-        2e-6
+    assert_eq!(end, finish);
+    assert_eq!(end.point, ModelFinishPoint::Transient { time: 2e-6 });
+    assert_eq!(result.time.last(), Some(&2e-6));
+    let refusal = TransientEnd::Finished(end)
+        .into_checkpoint()
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refusal.contains("the run already finished at 2e-6 s"),
+        "{refusal}"
     );
     let out = node_series(&result.node_names, &result.voltages, "out");
     assert_eq!(out.last(), Some(&11.0));
@@ -1262,15 +1270,15 @@ endmodule
                 assert!(result.node_names.is_empty());
                 assert!(result.voltages.is_empty());
                 if !mixed {
-                    let (_, checkpoint) = engine
+                    // A finished run has nothing left to resume, so a
+                    // checkpointed one ends finished, with no checkpoint.
+                    let (_, end) = engine
                         .run_tran_checkpointed(&netlist, 10e-6, 0.2e-6)
                         .unwrap();
-                    assert_eq!(
-                        TransientCheckpoint::from_text(&checkpoint.to_text())
-                            .unwrap()
-                            .time,
-                        endpoint
-                    );
+                    let rspice_core::engine::TransientEnd::Finished(end) = end else {
+                        panic!("a checkpoint after the finish at {event}");
+                    };
+                    assert_eq!(end.point, finish.point);
                 }
             }
             let _ = std::fs::remove_file(model);
@@ -1433,6 +1441,7 @@ endmodule
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 2e-6, 0.2e-6)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(checkpoint.to_text().contains("linearized_startup 0\n"));
     let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
     let (resumed, _) = engine
@@ -1486,6 +1495,7 @@ endmodule
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, checkpoint_time, 0.2e-6)
             .expect("Zi checkpoint segment solves");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("runtime Verilog-A state survives portable text");
         let (resumed, _) = engine
@@ -1505,6 +1515,7 @@ endmodule
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1.3e-6, 0.2e-6)
         .expect("missing-state refusal fixture captures");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let text = checkpoint.to_text();
     let (prefix, _) = text
         .split_once("runtime_veriloga_state_available ")
@@ -2336,6 +2347,7 @@ fn retained_variables_resume_from_a_checkpoint_with_their_accepted_values() {
         let (segment, checkpoint) = engine
             .run_tran_checkpointed(&netlist, checkpoint_time, 0.5e-9)
             .expect("counter checkpoint segment");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         assert_counter_follows_accepted_points(&segment, 0.5, "segment", None);
         let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("retained Verilog-A state survives portable text");

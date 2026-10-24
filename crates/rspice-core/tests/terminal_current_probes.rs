@@ -36,6 +36,7 @@ fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
     let (result, checkpoint) = engine
         .run_tran_checkpointed(&replayed, 6e-9, 0.1e-9)
         .unwrap();
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let current = result.try_branch_current_waveform_named("VMETER").unwrap();
     let input = result.try_voltage_waveform_named("in").unwrap();
     let output = result.try_voltage_waveform_named("out").unwrap();

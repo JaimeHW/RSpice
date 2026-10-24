@@ -636,6 +636,7 @@ fn checkpoint_serialization_stops_inside_its_encoder() {
             &rspice_core::abort_signal::NoAbort,
         )
         .expect("checkpointed transient completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     for (what, encoding) in [
         ("checkpoint text encoding", None),

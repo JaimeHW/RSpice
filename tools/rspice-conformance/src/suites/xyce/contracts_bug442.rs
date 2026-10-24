@@ -579,6 +579,9 @@ impl XyceTestRunner {
         let (result, final_checkpoint) = engine
             .run_tran_restart_resume_with_abort(netlist, checkpoint, FINAL_STOP, max_step, abort)
             .map_err(|error| format!("{LABEL} {role:?} resume failed: {error}"))?;
+        let final_checkpoint = final_checkpoint
+            .into_checkpoint()
+            .map_err(|error| format!("{LABEL} {role:?} resume ended: {error}"))?;
         Self::bug442_require_result_horizon(
             &format!("{role:?}"),
             &result,

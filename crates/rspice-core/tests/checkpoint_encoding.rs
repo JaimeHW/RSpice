@@ -23,6 +23,7 @@ fn checkpoint_fixture() -> (Engine, Netlist, TransientCheckpoint) {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 6.0e-6, 50.0e-9)
         .expect("checkpoint fixture first segment solves");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     (engine, netlist, checkpoint)
 }
 

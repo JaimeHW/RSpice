@@ -190,6 +190,7 @@ fn source_time_defaults_remain_attached_to_the_original_transient() {
             ))
             .unwrap();
             let (_, checkpoint) = engine.run_tran_checkpointed(&netlist, 1e-6, 1e-9).unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let checkpoint = TransientCheckpoint::from_bytes(
                 &checkpoint
                     .to_bytes(TransientCheckpointEncoding::Packed)
@@ -840,6 +841,7 @@ fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
             TransientStartupMode::Uic,
         )
         .expect("UIC first segment completes without a DC operating point");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert_eq!(checkpoint.startup_mode(), Some(TransientStartupMode::Uic));
     assert!(checkpoint.to_text().contains("startup_mode uic\n"));
     assert!(checkpoint.to_text().contains("linearized_startup 1\n"));
@@ -849,6 +851,7 @@ fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
     let (resumed, final_checkpoint) = engine
         .run_tran_resume(&netlist, &restored, 4.0e-6, 0.5e-6)
         .expect("UIC checkpoint resumes without reclassifying startup as an operating point");
+    let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
     assert_eq!(
         final_checkpoint.startup_mode(),
         Some(TransientStartupMode::Uic)
@@ -895,9 +898,10 @@ fn pem_resume_exposes_checkpointed_retained_resistance_at_the_seam() {
         ..Default::default()
     };
     let engine = Engine::new(config);
-    let (first, mut checkpoint) = engine
+    let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1.0e-9, 0.5e-9)
         .expect("PEM first segment completes");
+    let mut checkpoint = checkpoint.into_checkpoint().unwrap();
     let retained = *first.store_traces[0]
         .values
         .last()
@@ -959,6 +963,7 @@ fn xyce_generic_switch_store_history_round_trips_across_resume() {
     let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 0.274_889_451e-9, 1.0e-9)
         .expect("generic-switch first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(
         checkpoint.to_text().contains("generic_switch_stores 1\n"),
         "checkpoint contains the generic-switch store-vector state"
@@ -1075,6 +1080,7 @@ fn segmented_run_continues_the_unsegmented_trajectory() {
     let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1e-6, TAU_STEP)
         .expect("first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(
         (checkpoint.time - 1e-6).abs() < 1e-9,
         "checkpoint lands at the segment end, got {}",
@@ -1143,6 +1149,7 @@ fn an_endpoint_restart_caps_its_first_step_by_the_gap_to_the_next_breakpoint() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1.0e-9, 10.0e-9)
         .expect("the segment before the edge completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert_eq!(checkpoint.time.to_bits(), 1.0e-9_f64.to_bits());
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, 4.0e-9, 10.0e-9)
@@ -1176,6 +1183,7 @@ fn a_late_endpoint_restart_takes_the_first_step_of_the_start() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1.9e-6, TAU_STEP)
         .expect("the segment to late in the run completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, 2e-6, TAU_STEP)
         .expect("the late restart completes");
@@ -1211,6 +1219,7 @@ c1 out 0 1u ic=1
     let (_, checkpoint) = first_engine
         .run_tran_checkpointed(&netlist, SPLIT, PRE_RESUME_STEP)
         .expect("fixed-Gear2 first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     let resume_grid = Arc::new(vec![SPLIT, SPLIT + RESUME_STEP, SPLIT + 2.0 * RESUME_STEP]);
     let resume_engine = Engine::new(SimulationConfig {
@@ -1587,6 +1596,7 @@ c1 out 0 1u ic=1
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, SPLIT, CAPTURED_STEP)
         .expect("first segment completes under the fine cap");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, STOP, RESUME_STEP)
@@ -1618,6 +1628,7 @@ fn checkpoint_file_round_trip_resumes_identically() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1e-6, TAU_STEP)
         .expect("segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     let directory = std::env::temp_dir().join(format!(
         "rspice-checkpoint-roundtrip-{}-{}",
@@ -1689,6 +1700,7 @@ c1 out 0 100n ic=1
         let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 0.4e-3, 20.0e-6)
             .expect("NEWLTE first segment completes");
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
 
         let checkpoint_text = checkpoint.to_text();
         assert!(
@@ -1769,6 +1781,7 @@ c1 out 0 100p
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 0.5e-6, TAU_STEP)
         .expect("segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     let err = engine
         .run_tran_resume(&other, &checkpoint, 1e-6, TAU_STEP)
@@ -1787,6 +1800,7 @@ fn resume_requires_a_later_stop_time() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1e-6, TAU_STEP)
         .expect("segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     let err = engine
         .run_tran_resume(&netlist, &checkpoint, 0.5e-6, TAU_STEP)
@@ -2055,6 +2069,7 @@ d1 out 0 dcmc
     let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, SPLIT, STEP)
         .expect("generated CMC diode first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
 
     let checkpoint_text = checkpoint.to_text();
     assert!(
@@ -2292,6 +2307,7 @@ q1 c b 0 qmod
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, SPLIT, STEP)
         .expect("generated VBIC first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let checkpoint_text = checkpoint.to_text();
     let mut lines = checkpoint_text.lines();
     let event_header = lines
@@ -2337,7 +2353,7 @@ q1 c b 0 qmod
                 "generated VBIC resumes with accepted origin event state {accepted_event_state:?}: {error}"
             )
         });
-    let resumed_text = resumed_checkpoint.to_text();
+    let resumed_text = resumed_checkpoint.into_checkpoint().unwrap().to_text();
     let mut resumed_lines = resumed_text.lines();
     assert_eq!(
         resumed_lines.find(|line| line.starts_with("event_state ")),
@@ -2425,6 +2441,7 @@ endmodule
     let (first, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1.0e-6, 1.0e-9)
         .expect("partial-liveness checkpoint segment solves");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
         .expect("runtime Verilog-A state survives portable text");
     let (resumed, _) = engine
@@ -2527,6 +2544,7 @@ fn locked_grid_resume_folds_a_seam_adjacent_target_into_the_seam() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, SPLIT, STEP)
         .expect("locked first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert_eq!(
         checkpoint.time.to_bits(),
         SPLIT.to_bits(),
@@ -2616,6 +2634,7 @@ endmodule
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, SPLIT, STEP)
         .expect("locked first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, STOP, STEP)
         .expect("locked resume completes");
@@ -2772,6 +2791,7 @@ fn locked_paired_schedule_resume_integrates_the_seam_interval() {
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, SPLIT, STEP)
         .expect("replayed first segment completes");
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (resumed, _) = engine
         .run_tran_resume(&netlist, &checkpoint, STOP, STEP)
         .expect("replayed resume completes");
@@ -2812,6 +2832,7 @@ fn native_diode_current_survives_normalized_packed_restart() {
                 ..SimulationConfig::default().with_spice_dialect(dialect)
             });
             let (first, checkpoint) = engine.run_tran_checkpointed(&deck, 23e-9, 1e-9).unwrap();
+            let checkpoint = checkpoint.into_checkpoint().unwrap();
             let current = *first
                 .try_branch_current_waveform_named("d1")
                 .unwrap()

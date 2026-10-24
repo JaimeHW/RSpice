@@ -1371,12 +1371,78 @@ fn every_xspice_flip_flop_latch_and_divider_resumes_bit_for_bit() {
     }
 }
 
-/// The mixed corpus's C12 testbench, checkpointed inside its trim sequence,
-/// resumes bit for bit on either route. Its readings reach the LDO's analog
-/// side on `meas` through the automatic real-to-voltage converter, which once
-/// refused every checkpoint of the deck.
-#[test]
-fn the_ldo_testbench_resumes_bit_for_bit_from_inside_its_trim_sequence() {
+/// What a run's HDL printed, with the run's outcome: an engine of its own
+/// collects the output, and the run gets its own model control.
+fn recorded<T>(
+    run: impl FnOnce(&Engine, &dyn rspice_core::AbortSignal) -> Result<T, SimulationError>,
+) -> (
+    Result<rspice_core::SimulationOutcome<T>, SimulationError>,
+    Vec<rspice_core::config::HdlOutputRecord>,
+) {
+    let collector = std::sync::Arc::new(rspice_core::config::HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    let outcome = Engine::new(config).run_with_outcome(&rspice_core::NoAbort, run);
+    (outcome, collector.take())
+}
+
+/// The result of a run the design finished, and its finish record.
+fn finished<T>(
+    outcome: Result<rspice_core::SimulationOutcome<T>, SimulationError>,
+) -> (T, rspice_core::ModelFinish) {
+    match outcome {
+        Ok(rspice_core::SimulationOutcome::Finished {
+            result: Some(result),
+            finish,
+        }) => (result, finish),
+        Ok(rspice_core::SimulationOutcome::Finished { result: None, .. }) => {
+            panic!("the run finished before its first time step")
+        }
+        Ok(rspice_core::SimulationOutcome::Completed(_)) => panic!("the run was not finished"),
+        Err(error) => panic!("the run failed: {error}"),
+    }
+}
+
+/// The finish a checkpointed or resumed run ended with, which the run's own
+/// finish record must be: no checkpoint is taken after a finish.
+fn ended_by_finish(end: rspice_core::engine::TransientEnd) -> rspice_core::ModelFinish {
+    match end {
+        rspice_core::engine::TransientEnd::Finished(finish) => finish,
+        rspice_core::engine::TransientEnd::Checkpoint(checkpoint) => panic!(
+            "a checkpoint at {:e} after the design finished the run",
+            checkpoint.time
+        ),
+    }
+}
+
+/// Two whole runs, bit for bit: accepted times, every channel and every
+/// event trace.
+fn assert_runs_bit_for_bit(expected: &TransientResult, actual: &TransientResult) {
+    assert_resumes_bit_for_bit(expected, actual, expected.time[0]);
+    assert!(
+        event_traces(actual) == event_traces(expected),
+        "event traces"
+    );
+}
+
+/// The output records a run resumed at `seam` prints: the uninterrupted
+/// run's, from the first point it accepts after the seam.
+fn printed_after(
+    records: &[rspice_core::config::HdlOutputRecord],
+    seam: f64,
+) -> Vec<rspice_core::config::HdlOutputRecord> {
+    records
+        .iter()
+        .filter(|record| {
+            !matches!(record.point, rspice_core::config::HdlPoint::Transient { time } if time <= seam)
+        })
+        .cloned()
+        .collect()
+}
+
+/// The mixed corpus's C12 testbench (`full`), its stop time, maximum step
+/// and startup mode.
+fn ldo_testbench() -> (Netlist, f64, f64, TransientStartupMode) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/mixed-corpus/c12-ldo-tb/deck/full.tran.cir");
     let netlist = Netlist::parse_file(&path)
@@ -1398,42 +1464,196 @@ fn the_ldo_testbench_resumes_bit_for_bit_from_inside_its_trim_sequence() {
     let max_step =
         rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
             .unwrap();
-    let engine = Engine::new(SimulationConfig::default());
-    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    (netlist, stop, max_step, TransientStartupMode::from_uic(uic))
+}
+
+/// The mixed corpus's C12 testbench, checkpointed inside its trim sequence,
+/// resumes bit for bit on either route, to the testbench's own `$finish`.
+/// Its readings reach the LDO's analog side on `meas` through the automatic
+/// real-to-voltage converter, which once refused every checkpoint of the
+/// deck.
+#[test]
+fn the_ldo_testbench_resumes_bit_for_bit_from_inside_its_trim_sequence() {
+    let (netlist, stop, max_step, startup) = ldo_testbench();
+    let capability = Engine::default()
+        .preflight_transient_checkpoint(&netlist)
+        .unwrap();
     assert!(capability.is_resumable(), "{:?}", capability.blockers());
     // Code 8 latches at 800 us and is read 92.5 us later.
-    let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+    let (outcome, printed) = recorded(|engine, abort| {
+        engine.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             stop,
             max_step,
-            TransientStartupMode::from_uic(uic),
+            startup,
             &[850e-6],
+            abort,
         )
-        .unwrap();
+    });
+    let ((baseline, scheduled), finish) = finished(outcome);
     let checkpoint = &scheduled[0].checkpoint;
     assert!(image_names(checkpoint, "__rspice_auto_real_to_v_"));
     let saved = through_disk(checkpoint);
-    // The testbench ends with `$finish`, after which no checkpoint exists, so
-    // the run resumes through the stream, which keeps no final one.
-    let resumed = engine
-        .run_tran_checkpoint_stream_with_abort(
-            &netlist,
-            stop,
-            max_step,
-            TransientCheckpointStream {
-                start: TransientCheckpointStart::Resume(&saved),
-                times: &[],
-                observer: &|_| Ok(()),
-            },
-            &rspice_core::NoAbort,
-        )
-        .unwrap();
+    let (outcome, resumed_printed) = recorded(|engine, abort| {
+        engine.run_tran_resume_with_abort(&netlist, &saved, stop, max_step, abort)
+    });
+    let ((resumed, end), resumed_finish) = finished(outcome);
+    assert_eq!(ended_by_finish(end), finish);
+    assert_eq!(resumed_finish, finish);
     let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
     assert_eq!(events, 1, "the verdict rises once, after the seam");
+    assert_eq!(resumed_printed, printed_after(&printed, saved.time));
+    assert!(
+        matches!(
+            resumed_printed.last().map(|record| &record.stream),
+            Some(rspice_core::config::HdlStream::Finish { stop: false, .. })
+        ),
+        "the resumed run prints the testbench's `$finish`: {resumed_printed:?}"
+    );
     let meas = baseline.node_index_named("meas").unwrap();
     let moved = baseline.voltage_waveform(meas)[baseline.time.len() - 1];
     assert!(moved > 1.0, "the last reading reaches meas: {moved}");
+}
+
+/// A checkpointed run of the C12 testbench completes at its `$finish`, with
+/// the plain run's result bit for bit and the same finish record, and ends
+/// finished: no checkpoint follows a finish.
+#[test]
+fn a_checkpointed_ldo_testbench_completes_at_its_finish() {
+    let (netlist, stop, max_step, startup) = ldo_testbench();
+    let (outcome, printed) = recorded(|engine, abort| {
+        engine.run_tran_with_startup_mode_and_abort(&netlist, stop, max_step, startup, abort)
+    });
+    let (plain, finish) = finished(outcome);
+    let rspice_core::ModelFinishPoint::Transient { time } = finish.point else {
+        panic!("a transient finish, got {finish:?}");
+    };
+    assert!(
+        time < stop,
+        "the testbench finishes at {time:e}, before {stop:e}"
+    );
+    assert_eq!(plain.time.last(), Some(&time));
+    let (outcome, checkpointed_printed) = recorded(|engine, abort| {
+        engine.run_tran_checkpointed_with_startup_mode_and_abort(
+            &netlist, stop, max_step, startup, abort,
+        )
+    });
+    let ((checkpointed, end), checkpointed_finish) = finished(outcome);
+    assert_eq!(ended_by_finish(end), finish);
+    assert_eq!(checkpointed_finish, finish);
+    assert_runs_bit_for_bit(&plain, &checkpointed);
+    assert_eq!(checkpointed_printed, printed);
+}
+
+/// A clock divider that ends its run with `task` at 137 ns, between two
+/// clock edges, behind the analog side its divided output drives.
+fn ending_divider(task: &str) -> (ModelFile, Netlist) {
+    let model = ModelFile::new(
+        "ending_divider",
+        &CLOCK_DIVIDER
+            .replace("module clock_divider", "module ending_divider")
+            .replace("endmodule", &format!("    initial #137 {task};\nendmodule")),
+    );
+    let deck = divider_deck(&model, 200).replace("clock_divider", "ending_divider");
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    (model, netlist)
+}
+
+/// A design's `$finish`, `$stop` or `$fatal` ends a checkpointed run as it
+/// ends a plain one: there, complete, with the same result, finish record and
+/// HDL records bit for bit, and no checkpoint after it. A checkpoint taken
+/// before the end resumes to it, bit for bit, and a checkpoint scheduled at
+/// the end is not taken. A `$fatal` fails a run through its own fatal record,
+/// which a frontend counts, never through a checkpoint error.
+#[test]
+fn a_design_that_ends_its_run_completes_checkpointed_and_resumed_runs() {
+    use rspice_core::config::{HdlSeverity, HdlStream};
+    for (task, last) in [
+        (
+            "$finish",
+            HdlStream::Finish {
+                stop: false,
+                level: 1,
+            },
+        ),
+        (
+            "$stop",
+            HdlStream::Finish {
+                stop: true,
+                level: 1,
+            },
+        ),
+        (
+            "$fatal(1, \"the divider gave up\")",
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Fatal,
+            },
+        ),
+    ] {
+        a_design_end_completes_checkpointed_and_resumed_runs(task, &last);
+    }
+}
+
+fn a_design_end_completes_checkpointed_and_resumed_runs(
+    task: &str,
+    last: &rspice_core::config::HdlStream,
+) {
+    let (_model, netlist) = ending_divider(task);
+    let (stop, step) = (200e-9, 1e-9);
+    let (outcome, printed) =
+        recorded(|engine, abort| engine.run_tran_with_abort(&netlist, stop, step, abort));
+    let (plain, finish) = finished(outcome);
+    assert_eq!(
+        finish.point,
+        rspice_core::ModelFinishPoint::Transient { time: 137e-9 },
+        "{task}"
+    );
+    assert_eq!(
+        printed.last().map(|record| &record.stream),
+        Some(last),
+        "{task}: {printed:?}"
+    );
+
+    let (outcome, checkpointed_printed) = recorded(|engine, abort| {
+        engine.run_tran_checkpointed_with_abort(&netlist, stop, step, abort)
+    });
+    let ((checkpointed, end), checkpointed_finish) = finished(outcome);
+    assert_eq!(ended_by_finish(end), finish);
+    assert_eq!(checkpointed_finish, finish);
+    assert_runs_bit_for_bit(&plain, &checkpointed);
+    assert_eq!(checkpointed_printed, printed);
+
+    // The second scheduled time falls due at the stop's own accepted point,
+    // after the stop: that one is not taken.
+    let (outcome, _) = recorded(|engine, abort| {
+        engine.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+            &netlist,
+            stop,
+            step,
+            TransientStartupMode::OperatingPoint,
+            &[100e-9, 137e-9],
+            abort,
+        )
+    });
+    let ((baseline, scheduled), _) = finished(outcome);
+    assert_runs_bit_for_bit(&plain, &baseline);
+    assert_eq!(scheduled.len(), 1, "only the checkpoint before the stop");
+    let saved = through_disk(&scheduled[0].checkpoint);
+    let (outcome, resumed_printed) = recorded(|engine, abort| {
+        engine.run_tran_resume_with_abort(&netlist, &saved, stop, step, abort)
+    });
+    let ((resumed, end), resumed_finish) = finished(outcome);
+    assert_eq!(ended_by_finish(end), finish);
+    assert_eq!(resumed_finish, finish);
+    let events = assert_resumes_bit_for_bit(&plain, &resumed, saved.time);
+    assert!(events > 0, "the divider keeps toggling after the seam");
+    assert_eq!(resumed_printed, printed_after(&printed, saved.time));
+    println!(
+        "{task}: finished at {:e}; resumed from {:e} with {} records after the seam",
+        plain.time[plain.time.len() - 1],
+        saved.time,
+        resumed_printed.len()
+    );
 }
 
 /// Analog-only Verilog-A checkpoint compatibility remains intact alongside the

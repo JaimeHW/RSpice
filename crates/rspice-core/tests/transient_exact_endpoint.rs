@@ -130,6 +130,7 @@ fn final_time_is_canonical_across_run_checkpoint_schedule_and_resume() {
     let (first_segment, seam_checkpoint) = engine
         .run_tran_checkpointed(&netlist, PREVIOUS_TIME, max_step)
         .expect("first checkpointed segment completes");
+    let seam_checkpoint = seam_checkpoint.into_checkpoint().unwrap();
     assert_eq!(
         first_segment.time.last().expect("seam sample").to_bits(),
         PREVIOUS_TIME.to_bits()
@@ -151,6 +152,7 @@ fn final_time_is_canonical_across_run_checkpoint_schedule_and_resume() {
     let (resumed, final_checkpoint) = engine
         .run_tran_resume(&netlist, &serialized_seam, STOP_TIME, max_step)
         .expect("checkpoint continuation completes");
+    let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
     assert_eq!(
         resumed.time.first().expect("resumed seam sample").to_bits(),
         PREVIOUS_TIME.to_bits()

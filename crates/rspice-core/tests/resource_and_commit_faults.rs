@@ -185,7 +185,7 @@ fn checkpoint() -> TransientCheckpoint {
     let (_, checkpoint) = Engine::new(SimulationConfig::default())
         .run_tran_checkpointed(&netlist, 2.0e-6, 50.0e-9)
         .expect("the first segment solves");
-    checkpoint
+    checkpoint.into_checkpoint().unwrap()
 }
 
 /// Every phase a single-file publication passes through.

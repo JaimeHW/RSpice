@@ -163,7 +163,7 @@ fn checkpoint_fixture() -> TransientCheckpoint {
     let (_, checkpoint) = Engine::new(SimulationConfig::default())
         .run_tran_checkpointed(&netlist, 1.0e-6, 50.0e-9)
         .expect("the checkpoint fixture solves its first segment");
-    checkpoint
+    checkpoint.into_checkpoint().unwrap()
 }
 
 /// A decode that succeeded must be a fixed point of encode/decode.

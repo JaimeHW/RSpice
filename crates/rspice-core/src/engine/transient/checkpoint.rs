@@ -14140,6 +14140,7 @@ mod tests {
         };
         let engine = Engine::new(config.clone());
         let (baseline, checkpoint) = engine.run_tran_checkpointed(&deck, 1e-9, 1e-12).unwrap();
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let phase = checkpoint.accepted_junction_history.bjt_history.phase[0]
             .as_ref()
             .unwrap();
@@ -14446,6 +14447,7 @@ mod tests {
         let (_, captured) = Engine::default()
             .run_tran_checkpointed(&netlist, 1e-9, 1e-11)
             .expect("promoted VBIC has complete device, history and solver state");
+        let captured = captured.into_checkpoint().unwrap();
         captured.capability().require_resumable().unwrap();
         assert_eq!(
             captured.accepted_junction_history.bjt_runtime_tags,
@@ -16100,6 +16102,7 @@ mod tests {
             ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
         });
         let (_, checkpoint) = engine.run_tran_checkpointed(&deck, 2e-9, 1e-12).unwrap();
+        let checkpoint = checkpoint.into_checkpoint().unwrap();
         let state = checkpoint.solution_dependent_capacitor_states[0]
             .as_ref()
             .unwrap();
