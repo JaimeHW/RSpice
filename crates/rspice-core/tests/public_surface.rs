@@ -434,8 +434,13 @@ const MAX_PUBLIC_ITEMS: usize = 5460;
 // `Bsim4v8Device::eval_gmin` add three: the BSIM4 charge-companion and B3SOIDD
 // stamp-derivative checks build their instances through `Engine`, so they run
 // from an integration test, outside the crate, and read the built instances
-// back through these. The census is 1,315, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1315;
+// back through these. The census was 1,315, with no slack.
+// `numerics::integration::code_model_coincidence` and
+// `BreakpointManager::merge_tolerance` add two: the transient engine tells
+// every code model the window it counts as the current instant, which the
+// breakpoint schedule's merge tolerance and the solver floor set, and both
+// live in the base crate below it. The census is 1,317, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1317;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

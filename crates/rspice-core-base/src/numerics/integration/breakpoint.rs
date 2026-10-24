@@ -59,9 +59,53 @@ const XYCE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.1;
 /// it never leaves the solver a sub-floor sliver to step. A floor that is not
 /// a finite positive interval declares no resolution, and then only equal
 /// clocks are one instant.
+///
+/// What a code model counts as the current instant is a wider window, since
+/// the schedule also lands a step early: [`code_model_coincidence`].
 #[doc(hidden)]
 pub fn coincides_before(earlier: Value, later: Value, floor: Value) -> bool {
     floor.is_finite() && floor > 0.0 && earlier < later && later - earlier < floor
+}
+
+/// The window a code model compares its stored instants with before this
+/// window had a source: the narrowest it ever is.
+const CODE_MODEL_COINCIDENCE_FLOOR: Value = 1.0e-18;
+
+/// How far ahead of the clock an instant a code model scheduled is still the
+/// current instant.
+///
+/// A code model keeps the instants it owes an action — the next toggle of an
+/// oscillator, the end of an output delay — and at each evaluation asks
+/// whether the clock has reached one. The stepper does not always land on it.
+/// A request within the merge tolerance after a breakpoint already scheduled
+/// is absorbed into that breakpoint
+/// ([`BreakpointManager::merge_tolerance`]), so the step lands up to that
+/// tolerance *before* the instant; and an instant less than the solver's
+/// hard minimum step, `floor`, after the clock cannot be stepped to at all
+/// ([`coincides_before`]). A model that compares exactly reads either landing
+/// as "not yet", asks again for an instant the schedule then drops, and acts
+/// one step late. So an instant no further ahead of the clock than this window
+/// is now, and is acted on now; whatever the action dates is dated from the
+/// stored instant, not from the clock, so acting early by less than the window
+/// leaves nothing late.
+///
+/// The `1e-18` lower bound is a compatibility floor, not physics: it is the
+/// window every model used before. Wherever the floor and the merge tolerance
+/// are both below it the window is exactly that, and every answer read from
+/// it is unchanged. A term that is not a finite positive interval declares
+/// nothing.
+#[doc(hidden)]
+pub fn code_model_coincidence(floor: Value, merge_tolerance: Value) -> Value {
+    let interval = |term: Value| {
+        if term.is_finite() && term > 0.0 {
+            term
+        } else {
+            0.0
+        }
+    };
+    CODE_MODEL_COINCIDENCE_FLOOR
+        .max(interval(floor))
+        .max(interval(merge_tolerance))
 }
 
 /// How many units in the last place of the clock its resolution spans: the
@@ -234,6 +278,16 @@ impl BreakpointManager {
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
         }
+    }
+
+    /// The interval inside which two breakpoint times are merged into one:
+    /// ngspice's `CKTminBreak`, Xyce's `defaultTolerance_`, or what the manager
+    /// was built with. A runtime request this close after a scheduled
+    /// breakpoint is absorbed into it, which is the early landing
+    /// [`code_model_coincidence`] measures.
+    #[doc(hidden)]
+    pub fn merge_tolerance(&self) -> Value {
+        self.tolerance
     }
 
     /// An empty schedule that merges and compares times as this one does.
@@ -1081,6 +1135,50 @@ mod breakpoint_manager_tests {
         );
         for floor in [0.0, -1.0, Value::NAN, Value::INFINITY] {
             assert!(!coincides_before(tick, stop, floor), "floor {floor}");
+        }
+    }
+
+    #[test]
+    fn a_code_model_counts_the_widest_landing_window_as_now() {
+        // ngspice: CKTminBreak = 1e-10 * maxstep, here a 1 us maximum step;
+        // Xyce: defaultTolerance_.
+        let min_break: Value = 1.0e-6 * 1.0e-10;
+        let ngspice = BreakpointManager::new_with_tolerance(min_break);
+        let xyce = BreakpointManager::new_with_tolerance_and_policy(
+            XYCE_BREAKPOINT_TOLERANCE,
+            BreakpointStepPolicy::Xyce,
+        );
+        assert_eq!(ngspice.merge_tolerance(), min_break);
+        assert_eq!(xyce.merge_tolerance(), XYCE_BREAKPOINT_TOLERANCE);
+        assert_eq!(
+            BreakpointManager::new_with_tolerance(Value::NAN).merge_tolerance(),
+            DEFAULT_BREAKPOINT_TOLERANCE,
+            "a tolerance that is no interval falls back"
+        );
+
+        for (floor, tolerance) in [
+            (1.0e-17, ngspice.merge_tolerance()),
+            (2.2e-16, ngspice.merge_tolerance()),
+            (1.2e-17, xyce.merge_tolerance()),
+            (1.0e-30, xyce.merge_tolerance()),
+            (8.7e-19, 1.0e-18),
+        ] {
+            let expected = 1.0e-18_f64.max(floor).max(tolerance);
+            assert_eq!(
+                code_model_coincidence(floor, tolerance).to_bits(),
+                expected.to_bits(),
+                "floor {floor:e}, tolerance {tolerance:e}"
+            );
+        }
+        assert_eq!(
+            code_model_coincidence(1.0e-20, XYCE_BREAKPOINT_TOLERANCE),
+            1.0e-18,
+            "below both terms the compatibility floor is the window, bit for bit"
+        );
+        for nothing in [0.0, -1.0, Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+            assert_eq!(code_model_coincidence(nothing, nothing), 1.0e-18);
+            assert_eq!(code_model_coincidence(nothing, min_break), min_break);
+            assert_eq!(code_model_coincidence(min_break, nothing), min_break);
         }
     }
 

@@ -29,7 +29,8 @@ mod timestep;
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};
 #[doc(hidden)]
 pub use breakpoint::{
-    EdgeCompletionSchedule, XYCE_BREAKPOINT_TOLERANCE, clock_resolution, coincides_before,
+    EdgeCompletionSchedule, XYCE_BREAKPOINT_TOLERANCE, clock_resolution, code_model_coincidence,
+    coincides_before,
 };
 #[doc(hidden)]
 pub use charge::{
