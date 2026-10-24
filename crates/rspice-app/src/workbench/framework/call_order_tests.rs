@@ -198,9 +198,7 @@ const SHOW: &[Step] = &[
     ),
     (
         "11.9",
-        &[
-            "app.state.results.results.session.ac_display = app.state.model.preferences.ac_display()",
-        ],
+        &["app.state.results.follow_preferences(&app.state.model.preferences)"],
     ),
     (
         "11.10",
@@ -263,10 +261,7 @@ const SHOW: &[Step] = &[
     ("11.31", &["answer_result_requests(ctx, app)"]),
     (
         "11.32",
-        &[
-            "app.state.design.canvas_hover = None",
-            "app.state.design.canvas_view_center = None",
-        ],
+        &["app.state.design.follow_workspace(app.state.workbench.workspace)"],
     ),
     (
         "11.33",

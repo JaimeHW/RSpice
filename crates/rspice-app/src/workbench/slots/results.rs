@@ -40,3 +40,15 @@ pub(crate) struct ResultsState {
     pub(crate) analysis:
         Box<crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState>,
 }
+
+impl ResultsState {
+    /// The results frame hook. How AC traces are drawn has no control but
+    /// Preferences, so the viewer takes it from there on every frame and never
+    /// drifts from the page.
+    pub(crate) fn follow_preferences(
+        &mut self,
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) {
+        self.results.session.ac_display = preferences.ac_display();
+    }
+}

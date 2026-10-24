@@ -19,7 +19,6 @@ use super::framework::requests::{
     self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox,
 };
 use super::layout::LayoutSpec;
-use super::state::Workspace;
 use super::*;
 
 pub(in crate::workbench) mod dialog_order;
@@ -71,9 +70,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // Touch target inflation is capability-driven. A fine-pointer browser
     // resized through tablet/phone widths retains the compact mockup metrics.
     let large_targets = app.state.workbench.coarse_pointer;
-    // How AC traces are drawn has no control but Preferences, so the viewer
-    // takes it from there on every frame and never drifts from the page.
-    app.state.results.results.session.ac_display = app.state.model.preferences.ac_display();
+    app.state
+        .results
+        .follow_preferences(&app.state.model.preferences);
     let requested_target = app.state.model.preferences.minimum_touch_target();
     app.state
         .workbench
@@ -174,10 +173,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // owned by the app boundary.
     answer_result_requests(ctx, app);
 
-    if app.state.workbench.workspace != Workspace::Design {
-        app.state.design.canvas_hover = None;
-        app.state.design.canvas_view_center = None;
-    }
+    app.state
+        .design
+        .follow_workspace(app.state.workbench.workspace);
     if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
         commands::result_navigation::perform_notification_action(app, action);
     }
@@ -646,10 +644,9 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
     }
 
     answer_result_requests(ctx, app);
-    if app.state.workbench.workspace != Workspace::Design {
-        app.state.design.canvas_hover = None;
-        app.state.design.canvas_view_center = None;
-    }
+    app.state
+        .design
+        .follow_workspace(app.state.workbench.workspace);
     app.state.drain_notices(ctx);
     // A detached window with the keyboard draws the toasts instead.
     if tools::notification_center::focused_window(ctx) == ctx.viewport_id() {
@@ -921,7 +918,7 @@ fn apply_browser_full_screen(app: &mut RSpiceApp, enabled: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::state::Drawer;
+    use crate::workbench::state::{Drawer, Workspace};
 
     #[test]
     fn every_canonical_workspace_has_a_surface_owner() {

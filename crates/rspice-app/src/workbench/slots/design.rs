@@ -222,6 +222,16 @@ impl DesignState {
         self.grid = style;
     }
 
+    /// The design frame hook. The pointer and view centre the canvas reports
+    /// are the Design canvas's, so while another workspace shows there are
+    /// none.
+    pub(crate) fn follow_workspace(&mut self, workspace: crate::workbench::state::Workspace) {
+        if workspace != crate::workbench::state::Workspace::Design {
+            self.canvas_hover = None;
+            self.canvas_view_center = None;
+        }
+    }
+
     /// Cycle the upgraded toolbar's exact presentation order.
     pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
         let next = match self.grid {
