@@ -23,9 +23,8 @@ use super::{
     checks_status, count_label, findings_problem, sheet_floating_net_findings,
     sheet_open_pin_findings,
 };
-use crate::schematic::view::drawing_sheet::{
-    ActiveDrawingSheet, grid_pitch_label, resolve_active_drawing_sheet, resolved_title_block_fields,
-};
+use crate::schematic::view::drawing_sheet::ActiveDrawingSheet;
+use crate::state::policy_labels::grid_pitch_label;
 use crate::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY, DrawingSheetReleaseStatus,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
@@ -67,7 +66,7 @@ fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlock
 }
 
 pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
-    let sheet = resolve_active_drawing_sheet(state);
+    let sheet = state.model.active_drawing_sheet();
     let identity = sheet_identity(state);
     let editable = drawing_sheet_editable(state);
     let cut = cut_fields(state, &sheet);
@@ -93,7 +92,7 @@ pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
 fn cut_fields(state: &AppState, sheet: &ActiveDrawingSheet) -> Vec<DrawingSheetTitleFieldId> {
     drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
         .map_or_else(Vec::new, |layout| {
-            layout.cut_fields(&resolved_title_block_fields(state, sheet))
+            layout.cut_fields(&state.model.title_block_fields(sheet))
         })
 }
 
@@ -700,7 +699,7 @@ pub(super) fn commit_pending_sheet_text(ctx: &egui::Context, state: &mut AppStat
         if draft.sheet != sheet {
             continue;
         }
-        let format = resolve_active_drawing_sheet(state).format;
+        let format = state.model.active_drawing_sheet().format;
         if draft.text.trim() == text.stored(state, &format) {
             continue;
         }

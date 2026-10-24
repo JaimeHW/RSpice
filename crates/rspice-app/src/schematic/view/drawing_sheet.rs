@@ -2,158 +2,15 @@
 
 use super::viewport::Viewport;
 use super::{AppState, SchematicSymbolContext, schematic_symbol_context};
-use crate::state::DrawingSheetTitleFieldId;
 use crate::state::overflow_memo::OverflowKey;
 use egui::{Painter, Rect};
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
 pub(crate) use rspice_schematic_editor::view::drawing_sheet::{
-    ActiveDrawingSheet, DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetGeometry,
-    DrawingSheetOverflowItem, DrawingSheetOverflowSummary, DrawingSheetOverflowTarget,
-    DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, FIT_SCREEN_INSET,
+    ActiveDrawingSheet, DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetOverflowItem,
+    DrawingSheetOverflowSummary, DrawingSheetOverflowTarget, DrawingSheetPrintablePreview,
+    DrawingSheetPrintablePreviewKind, FIT_SCREEN_INSET,
 };
 use std::sync::Arc;
-
-pub(crate) fn resolve_active_drawing_sheet(state: &AppState) -> ActiveDrawingSheet {
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    if let Some(catalog) = state
-        .model
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&key)
-        && let Some(sheet) = catalog.active()
-    {
-        let (page, page_count) = catalog
-            .page_number_and_count(sheet.id())
-            .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)));
-        let format = match sheet.page_format().inheritance {
-            crate::state::DrawingSheetInheritance::ProjectDefault => state
-                .model
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .default_format
-                .with_target_sheet_title_fields(sheet.page_format()),
-            crate::state::DrawingSheetInheritance::Explicit
-            | crate::state::DrawingSheetInheritance::UserDefault => sheet.page_format().clone(),
-        };
-        return ActiveDrawingSheet {
-            geometry: DrawingSheetGeometry::from_format(&format),
-            format,
-            sheet_name: sheet.name().to_owned(),
-            page_label: format!("{page} of {page_count}"),
-        };
-    }
-
-    let format = state
-        .model
-        .workspace
-        .content
-        .design_management
-        .drawing_sheet_settings()
-        .default_format
-        .clone();
-    ActiveDrawingSheet {
-        geometry: DrawingSheetGeometry::from_format(&format),
-        format,
-        sheet_name: state.model.workspace.content.active_view.cell.clone(),
-        page_label: "1 of 1".to_owned(),
-    }
-}
-
-pub(crate) fn resolved_title_block_fields(
-    state: &AppState,
-    sheet: &ActiveDrawingSheet,
-) -> Vec<crate::state::ResolvedDrawingSheetTitleField> {
-    let authority_values = DrawingSheetTitleFieldId::ALL
-        .into_iter()
-        .map(|id| (id, default_title_field_value(id, state, sheet)))
-        .collect();
-    crate::state::resolve_drawing_sheet_title_fields(&sheet.format, &authority_values)
-}
-
-fn default_title_field_value(
-    field: DrawingSheetTitleFieldId,
-    state: &AppState,
-    sheet: &ActiveDrawingSheet,
-) -> String {
-    match field {
-        DrawingSheetTitleFieldId::Project => {
-            state.model.workspace.content.project.name().to_owned()
-        }
-        DrawingSheetTitleFieldId::CellView => state
-            .model
-            .workspace
-            .content
-            .active_view
-            .display_path()
-            .to_owned(),
-        DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.clone(),
-        DrawingSheetTitleFieldId::Page => sheet.page_label.clone(),
-        DrawingSheetTitleFieldId::Revision => state
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .document_control
-            .revision_index()
-            .to_owned(),
-        DrawingSheetTitleFieldId::PaperSize => sheet.format.authored_size.paper_size().to_owned(),
-        // Retired: never present in a normalized field set, so never resolved.
-        DrawingSheetTitleFieldId::Scale => String::new(),
-        // The approval date reads the document's date of issue while the
-        // sheet gives none of its own.
-        DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::ApprovedDate => state
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .document_control
-            .revision_date_utc
-            .clone(),
-        DrawingSheetTitleFieldId::DocumentStatus => state
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .document_control
-            .status
-            .label()
-            .to_owned(),
-        DrawingSheetTitleFieldId::Organization
-        | DrawingSheetTitleFieldId::DocumentId
-        | DrawingSheetTitleFieldId::Classification
-        | DrawingSheetTitleFieldId::Language
-        | DrawingSheetTitleFieldId::CageCode
-        | DrawingSheetTitleFieldId::ContractNumber => state
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .title_block_field_values
-            .get(&field)
-            .cloned()
-            .unwrap_or_default(),
-        DrawingSheetTitleFieldId::DrawnBy
-        | DrawingSheetTitleFieldId::CheckedBy
-        | DrawingSheetTitleFieldId::ApprovedBy
-        | DrawingSheetTitleFieldId::Engineer
-        | DrawingSheetTitleFieldId::DrawnDate
-        | DrawingSheetTitleFieldId::CheckedDate
-        | DrawingSheetTitleFieldId::EngineerDate
-        | DrawingSheetTitleFieldId::DocumentType => String::new(),
-    }
-}
 
 pub(super) fn draw_base(
     painter: &Painter,
@@ -172,7 +29,7 @@ pub(super) fn draw_base(
             grid_size: state.model.schematic.document().grid_size,
         },
         sheet,
-        || resolved_title_block_fields(state, sheet),
+        || state.model.title_block_fields(sheet),
     );
 }
 
@@ -297,7 +154,7 @@ pub(crate) fn drawing_sheet_printable_preview(
 pub(crate) fn show_first_drawing_sheet_overflow(state: &mut AppState) -> bool {
     let first_target = {
         let symbol_context = schematic_symbol_context(state);
-        let sheet = resolve_active_drawing_sheet(state);
+        let sheet = state.model.active_drawing_sheet();
         drawing_sheet_overflow_summary(state, &symbol_context, &sheet).first_target
     };
     first_target.is_some_and(|target| show_drawing_sheet_overflow_target(state, target))
@@ -308,7 +165,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
 ) -> bool {
     let center = {
         let symbol_context = schematic_symbol_context(state);
-        let sheet = resolve_active_drawing_sheet(state);
+        let sheet = state.model.active_drawing_sheet();
         drawing_sheet_overflow_summary(state, &symbol_context, &sheet)
             .items
             .into_iter()
@@ -407,43 +264,11 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     true
 }
 
-/// What one schematic grid pitch measures on the printed sheet: "2.5 mm".
-///
-/// Derived from the sheet's calibration rather than spelled by hand, so that
-/// every place a pitch is named agrees with the drawing it prints on.
-pub(crate) fn grid_pitch_label(pitch: crate::state::SchematicGridPitch) -> String {
-    let micrometres = u64::from(pitch.canvas_grid_size().unsigned_abs())
-        * rspice_schematic_editor::view::drawing_sheet::DRAWING_SHEET_WORLD_UNIT_UM;
-    format!("{} mm", micrometres as f64 / 1_000.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{Point, Wire};
-
-    /// A grid label is what the pitch measures on the sheet, so reading the
-    /// label back through the sheet scale gives the pitch's own unit count.
-    #[test]
-    fn grid_labels_measure_the_pitch_on_the_printed_sheet() {
-        use crate::state::SchematicGridPitch;
-        for (pitch, label) in [
-            (SchematicGridPitch::Mil50, "2.5 mm"),
-            (SchematicGridPitch::Mil25, "1.25 mm"),
-            (SchematicGridPitch::Metric, "1 mm"),
-        ] {
-            assert_eq!(grid_pitch_label(pitch), label);
-            let millimetres = label
-                .strip_suffix(" mm")
-                .and_then(|value| value.parse::<f64>().ok())
-                .expect("a grid label is millimetres");
-            assert_eq!(
-                millimetres * DRAWING_SHEET_UNITS_PER_MM,
-                f64::from(pitch.canvas_grid_size()),
-                "{label} disagrees with the sheet scale"
-            );
-        }
-    }
+    use rspice_schematic_editor::view::drawing_sheet::DrawingSheetGeometry;
 
     /// Saved with 5 mm margins all round, an A4 sheet drew its frame 5 mm
     /// from the trimmed edge. It loads on ISO 5457's 20 mm filing border, so
@@ -504,7 +329,7 @@ mod tests {
             ));
         let expected_center = {
             let symbol_context = schematic_symbol_context(&state);
-            let sheet = resolve_active_drawing_sheet(&state);
+            let sheet = state.model.active_drawing_sheet();
             drawing_sheet_overflow_summary(&state, &symbol_context, &sheet).items[0].center()
         };
 
@@ -556,7 +381,7 @@ mod tests {
         };
 
         let mut state = overflowing();
-        let sheet = resolve_active_drawing_sheet(&state);
+        let sheet = state.model.active_drawing_sheet();
         assert!(held(&state, &sheet).is_none());
         hold(&mut state, &sheet);
         let first = held(&state, &sheet).expect("held after a frame");
@@ -597,7 +422,7 @@ mod tests {
         ];
         for (input, change) in changes {
             let mut state = overflowing();
-            let sheet = resolve_active_drawing_sheet(&state);
+            let sheet = state.model.active_drawing_sheet();
             hold(&mut state, &sheet);
             change(&mut state);
             assert!(held(&state, &sheet).is_none(), "{input}");

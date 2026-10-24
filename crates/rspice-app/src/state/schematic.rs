@@ -44,6 +44,7 @@ pub(crate) mod named_net;
 use rspice_design::schematic::net_label;
 use rspice_schematic_editor::session::net_highlight;
 use rspice_schematic_editor::session::placement_authority;
+pub(crate) mod policy_labels;
 mod port;
 use rspice_design::schematic::probe;
 use rspice_design::schematic::replacement;

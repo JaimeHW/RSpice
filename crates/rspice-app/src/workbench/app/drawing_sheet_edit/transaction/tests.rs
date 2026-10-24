@@ -320,7 +320,7 @@ fn the_first_edit_gives_the_schematic_its_governed_sheet() {
     assert_eq!(sheet.inheritance, DrawingSheetInheritance::Explicit);
     assert_eq!(sheet.orientation, SchematicPageOrientation::Portrait);
     assert_eq!(
-        resolve_active_drawing_sheet(&app.state).format.orientation,
+        app.state.model.active_drawing_sheet().format.orientation,
         SchematicPageOrientation::Portrait
     );
 }

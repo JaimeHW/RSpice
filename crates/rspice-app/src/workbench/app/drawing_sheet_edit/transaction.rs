@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet;
 use crate::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_MIXED_SIZES_ADVISORY, DrawingSheetBorderTemplate,
     DrawingSheetDisplayUnit, DrawingSheetDocumentControl, DrawingSheetFrameConvention,
@@ -124,7 +123,7 @@ impl SheetTransaction {
     /// The active sheet's transaction, drafted from what the sheet draws.
     fn open(state: &AppState) -> Self {
         let cell_view_key = state.model.workspace.content.active_key();
-        let resolved = resolve_active_drawing_sheet(state);
+        let resolved = state.model.active_drawing_sheet();
         let designs = &state.model.workspace.content.design_management;
         let governed = designs
             .sheet_catalog(&cell_view_key)

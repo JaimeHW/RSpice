@@ -8,6 +8,8 @@
 //! application holds it inline, so moving a state carries what it carried
 //! before these fields were gathered here.
 
+mod drawing_sheet;
+
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
 

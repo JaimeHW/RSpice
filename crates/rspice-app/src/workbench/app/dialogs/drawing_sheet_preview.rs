@@ -29,8 +29,7 @@ impl DrawingSheetPreviewContent {
     pub(super) fn from_state(state: &AppState) -> Self {
         Self {
             objects: drawing_sheet_printable_preview(state),
-            page_label: crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state)
-                .page_label,
+            page_label: state.model.active_drawing_sheet().page_label,
         }
     }
 

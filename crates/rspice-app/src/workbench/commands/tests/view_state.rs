@@ -223,7 +223,10 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
     let (width, height) = (240.0_f32, 180.0_f32);
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    let paper = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&app.state)
+    let paper = app
+        .state
+        .model
+        .active_drawing_sheet()
         .geometry
         .paper
         .as_tuple();

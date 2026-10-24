@@ -930,7 +930,7 @@ fn site_cost_table() -> String {
     let state = &fixture.state;
     let symbols = super::schematic_symbol_context(state);
     let design = super::schematic_design_view(state);
-    let sheet = super::drawing_sheet::resolve_active_drawing_sheet(state);
+    let sheet = state.model.active_drawing_sheet();
     let viewport = super::viewport::Viewport {
         offset: egui::Pos2::ZERO,
         zoom: 0.15,

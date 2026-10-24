@@ -22,7 +22,7 @@ impl GridSnapSpacingChoice {
     pub(crate) fn label(self) -> String {
         self.pitch().map_or_else(
             || "Free".to_owned(),
-            crate::schematic::view::drawing_sheet::grid_pitch_label,
+            crate::state::policy_labels::grid_pitch_label,
         )
     }
 

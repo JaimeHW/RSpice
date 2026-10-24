@@ -667,7 +667,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
                     .preferences
                     .choice(ChoicePreference::SchematicGrid);
                 let labels = crate::state::SchematicGridPitch::ALL
-                    .map(crate::schematic::view::drawing_sheet::grid_pitch_label);
+                    .map(crate::state::policy_labels::grid_pitch_label);
                 if segmented(
                     ui,
                     "preferences.schematic.grid",

@@ -92,7 +92,10 @@ impl SheetPanel {
     }
 
     fn title_value(&self, field: DrawingSheetTitleFieldId) -> String {
-        resolve_active_drawing_sheet(&self.app.state)
+        self.app
+            .state
+            .model
+            .active_drawing_sheet()
             .format
             .title_block
             .fields[&field]
@@ -108,7 +111,7 @@ impl SheetPanel {
     }
 
     fn document_value(&self, field: DrawingSheetTitleFieldId) -> String {
-        let format = resolve_active_drawing_sheet(&self.app.state).format;
+        let format = self.app.state.model.active_drawing_sheet().format;
         stored_title_value(&self.app.state, &format, field)
     }
 }
@@ -334,7 +337,7 @@ fn the_asme_forms_approvals_are_typed_in_the_panel() {
         DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
     )
     .unwrap();
-    let format = resolve_active_drawing_sheet(&panel.app.state).format;
+    let format = panel.app.state.model.active_drawing_sheet().format;
     assert_eq!(
         format.title_block.template,
         DrawingSheetTitleBlockTemplate::AsmeY141
@@ -400,7 +403,7 @@ fn an_asme_sheet_offers_the_release_record_its_block_does_not_letter() {
         DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
     )
     .unwrap();
-    let format = resolve_active_drawing_sheet(&panel.app.state).format;
+    let format = panel.app.state.model.active_drawing_sheet().format;
     assert!(!format.title_field_shown(DrawingSheetTitleFieldId::Date));
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
     for label in ["Document status\n", "Revision\n", "Date of issue\n"] {
@@ -631,7 +634,7 @@ fn checks_appear_only_for_findings_on_this_sheet() {
 }
 
 fn sheet_format(state: &AppState) -> SchematicSheetFormat {
-    resolve_active_drawing_sheet(state).format
+    state.model.active_drawing_sheet().format
 }
 
 /// A size the standard list does not hold is typed where the size is: the
@@ -855,7 +858,11 @@ fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
     // needs one, so it is still typed with the document's values.
     assert!(painted.contains("Revision\n\nDate of issue\n"), "{painted}");
     assert!(
-        !resolve_active_drawing_sheet(&panel.app.state)
+        !panel
+            .app
+            .state
+            .model
+            .active_drawing_sheet()
             .format
             .title_field_shown(DrawingSheetTitleFieldId::Revision)
     );

@@ -1815,7 +1815,6 @@ mod tests {
     /// a format of its own keeps it, and the dialog names both.
     #[test]
     fn a_new_project_default_redraws_the_sheets_that_follow_it() {
-        use crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet;
         use crate::state::{
             DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy, SheetTemplate,
         };
@@ -1891,7 +1890,9 @@ mod tests {
         apply_drawing_sheet_defaults(&mut app).unwrap();
 
         let drawn = |app: &RSpiceApp| {
-            resolve_active_drawing_sheet(&app.state)
+            app.state
+                .model
+                .active_drawing_sheet()
                 .format
                 .authored_size
                 .label()

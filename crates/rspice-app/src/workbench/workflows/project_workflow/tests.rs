@@ -995,8 +995,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
         project_default.inheritance,
         DrawingSheetInheritance::ProjectDefault
     );
-    let sheet_format =
-        crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&state).format;
+    let sheet_format = state.model.active_drawing_sheet().format;
     assert_eq!(
         sheet_format.as_drawing_sheet_default(),
         project_default,

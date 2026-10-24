@@ -56,7 +56,6 @@ use rspice_schematic_editor::view::{
 };
 
 use self::coordinates::viewport_from_camera;
-use self::drawing_sheet::resolve_active_drawing_sheet;
 use self::interaction::handle_tool_interactions;
 use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
@@ -392,7 +391,7 @@ pub fn render_schematic_view(
 ) {
     let available = ui.available_rect_before_wrap();
     let mut symbol_context = frame_symbol_context(state);
-    let drawing_sheet = resolve_active_drawing_sheet(state);
+    let drawing_sheet = state.model.active_drawing_sheet();
     let (canvas_width, canvas_height) = (available.width() as f64, available.height() as f64);
     let min_zoom = crate::state::SchematicState::zoom_floor_for_sheet(
         drawing_sheet.geometry.paper.as_tuple(),

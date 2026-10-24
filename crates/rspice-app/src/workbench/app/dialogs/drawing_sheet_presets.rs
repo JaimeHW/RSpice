@@ -1391,7 +1391,7 @@ mod tests {
 
         app.handle_preset_library_action(LibraryBodyAction::Use(PresetKey::from(&preset)));
 
-        let sheet = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&app.state);
+        let sheet = app.state.model.active_drawing_sheet();
         assert_eq!(sheet.format.authored_size.label(), "Lab panel");
         assert!(!app.state.sheets.drawing_sheet_presets.any_open());
         assert!(app.state.sheets.reveal_sheet_section);
