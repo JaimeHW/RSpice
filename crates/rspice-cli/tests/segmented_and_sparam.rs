@@ -483,6 +483,58 @@ fn xyce_restart_pack_selects_distinct_encodings_and_file_auto_detects_both() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A testbench that ends its own run completes a `--checkpoint` run there
+/// and saves no checkpoint, which would have nothing left to resume. Its
+/// `$fatal` fails the run as the HDL failure it is, never as a checkpoint
+/// error.
+#[test]
+fn a_checkpointed_testbench_that_ends_its_run_saves_no_checkpoint() {
+    let dir = test_dir("ckpt-finish");
+    for (task, code) in [("$finish", Some(0)), ("$fatal(1, \"gave up\")", Some(3))] {
+        let model = dir.join("bench.vams");
+        std::fs::write(
+            &model,
+            format!(
+                "`timescale 1ns/1ns\nmodule bench;\n\
+                 initial begin #5 $display(\"half way\"); #5 {task}; end\nendmodule\n"
+            ),
+        )
+        .expect("write model");
+        let deck = dir.join("bench.sp");
+        std::fs::write(
+            &deck,
+            format!(
+                "* a testbench beside a resistor\nV1 a 0 1\nR1 a 0 1k\nXtb bench\n\
+                 .hdl \"{}\"\n.tran 1n 100n\n.end\n",
+                model.display().to_string().replace('\\', "/")
+            ),
+        )
+        .expect("write deck");
+        let state = dir.join("state.ckpt");
+        let output = run_rspice(&[
+            "run",
+            deck.to_str().unwrap(),
+            "--checkpoint",
+            state.to_str().unwrap(),
+        ]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), code, "{task}: {stdout}\n{stderr}");
+        assert!(!state.exists(), "{task}: no checkpoint follows the end");
+        assert!(
+            stdout.contains("No checkpoint saved to") && stdout.contains("$finish at site"),
+            "{task}: {stdout}"
+        );
+        if code == Some(3) {
+            assert!(
+                stderr.contains("reported 1 $error/$fatal message")
+                    && !stderr.contains("checkpoint"),
+                "{task}: {stderr}"
+            );
+        }
+    }
+}
+
 /// A run segmented through --checkpoint/--resume must land on the same
 /// final state as one uninterrupted run; resuming against a different deck
 /// must be refused.
