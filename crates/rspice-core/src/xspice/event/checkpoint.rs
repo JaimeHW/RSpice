@@ -350,7 +350,11 @@ impl XspiceEventCheckpoint {
             }
         }
         Ok((
-            SharedXspiceEventQueue(Arc::new(XspiceEventScheduler { inner })),
+            SharedXspiceEventQueue(Arc::new(XspiceEventScheduler {
+                inner,
+                #[cfg(feature = "veriloga")]
+                lattice: queue.lattice,
+            })),
             SharedXspiceEventValues(Arc::new(restored)),
         ))
     }

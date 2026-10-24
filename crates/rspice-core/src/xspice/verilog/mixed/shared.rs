@@ -4,6 +4,7 @@ use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
 pub(crate) mod checkpoint;
 mod observations;
+use crate::xspice::event_scheduler::EventLattice;
 use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
@@ -1094,6 +1095,13 @@ impl MixedDigitalCoordinator {
         self.analog_step_floor
     }
 
+    /// The kernel's tick lattice under that floor: what a coupled code-model
+    /// output is made canonical on, and what a wake from one is dated with
+    /// ([`Instant::coincident_ceil_tick`]).
+    pub(crate) fn event_lattice(&self) -> EventLattice {
+        EventLattice::new(self.resolution, self.analog_step_floor)
+    }
+
     /// Whether an activation the analog side stepped past was one it could
     /// have landed on.
     ///
@@ -1377,7 +1385,28 @@ impl MixedDigitalCoordinator {
             // is the least tick not before the instant — see this module's
             // "three time bases", which also says why nearest-tick is the
             // rejected alternative here rather than a forbidden one.
-            let tick = hdl_tick(cursor.time, |at| at.ceil_tick(coordinator.resolution))?;
+            //
+            // The instant is the due event's own key rather than the
+            // endpoint, and the ceiling is read after coincidence
+            // (`Instant::coincident_ceil_tick`). A coupled event landed one
+            // floor late has an endpoint one rounding past its tick image,
+            // whose plain ceiling is the next tick: the `#d` the wake runs
+            // would fire a whole tick late. The earliest due key names the
+            // instant of every event this wake delivers, because the stepper
+            // lands on the earliest activation, and on the latest of any
+            // instants less than one floor apart. An endpoint with no event
+            // due is an analog input's wake, dated at the endpoint itself.
+            // Never before a tick this trial has already run the wheel at.
+            let lattice = coordinator.event_lattice();
+            let wake = participant
+                .external
+                .as_deref()
+                .and_then(DigitalActiveParticipant::next_event_time)
+                .filter(|due| *due <= cursor.time)
+                .unwrap_or(cursor.time);
+            let tick = hdl_tick(wake, |at| at.coincident_ceil_tick(lattice))?
+                .max(cursor.tick)
+                .max(cursor.published_tick);
             let digital = coordinator
                 .digital
                 .make_mut_recycling(&mut coordinator.spare);

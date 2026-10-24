@@ -382,6 +382,81 @@ impl TimeResolution {
         }
         Ok(ticks + 1)
     }
+
+    /// The tick `seconds` is that tick's instant computed another way: the
+    /// nearest tick, when `seconds` lies strictly less than `window` from its
+    /// exact image.
+    ///
+    /// `None` when no tick is that close, when the window is not a finite
+    /// positive interval, and for a time that has no tick at all. The window an
+    /// [`EventLattice`] hands this is never wider than a thousandth of a tick,
+    /// so at most one tick can qualify and the nearest one is it.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn coincident_tick(self, seconds: f64, window: f64) -> Option<u64> {
+        if !window.is_finite() || window <= 0.0 {
+            return None;
+        }
+        let tick = self.seconds_to_ticks(seconds).ok()?;
+        ((seconds - self.tick_instant(tick)).abs() < window).then_some(tick)
+    }
+}
+
+/// The HDL tick lattice a coupled run's discrete instants are canonical on,
+/// with the solver floor that says how close to a tick image an instant has to
+/// be to be that tick.
+///
+/// Present only where code models share event nets with a mixed module: an
+/// uncoupled XSPICE run has no lattice to be canonical on. See
+/// [`Instant`]'s "one instant, one key" for the rule this carries.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EventLattice {
+    resolution: TimeResolution,
+    /// The transient stepper's hard minimum at its latest accepted clock, or
+    /// zero before a solver has declared one.
+    floor: f64,
+}
+
+#[cfg(feature = "veriloga")]
+impl EventLattice {
+    /// The widest coincidence window, as a fraction of one tick.
+    ///
+    /// The window absorbs two roundings of one instant and nothing else. A
+    /// floor is a solver resolution rather than a rounding, and a deck can
+    /// declare a large one — a `DELMIN` near the precision — which uncapped
+    /// would quantize code-model timing onto the HDL grid. At a 1 ps precision
+    /// the cap is a femtosecond: thousands of ulps of a millisecond clock, and
+    /// four of a one-second one.
+    const MAX_WINDOW_PER_TICK: f64 = 1.0e-3;
+
+    /// The lattice of `resolution`'s ticks under the solver floor `floor`. A
+    /// floor that is not a finite positive interval declares none.
+    pub(crate) fn new(resolution: TimeResolution, floor: f64) -> Self {
+        Self {
+            resolution,
+            floor: if floor.is_finite() && floor > 0.0 {
+                floor
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// How close to a tick image an instant at `seconds` has to be to be that
+    /// tick: the solver's floor at that clock, never wider than
+    /// [`Self::MAX_WINDOW_PER_TICK`] of a tick.
+    ///
+    /// The floor at a later clock is the declared one or the clock's own
+    /// resolution, whichever is larger
+    /// ([`crate::numerics::integration::clock_resolution`]) — the transient
+    /// stepper's `hard_min_at_clock`, read at the instant in question rather
+    /// than at the point that scheduled it.
+    pub(crate) fn window(self, seconds: f64) -> f64 {
+        let floor = self
+            .floor
+            .max(crate::numerics::integration::clock_resolution(seconds));
+        floor.min(self.resolution.seconds_per_tick() * Self::MAX_WINDOW_PER_TICK)
+    }
 }
 
 /// One exact physical instant: the IEEE-754 bit pattern of a non-negative
@@ -422,7 +497,41 @@ impl TimeResolution {
 ///   which Verilog-AMS LRM 2.4 section 7.3.6.1 fixes at the nearest tick.
 /// * [`Self::ceil_tick`] — where an event crossing in from another event
 ///   kernel lands, so the HDL never labels a foreign event earlier than it
-///   happened.
+///   happened. A wake read off a coupled event uses its coincidence-aware
+///   form, [`Self::coincident_ceil_tick`]; see below.
+///
+/// # One instant, one key
+///
+/// Where code models share event nets with an HDL module, one instant can be
+/// computed two ways: as a tick's exact image, and as a code model's float sum
+/// — `crossing + 1e-9`, `TIME + delay` — or a PULSE corner that names the same
+/// nanosecond a few ulps away. Two keys for one instant cost the run twice. The
+/// copy keyed later is landed one solver floor after the other, the code model
+/// it causes is evaluated again there and puts a second, late copy of its own
+/// output on the queue, and a wake read off the late landing reaches the HDL a
+/// whole tick late. The two copies' ulp order also decides which side of an
+/// HDL edge a flip-flop samples, which no declared ordering rule does.
+///
+/// So in a coupled run **a discrete instant less than one coincidence window
+/// from a tick image is that tick image**, and is keyed at its exact bits
+/// ([`Self::canonical`]). The window is the solver's floor at that clock,
+/// capped at a thousandth of a tick ([`EventLattice::window`]): it absorbs a
+/// rounding, never a delay a model meant, however large a minimum step the
+/// deck declares. The snap is onto the lattice, never onto a neighbouring
+/// event, so it cannot chain; it is idempotent; and it never moves a key
+/// before the instant that scheduled it, so a zero-delay output at an off-grid
+/// "now" stays at "now". Two bit-equal keys are then ordered by the declared
+/// same-instant rule — HDL events first, then the code models' wave — rather
+/// than by rounding. An uncoupled run has no lattice, and its keys are the sums
+/// its code models computed.
+///
+/// The ceiling reads the rule back. A wake from the other kernel lands on the
+/// least tick not before the event *after coincidence*: an instant less than
+/// one window past a tick image is that tick ([`Self::coincident_ceil_tick`]).
+/// Floor and nearest are unchanged, and the landing contract the analog
+/// stepper keeps with every lane is the same rule again: instants less than one
+/// floor apart are one instant, landed at the latest of them
+/// (`engine::transient`'s `accepted_veriloga_event_time`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Instant(u64);
 
@@ -496,6 +605,58 @@ impl Instant {
     #[cfg(feature = "veriloga")]
     pub(crate) fn ceil_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
         resolution.seconds_to_ceil_ticks(self.seconds())
+    }
+
+    /// This instant as a coupled run keys it: the exact image of the tick it
+    /// is within one coincidence window of, or itself when it is near none.
+    ///
+    /// `scheduled_from` is the instant whose evaluation scheduled this one,
+    /// and the snap never moves a key before it: an image earlier than both
+    /// this instant and `scheduled_from` is refused, and the instant keeps its
+    /// own bits. A zero-delay output at an off-lattice "now" therefore stays at
+    /// "now" rather than moving into a slot the run has already left. An
+    /// instant a negative delay — an output dated from a crossing inside the
+    /// step — already put before `scheduled_from` may still move later onto
+    /// its image.
+    ///
+    /// A pure function of the instant, the lattice and `scheduled_from`, and
+    /// idempotent: a tick image is its own nearest tick at distance zero. See
+    /// "one instant, one key" on this type.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn canonical(self, lattice: EventLattice, scheduled_from: Instant) -> Self {
+        let seconds = self.seconds();
+        let Some(image) = lattice
+            .resolution
+            .coincident_tick(seconds, lattice.window(seconds))
+            .and_then(|tick| Self::from_tick(tick, lattice.resolution).ok())
+        else {
+            return self;
+        };
+        if image < self.min(scheduled_from) {
+            self
+        } else {
+            image
+        }
+    }
+
+    /// The least HDL tick not before this instant, after coincidence: the
+    /// tick at or before it when it lies less than one coincidence window past
+    /// that tick's image, and otherwise [`Self::ceil_tick`].
+    ///
+    /// This is the wake a coupled code-model event dates in the HDL. The plain
+    /// ceiling of an instant one rounding past a tick image is the *next*
+    /// tick, so a `#d` that wake schedules would fire a whole tick late; the
+    /// two are one instant, and the wake is that tick. See "one instant, one
+    /// key" on this type.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn coincident_ceil_tick(self, lattice: EventLattice) -> Result<u64, SchedulerError> {
+        let seconds = self.seconds();
+        let resolution = lattice.resolution;
+        let floor = resolution.seconds_to_floor_ticks(seconds)?;
+        if seconds - resolution.tick_instant(floor) < lattice.window(seconds) {
+            return Ok(floor);
+        }
+        self.ceil_tick(resolution)
     }
 }
 
@@ -2343,5 +2504,180 @@ mod tests {
                 .floor_tick(resolution)
                 .is_err()
         );
+    }
+
+    /// `n` ulps above `at`.
+    fn ulps_above(at: Instant, n: usize) -> Instant {
+        let mut seconds = at.seconds();
+        for _ in 0..n {
+            seconds = seconds.next_up();
+        }
+        instant(seconds)
+    }
+
+    /// The picosecond lattice of a sigma-delta testbench at 1.000104 ms, under
+    /// the floor its clock resolves there: eight ulps, 1.7e-18 s.
+    fn picosecond_lattice_at_a_millisecond() -> (EventLattice, u64, Instant) {
+        let resolution = TimeResolution::new(-12).expect("1 ps");
+        let tick = 1_000_104_000;
+        let image = Instant::from_tick(tick, resolution).expect("in range");
+        let floor = crate::numerics::integration::clock_resolution(image.seconds());
+        (EventLattice::new(resolution, floor), tick, image)
+    }
+
+    /// The coincident ceiling of an instant less than one floor past a tick
+    /// image is that tick; one floor and more past it is the next one. The
+    /// plain ceiling moves on at the first ulp, which is the whole tick a
+    /// floor-landed wake used to lose.
+    #[test]
+    fn the_coincident_ceiling_keeps_an_instant_within_a_floor_of_its_tick() {
+        let (lattice, tick, image) = picosecond_lattice_at_a_millisecond();
+        let window = lattice.window(image.seconds());
+        assert_eq!(window, lattice.floor, "a floor under the cap is the window");
+
+        let mut k = 0;
+        while ulps_above(image, k).seconds() - image.seconds() < window {
+            let at = ulps_above(image, k);
+            assert_eq!(at.coincident_ceil_tick(lattice), Ok(tick), "{k} ulps past");
+            if k > 0 {
+                assert_eq!(at.ceil_tick(lattice.resolution), Ok(tick + 1));
+            }
+            k += 1;
+        }
+        assert_eq!(k, 8, "the floor at a millisecond is eight ulps");
+        assert_eq!(
+            ulps_above(image, k).coincident_ceil_tick(lattice),
+            Ok(tick + 1),
+            "one whole floor past the image is another instant"
+        );
+        assert_eq!(
+            instant(image.seconds() + 2.0 * window).coincident_ceil_tick(lattice),
+            Ok(tick + 1)
+        );
+        // Below the image the ceiling already is the tick.
+        let below = instant(image.seconds().next_down());
+        assert_eq!(below.coincident_ceil_tick(lattice), Ok(tick));
+        assert_eq!(image.coincident_ceil_tick(lattice), Ok(tick));
+    }
+
+    /// The snap is onto the lattice: idempotent, the identity on a tick image,
+    /// and the identity on an instant at least one window from every image.
+    #[test]
+    fn the_snap_is_idempotent_and_moves_only_an_instant_within_a_floor_of_a_tick() {
+        let (lattice, _, image) = picosecond_lattice_at_a_millisecond();
+        let window = lattice.window(image.seconds());
+        let long_ago = Instant::ZERO;
+
+        assert_eq!(image.canonical(lattice, long_ago), image);
+        for k in 1..8 {
+            for at in [
+                ulps_above(image, k),
+                instant({
+                    let mut seconds = image.seconds();
+                    for _ in 0..k {
+                        seconds = seconds.next_down();
+                    }
+                    seconds
+                }),
+            ] {
+                let snapped = at.canonical(lattice, long_ago);
+                assert_eq!(snapped, image, "{at} is {k} ulps from {image}");
+                assert_eq!(snapped.canonical(lattice, long_ago), snapped);
+            }
+        }
+        for at in [
+            ulps_above(image, 8),
+            instant(image.seconds() + 2.0 * window),
+            instant(image.seconds() - 2.0 * window),
+            instant(image.seconds() + 0.5e-12),
+        ] {
+            assert_eq!(at.canonical(lattice, long_ago), at, "{at} is near no tick");
+            assert_eq!(
+                at.canonical(lattice, long_ago).canonical(lattice, long_ago),
+                at
+            );
+        }
+    }
+
+    /// The snap never moves a key before the instant that scheduled it. A
+    /// zero-delay output at an off-lattice "now" keeps "now"; one scheduled
+    /// from just before the image moves later onto it; and an output a
+    /// positive delay puts a rounding past a later image takes that image.
+    #[test]
+    fn the_snap_never_moves_a_key_before_the_instant_that_scheduled_it() {
+        let (lattice, tick, image) = picosecond_lattice_at_a_millisecond();
+        let resolution = lattice.resolution;
+
+        let now = ulps_above(image, 3);
+        assert_eq!(now.canonical(lattice, now), now, "zero delay keeps now");
+        let later_output = ulps_above(image, 5);
+        assert_eq!(
+            later_output.canonical(lattice, now),
+            later_output,
+            "the image is before the instant that scheduled it"
+        );
+
+        let just_before = instant(image.seconds().next_down().next_down());
+        assert_eq!(just_before.canonical(lattice, just_before), image);
+
+        let next = Instant::from_tick(tick + 1_000, resolution).expect("in range");
+        let sum = instant(now.seconds() + 1.0e-9);
+        assert!(
+            sum != next && (sum.seconds() - next.seconds()).abs() < lattice.window(sum.seconds())
+        );
+        assert_eq!(sum.canonical(lattice, now), next);
+    }
+
+    /// The window is rounding-sized, never semantic: a solver floor near the
+    /// precision itself — a large `DELMIN` — would otherwise quantize
+    /// code-model timing onto the HDL grid. Capped at a thousandth of a tick,
+    /// an output half a tick from its nearest image keeps its time, and only
+    /// one within the cap moves.
+    #[test]
+    fn a_floor_near_the_precision_moves_no_instant_by_more_than_the_cap() {
+        let resolution = TimeResolution::new(-12).expect("1 ps");
+        let lattice = EventLattice::new(resolution, 0.9e-12);
+        let tick = 5_000;
+        let image = Instant::from_tick(tick, resolution).expect("in range");
+        let cap = resolution.seconds_per_tick() * EventLattice::MAX_WINDOW_PER_TICK;
+        assert_eq!(lattice.window(image.seconds()), cap);
+        assert!((cap - 1.0e-15).abs() < 1.0e-30);
+
+        for offset in [0.5e-12, 0.3e-12, -0.4e-12, 2.0e-15, -2.0e-15] {
+            let at = instant(image.seconds() + offset);
+            assert_eq!(
+                at.canonical(lattice, Instant::ZERO),
+                at,
+                "offset {offset:e}"
+            );
+        }
+        let near = instant(image.seconds() + 0.5e-15);
+        assert_eq!(near.canonical(lattice, Instant::ZERO), image);
+        assert_eq!(
+            instant(image.seconds() + 0.5e-12).coincident_ceil_tick(lattice),
+            Ok(tick + 1),
+            "a wake half a tick late is a tick late"
+        );
+        assert_eq!(near.coincident_ceil_tick(lattice), Ok(tick));
+    }
+
+    /// No declared floor still leaves the clock's own resolution as the
+    /// window, which is what a coupled run schedules with before its first
+    /// transient step.
+    #[test]
+    fn a_lattice_with_no_declared_floor_resolves_the_clock() {
+        let resolution = TimeResolution::new(-12).expect("1 ps");
+        let image = Instant::from_tick(1_000, resolution).expect("in range");
+        for floor in [0.0, -1.0, f64::NAN] {
+            let lattice = EventLattice::new(resolution, floor);
+            assert_eq!(
+                lattice.window(image.seconds()),
+                crate::numerics::integration::clock_resolution(image.seconds())
+            );
+            assert_eq!(
+                ulps_above(image, 2).canonical(lattice, Instant::ZERO),
+                image
+            );
+        }
     }
 }

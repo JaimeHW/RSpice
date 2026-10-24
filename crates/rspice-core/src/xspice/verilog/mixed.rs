@@ -53,6 +53,15 @@
 //! a foreign-kernel event earlier than it happened. Exact one way,
 //! least-tick-not-before the other.
 //!
+//! "Not before" is read after coincidence, because one instant has one key. In
+//! a coupled run a code model's output within one coincidence window of a tick
+//! image is keyed at that image, and a wake is dated from the event's own key
+//! by [`Instant::coincident_ceil_tick`](crate::xspice::event_scheduler::Instant::coincident_ceil_tick):
+//! an instant less than one window past a tick image is that tick, where the
+//! plain ceiling would move a `#d` the wake runs a whole tick late. The rule,
+//! its window and its causality clamp are stated once, as "one instant, one
+//! key" on [`Instant`](crate::xspice::event_scheduler::Instant).
+//!
 //! A fourth question is not a fourth base. It asks which of the answers above
 //! a particular crossing gets, and it is written here because the answer is
 //! only correct when read beside them.

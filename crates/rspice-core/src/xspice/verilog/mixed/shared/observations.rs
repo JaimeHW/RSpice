@@ -305,8 +305,13 @@ impl MixedDigitalCoordinator {
             let external_due =
                 external_time == Some(time) || (external_endpoint && time == cursor.time);
             if external_due {
+                // The least tick not before the event, after coincidence: an
+                // event one rounding past a tick image is that tick
+                // (`Instant::coincident_ceil_tick`). `time` is the event's own
+                // key here, or the endpoint for an analog input's wake.
+                let lattice = self.event_lattice();
                 publication_tick =
-                    publication_tick.max(hdl_tick(time, |at| at.ceil_tick(self.resolution))?);
+                    publication_tick.max(hdl_tick(time, |at| at.coincident_ceil_tick(lattice))?);
             }
             cursor.published_tick = publication_tick;
             let external = participant

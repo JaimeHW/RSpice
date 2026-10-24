@@ -418,6 +418,7 @@ impl CircuitData {
             }
             self.scheduler.mixed_digital_coordinator = Some(coordinator);
             self.scheduler.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
+            self.scheduler.publish_event_lattice();
         }
         Ok(())
     }

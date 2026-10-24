@@ -9,6 +9,8 @@
 
 use super::copy_on_write::CopyOnWrite;
 use super::digital::DigitalValue;
+#[cfg(feature = "veriloga")]
+use super::event_scheduler::EventLattice;
 use super::event_scheduler::{
     EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
 };
@@ -86,9 +88,24 @@ fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
 /// no conversion left to do — a code model's event time *is* the kernel's key,
 /// which is why an off-grid delay reaches the transient breakpoint manager
 /// exactly where the model dated it.
+///
+/// The one exception is a coupled run's: where code models share event nets
+/// with a mixed module, an output time within one coincidence window of an HDL
+/// tick image is keyed at that image, so one instant has one key
+/// ([`Instant`]'s "one instant, one key"). Off that path the key is the sum the
+/// code model computed, bit for bit.
 #[derive(Debug, Clone)]
 pub(crate) struct XspiceEventScheduler {
     inner: EventScheduler,
+    /// The tick lattice code-model outputs are canonical on, present exactly
+    /// when the queue is coupled to a mixed module. Set by
+    /// `CircuitScheduler`, which owns the coupling and the solver floor.
+    ///
+    /// Configuration rather than state: a checkpoint does not carry it,
+    /// because the keys it produced are already in the queue and a resumed run
+    /// re-derives it from the same coupling and the same floor.
+    #[cfg(feature = "veriloga")]
+    lattice: Option<EventLattice>,
 }
 
 impl Default for XspiceEventScheduler {
@@ -102,11 +119,48 @@ impl XspiceEventScheduler {
     pub(crate) fn new() -> Self {
         Self {
             inner: EventScheduler::new(SchedulerLimits::default()),
+            #[cfg(feature = "veriloga")]
+            lattice: None,
         }
+    }
+
+    /// The lattice output times are made canonical on, if the queue is
+    /// coupled.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn lattice(&self) -> Option<EventLattice> {
+        self.lattice
+    }
+
+    /// Couple the queue to an HDL tick lattice, or uncouple it with `None`.
+    ///
+    /// Keys already queued keep their bits: each was canonical under the
+    /// lattice in force when it was scheduled, and moving it now would move an
+    /// instant something may already have landed on.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn set_lattice(&mut self, lattice: Option<EventLattice>) {
+        self.lattice = lattice;
+    }
+
+    /// The key an output scheduled from `current_time` is filed under.
+    ///
+    /// The sum itself, except in a coupled run, where it is the sum made
+    /// canonical on the lattice ([`Instant::canonical`]), never earlier than
+    /// `current_time` unless the sum already was.
+    fn output_instant(&self, current_time: Value, delay: Value) -> Option<Instant> {
+        let at = Instant::from_seconds(scheduled_output_time(current_time, delay)?)?;
+        #[cfg(feature = "veriloga")]
+        if let Some(lattice) = self.lattice {
+            return Some(at.canonical(lattice, Instant::from_seconds(current_time)?));
+        }
+        Some(at)
     }
 
     /// Schedule an event at an absolute time, superseding this driver's own
     /// pending output at or after that time.
+    ///
+    /// Test-only: a code model dates every output from the time it was
+    /// evaluated at, which is what keys it ([`Self::schedule_delayed`]).
+    #[cfg(test)]
     pub(crate) fn schedule(
         &mut self,
         time: Value,
@@ -119,6 +173,19 @@ impl XspiceEventScheduler {
         let Some(at) = Instant::from_seconds(time) else {
             return;
         };
+        self.schedule_instant(at, node_id, port_name, instance, driver_index, value);
+    }
+
+    /// [`Self::schedule`], at an instant already keyed.
+    fn schedule_instant(
+        &mut self,
+        at: Instant,
+        node_id: usize,
+        port_name: impl Into<String>,
+        instance: impl Into<String>,
+        driver_index: usize,
+        value: EventValue,
+    ) {
         self.inner.schedule_superseding_at(
             at,
             // Every XSPICE output is a blocking assignment: the value is
@@ -169,11 +236,11 @@ impl XspiceEventScheduler {
         driver_index: usize,
         value: DigitalValue,
     ) {
-        let Some(event_time) = scheduled_output_time(current_time, delay) else {
+        let Some(at) = self.output_instant(current_time, delay) else {
             return;
         };
-        self.schedule(
-            event_time,
+        self.schedule_instant(
+            at,
             node_id,
             port_name,
             instance,
@@ -216,11 +283,11 @@ impl XspiceEventScheduler {
         driver_index: usize,
         value: Value,
     ) {
-        let Some(event_time) = scheduled_output_time(current_time, delay) else {
+        let Some(at) = self.output_instant(current_time, delay) else {
             return;
         };
-        self.schedule(
-            event_time,
+        self.schedule_instant(
+            at,
             node_id,
             port_name,
             instance,
@@ -635,6 +702,66 @@ mod tests {
         );
     }
 
+    /// A clock edge one rounding past the 1.000102 ms tick image, and the
+    /// gate delay a code model adds to it: the sum lands a few ulps from the
+    /// 1.000103 ms image rather than on it.
+    fn edge_one_rounding_late() -> (Value, Value) {
+        let edge = 1.000102e-3_f64.next_up().next_up();
+        (edge, 1.0e-9)
+    }
+
+    /// Off the coupled path the key is the sum the code model computed, bit
+    /// for bit, however close it is to a tick: an uncoupled queue has no
+    /// lattice to be canonical on.
+    #[test]
+    fn an_uncoupled_queue_keys_the_sum_the_code_model_computed() {
+        let (edge, delay) = edge_one_rounding_late();
+        let mut scheduler = XspiceEventScheduler::new();
+        scheduler.schedule_delayed(edge, delay, 1, "out", "agate", DigitalValue::one());
+        scheduler.schedule_real_delayed(edge, delay, 2, "out", "areal", 1.0);
+        assert_eq!(
+            scheduler.next_event_time().map(f64::to_bits),
+            Some((edge + delay).to_bits())
+        );
+        drain(&mut scheduler, edge + delay);
+        assert!(scheduler.is_empty(), "both outputs share the one sum");
+    }
+
+    /// A coupled queue keys a digital or real output one rounding from a tick
+    /// image at that image's exact bits, and an output near no tick at its
+    /// own sum.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn a_coupled_queue_keys_an_output_a_rounding_from_a_tick_at_its_image() {
+        use super::super::event_scheduler::TimeResolution;
+        let resolution = TimeResolution::new(-12).expect("1 ps");
+        let image = resolution
+            .ticks_to_seconds(1_000_103_000)
+            .expect("in range");
+        let (edge, delay) = edge_one_rounding_late();
+        assert_ne!((edge + delay).to_bits(), image.to_bits());
+
+        let mut scheduler = XspiceEventScheduler::new();
+        let floor = crate::numerics::integration::clock_resolution(image);
+        scheduler.set_lattice(Some(EventLattice::new(resolution, floor)));
+        scheduler.schedule_delayed(edge, delay, 1, "out", "agate", DigitalValue::one());
+        scheduler.schedule_real_delayed(edge, delay, 2, "out", "areal", 1.0);
+        assert_eq!(
+            scheduler.next_event_time().map(f64::to_bits),
+            Some(image.to_bits())
+        );
+        drain(&mut scheduler, image);
+        assert!(scheduler.is_empty(), "both outputs are keyed at the image");
+
+        let off_lattice = edge + 0.4e-12;
+        scheduler.schedule_delayed(edge, 0.4e-12, 1, "out", "agate", DigitalValue::zero());
+        assert_eq!(
+            scheduler.next_event_time().map(f64::to_bits),
+            Some(off_lattice.to_bits()),
+            "an output near no tick keeps its own time"
+        );
+    }
+
     #[test]
     fn scheduler_ignores_negative_absolute_output_times() {
         let mut scheduler = XspiceEventScheduler::new();
@@ -935,6 +1062,8 @@ mod tests {
                 max_events_per_tick: 2,
                 ..SchedulerLimits::default()
             }),
+            #[cfg(feature = "veriloga")]
+            lattice: None,
         };
         for time in [1e-9, 2e-9, 3e-9] {
             scheduler.schedule(

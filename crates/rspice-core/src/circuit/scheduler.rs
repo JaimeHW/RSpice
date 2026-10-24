@@ -380,6 +380,31 @@ impl CircuitScheduler {
         if let Some(coordinator) = self.mixed_digital_coordinator.as_mut() {
             coordinator.set_analog_step_floor(self.analog_step_floor);
         }
+        self.publish_event_lattice();
+    }
+
+    /// Hand the code-model queue the HDL tick lattice it keys outputs on, or
+    /// take it away.
+    ///
+    /// Present exactly when the queue is coupled — a code model shares an
+    /// event net with a mixed module — and then made of the coordinator's
+    /// kernel resolution and this scheduler's one floor, so a coupled output
+    /// within one coincidence window of a tick image is keyed at that image
+    /// ([`crate::xspice::event_scheduler::Instant`]'s "one instant, one key").
+    /// Called where either input moves: the coupling, and every floor this
+    /// scheduler is told. The queue is only written when the lattice changes,
+    /// so a floor raised once per binade is the only copy a shared snapshot
+    /// of the queue pays for.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) fn publish_event_lattice(&mut self) {
+        let lattice = self
+            .mixed_xspice_bindings
+            .as_ref()
+            .and(self.mixed_digital_coordinator.as_ref())
+            .map(crate::xspice::verilog::MixedDigitalCoordinator::event_lattice);
+        if self.xspice_event_queue.lattice() != lattice {
+            self.xspice_event_queue.make_mut().set_lattice(lattice);
+        }
     }
 
     /// The floor every lane measures a stepped-past activation against, or
