@@ -10,7 +10,8 @@ use rspice_veriloga::canonical_ir::digital_eval::checkpoint::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HostCheckpointLimits {
+#[doc(hidden)]
+pub struct HostCheckpointLimits {
     pub scheduler: SchedulerCheckpointLimits,
     pub digital: DigitalCheckpointLimits,
     pub max_processes: usize,
@@ -37,7 +38,8 @@ const HOST_CHECKPOINT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct HostCheckpoint {
+#[doc(hidden)]
+pub struct HostCheckpoint {
     version: u32,
     plan: [u8; 32],
     tick_seconds: u64,
@@ -280,10 +282,8 @@ impl DigitalHost {
         Ok(())
     }
 
-    pub(crate) fn checkpoint(
-        &self,
-        limits: HostCheckpointLimits,
-    ) -> Result<HostCheckpoint, String> {
+    #[doc(hidden)]
+    pub fn checkpoint(&self, limits: HostCheckpointLimits) -> Result<HostCheckpoint, String> {
         self.checkpoint_boundary()?;
         if self.store.has_charge_changes() {
             return Err("host has unscheduled charge decays".into());
@@ -438,7 +438,8 @@ impl DigitalHost {
         Ok(())
     }
 
-    pub(crate) fn restored_checkpoint(
+    #[doc(hidden)]
+    pub fn restored_checkpoint(
         &self,
         image: &HostCheckpoint,
         limits: HostCheckpointLimits,

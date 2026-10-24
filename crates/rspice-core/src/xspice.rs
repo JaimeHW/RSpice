@@ -45,7 +45,8 @@ mod copy_on_write;
 mod data_file;
 mod digital;
 mod event;
-pub(crate) mod event_trace;
+#[doc(hidden)]
+pub mod event_trace;
 // The discrete-event scheduler kernel for the digital substrate.
 //
 // It lives here rather than under `engine` because of what the layering
@@ -90,7 +91,8 @@ pub mod models;
 
 /// Return registered virtual data-file contents for checkpoint provenance.
 /// Native files are hashed as bytes by the checkpoint layer itself.
-pub(crate) fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::sync::Arc<str>> {
+#[doc(hidden)]
+pub fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::sync::Arc<str>> {
     data_file::read_to_string_with_stamp(path)
         .ok()
         .filter(|(_, stamp)| stamp.virtual_file)
@@ -101,10 +103,12 @@ pub(crate) fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::s
 /// boundary is named (`__rspice_auto_dac_3`). The deck never names one, so a
 /// name with this prefix, or a branch or input of such an instance, is
 /// plumbing: default output and diagnostics speak of the author's nets.
-pub(crate) const AUTO_BRIDGE_PREFIX: &str = "__rspice_auto_";
+#[doc(hidden)]
+pub const AUTO_BRIDGE_PREFIX: &str = "__rspice_auto_";
 
 /// Whether `name` is an inserted converter or one of its branches or inputs.
-pub(crate) fn is_auto_bridge_name(name: &str) -> bool {
+#[doc(hidden)]
+pub fn is_auto_bridge_name(name: &str) -> bool {
     name.get(..AUTO_BRIDGE_PREFIX.len())
         .is_some_and(|head| head.eq_ignore_ascii_case(AUTO_BRIDGE_PREFIX))
 }
@@ -114,21 +118,26 @@ pub(crate) use context::CmContextCheckpoint;
 pub use context::{
     AnalogTransition, AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase,
 };
-pub(crate) use data_file::native_input_candidates as data_file_input_candidates;
-pub(crate) use data_file::read_to_string as read_data_file_to_string;
-pub(crate) use data_file::read_to_string_limited as read_data_file_to_string_limited;
+#[doc(hidden)]
+pub use data_file::native_input_candidates as data_file_input_candidates;
+#[doc(hidden)]
+pub use data_file::read_to_string as read_data_file_to_string;
+#[doc(hidden)]
+pub use data_file::read_to_string_limited as read_data_file_to_string_limited;
 pub use data_file::{
     clear_registered_data_files, register_data_file, register_data_file_with_limits,
     unregister_data_file,
 };
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
+pub(crate) use event::EventNodeMap;
 pub use event::EventValue;
 #[cfg(any(feature = "veriloga", feature = "test-support", test))]
 #[doc(hidden)]
 pub use event::checkpoint as event_checkpoint;
-pub(crate) use event::{
-    EventLoads, EventNodeMap, SharedXspiceEventQueue, SharedXspiceEventValues,
-    XspiceEventScheduler, XspiceEventValues,
+#[doc(hidden)]
+pub use event::{
+    EventLoads, SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler,
+    XspiceEventValues,
 };
 pub use external::{
     DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimRuntimeFactory, DigitalCosimSpec,
@@ -143,9 +152,9 @@ pub(crate) use instance::{
     SharedXspiceInstance, XspiceEventInputs, XspiceInstanceCheckpoint,
 };
 pub use registry::CodeModelRegistry;
-pub(crate) use resource_transaction::{
-    ResourceEntry, ResourceTransaction, ResourceTransactionScope, TransactionalContextResource,
-};
+pub(crate) use resource_transaction::{ResourceEntry, ResourceTransactionScope};
+#[doc(hidden)]
+pub use resource_transaction::{ResourceTransaction, TransactionalContextResource};
 mod threshold;
 pub(crate) use threshold::AnalogBandLaw;
 pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};

@@ -24,7 +24,8 @@ impl Serialize for DriverMap<'_> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct CoordinatorCheckpoint {
+#[doc(hidden)]
+pub struct CoordinatorCheckpoint {
     version: u32,
     topology: [u8; 32],
     time: u64,
@@ -34,7 +35,8 @@ pub(crate) struct CoordinatorCheckpoint {
 }
 
 impl MixedDigitalCoordinator {
-    pub(crate) fn validate_checkpoint_boundary(&self, time: f64) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_checkpoint_boundary(&self, time: f64) -> Result<(), String> {
         if self.trial_open || self.accepted_time != Some(time) {
             return Err("coordinator and circuit accepted times differ".into());
         }
@@ -184,7 +186,8 @@ impl MixedDigitalCoordinator {
         Ok(())
     }
 
-    pub(crate) fn checkpoint(
+    #[doc(hidden)]
+    pub fn checkpoint(
         &self,
         limits: HostCheckpointLimits,
     ) -> Result<CoordinatorCheckpoint, String> {
@@ -218,7 +221,8 @@ impl MixedDigitalCoordinator {
     /// caller bounds input bytes before deserialization and installs this only
     /// after all circuit participants have also validated. Receiving resource
     /// policies are retained; the saved image cannot raise them.
-    pub(crate) fn restored_checkpoint(
+    #[doc(hidden)]
+    pub fn restored_checkpoint(
         &self,
         image: &CoordinatorCheckpoint,
         limits: HostCheckpointLimits,

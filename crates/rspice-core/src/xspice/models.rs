@@ -226,7 +226,8 @@ pub use tlines::{
     MicrostripOpenEnd,
 };
 
-pub(crate) use xtradev::XTRADEV_METER_MEASURED_VALUE_PARAM;
+#[doc(hidden)]
+pub use xtradev::XTRADEV_METER_MEASURED_VALUE_PARAM;
 pub use xtradev::{
     AnalogSwitch, CapacitanceMeter, CapacitorAlias, CapacitorIc, Core, Ilimit, InductanceMeter,
     InductorAlias, InductorIc, LcCouple, Memristor, Potentiometer, Pswitch, SeeGenerator,

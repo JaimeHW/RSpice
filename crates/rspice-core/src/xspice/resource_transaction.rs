@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 /// Register through `CmContext::set_transactional_resource` and obtain every
 /// access through `CmContext::transactional_resource`. Do not retain a resource
 /// handle across evaluations or mutate it through an independently held alias.
-pub(crate) trait TransactionalContextResource: Any + Send + Sync {
+#[doc(hidden)]
+pub trait TransactionalContextResource: Any + Send + Sync {
     fn capture_transaction_state(&self) -> CmResult<Vec<u8>>;
     fn restore_transaction_state(&self, state: &[u8]) -> CmResult<()>;
 }
@@ -75,7 +76,8 @@ struct Journal {
 /// The caller must explicitly commit or roll back before discarding it.
 #[derive(Clone, Default)]
 #[must_use]
-pub(crate) struct ResourceTransaction(Arc<Mutex<Journal>>);
+#[doc(hidden)]
+pub struct ResourceTransaction(Arc<Mutex<Journal>>);
 
 impl fmt::Debug for ResourceTransaction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -93,10 +95,11 @@ pub(crate) struct ResourceTransactionScope {
     pub(crate) owner: usize,
 }
 
-pub(crate) struct ResourceRollbackFailure {
-    pub(crate) owner: usize,
-    pub(crate) key: String,
-    pub(crate) detail: String,
+#[doc(hidden)]
+pub struct ResourceRollbackFailure {
+    pub owner: usize,
+    pub key: String,
+    pub detail: String,
 }
 
 fn provider_call<T>(operation: &str, call: impl FnOnce() -> CmResult<T>) -> CmResult<T> {
@@ -136,14 +139,16 @@ impl ResourceTransaction {
         Ok(())
     }
 
-    pub(crate) fn commit(&self) {
+    #[doc(hidden)]
+    pub fn commit(&self) {
         let mut journal = self.0.lock().unwrap_or_else(|error| error.into_inner());
         journal.closed = true;
         journal.undo.clear();
         journal.seen.clear();
     }
 
-    pub(crate) fn rollback(&self) -> Vec<ResourceRollbackFailure> {
+    #[doc(hidden)]
+    pub fn rollback(&self) -> Vec<ResourceRollbackFailure> {
         let undo = {
             let mut journal = self.0.lock().unwrap_or_else(|error| error.into_inner());
             journal.closed = true;

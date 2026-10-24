@@ -166,7 +166,8 @@ struct CoreHysteresisParams {
     input_domain: Value,
 }
 
-pub(crate) const XTRADEV_METER_MEASURED_VALUE_PARAM: &str = "__rspice_measured_value";
+#[doc(hidden)]
+pub const XTRADEV_METER_MEASURED_VALUE_PARAM: &str = "__rspice_measured_value";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XtradevPortKey {

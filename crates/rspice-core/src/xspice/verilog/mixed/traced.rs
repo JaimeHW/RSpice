@@ -23,7 +23,8 @@ use super::MixedSignalHost;
 
 /// One HDL net or variable, as its instance declared it.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct HdlSignalSource {
+#[doc(hidden)]
+pub struct HdlSignalSource {
     /// The deck instance (`xtb`).
     pub instance: String,
     /// Its name in the instance's design (`ok`; `u1.q` inside a child).
@@ -34,7 +35,8 @@ pub(crate) struct HdlSignalSource {
 
 /// A process that writes a signal.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct HdlSignalDriver {
+#[doc(hidden)]
+pub struct HdlSignalDriver {
     /// The scope the driven signal is declared in, which a process writing
     /// it is written in: the instance, then any child path (`xtb.u1`).
     pub scope: String,
@@ -44,10 +46,12 @@ pub(crate) struct HdlSignalDriver {
 
 /// Every signal's static writers in one design, by process index.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SignalWriters(Vec<BTreeSet<usize>>);
+#[doc(hidden)]
+pub struct SignalWriters(Vec<BTreeSet<usize>>);
 
 impl SignalWriters {
-    pub(crate) fn of(plan: &CanonicalDigitalPlan) -> Self {
+    #[doc(hidden)]
+    pub fn of(plan: &CanonicalDigitalPlan) -> Self {
         // What each task and function writes, itself or through what it
         // calls in turn, to a fixed point over the call graph.
         let routines: Vec<_> = plan
@@ -126,7 +130,8 @@ fn function_writes(function: &CfgFunction) -> (BTreeSet<DigitalSignalId>, BTreeS
 
 /// A net or variable of an instance's design that has a value to trace.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct HdlVariable {
+#[doc(hidden)]
+pub struct HdlVariable {
     pub signal: DigitalSignalId,
     /// Its name as declared.
     pub identifier: String,
@@ -137,7 +142,8 @@ pub(crate) struct HdlVariable {
 
 impl HdlVariable {
     /// How many trace slots it publishes: one per bit, or one real.
-    pub(crate) fn slots(&self) -> usize {
+    #[doc(hidden)]
+    pub fn slots(&self) -> usize {
         match self.range {
             Some((msb, lsb)) => {
                 usize::try_from(msb.abs_diff(lsb)).map_or(usize::MAX, |span| span.saturating_add(1))
@@ -156,7 +162,8 @@ impl MixedSignalHost {
     /// The net or variable `identifier` names in this instance's design: the
     /// one declared with exactly that name, or else the only one whose name
     /// matches it ignoring case, as a deck that folds case spells it.
-    pub(crate) fn hdl_variable(&self, identifier: &str) -> Option<HdlVariable> {
+    #[doc(hidden)]
+    pub fn hdl_variable(&self, identifier: &str) -> Option<HdlVariable> {
         let plan = self.digital_plan();
         let candidates = || plan.signals.iter().filter(|signal| valued(signal));
         let signal = match candidates().find(|signal| signal.name == identifier) {
@@ -191,7 +198,8 @@ impl MixedSignalHost {
     /// with the port's signal: a bridge's node, an event port's net, and the
     /// deck net a port moved onto a converter's endpoint is recorded under.
     /// A node may come more than once.
-    pub(crate) fn traced_port_signals(&self, mut sink: impl FnMut(usize, DigitalSignalId)) {
+    #[doc(hidden)]
+    pub fn traced_port_signals(&self, mut sink: impl FnMut(usize, DigitalSignalId)) {
         self.boundary_trace_bindings(|node, signal, _, _| sink(node, signal));
         for port in &self.event_ports {
             sink(port.node, port.signal);
@@ -202,7 +210,8 @@ impl MixedSignalHost {
     }
 
     /// Where `signal` was declared, and the processes `writers` says write it.
-    pub(crate) fn signal_source(
+    #[doc(hidden)]
+    pub fn signal_source(
         &self,
         signal: DigitalSignalId,
         writers: &SignalWriters,

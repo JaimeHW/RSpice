@@ -3,17 +3,19 @@ use super::EventValue;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct EventTracePoint {
-    pub(crate) time: f64,
-    pub(crate) node: usize,
-    pub(crate) value: EventValue,
+#[doc(hidden)]
+pub struct EventTracePoint {
+    pub time: f64,
+    pub node: usize,
+    pub value: EventValue,
 }
 
 /// Disabled until transient initialization has produced its baseline snapshot.
 /// Only retained nodes allocate entries; cloning a trial clones its pending
 /// publications, so rejected events cannot escape into accepted results.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct EventTraceJournal {
+#[doc(hidden)]
+pub struct EventTraceJournal {
     retained: Arc<[bool]>,
     points: Vec<EventTracePoint>,
 }
@@ -30,12 +32,14 @@ impl EventTraceJournal {
         Ok(&self.retained)
     }
 
-    pub(crate) fn configure(&mut self, retained: Arc<[bool]>) {
+    #[doc(hidden)]
+    pub fn configure(&mut self, retained: Arc<[bool]>) {
         self.retained = retained;
         self.points.clear();
     }
 
-    pub(crate) fn record(&mut self, time: f64, node: usize, value: EventValue) {
+    #[doc(hidden)]
+    pub fn record(&mut self, time: f64, node: usize, value: EventValue) {
         if node
             .checked_sub(1)
             .and_then(|index| self.retained.get(index))
@@ -46,11 +50,13 @@ impl EventTraceJournal {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
 
-    pub(crate) fn drain_into(&mut self, points: &mut Vec<EventTracePoint>) {
+    #[doc(hidden)]
+    pub fn drain_into(&mut self, points: &mut Vec<EventTracePoint>) {
         points.append(&mut self.points);
     }
 }
@@ -58,7 +64,8 @@ impl EventTraceJournal {
 /// One waveform value per node, domain and physical instant. Stable ordering
 /// retains the final delta-cycle value without inventing zero-duration pulses.
 /// Digital and real domains remain distinct even on a hybrid circuit node.
-pub(crate) fn settle_trace_points(points: &mut Vec<EventTracePoint>) {
+#[doc(hidden)]
+pub fn settle_trace_points(points: &mut Vec<EventTracePoint>) {
     fn domain(value: EventValue) -> bool {
         matches!(value, EventValue::Real(_))
     }

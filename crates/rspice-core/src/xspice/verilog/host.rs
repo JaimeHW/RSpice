@@ -68,7 +68,8 @@ mod oscillation;
 mod paths;
 mod threads;
 use coupled::NoActiveParticipant;
-pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
+#[doc(hidden)]
+pub use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
 pub(crate) use oscillation::{process_label, process_reads, process_writes};
 
 use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
@@ -479,7 +480,8 @@ fn name_oscillating_tick(resolution: TimeResolution, error: SchedulerError) -> S
 /// A compiled digital plan, running.
 ///
 /// `Clone` is written out in `image.rs`, so a trial image can be refilled.
-pub(crate) struct DigitalHost {
+#[doc(hidden)]
+pub struct DigitalHost {
     /// Failed settlement cannot become an accepted restart boundary.
     checkpoint_failed: bool,
     plan: Arc<CanonicalDigitalPlan>,
@@ -687,7 +689,8 @@ impl DigitalHost {
     /// So two hosts over one plan share the compiled design and share no
     /// running state, which is exactly the property
     /// [`super::CompiledDigitalDesign::run`] rests on.
-    pub(crate) fn from_plan(
+    #[doc(hidden)]
+    pub fn from_plan(
         plan: Arc<CanonicalDigitalPlan>,
         resolution: TimeResolution,
         limits: SchedulerLimits,
@@ -823,7 +826,8 @@ impl DigitalHost {
             .map_err(DigitalRunError::from)
     }
 
-    pub(crate) fn connect_bits(
+    #[doc(hidden)]
+    pub fn connect_bits(
         &mut self,
         nets: &[Vec<super::store::DigitalBitConnection>],
     ) -> Result<(), DigitalRunError> {
@@ -837,7 +841,8 @@ impl DigitalHost {
             .map_err(|detail| DigitalRunError::Compile { detail })
     }
 
-    pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
+    #[doc(hidden)]
+    pub fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         self.store.connected_value(net)
     }
 
@@ -854,7 +859,8 @@ impl DigitalHost {
     }
 
     /// A fresh run sharing the immutable design and retaining scheduler limits.
-    pub(crate) fn fresh(&self) -> Self {
+    #[doc(hidden)]
+    pub fn fresh(&self) -> Self {
         let mut fresh = Self::from_plan(
             Arc::clone(&self.plan),
             self.resolution,
@@ -881,7 +887,8 @@ impl DigitalHost {
     }
 
     /// The signal a name refers to.
-    pub(crate) fn signal(&self, name: &str) -> Result<DigitalSignalId, DigitalRunError> {
+    #[doc(hidden)]
+    pub fn signal(&self, name: &str) -> Result<DigitalSignalId, DigitalRunError> {
         self.plan
             .signals
             .iter()
@@ -893,12 +900,14 @@ impl DigitalHost {
     }
 
     /// The value a signal holds right now.
-    pub(crate) fn read(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
+    #[doc(hidden)]
+    pub fn read(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
         self.store.value(signal)
     }
 
     /// The value a real net holds right now.
-    pub(crate) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
+    #[doc(hidden)]
+    pub fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
         self.store.real_value(signal)
     }
 
@@ -919,9 +928,8 @@ impl DigitalHost {
         self.store.other_driver_value(driver)
     }
 
-    pub(crate) fn external_contributions(
-        &self,
-    ) -> impl Iterator<Item = (&EventTarget, EventValue)> + '_ {
+    #[doc(hidden)]
+    pub fn external_contributions(&self) -> impl Iterator<Item = (&EventTarget, EventValue)> + '_ {
         self.store
             .external_bit_contributions()
             .map(|(target, value)| (target, EventValue::Digital(value)))
@@ -997,7 +1005,8 @@ impl DigitalHost {
         self.settle(0)
     }
 
-    pub(crate) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
+    #[doc(hidden)]
+    pub fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
         self.elaboration_closed = true;
         if self.checks.is_some() {
             for warning in checks::TimingChecks::start_warnings(&self.plan) {
@@ -1016,7 +1025,8 @@ impl DigitalHost {
     }
 
     /// Write a signal from outside the design and settle the consequences.
-    pub(crate) fn force(
+    #[doc(hidden)]
+    pub fn force(
         &mut self,
         signal: DigitalSignalId,
         value: FourStateValue,
@@ -1103,7 +1113,8 @@ impl DigitalHost {
     /// which hands the HDL a wake from the other event kernel at the trial's
     /// own endpoint: that event happened there, so there is no interior
     /// instant to carry apart from the candidate.
-    pub(crate) fn force_many_from_analog_with(
+    #[doc(hidden)]
+    pub fn force_many_from_analog_with(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
@@ -1196,7 +1207,8 @@ impl DigitalHost {
         self.advance_to_with(tick, &mut NoActiveParticipant)
     }
 
-    pub(crate) fn advance_to_with(
+    #[doc(hidden)]
+    pub fn advance_to_with(
         &mut self,
         tick: u64,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
@@ -1222,7 +1234,8 @@ impl DigitalHost {
         self.settle_with(tick, &mut NoActiveParticipant)
     }
 
-    pub(crate) fn settle_with(
+    #[doc(hidden)]
+    pub fn settle_with(
         &mut self,
         tick: u64,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),

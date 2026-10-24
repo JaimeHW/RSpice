@@ -39,16 +39,17 @@ pub(super) struct DriveEdge {
 /// with its values before and after, the edge time, the processes writing it,
 /// and the drive it crossed into the analog circuit through.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DriveEdgeReport {
-    pub(crate) net: String,
-    pub(crate) before: String,
-    pub(crate) after: String,
-    pub(crate) time: f64,
-    pub(crate) drivers: Vec<String>,
-    pub(crate) into: String,
+#[doc(hidden)]
+pub struct DriveEdgeReport {
+    pub net: String,
+    pub before: String,
+    pub after: String,
+    pub time: f64,
+    pub drivers: Vec<String>,
+    pub into: String,
     /// Whether the drive steps between its values at once: a D/A bridge
     /// does. A read may pass through `transition()`, so it is not said to.
-    pub(crate) ideal: bool,
+    pub ideal: bool,
 }
 
 impl MixedSignalHost {
@@ -98,11 +99,8 @@ impl MixedSignalHost {
     /// failure at `time` lies after it by no more than two steps of `step`:
     /// the window an inserted converter with no delay and no transition time
     /// is given.
-    pub(crate) fn drive_edge_before_failure(
-        &self,
-        time: f64,
-        step: f64,
-    ) -> Option<DriveEdgeReport> {
+    #[doc(hidden)]
+    pub fn drive_edge_before_failure(&self, time: f64, step: f64) -> Option<DriveEdgeReport> {
         let edge = self.state.accepted_drive_edge.as_ref()?;
         if edge.time <= 0.0 || edge.time >= time || time - edge.time > 2.0 * step {
             return None;

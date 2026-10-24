@@ -4,15 +4,18 @@ use crate::xspice::DigitalValue;
 use crate::xspice::event_scheduler::EventTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExternalRealDriverId(pub(super) usize);
+#[doc(hidden)]
+pub struct ExternalRealDriverId(pub(super) usize);
 impl ExternalRealDriverId {
-    pub(crate) fn index(self) -> usize {
+    #[doc(hidden)]
+    pub fn index(self) -> usize {
         self.0
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ExternalNetChange {
+#[doc(hidden)]
+pub enum ExternalNetChange {
     Bits(DigitalBitChange),
     DriverInput {
         driver: ExternalBitDriverId,
@@ -35,7 +38,8 @@ pub(crate) enum ExternalNetChange {
     },
 }
 impl ExternalNetChange {
-    pub(crate) fn starts_publication(self) -> bool {
+    #[doc(hidden)]
+    pub fn starts_publication(self) -> bool {
         match self {
             Self::Bits(change) => change.starts_publication,
             Self::DriverInput {

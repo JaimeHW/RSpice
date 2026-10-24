@@ -2,7 +2,8 @@
 use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
 use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
-pub(crate) mod checkpoint;
+#[doc(hidden)]
+pub mod checkpoint;
 mod observations;
 use crate::xspice::event_scheduler::EventLattice;
 use crate::xspice::event_scheduler::EventTarget;
@@ -234,7 +235,8 @@ impl MixedDigital {
 /// The circuit's one HDL process/driver/queue state. Instance maps are aligned
 /// with CircuitData's analog-host order, independently of linked process order.
 #[derive(Clone)]
-pub(crate) struct MixedDigitalCoordinator {
+#[doc(hidden)]
+pub struct MixedDigitalCoordinator {
     digital: MixedCell<DigitalHost>,
     /// The image the last trial left behind, refilled by the next trial's
     /// first write instead of a fresh copy of the host.
@@ -288,7 +290,8 @@ pub(crate) struct MixedDigitalCoordinator {
 }
 
 /// A design-requested end of run, with where it was requested.
-pub(crate) struct CoordinatorFinish<'a> {
+#[doc(hidden)]
+pub struct CoordinatorFinish<'a> {
     /// The enrolled instance whose process executed it.
     pub instance: &'a str,
     /// That instance's module.
@@ -299,7 +302,8 @@ pub(crate) struct CoordinatorFinish<'a> {
 /// The coordinator's half of a held-equilibrium image; see
 /// [`MixedDigitalCoordinator::equilibrium_image`].
 #[derive(Clone)]
-pub(crate) struct CoordinatorEquilibriumImage {
+#[doc(hidden)]
+pub struct CoordinatorEquilibriumImage {
     topology: [u8; 32],
     digital: MixedCell<DigitalHost>,
     observers: Vec<AbsDeltaState>,
@@ -366,7 +370,8 @@ fn readable_net_name(name: &str) -> String {
 }
 
 impl MixedDigitalCoordinator {
-    pub(crate) fn enroll(
+    #[doc(hidden)]
+    pub fn enroll(
         hosts: &mut [MixedSignalHost],
         event_nodes: &std::collections::BTreeSet<usize>,
         control: &dyn rspice_veriloga::PipelineControl,
@@ -681,7 +686,8 @@ impl MixedDigitalCoordinator {
 
     /// Install the run's HDL options and output receiver before execution
     /// starts.
-    pub(crate) fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
+    #[doc(hidden)]
+    pub fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
         use super::super::effects::files::{HdlFileOptions, HdlFileStore, HdlFileTarget};
         self.hdl_output = config.output.clone();
         // Design P2 section 4.3: relative HDL paths resolve against the
@@ -710,7 +716,8 @@ impl MixedDigitalCoordinator {
 
     /// The `$finish`, `$stop` or `$fatal` the design executed, with the
     /// enrolled instance and module it ran in.
-    pub(crate) fn hdl_finish(&self) -> Option<CoordinatorFinish<'_>> {
+    #[doc(hidden)]
+    pub fn hdl_finish(&self) -> Option<CoordinatorFinish<'_>> {
         let finish = self.digital.hdl_finish()?;
         let plan = self.digital.plan();
         let site = plan.system_calls.get(finish.site as usize)?;
@@ -737,7 +744,8 @@ impl MixedDigitalCoordinator {
         })
     }
 
-    pub(crate) fn fresh(&self) -> Self {
+    #[doc(hidden)]
+    pub fn fresh(&self) -> Self {
         Self {
             accepted_observers: vec![AbsDeltaState::default(); self.accepted_observers.len()],
             accepted_observation_probes: vec![None; self.accepted_observation_probes.len()],
@@ -825,7 +833,8 @@ impl MixedDigitalCoordinator {
         Ok(bank)
     }
 
-    pub(crate) fn start(&mut self) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn start(&mut self) -> Result<(), MixedSignalError> {
         if !self.enabled {
             self.digital.make_mut().prepare_start()?;
             self.enabled = true;
@@ -833,19 +842,22 @@ impl MixedDigitalCoordinator {
         Ok(())
     }
 
-    pub(crate) fn event_bindings(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+    #[doc(hidden)]
+    pub fn event_bindings(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.event_nodes
             .iter()
             .enumerate()
             .map(|(net, &node)| (node, net))
     }
 
-    pub(crate) fn real_event_bindings(&self) -> &[(usize, DigitalSignalId)] {
+    #[doc(hidden)]
+    pub fn real_event_bindings(&self) -> &[(usize, DigitalSignalId)] {
         &self.real_event_nodes
     }
 
     /// `fallbacks` names the receiving drivers by index into `drivers`.
-    pub(crate) fn attach_external_reals(
+    #[doc(hidden)]
+    pub fn attach_external_reals(
         &mut self,
         observed: &[DigitalSignalId],
         drivers: &[(DigitalSignalId, EventTarget)],
@@ -856,7 +868,8 @@ impl MixedDigitalCoordinator {
             .attach_external_reals_with_fallbacks(observed, drivers, fallbacks)
     }
 
-    pub(crate) fn attach_external_bits(
+    #[doc(hidden)]
+    pub fn attach_external_bits(
         &mut self,
         observed: &[usize],
         drivers: &[(usize, EventTarget)],
@@ -866,7 +879,8 @@ impl MixedDigitalCoordinator {
             .attach_external_bits(observed, drivers)
     }
 
-    pub(crate) fn observe_other_drivers(
+    #[doc(hidden)]
+    pub fn observe_other_drivers(
         &mut self,
         drivers: &[ExternalBitDriverId],
     ) -> Result<(), DigitalRunError> {
@@ -878,7 +892,8 @@ impl MixedDigitalCoordinator {
         self.event_domains().map(|(node, _)| node)
     }
 
-    pub(crate) fn event_domains(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
+    #[doc(hidden)]
+    pub fn event_domains(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
         self.event_nodes
             .iter()
             .copied()
@@ -889,7 +904,8 @@ impl MixedDigitalCoordinator {
 
     /// Match the snapshot's resolved / driven / sampled precedence. Resolve
     /// once at capture setup, rather than scanning every net on every event.
-    pub(crate) fn configure_traces(&mut self, hosts: &[MixedSignalHost], retained: Arc<[bool]>) {
+    #[doc(hidden)]
+    pub fn configure_traces(&mut self, hosts: &[MixedSignalHost], retained: Arc<[bool]>) {
         use super::super::store::TraceSource;
         let mut claims = Vec::new();
         for (net, &node) in self.event_nodes.iter().enumerate() {
@@ -948,10 +964,8 @@ impl MixedDigitalCoordinator {
         self.digital.make_mut().configure_traces(&sources, retained);
     }
 
-    pub(crate) fn drain_traces(
-        &mut self,
-        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
-    ) {
+    #[doc(hidden)]
+    pub fn drain_traces(&mut self, points: &mut Vec<crate::xspice::event_trace::EventTracePoint>) {
         if self.digital.has_traces() {
             self.digital.make_mut().drain_traces(points);
         }
@@ -960,7 +974,8 @@ impl MixedDigitalCoordinator {
     /// Publish HDL variables as traces: each one an instance's own signal,
     /// named by the instance's place among the enrolled hosts, with whether
     /// it is a real and the slot its first value goes to.
-    pub(crate) fn trace_variables(&mut self, vars: &[(usize, DigitalSignalId, bool, usize)]) {
+    #[doc(hidden)]
+    pub fn trace_variables(&mut self, vars: &[(usize, DigitalSignalId, bool, usize)]) {
         let vars = vars
             .iter()
             .map(
@@ -976,7 +991,8 @@ impl MixedDigitalCoordinator {
 
     /// The traced variables' publications since the last accepted point,
     /// then every one's value at `time`, the point being accepted.
-    pub(crate) fn drain_variable_traces(
+    #[doc(hidden)]
+    pub fn drain_variable_traces(
         &mut self,
         time: f64,
         points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
@@ -987,20 +1003,23 @@ impl MixedDigitalCoordinator {
         self.digital.variable_snapshot(time, points);
     }
 
-    pub(crate) fn real_event_values(&self) -> impl Iterator<Item = (usize, f64)> + '_ {
+    #[doc(hidden)]
+    pub fn real_event_values(&self) -> impl Iterator<Item = (usize, f64)> + '_ {
         self.real_event_nodes
             .iter()
             .filter_map(|&(node, signal)| self.digital.read_real(signal).map(|value| (node, value)))
     }
 
-    pub(crate) fn checkpoint_other_drivers(
+    #[doc(hidden)]
+    pub fn checkpoint_other_drivers(
         &self,
         driver: ExternalBitDriverId,
     ) -> Option<crate::xspice::DigitalValue> {
         self.digital.checkpoint_other_drivers(driver)
     }
 
-    pub(crate) fn external_contributions(
+    #[doc(hidden)]
+    pub fn external_contributions(
         &self,
     ) -> impl Iterator<Item = (&EventTarget, crate::xspice::EventValue)> + '_ {
         self.digital.external_contributions()
@@ -1021,18 +1040,15 @@ impl MixedDigitalCoordinator {
 
     /// [`Self::boundary_drive`] of the event net the circuit's event node
     /// `node` carries, or `None` for a node that is not the design's.
-    pub(crate) fn event_node_drive(
-        &self,
-        node: usize,
-    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+    #[doc(hidden)]
+    pub fn event_node_drive(&self, node: usize) -> Option<crate::xspice::verilog::store::BitDrive> {
         let net = self.event_nodes.iter().position(|&event| event == node)?;
         let bit = self.event_bits[net];
         self.boundary_drive(bit.signal, bit.bit)
     }
 
-    pub(crate) fn event_values(
-        &self,
-    ) -> impl Iterator<Item = (usize, crate::xspice::DigitalValue)> + '_ {
+    #[doc(hidden)]
+    pub fn event_values(&self) -> impl Iterator<Item = (usize, crate::xspice::DigitalValue)> + '_ {
         self.event_nodes
             .iter()
             .enumerate()
@@ -1060,7 +1076,8 @@ impl MixedDigitalCoordinator {
     /// The instance is still optional. The queue also holds the host's
     /// nonblocking-update wakeup and external bit drivers, which belong to no
     /// module, and an answer of `None` there is the honest one.
-    pub(crate) fn next_event_time(&self) -> Result<Option<(Option<&str>, f64)>, MixedSignalError> {
+    #[doc(hidden)]
+    pub fn next_event_time(&self) -> Result<Option<(Option<&str>, f64)>, MixedSignalError> {
         let Some((tick, process)) = self.digital.next_tick_process() else {
             return Ok(None);
         };
@@ -1081,7 +1098,8 @@ impl MixedDigitalCoordinator {
     /// activation the analog side steps past is a synchronization fault. A
     /// positive floor is the transient stepper's hard minimum timestep, and it
     /// is what makes [`Self::open_trial`] able to tell the two cases apart.
-    pub(crate) fn set_analog_step_floor(&mut self, floor: f64) {
+    #[doc(hidden)]
+    pub fn set_analog_step_floor(&mut self, floor: f64) {
         self.analog_step_floor = if floor.is_finite() && floor > 0.0 {
             floor
         } else {
@@ -1091,14 +1109,16 @@ impl MixedDigitalCoordinator {
 
     /// The published copy of the circuit's one floor this wheel measures a
     /// stepped-past activation against.
-    pub(crate) fn analog_step_floor(&self) -> f64 {
+    #[doc(hidden)]
+    pub fn analog_step_floor(&self) -> f64 {
         self.analog_step_floor
     }
 
     /// The kernel's tick lattice under that floor: what a coupled code-model
     /// output is made canonical on, and what a wake from one is dated with
     /// ([`Instant::coincident_ceil_tick`]).
-    pub(crate) fn event_lattice(&self) -> EventLattice {
+    #[doc(hidden)]
+    pub fn event_lattice(&self) -> EventLattice {
         EventLattice::new(self.resolution, self.analog_step_floor)
     }
 
@@ -1134,7 +1154,8 @@ impl MixedDigitalCoordinator {
     /// that window coalesces onto this one analog timepoint. The refusal is
     /// kept for an activation the stepper could have landed on, because that
     /// one is a lost breakpoint rather than a resolution limit.
-    pub(crate) fn open_trial(
+    #[doc(hidden)]
+    pub fn open_trial(
         &mut self,
         time: f64,
         probe: bool,
@@ -1210,7 +1231,8 @@ impl MixedDigitalCoordinator {
 /// explicit [`MixedDigitalCoordinator::commit_trial`] — the same discipline,
 /// enforced in the one place that owns both halves.
 #[derive(Clone)]
-pub(crate) struct SharedTrialCursor {
+#[doc(hidden)]
+pub struct SharedTrialCursor {
     observers: Vec<AbsDeltaState>,
     observation_probes: Vec<Option<f64>>,
     observation_time: Option<f64>,
@@ -1288,7 +1310,8 @@ impl SharedTrialCursor {
     ///
     /// The one caller is the acceptance path, which hands the answer to every
     /// enrolled instance before a boundary move at this timepoint is judged.
-    pub(crate) fn opened_on_scheduled_activation(&self) -> bool {
+    #[doc(hidden)]
+    pub fn opened_on_scheduled_activation(&self) -> bool {
         self.scheduled_activation
     }
 
@@ -1305,7 +1328,8 @@ impl SharedTrialCursor {
 
 impl MixedDigitalCoordinator {
     /// Read every process probe before allowing any instance to run.
-    pub(crate) fn advance(
+    #[doc(hidden)]
+    pub fn advance(
         &mut self,
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
@@ -1314,7 +1338,8 @@ impl MixedDigitalCoordinator {
         self.advance_with(cursor, hosts, solution, None)
     }
 
-    pub(crate) fn advance_with(
+    #[doc(hidden)]
+    pub fn advance_with(
         &mut self,
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
@@ -1421,7 +1446,8 @@ impl MixedDigitalCoordinator {
     /// Publish newly detected converter inputs through the analog causal lane.
     /// Immediate threshold consequences use nearest-tick reporting, as the
     /// direct A/D path does. Delayed converter outputs remain queued events.
-    pub(crate) fn publish_converter_inputs_with(
+    #[doc(hidden)]
+    pub fn publish_converter_inputs_with(
         &mut self,
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
@@ -1456,7 +1482,8 @@ impl MixedDigitalCoordinator {
     }
 
     /// Apply all A/D decisions together, preserving analog activation provenance.
-    pub(crate) fn publish_adc(
+    #[doc(hidden)]
+    pub fn publish_adc(
         &mut self,
         abort: &dyn crate::abort_signal::AbortSignal,
         cursor: &mut SharedTrialCursor,
@@ -1532,7 +1559,8 @@ impl MixedDigitalCoordinator {
         Ok(())
     }
 
-    pub(crate) fn publish_adc_with(
+    #[doc(hidden)]
+    pub fn publish_adc_with(
         &mut self,
         abort: &dyn crate::abort_signal::AbortSignal,
         cursor: &mut SharedTrialCursor,
@@ -1705,10 +1733,8 @@ impl MixedDigitalCoordinator {
 
     /// Refresh analog-facing values after shared settlement. No model view can
     /// advance a process or resolve a driver independently.
-    pub(crate) fn synchronize(
-        &self,
-        hosts: &mut [MixedSignalHost],
-    ) -> Result<bool, MixedSignalError> {
+    #[doc(hidden)]
+    pub fn synchronize(&self, hosts: &mut [MixedSignalHost]) -> Result<bool, MixedSignalError> {
         let mut changed = false;
         for (host, map) in hosts.iter_mut().zip(&self.maps) {
             let differs = map.signals.iter().enumerate().any(|(local, &global)| {
@@ -1783,7 +1809,8 @@ impl MixedDigitalCoordinator {
 
     /// Promote the candidate this cursor opened. The image it carries is
     /// dropped rather than applied.
-    pub(crate) fn commit_trial(&mut self, mut cursor: SharedTrialCursor) {
+    #[doc(hidden)]
+    pub fn commit_trial(&mut self, mut cursor: SharedTrialCursor) {
         assert!(
             !cursor.probe,
             "a numerical probe cannot commit shared digital state"
@@ -1807,7 +1834,8 @@ impl MixedDigitalCoordinator {
     /// than serialized, because the image never leaves the analysis that
     /// rebuilds the circuit, and it is captured between DC sweep points where
     /// no trial is open and no time has been accepted.
-    pub(crate) fn equilibrium_image(&self) -> Result<CoordinatorEquilibriumImage, String> {
+    #[doc(hidden)]
+    pub fn equilibrium_image(&self) -> Result<CoordinatorEquilibriumImage, String> {
         if !self.enabled || self.trial_open || self.accepted_time.is_some() {
             return Err(
                 "the held equilibrium image requires a started, idle time-zero coordinator".into(),
@@ -1824,7 +1852,8 @@ impl MixedDigitalCoordinator {
     /// Adopt a held equilibrium captured on another elaboration of this
     /// circuit, iff its digital structure is this one's. Returns `false`,
     /// leaving this coordinator as it was, when the structures differ.
-    pub(crate) fn adopt_equilibrium_image(
+    #[doc(hidden)]
+    pub fn adopt_equilibrium_image(
         &mut self,
         image: &CoordinatorEquilibriumImage,
     ) -> Result<bool, String> {
@@ -1847,7 +1876,8 @@ impl MixedDigitalCoordinator {
     /// equilibrium. The image it carries is dropped rather than applied, and
     /// no time is accepted: the next trial at time zero opens on this store,
     /// so it is the operating point again rather than a repeated timepoint.
-    pub(crate) fn commit_equilibrium(&mut self, mut cursor: SharedTrialCursor) {
+    #[doc(hidden)]
+    pub fn commit_equilibrium(&mut self, mut cursor: SharedTrialCursor) {
         assert!(
             !cursor.probe,
             "a numerical probe cannot commit shared digital state"
@@ -1881,7 +1911,8 @@ impl MixedDigitalCoordinator {
     /// Called from the circuit trial's `Drop` on every exit that did not
     /// commit, which is what makes a rejected trial's publications, process
     /// resumptions and queued events disappear together.
-    pub(crate) fn rollback_trial(&mut self, mut cursor: SharedTrialCursor) {
+    #[doc(hidden)]
+    pub fn rollback_trial(&mut self, mut cursor: SharedTrialCursor) {
         if let Some(rollback) = cursor.rollback.take() {
             std::mem::replace(&mut self.digital, rollback).retire(&mut self.spare);
         }

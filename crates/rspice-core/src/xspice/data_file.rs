@@ -254,7 +254,8 @@ fn ngspice_input_dir_path(path: &Path) -> Option<PathBuf> {
 /// Reserve both the search-directory candidate and the CWD fallback: publishing
 /// a previously absent preferred file must not shadow the input used by a run.
 /// This query performs no native I/O and never reads a registered virtual file.
-pub(crate) fn native_input_candidates(path: &str) -> Vec<PathBuf> {
+#[doc(hidden)]
+pub fn native_input_candidates(path: &str) -> Vec<PathBuf> {
     if path.is_empty() || lock_virtual_files().files.contains_key(path) {
         return Vec::new();
     }
@@ -481,7 +482,8 @@ pub(crate) fn read_to_string_with_stamp_limited(
     read_native_to_string_with_stamp_limited(path, limit)
 }
 
-pub(crate) fn read_to_string(path: &str) -> Result<Arc<str>, String> {
+#[doc(hidden)]
+pub fn read_to_string(path: &str) -> Result<Arc<str>, String> {
     read_to_string_with_stamp(path).map(|(contents, _)| contents)
 }
 
@@ -489,7 +491,8 @@ pub(crate) fn read_to_string(path: &str) -> Result<Arc<str>, String> {
 ///
 /// Registered virtual files are checked before their cheap `Arc` clone. Native
 /// files use the shared race-safe, bounded UTF-8 reader.
-pub(crate) fn read_to_string_limited(path: &str, limit: usize) -> Result<Arc<str>, String> {
+#[doc(hidden)]
+pub fn read_to_string_limited(path: &str, limit: usize) -> Result<Arc<str>, String> {
     read_to_string_with_stamp_limited(path, limit).map(|(contents, _)| contents)
 }
 

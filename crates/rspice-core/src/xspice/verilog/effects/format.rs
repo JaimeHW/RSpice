@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 
 /// `$timeformat`'s settings (IEEE 1364-2005 section 17.3.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TimeFormat {
+#[doc(hidden)]
+pub struct TimeFormat {
     /// The power of ten `%t` prints in.
     pub units: i8,
     /// Digits after the decimal point.
@@ -30,7 +31,8 @@ pub(crate) struct TimeFormat {
 impl TimeFormat {
     /// Section 17.3.2's defaults: the design's finest precision, no fraction,
     /// no suffix, twenty columns.
-    pub(crate) fn default_for(design_precision: i8) -> Self {
+    #[doc(hidden)]
+    pub fn default_for(design_precision: i8) -> Self {
         Self {
             units: design_precision,
             precision: 0,
@@ -42,7 +44,8 @@ impl TimeFormat {
 
 /// One argument as the formatter sees it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum FormatArgument<'a> {
+#[doc(hidden)]
+pub enum FormatArgument<'a> {
     /// `$display(a,,b)`: printed as one space.
     Empty,
     /// A string literal: a format specification where it stands, text where a
@@ -59,7 +62,8 @@ pub(crate) enum FormatArgument<'a> {
 }
 
 /// What a format reads besides its arguments.
-pub(crate) struct FormatContext<'a> {
+#[doc(hidden)]
+pub struct FormatContext<'a> {
     /// How an argument no specification consumes is printed.
     pub radix: DigitalRadix,
     /// `%m`: the calling scope's full path.
@@ -73,7 +77,8 @@ pub(crate) struct FormatContext<'a> {
 }
 
 /// Format a whole argument list the way `$display` does, without the newline.
-pub(crate) fn format(arguments: &[FormatArgument<'_>], context: &FormatContext<'_>) -> String {
+#[doc(hidden)]
+pub fn format(arguments: &[FormatArgument<'_>], context: &FormatContext<'_>) -> String {
     let mut out = String::new();
     let mut next = 0;
     while next < arguments.len() {

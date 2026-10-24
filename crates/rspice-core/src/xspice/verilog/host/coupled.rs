@@ -9,7 +9,8 @@ use super::*;
 /// One external Active wave. Return true while external work remains, even if
 /// it did not change an HDL bit. Consume resolved changes in publication order;
 /// reading only the last value can lose intervening edges.
-pub(crate) trait DigitalActiveParticipant {
+#[doc(hidden)]
+pub trait DigitalActiveParticipant {
     fn settle_active(
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,
@@ -69,7 +70,8 @@ pub(crate) trait DigitalActiveParticipant {
 
 /// Restricted access: an event participant can observe resolved nets and drive
 /// its enrolled outputs, but cannot advance HDL time or promote a later region.
-pub(crate) struct DigitalActiveExchange<'a> {
+#[doc(hidden)]
+pub struct DigitalActiveExchange<'a> {
     pub(super) host: &'a mut DigitalHost,
     pub(super) tick: u64,
     pub(super) physical_seconds: f64,
@@ -98,7 +100,8 @@ impl DigitalActiveExchange<'_> {
         self.host.read(signal)
     }
 
-    pub(crate) fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
+    #[doc(hidden)]
+    pub fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
         self.host.read_real(signal)
     }
     pub(crate) fn analog_edge(&self, signal: DigitalSignalId) -> u8 {
@@ -149,10 +152,12 @@ impl DigitalActiveExchange<'_> {
     pub(crate) fn tick(&self) -> u64 {
         self.tick
     }
-    pub(crate) fn physical_seconds(&self) -> f64 {
+    #[doc(hidden)]
+    pub fn physical_seconds(&self) -> f64 {
         self.physical_seconds
     }
-    pub(crate) fn read_net(&self, net: usize) -> Result<DigitalValue, DigitalRunError> {
+    #[doc(hidden)]
+    pub fn read_net(&self, net: usize) -> Result<DigitalValue, DigitalRunError> {
         self.host
             .store
             .connected_value(net)
@@ -162,13 +167,12 @@ impl DigitalActiveExchange<'_> {
     }
     /// What the design drives onto the shared net `net`, at its strength
     /// levels; see `DigitalSignalStore::connected_drive`.
-    pub(crate) fn read_net_drive(
-        &self,
-        net: usize,
-    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+    #[doc(hidden)]
+    pub fn read_net_drive(&self, net: usize) -> Option<crate::xspice::verilog::store::BitDrive> {
         self.host.store.connected_drive(net)
     }
-    pub(crate) fn read_other_drivers(
+    #[doc(hidden)]
+    pub fn read_other_drivers(
         &self,
         driver: ExternalBitDriverId,
     ) -> Result<DigitalValue, DigitalRunError> {
@@ -180,10 +184,8 @@ impl DigitalActiveExchange<'_> {
     }
     /// Whether the net a receiving real driver samples into is driven by its
     /// own drivers.
-    pub(crate) fn read_real_drive(
-        &self,
-        driver: ExternalRealDriverId,
-    ) -> Result<bool, DigitalRunError> {
+    #[doc(hidden)]
+    pub fn read_real_drive(&self, driver: ExternalRealDriverId) -> Result<bool, DigitalRunError> {
         self.host.store.real_fallback_driven(driver).ok_or_else(|| {
             DigitalRunError::ExternalExecution {
                 detail: format!("unknown receiving real driver {}", driver.index()),
@@ -194,7 +196,8 @@ impl DigitalActiveExchange<'_> {
     pub(crate) fn take_changes(&mut self) -> Vec<DigitalBitChange> {
         self.host.store.take_external_bit_changes()
     }
-    pub(crate) fn take_event_changes(&mut self) -> Vec<ExternalNetChange> {
+    #[doc(hidden)]
+    pub fn take_event_changes(&mut self) -> Vec<ExternalNetChange> {
         self.host.store.take_external_changes()
     }
     #[cfg(test)]
@@ -204,7 +207,8 @@ impl DigitalActiveExchange<'_> {
     ) -> Result<(), DigitalRunError> {
         self.drive_bank(drives, &[])
     }
-    pub(crate) fn drive_bank(
+    #[doc(hidden)]
+    pub fn drive_bank(
         &mut self,
         drives: &[(ExternalBitDriverId, DigitalValue)],
         reals: &[(ExternalRealDriverId, f64)],
@@ -343,7 +347,8 @@ impl DigitalHost {
 
     /// Enroll external driver identities at elaboration, before process execution.
     /// The returned IDs and immutable topology survive fresh analysis and cloning.
-    pub(crate) fn attach_external_bits(
+    #[doc(hidden)]
+    pub fn attach_external_bits(
         &mut self,
         observed: &[usize],
         drivers: &[(usize, EventTarget)],
@@ -364,7 +369,8 @@ impl DigitalHost {
         Ok(identities)
     }
 
-    pub(crate) fn observe_other_drivers(
+    #[doc(hidden)]
+    pub fn observe_other_drivers(
         &mut self,
         drivers: &[ExternalBitDriverId],
     ) -> Result<(), DigitalRunError> {

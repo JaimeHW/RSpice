@@ -8,10 +8,12 @@ use crate::xspice::logic_map;
 use crate::xspice::{DigitalState, DigitalValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExternalBitDriverId(pub(super) usize);
+#[doc(hidden)]
+pub struct ExternalBitDriverId(pub(super) usize);
 
 impl ExternalBitDriverId {
-    pub(crate) fn index(self) -> usize {
+    #[doc(hidden)]
+    pub fn index(self) -> usize {
         self.0
     }
 }
@@ -19,14 +21,16 @@ impl ExternalBitDriverId {
 /// One resolved-net change. The first change of each atomic publication is
 /// marked so an event participant can reconstruct simultaneous vector updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DigitalBitChange {
+#[doc(hidden)]
+pub struct DigitalBitChange {
     pub net: usize,
     pub previous: DigitalValue,
     pub value: DigitalValue,
     pub starts_publication: bool,
 }
 
-pub(crate) use rspice_veriloga::canonical_ir::digital::DigitalNetBit as DigitalBitConnection;
+#[doc(hidden)]
+pub use rspice_veriloga::canonical_ir::digital::DigitalNetBit as DigitalBitConnection;
 
 #[derive(Clone, serde::Serialize)]
 struct BitNet {

@@ -410,7 +410,8 @@ impl TimeResolution {
 /// [`Instant`]'s "one instant, one key" for the rule this carries.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct EventLattice {
+#[doc(hidden)]
+pub struct EventLattice {
     resolution: TimeResolution,
     /// The transient stepper's hard minimum at its latest accepted clock, or
     /// zero before a solver has declared one.
@@ -431,7 +432,8 @@ impl EventLattice {
 
     /// The lattice of `resolution`'s ticks under the solver floor `floor`. A
     /// floor that is not a finite positive interval declares none.
-    pub(crate) fn new(resolution: TimeResolution, floor: f64) -> Self {
+    #[doc(hidden)]
+    pub fn new(resolution: TimeResolution, floor: f64) -> Self {
         Self {
             resolution,
             floor: if floor.is_finite() && floor > 0.0 {
@@ -946,7 +948,8 @@ impl SchedulerLimits {
     /// `#0` in it is caught long before, at
     /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`].
     #[cfg(feature = "veriloga")]
-    pub(crate) const HDL: Self = Self {
+    #[doc(hidden)]
+    pub const HDL: Self = Self {
         max_delta_cycles_per_tick: 20_000_000,
         max_events_per_tick: 16_000_000,
         max_reported_oscillating_entities: 16,

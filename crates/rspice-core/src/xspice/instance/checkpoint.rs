@@ -48,7 +48,8 @@ impl From<&SignatureEntry> for EventInputSignatureEntry {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct InstanceRuntimeCheckpoint {
+#[doc(hidden)]
+pub struct InstanceRuntimeCheckpoint {
     version: u32,
     identity: [u8; 32],
     context: ContextRuntimeCheckpoint,
@@ -86,7 +87,8 @@ impl std::io::Write for HashWriter {
 
 impl XspiceInstance {
     #[cfg(feature = "veriloga")]
-    pub(crate) fn runtime_checkpoint_resume_blocker(&self) -> Option<String> {
+    #[doc(hidden)]
+    pub fn runtime_checkpoint_resume_blocker(&self) -> Option<String> {
         self.require_runtime_checkpoint_support()
             .and_then(|()| {
                 if self.context.has_checkpoint_host_resources() {
@@ -101,7 +103,8 @@ impl XspiceInstance {
 
     /// Resolve receiving-circuit loads without evaluating model inputs or body.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn prepare_checkpoint_loads(
+    #[doc(hidden)]
+    pub fn prepare_checkpoint_loads(
         &mut self,
         loads: &crate::xspice::EventLoads,
     ) -> Result<(), String> {

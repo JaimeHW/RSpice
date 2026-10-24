@@ -466,8 +466,16 @@ const MAX_PUBLIC_ITEMS: usize = 5313;
 // shared cells and the scheduler's slot id that those signatures name. The
 // re-export, its module and the three scheduler and trace readers it calls
 // compile under `test-support` as well as `veriloga` and `cfg(test)`, for the
-// circuit's checkpoint tests. The census is 1,346, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1346;
+// circuit's checkpoint tests. The census was 1,346, with no slack.
+// The circuit store, the engine's builder and the analyses reach the event
+// queue and its values, the trace journal, resource transactions, data-file
+// readers, auto-bridge names, the Verilog host's format, effect, coupling and
+// checkpoint records, and the mixed-signal coordinator's boundary, trace and
+// checkpoint plumbing through hidden items for the same move, with each type
+// their signatures name. The event scheduler's `schedule`, `len` and
+// `is_empty` compile under `test-support` as well as `cfg(test)`, for the
+// engine's event tests. The census is 1,598, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1598;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

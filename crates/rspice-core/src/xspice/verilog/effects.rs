@@ -32,7 +32,8 @@
 pub(crate) mod checkpoint;
 pub(crate) mod dump;
 pub(crate) mod files;
-pub(crate) mod format;
+#[doc(hidden)]
+pub mod format;
 pub(crate) mod plusargs;
 pub(crate) mod random;
 
@@ -67,7 +68,8 @@ pub(crate) struct HdlEffectsConfig {
 
 /// What ended a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) enum HdlFinishKind {
+#[doc(hidden)]
+pub enum HdlFinishKind {
     Finish,
     Stop,
     Fatal,
@@ -75,7 +77,8 @@ pub(crate) enum HdlFinishKind {
 
 /// A `$finish`, `$stop` or `$fatal` the design executed.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct HdlFinishRequest {
+#[doc(hidden)]
+pub struct HdlFinishRequest {
     pub kind: HdlFinishKind,
     pub level: u8,
     pub site: u32,

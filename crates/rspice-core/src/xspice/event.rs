@@ -42,19 +42,20 @@ pub enum EventValue {
 /// flattened, so the drain can move the driver's names straight into its
 /// driver key without copying them.
 #[derive(Debug, Clone)]
-pub(crate) struct XspiceEvent {
+#[doc(hidden)]
+pub struct XspiceEvent {
     /// Absolute time the event occurs, in analog seconds.
-    pub(crate) time: Value,
+    pub time: Value,
     /// Target node identifier (internal representation).
-    pub(crate) node_id: usize,
+    pub node_id: usize,
     /// Port name on the driving instance.
-    pub(crate) port_name: String,
+    pub port_name: String,
     /// Vector element index distinguishing separate drivers on one port.
-    pub(crate) driver_index: usize,
+    pub driver_index: usize,
     /// Instance that scheduled the event.
-    pub(crate) instance: String,
+    pub instance: String,
     /// New event value.
-    pub(crate) value: EventValue,
+    pub value: EventValue,
 }
 
 //=============================================================================
@@ -118,7 +119,8 @@ impl Default for XspiceEventScheduler {
 
 impl XspiceEventScheduler {
     /// Create a new empty scheduler.
-    pub(crate) fn new() -> Self {
+    #[doc(hidden)]
+    pub fn new() -> Self {
         Self {
             inner: EventScheduler::new(SchedulerLimits::default()),
             #[cfg(feature = "veriloga")]
@@ -129,7 +131,8 @@ impl XspiceEventScheduler {
     /// The lattice output times are made canonical on, if the queue is
     /// coupled.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn lattice(&self) -> Option<EventLattice> {
+    #[doc(hidden)]
+    pub fn lattice(&self) -> Option<EventLattice> {
         self.lattice
     }
 
@@ -139,7 +142,8 @@ impl XspiceEventScheduler {
     /// lattice in force when it was scheduled, and moving it now would move an
     /// instant something may already have landed on.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn set_lattice(&mut self, lattice: Option<EventLattice>) {
+    #[doc(hidden)]
+    pub fn set_lattice(&mut self, lattice: Option<EventLattice>) {
         self.lattice = lattice;
     }
 
@@ -179,8 +183,9 @@ impl XspiceEventScheduler {
     ///
     /// Test-only: a code model dates every output from the time it was
     /// evaluated at, which is what keys it ([`Self::schedule_delayed`]).
-    #[cfg(test)]
-    pub(crate) fn schedule(
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn schedule(
         &mut self,
         time: Value,
         node_id: usize,
@@ -222,7 +227,8 @@ impl XspiceEventScheduler {
     }
 
     /// Schedule a digital event with delay from current time.
-    pub(crate) fn schedule_delayed(
+    #[doc(hidden)]
+    pub fn schedule_delayed(
         &mut self,
         current_time: Value,
         delay: Value,
@@ -320,7 +326,8 @@ impl XspiceEventScheduler {
     /// The XSPICE publication drain uses each physical instant, including
     /// in builds without Verilog-A. Callers that also need the originating
     /// code-model instance use [`Self::next_event_instance`].
-    pub(crate) fn next_event_time(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn next_event_time(&self) -> Option<Value> {
         self.inner.next_instant().map(Instant::seconds)
     }
 
@@ -331,14 +338,16 @@ impl XspiceEventScheduler {
     /// process queue next door, which also holds wakeups belonging to no
     /// module. What asks is the diagnostic that has to say whose schedule is
     /// holding a run at the solver's minimum step.
-    pub(crate) fn next_event_instance(&self) -> Option<(&str, Value)> {
+    #[doc(hidden)]
+    pub fn next_event_instance(&self) -> Option<(&str, Value)> {
         self.inner
             .next_instant_instance()
             .map(|(at, instance)| (instance, at.seconds()))
     }
 
     /// Whether an event is pending at or before the given time.
-    pub(crate) fn has_event_at_or_before(&self, time: Value) -> bool {
+    #[doc(hidden)]
+    pub fn has_event_at_or_before(&self, time: Value) -> bool {
         self.inner
             .next_instant()
             .is_some_and(|at| at.seconds() <= time)
@@ -348,11 +357,8 @@ impl XspiceEventScheduler {
     ///
     /// Failure means the tick did not settle; see
     /// [`XspiceEventScheduler::note_delta_cycle`].
-    pub(crate) fn run_due_events<F>(
-        &mut self,
-        time: Value,
-        mut sink: F,
-    ) -> Result<(), SchedulerError>
+    #[doc(hidden)]
+    pub fn run_due_events<F>(&mut self, time: Value, mut sink: F) -> Result<(), SchedulerError>
     where
         F: FnMut(XspiceEvent),
     {
@@ -373,7 +379,8 @@ impl XspiceEventScheduler {
     }
 
     /// Publish one physical group while retaining the enclosing settle budget.
-    pub(crate) fn run_due_event_slot<F>(
+    #[doc(hidden)]
+    pub fn run_due_event_slot<F>(
         &mut self,
         time: Value,
         slot: Value,
@@ -409,7 +416,8 @@ impl XspiceEventScheduler {
     /// Delta settling is unbounded, so this is what turns a zero-delay loop
     /// into an [`SchedulerError::Oscillation`] naming its busiest drivers
     /// rather than a hang.
-    pub(crate) fn note_delta_cycle(&mut self, time: Value) -> Result<(), SchedulerError> {
+    #[doc(hidden)]
+    pub fn note_delta_cycle(&mut self, time: Value) -> Result<(), SchedulerError> {
         let Some(bound) = Instant::from_seconds(time) else {
             return Ok(());
         };
@@ -417,14 +425,16 @@ impl XspiceEventScheduler {
     }
 
     /// Number of pending events.
-    #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn len(&self) -> usize {
         self.inner.pending()
     }
 
     /// Whether any event is pending.
-    #[cfg(test)]
-    pub(crate) fn is_empty(&self) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn is_empty(&self) -> bool {
         self.inner.pending() == 0
     }
 }
@@ -456,7 +466,8 @@ pub(crate) type EventNodeMap<V> = rustc_hash::FxHashMap<NodeId, V>;
 /// process-wide counter, so two maps that share a revision are copies of one
 /// another and a context can never match a map it was not filled from.
 #[derive(Debug, Clone)]
-pub(crate) struct EventLoads {
+#[doc(hidden)]
+pub struct EventLoads {
     values: EventNodeMap<Value>,
     revision: u64,
 }
@@ -491,14 +502,16 @@ impl EventLoads {
     }
 
     /// Add one instance's contribution to `node`.
-    pub(crate) fn add(&mut self, node: NodeId, load: Value) {
+    #[doc(hidden)]
+    pub fn add(&mut self, node: NodeId, load: Value) {
         *self.values.entry(node).or_insert(0.0) += load;
         self.revision = next_event_loads_revision();
     }
 
     /// Forget every contribution, ahead of summing them again.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn clear(&mut self) {
+    #[doc(hidden)]
+    pub fn clear(&mut self) {
         self.values.clear();
         self.revision = next_event_loads_revision();
     }
@@ -530,19 +543,19 @@ pub(crate) type XspiceRealDrivers = EventNodeMap<CopyOnWrite<BTreeMap<XspiceDriv
 #[derive(Debug, Clone, Default, PartialEq)]
 #[doc(hidden)]
 pub struct XspiceEventValues {
-    pub(crate) traces: super::event_trace::EventTraceJournal,
+    pub traces: super::event_trace::EventTraceJournal,
     /// Resolved digital value of each event-driven node.
-    pub(crate) digital_values: EventNodeMap<DigitalValue>,
+    pub digital_values: EventNodeMap<DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.
     pub(crate) digital_drivers: XspiceDigitalDrivers,
     /// Last event time per digital node.
-    pub(crate) digital_event_times: EventNodeMap<Value>,
+    pub digital_event_times: EventNodeMap<Value>,
     /// Resolved real-valued value of each event-driven node.
-    pub(crate) real_values: EventNodeMap<Value>,
+    pub real_values: EventNodeMap<Value>,
     /// Per-output real-valued drivers, summed onto real nodes.
     pub(crate) real_drivers: XspiceRealDrivers,
     /// Last event time per real-valued node.
-    pub(crate) real_event_times: EventNodeMap<Value>,
+    pub real_event_times: EventNodeMap<Value>,
 }
 
 /// A circuit's handle on its resolved event-node state, shared with rollback
@@ -578,7 +591,8 @@ impl SharedXspiceEventValues {
     /// `engine::xspice_settle_ratchet` can fail a change that puts the deep
     /// copies back.
     #[inline]
-    pub(crate) fn make_mut(&mut self) -> &mut XspiceEventValues {
+    #[doc(hidden)]
+    pub fn make_mut(&mut self) -> &mut XspiceEventValues {
         let (values, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
         if copied {
             crate::xspice::settle_cost::note_event_values_deep_copy();
@@ -623,7 +637,8 @@ pub struct SharedXspiceEventQueue(Arc<XspiceEventScheduler>);
 
 impl SharedXspiceEventQueue {
     /// Create a circuit's empty event queue.
-    pub(crate) fn new() -> Self {
+    #[doc(hidden)]
+    pub fn new() -> Self {
         Self(Arc::new(XspiceEventScheduler::new()))
     }
 
@@ -639,7 +654,8 @@ impl SharedXspiceEventQueue {
     /// `engine::xspice_settle_ratchet` can fail a change that puts the deep
     /// copies back.
     #[inline]
-    pub(crate) fn make_mut(&mut self) -> &mut XspiceEventScheduler {
+    #[doc(hidden)]
+    pub fn make_mut(&mut self) -> &mut XspiceEventScheduler {
         let (queue, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
         if copied {
             crate::xspice::settle_cost::note_event_queue_deep_copy();

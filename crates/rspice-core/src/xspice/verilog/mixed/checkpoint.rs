@@ -5,7 +5,8 @@ use crate::xspice::verilog::store::checkpoint::fingerprint;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy)]
-pub(crate) struct ParticipantCheckpointLimits {
+#[doc(hidden)]
+pub struct ParticipantCheckpointLimits {
     pub max_analog_words: usize,
     pub max_items: usize,
 }
@@ -20,7 +21,8 @@ impl Default for ParticipantCheckpointLimits {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ParticipantCheckpoint {
+#[doc(hidden)]
+pub struct ParticipantCheckpoint {
     version: u32,
     topology: [u8; 32],
     // Instance, model, source digest and resolved parameter/state shape.
@@ -229,7 +231,8 @@ fn decision(value: u8) -> Result<FourStateBit, String> {
 }
 
 impl MixedSignalHost {
-    pub(crate) fn validate_participant_checkpoint_boundary(&self, time: f64) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_participant_checkpoint_boundary(&self, time: f64) -> Result<(), String> {
         self.require_idle("capture a circuit participant")
             .map_err(|e| e.to_string())?;
         if !self.state.started || self.state.accepted_time != time {
@@ -390,7 +393,8 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    pub(crate) fn participant_checkpoint(
+    #[doc(hidden)]
+    pub fn participant_checkpoint(
         &self,
         limits: ParticipantCheckpointLimits,
     ) -> Result<ParticipantCheckpoint, String> {
@@ -474,7 +478,8 @@ impl MixedSignalHost {
     /// Validate and construct without modifying either the receiving participant
     /// or the coordinator. The outer circuit must also authenticate its complete
     /// solver topology, temperature/configuration and source include identities.
-    pub(crate) fn restored_participant_checkpoint(
+    #[doc(hidden)]
+    pub fn restored_participant_checkpoint(
         &self,
         image: &ParticipantCheckpoint,
         coordinator: &MixedDigitalCoordinator,
@@ -687,9 +692,8 @@ impl MixedSignalHost {
     ///   so it is checked only where the boundary histories show that every
     ///   bit it reads held still across the accepted point;
     /// - an edge flag is that activity itself, which the view does not hold.
-    pub(crate) fn restored_discrete_input_refusal(
-        &self,
-    ) -> Option<crate::UnsupportedCapabilityError> {
+    #[doc(hidden)]
+    pub fn restored_discrete_input_refusal(&self) -> Option<crate::UnsupportedCapabilityError> {
         let input = self.discrete_inputs.iter().find(|input| {
             if input.edge.is_some() || (input.reads_left_limit() && !self.read_held_still(input)) {
                 return false;

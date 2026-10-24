@@ -65,7 +65,8 @@ impl MixedDigitalCoordinator {
         self.max_interval_events
     }
 
-    pub(crate) fn set_interval_event_limit(&mut self, limit: usize) {
+    #[doc(hidden)]
+    pub fn set_interval_event_limit(&mut self, limit: usize) {
         self.max_interval_events = limit;
     }
 

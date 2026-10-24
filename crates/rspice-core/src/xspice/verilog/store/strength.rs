@@ -356,7 +356,8 @@ impl StrengthBit {
 
 /// What the HDL drives onto one bit at the analog boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct BitDrive {
+#[doc(hidden)]
+pub struct BitDrive {
     pub(crate) value: FourStateBit,
     /// The strongest component driving 0, `HighZ` for none.
     pub(crate) zero: DigitalStrengthLevel,

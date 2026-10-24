@@ -152,19 +152,24 @@
 mod analog_drivers;
 mod analog_events;
 mod analog_samples;
-pub(crate) mod checkpoint;
+#[doc(hidden)]
+pub mod checkpoint;
 pub(super) mod digital_edges;
 mod drive_edges;
 mod shared;
 mod standalone;
 mod traced;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
-pub(crate) use drive_edges::DriveEdgeReport;
+#[doc(hidden)]
+pub use drive_edges::DriveEdgeReport;
 use shared::MixedDigital;
-pub(crate) use shared::checkpoint as coordinator_checkpoint;
-pub(crate) use shared::{CoordinatorEquilibriumImage, MixedDigitalCoordinator, SharedTrialCursor};
+#[doc(hidden)]
+pub use shared::checkpoint as coordinator_checkpoint;
+#[doc(hidden)]
+pub use shared::{CoordinatorEquilibriumImage, MixedDigitalCoordinator, SharedTrialCursor};
 use standalone::StandaloneExecution;
-pub(crate) use traced::{HdlSignalSource, HdlVariable, SignalWriters};
+#[doc(hidden)]
+pub use traced::{HdlSignalSource, HdlVariable, SignalWriters};
 
 use std::fmt;
 use std::sync::Arc;
@@ -215,7 +220,8 @@ fn hdl_tick(
 /// publish *the* value of the net resolves that with this, and the driver wins:
 /// the net's value is what its driver put there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum BoundaryBitSource {
+#[doc(hidden)]
+pub enum BoundaryBitSource {
     /// A D/A bridge: what the module drives onto the deck node.
     Driven,
     /// An A/D bridge: what the module read off the deck node.
@@ -429,7 +435,8 @@ struct BoundaryHistories {
 /// [`MixedSignalHost::install_candidate_ledger`]. A standalone host keeps its
 /// own and is never parked; that path retires with the per-host wheel.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct CandidateLedger {
+#[doc(hidden)]
+pub struct CandidateLedger {
     /// The candidate timestamp the latch below was armed for. `None` when
     /// nothing is latched: a new accepted point opens a new interval and the
     /// write that was latched is now part of the accepted state rather than of
@@ -450,7 +457,8 @@ pub(crate) struct CandidateLedger {
 }
 
 impl CandidateLedger {
-    pub(crate) fn has_pending_candidate(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_pending_candidate(&self) -> bool {
         self.carried_time.is_some() || self.probe_time.is_some()
     }
 
@@ -974,15 +982,16 @@ impl AnalogProbeWiring {
 
 /// One `$cds_get_analog_value` read a mixed module makes, for the builder to
 /// resolve against the deck.
-pub(crate) struct ExternalProbeRequest {
+#[doc(hidden)]
+pub struct ExternalProbeRequest {
     /// Its slot in the module's probe table.
-    pub(crate) slot: usize,
+    pub slot: usize,
     /// The path as written: absolute from the deck root, `$root.` accepted.
-    pub(crate) path: String,
+    pub path: String,
     /// A branch current (`"flow"`) rather than a node potential.
-    pub(crate) flow: bool,
+    pub flow: bool,
     /// The call as the author wrote it, for a refusal.
-    pub(crate) call: String,
+    pub call: String,
 }
 
 /// The bridge declarations, fixed once the module is wired.
@@ -999,11 +1008,12 @@ struct Bridges {
 /// A typed port that connects directly to the shared event domain. Electrical
 /// conversion, when required, must be elaborated explicitly before enrollment.
 #[derive(Clone)]
-pub(crate) struct EventPort {
+#[doc(hidden)]
+pub struct EventPort {
     signal: DigitalSignalId,
-    pub(crate) bit: Option<u32>,
-    pub(crate) node: usize,
-    pub(crate) direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
+    pub bit: Option<u32>,
+    pub node: usize,
+    pub direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
     /// Existing unidirectional trace/bus label, independent of the private
     /// converter endpoint. Qualified event traces remain available as well.
     /// A real port has one too: the deck net its value is recorded under
@@ -1025,7 +1035,8 @@ pub(crate) struct EventPort {
 /// One instance's half of a held-equilibrium image; see
 /// [`MixedSignalHost::equilibrium_image`].
 #[derive(Clone, Debug)]
-pub(crate) struct HostEquilibriumImage {
+#[doc(hidden)]
+pub struct HostEquilibriumImage {
     instance: String,
     topology: [u8; 32],
     adc_voltages: Vec<f64>,
@@ -1036,15 +1047,16 @@ pub(crate) struct HostEquilibriumImage {
 
 /// One of a module's own A/D bridges, as a held-equilibrium threshold finding
 /// reads it.
-pub(crate) struct BoundaryThreshold<'a> {
+#[doc(hidden)]
+pub struct BoundaryThreshold<'a> {
     /// The boundary net's spelling.
-    pub(crate) signal: &'a str,
-    pub(crate) positive: usize,
-    pub(crate) negative: usize,
-    pub(crate) low: f64,
-    pub(crate) high: f64,
+    pub signal: &'a str,
+    pub positive: usize,
+    pub negative: usize,
+    pub low: f64,
+    pub high: f64,
     /// Whether the bit the bridge publishes is X.
-    pub(crate) undefined: bool,
+    pub undefined: bool,
 }
 
 impl EventPort {
@@ -1084,16 +1096,17 @@ impl EventPort {
 /// naming the nodes; it is not that type here because a boundary sits eleven
 /// layers below the result types and may not reach up for one.
 #[derive(Clone, Debug)]
-pub(crate) struct BoundaryBus {
+#[doc(hidden)]
+pub struct BoundaryBus {
     /// `<instance>.<port>` — the deck's name for the instance and the module's
     /// for the port, which is the only pair that is unique across a deck.
-    pub(crate) name: String,
+    pub name: String,
     /// Declared most significant index, exactly as the module wrote it.
-    pub(crate) msb: i64,
+    pub msb: i64,
     /// Declared least significant index, exactly as the module wrote it.
-    pub(crate) lsb: i64,
+    pub lsb: i64,
     /// Circuit-node ids of the members, declared MSB first.
-    pub(crate) members: Vec<usize>,
+    pub members: Vec<usize>,
 }
 
 /// The solver inputs the host pushes into the analog device before it is
@@ -1702,13 +1715,15 @@ impl DiscreteAnalogInput {
 
 /// An exclusive reservation of one validated mixed candidate. A failed later
 /// participant drops earlier reservations and unwinds their speculative state.
-pub(crate) struct PreparedMixedAcceptance<'a> {
+#[doc(hidden)]
+pub struct PreparedMixedAcceptance<'a> {
     host: &'a mut MixedSignalHost,
     trial: Option<ActiveTrial>,
 }
 
 impl PreparedMixedAcceptance<'_> {
-    pub(crate) fn commit(mut self) {
+    #[doc(hidden)]
+    pub fn commit(mut self) {
         let trial = self.trial.take().expect("unconsumed mixed acceptance");
         self.host.apply_prepared_acceptance(trial);
     }
@@ -1794,7 +1809,8 @@ impl MixedSignalHost {
     /// produced. That is checked, not assumed: `VerilogADevice` construction
     /// refuses a mismatched digest, and the engine's cache validates the pair
     /// before admitting it.
-    pub(crate) fn from_compiled(
+    #[doc(hidden)]
+    pub fn from_compiled(
         instance: &str,
         model: Arc<rspice_veriloga::CompiledModel>,
         canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
@@ -1833,7 +1849,8 @@ impl MixedSignalHost {
     /// Bind internal-node and branch-current indices before cross-domain
     /// probes are resolved. The owning solver allocates these unknowns.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_compiled_with_analog_setup(
+    #[doc(hidden)]
+    pub fn from_compiled_with_analog_setup(
         instance: &str,
         model: Arc<rspice_veriloga::CompiledModel>,
         canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
@@ -2021,7 +2038,8 @@ impl MixedSignalHost {
 
     /// The reads of deck objects outside this module, by path, that the
     /// builder has still to resolve.
-    pub(crate) fn external_probe_requests(&self) -> Vec<ExternalProbeRequest> {
+    #[doc(hidden)]
+    pub fn external_probe_requests(&self) -> Vec<ExternalProbeRequest> {
         self.analog_probes
             .iter()
             .enumerate()
@@ -2040,7 +2058,8 @@ impl MixedSignalHost {
     /// Bind the read in probe slot `slot` to one-based solution index
     /// `index`: a node's potential, or a branch's current. Called once every
     /// node and branch of the deck exists, so the index is final.
-    pub(crate) fn bind_external_probe(&mut self, slot: usize, index: usize) {
+    #[doc(hidden)]
+    pub fn bind_external_probe(&mut self, slot: usize, index: usize) {
         debug_assert!(matches!(
             self.analog_probes.get(slot),
             Some(AnalogProbeWiring::External { .. })
@@ -2068,7 +2087,8 @@ impl MixedSignalHost {
         )
     }
 
-    pub(crate) fn begin_analog_analysis_in_phase(
+    #[doc(hidden)]
+    pub fn begin_analog_analysis_in_phase(
         &mut self,
         analysis: u8,
         phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
@@ -2110,7 +2130,8 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    pub(crate) fn set_temperature(&mut self, temperature: f64) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn set_temperature(&mut self, temperature: f64) -> Result<(), MixedSignalError> {
         self.require_idle("configure temperature")?;
         self.prepared_analog.invalidate();
         self.analog
@@ -2137,7 +2158,8 @@ impl MixedSignalHost {
     /// so scaling one here would be a rule the plain Verilog-A carve-out does
     /// not have. It would also change only how stiffly the boundary is driven
     /// rather than what it drives, which is not a module contribution.
-    pub(crate) fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), MixedSignalError> {
         self.require_idle("configure multiplicity")?;
         self.prepared_analog.invalidate();
         self.analog
@@ -2146,23 +2168,23 @@ impl MixedSignalHost {
             .map_err(analog_error)
     }
 
-    pub(crate) fn visit_equation_abstols(
-        &self,
-        current_abstol: f64,
-        visit: impl FnMut(usize, f64),
-    ) {
+    #[doc(hidden)]
+    pub fn visit_equation_abstols(&self, current_abstol: f64, visit: impl FnMut(usize, f64)) {
         self.analog.visit_equation_abstols(current_abstol, visit);
     }
 
-    pub(crate) fn one_step_dae_split_safe(&self) -> bool {
+    #[doc(hidden)]
+    pub fn one_step_dae_split_safe(&self) -> bool {
         self.analog.one_step_dae_split_safe()
     }
 
-    pub(crate) fn requires_nodeset_phase(&self) -> bool {
+    #[doc(hidden)]
+    pub fn requires_nodeset_phase(&self) -> bool {
         self.analog.requires_nodeset_phase()
     }
 
-    pub(crate) fn set_analog_analysis_phase(
+    #[doc(hidden)]
+    pub fn set_analog_analysis_phase(
         &mut self,
         phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
     ) -> Result<(), MixedSignalError> {
@@ -2178,7 +2200,8 @@ impl MixedSignalHost {
 
     /// Start digital processes after every analog initializer has completed and
     /// its accepted control calls have been handled by the analysis host.
-    pub(crate) fn start_digital_execution(&mut self) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn start_digital_execution(&mut self) -> Result<(), MixedSignalError> {
         self.require_idle("start digital execution")?;
         if self.analog.has_accepted_analog_tasks() {
             return Err(MixedSignalError::TrialProtocol {
@@ -2216,16 +2239,16 @@ impl MixedSignalHost {
     }
 
     /// The deck's name for this instance.
-    pub(crate) fn instance_name(&self) -> &str {
+    #[doc(hidden)]
+    pub fn instance_name(&self) -> &str {
         &self.instance
     }
 
     /// The design this instance runs as its own module compiled it, with
     /// the names and declarations of its signals before linking renamed
     /// them.
-    pub(crate) fn digital_plan(
-        &self,
-    ) -> &rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan {
+    #[doc(hidden)]
+    pub fn digital_plan(&self) -> &rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan {
         self.state.digital.plan()
     }
 
@@ -2236,7 +2259,8 @@ impl MixedSignalHost {
     /// naming neither the quantity nor the time. The host knows both: every
     /// analog-read input whose lane holds "unknown" at the failed evaluation
     /// is named with its four-state value.
-    pub(crate) fn explain_analog_refusal(&self, error: MixedSignalError) -> MixedSignalError {
+    #[doc(hidden)]
+    pub fn explain_analog_refusal(&self, error: MixedSignalError) -> MixedSignalError {
         const UNKNOWN_READ: &str = "analog read of discrete input has an X, Z, or non-finite value";
         let MixedSignalError::Analog { detail } = &error else {
             return error;
@@ -2288,11 +2312,13 @@ impl MixedSignalHost {
 
     /// The tick this instance's HDL runs on: its design's finest `timescale`
     /// precision, or the linked design's when the deck links instances.
-    pub(crate) fn time_resolution(&self) -> TimeResolution {
+    #[doc(hidden)]
+    pub fn time_resolution(&self) -> TimeResolution {
         self.resolution
     }
 
-    pub(crate) fn set_simulation_parameters(
+    #[doc(hidden)]
+    pub fn set_simulation_parameters(
         &mut self,
         parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
     ) {
@@ -2300,7 +2326,8 @@ impl MixedSignalHost {
         self.analog.make_mut().set_simulation_parameters(parameters);
     }
 
-    pub(crate) fn analog_device(&self) -> &VerilogADevice {
+    #[doc(hidden)]
+    pub fn analog_device(&self) -> &VerilogADevice {
         &self.analog
     }
 
@@ -2310,7 +2337,8 @@ impl MixedSignalHost {
     /// change, including Z release, to the integration restart contract. A
     /// purely event-connected bit, an intermediate delta glitch, and a value
     /// only a task or a dead assignment reads add none.
-    pub(crate) fn candidate_discontinuity(&self) -> bool {
+    #[doc(hidden)]
+    pub fn candidate_discontinuity(&self) -> bool {
         if self.analog.discontinuity_rising() || self.converted_output_changed() {
             return true;
         }
@@ -2381,7 +2409,8 @@ impl MixedSignalHost {
     /// ([`EventPort::solution_sample`]), the chain began with that sampling
     /// call at the accepted point, and every value it stepped is a sample
     /// held.
-    pub(crate) fn candidate_steps_only_sampled_holds(&self) -> bool {
+    #[doc(hidden)]
+    pub fn candidate_steps_only_sampled_holds(&self) -> bool {
         self.trial
             .as_ref()
             .is_some_and(|trial| self.steps_only_sampled_holds(trial))
@@ -2438,7 +2467,8 @@ impl MixedSignalHost {
     /// `solution_samples` is the subset only such a sample moves (see
     /// [`EventPort::solution_sample`]): a net whose every driver reads no
     /// event input, so nothing scheduled can move it.
-    pub(crate) fn declare_analog_sampled_reals(
+    #[doc(hidden)]
+    pub fn declare_analog_sampled_reals(
         &mut self,
         nodes: &std::collections::BTreeSet<usize>,
         solution_samples: &std::collections::BTreeSet<usize>,
@@ -2471,7 +2501,8 @@ impl MixedSignalHost {
     /// and an event body that only runs tasks steps nothing. A real that a
     /// code model samples off the analog solution is continuous at the
     /// timepoints and is not one.
-    pub(crate) fn analog_reads_discrete_after_activity(&self) -> bool {
+    #[doc(hidden)]
+    pub fn analog_reads_discrete_after_activity(&self) -> bool {
         self.discrete_inputs
             .iter()
             .any(|input| !input.reads_left_limit() && !input.analog_sample && input.feeds_equations)
@@ -2479,7 +2510,8 @@ impl MixedSignalHost {
 
     /// Whether the analog block's `@(final_step)` body can change its
     /// equations (`VerilogADevice::final_step_feeds_equations`).
-    pub(crate) fn analog_final_step_feeds_equations(&self) -> bool {
+    #[doc(hidden)]
+    pub fn analog_final_step_feeds_equations(&self) -> bool {
         self.analog.final_step_feeds_equations()
     }
 
@@ -2501,7 +2533,8 @@ impl MixedSignalHost {
     /// that activity has run and before the trial publishes a crossing: by
     /// the circuit for every enrolled instance before any of them settles,
     /// and otherwise by the first settle pass.
-    pub(crate) fn image_endpoint_activity(&mut self) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn image_endpoint_activity(&mut self) -> Result<(), MixedSignalError> {
         let Some(trial) = self.trial.as_mut() else {
             return Ok(());
         };
@@ -2546,7 +2579,8 @@ impl MixedSignalHost {
     ///
     /// An operating point has no interval and no left limit; it answers as
     /// [`Self::digital_feedback_since_trial_start`] does.
-    pub(crate) fn digital_feedback_into_interval(&self) -> Result<bool, MixedSignalError> {
+    #[doc(hidden)]
+    pub fn digital_feedback_into_interval(&self) -> Result<bool, MixedSignalError> {
         let Some(trial) = self.trial.as_ref() else {
             return Ok(false);
         };
@@ -2592,14 +2626,16 @@ impl MixedSignalHost {
             }))
     }
 
-    pub(crate) fn analysis_step(&self) -> (bool, bool) {
+    #[doc(hidden)]
+    pub fn analysis_step(&self) -> (bool, bool) {
         (
             self.analog_inputs.initial_step,
             self.analog_inputs.final_step,
         )
     }
 
-    pub(crate) fn set_analysis_step(
+    #[doc(hidden)]
+    pub fn set_analysis_step(
         &mut self,
         initial: bool,
         final_step: bool,
@@ -2617,7 +2653,8 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    pub(crate) fn validate_analog_task_delivery(&self) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn validate_analog_task_delivery(&self) -> Result<(), MixedSignalError> {
         if self.trial.is_some() {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "analog task delivery requires the mixed-signal trial to be accepted or rejected".into(),
@@ -2626,7 +2663,8 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    pub(crate) fn visit_accepted_analog_tasks(
+    #[doc(hidden)]
+    pub fn visit_accepted_analog_tasks(
         &mut self,
         consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
     ) -> Result<(), MixedSignalError> {
@@ -2639,7 +2677,8 @@ impl MixedSignalHost {
     }
 
     /// Physical module terminals, excluding the discrete port views.
-    pub(crate) fn electrical_terminal_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn electrical_terminal_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.analog
             .terminal_names()
             .iter()
@@ -2700,7 +2739,8 @@ impl MixedSignalHost {
     /// own equations and D/A bridges couple their two nodes, so the union is
     /// what a conservative dense block must span — the same answer, and for the
     /// same reason, that `engine::matrix` computes for a `VerilogADevice`.
-    pub(crate) fn coupled_nodes(&self) -> Vec<usize> {
+    #[doc(hidden)]
+    pub fn coupled_nodes(&self) -> Vec<usize> {
         let mut nodes: Vec<usize> = analog_solver_nodes(&self.analog)
             .chain(
                 self.state
@@ -2738,7 +2778,8 @@ impl MixedSignalHost {
     /// Only bridges that survived elaboration are here: a boundary that landed
     /// on a pure event net has no analog node to speak of and
     /// `strip_event_boundaries` has already removed it.
-    pub(crate) fn dac_bridge_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn dac_bridge_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.state
             .bridges
             .dac
@@ -2750,7 +2791,8 @@ impl MixedSignalHost {
     /// Whether one of this module's D/A bridges drives a deck net against node
     /// 0: its Thevenin branch has node 0 at one end. An A/D bridge only senses
     /// its net, and stamps nothing.
-    pub(crate) fn drives_against_ground(&self) -> bool {
+    #[doc(hidden)]
+    pub fn drives_against_ground(&self) -> bool {
         self.state
             .bridges
             .dac
@@ -2761,7 +2803,8 @@ impl MixedSignalHost {
     /// One endpoint per discrete port, excluding ground. Root-only detectors
     /// are observations of a physical node, not additional event endpoints.
     /// Count the linked port once, independently of its conversion machinery.
-    pub(crate) fn boundary_port_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn boundary_port_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.state
             .bridges
             .adc
@@ -2775,7 +2818,8 @@ impl MixedSignalHost {
 
     /// Verify direct ports after all electrical loads and event endpoints are
     /// known. A physical boundary must never be silently treated as an event net.
-    pub(crate) fn validate_direct_event_ports(
+    #[doc(hidden)]
+    pub fn validate_direct_event_ports(
         &self,
         nodes: &std::collections::BTreeSet<usize>,
     ) -> Result<(), MixedSignalError> {
@@ -2802,7 +2846,8 @@ impl MixedSignalHost {
     /// declaration states it: the resolution its net type names, and whether
     /// this instance drives it — by a continuous assignment, or as a real
     /// variable output. `None` for an input, and for a four-state port.
-    pub(crate) fn real_output_net(
+    #[doc(hidden)]
+    pub fn real_output_net(
         &self,
         port: &EventPort,
     ) -> Option<(
@@ -2830,7 +2875,8 @@ impl MixedSignalHost {
     /// The deck nodes this instance's real-valued ports that are not inputs
     /// reach, each with the port's name, its resolution and whether this
     /// instance drives it; one entry per node.
-    pub(crate) fn real_output_ports(
+    #[doc(hidden)]
+    pub fn real_output_ports(
         &self,
     ) -> Vec<(
         usize,
@@ -2851,14 +2897,16 @@ impl MixedSignalHost {
         ports
     }
 
-    pub(crate) fn direct_real_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn direct_real_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.event_ports
             .iter()
             .filter(|port| port.bit.is_none())
             .map(|port| port.node)
     }
 
-    pub(crate) fn direct_event_ports(&self) -> impl Iterator<Item = (&EventPort, &str)> {
+    #[doc(hidden)]
+    pub fn direct_event_ports(&self) -> impl Iterator<Item = (&EventPort, &str)> {
         self.event_ports.iter().map(|port| {
             (
                 port,
@@ -2875,11 +2923,8 @@ impl MixedSignalHost {
 
     /// Move only the event endpoint when elaboration inserts an electrical
     /// converter. Continuous terminals retain their original solver nodes.
-    pub(crate) fn rebind_event_port(
-        &mut self,
-        index: usize,
-        node: usize,
-    ) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn rebind_event_port(&mut self, index: usize, node: usize) -> Result<(), MixedSignalError> {
         self.require_idle("rebind an event port")?;
         // Tied physical members need distinct port identities in a waveform
         // bus. Inspect the original aliases, which survive earlier rebindings.
@@ -2919,7 +2964,8 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    pub(crate) fn declare_event_port(
+    #[doc(hidden)]
+    pub fn declare_event_port(
         &mut self,
         signal: &str,
         bit: Option<u32>,
@@ -2952,7 +2998,8 @@ impl MixedSignalHost {
     /// Name what this module's boundary crosses, for a boundary diagnostic:
     /// the deck converter on each converted port's private endpoint, from
     /// `converter`, and each boundary node's deck name, from `net`.
-    pub(crate) fn name_boundary_crossings(
+    #[doc(hidden)]
+    pub fn name_boundary_crossings(
         &mut self,
         converter: impl Fn(usize) -> Option<String>,
         net: impl Fn(usize) -> Option<String>,
@@ -2974,7 +3021,8 @@ impl MixedSignalHost {
     /// Signal names and electrical endpoints of the built-in boundaries.
     /// Wiring is available before digital startup, so circuit elaboration can
     /// validate it against event ports declared by later instances.
-    pub(crate) fn boundary_connections(&self) -> impl Iterator<Item = (&str, usize)> + '_ {
+    #[doc(hidden)]
+    pub fn boundary_connections(&self) -> impl Iterator<Item = (&str, usize)> + '_ {
         self.state
             .bridges
             .adc
@@ -3018,7 +3066,8 @@ impl MixedSignalHost {
     /// value for the net needs to know which is which. Speculative state is
     /// never reported — this reads the accepted store, and every trial that has
     /// not been accepted has already been rolled back.
-    pub(crate) fn boundary_digital_values<F>(&self, mut sink: F)
+    #[doc(hidden)]
+    pub fn boundary_digital_values<F>(&self, mut sink: F)
     where
         F: FnMut(usize, FourStateBit, BoundaryBitSource),
     {
@@ -3029,7 +3078,8 @@ impl MixedSignalHost {
         });
     }
 
-    pub(crate) fn boundary_trace_bindings(
+    #[doc(hidden)]
+    pub fn boundary_trace_bindings(
         &self,
         mut sink: impl FnMut(usize, DigitalSignalId, u32, BoundaryBitSource),
     ) {
@@ -3075,7 +3125,8 @@ impl MixedSignalHost {
     /// value under the author's net name as a digital one does. The value is
     /// the endpoint's event net, which holds the port's value from the first
     /// instant.
-    pub(crate) fn real_boundary_trace_bindings(
+    #[doc(hidden)]
+    pub fn real_boundary_trace_bindings(
         &self,
         mut sink: impl FnMut(usize, usize, BoundaryBitSource),
     ) {
@@ -3101,7 +3152,8 @@ impl MixedSignalHost {
     /// failure after an edge there names, since the endpoint is
     /// elaboration's private copy of the bit. The instance alone stands for
     /// the writer when no process writes the port signal directly.
-    pub(crate) fn converted_bit_origin(&self, endpoint: usize) -> Option<(usize, Vec<String>)> {
+    #[doc(hidden)]
+    pub fn converted_bit_origin(&self, endpoint: usize) -> Option<(usize, Vec<String>)> {
         let port = self.event_ports.iter().find(|port| port.node == endpoint)?;
         let (_, deck) = port.converted_bit()?;
         let mut writers: Vec<String> = self
@@ -3147,7 +3199,8 @@ impl MixedSignalHost {
     /// The event endpoints of this module's converted port bits, each with
     /// its deck net: the node elaboration moved the bit to, whose value
     /// [`Self::boundary_trace_bindings`] also records on the deck net.
-    pub(crate) fn converter_event_endpoints(&self, mut sink: impl FnMut(usize, usize)) {
+    #[doc(hidden)]
+    pub fn converter_event_endpoints(&self, mut sink: impl FnMut(usize, usize)) {
         for port in &self.event_ports {
             if let Some((_, deck)) = port.converted_bit() {
                 sink(deck, port.node);
@@ -3159,7 +3212,8 @@ impl MixedSignalHost {
     ///
     /// Empty for a module with no vector discrete port, which is what makes a
     /// scalar-only deck publish the same empty bus table it always did.
-    pub(crate) fn boundary_buses(&self) -> &[BoundaryBus] {
+    #[doc(hidden)]
+    pub fn boundary_buses(&self) -> &[BoundaryBus] {
         &self.boundary_buses
     }
 
@@ -3168,10 +3222,8 @@ impl MixedSignalHost {
     /// A declaration, like a bridge: taken while the module is being wired and
     /// never during a trial, which is why it is refused on a running host
     /// rather than merged into one.
-    pub(crate) fn declare_boundary_bus(
-        &mut self,
-        bus: BoundaryBus,
-    ) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn declare_boundary_bus(&mut self, bus: BoundaryBus) -> Result<(), MixedSignalError> {
         self.require_idle("declare a boundary bus")?;
         self.boundary_buses.push(bus);
         Ok(())
@@ -3228,7 +3280,8 @@ impl MixedSignalHost {
 
     /// Bind a root detector to the input actually sampled by a converter.
     /// The host owns its trial history; no HDL bit or output driver is required.
-    pub(crate) fn add_converter_input_root(
+    #[doc(hidden)]
+    pub fn add_converter_input_root(
         &mut self,
         instance: usize,
         instance_name: &str,
@@ -3283,7 +3336,8 @@ impl MixedSignalHost {
 
     /// Copy current converter inputs after Active input refresh, before any
     /// converter publishes. Samples belong to this trial and disappear on rollback.
-    pub(crate) fn sample_converter_inputs(
+    #[doc(hidden)]
+    pub fn sample_converter_inputs(
         &mut self,
         mut sample: impl FnMut(usize, &str, usize, usize) -> Option<f64>,
     ) -> Result<(), MixedSignalError> {
@@ -3459,7 +3513,8 @@ impl MixedSignalHost {
     /// transient stepper keeps — means no solver has declared one, and every
     /// activation stepped past is treated as a lost breakpoint. A positive
     /// floor is the stepper's hard minimum timestep.
-    pub(crate) fn set_analog_step_floor(&mut self, floor: f64) {
+    #[doc(hidden)]
+    pub fn set_analog_step_floor(&mut self, floor: f64) {
         self.analog_step_floor = if floor.is_finite() && floor > 0.0 {
             floor
         } else {
@@ -3469,7 +3524,8 @@ impl MixedSignalHost {
 
     /// The published copy of the circuit's one floor this module measures a
     /// stepped-past activation against.
-    pub(crate) fn analog_step_floor(&self) -> f64 {
+    #[doc(hidden)]
+    pub fn analog_step_floor(&self) -> f64 {
         self.analog_step_floor
     }
 
@@ -3500,7 +3556,8 @@ impl MixedSignalHost {
     /// this way. [`MixedSignalError::MissedDigitalBreakpoint`] is kept for an
     /// activation the stepper had a legal interval to and skipped anyway.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn begin_trial_with_integration_rules(
+    #[doc(hidden)]
+    pub fn begin_trial_with_integration_rules(
         &mut self,
         time_seconds: f64,
         timestep_seconds: f64,
@@ -3719,7 +3776,8 @@ impl MixedSignalHost {
     }
 
     /// Whether a trial is open.
-    pub(crate) fn trial_active(&self) -> bool {
+    #[doc(hidden)]
+    pub fn trial_active(&self) -> bool {
         self.trial.is_some()
     }
 
@@ -3732,7 +3790,8 @@ impl MixedSignalHost {
     /// moved need not belong to the instance whose crossing is being dated.
     /// The coordinator makes the comparison for every enrolled instance at
     /// once and reports the disjunction here.
-    pub(crate) fn note_shared_digital_feedback(&mut self) {
+    #[doc(hidden)]
+    pub fn note_shared_digital_feedback(&mut self) {
         if let Some(trial) = self.trial.as_mut() {
             trial.digital_feedback = true;
         }
@@ -3749,7 +3808,8 @@ impl MixedSignalHost {
     /// boundary move has to be judged against is whether *anything* was
     /// scheduled to run at this timepoint. See
     /// [`ActiveTrial::scheduled_activation`].
-    pub(crate) fn note_scheduled_activation(&mut self) {
+    #[doc(hidden)]
+    pub fn note_scheduled_activation(&mut self) {
         if let Some(trial) = self.trial.as_mut() {
             trial.scheduled_activation = true;
         }
@@ -3759,7 +3819,8 @@ impl MixedSignalHost {
     /// an ideal switch of the circuit changed state at the candidate. An
     /// instance cannot see the circuit's switches, so the circuit reports it.
     /// See [`ActiveTrial::analog_step`].
-    pub(crate) fn note_analog_step(&mut self) {
+    #[doc(hidden)]
+    pub fn note_analog_step(&mut self) {
         if let Some(trial) = self.trial.as_mut() {
             trial.analog_step = true;
         }
@@ -3952,7 +4013,8 @@ impl MixedSignalHost {
     /// One entry per answer instead of one entry and a classification: the
     /// wording a mixed host's failure carries — "at a trial iterate" — is a
     /// claim about which loop asked, and only the caller knows that.
-    pub(crate) fn stamp_trial<M, R>(
+    #[doc(hidden)]
+    pub fn stamp_trial<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         matrix_add: M,
@@ -4003,7 +4065,8 @@ impl MixedSignalHost {
 
     /// Observe the already settled candidate without running HDL, resampling
     /// A/D inputs, or changing the analog operator/task state.
-    pub(crate) fn stamp_static_dae<M, R>(
+    #[doc(hidden)]
+    pub fn stamp_static_dae<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         mut matrix_add: M,
@@ -4133,7 +4196,8 @@ impl MixedSignalHost {
     /// [`Self::trial_boundary_refinement_time`], with whether any drive in the
     /// circuit stepped at the accepted point supplied by the caller: one
     /// instance's D/A bridge and another's A/D bridge can share a deck node.
-    pub(crate) fn boundary_refinement_time(
+    #[doc(hidden)]
+    pub fn boundary_refinement_time(
         &self,
         minimum_timestep: f64,
         opened_on_drive_step: bool,
@@ -4592,7 +4656,8 @@ impl MixedSignalHost {
 
     /// Reserve a validated candidate for the circuit's acceptance barrier.
     /// Dropping the reservation restores this host; committing cannot fail.
-    pub(crate) fn prepare_circuit_acceptance(
+    #[doc(hidden)]
+    pub fn prepare_circuit_acceptance(
         &mut self,
     ) -> Result<PreparedMixedAcceptance<'_>, (String, MixedSignalError)> {
         match self.prepare_trial_acceptance() {
@@ -4726,7 +4791,8 @@ impl MixedSignalHost {
     /// promotes any: the trial is a non-probe time-zero trial whose boundary
     /// the last settle found quiet, with no interpolated event pending, and
     /// the analog half's candidate passes its own advance validation.
-    pub(crate) fn validate_equilibrium(&self) -> Result<(), MixedSignalError> {
+    #[doc(hidden)]
+    pub fn validate_equilibrium(&self) -> Result<(), MixedSignalError> {
         let trial = self
             .trial
             .as_ref()
@@ -4758,7 +4824,8 @@ impl MixedSignalHost {
     /// time stays zero — so the next trial at time zero is still the operating
     /// point; it starts from this settled state, because the initial-state
     /// image a time-zero trial would otherwise restart from is dropped.
-    pub(crate) fn apply_equilibrium(&mut self) {
+    #[doc(hidden)]
+    pub fn apply_equilibrium(&mut self) {
         let Some(mut trial) = self.trial.take() else {
             return;
         };
@@ -4794,7 +4861,8 @@ impl MixedSignalHost {
     /// structure and the accepted decision bank its time-zero settle kept.
     /// The discrete state itself is the coordinator's; the analog half is
     /// rebuilt with the circuit and is not part of the image.
-    pub(crate) fn equilibrium_image(&self) -> Result<HostEquilibriumImage, String> {
+    #[doc(hidden)]
+    pub fn equilibrium_image(&self) -> Result<HostEquilibriumImage, String> {
         self.require_idle("capture a held equilibrium")
             .map_err(|error| error.to_string())?;
         if !self.digital_started || self.state.started {
@@ -4816,7 +4884,8 @@ impl MixedSignalHost {
     /// Adopt a held-equilibrium image captured on another elaboration of this
     /// circuit, iff this instance's boundary structure is the image's.
     /// Returns `false`, changing nothing, when it is not.
-    pub(crate) fn adopt_equilibrium_image(
+    #[doc(hidden)]
+    pub fn adopt_equilibrium_image(
         &mut self,
         image: &HostEquilibriumImage,
     ) -> Result<bool, String> {
@@ -4849,7 +4918,8 @@ impl MixedSignalHost {
 
     /// This module's own A/D bridges as a threshold finding reads them: the
     /// sensed pair, both thresholds, and whether the bit they publish is X.
-    pub(crate) fn boundary_thresholds(&self) -> impl Iterator<Item = BoundaryThreshold<'_>> + '_ {
+    #[doc(hidden)]
+    pub fn boundary_thresholds(&self) -> impl Iterator<Item = BoundaryThreshold<'_>> + '_ {
         self.state
             .bridges
             .adc
@@ -4872,7 +4942,8 @@ impl MixedSignalHost {
     /// Stamp the small-signal conductance of this module's own D/A bridges at
     /// the held state (S3): a bridge driving 0, 1 or X is its level behind
     /// `1 / R`, which linearizes to that conductance; one driving Z is open.
-    pub(crate) fn stamp_small_signal_bridges(&self, mut matrix_add: impl FnMut(usize, usize, f64)) {
+    #[doc(hidden)]
+    pub fn stamp_small_signal_bridges(&self, mut matrix_add: impl FnMut(usize, usize, f64)) {
         for bridge in &self.state.bridges.dac {
             let Some(value) = self.state.digital.read(bridge.signal) else {
                 continue;
@@ -4899,7 +4970,8 @@ impl MixedSignalHost {
     /// The thermal-noise conductances of this module's own D/A bridges at the
     /// held state, as `(positive, negative, conductance)` (S11): every bridge
     /// not driving Z is a physical driver behind its output resistance.
-    pub(crate) fn bridge_noise_conductances(&self) -> Vec<(usize, usize, f64)> {
+    #[doc(hidden)]
+    pub fn bridge_noise_conductances(&self) -> Vec<(usize, usize, f64)> {
         self.state
             .bridges
             .dac
@@ -5179,7 +5251,8 @@ impl MixedSignalHost {
     ///
     /// A net is named once it has switched `minimum_run` times: repeatedly
     /// for a failure on its own, once for one that followed an accepted edge.
-    pub(crate) fn rejected_probe_activity(
+    #[doc(hidden)]
+    pub fn rejected_probe_activity(
         &self,
         ledger: &CandidateLedger,
         time: f64,
@@ -5210,7 +5283,8 @@ impl MixedSignalHost {
     /// in more solves than any read did was moved by something other than
     /// what the module reads, which is not that loop. `None` when the probes
     /// show no such loop.
-    pub(crate) fn coupled_loop_at_start(&self, ledger: &CandidateLedger) -> Option<String> {
+    #[doc(hidden)]
+    pub fn coupled_loop_at_start(&self, ledger: &CandidateLedger) -> Option<String> {
         let (nets, elided) = self.rejected_probe_nets(ledger, 0.0, MIN_BOUNDARY_LOOP_SWITCHES)?;
         // Either side may have moved first, so the runs differ by one at most.
         let in_loop = |net: &BoundaryNetActivity| {
@@ -5395,7 +5469,8 @@ impl MixedSignalHost {
     /// any instant and the trial's own `Drop` puts them back by calling this a
     /// second time. Neither side allocates: both vectors keep the capacity the
     /// last candidate left them.
-    pub(crate) fn install_candidate_ledger(&mut self, ledger: &mut CandidateLedger) {
+    #[doc(hidden)]
+    pub fn install_candidate_ledger(&mut self, ledger: &mut CandidateLedger) {
         std::mem::swap(&mut self.scratch.ledger, ledger);
     }
 
@@ -5495,7 +5570,8 @@ impl MixedSignalHost {
     ///
     /// Read from the accepted histories: their two newest values are the bit
     /// before and after the accepted point.
-    pub(crate) fn accepted_point_stepped_a_drive(&self) -> bool {
+    #[doc(hidden)]
+    pub fn accepted_point_stepped_a_drive(&self) -> bool {
         let stepped = |entry: &BoundaryNetHistory| {
             entry.filled >= 2 && (entry.recent ^ (entry.recent >> 2)) & 0b11 != 0
         };
@@ -5533,7 +5609,8 @@ impl MixedSignalHost {
     /// ([`Self::candidate_steps_only_sampled_holds`]): the hold changes at
     /// every accepted point, and a completion a picosecond after each one
     /// took the next sample there.
-    pub(crate) fn read_step_completion(&self) -> Option<f64> {
+    #[doc(hidden)]
+    pub fn read_step_completion(&self) -> Option<f64> {
         (self.state.started
             && !self.state.accepted_steps_sampled_holds
             && self.accepted_point_stepped_a_read())
@@ -5613,7 +5690,8 @@ impl MixedSignalHost {
     /// that the step will not grow; what it cannot say is why. When every one
     /// of the points it counted also moved a boundary net with nothing
     /// scheduled to explain it, this is why, and these are the participants.
-    pub(crate) fn accepted_boundary_loop(&self, minimum_run: u32) -> Option<MixedSignalError> {
+    #[doc(hidden)]
+    pub fn accepted_boundary_loop(&self, minimum_run: u32) -> Option<MixedSignalError> {
         let histories = BoundaryHistories {
             adc: self.state.adc_history.clone(),
             dac: self.state.dac_history.clone(),
@@ -5692,7 +5770,8 @@ impl MixedSignalHost {
     /// ones this trial's settles moved, with the values they currently hold —
     /// within one trial there is no history to show, because a settle pass is
     /// not a timepoint.
-    pub(crate) fn boundary_settle_oscillation(&self, limit: u32) -> MixedSignalError {
+    #[doc(hidden)]
+    pub fn boundary_settle_oscillation(&self, limit: u32) -> MixedSignalError {
         let Some(trial) = self.trial.as_ref() else {
             return MixedSignalError::TrialProtocol {
                 detail: "there is no active trial whose boundary could be unsettled".into(),
