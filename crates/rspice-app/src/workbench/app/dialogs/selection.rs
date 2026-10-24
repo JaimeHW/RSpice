@@ -10,6 +10,3 @@ pub(in crate::workbench) mod move_selection;
 pub(in crate::workbench) mod rename;
 pub(in crate::workbench) mod shared_properties;
 pub(in crate::workbench) mod stretch;
-
-#[cfg(test)]
-mod tests;

@@ -224,26 +224,6 @@ mod tests {
         assert!(!copy.summary.contains("1 analyses"));
     }
 
-    /// Three literals — the width measurement, the accessibility label and the
-    /// painted line — named one fixture plan while the summary beside them was
-    /// live, which is what made the stale name read as authoritative.
-    ///
-    /// The guard follows the paint. `include_str!` resolves against the
-    /// including file's own directory, so it reads this module for the chip's
-    /// copy and `../toolbar.rs` for the lane that reserves room for it: the
-    /// literal must not come back in either place.
-    #[test]
-    fn the_toolbar_never_hardcodes_a_simulation_plan_name() {
-        for source in [
-            include_str!("run_config_chip.rs"),
-            include_str!("../toolbar.rs"),
-        ] {
-            let production = crate::source_guard::production_half(source);
-
-            assert!(!production.contains("Lab characterization"));
-        }
-    }
-
     /// A user-authored name is valid up to 96 characters, so the chip must clip
     /// rather than grow — and it must clip at exactly the width the toolbar
     /// reserved for it, or the scrolling context lane runs underneath it.

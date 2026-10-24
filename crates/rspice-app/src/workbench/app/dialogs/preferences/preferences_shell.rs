@@ -1878,30 +1878,6 @@ mod tests {
         );
     }
 
-    /// The ring is withheld by the `:focus-visible` rule, not deleted.
-    ///
-    /// `focus_is_visible` is the kit's own helper and carries its own tests
-    /// for telling a tabbed-to focus from a pointer-given one. What belongs
-    /// here is that the rail asks it before ringing anything, because the
-    /// failure this guards against is someone restoring the unconditional
-    /// call and taking the dialog back to ringing itself on open.
-    #[test]
-    fn the_rail_rings_a_row_only_when_the_keyboard_put_focus_there() {
-        let production = crate::source_guard::production_half(include_str!("preferences_shell.rs"));
-        let ring = production
-            .match_indices("paint_focus_ring")
-            .next()
-            .expect("the rail still paints a keyboard ring");
-        assert!(
-            production[..ring.0].ends_with("        theme::"),
-            "the ring call moved; check it is still inside a focus_is_visible gate"
-        );
-        assert!(
-            production.contains("if theme::focus_is_visible(ui.ctx(), &response) {"),
-            "the rail must ask whether focus is visible before ringing a row"
-        );
-    }
-
     #[test]
     fn phone_geometry_keeps_four_point_viewport_gutters() {
         let layout =

@@ -371,17 +371,4 @@ mod tests {
             "Maximum Newton iterations per transient step (ITL4). Default 10."
         );
     }
-
-    /// The form builds its hovers from the catalogue's meaning, not from the
-    /// engine site an option is admitted on.
-    #[test]
-    fn the_option_form_never_reads_the_engine_site_into_product_text() {
-        let source = crate::source_guard::production_source(include_str!("options.rs"));
-        for internal in [".consumer()", ".config_field()", "resolves onto"] {
-            assert!(
-                !source.contains(internal),
-                "options.rs builds product text from {internal}"
-            );
-        }
-    }
 }

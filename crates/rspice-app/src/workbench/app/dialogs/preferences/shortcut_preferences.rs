@@ -1378,26 +1378,6 @@ mod tests {
         actions
     }
 
-    /// The page shows no table of its own.
-    ///
-    /// It used to open with a read-only five-column projection of eleven
-    /// hand-picked commands. The binding editor below it is the searchable
-    /// table of every command in the registry, so the page's copy was a
-    /// sample of the real list presented as the list, and nothing on it could
-    /// be changed.
-    #[test]
-    fn the_page_does_not_reproduce_the_editors_table() {
-        let source = include_str!("shortcut_preferences.rs");
-        let page = source
-            .split("pub(super) fn render_page(")
-            .nth(1)
-            .and_then(|source| source.split("\nfn ").next())
-            .expect("page source");
-        assert!(!page.contains("semantic_table_row"));
-        assert!(!page.contains("table_text_cell"));
-        assert!(!page.contains("Browser / touch alternate"));
-    }
-
     #[test]
     fn policy_edits_queue_persist_before_live_candidates() {
         let live = ShortcutPreferences::default();

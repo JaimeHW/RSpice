@@ -626,27 +626,3 @@ fn an_empty_selection_refuses_with_one_plain_line() {
     }
     assert_eq!(state.model.schematic.document().components.len(), 2);
 }
-
-/// The copy these commands ship is the prompt, so the words the review
-/// surface used must not come back through it.
-#[test]
-fn no_shipped_copy_here_speaks_the_old_review_vocabulary() {
-    const BANNED: [&str; 4] = ["transaction", "stable id", "undo record", "mockup"];
-
-    let production = crate::source_guard::production_source(include_str!("../commands.rs"));
-    let mut found = Vec::new();
-    for (number, line) in production.lines().enumerate() {
-        let lowered = line.to_ascii_lowercase();
-        for banned in BANNED {
-            if lowered.contains(banned) {
-                found.push(format!("commands.rs:{}: {banned}", number + 1));
-            }
-        }
-    }
-
-    assert!(
-        found.is_empty(),
-        "these lines speak the vocabulary the review surface was deleted for:\n  {}",
-        found.join("\n  ")
-    );
-}

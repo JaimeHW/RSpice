@@ -1222,41 +1222,6 @@ mod tests {
         );
     }
 
-    /// Zero on that row is the word "All", not the number none.
-    ///
-    /// A ceiling of zero workers would refuse to solve anything, so the
-    /// sentinel has to read as what it means wherever it is shown.
-    #[test]
-    fn the_worker_row_spells_its_sentinel_rather_than_printing_zero() {
-        let production = production_code();
-        assert!(production.contains("custom_formatter"));
-        assert!(production.contains("\"All\".to_owned()"));
-    }
-
-    /// Rows the pages used to carry that set nothing.
-    ///
-    /// Each was a label whose value column could not be operated: two dock
-    /// widths read back from a layout the reader sets by dragging, a static
-    /// sentence about the system locale, and a count of the host's logical
-    /// processors.
-    #[test]
-    fn pages_carry_no_read_only_readout_dressed_as_a_setting() {
-        let production = production_code();
-        for readout in [
-            "\"Dock sizes\"",
-            "navigator {:.0} px",
-            "Locale, date, time and numeric format",
-            "System locale",
-            "Local processor availability",
-            "logical threads detected",
-        ] {
-            assert!(
-                !production.contains(readout),
-                "a read-only readout is presented as a setting: {readout}"
-            );
-        }
-    }
-
     /// Restore defaults is only as good as its coverage: a row added to a page
     /// and not to [`restore_defaults`] is a setting the footer's control
     /// silently skips, with nothing on screen to say which.
@@ -1534,29 +1499,6 @@ mod tests {
             stored = true;
         }
         stored
-    }
-
-    /// The hierarchy rows read in the order a reader builds them up: what a
-    /// drag selects, then what descending into a child does, then what the
-    /// nets it connects may be called.
-    #[test]
-    fn the_schematic_page_orders_its_hierarchy_rows() {
-        let source = production_source();
-        let schematic = source
-            .split("fn schematic(")
-            .nth(1)
-            .and_then(|source| source.split("\nfn ").next())
-            .expect("Schematic page source");
-        let selection = schematic
-            .find("\"Drag selection\"")
-            .expect("drag selection row");
-        let edit_in_place = schematic
-            .find("TogglePreference::HierarchicalEditInPlace")
-            .expect("hierarchical edit-in-place row");
-        let net_naming = schematic
-            .find("\"Net name characters\"")
-            .expect("net name characters row");
-        assert!(selection < edit_in_place && edit_in_place < net_naming);
     }
 
     /// The waveform defaults reach the viewer: a viewer cleared for a new

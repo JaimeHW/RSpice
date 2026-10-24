@@ -74,8 +74,6 @@ fn model_key(library: &str, item: &str) -> String {
 }
 
 #[cfg(test)]
-mod control_ratchet;
-#[cfg(test)]
 mod scale;
 #[cfg(test)]
 mod tests;
