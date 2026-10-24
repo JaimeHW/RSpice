@@ -51,7 +51,7 @@ netlist text
 | `xspice/` | XSPICE code models: `CodeModel`, `CodeModelRegistry`, instance and context types, the discrete-event scheduler, bundled analog, digital and bridge models, the native IEEE 1364-2005 digital Verilog host (`verilog`), and an `ifspec.ifs` parser with conformance helpers that diff the registry against an ngspice checkout |
 | `numerics/` | Integration methods and companion coefficients, Krylov and eigenspectrum kernels, exact rank arithmetic for constraint elimination, and RustFFT resource qualification |
 | `config`, `resource` | `SimulationConfig`, `ConvergenceConfig` and their selectors; `ResourceLimits` and the limit errors that govern untrusted and batch workloads |
-| `diagnostics`, `identity`, `op_label` | Structured warnings and convergence-quality metrics; stable analysis-instance and run-coordinate identities; the closed vocabulary of operating-point report labels |
+| `diagnostics`, `identity`, `op_label` | Convergence-quality metrics and failure attribution; stable analysis-instance and run-coordinate identities; the closed vocabulary of operating-point report labels |
 | `abort_signal`, `constants`, `time_compat` | Cooperative cancellation (`AbortSignal`, `AtomicAbort`, `NoAbort`); physical and simulation constants; a wall-clock shim that is a no-op on `wasm32` |
 
 ## Device routing
