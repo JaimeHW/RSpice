@@ -6,8 +6,7 @@ use crate::workbench::documents::netlist_document::NetlistImportIssueSeverity;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-const CORPUS: &str =
-    include_str!("../../../../state/workspace/testdata/vendor_profile_corpus_v1.tsv");
+const CORPUS: &str = include_str!("testdata/vendor_profile_corpus_v1.tsv");
 
 fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecutionProfile)> {
     let mut seen = BTreeSet::new();
