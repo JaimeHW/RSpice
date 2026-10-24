@@ -5534,7 +5534,6 @@ dependencies = [
  "thiserror 2.0.21",
  "wasm-bindgen",
  "wasm-bindgen-test",
- "wide",
  "windows-sys 0.61.2",
 ]
 

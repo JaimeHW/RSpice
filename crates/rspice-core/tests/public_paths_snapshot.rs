@@ -2514,35 +2514,6 @@ use rspice_core::xspice::set_digital_cosim_runtime_factory as _;
 use rspice_core::xspice::set_digital_process_runtime_factory as _;
 use rspice_core::xspice::unregister_data_file as _;
 
-#[cfg(feature = "simd")]
-mod simd {
-    use rspice_core::simd::SIMD_THRESHOLD as _;
-    use rspice_core::simd::SIMD_WIDTH as _;
-    use rspice_core::simd::add as _;
-    use rspice_core::simd::average as _;
-    use rspice_core::simd::axpy as _;
-    use rspice_core::simd::check_convergence as _;
-    use rspice_core::simd::clamp as _;
-    use rspice_core::simd::copy as _;
-    use rspice_core::simd::diff as _;
-    use rspice_core::simd::diode_iv as _;
-    use rspice_core::simd::div_safe as _;
-    use rspice_core::simd::exp_f64x4 as _;
-    use rspice_core::simd::limit_diode_voltage as _;
-    use rspice_core::simd::max as _;
-    use rspice_core::simd::max_abs as _;
-    use rspice_core::simd::max_abs_diff as _;
-    use rspice_core::simd::max_rel_diff as _;
-    use rspice_core::simd::min as _;
-    use rspice_core::simd::rms as _;
-    use rspice_core::simd::scale as _;
-    use rspice_core::simd::should_use_simd as _;
-    use rspice_core::simd::store_f64x4 as _;
-    use rspice_core::simd::sub as _;
-    use rspice_core::simd::sum as _;
-    use rspice_core::simd::trapezoidal_integrate as _;
-}
-
 #[cfg(feature = "veriloga")]
 mod veriloga {
     use rspice_core::HeldVerilogASources as _;

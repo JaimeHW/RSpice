@@ -81,7 +81,7 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 /// either.
 ///
 /// Attributes may sit between the visibility and the keyword in real code
-/// (`#[cfg(feature = "simd")] pub mod simd;`), but those are on their own
+/// (`#[cfg(feature = "veriloga")] pub mod verilog;`), but those are on their own
 /// line, so a per-line scan is sufficient and cheap.
 fn declared_submodules(source: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();

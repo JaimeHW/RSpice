@@ -66,9 +66,6 @@ pub mod result_scalar;
 /// Physical units carried by result schemas and control-expression vectors.
 #[doc(hidden)]
 pub mod signal_unit;
-/// SIMD-accelerated operations (optional, requires `simd` feature)
-#[cfg(feature = "simd")]
-pub mod simd;
 pub mod solver;
 /// Where a line of deck text was written. A leaf, so a refusal raised below
 /// the parser can cite one; published through `netlist` of `rspice-core`.

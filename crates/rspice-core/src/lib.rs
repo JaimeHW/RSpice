@@ -37,7 +37,6 @@
 //! - [`abort_signal`] — cooperative cancellation for long runs
 //! - [`resource`] — resource limits for untrusted input
 //! - [`time_compat`] — wall-clock shim (`wasm32` has no clock)
-//! - [`simd`] — SIMD kernels, with the `simd` feature
 //!
 //! ## Example
 //!
@@ -141,10 +140,6 @@ pub mod xspice;
 /// Abort signal for cancelling long-running simulations
 pub use rspice_core_base::abort_signal;
 pub use rspice_core_base::resource;
-
-/// SIMD-accelerated operations (optional, requires `simd` feature)
-#[cfg(feature = "simd")]
-pub use rspice_core_base::simd;
 
 // Re-export primary types for convenience
 pub use abort_signal::{

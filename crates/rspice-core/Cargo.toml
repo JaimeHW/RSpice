@@ -436,7 +436,7 @@ veriloga-builtins = [
     "rspice-core-netlist/veriloga-builtins",
     "rspice-core-devices/veriloga-builtins",
 ]
-simd = ["wide", "rspice-core-base/simd", "rspice-core-netlist/simd", "rspice-core-devices/simd"]
+simd = ["rspice-core-base/simd", "rspice-core-netlist/simd", "rspice-core-devices/simd"]
 # Test helpers a crate built on this one compiles into its own unit tests.
 # Additive only: it adds hidden items and changes no behaviour.
 test-support = [
@@ -492,9 +492,6 @@ wasm-bindgen = { version = "0.2", optional = true }
 
 # Verilog-A support (optional)
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = true, default-features = false }
-
-# SIMD acceleration (optional)
-wide = { version = "1.5", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

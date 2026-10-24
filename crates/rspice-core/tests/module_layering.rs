@@ -173,18 +173,13 @@ const LAYERS: &[(&str, u32)] = &[
     // re-exports it. It shares rank 1 with `io` and `numerics` because none
     // references another.
     ("capability", 1),
-    // SIMD acceleration uses the scalar numerical definitions for exceptional
-    // values, unaligned tails and convergence policy. Numerics stays independent
-    // of the accelerator so native and browser fallbacks have the same meaning.
-    ("simd", 2),
     // What a run raised and went on to complete with: the parameters the
     // device models clamp, the convergence aids that solved, the timestep
     // floor the transient stepper was held at. The device models record into
     // it, so it sits below them, and it owns the `ContinuationAid` vocabulary
     // its convergence notice carries rather than reaching up into `analysis`
     // for it; `analysis::error` re-exports the aid for the failure that names
-    // it. It reads `log_scope` and `numerics`, and shares rank 2 with `simd`
-    // because neither references the other.
+    // it. It reads `log_scope` and `numerics`.
     ("notice", 2),
     // Simulation configuration. Below the solver, the device models and the
     // circuit store, all of which read a tolerance or a dialect flag and used
