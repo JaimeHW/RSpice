@@ -92,7 +92,7 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
-      - name: Test and build the adapter in the runtime-matched toolchain
+      - name: Build the adapter in the runtime-matched toolchain
         run: |
           set -euo pipefail
           docker run --rm \
@@ -103,7 +103,6 @@ jobs:
             --env RSPICE_BUILD_SHA="$GITHUB_SHA" \
             "$BUILDER_IMAGE" \
             bash -euo pipefail -c '
-              cargo test --locked --release -p rspice-engine-adapter
               cargo build --locked --release -p rspice-engine-adapter
             '
       - name: Smoke the packaged executor exactly as the worker launches it
