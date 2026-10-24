@@ -1172,17 +1172,6 @@ impl Capacitors {
             .and_then(Option::as_mut)
     }
 
-    /// Evaluate a retained solution-dependent capacitance expression.
-    pub fn evaluate_value_expression(
-        &mut self,
-        index: usize,
-        solution: &[Value],
-        time: Value,
-    ) -> Option<Value> {
-        self.value_expression_mut(index)
-            .map(|expression| expression.evaluate(solution, time))
-    }
-
     /// Linearize an effective solution-dependent capacitance, including the
     /// static instance/model scale. Returns `None` for a static capacitor.
     pub fn linearize_effective_capacitance(
@@ -2216,57 +2205,6 @@ impl Capacitors {
             }
         }
     }
-
-    /// Update capacitor state after a successful timestep using the exact
-    /// coefficients that stamped that timestep.
-    ///
-    /// Adaptive integrators should prefer this entry point so the committed
-    /// current history cannot be reconstructed with a different timestep
-    /// ratio or integration order than the accepted linear system.
-    /// Whole-circuit callers with explicit IC-current branches must instead
-    /// commit those solved branch unknowns; this container-only helper has no
-    /// node-count offset with which to locate them.
-    pub fn update_state_with_coefficients(
-        &mut self,
-        solution: &[Value],
-        dt: Value,
-        coeff: &CompanionCoefficients,
-    ) {
-        for (i, stamp) in self.stamps.iter().enumerate() {
-            if self
-                .value_expressions
-                .get(i)
-                .and_then(Option::as_ref)
-                .is_some()
-            {
-                continue;
-            }
-            let v_curr = if stamp.pp.row != 0 {
-                solution[stamp.pp.row - 1]
-            } else {
-                0.0
-            } - if stamp.nn.row != 0 {
-                solution[stamp.nn.row - 1]
-            } else {
-                0.0
-            };
-
-            let i_curr = coeff.capacitor_current(
-                self.capacitances[i],
-                dt,
-                v_curr,
-                self.v_prev[i],
-                self.v_prev_prev[i],
-                self.i_prev[i],
-            );
-
-            // Advance history
-            self.v_prev_prev_prev[i] = self.v_prev_prev[i];
-            self.v_prev_prev[i] = self.v_prev[i];
-            self.v_prev[i] = v_curr;
-            self.i_prev[i] = i_curr;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -2356,88 +2294,6 @@ mod capacitor_state_tests {
         );
     }
 
-    fn capacitor_with_history(
-        capacitance: Value,
-        previous_voltage: Value,
-        older_voltage: Value,
-    ) -> Capacitors {
-        let mut capacitors = Capacitors::new();
-        capacitors.add("C1".to_string(), 1, 0, capacitance);
-        capacitors.v_prev[0] = previous_voltage;
-        capacitors.v_prev_prev[0] = older_voltage;
-        capacitors
-    }
-
-    #[test]
-    fn variable_step_gear2_state_update_is_exact_for_an_affine_voltage() {
-        let dt = 2.0;
-        let previous_dt = 1.0;
-        let slope = 3.0;
-        let previous_voltage = 7.0;
-        let older_voltage = previous_voltage - slope * previous_dt;
-        let current_voltage = previous_voltage + slope * dt;
-        let capacitance = 0.25;
-        let mut capacitors = capacitor_with_history(capacitance, previous_voltage, older_voltage);
-
-        capacitors.update_state_with_coefficients(
-            &[current_voltage],
-            dt,
-            &CompanionCoefficients::for_method_with_previous_step(
-                IntegrationMethod::Gear2,
-                dt,
-                previous_dt,
-            ),
-        );
-
-        assert_close(capacitors.i_prev[0], capacitance * slope);
-        assert_eq!(capacitors.v_prev[0], current_voltage);
-        assert_eq!(capacitors.v_prev_prev[0], previous_voltage);
-        assert_eq!(capacitors.v_prev_prev_prev[0], older_voltage);
-    }
-
-    #[test]
-    fn backward_euler_commit_reads_no_older_history() {
-        let dt = 2.0;
-        let previous_voltage = 4.0;
-        let current_voltage = 10.0;
-        let capacitance = 0.5;
-        // An intentionally unrelated older value proves that a startup commit
-        // does not build a BDF2 stencil from invalid history.
-        let mut capacitors = capacitor_with_history(capacitance, previous_voltage, -100.0);
-
-        capacitors.update_state_with_coefficients(
-            &[current_voltage],
-            dt,
-            &CompanionCoefficients::backward_euler(),
-        );
-
-        assert_close(
-            capacitors.i_prev[0],
-            capacitance * (current_voltage - previous_voltage) / dt,
-        );
-    }
-
-    #[test]
-    fn fixed_grid_gear2_coefficients_commit_the_equal_step_slope() {
-        let dt = 2.0;
-        let slope = 3.0;
-        let previous_voltage = 7.0;
-        let older_voltage = previous_voltage - slope * dt;
-        let current_voltage = previous_voltage + slope * dt;
-        let capacitance = 0.25;
-        let mut capacitors = capacitor_with_history(capacitance, previous_voltage, older_voltage);
-
-        // `for_method` builds the equal-step BDF2 stencil, so this is the
-        // fixed-grid answer against which the adaptive stencil above is read.
-        capacitors.update_state_with_coefficients(
-            &[current_voltage],
-            dt,
-            &CompanionCoefficients::for_method(IntegrationMethod::Gear2),
-        );
-
-        assert_close(capacitors.i_prev[0], capacitance * slope);
-    }
-
     #[test]
     fn ic_branch_companion_uses_physical_current_in_terminal_kcl() {
         let mut capacitors = Capacitors::new();
@@ -2487,8 +2343,9 @@ mod capacitor_state_tests {
         // The next interval integrates an input changing from 2 to 4. The
         // initial accepted input must not be zero or the last derivative probe.
         let value = capacitors
-            .evaluate_value_expression(0, &[4.0, 0.5], 1.0)
-            .unwrap();
+            .value_expression_mut(0)
+            .unwrap()
+            .evaluate(&[4.0, 0.5], 1.0);
         assert_close(value, 4.0);
     }
 
@@ -2749,7 +2606,9 @@ mod capacitor_state_tests {
             )
             .expect("capacitor expression references bind");
         assert_eq!(
-            capacitors.evaluate_value_expression(1, &[2.5], 0.0),
+            capacitors
+                .value_expression_mut(1)
+                .map(|expression| expression.evaluate(&[2.5], 0.0)),
             Some(2.5)
         );
         let linearization = capacitors
