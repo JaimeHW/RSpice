@@ -33,7 +33,7 @@
 //! - [`xspice`] — XSPICE code-model subsystem and bundled models
 //! - [`io`] — SPICE RAW waveform files, read and written
 //! - [`constants`] — physical and simulation constants
-//! - [`diagnostics`] — structured warnings and convergence-quality metrics
+//! - [`diagnostics`] — convergence-quality metrics and failure attribution
 //! - [`abort_signal`] — cooperative cancellation for long runs
 //! - [`resource`] — resource limits for untrusted input
 //! - [`time_compat`] — wall-clock shim (`wasm32` has no clock)

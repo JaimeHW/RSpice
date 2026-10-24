@@ -1026,12 +1026,15 @@ mod convergence_quality_tests {
         engine.run_dc_op(&netlist).expect("divider solves");
 
         let quality = engine.convergence_quality();
-        assert!(
-            !quality.has_issues(),
-            "a linear divider needs no convergence aids: {}",
-            quality.summary()
+        assert_eq!(
+            (
+                quality.force_accepted_points,
+                quality.gmin_stepping_count,
+                quality.source_stepping_count,
+            ),
+            (0, 0, 0),
+            "a linear divider needs no convergence aids"
         );
-        assert_eq!(quality.summary(), "Clean convergence");
     }
 
     /// The analyses do not run on the engine the caller holds — every entry
@@ -1061,17 +1064,18 @@ mod convergence_quality_tests {
         let engine = Engine::new(SimulationConfig::default());
 
         engine.record_convergence(|quality| quality.record_gmin_stepping());
-        assert!(engine.convergence_quality().has_issues());
+        assert_eq!(engine.convergence_quality().gmin_stepping_count, 1);
 
         engine.run_dc_op(&netlist).expect("divider solves");
-        assert!(
-            !engine.convergence_quality().has_issues(),
+        assert_eq!(
+            engine.convergence_quality().gmin_stepping_count,
+            0,
             "metrics describe one run, so an analysis must clear the previous one"
         );
     }
 
     #[test]
-    fn recorded_aids_are_summarised_for_the_caller() {
+    fn recorded_aids_are_counted_for_the_caller() {
         let engine = Engine::new(SimulationConfig::default());
         engine.record_convergence(|quality| {
             quality.record_gmin_stepping();
@@ -1080,11 +1084,10 @@ mod convergence_quality_tests {
         });
 
         let quality = engine.convergence_quality();
-        assert!(quality.has_issues());
+        assert_eq!(quality.gmin_stepping_count, 1);
+        assert_eq!(quality.force_accepted_points, 1);
+        assert_eq!(quality.force_accepted_indices, vec![3]);
         assert_eq!(quality.timestep_reductions, 1);
-        let summary = quality.summary();
-        assert!(summary.contains("force-accepted"), "{summary}");
-        assert!(summary.contains("GMIN"), "{summary}");
     }
 
     /// A step rejected on truncation error is an LTE rejection as well as a
