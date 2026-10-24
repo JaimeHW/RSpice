@@ -7,7 +7,7 @@
 /// A single-sheet cell view has no position to report, so the segment is
 /// absent rather than reading `p1/1`. The page number is the catalog's, so it
 /// is the number the sheet strip's chip and the printed title block carry.
-pub(super) fn sheet_position_summary(
+pub(in crate::workbench) fn sheet_position_summary(
     state: &crate::workbench::app_state::AppState,
 ) -> Option<(String, String)> {
     let catalog = crate::schematic::view::sheet_visibility::multi_sheet_catalog(state)?;

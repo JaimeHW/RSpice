@@ -8,6 +8,7 @@ use egui::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::host::Host;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -15,14 +16,12 @@ use super::super::state::{VerificationPage, WorkbenchSession, Workspace};
 use crate::state::ModelsPage;
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
-mod code;
-mod design;
+pub(in crate::workbench) mod code;
+pub(in crate::workbench) mod design;
 mod keyboard;
 mod menu_entries;
 mod menu_row;
 mod menus;
-use code::code_title_cell;
-use design::design_title_cell;
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
     claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
@@ -704,16 +703,7 @@ fn active_title_cell(app: &RSpiceApp) -> String {
     if !app.state.platform.project_lifecycle.is_open() {
         return "No project open".to_owned();
     }
-    match app.state.workbench.workspace {
-        Workspace::Project => "Project overview".to_owned(),
-        Workspace::Design => design_title_cell(&app.state),
-        Workspace::Simulate => "Simulation plan".to_owned(),
-        Workspace::Stimulus => "Stimulus Library".to_owned(),
-        Workspace::Results => "Results".to_owned(),
-        Workspace::Verify => "Verification".to_owned(),
-        Workspace::Models => "Models & PDKs".to_owned(),
-        Workspace::Netlist => code_title_cell(&app.state),
-    }
+    app.title_cell(app.state.workbench.workspace)
 }
 
 fn ellipsize(value: &str, maximum_characters: usize) -> String {

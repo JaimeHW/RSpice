@@ -9,7 +9,9 @@ use crate::workbench::state::WorkspaceDocumentId;
 
 use super::WorkspaceDocument;
 
-pub(super) fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
+pub(in crate::workbench) fn netlist_workspace_documents(
+    state: &AppState,
+) -> Vec<WorkspaceDocument> {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     if state.code.code_workspace.page != CodeWorkspacePage::Netlist {
@@ -137,7 +139,9 @@ fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
     }
 }
 
-pub(super) fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
+pub(in crate::workbench) fn active_netlist_document_id(
+    state: &AppState,
+) -> Option<WorkspaceDocumentId> {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
     use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 
@@ -180,7 +184,7 @@ pub(super) fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDo
 }
 
 /// Show the generated netlist, when it is the one this tab names.
-pub(super) fn activate_generated_netlist(
+pub(in crate::workbench) fn activate_generated_netlist(
     state: &mut AppState,
     document_id: &crate::state::NetlistDocumentId,
 ) -> bool {
@@ -198,7 +202,7 @@ pub(super) fn activate_generated_netlist(
 }
 
 /// Show the project's own netlist, when it is the one this tab names.
-pub(super) fn activate_owned_netlist(
+pub(in crate::workbench) fn activate_owned_netlist(
     state: &mut AppState,
     document_id: &crate::state::NetlistDocumentId,
 ) -> bool {
@@ -212,7 +216,7 @@ pub(super) fn activate_owned_netlist(
 }
 
 /// Show an include of the generated or the owned netlist.
-pub(super) fn activate_netlist_dependency(
+pub(in crate::workbench) fn activate_netlist_dependency(
     state: &mut AppState,
     root: &crate::state::NetlistDocumentId,
     logical_identity: &str,
@@ -248,11 +252,11 @@ pub(super) fn activate_netlist_dependency(
 }
 
 /// Show the generated netlist's comparison.
-pub(super) fn activate_netlist_comparison(state: &mut AppState) -> bool {
+pub(in crate::workbench) fn activate_netlist_comparison(state: &mut AppState) -> bool {
     crate::workbench::documents::netlist_document::open_netlist_comparison(state)
 }
 
 /// Show the deck the last manual run consumed.
-pub(super) fn activate_netlist_run_snapshot(state: &mut AppState) -> bool {
+pub(in crate::workbench) fn activate_netlist_run_snapshot(state: &mut AppState) -> bool {
     crate::workbench::documents::netlist_document::open_run_deck_snapshot(state)
 }

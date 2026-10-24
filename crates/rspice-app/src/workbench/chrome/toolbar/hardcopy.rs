@@ -7,7 +7,11 @@ use crate::workbench::layout::LayoutSpec;
 
 use super::toolbar_text_command;
 
-pub(super) fn report_authoring_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn report_authoring_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     toolbar_text_command(
         ui,
         app,

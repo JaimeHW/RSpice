@@ -7,7 +7,7 @@ use crate::workbench::state::WorkspaceDocumentId;
 use super::WorkspaceDocument;
 
 /// The Simulate workspace's one document, its plan.
-pub(super) fn simulation_plan_documents() -> Vec<WorkspaceDocument> {
+pub(in crate::workbench) fn simulation_plan_documents() -> Vec<WorkspaceDocument> {
     // One plan, one document. The Studio used to open a "<name> · setup"
     // tab per analysis instance too, and activating one only selected that
     // instance on the Analyses page — which the plan's own analysis list
@@ -24,7 +24,7 @@ pub(super) fn simulation_plan_documents() -> Vec<WorkspaceDocument> {
 }
 
 /// The Verify workspace's one document.
-pub(super) fn verification_documents() -> Vec<WorkspaceDocument> {
+pub(in crate::workbench) fn verification_documents() -> Vec<WorkspaceDocument> {
     vec![WorkspaceDocument {
         id: WorkspaceDocumentId::Verification,
         label: "Verification".to_owned(),

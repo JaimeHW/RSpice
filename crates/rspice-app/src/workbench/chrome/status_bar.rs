@@ -1,10 +1,10 @@
 //! Compact application status with exact engineering context.
 
-mod design;
-mod results;
-mod run;
-mod sheets;
-mod shell;
+pub(in crate::workbench) mod design;
+pub(in crate::workbench) mod results;
+pub(in crate::workbench) mod run;
+pub(in crate::workbench) mod sheets;
+pub(in crate::workbench) mod shell;
 
 use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 
@@ -13,17 +13,12 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticCounts, listing_in_pass};
+use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
+use crate::workbench::framework::host::{
+    Host, StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
+};
 
-use super::super::commands::vocabulary::Command;
 use super::super::layout::LayoutSpec;
-use super::super::state::Workspace;
-
-use design::{design_engineering_context, selection_summary, zoom_factor};
-use results::{format_plot_zoom, results_view_summary};
-use run::{preflight_status, simulation_engine_status};
-use sheets::sheet_position_summary;
-use shell::platform_label;
 
 const STATUS_PADDING_X: f32 = 9.0;
 const STATUS_MARK_GAP: f32 = 5.0;
@@ -42,82 +37,28 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let bar_width = ui.available_width();
             let height = ui.available_height();
-            let check_counts = listing_in_pass(&app.state, ctx.cumulative_pass_nr()).counts();
-            let check = check_summary(check_counts);
-            // The Results workspace reports the view its instrument shows:
-            // the visible X interval in the coordinate segment, and that
-            // interval's magnification in the zoom chip beside it.
-            let results_view = (app.state.workbench.workspace == Workspace::Results)
-                .then(|| {
-                    crate::workbench::documents::result_document::active_shared_x_status(
-                        &t,
-                        &mut app.state,
-                    )
-                })
-                .flatten();
-            let engineering = engineering_context_summary(app, results_view.as_ref());
-            let selection = selection_summary(app);
-            let sheet_position = sheet_position_summary(&app.state);
-            let zoom_command = if app.state.workbench.workspace == Workspace::Results {
-                Command::ZoomFit
-            } else {
-                Command::ZoomOneToOne
-            };
-            let zoom = if let Some(view) = results_view.as_ref() {
-                format_plot_zoom(view.zoom)
-            } else if app.state.workbench.workspace == Workspace::Results {
-                // A result sheet with nothing plotted still reports in the
-                // instrument's unit rather than flipping the chip to a
-                // canvas percentage it never uses.
-                format_plot_zoom(1.0)
-            } else {
-                format!("{}%", (zoom_factor(app) * 100.0).round())
-            };
-            let availability = app.simulation_controller.engine_availability();
-            let checking = app
-                .state
-                .runs
-                .preflight
-                .checking
-                .as_ref()
-                .and(app.simulation_controller.preflight_stage());
-            let engine = match checking {
-                Some(stage) => Some(preflight_status(stage)),
-                None => simulation_engine_status(&app.state.model.simulation, &availability),
-            };
-            let engine_mark = engine_status_mark(
-                &availability,
-                app.state.model.simulation.execution.has_active_execution() || checking.is_some(),
-            );
-            let platform = platform_label();
-            let prompt = current_prompt(ctx, &mut app.state.workbench.prompt);
-            let check_mark =
-                check_problem(check_counts).map_or(StatusMark::None, StatusMark::Problem);
-            let others_desired = optional_status_width(ui, check.as_deref(), check_mark)
-                + if visibility.coordinates {
-                    desired_status_width(ui, &engineering, StatusMark::None)
-                } else {
-                    0.0
-                }
-                + if visibility.selection {
-                    desired_status_width(ui, &selection, StatusMark::None)
-                } else {
-                    0.0
-                }
-                + sheet_position.as_ref().map_or(0.0, |(text, _)| {
-                    desired_status_width(ui, text, StatusMark::None)
-                });
-            let right_desired = desired_status_width(ui, &zoom, StatusMark::None)
-                + optional_status_width(ui, engine.as_deref(), engine_mark)
-                + if visibility.platform {
-                    desired_status_width(ui, &platform, StatusMark::Processor)
-                } else {
-                    0.0
-                };
+            let frame = app.status_frame(ctx);
+            let workspace = app.state.workbench.workspace;
+            let (leading, trailing) = status_zones(app, &frame, workspace, visibility);
+            let mut leading_desired = leading.each_ref().map(|cell| status_cell_width(ui, cell));
+            let trailing_desired = trailing.each_ref().map(|cell| status_cell_width(ui, cell));
+            let others_desired = leading
+                .iter()
+                .zip(leading_desired)
+                .filter(|(cell, _)| !yields_room(cell.as_ref()))
+                .map(|(_, width)| width)
+                .sum::<f32>();
+            let right_desired = trailing_desired.iter().sum::<f32>();
             // The prompt takes what the other items leave and never squeezes
             // one of them: it is the answer to a gesture, they are the state.
-            let prompt_width = optional_status_width(ui, prompt.as_deref(), StatusMark::None)
-                .min((bar_width - others_desired - right_desired).max(0.0));
+            let room = (bar_width - others_desired - right_desired).max(0.0);
+            let mut prompt_width = 0.0;
+            for (cell, width) in leading.iter().zip(&mut leading_desired) {
+                if yields_room(cell.as_ref()) {
+                    *width = width.min(room);
+                    prompt_width += *width;
+                }
+            }
             let left_desired = prompt_width + others_desired;
             let groups = status_group_allocation(left_desired, right_desired, bar_width);
             ui.horizontal(|ui| {
@@ -126,84 +67,21 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        let desired = [
-                            prompt_width,
-                            optional_status_width(ui, check.as_deref(), check_mark),
-                            if visibility.coordinates {
-                                desired_status_width(ui, &engineering, StatusMark::None)
-                            } else {
-                                0.0
-                            },
-                            if visibility.selection {
-                                desired_status_width(ui, &selection, StatusMark::None)
-                            } else {
-                                0.0
-                            },
-                            sheet_position.as_ref().map_or(0.0, |(text, _)| {
-                                desired_status_width(ui, text, StatusMark::None)
-                            }),
-                        ];
-                        let widths = fit_status_widths(desired, groups.left);
+                        let widths = fit_status_widths(leading_desired, groups.left);
                         // Rules go between items, so the last item on the left
                         // draws none: a rule there would face empty bar.
-                        let last = if sheet_position.is_some() {
-                            4
-                        } else if visibility.selection {
-                            3
-                        } else if visibility.coordinates {
-                            2
-                        } else if check.is_some() {
-                            1
-                        } else {
-                            0
-                        };
-                        if let Some(prompt) = prompt.as_deref() {
-                            let response = status_item_sized(
-                                ui,
-                                prompt,
-                                StatusMark::None,
-                                false,
-                                last != 0,
-                                widths[0],
-                            );
-                            ctx.accesskit_node_builder(response.id, |node| {
-                                node.set_role(egui::accesskit::Role::Status);
-                                node.set_label(prompt);
-                                node.set_live(egui::accesskit::Live::Polite);
-                            });
-                        }
-                        if let Some(check) = check.as_deref()
-                            && status_item_sized(ui, check, check_mark, true, last != 1, widths[1])
-                                .clicked()
-                        {
-                            Command::OpenProblems.execute(app);
-                        }
-                        if visibility.coordinates {
-                            status_item_sized(
-                                ui,
-                                &engineering,
-                                StatusMark::None,
-                                false,
-                                last != 2,
-                                widths[2],
-                            );
-                        }
-                        if visibility.selection {
-                            status_item_sized(
-                                ui,
-                                &selection,
-                                StatusMark::None,
-                                false,
-                                last != 3,
-                                widths[3],
-                            );
-                        }
-                        // The page a multi-sheet drawing is open at reads
-                        // beside where the cursor is, because both answer
-                        // where the reader is rather than what is selected.
-                        if let Some((text, detail)) = sheet_position.as_ref() {
-                            status_item_sized(ui, text, StatusMark::None, false, false, widths[4])
-                                .on_hover_text(detail);
+                        let last = leading.iter().rposition(Option::is_some).unwrap_or(0);
+                        for (order, cell) in leading.into_iter().enumerate() {
+                            if let Some(cell) = cell {
+                                paint_status_cell(
+                                    ui,
+                                    app,
+                                    &frame,
+                                    cell,
+                                    order != last,
+                                    widths[order],
+                                );
+                            }
                         }
                     },
                 );
@@ -215,97 +93,22 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     Layout::right_to_left(Align::Center),
                     |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        let zoom_mark = StatusMark::None;
-                        let platform_mark = StatusMark::Processor;
-                        let widths = fit_status_widths(
-                            [
-                                desired_status_width(ui, &zoom, zoom_mark),
-                                optional_status_width(ui, engine.as_deref(), engine_mark),
-                                if visibility.platform {
-                                    desired_status_width(ui, &platform, platform_mark)
-                                } else {
-                                    0.0
-                                },
-                            ],
-                            groups.right,
-                        );
+                        let widths = fit_status_widths(trailing_desired, groups.right);
                         // The right group lays out from the window edge, so
                         // each item's rule falls between it and the one to its
                         // right; the rightmost would draw on the edge itself.
-                        if status_item_sized(
-                            ui,
-                            &zoom,
-                            zoom_mark,
-                            zoom_command.is_enabled(app),
-                            false,
-                            widths[0],
-                        )
-                        .on_hover_text(if app.state.workbench.workspace == Workspace::Results {
-                            "Fit the active result plot"
-                        } else {
-                            "Reset active canvas zoom to 100%"
-                        })
-                        .clicked()
-                        {
-                            zoom_command.execute(app);
-                        }
-                        // The engine chip reports what the solver is doing; the
-                        // dataset it produces is the one thing a reader wants
-                        // next, so the chip is the route to it rather than a
-                        // label about it. An idle, ready engine is nothing to
-                        // report, so the bar shows no chip then.
-                        if let Some(engine) = engine.as_deref() {
-                        let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
-                            && !app.state.model.simulation.execution.has_active_execution();
-                        let can_open = availability == EngineAvailability::Ready
-                            && app.state.platform.project_lifecycle.is_open()
-                            && app
-                                .state
-                                .model.simulation
-                                .retained.newest_retained_result_run_index()
-                                .is_some();
-                        let engine_response = ui
-                            .scope(|ui| {
-                                if !can_open && !can_retry {
-                                    ui.disable();
-                                }
-                                status_item_sized(ui, engine, engine_mark, true, true, widths[1])
-                            })
-                            .inner;
-                        if can_retry {
-                            let detail = availability.failure_reason().map_or_else(
-                                || "Restart the simulation engine. This does not queue a simulation.".to_owned(),
-                                |reason| format!("{reason}\nRetry engine startup. This does not queue a simulation."),
-                            );
-                            if engine_response.on_hover_text(detail).clicked()
-                                && let Err(error) = app.simulation_controller.retry_engine_startup()
-                            {
-                                app.state.record(
-                                    crate::diagnostics::LogSeverity::Error,
-                                    crate::diagnostics::LogSource::Studio,
-                                    format!("Engine startup could not be retried: {error}"),
+                        let rightmost = trailing.iter().position(Option::is_some).unwrap_or(0);
+                        for (order, cell) in trailing.into_iter().enumerate() {
+                            if let Some(cell) = cell {
+                                paint_status_cell(
+                                    ui,
+                                    app,
+                                    &frame,
+                                    cell,
+                                    order != rightmost,
+                                    widths[order],
                                 );
                             }
-                        } else if can_open {
-                            if engine_response
-                                .on_hover_text(
-                                    "Open the newest retained result dataset in Results",
-                                )
-                                .clicked()
-                            {
-                                crate::workbench::commands::result_navigation::open_newest_retained_run(app);
-                            }
-                        } else {
-                            let detail = availability.failure_reason().unwrap_or(match &availability {
-                                EngineAvailability::Starting => "The simulation engine is starting. Validated Run requests wait for initialization.",
-                                EngineAvailability::Restartable => "The current execution is finishing its cancellation before the engine can restart.",
-                                _ => "No run has retained a dataset yet, so there is nothing to open in Results.",
-                            });
-                            engine_response.on_disabled_hover_text(detail);
-                        }
-                        }
-                        if visibility.platform {
-                            status_item_sized(ui, &platform, platform_mark, false, true, widths[2]);
                         }
                     },
                 );
@@ -317,10 +120,114 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     });
 }
 
+/// The most cells one end of the bar holds.
+const ZONE_CELLS: usize = 8;
+
+/// A cell with something to show this frame, and what it shows.
+struct ShownCell<'a, H: Host> {
+    cell: &'static StatusCell<H>,
+    text: StatusText<'a>,
+}
+
+/// One end of the bar, by place.
+type Zone<'a, H> = [Option<ShownCell<'a, H>>; ZONE_CELLS];
+
+/// Offer each place to the cells the host lists for it, in their order: the
+/// first that reports in `workspace`, fits the bar, and has something to say
+/// takes it.
+fn status_zones<'a, H: Host>(
+    app: &mut H,
+    frame: &'a H::StatusFrame,
+    workspace: H::WorkspaceKey,
+    visibility: StatusVisibility,
+) -> (Zone<'a, H>, Zone<'a, H>) {
+    let mut leading: Zone<'a, H> = Default::default();
+    let mut trailing: Zone<'a, H> = Default::default();
+    for cell in app.status_cells() {
+        if !cell.workspace.is_none_or(|only| only == workspace) || !visibility.shows(cell.key) {
+            continue;
+        }
+        let zone = match cell.zone {
+            StatusZone::Leading => &mut leading,
+            StatusZone::Trailing => &mut trailing,
+        };
+        if zone[cell.order].is_none() {
+            zone[cell.order] = (cell.content)(app, frame).map(|text| ShownCell { cell, text });
+        }
+    }
+    (leading, trailing)
+}
+
+/// The width a place asks for: none when nothing shows there.
+fn status_cell_width<H: Host>(ui: &egui::Ui, cell: &Option<ShownCell<'_, H>>) -> f32 {
+    cell.as_ref().map_or(0.0, |shown| {
+        desired_status_width(ui, &shown.text.text, shown.text.mark)
+    })
+}
+
+/// Whether the place holds the prompt, which takes only the room the other
+/// cells leave.
+fn yields_room<H: Host>(cell: Option<&ShownCell<'_, H>>) -> bool {
+    cell.is_some_and(|shown| shown.cell.key == StatusKey::Prompt)
+}
+
+/// Paint `shown` at `width`, and do what pressing it does.
+fn paint_status_cell<H: Host>(
+    ui: &mut egui::Ui,
+    app: &mut H,
+    frame: &H::StatusFrame,
+    shown: ShownCell<'_, H>,
+    rule_after: bool,
+    width: f32,
+) {
+    let ShownCell {
+        cell,
+        text:
+            StatusText {
+                text,
+                mark,
+                control,
+                hover,
+            },
+    } = shown;
+    let response = match control {
+        StatusControl::Label => status_item_sized(ui, &text, mark, false, rule_after, width),
+        StatusControl::Button => status_item_sized(ui, &text, mark, true, rule_after, width),
+        StatusControl::Guarded { enabled } => {
+            ui.scope(|ui| {
+                if !enabled {
+                    ui.disable();
+                }
+                status_item_sized(ui, &text, mark, true, rule_after, width)
+            })
+            .inner
+        }
+    };
+    if cell.key == StatusKey::Prompt {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Status);
+            node.set_label(&*text);
+            node.set_live(egui::accesskit::Live::Polite);
+        });
+    }
+    let response = match hover {
+        Some(hover) if control == (StatusControl::Guarded { enabled: false }) => {
+            response.on_disabled_hover_text(hover)
+        }
+        Some(hover) => response.on_hover_text(hover),
+        None => response,
+    };
+    if response.clicked()
+        && let Some(activate) = cell.activate
+    {
+        activate(app, frame);
+    }
+}
+
 /// The prompt the bar shows this frame. One that has expired is dropped here;
 /// one that has not asks for the frame that will drop it, because an idle
 /// window paints no frame of its own.
-fn current_prompt(
+pub(in crate::workbench) fn current_prompt(
     ctx: &egui::Context,
     slot: &mut Option<crate::workbench::state::StatusPrompt>,
 ) -> Option<String> {
@@ -342,6 +249,23 @@ struct StatusVisibility {
     coordinates: bool,
     selection: bool,
     platform: bool,
+}
+
+impl StatusVisibility {
+    /// Whether the bar has room for what `key` reports: the dense metadata
+    /// gives way on a narrow bar.
+    fn shows(self, key: StatusKey) -> bool {
+        match key {
+            StatusKey::Context => self.coordinates,
+            StatusKey::Selection => self.selection,
+            StatusKey::Platform => self.platform,
+            StatusKey::Prompt
+            | StatusKey::Checks
+            | StatusKey::Page
+            | StatusKey::Zoom
+            | StatusKey::Engine => true,
+        }
+    }
 }
 
 fn status_visibility(viewport_width: f32) -> StatusVisibility {
@@ -407,7 +331,7 @@ fn status_group_allocation(
 /// was open, the badge from the page, the page from four producers — and they
 /// disagreed routinely. There is one list now, so there is one answer, and
 /// the bar reads it once per pass for both the text and the mark.
-fn check_summary(counts: DiagnosticCounts) -> Option<String> {
+pub(in crate::workbench) fn check_summary(counts: DiagnosticCounts) -> Option<String> {
     if counts == DiagnosticCounts::default() {
         return None;
     }
@@ -435,7 +359,7 @@ fn check_summary(counts: DiagnosticCounts) -> Option<String> {
 /// a warning while anything warns, is stale or cannot be evaluated, and
 /// nothing otherwise, the way a compiler's problem count reads. A note or a
 /// hint is counted among the advisories but raises no mark.
-fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
+pub(in crate::workbench) fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
     if counts.errors > 0 {
         Some(Problem::Failure)
     } else if counts.warnings > 0 || counts.stale > 0 || counts.unavailable > 0 {
@@ -447,7 +371,10 @@ fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
 
 /// The mark in front of the engine segment: a failure when the engine cannot
 /// run, the one live dot while a run is in progress, and nothing otherwise.
-fn engine_status_mark(availability: &EngineAvailability, run_in_progress: bool) -> StatusMark {
+pub(in crate::workbench) fn engine_status_mark(
+    availability: &EngineAvailability,
+    run_in_progress: bool,
+) -> StatusMark {
     if availability.failure_reason().is_some() {
         StatusMark::Problem(Problem::Failure)
     } else if run_in_progress {
@@ -455,40 +382,6 @@ fn engine_status_mark(availability: &EngineAvailability, run_in_progress: bool) 
     } else {
         StatusMark::None
     }
-}
-
-fn engineering_context_summary(
-    app: &RSpiceApp,
-    results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
-) -> String {
-    if !app.state.platform.project_lifecycle.is_open() {
-        return "No project loaded".to_owned();
-    }
-    match app.state.workbench.workspace {
-        Workspace::Design => design_engineering_context(&app.state),
-        Workspace::Results => results_view_summary(app, results_view),
-        Workspace::Project
-        | Workspace::Simulate
-        | Workspace::Stimulus
-        | Workspace::Verify
-        | Workspace::Models
-        | Workspace::Netlist => {
-            format!(
-                "revision {}",
-                app.state.model.workspace.content.project.revision().get()
-            )
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StatusMark {
-    None,
-    /// A warning or a failure the reader has to notice.
-    Problem(Problem),
-    /// A run in progress: the bar's one live indicator.
-    Live,
-    Processor,
 }
 
 fn status_padding_x(ui: &egui::Ui) -> f32 {
@@ -514,11 +407,6 @@ fn status_mark_size(mark: StatusMark) -> f32 {
 
 fn status_text_font() -> egui::FontId {
     theme::mono(STATUS_FONT_SIZE, FontWeight::Regular)
-}
-
-/// The width a segment that may be absent asks for: none when it is.
-fn optional_status_width(ui: &egui::Ui, text: Option<&str>, mark: StatusMark) -> f32 {
-    text.map_or(0.0, |text| desired_status_width(ui, text, mark))
 }
 
 fn desired_status_width(ui: &egui::Ui, text: &str, mark: StatusMark) -> f32 {
@@ -716,9 +604,12 @@ fn paint_processor(painter: &egui::Painter, rect: egui::Rect, color: egui::Color
 
 #[cfg(test)]
 mod tests {
-    use super::design::schematic_cursor_summary;
-    use super::run::simulation_progress_percent;
+    use super::design::{schematic_cursor_summary, selection_summary};
+    use super::results::{format_plot_zoom, results_view_summary};
+    use super::run::{preflight_status, simulation_engine_status, simulation_progress_percent};
+    use super::sheets::sheet_position_summary;
     use super::*;
+    use crate::workbench::state::Workspace;
 
     /// The counts the bar states, read as the page reads them.
     fn counts(app: &RSpiceApp) -> DiagnosticCounts {

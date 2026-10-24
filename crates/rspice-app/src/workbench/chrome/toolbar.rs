@@ -1,22 +1,22 @@
 //! Context toolbar.  Tool groups change with the canonical workspace while
 //! global run state remains visible at the trailing edge.
 
-mod code;
-mod design;
-mod hardcopy;
-mod models;
+pub(in crate::workbench) mod code;
+pub(in crate::workbench) mod design;
+pub(in crate::workbench) mod hardcopy;
+pub(in crate::workbench) mod models;
 mod overflow;
-mod project;
-mod results;
-mod run_config_chip;
-mod simulate;
+pub(in crate::workbench) mod project;
+pub(in crate::workbench) mod results;
+pub(in crate::workbench) mod run_config_chip;
+pub(in crate::workbench) mod simulate;
 
 use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 
-use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::host::{Host, Point, ToolbarScope, ToolbarSlot};
 
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
@@ -24,14 +24,7 @@ use super::super::state::{Drawer, Workspace};
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
-use code::{netlist_tools, veriloga_tools};
-use design::{design_tools, stimulus_tools, symbol_tools};
-use hardcopy::report_authoring_tools;
-use models::{model_editor_tools, models_tools};
-use project::{no_project_tools, project_tools};
-use results::results_tools;
-use run_config_chip::{RUN_CONFIG_CHIP_MAX_WIDTH, run_config_selector};
-use simulate::{pvt_selector, run_controls, simulation_tools, verification_tools};
+use run_config_chip::RUN_CONFIG_CHIP_MAX_WIDTH;
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
 
@@ -145,13 +138,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         }
                     }
                     if show_simulation_context {
-                        run_controls(ui, app, layout);
-                        if layout.show_run_config_selector {
-                            run_config_selector(ui, app, layout.run_control_height);
-                        }
-                        if layout.show_pvt_selector {
-                            pvt_selector(ui, app, layout.toolbar_control_height);
-                        }
+                        app.contribute(Point::Toolbar(ToolbarSlot::Trailing, layout), ui);
                     }
                 });
             });
@@ -364,42 +351,11 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     ui.data_mut(|data| {
         data.insert_temp(projected_tool_count_id(), 0_usize);
     });
-    if !app.state.platform.project_lifecycle.is_open() {
-        no_project_tools(ui, app, layout);
-        return;
-    }
-    if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ReportAuthoring
-    {
-        report_authoring_tools(ui, app, layout);
+    let scope = app.toolbar_scope(workspace);
+    app.contribute(Point::Toolbar(ToolbarSlot::Tools(scope), layout), ui);
+    if !matches!(scope, ToolbarScope::NoProject) {
         workspace_focus_tool(ui, app, layout);
-        return;
     }
-    if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ModelEditor {
-        model_editor_tools(ui, app, layout);
-        workspace_focus_tool(ui, app, layout);
-        return;
-    }
-    match workspace {
-        Workspace::Project => project_tools(ui, app, layout),
-        Workspace::Design
-            if app.state.model.workspace.content.active_view_type() == ViewType::Symbol =>
-        {
-            symbol_tools(ui, app, layout);
-        }
-        Workspace::Design
-            if app.state.model.workspace.content.active_view_type() == ViewType::VerilogA =>
-        {
-            veriloga_tools(ui, app, layout);
-        }
-        Workspace::Design => design_tools(ui, app, layout),
-        Workspace::Simulate => simulation_tools(ui, app, layout),
-        Workspace::Stimulus => stimulus_tools(ui, app, layout),
-        Workspace::Results => results_tools(ui, app, layout),
-        Workspace::Verify => verification_tools(ui, app, layout),
-        Workspace::Models => models_tools(ui, app, layout),
-        Workspace::Netlist => netlist_tools(ui, app, layout),
-    }
-    workspace_focus_tool(ui, app, layout);
 }
 
 /// The upgraded shell keeps focus mode at the end of every project toolbar,

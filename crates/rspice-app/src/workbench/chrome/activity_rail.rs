@@ -1,18 +1,17 @@
 //! Desktop/tablet primary workspace rail.
 
-mod results;
+pub(in crate::workbench) mod results;
 
 use egui::{Frame, Panel, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::host::Host;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};
 use super::super::state::Workspace;
-
-use results::unseen_result_count;
 
 const ACTIVITY_BUTTON_WIDTH: f32 = 50.0;
 const ACTIVITY_BUTTON_HEIGHT: f32 = 45.0;
@@ -69,13 +68,13 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
         .show_separator_line(true)
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            if app.state.workbench.workspace == Workspace::Results {
-                app.state.results.results_seen_version =
-                    app.state.model.simulation.view.data_version;
+            if let Some(on_visible) = app.rail_entry(app.state.workbench.workspace).on_visible {
+                on_visible(app);
             }
             for workspace in Workspace::ALL {
                 let active = app.state.workbench.workspace == workspace;
-                let new_result_count = unseen_result_count(&app.state, workspace, active);
+                let entry = app.rail_entry(workspace);
+                let new_result_count = entry.badge.map_or(0, |badge| badge(app, active));
                 let command = Command::OpenWorkspace(workspace);
                 let shortcut = app.state.model.preferences.shortcuts().resolved_label(
                     &crate::workbench::commands::vocabulary::CommandRegistry,
@@ -89,9 +88,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
                     })
                     .inner;
                 if response.clicked() {
-                    if workspace == Workspace::Results {
-                        app.state.results.results_seen_version =
-                            app.state.model.simulation.view.data_version;
+                    if let Some(on_visible) = entry.on_visible {
+                        on_visible(app);
                     }
                     command.execute(app);
                     ui.ctx().request_repaint();

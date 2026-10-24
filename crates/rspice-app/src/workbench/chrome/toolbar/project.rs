@@ -8,7 +8,11 @@ use crate::workbench::layout::LayoutSpec;
 
 use super::toolbar_text_command;
 
-pub(super) fn no_project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn no_project_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     toolbar_text_command(
         ui,
         app,
@@ -27,7 +31,11 @@ pub(super) fn no_project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: L
     );
 }
 
-pub(super) fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn project_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     toolbar_text_command(
         ui,
         app,

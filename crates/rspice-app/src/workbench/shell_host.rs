@@ -7,17 +7,35 @@
 //! takes a point from one listed later. The owner draws in the `Ui` the
 //! container handed over.
 
+mod status_order;
+
 use egui::Ui;
 
 use crate::state::ViewType;
-use crate::workbench::framework::host::{Host, InspectorScope, NavigatorSection, Point};
-use crate::workbench::state::{ProjectPage, VerificationPage, Workspace};
-use crate::workbench::{MessageId, RSpiceApp};
+use crate::workbench::chrome::document_bar::WorkspaceDocument;
+use crate::workbench::framework::host::{
+    DocumentHost, Host, InspectorScope, NavigatorSection, Point, RailEntry, StatusCell,
+    ToolbarScope, ToolbarSlot,
+};
+use crate::workbench::layout::LayoutSpec;
+use crate::workbench::state::{ProjectPage, VerificationPage, Workspace, WorkspaceDocumentId};
+use crate::workbench::{AppState, MessageId, RSpiceApp};
+
+/// A route whose surface brings its own toolbar, in place of its
+/// workspace's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SurfaceOwner {
+    ReportAuthoring,
+    ModelEditor,
+}
 
 impl Host for RSpiceApp {
     type WorkspaceKey = Workspace;
+    type SurfaceKey = SurfaceOwner;
+    type Layout = LayoutSpec;
+    type StatusFrame = status_order::StatusReadings;
 
-    fn contribute(&mut self, point: Point<Workspace>, ui: &mut Ui) {
+    fn contribute(&mut self, point: Point<Workspace, SurfaceOwner, LayoutSpec>, ui: &mut Ui) {
         let app = self;
         match point {
             // The stage: a route that opens a surface of its own takes it
@@ -172,6 +190,66 @@ impl Host for RSpiceApp {
                     Workspace::Netlist => code_workspace_inspector(ui, app),
                 }
             }
+            // The toolbar's lane: the tools of whoever its scope names.
+            Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
+                use crate::workbench::chrome::toolbar::code::{netlist_tools, veriloga_tools};
+                use crate::workbench::chrome::toolbar::design::{
+                    design_tools, stimulus_tools, symbol_tools,
+                };
+                use crate::workbench::chrome::toolbar::hardcopy::report_authoring_tools;
+                use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
+                use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
+                use crate::workbench::chrome::toolbar::results::results_tools;
+                use crate::workbench::chrome::toolbar::simulate::{
+                    simulation_tools, verification_tools,
+                };
+
+                match scope {
+                    ToolbarScope::NoProject => no_project_tools(ui, app, layout),
+                    ToolbarScope::Surface(SurfaceOwner::ReportAuthoring) => {
+                        report_authoring_tools(ui, app, layout);
+                    }
+                    ToolbarScope::Surface(SurfaceOwner::ModelEditor) => {
+                        model_editor_tools(ui, app, layout);
+                    }
+                    ToolbarScope::Workspace(workspace) => match workspace {
+                        Workspace::Project => project_tools(ui, app, layout),
+                        Workspace::Design
+                            if app.state.model.workspace.content.active_view_type()
+                                == ViewType::Symbol =>
+                        {
+                            symbol_tools(ui, app, layout);
+                        }
+                        Workspace::Design
+                            if app.state.model.workspace.content.active_view_type()
+                                == ViewType::VerilogA =>
+                        {
+                            veriloga_tools(ui, app, layout);
+                        }
+                        Workspace::Design => design_tools(ui, app, layout),
+                        Workspace::Simulate => simulation_tools(ui, app, layout),
+                        Workspace::Stimulus => stimulus_tools(ui, app, layout),
+                        Workspace::Results => results_tools(ui, app, layout),
+                        Workspace::Verify => verification_tools(ui, app, layout),
+                        Workspace::Models => models_tools(ui, app, layout),
+                        Workspace::Netlist => netlist_tools(ui, app, layout),
+                    },
+                }
+            }
+            // The trailing group: the run controls, then the plan chip and the
+            // PVT selector where the layout has room for them.
+            Point::Toolbar(ToolbarSlot::Trailing, layout) => {
+                use crate::workbench::chrome::toolbar::run_config_chip::run_config_selector;
+                use crate::workbench::chrome::toolbar::simulate::{pvt_selector, run_controls};
+
+                run_controls(ui, app, layout);
+                if layout.show_run_config_selector {
+                    run_config_selector(ui, app, layout.run_control_height);
+                }
+                if layout.show_pvt_selector {
+                    pvt_selector(ui, app, layout.toolbar_control_height);
+                }
+            }
         }
     }
 
@@ -270,6 +348,166 @@ impl Host for RSpiceApp {
                 )
             }
             _ => workspace.inspector_title().to_owned(),
+        }
+    }
+
+    fn toolbar_scope(&self, workspace: Workspace) -> ToolbarScope<Workspace, SurfaceOwner> {
+        let app = self;
+        if !app.state.platform.project_lifecycle.is_open() {
+            return ToolbarScope::NoProject;
+        }
+        if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
+            return ToolbarScope::Surface(SurfaceOwner::ReportAuthoring);
+        }
+        if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor {
+            return ToolbarScope::Surface(SurfaceOwner::ModelEditor);
+        }
+        ToolbarScope::Workspace(workspace)
+    }
+
+    fn title_cell(&self, workspace: Workspace) -> String {
+        use crate::workbench::chrome::title_bar::code::code_title_cell;
+        use crate::workbench::chrome::title_bar::design::design_title_cell;
+
+        let app = self;
+        match workspace {
+            Workspace::Project => "Project overview".to_owned(),
+            Workspace::Design => design_title_cell(&app.state),
+            Workspace::Simulate => "Simulation plan".to_owned(),
+            Workspace::Stimulus => "Stimulus Library".to_owned(),
+            Workspace::Results => "Results".to_owned(),
+            Workspace::Verify => "Verification".to_owned(),
+            Workspace::Models => "Models & PDKs".to_owned(),
+            Workspace::Netlist => code_title_cell(&app.state),
+        }
+    }
+
+    fn rail_entry(&self, workspace: Workspace) -> RailEntry<RSpiceApp> {
+        use crate::workbench::chrome::activity_rail::results::{
+            mark_results_seen, unseen_result_count,
+        };
+
+        match workspace {
+            // Results not yet seen badge the button, and showing Results is
+            // seeing them.
+            Workspace::Results => RailEntry {
+                badge: Some(|app, active| {
+                    unseen_result_count(&app.state, Workspace::Results, active)
+                }),
+                on_visible: Some(|app| mark_results_seen(&mut app.state)),
+            },
+            _ => RailEntry {
+                badge: None,
+                on_visible: None,
+            },
+        }
+    }
+
+    fn status_frame(&mut self, ctx: &egui::Context) -> status_order::StatusReadings {
+        let availability = self.simulation_controller.engine_availability();
+        status_order::status_readings(&mut self.state, availability, ctx)
+    }
+
+    fn status_cells(&self) -> &'static [StatusCell<RSpiceApp>] {
+        status_order::STATUS_ORDER
+    }
+}
+
+impl DocumentHost for AppState {
+    type WorkspaceKey = Workspace;
+    type DocumentId = WorkspaceDocumentId;
+    type Document = WorkspaceDocument;
+
+    fn workspace_documents(&self, workspace: Workspace) -> Vec<WorkspaceDocument> {
+        use crate::workbench::chrome::document_bar::code::netlist_workspace_documents;
+        use crate::workbench::chrome::document_bar::design::design_documents;
+        use crate::workbench::chrome::document_bar::models::models_documents;
+        use crate::workbench::chrome::document_bar::project::project_documents;
+        use crate::workbench::chrome::document_bar::results::result_documents;
+        use crate::workbench::chrome::document_bar::simulate::{
+            simulation_plan_documents, verification_documents,
+        };
+
+        let state = self;
+        match workspace {
+            Workspace::Project => project_documents(),
+            Workspace::Design => design_documents(state),
+            Workspace::Simulate => simulation_plan_documents(),
+            // The library is one project-owned record, and the shell has no
+            // document identity for it yet — the instrument that edits a
+            // definition is what will open one. Naming a tab here before that
+            // exists would put a document in the window session that nothing can
+            // detach, close, or save.
+            Workspace::Stimulus => Vec::new(),
+            Workspace::Results => result_documents(state),
+            Workspace::Verify => verification_documents(),
+            Workspace::Models => models_documents(),
+            Workspace::Netlist => netlist_workspace_documents(state),
+        }
+    }
+
+    fn page_document(&self, workspace: Workspace) -> Option<WorkspaceDocumentId> {
+        use crate::workbench::chrome::document_bar::code::active_netlist_document_id;
+
+        match workspace {
+            Workspace::Netlist => active_netlist_document_id(self),
+            _ => None,
+        }
+    }
+
+    fn activate_owned_document(&mut self, document: &WorkspaceDocumentId) -> bool {
+        use crate::workbench::chrome::document_bar::code::{
+            activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
+            activate_netlist_run_snapshot, activate_owned_netlist,
+        };
+        use crate::workbench::chrome::document_bar::design::activate_cell_view;
+        use crate::workbench::chrome::document_bar::results::{
+            activate_result_dataset, activate_visualization_document,
+        };
+
+        let state = self;
+        match document {
+            WorkspaceDocumentId::CellView(reference) => activate_cell_view(state, reference),
+            WorkspaceDocumentId::VisualizationDocument(document_id) => {
+                activate_visualization_document(state, document_id)
+            }
+            WorkspaceDocumentId::ResultDataset(dataset_id) => {
+                activate_result_dataset(state, dataset_id)
+            }
+            WorkspaceDocumentId::NetlistGenerated(document_id) => {
+                activate_generated_netlist(state, document_id)
+            }
+            WorkspaceDocumentId::NetlistOwned(document_id) => {
+                activate_owned_netlist(state, document_id)
+            }
+            WorkspaceDocumentId::NetlistDependency {
+                root,
+                logical_identity,
+            } => activate_netlist_dependency(state, root, logical_identity),
+            WorkspaceDocumentId::NetlistComparison => activate_netlist_comparison(state),
+            WorkspaceDocumentId::NetlistRunSnapshot => activate_netlist_run_snapshot(state),
+            WorkspaceDocumentId::Project
+            | WorkspaceDocumentId::SimulationPlan
+            | WorkspaceDocumentId::Verification
+            | WorkspaceDocumentId::Models
+            | WorkspaceDocumentId::NetlistSource => true,
+        }
+    }
+
+    fn close_owned_document(&mut self, document: &WorkspaceDocumentId) -> Option<bool> {
+        let state = self;
+        match document {
+            // A cell view closes as the view that shows, so it is brought
+            // forward first.
+            WorkspaceDocumentId::CellView(_) => Some(
+                crate::workbench::chrome::document_bar::activate_document_by_id(state, document)
+                    && crate::workbench::workflows::project_workflow::close_active_document(state),
+            ),
+            WorkspaceDocumentId::NetlistDependency { .. } => {
+                state.code.netlist_open_documents.remove(document);
+                None
+            }
+            _ => None,
         }
     }
 }

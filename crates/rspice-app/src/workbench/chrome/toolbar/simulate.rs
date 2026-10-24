@@ -18,7 +18,11 @@ use super::{
     toolbar_text_command,
 };
 
-pub(super) fn simulation_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn simulation_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     toolbar_icon_command(
         ui,
         app,
@@ -37,7 +41,11 @@ pub(super) fn simulation_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: L
     );
 }
 
-pub(super) fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn verification_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     toolbar_icon_command(
         ui,
         app,
@@ -47,7 +55,11 @@ pub(super) fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout:
     );
 }
 
-pub(super) fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn run_controls(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     // A preflight preparing its run or building its decks is stopped the way
     // a run is: the control is Stop until it finishes.
     let checking = app.state.runs.preflight.checking.is_some();
@@ -298,7 +310,7 @@ const PVT_CHIP_TEXT_INSET: f32 = 10.0;
 /// The chip's right end: the chevron and the space around it.
 const PVT_CHIP_CHEVRON_SPAN: f32 = 21.0;
 
-pub(super) fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
+pub(in crate::workbench) fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
     let t = Tokens::get(ui.ctx());
     let reference = app.state.model.sim_setup.reference_pvt;
     let quantity_policy = app.state.model.preferences.quantity_presentation_policy();

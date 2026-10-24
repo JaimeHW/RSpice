@@ -9,7 +9,7 @@ use crate::workbench::state::WorkspaceDocumentId;
 use super::WorkspaceDocument;
 
 /// One tab per cell view open in Design.
-pub(super) fn design_documents(state: &AppState) -> Vec<WorkspaceDocument> {
+pub(in crate::workbench) fn design_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     state
         .model
         .workspace
@@ -26,7 +26,10 @@ pub(super) fn design_documents(state: &AppState) -> Vec<WorkspaceDocument> {
 }
 
 /// Show a cell view that is open in Design.
-pub(super) fn activate_cell_view(state: &mut AppState, reference: &CellViewRef) -> bool {
+pub(in crate::workbench) fn activate_cell_view(
+    state: &mut AppState,
+    reference: &CellViewRef,
+) -> bool {
     if state
         .model
         .workspace

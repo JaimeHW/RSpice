@@ -12,7 +12,11 @@ use super::{
     context_separator, explicit_label_width, take_projected_tool_slot, toolbar_icon_command,
 };
 
-pub(super) fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn results_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     let historical = results_document_is_historical(app);
     if results_tracking_button(ui, app, layout) {
         context_separator(ui, layout);

@@ -1,34 +1,24 @@
 //! Workspace-scoped document tabs. Stable project identities drive every tab;
 //! the shell never fabricates datasets, source files, or verification records.
 
-mod code;
-mod design;
-mod models;
-mod project;
-mod results;
-mod simulate;
+pub(in crate::workbench) mod code;
+pub(in crate::workbench) mod design;
+pub(in crate::workbench) mod models;
+pub(in crate::workbench) mod project;
+pub(in crate::workbench) mod results;
+pub(in crate::workbench) mod simulate;
 
 use egui::containers::menu::MenuButton;
 use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::framework::host::DocumentHost;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
-
-use code::{
-    activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
-    activate_netlist_run_snapshot, activate_owned_netlist, active_netlist_document_id,
-    netlist_workspace_documents,
-};
-use design::{activate_cell_view, design_documents};
-use models::models_documents;
-use project::project_documents;
-use results::{activate_result_dataset, activate_visualization_document, result_documents};
-use simulate::{simulation_plan_documents, verification_documents};
 
 const TAB_MAX_WIDTH: f32 = 190.0;
 /// The narrowest a tab shrinks to before the strip scrolls instead: its icon,
@@ -335,7 +325,7 @@ pub(in crate::workbench) fn is_visible(app: &RSpiceApp) -> bool {
 }
 
 #[derive(Debug, Clone)]
-struct WorkspaceDocument {
+pub(crate) struct WorkspaceDocument {
     id: WorkspaceDocumentId,
     label: String,
     icon: WorkbenchIcon,
@@ -503,21 +493,7 @@ fn available_documents_for_workspace(
     state: &AppState,
     workspace: Workspace,
 ) -> Vec<WorkspaceDocument> {
-    match workspace {
-        Workspace::Project => project_documents(),
-        Workspace::Design => design_documents(state),
-        Workspace::Simulate => simulation_plan_documents(),
-        // The library is one project-owned record, and the shell has no
-        // document identity for it yet — the instrument that edits a
-        // definition is what will open one. Naming a tab here before that
-        // exists would put a document in the window session that nothing can
-        // detach, close, or save.
-        Workspace::Stimulus => Vec::new(),
-        Workspace::Results => result_documents(state),
-        Workspace::Verify => verification_documents(),
-        Workspace::Models => models_documents(),
-        Workspace::Netlist => netlist_workspace_documents(state),
-    }
+    state.workspace_documents(workspace)
 }
 
 fn owned_available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
@@ -556,8 +532,7 @@ fn authoritative_active_document(
     state: &AppState,
     available: &[WorkspaceDocument],
 ) -> Option<WorkspaceDocumentId> {
-    if state.workbench.workspace == Workspace::Netlist
-        && let Some(document) = active_netlist_document_id(state)
+    if let Some(document) = state.page_document(state.workbench.workspace)
         && available.iter().any(|candidate| candidate.id == document)
     {
         return Some(document);
@@ -768,32 +743,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
     if document.workspace() != state.workbench.workspace {
         return false;
     }
-    let activated = match document {
-        WorkspaceDocumentId::CellView(reference) => activate_cell_view(state, reference),
-        WorkspaceDocumentId::VisualizationDocument(document_id) => {
-            activate_visualization_document(state, document_id)
-        }
-        WorkspaceDocumentId::ResultDataset(dataset_id) => {
-            activate_result_dataset(state, dataset_id)
-        }
-        WorkspaceDocumentId::NetlistGenerated(document_id) => {
-            activate_generated_netlist(state, document_id)
-        }
-        WorkspaceDocumentId::NetlistOwned(document_id) => {
-            activate_owned_netlist(state, document_id)
-        }
-        WorkspaceDocumentId::NetlistDependency {
-            root,
-            logical_identity,
-        } => activate_netlist_dependency(state, root, logical_identity),
-        WorkspaceDocumentId::NetlistComparison => activate_netlist_comparison(state),
-        WorkspaceDocumentId::NetlistRunSnapshot => activate_netlist_run_snapshot(state),
-        WorkspaceDocumentId::Project
-        | WorkspaceDocumentId::SimulationPlan
-        | WorkspaceDocumentId::Verification
-        | WorkspaceDocumentId::Models
-        | WorkspaceDocumentId::NetlistSource => true,
-    };
+    let activated = state.activate_owned_document(document);
     if activated {
         state.workbench.documents.activate(document.clone());
         let window = state.workbench.window_session.current();
@@ -828,21 +778,10 @@ fn close_document(
         .or_else(|| documents.get(closed_index.saturating_sub(1)))
         .map(|document| document.id.clone());
 
-    let closed = match document {
-        WorkspaceDocumentId::CellView(_) => {
-            if !activate_document(state, document) {
-                return false;
-            }
-            crate::workbench::workflows::project_workflow::close_active_document(state)
-        }
-        _ => {
-            if matches!(document, WorkspaceDocumentId::NetlistDependency { .. }) {
-                state.code.netlist_open_documents.remove(document);
-            }
-            state.workbench.documents.close(document);
-            true
-        }
-    };
+    let closed = state.close_owned_document(document).unwrap_or_else(|| {
+        state.workbench.documents.close(document);
+        true
+    });
     if closed
         && (was_active || matches!(document, WorkspaceDocumentId::CellView(_)))
         && let Some(fallback) = fallback
@@ -1135,6 +1074,7 @@ fn suffix_width(dirty: bool, closable: bool) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use super::code::netlist_workspace_documents;
     use super::design::icon_for_view;
     use super::*;
     use crate::product::ObjectRevision;

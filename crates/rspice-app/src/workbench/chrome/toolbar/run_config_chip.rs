@@ -62,7 +62,11 @@ fn run_config_chip_width(title_width: f32, summary_width: f32) -> f32 {
     (31.0 + title_width.max(summary_width) + 22.0).min(RUN_CONFIG_CHIP_MAX_WIDTH)
 }
 
-pub(super) fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
+pub(in crate::workbench) fn run_config_selector(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    height: f32,
+) {
     let t = Tokens::get(ui.ctx());
     let copy = run_config_chip_copy(app);
     let availability = Command::ManageSimulationPlans.availability(app);

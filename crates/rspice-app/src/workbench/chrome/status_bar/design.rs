@@ -23,7 +23,9 @@ fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState)
 
 /// The coordinate segment in Design: where the pointer is in the open view's
 /// own units, or the view's empty form while the pointer is off its canvas.
-pub(super) fn design_engineering_context(state: &crate::workbench::app_state::AppState) -> String {
+pub(in crate::workbench) fn design_engineering_context(
+    state: &crate::workbench::app_state::AppState,
+) -> String {
     let view_type = state.model.workspace.content.active_view_type();
     state.design.canvas_hover.map_or_else(
         || match view_type {
@@ -78,7 +80,7 @@ pub(super) fn design_engineering_context(state: &crate::workbench::app_state::Ap
     )
 }
 
-pub(super) fn selection_summary(app: &RSpiceApp) -> String {
+pub(in crate::workbench) fn selection_summary(app: &RSpiceApp) -> String {
     if !app.state.platform.project_lifecycle.is_open() {
         return "No engineering object selected".to_owned();
     }
@@ -129,7 +131,7 @@ pub(super) fn selection_summary(app: &RSpiceApp) -> String {
 
 /// The canvas zoom behind the percentage chip. The Results workspace never
 /// reaches here — its chip reports plot magnification instead.
-pub(super) fn zoom_factor(app: &RSpiceApp) -> f64 {
+pub(in crate::workbench) fn zoom_factor(app: &RSpiceApp) -> f64 {
     if app.state.workbench.workspace == Workspace::Design
         && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
     {

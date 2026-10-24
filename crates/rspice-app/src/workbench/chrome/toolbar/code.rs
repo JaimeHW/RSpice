@@ -20,7 +20,11 @@ use super::{
 /// and every source tool are in the command palette as well, and Format in the
 /// editor's own menu. A schematic's placement and transform tools have nothing
 /// to act on here.
-pub(super) fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn veriloga_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     toolbar_text_command(
         ui,
         app,
@@ -161,7 +165,11 @@ fn veriloga_format_tool(ui: &mut egui::Ui, app: &RSpiceApp, layout: LayoutSpec) 
 /// mistake, and here it was worse than redundant — the find window is drawn
 /// only by the netlist page, so the button silently did nothing on the other
 /// two and then ambushed the user on return.
-pub(super) fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn netlist_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     match app.state.code.code_workspace.page {

@@ -127,7 +127,11 @@ const STIMULUS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 6] = [
     (Command::StimulusShowAdopter, WorkbenchIcon::Target, None),
 ];
 
-pub(super) fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn design_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     for (index, (command, icon, label)) in DESIGN_DIRECT_TOOLBAR_COMMANDS.into_iter().enumerate() {
         if index == 1 {
             context_separator(ui, layout);
@@ -286,7 +290,11 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
 ///
 /// Symbol geometry has its own undo stack, so undo and redo route through
 /// the symbol document rather than the schematic's.
-pub(super) fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn symbol_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     let active = app.state.design.symbol.editor.tool;
     for (command, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
         toolbar_icon_command_selected(ui, app, command, icon, active == tool, layout);
@@ -399,7 +407,11 @@ fn symbol_grid_spacing(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpe
 /// New leads because an empty library is the state this workspace opens in
 /// most often; the separator divides the verbs that act on one definition from
 /// the two that act on the library and the design around it.
-pub(super) fn stimulus_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(in crate::workbench) fn stimulus_tools(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    layout: LayoutSpec,
+) {
     for (index, (command, icon, label)) in STIMULUS_TOOLBAR_COMMANDS.into_iter().enumerate() {
         // After Place: the first two verbs make and use a definition, the rest
         // act on the one the browser is reading.
