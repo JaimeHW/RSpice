@@ -1384,6 +1384,7 @@ impl SemanticAnalyzer {
                 nature_flow: flow,
                 supply_sensitivity: sensitivity.supply,
                 ground_sensitivity: sensitivity.ground,
+                coerced_from_input: false,
             });
 
             self.define_symbol(Symbol {

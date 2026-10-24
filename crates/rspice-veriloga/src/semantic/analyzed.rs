@@ -368,6 +368,10 @@ pub struct AnalyzedPort {
     pub supply_sensitivity: Option<SmolStr>,
     /// The net its `groundSensitivity` attribute names.
     pub ground_sensitivity: Option<SmolStr>,
+    /// Declared `input` and driven inside its own module, so IEEE 1364-2005
+    /// section 12.3.8 coerced it to `inout`; `direction` says `Inout`. A
+    /// boundary that would convert it refuses it by this flag.
+    pub coerced_from_input: bool,
 }
 
 /// One port of the module header, before vector expansion.

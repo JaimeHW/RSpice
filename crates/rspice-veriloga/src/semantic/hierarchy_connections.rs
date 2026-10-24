@@ -402,6 +402,14 @@ fn prepare_boundaries(
             if upper.net_kind.is_some() == lower.net_kind.is_some() {
                 continue;
             }
+            if port.coerced_from_input {
+                return Err(super::digital_elaborate::coerced_boundary_error(
+                    &port.name,
+                    &child_path,
+                    &name,
+                    actual.span(),
+                ));
+            }
             if [(&upper, name.as_str()), (&lower, port.name.as_str())]
                 .iter()
                 .any(|(endpoint, _)| endpoint.width > 1 || endpoint.unpacked)

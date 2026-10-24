@@ -1078,6 +1078,44 @@ fn a_vector_discrete_port_refuses_a_deck_that_names_one_node_for_it() {
     );
 }
 
+/// An `input` port its module drives is coerced to `inout` (IEEE 1364-2005
+/// section 12.3.8), and a deck node would put a one-way converter on it: the
+/// boundary refuses it by name rather than convert it one way.
+#[test]
+fn a_coerced_input_port_on_a_deck_node_is_refused() {
+    let model = ModelFile::new(
+        "coerced_input",
+        r#"
+`include "disciplines.vams"
+module coerced_mixed(p, n, d);
+    inout p, n;
+    electrical p, n;
+    input d;
+    wire d;
+    assign d = 1'b1;
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* an input port its module drives, on a deck node\n\
+         x1 p 0 d coerced_mixed\n\
+         rp p 0 1meg\n\
+         rd d 0 1k\n\
+         .va \"{}\" coerced_mixed\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let error = error_for(&deck, 20.0e-9, 1.0e-9);
+    assert!(
+        error.contains("`input` port 'd'")
+            && error.contains("12.3.8")
+            && error.contains("bidirectional converter"),
+        "{error}"
+    );
+}
+
 /// **Selecting one member retains the whole bus.**
 ///
 /// A declaration whose member has no trace cannot say what the bus held, so

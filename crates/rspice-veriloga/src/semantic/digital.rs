@@ -755,6 +755,10 @@ enum SelectBound {
 /// the 31 bits Verilog-AMS 2023 Table 7-1 gives a bit grouping.
 pub(super) const WIDE_DISCRETE_READ_CODE: &str = "VA-SEM-WIDE-DISCRETE-READ";
 
+/// Diagnostic code for an `input` port driven inside its module and coerced
+/// to `inout` (IEEE 1364-2005 section 12.3.8).
+pub(super) const COERCED_INPUT_PORT_CODE: &str = "VA-SEM-COERCED-INPUT-PORT";
+
 impl SemanticAnalyzer {
     /// Resolve and validate the module's discrete-domain content.
     ///
@@ -840,7 +844,7 @@ impl SemanticAnalyzer {
                 continuous_assigns.push(analyzed_assignment);
             }
         }
-        self.reject_drivers_on_input_ports(module, &continuous_assigns);
+        self.coerce_driven_input_ports(module, analyzed, &continuous_assigns);
         let paths = self.analyze_specify_paths(module, &signals);
         let timing_checks = self.analyze_timing_checks(module, &signals);
 
@@ -1636,22 +1640,6 @@ impl SemanticAnalyzer {
         }
     }
 
-    /// Refuse a continuous assignment that drives one of this module's own
-    /// `input` ports.
-    ///
-    /// IEEE 1364-2005 section 12.3.9.1: an input port is driven from outside
-    /// the instance, so nothing inside the module may assign it. Hierarchy
-    /// elaboration already refuses this — but only for a module somebody
-    /// *instantiates*, and only when the connecting scope's own view says the
-    /// net is an input port. A module compiled as the top of the design is
-    /// never instantiated, so without this the same source is accepted or
-    /// refused depending on where it sits in a hierarchy, and a top-level
-    /// design with the defect gets a net with a driver the standard says it
-    /// cannot have.
-    ///
-    /// `inout` is deliberately not here. Section 12.3.9.3 makes a bidirectional
-    /// port drivable from both sides, which is the whole reason the direction
-    /// exists.
     /// Each source and destination pair of the module's path delays (IEEE
     /// 1364-2005 section 14.2.1): a source is an input or inout port, and a
     /// destination an output or inout port, of the module's discrete nets
@@ -1917,9 +1905,24 @@ impl SemanticAnalyzer {
         checks
     }
 
-    fn reject_drivers_on_input_ports(
+    /// Coerce each of this module's own `input` ports that a continuous
+    /// assignment inside the module drives to `inout`, with a warning.
+    ///
+    /// IEEE 1364-2005 section 12.3.8: a port declared `input` but used as an
+    /// output may be coerced to `inout`, and is otherwise warned about. Coerced,
+    /// the driver inside and the connection outside resolve on one net, as an
+    /// `inout` port's two sides do (section 12.3.9.3), whether or not anybody
+    /// instantiates the module. A gate primitive and a delayed signal's copy
+    /// are continuous assignments by now, so they count as drivers too.
+    ///
+    /// A boundary that would put a converter on the port refuses it by its
+    /// `AnalyzedPort::coerced_from_input` flag: a
+    /// coerced port needs a bidirectional converter, which no `input` port
+    /// was given. A real port bus is not coerced and stays refused.
+    fn coerce_driven_input_ports(
         &mut self,
         module: &Module,
+        analyzed: &mut AnalyzedModule,
         assignments: &[AnalyzedContinuousAssign],
     ) {
         let inputs: std::collections::HashSet<SmolStr> = module
@@ -1927,24 +1930,46 @@ impl SemanticAnalyzer {
             .iter()
             .filter(|declaration| declaration.direction == PortDirection::Input)
             .flat_map(|declaration| declaration.names.iter().cloned())
-            .chain(self.physical_nodes.real_input_buses.iter().cloned())
             .collect();
-        if inputs.is_empty() {
-            return;
-        }
+        let mut coerced = std::collections::HashSet::new();
         for assignment in assignments {
             for (name, span) in assignment.assignment.target.written_names() {
-                if inputs.contains(name) {
+                if self.physical_nodes.real_input_buses.contains(name) {
                     self.record_error_at(
                         SemanticErrorKind::InvalidContribution(format!(
-                            "cannot contribute to `{name}`, which module `{}` declares an `input` port; IEEE \
-                             1364-2005 section 12.3.9.1 drives an input port from outside the \
-                             instance, so nothing inside the module may assign one",
+                            "cannot contribute to `{name}`, which module `{}` declares a real \
+                             `input` port bus; IEEE 1364-2005 section 12.3.8 coerces an input \
+                             port driven inside its module to inout, and this compiler does \
+                             not coerce a real port bus",
                             module.name
                         )),
                         span,
                     );
+                    continue;
                 }
+                if !inputs.contains(name) || !coerced.insert(name.clone()) {
+                    continue;
+                }
+                for port in &mut analyzed.ports {
+                    let lane = port
+                        .name
+                        .strip_prefix(name.as_str())
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with('['));
+                    if lane && port.direction == PortDirection::Input {
+                        port.direction = PortDirection::Inout;
+                        port.coerced_from_input = true;
+                    }
+                }
+                self.warn(
+                    COERCED_INPUT_PORT_CODE,
+                    format!(
+                        "`{name}` is an `input` port of module `{}` driven inside the module; \
+                         IEEE 1364-2005 section 12.3.8 coerces it to inout, so its drivers \
+                         inside and its connection outside resolve on one net",
+                        module.name
+                    ),
+                    span,
+                );
             }
         }
     }

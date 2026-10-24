@@ -290,6 +290,11 @@ pub struct HirPort {
     /// The net the port's `groundSensitivity` attribute names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ground_sensitivity: Option<SmolStr>,
+    /// Declared `input`, driven inside the module, and coerced to the
+    /// `inout` that `direction` says (IEEE 1364-2005 section 12.3.8). A
+    /// circuit node converts no such port.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub coerced_from_input: bool,
 }
 
 /// One port of the module header as declared, before vector expansion.
@@ -1288,6 +1293,7 @@ impl HirModel {
                     nature_flow: port.nature_flow.clone(),
                     supply_sensitivity: port.supply_sensitivity.clone(),
                     ground_sensitivity: port.ground_sensitivity.clone(),
+                    coerced_from_input: port.coerced_from_input,
                 })
                 .collect(),
             formal_ports: module

@@ -438,6 +438,19 @@ fn classify_boundary_ports(
         let Some(signal) = signal else {
             continue;
         };
+        if port.coerced_from_input {
+            return Err(refuse(
+                &element.name,
+                subckt_name,
+                ElaborationErrorKind::CompileRefusal,
+                format!(
+                    "`input` port '{}' is driven inside module '{}', which IEEE 1364-2005 section \
+                     12.3.8 coerces to inout; a coerced port on a circuit node needs a \
+                     bidirectional converter, so declare the port `inout`",
+                    port.name, artifact.hir.module_name
+                ),
+            ));
+        }
         let direction = match port.direction {
             rspice_veriloga::ast::PortDirection::Input => BoundaryDirection::AnalogToDiscrete,
             rspice_veriloga::ast::PortDirection::Output => BoundaryDirection::DiscreteToAnalog,

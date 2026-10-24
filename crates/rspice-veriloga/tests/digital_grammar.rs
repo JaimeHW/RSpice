@@ -2238,39 +2238,80 @@ fn a_module_whose_only_digital_content_is_an_instance_still_refuses() {
     );
 }
 
-/// A module may not drive its own `input` port, whether or not anybody
-/// instantiates it (IEEE 1364-2005 section 12.3.9.1).
+/// An `input` port its own module drives is coerced to `inout`, with a
+/// warning, whether or not anybody instantiates the module (IEEE 1364-2005
+/// section 12.3.8: a port "declared as input ... but used as an output" may be
+/// coerced to inout).
 ///
-/// The "whether or not" is the point. An input port is driven from outside the
-/// instance, and that holds for a module compiled as the top of the design as
-/// much as for one somebody instantiates — so the refusal is on the module's own
-/// text rather than on a connection, and the same source cannot be accepted or
-/// refused depending on where it sits in a hierarchy.
-///
-/// `inout` is not included: section 12.3.9.3 makes a bidirectional port
-/// drivable from both sides, which is the whole reason the direction exists.
+/// The "whether or not" is the point: the coercion is read off the module's
+/// own text rather than off a connection, so the same source is not accepted
+/// one way or the other depending on where it sits in a hierarchy.
 #[test]
-fn a_module_may_not_drive_its_own_input_port() {
-    let message = analyze_error(
+fn a_module_driving_its_own_input_port_coerces_it_to_inout() {
+    let coerced = |source: &str| {
+        let analyzed = analyze(source);
+        let module = only_module(&analyzed);
+        let port = module
+            .ports
+            .iter()
+            .find(|port| port.name == "a")
+            .expect("port a");
+        assert_eq!(port.direction, PortDirection::Inout, "{source}");
+        assert!(port.coerced_from_input, "{source}");
+        let untouched = module
+            .ports
+            .iter()
+            .find(|port| port.name == "y")
+            .expect("port y");
+        assert_eq!(untouched.direction, PortDirection::Output);
+        assert!(!untouched.coerced_from_input);
+        let warnings: Vec<_> = analyzed
+            .warnings
+            .iter()
+            .filter(|warning| warning.code == "VA-SEM-COERCED-INPUT-PORT")
+            .collect();
+        assert_eq!(warnings.len(), 1, "{:?}", analyzed.warnings);
+        assert!(
+            warnings[0].message.contains("`a`"),
+            "{}",
+            warnings[0].message
+        );
+        assert!(
+            warnings[0].message.contains("12.3.8"),
+            "{}",
+            warnings[0].message
+        );
+    };
+    // Two drivers of one port warn once.
+    coerced(
         "module driver(y, a);\n\
          \x20   output y;\n     input a;\n     wire y, a;\n\
          \x20   assign y = 1'b0;\n\
-         \x20   assign a = y;\n\
+         \x20   assign a = y;\n     assign a = 1'b1;\n\
          endmodule\n",
     );
-    assert!(message.contains("declares an `input` port"), "{message}");
-    assert!(message.contains("12.3.9.1"), "{message}");
-
     // A gate primitive is a continuous assignment by the time this runs, so the
-    // same rule reaches it — a design cannot get past the check by spelling the
-    // driver as `buf`.
-    let message = analyze_error(
+    // same rule reaches it.
+    coerced(
         "module gated(y, a);\n\
          \x20   output y;\n     input a;\n     wire y, a;\n\
          \x20   buf u (a, y);\n\
          endmodule\n",
     );
-    assert!(message.contains("declares an `input` port"), "{message}");
+
+    // An input port nothing inside drives keeps its direction, unwarned.
+    let analyzed = analyze(
+        "module reader(y, a);\n\
+         \x20   output y;\n     input a;\n     wire y, a;\n\
+         \x20   assign y = a;\n\
+         endmodule\n",
+    );
+    let port = &only_module(&analyzed).ports[1];
+    assert_eq!(
+        (port.direction, port.coerced_from_input),
+        (PortDirection::Input, false)
+    );
+    assert!(analyzed.warnings.is_empty(), "{:?}", analyzed.warnings);
 
     // An `inout` port may be driven from inside.
     let analyzed = analyze(
@@ -2491,15 +2532,29 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["connects an output or inout port to a net", "12.3.9.2"],
         ),
         (
-            "a module driving its own input port",
-            hierarchy(
-                "module gate(y, a);\n\
-                 \x20   output y;\n     input a;\n     wire y, a;\n\
-                 \x20   assign y = 1'b0;\n     assign a = y;\n\
-                 endmodule\n",
-                "    wire x, z;\n     gate g1(z, x);",
+            "an input port coerced to inout on a continuous net",
+            hierarchy(DRIVEN_INPUT, "    wire z;\n     gate g1(z, p);"),
+            vec![
+                "`input` port `a` of instance `g1`",
+                "12.3.8",
+                "bidirectional converter",
+            ],
+        ),
+        (
+            "an output port driving the connecting module's input port",
+            format!(
+                "{DRIVEN_INPUT}\n\
+                 module mid(q, d);\n\
+                 \x20   output q;\n     input d;\n     wire q, d;\n\
+                 \x20   gate g(q, d);\n\
+                 endmodule\n\
+                 module top(p, n);\n\
+                 \x20   inout p, n;\n     electrical p, n;\n\
+                 \x20   wire x, z;\n     mid m1(z, x);\n\
+                 \x20   analog I(p, n) <+ V(p, n);\n\
+                 endmodule\n"
             ),
-            vec!["declares an `input` port", "12.3.9.1"],
+            vec!["receives through an input port", "12.3.8"],
         ),
         (
             "an unknown named port",
@@ -2553,6 +2608,39 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             );
         }
     }
+}
+
+/// A module that drives its own `input` port `a`, which IEEE 1364-2005
+/// section 12.3.8 coerces to `inout`.
+const DRIVEN_INPUT: &str = "module gate(y, a);\n\
+                            \x20   output y;\n     input a;\n     wire y, a;\n\
+                            \x20   assign y = 1'b0;\n     assign a = y;\n\
+                            endmodule\n";
+
+/// The coerced port joins its connection as an `inout` port does (IEEE
+/// 1364-2005 section 12.3.8): the driver inside the instance is a driver of
+/// the parent's net, and the parent's other driver resolves with it there.
+#[test]
+fn a_coerced_input_port_drives_its_connection_in_the_parent() {
+    let source = format!(
+        "{DRIVEN_INPUT}\n\
+         module top(z);\n\
+         \x20   output z;\n     wire x, z;\n\
+         \x20   gate g1(z, x);\n     assign x = 1'b1;\n\
+         endmodule\n"
+    );
+    let plan = plan(&source, "top");
+    let x = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "x")
+        .expect("the parent's net");
+    assert!(
+        plan.signals.iter().all(|signal| signal.name != "g1.a"),
+        "the coerced port collapsed onto `x`"
+    );
+    // `assign a = y;` inside the instance and `assign x = 1'b1;` beside it.
+    assert_eq!(plan.drivers_of(x.id).count(), 2);
 }
 
 const BOUNDARY_CHILDREN: &str = "module dig(q);\n\

@@ -10215,6 +10215,7 @@ mod tests {
                     nature_flow: Some("current".into()),
                     supply_sensitivity: None,
                     ground_sensitivity: None,
+                    coerced_from_input: false,
                 },
                 AnalyzedPort {
                     name: "n".into(),
@@ -10224,6 +10225,7 @@ mod tests {
                     nature_flow: Some("current".into()),
                     supply_sensitivity: None,
                     ground_sensitivity: None,
+                    coerced_from_input: false,
                 },
             ],
             formal_ports: ["p", "n"]

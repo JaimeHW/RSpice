@@ -87,9 +87,12 @@
 //! * an output/inout net collapse whose widths differ; input conversions and
 //!   variable outputs instead use assignment sizing (section 12.3.9);
 //! * an `input` or `inout` port declared as a variable (section 12.3.3);
-//! * an output or inout port connected to a variable, or to anything the
-//!   connecting scope sees as an input port, because either would let the
-//!   instance drive what it must not (section 12.3.9.1);
+//! * an output or inout port connected to a variable (section 12.3.9.2), or
+//!   to anything the connecting scope sees as an input port, which section
+//!   12.3.8 would coerce to inout and this compiler coerces only for the
+//!   module's own drivers;
+//! * an input port coerced to inout (section 12.3.8) on a continuous net,
+//!   which needs a bidirectional converter;
 //! * a repeating specialization on one ancestor path, or a hierarchy exceeding
 //!   the documented resource limits, as a source-located error.
 
@@ -809,6 +812,14 @@ impl DigitalElaborator<'_> {
                 _ => None,
             };
             if let Some(identifier) = hoist {
+                if port.coerced_from_input {
+                    return Err(coerced_boundary_error(
+                        &port.name,
+                        path,
+                        &identifier.name,
+                        identifier.span,
+                    ));
+                }
                 if declared.width > 1 {
                     return Err(semantic_error(
                         SemanticErrorKind::UnsupportedFeature(format!(
@@ -1629,11 +1640,32 @@ fn input_port_connection_error(
         SemanticErrorKind::InvalidContribution(format!(
             "cannot contribute to `{}`, which the connecting module receives through an input \
              port and the `{}` port \
-             `{}` of instance `{path}` would drive; IEEE 1364-2005 section 12.3.9.1 drives an \
-             input port from outside",
+             `{}` of instance `{path}` would drive; IEEE 1364-2005 section 12.3.8 coerces an \
+             input port driven inside its module to inout, and this compiler coerces one only \
+             for a driver in the module's own statements, not for an instance's port",
             outer.elaborated,
             direction_keyword(port.direction),
             port.name
+        )),
+        span,
+    )
+}
+
+/// An `input` port coerced to `inout` (IEEE 1364-2005 section 12.3.8) that a
+/// continuous net would convert: the conversion an `input` port was given is
+/// one way, and a coerced port drives both.
+pub(super) fn coerced_boundary_error(
+    port: &str,
+    path: &str,
+    net: &str,
+    span: Span,
+) -> CompileError {
+    semantic_error(
+        SemanticErrorKind::UnsupportedFeature(format!(
+            "`input` port `{port}` of instance `{path}` is driven inside its module, which IEEE \
+             1364-2005 section 12.3.8 coerces to inout, and connects continuous net `{net}`; a \
+             coerced port on a mixed boundary needs a bidirectional converter, so declare the \
+             port `inout`"
         )),
         span,
     )
