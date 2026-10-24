@@ -157,13 +157,6 @@ pub fn fa_nand(b: &mut Builder, p: &str, a: &str, c: &str, cin: &str) -> (String
     (sum, carry)
 }
 
-/// Half adder in NAND form: six gates, `(sum, carry)`.
-pub fn ha_nand(b: &mut Builder, p: &str, a: &str, c: &str) -> (String, String) {
-    let sum = xor2n(b, p, a, c);
-    let carry = and2(b, p, a, c);
-    (sum, carry)
-}
-
 /// A ripple-carry adder in NAND form. Returns `(sum bits, carry bits)` where
 /// `carry[i]` is the carry *out* of bit `i`, so `carry.last()` is the carry
 /// out of the adder and `carry[width - 2]` is what an overflow flag needs.
@@ -289,18 +282,6 @@ mod tests {
                 let total = bits.iter().filter(|bit| **bit).count();
                 vec![total % 2 == 1, total >= 2]
             },
-        );
-    }
-
-    #[test]
-    fn the_half_adder_matches_its_truth_table() {
-        check(
-            2,
-            |b| {
-                let (sum, carry) = ha_nand(b, "t", "i0", "i1");
-                vec![sum, carry]
-            },
-            &|bits| vec![bits[0] ^ bits[1], bits[0] && bits[1]],
         );
     }
 

@@ -451,18 +451,6 @@ impl StampAudit {
         self.entries.iter().filter(|entry| !entry.unverifiable())
     }
 
-    /// Fraction of entries the difference resolved tightly.
-    ///
-    /// Informational. Most of the shortfall in a stiff model is entries too
-    /// small to matter, which is why [`Self::unverified_significant`] rather
-    /// than this is the thing worth gating on.
-    pub fn checked_fraction(&self) -> f64 {
-        if self.entries.is_empty() {
-            return 1.0;
-        }
-        self.checked().count() as f64 / self.entries.len() as f64
-    }
-
     /// Entries the oracle learned nothing about that are nonetheless large
     /// enough to change a solve, largest first.
     ///
@@ -1457,7 +1445,6 @@ mod tests {
             entries: vec![entry(1.0, 1.0, 0.0), entry(1.0, 9.0e9, Value::INFINITY)],
         };
         assert_eq!(audit.checked().count(), 1);
-        assert_eq!(audit.checked_fraction(), 0.5);
         // The wild entry must not be reported as a numerical failure — the
         // difference is what failed — but it must surface as a coverage gap.
         assert!(audit.failures(1.0e-6).is_empty());
