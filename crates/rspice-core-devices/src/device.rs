@@ -20,7 +20,6 @@ pub mod memristor_team;
 pub mod pwl_file;
 mod stamp_error;
 mod switch;
-pub mod thermal;
 mod traits;
 mod transmission_line;
 
