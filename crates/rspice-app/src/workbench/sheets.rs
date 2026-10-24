@@ -7,6 +7,8 @@
 //! the [`DesignPort`](crate::workbench::framework::feature::DesignPort).
 
 pub(crate) mod commands;
+#[cfg(test)]
+mod tests;
 
 use crate::state::ViewType;
 use crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable;

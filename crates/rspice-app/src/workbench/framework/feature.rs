@@ -19,6 +19,9 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 use super::command_registry::{CommandAvailability, CommandSpec};
 use super::requests::{Drain, Outbox, Request};
 
+#[cfg(test)]
+pub(crate) mod harness;
+
 /// The session a feature's context holds. The framework asks of it only
 /// where requests wait.
 pub(crate) trait Session: 'static {
