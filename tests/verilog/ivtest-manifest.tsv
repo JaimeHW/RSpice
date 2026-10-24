@@ -155,8 +155,8 @@ br1029b	vlg	gold	L3	deviation	IEEE 1364-2005 §4.8.2: a real converts to an inte
 br1029c	vlg	ce	L1	refused:$signed	Semantic error: Unsupported feature: `$signed` takes one integral argument
 br605a	vlg	passed	-	excluded:icarus-override	
 br605b	vlg	passed	-	excluded:icarus-override	
-br916a	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 4)
-br916b	vlg	gold	L1	fail	differs from the gold file at line 1 (3 lines against 4)
+br916a	vlg	gold	L1	deviation	IEEE 1364-2005 §17.1.2: `$strobe` takes any expression, so `value + 1` prints 2 3 at the end of the step; the gold is Icarus's refusal of the expression as unsupported (SORRY)
+br916b	vlg	gold	L1	deviation	IEEE 1364-2005 §17.1.3: `$monitor` takes any expression, so `value + 1` prints x x, 0 1 and 2 3; the gold is Icarus's refusal of the expression as unsupported (SORRY)
 br918a	vlg	passed	L7	pass	PASSED
 br918b	vlg	passed	L7	pass	PASSED
 br918c	vlg	passed	L7	pass	PASSED
@@ -688,7 +688,7 @@ param_mod	vlg	passed	L1	pass	PASSED
 param_select	vlg	passed	L1	pass	PASSED
 param_select2	vlg	passed	L1	fail	internal error: Code generation error: canonical IR validation failed: Error HirValidation at 0:125-133: HIR scalar symbol 'value' must not be indexed; Error HirValidation at 0...
 param_select3	vlg	passed	L4	pass	PASSED
-param_string	vlg	passed	L1	fail	no PASSED line (1 output lines)
+param_string	vlg	passed	L1	deviation	IEEE 1364-2005 §17.1.1 and §3.6: an argument with no format prints in decimal, and a string is an unsigned integer constant, so the parameter "PASSED" prints as 88241501062468; Icarus prints it as text
 param_tern	vlg	passed	L1	pass	PASSED
 param_tern2	vlg	passed	L1	pass	PASSED
 param_test1	vlg	gold	L1	pass	matches the gold file
@@ -907,7 +907,7 @@ pr1822658	vlg	passed	L1	pass	PASSED
 pr1823732	vlg	gold	L1	pass	matches the gold file
 pr1828642	vlg	gold	L1	pass	matches the gold file
 pr183	vlg	co	-	excluded:flag-gno-specify	
-pr1830834	vlg	gold	L4	fail	differs from the gold file at line 1 (4 lines against 4)
+pr1830834	vlg	gold	L4	deviation	IEEE 1364-2005 §17.1.2: `$strobe` takes any expression, so `in[j]` and `out[j*1-1 +: 4]` print at the end of the step; the gold is Icarus's refusal of them as unsupported (SORRY)
 pr1831724	vlg	gold	L1	pass	matches the gold file
 pr1832097a	vlg	passed	L4	pass	PASSED
 pr1832097b	vlg	passed	L4	refused:force	Semantic error: Unsupported feature: a `force` names a bit- or part-select of the variable `bus`; IEEE 1364-2005 section 9.3 allows a select of a net only
