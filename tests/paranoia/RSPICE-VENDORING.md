@@ -36,7 +36,9 @@ nowhere in the regression corpus.
   `paranoia_table_generators.sh`, `textract.py`, `nggtk.tcl`, `sine.m`) and
   the Valgrind suppression file. RSpice runs these decks through its own Rust
   runner; the shell harness is neither portable to Windows nor useful here.
-- Run artefacts (`*.log`).
+- Run artefacts (`*.log`, and the `s3046.s2p` and `adder_x.vcd` that two decks
+  write).
+- `proc2mod/process.pro`, an input for ngspice's `proc2mod` utility.
 
 ## Excluded: third-party proprietary device models
 
