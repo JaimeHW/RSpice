@@ -11,6 +11,7 @@ use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
 use crate::execution_artifact::TransientTrajectoryArtifact;
+use crate::execution_artifact::materialize_periodic_consumer;
 use crate::results::{SampledWaveform, SimulationResult};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::PssMethod;
@@ -35,7 +36,8 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                let circuit = state.materialize_consumer_with_resource_limits(
+                let circuit = materialize_periodic_consumer(
+                    state.environment(),
                     netlist,
                     source_path,
                     dependencies,
@@ -59,7 +61,8 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                let circuit = state.materialize_consumer_with_resource_limits(
+                let circuit = materialize_periodic_consumer(
+                    state.environment(),
                     netlist,
                     source_path,
                     dependencies,
@@ -83,7 +86,8 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                let circuit = state.materialize_consumer_with_resource_limits(
+                let circuit = materialize_periodic_consumer(
+                    state.environment(),
                     netlist,
                     source_path,
                     dependencies,
@@ -240,7 +244,8 @@ pub(super) fn run_periodic_spec(
                 ))
             })?;
             let circuit = super::run_abort_aware_service(abort, || {
-                state.materialize_consumer_with_resource_limits(
+                materialize_periodic_consumer(
+                    state.environment(),
                     netlist,
                     source_path,
                     dependencies,
@@ -417,7 +422,8 @@ fn run_psp(
         ))
     })?;
     run_periodic_sparameters(request, abort, |config| {
-        let circuit = periodic_state.materialize_consumer_with_resource_limits(
+        let circuit = materialize_periodic_consumer(
+            periodic_state.environment(),
             netlist,
             source_path,
             dependencies,

@@ -8,6 +8,7 @@ use super::insert_scalar_waveform;
 use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
+use crate::execution_artifact::materialize_periodic_consumer;
 use crate::execution_options::SpecExecutionOptions;
 use crate::results::{PstbFloquetMode, SampledWaveform, SimulationResult};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -371,7 +372,8 @@ fn run_pac(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            let circuit = hb_state.materialize_consumer_with_resource_limits(
+            let circuit = materialize_periodic_consumer(
+                hb_state.environment(),
                 netlist,
                 source_path,
                 dependencies,
@@ -403,7 +405,8 @@ fn run_pac(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            let circuit = periodic_state.materialize_consumer_with_resource_limits(
+            let circuit = materialize_periodic_consumer(
+                periodic_state.environment(),
                 netlist,
                 source_path,
                 dependencies,
@@ -462,7 +465,8 @@ fn run_pxf(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            let circuit = hb_state.materialize_consumer_with_resource_limits(
+            let circuit = materialize_periodic_consumer(
+                hb_state.environment(),
                 netlist,
                 source_path,
                 dependencies,
@@ -494,7 +498,8 @@ fn run_pxf(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            let circuit = periodic_state.materialize_consumer_with_resource_limits(
+            let circuit = materialize_periodic_consumer(
+                periodic_state.environment(),
                 netlist,
                 source_path,
                 dependencies,
@@ -572,7 +577,8 @@ fn run_pnoise(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            let circuit = hb_state.materialize_consumer_with_resource_limits(
+            let circuit = materialize_periodic_consumer(
+                hb_state.environment(),
                 netlist,
                 source_path,
                 dependencies,
@@ -602,7 +608,8 @@ fn run_pnoise(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            let circuit = periodic_state.materialize_consumer_with_resource_limits(
+            let circuit = materialize_periodic_consumer(
+                periodic_state.environment(),
                 netlist,
                 source_path,
                 dependencies,
@@ -1018,7 +1025,8 @@ fn run_pstb(
         )
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        let circuit = periodic_state.materialize_consumer_with_resource_limits(
+        let circuit = materialize_periodic_consumer(
+            periodic_state.environment(),
             netlist,
             source_path,
             dependencies,

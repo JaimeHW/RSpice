@@ -18,6 +18,7 @@
 #![allow(clippy::large_enum_variant)]
 
 use super::*;
+use crate::execution_artifact::pss_floquet_contract_is_authenticated;
 mod dc_sweep;
 mod monte_carlo;
 mod stb;
@@ -621,29 +622,6 @@ pub(crate) struct WorkerPssOperatingPointTransport {
 
 fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVerdict {
     rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
-}
-
-fn pss_floquet_contract_is_authenticated(
-    result: &rspice_core::analysis::pss::PssResult,
-    monodromy_order: usize,
-) -> bool {
-    if !result.has_consistent_floquet_contract() {
-        return false;
-    }
-    match &result.floquet_evidence {
-        rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } => {
-            certificate.is_valid()
-                && monodromy_order > 0
-                && certificate.problem_order == monodromy_order
-                && certificate.problem_order == result.floquet_multipliers.len()
-        }
-        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes => {
-            monodromy_order == 0
-                && result.floquet_multipliers.is_empty()
-                && result.floquet_orbit_kind == rspice_core::analysis::FloquetOrbitKind::Driven
-        }
-        _ => false,
-    }
 }
 
 impl WorkerPssOperatingPointTransport {

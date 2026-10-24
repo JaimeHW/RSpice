@@ -782,7 +782,34 @@ fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVer
     rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
 }
 
-fn pss_floquet_contract_is_authenticated(
+/// Parse a consumer analysis's deck under the operating environment its periodic
+/// dependency retained, or as authored when the dependency retained none.
+pub(crate) fn materialize_periodic_consumer(
+    environment: Option<&PeriodicOperatingEnvironment>,
+    source: &str,
+    source_path: Option<&std::path::Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
+    match environment {
+        Some(environment) => environment.materialize_with_resource_limits(
+            source,
+            source_path,
+            dependencies,
+            limits,
+            abort,
+        ),
+        None => crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort(
+            source,
+            source_path,
+            limits,
+            abort,
+        ),
+    }
+}
+
+pub(crate) fn pss_floquet_contract_is_authenticated(
     result: &rspice_core::analysis::pss::PssResult,
     monodromy_order: usize,
 ) -> bool {
@@ -812,31 +839,8 @@ impl PeriodicStateArtifact {
         &self.operating_point
     }
 
-    pub fn materialize_consumer_with_resource_limits(
-        &self,
-        source: &str,
-        source_path: Option<&std::path::Path>,
-        dependencies: &ResolvedExecutionDependencies,
-        limits: rspice_core::ResourceLimits,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
-        match &self.environment {
-            Some(environment) => environment.materialize_with_resource_limits(
-                source,
-                source_path,
-                dependencies,
-                limits,
-                abort,
-            ),
-            None => {
-                crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort(
-                    source,
-                    source_path,
-                    limits,
-                    abort,
-                )
-            }
-        }
+    pub(crate) fn environment(&self) -> Option<&PeriodicOperatingEnvironment> {
+        self.environment.as_ref()
     }
 
     pub fn validate_consumer_basis(
@@ -1234,31 +1238,8 @@ pub struct HbStateArtifact {
 impl HbStateArtifact {
     const MAX_NUMERIC_VALUES: usize = 16_777_216;
 
-    pub fn materialize_consumer_with_resource_limits(
-        &self,
-        source: &str,
-        source_path: Option<&std::path::Path>,
-        dependencies: &ResolvedExecutionDependencies,
-        limits: rspice_core::ResourceLimits,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
-        match &self.environment {
-            Some(environment) => environment.materialize_with_resource_limits(
-                source,
-                source_path,
-                dependencies,
-                limits,
-                abort,
-            ),
-            None => {
-                crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort(
-                    source,
-                    source_path,
-                    limits,
-                    abort,
-                )
-            }
-        }
+    pub(crate) fn environment(&self) -> Option<&PeriodicOperatingEnvironment> {
+        self.environment.as_ref()
     }
 
     pub fn operating_point(&self) -> &rspice_core::engine::HbOperatingPoint {

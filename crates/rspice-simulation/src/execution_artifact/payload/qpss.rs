@@ -17,31 +17,8 @@ impl QpssStateArtifact {
         &self.operating_point
     }
 
-    pub fn materialize_consumer_with_resource_limits(
-        &self,
-        source: &str,
-        source_path: Option<&std::path::Path>,
-        dependencies: &ResolvedExecutionDependencies,
-        limits: rspice_core::ResourceLimits,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
-        match &self.environment {
-            Some(environment) => environment.materialize_with_resource_limits(
-                source,
-                source_path,
-                dependencies,
-                limits,
-                abort,
-            ),
-            None => {
-                crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort(
-                    source,
-                    source_path,
-                    limits,
-                    abort,
-                )
-            }
-        }
+    pub(crate) fn environment(&self) -> Option<&PeriodicOperatingEnvironment> {
+        self.environment.as_ref()
     }
 
     pub(super) fn validate(&self) -> Result<(), ExecutionArtifactError> {
