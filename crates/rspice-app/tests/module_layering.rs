@@ -270,7 +270,16 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// through each took the application whole to draw rows; the rows are now
 /// resolved from a shared borrow, and only the row a reader chose runs
 /// against the application.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 771;
+///
+/// 771 -> 721 on 2026-10-24, when the framework's containers began drawing
+/// for a host. The chrome, the command palette, the docks, the stage, the
+/// notification centre, the specialist tool browser and the window-session
+/// dialog took the application whole to read the session and to ask the
+/// shell; they take `impl WorkbenchHost` now, which names neither, so 48
+/// signatures are gone. The other two slots were never occupied: the
+/// measurement stood at 769 when the work began, and the ceiling follows it
+/// down rather than keeping them.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 721;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
