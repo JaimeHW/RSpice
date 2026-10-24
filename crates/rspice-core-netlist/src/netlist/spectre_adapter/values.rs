@@ -43,9 +43,11 @@ pub(super) const SPECTRE_SCALE_FACTORS: &[(&str, i32)] = &[
 const SHARED_SPELLINGS: &[&str] = &["T", "G", "K", "k", "m", "u", "n", "p", "f"];
 
 /// Rewrite every numeric literal of a Spectre-language `value` to its exact
-/// canonical spelling. Quoted text is copied untouched: a quoted Spectre value
-/// is a string, and the one quoted expression the adapter lowers (a
-/// `bsource` equation) is passed through here again once its quotes are off.
+/// canonical spelling. A double-quoted string is copied untouched (the one
+/// such expression the adapter lowers, a `bsource` equation, is passed through
+/// here again once its quotes are off). Single quotes are read through: the
+/// canonical reader takes a single-quoted value for an expression, so its
+/// literals are Spectre numbers like any other.
 pub(super) fn lower_spectre_value(
     value: &str,
     parameter: &str,
@@ -56,7 +58,7 @@ pub(super) fn lower_spectre_value(
     let mut index = 0usize;
     while index < bytes.len() {
         let byte = bytes[index];
-        if matches!(byte, b'\'' | b'"') {
+        if byte == b'"' {
             let end = quoted_end(bytes, index);
             lowered.push_str(&value[index..end]);
             index = end;
@@ -101,15 +103,15 @@ pub(super) fn card_value(value: &str) -> Cow<'_, str> {
 }
 
 /// The names a Spectre-language value refers to: every identifier outside a
-/// quoted string that is not called as a function. Numbers and their scale
-/// factors are skipped.
+/// double-quoted string that is not called as a function. Numbers and their
+/// scale factors are skipped.
 pub(super) fn spectre_value_identifiers(value: &str) -> Vec<&str> {
     let bytes = value.as_bytes();
     let mut identifiers = Vec::new();
     let mut index = 0usize;
     while index < bytes.len() {
         let byte = bytes[index];
-        if matches!(byte, b'\'' | b'"') {
+        if byte == b'"' {
             index = quoted_end(bytes, index);
         } else if is_identifier_start(byte) {
             let end = identifier_end(bytes, index);
@@ -361,6 +363,7 @@ mod tests {
         assert_eq!(lowered("(rr*1M+x1M)/2%"), "(rr*1e6+x1M)/2e-2");
         assert_eq!(lowered("[0 0 1n 1M]"), "[0 0 1n 1e6]");
         assert_eq!(lowered("\"1M.txt\""), "\"1M.txt\"");
+        assert_eq!(lowered("'rr*1M'"), "'rr*1e6'");
         assert_eq!(lowered("2**3"), "2**3");
         assert_eq!(lowered("1_"), "1");
         assert_eq!(lowered("V(2M, 1a)*1M + I(v1)"), "V(2M, 1a)*1e6 + I(v1)");

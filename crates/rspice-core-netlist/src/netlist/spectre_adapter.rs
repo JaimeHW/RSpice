@@ -2540,11 +2540,12 @@ fn parse_spectre_model_assignments(
                 },
             ));
         }
-        // A quoted value is a string and passes as written; every other
-        // value is a number or an expression, whose literals carry Spectre
-        // scale factors.
+        // A double-quoted value is a string and passes as written; every
+        // other value is a number or an expression (the canonical reader
+        // takes a single-quoted one for an expression too), whose literals
+        // carry Spectre scale factors.
         let written = &parameters[value_start..index];
-        let value = if matches!(opening, b'\'' | b'"') {
+        let value = if opening == b'"' {
             written.to_owned()
         } else {
             lower_spectre_value(written, name, line)?

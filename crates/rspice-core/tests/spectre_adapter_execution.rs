@@ -146,11 +146,13 @@ fn spectre_mega_reaches_instances_parameters_expressions_and_subckts() {
                   x5 (e) load rv=4M\n\
                   v7 (g 0) vsource dc=1\n\
                   x7 (g) load rv=rr*gg*2\n\
+                  v8 (h 0) vsource dc=1\n\
+                  r8 (h 0) resistor r='1M'\n\
                   op1 dc\n";
     let currents = source_currents(
         "mega",
         source,
-        &["Vv1", "Vv2", "Vv3", "Vv4", "Vv5", "Vv6", "Vv7"],
+        &["Vv1", "Vv2", "Vv3", "Vv4", "Vv5", "Vv6", "Vv7", "Vv8"],
     );
     for (label, measured, resistance) in [
         ("r=1M", currents[0], 1e6),
@@ -160,6 +162,11 @@ fn spectre_mega_reaches_instances_parameters_expressions_and_subckts() {
         ("subckt rv=4M", currents[4], 4e6),
         ("parameters r6=gg*rr+1M", currents[5], 3e6),
         ("subckt rv=rr*gg*2", currents[6], 4e6),
+        (
+            "r='1M', an expression to the canonical reader",
+            currents[7],
+            1e6,
+        ),
     ] {
         assert_current(label, measured, resistance);
     }
