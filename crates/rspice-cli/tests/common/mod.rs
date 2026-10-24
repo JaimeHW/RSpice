@@ -322,8 +322,6 @@ pub struct AxisCoordinate {
     pub coordinate_id: String,
     pub ordinal: usize,
     pub tag: String,
-    #[allow(dead_code)]
-    pub assignment: String,
     /// Artifacts this coordinate published, in publication order.
     pub artifacts: Vec<PathBuf>,
 }
@@ -420,10 +418,6 @@ impl AxisRunSet {
                 tag: coordinate["tag"]
                     .as_str()
                     .expect("coordinate tag")
-                    .to_owned(),
-                assignment: coordinate["assignment"]
-                    .as_str()
-                    .expect("coordinate assignment")
                     .to_owned(),
                 artifacts: coordinate["artifacts"]
                     .as_array()

@@ -256,52 +256,6 @@ impl FftData {
         })
     }
 
-    /// Create from magnitude/phase arrays
-    #[cfg(test)]
-    pub fn from_spectrum(
-        name: &str,
-        frequencies: &[f64],
-        magnitudes: &[f64],
-        phases: &[f64],
-        sample_rate: f64,
-    ) -> Self {
-        Self::from_spectrum_with_normalization(
-            name,
-            frequencies,
-            magnitudes,
-            phases,
-            sample_rate,
-            SpectrumNormalization::Peak,
-        )
-    }
-
-    /// Create from magnitude/phase arrays with explicit normalization metadata.
-    #[cfg(test)]
-    pub fn from_spectrum_with_normalization(
-        name: &str,
-        frequencies: &[f64],
-        magnitudes: &[f64],
-        phases: &[f64],
-        sample_rate: f64,
-        normalization: SpectrumNormalization,
-    ) -> Self {
-        let n = frequencies.len().min(magnitudes.len()).min(phases.len());
-        let points: Vec<FftPoint> = (0..n)
-            .map(|i| FftPoint::new(frequencies[i], magnitudes[i], phases[i]))
-            .collect();
-        let fft_size = n.saturating_sub(1).saturating_mul(2);
-
-        Self {
-            name: name.to_string(),
-            points,
-            sample_rate,
-            fft_size,
-            window: WindowFunction::Rectangular,
-            normalization,
-            equivalent_noise_bandwidth_bins: 1.0,
-        }
-    }
-
     /// Convert all spectrum magnitudes to a different normalization mode.
     pub fn convert_normalization(
         &mut self,

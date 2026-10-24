@@ -12,7 +12,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::{DeviceModel, ModelDefinitionMetadata, ModelType, ProcessCorner};
+use super::{DeviceModel, ModelDefinitionMetadata, ProcessCorner};
 use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
 /// The comment every materialized model block is sealed under in a deck.
@@ -531,14 +531,6 @@ impl ModelLibrary {
     /// Get a model by name
     pub fn get_model(&self, name: &str) -> Option<&DeviceModel> {
         self.models.get(name)
-    }
-
-    /// Get models by type
-    pub fn models_by_type(&self, model_type: ModelType) -> Vec<&DeviceModel> {
-        self.models
-            .values()
-            .filter(|m| m.model_type == model_type)
-            .collect()
     }
 
     /// Activate a corner for the library's executable model projection.

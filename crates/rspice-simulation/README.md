@@ -57,7 +57,7 @@ closure.
 - `execution::PreparedRunAuthorization::retain(snapshot)`, then
   `consume(intent, rebuild)` for the one `AuthorizedRunDispatch`.
 - `AuthorizedTaskDispatch::resolve_dependency_artifacts(&artifacts)`, then
-  `runner::SimulationRunner::start_prepared(dispatch, stream_samples)` and
+  `runner::SimulationRunner::start_prepared(dispatch, stream_transient_samples)` and
   `poll_result`.
 - `result_conversion::convert(result, analysis_type, label, now)` for an
   `AnalysisResult`.

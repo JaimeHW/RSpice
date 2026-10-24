@@ -60,22 +60,4 @@ impl WireConnection {
     pub fn is_endpoint(&self, wire_point_count: usize) -> bool {
         self.is_start() || self.is_end(wire_point_count)
     }
-
-    /// Check if this connection belongs to a specific wire
-    pub fn is_wire(&self, wire_id: u64) -> bool {
-        self.wire_id == wire_id
-    }
-
-    /// Check if this connection is to a specific terminal
-    pub fn is_terminal(&self, terminal_name: &str) -> bool {
-        self.terminal_name == terminal_name
-    }
-
-    /// Get a descriptive string for this connection
-    pub fn description(&self) -> String {
-        format!(
-            "Wire {} point {} → Component {} terminal {}",
-            self.wire_id, self.point_index, self.component_id, self.terminal_name
-        )
-    }
 }

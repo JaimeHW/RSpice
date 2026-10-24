@@ -1,7 +1,7 @@
 //! Result-artifact publication for one CLI invocation.
 //!
 //! Every result file the `run` and `export` commands produce goes through
-//! [`artifact`] (or [`artifact_group`] for files that only make sense
+//! [`artifact`] (or [`artifact_pair`] for files that only make sense
 //! together). Without an open transaction each call publishes one file
 //! atomically, exactly as a direct `rspice_output::write_atomic` would.
 //!

@@ -267,17 +267,6 @@ impl SchematicPageSize {
             Self::UsLedger => "US Ledger",
         }
     }
-
-    /// Nominal portrait dimensions in tenths of a millimetre.
-    #[must_use]
-    pub const fn portrait_dimensions_tenth_mm(self) -> (u32, u32) {
-        match self {
-            Self::A4 => (2_100, 2_970),
-            Self::A3 => (2_970, 4_200),
-            Self::UsLetter => (2_159, 2_794),
-            Self::UsLedger => (2_794, 4_318),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
