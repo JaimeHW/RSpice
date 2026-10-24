@@ -4,6 +4,7 @@
 //! host timestamps, live display conventions and the application waveform type.
 
 use super::*;
+use rspice_formats::project_results::{ProjectAnalysisResult, ProjectWaveformData};
 use rspice_results::analysis_result::AnalysisResult as RetainedAnalysisResult;
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -47,6 +48,17 @@ impl<'a> From<&'a AnalysisResult>
 {
     fn from(analysis: &'a AnalysisResult) -> Self {
         (&analysis.data).into()
+    }
+}
+
+/// A retained trace in the portable project form, keeping its colour and visibility.
+pub(super) fn capture_waveform(waveform: &RetainedTrace) -> ProjectWaveformData {
+    ProjectWaveformData::from_waveform(&waveform.data, waveform.color.clone(), waveform.visible)
+}
+
+impl From<&AnalysisResult> for ProjectAnalysisResult {
+    fn from(analysis: &AnalysisResult) -> Self {
+        Self::from_analysis(&analysis.data, capture_waveform)
     }
 }
 

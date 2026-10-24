@@ -3,6 +3,7 @@
 use super::*;
 #[cfg(test)]
 use crate::product::AnalysisInstanceId;
+use rspice_formats::project_results::ProjectSimulationRun;
 use rspice_results::run::SimulationRun as RetainedRun;
 use std::ops::{Deref, DerefMut};
 
@@ -21,6 +22,12 @@ impl Deref for SimulationRun {
 impl DerefMut for SimulationRun {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
+    }
+}
+
+impl From<&SimulationRun> for ProjectSimulationRun {
+    fn from(run: &SimulationRun) -> Self {
+        Self::from_run(&run.data, super::analysis_result::capture_waveform)
     }
 }
 
