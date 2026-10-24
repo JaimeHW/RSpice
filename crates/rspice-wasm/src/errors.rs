@@ -494,6 +494,15 @@ pub(crate) fn resource_limit_error(
     Box::new(WasmError::resource_limit(error.to_string(), error))
 }
 
+/// The failure for a result buffer the browser could not reserve.
+pub(crate) fn allocation_error(object: &'static str) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        format!("could not allocate {object}"),
+        "result_allocation_failed",
+        "result_projection",
+    ))
+}
+
 pub(crate) fn wasm_error_to_js(error: WasmError) -> JsValue {
     let js_error = js_sys::Error::new(&error.message);
     js_error.set_name("RSpiceError");

@@ -22,7 +22,7 @@ use rspice_core::execution::{
 use serde::Serialize;
 
 use crate::DetailedWasmResult;
-use crate::errors::WasmError;
+use crate::errors::{WasmError, allocation_error};
 
 /// One `kind`/`ordinal` analysis identity, spelled the way core spells it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -489,14 +489,6 @@ fn unknown_variant(location: &str, found: String) -> Box<WasmError> {
     Box::new(WasmError::new(
         format!("{location} {found} has no browser representation in this build"),
         "unsupported_result_schema",
-        "result_projection",
-    ))
-}
-
-fn allocation_error(object: &'static str) -> Box<WasmError> {
-    Box::new(WasmError::new(
-        format!("could not allocate {object}"),
-        "result_allocation_failed",
         "result_projection",
     ))
 }

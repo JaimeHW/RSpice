@@ -18,7 +18,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::DetailedWasmResult;
 use crate::document::{AnalysisIdentity, ResultMetadata, result_metadata, window_transfer_values};
-use crate::errors::{WasmError, wasm_error_to_js};
+use crate::errors::{WasmError, allocation_error, wasm_error_to_js};
 use crate::events::{BusEventRow, DigitalBusDescriptor, DigitalEventRow, DigitalNodeDescriptor};
 use crate::js_interop::{serialize_result_window_to_js, serialize_to_js};
 use crate::options::DEFAULT_MAX_TRANSFER_VALUES;
@@ -483,14 +483,6 @@ fn window_error(message: String) -> Box<WasmError> {
         message,
         "invalid_result_window",
         "result_transfer",
-    ))
-}
-
-fn allocation_error(object: &'static str) -> Box<WasmError> {
-    Box::new(WasmError::new(
-        format!("could not allocate {object}"),
-        "result_allocation_failed",
-        "result_projection",
     ))
 }
 

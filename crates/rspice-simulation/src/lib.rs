@@ -42,6 +42,8 @@ pub mod veriloga;
 mod engine_bridge;
 mod engine_services;
 pub mod execution;
+#[cfg(target_arch = "wasm32")]
+mod js_error;
 mod output_spec;
 pub mod point_family;
 pub mod runner;

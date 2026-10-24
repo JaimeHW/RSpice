@@ -2,6 +2,7 @@
 //!
 //! Provides a typed UI surface for closed-loop parameter optimization.
 
+use crate::mc_statistics::is_parameter_name;
 use crate::optimization_search::OptimizationSearchControls;
 use crate::options::parse_si_value;
 use rspice_results::optimization::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
@@ -63,7 +64,7 @@ pub struct OptimizationVariableConfig {
 
 impl OptimizationVariableConfig {
     fn validate(&self) -> Result<(), String> {
-        if !is_valid_identifier(&self.name) {
+        if !is_parameter_name(&self.name) {
             return Err(format!(
                 "Invalid variable name '{}': must start with a letter/underscore and contain only [A-Za-z0-9_]",
                 self.name
@@ -628,17 +629,6 @@ fn default_seed() -> String {
     OptimizationSearchControls::default()
         .random_seed
         .to_string()
-}
-
-fn is_valid_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn parse_variable_specs(input: &str) -> Result<Vec<OptimizationVariableConfig>, String> {

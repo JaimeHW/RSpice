@@ -50,6 +50,7 @@ mod browser {
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
     use crate::engine_log::{EngineLogLine, EngineLogQueue, EngineLogSeal};
     use crate::error::SimulationError;
+    use crate::js_error::js_error_message;
     use crate::live_transient::{
         LiveTransientQueue, TransientSampleDelta, push_live_transient_sample,
     };
@@ -1084,17 +1085,6 @@ mod browser {
 
     fn reflect_error(error: JsValue) -> SimulationError {
         SimulationError::InvalidConfig(js_error_message(error))
-    }
-
-    fn js_error_message(error: JsValue) -> String {
-        error
-            .as_string()
-            .or_else(|| {
-                Reflect::get(&error, &JsValue::from_str("message"))
-                    .ok()
-                    .and_then(|message| message.as_string())
-            })
-            .unwrap_or_else(|| "unknown JavaScript error".to_string())
     }
 }
 

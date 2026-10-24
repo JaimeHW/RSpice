@@ -6,7 +6,7 @@ use rspice_core::netlist::{
 };
 use serde::{Deserialize, Serialize};
 
-/// One `.MC PARAMS` entry: an ASCII identifier that does not begin with a digit.
+/// A netlist parameter name: an ASCII identifier that does not begin with a digit.
 pub fn is_parameter_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {

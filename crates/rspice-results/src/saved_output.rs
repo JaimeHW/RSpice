@@ -35,6 +35,17 @@ pub enum SavedOutputKind {
 }
 
 impl SavedOutputKind {
+    /// The byte this value encodes as in result digests and run snapshots.
+    pub const fn digest_tag(self) -> u8 {
+        match self {
+            Self::RawVoltageOrCurrent => 0,
+            Self::DerivedExpression => 1,
+            Self::DeviceOperatingPointQuantity => 2,
+            Self::NoiseContributor => 3,
+            Self::RfPortQuantity => 4,
+        }
+    }
+
     pub const ALL: [Self; 5] = [
         Self::RawVoltageOrCurrent,
         Self::DerivedExpression,
@@ -64,6 +75,16 @@ pub enum SavedOutputPolicy {
 }
 
 impl SavedOutputPolicy {
+    /// The byte this value encodes as in result digests and run snapshots.
+    pub const fn digest_tag(self) -> u8 {
+        match self {
+            Self::EveryAcceptedPoint => 0,
+            Self::SelectedAndFinalPoints => 1,
+            Self::OnDemandFromRetainedState => 2,
+            Self::FailureDiagnosticsOnly => 3,
+        }
+    }
+
     pub const ALL: [Self; 4] = [
         Self::EveryAcceptedPoint,
         Self::SelectedAndFinalPoints,
@@ -89,6 +110,14 @@ pub enum SavedOutputPrecision {
 }
 
 impl SavedOutputPrecision {
+    /// The byte this value encodes as in result digests and run snapshots.
+    pub const fn digest_tag(self) -> u8 {
+        match self {
+            Self::FullSourcePrecision => 0,
+            Self::DisplayCacheWithFullSourcePrecision => 1,
+        }
+    }
+
     pub const ALL: [Self; 2] = [
         Self::FullSourcePrecision,
         Self::DisplayCacheWithFullSourcePrecision,
@@ -112,6 +141,14 @@ pub enum SavedOutputStreaming {
 }
 
 impl SavedOutputStreaming {
+    /// The byte this value encodes as in result digests and run snapshots.
+    pub const fn digest_tag(self) -> u8 {
+        match self {
+            Self::LivePlotAdaptiveDisplayDecimation => 0,
+            Self::StoreOnly => 1,
+        }
+    }
+
     pub const ALL: [Self; 2] = [Self::LivePlotAdaptiveDisplayDecimation, Self::StoreOnly];
 
     pub const fn label(self) -> &'static str {

@@ -11,10 +11,6 @@ use crate::execution::SimulationRunIntent;
 use crate::netlist_gen::CrossProbeSnapshot;
 use crate::netlist_preparation::splice_before_terminal_end_card;
 use crate::output_contract::PreparedSavedOutput;
-use crate::output_contract::output_kind_tag;
-use crate::output_contract::policy_tag;
-use crate::output_contract::precision_tag;
-use crate::output_contract::streaming_tag;
 use crate::preparation::QueuedAnalysis;
 pub use crate::preparation::touchstone::TouchstoneExportPolicy;
 use rspice_results::run_receipt::HierarchyMapRow;
@@ -2312,12 +2308,12 @@ fn snapshot_digest(parts: &SnapshotParts, pvt_points: &[PreparedPvtPoint]) -> Co
             writer.u64(contract.output_revision().get());
             writer.uuid(contract.analysis_id().as_uuid());
             writer.digest(contract.digest());
-            writer.u8(output_kind_tag(contract.kind()));
+            writer.u8(contract.kind().digest_tag());
             writer.string(contract.name());
             writer.string(contract.source_expression());
-            writer.u8(policy_tag(contract.policy()));
-            writer.u8(precision_tag(contract.precision()));
-            writer.u8(streaming_tag(contract.streaming()));
+            writer.u8(contract.policy().digest_tag());
+            writer.u8(contract.precision().digest_tag());
+            writer.u8(contract.streaming().digest_tag());
             writer.option(contract.selection_grid().as_ref(), |writer, grid| {
                 writer.f64(grid.start);
                 writer.f64(grid.step);

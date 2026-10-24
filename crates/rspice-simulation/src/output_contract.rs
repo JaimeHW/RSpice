@@ -478,12 +478,12 @@ fn output_contract_digest(
     bytes.extend_from_slice(&output.revision.get().to_be_bytes());
     bytes.extend_from_slice(analysis_id.as_uuid().as_bytes());
     bytes.push(analysis_kind_tag(spec));
-    bytes.push(output_kind_tag(output.kind));
+    bytes.push(output.kind.digest_tag());
     append_string(&mut bytes, &output.name);
     append_string(&mut bytes, &output.source_expression);
-    bytes.push(policy_tag(output.save_policy));
-    bytes.push(precision_tag(output.stored_precision));
-    bytes.push(streaming_tag(output.streaming));
+    bytes.push(output.save_policy.digest_tag());
+    bytes.push(output.stored_precision.digest_tag());
+    bytes.push(output.streaming.digest_tag());
     bytes.push(match output.display_intent {
         rspice_results::saved_output::SavedOutputDisplayIntent::Plot => 0,
         rspice_results::saved_output::SavedOutputDisplayIntent::DataBrowserOnly => 1,
@@ -509,37 +509,4 @@ fn output_contract_digest(
 fn append_string(bytes: &mut Vec<u8>, value: &str) {
     bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
     bytes.extend_from_slice(value.as_bytes());
-}
-
-pub const fn output_kind_tag(kind: SavedOutputKind) -> u8 {
-    match kind {
-        SavedOutputKind::RawVoltageOrCurrent => 0,
-        SavedOutputKind::DerivedExpression => 1,
-        SavedOutputKind::DeviceOperatingPointQuantity => 2,
-        SavedOutputKind::NoiseContributor => 3,
-        SavedOutputKind::RfPortQuantity => 4,
-    }
-}
-
-pub const fn policy_tag(policy: SavedOutputPolicy) -> u8 {
-    match policy {
-        SavedOutputPolicy::EveryAcceptedPoint => 0,
-        SavedOutputPolicy::SelectedAndFinalPoints => 1,
-        SavedOutputPolicy::OnDemandFromRetainedState => 2,
-        SavedOutputPolicy::FailureDiagnosticsOnly => 3,
-    }
-}
-
-pub const fn precision_tag(precision: SavedOutputPrecision) -> u8 {
-    match precision {
-        SavedOutputPrecision::FullSourcePrecision => 0,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision => 1,
-    }
-}
-
-pub const fn streaming_tag(streaming: SavedOutputStreaming) -> u8 {
-    match streaming {
-        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation => 0,
-        SavedOutputStreaming::StoreOnly => 1,
-    }
 }

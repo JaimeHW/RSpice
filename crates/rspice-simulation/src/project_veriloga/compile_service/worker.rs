@@ -185,6 +185,7 @@ mod browser {
         DigitalDelaySelect, ExternalCell, ProjectSourceBundle, VerilogACompileOutcome,
         VerilogAWorkerRequest,
     };
+    use crate::js_error::js_error_message;
 
     struct ActiveCompileWorker {
         id: u32,
@@ -421,17 +422,6 @@ mod browser {
                     && value.fract() == 0.0
             })
             .map(|value| value as u32)
-    }
-
-    fn js_error_message(error: JsValue) -> String {
-        error
-            .as_string()
-            .or_else(|| {
-                Reflect::get(&error, &JsValue::from_str("message"))
-                    .ok()
-                    .and_then(|message| message.as_string())
-            })
-            .unwrap_or_else(|| "unknown JavaScript error".to_owned())
     }
 }
 

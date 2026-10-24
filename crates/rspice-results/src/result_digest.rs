@@ -30,8 +30,7 @@ use crate::operating_point::{
 use crate::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
 use crate::result_import::ResultImportSource;
 use crate::saved_output::{
-    ComplexExpressionPolicy, SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputReceipt, SavedOutputStreaming,
+    ComplexExpressionPolicy, SavedOutputMaterializationStatus, SavedOutputReceipt,
 };
 use crate::sensitivity::{
     SensitivityBasisEvidence, SensitivityResultMode, SensitivityStudyEvidence,
@@ -370,10 +369,10 @@ where
                     ComplexExpressionPolicy::Rectangular => 1,
                 });
             }
-            writer.u8(saved_output_kind_tag(receipt.output_kind));
-            writer.u8(saved_output_policy_tag(receipt.save_policy));
-            writer.u8(saved_output_precision_tag(receipt.stored_precision));
-            writer.u8(saved_output_streaming_tag(receipt.streaming));
+            writer.u8(receipt.output_kind.digest_tag());
+            writer.u8(receipt.save_policy.digest_tag());
+            writer.u8(receipt.stored_precision.digest_tag());
+            writer.u8(receipt.streaming.digest_tag());
             encode_saved_output_status(&mut writer, &receipt.status);
             if version >= ResultDigestEncoding::V13 {
                 writer.option(receipt.source_bindings.as_ref(), |writer, bindings| {
@@ -2243,39 +2242,6 @@ const fn analysis_type_tag(analysis_type: AnalysisType) -> u8 {
         AnalysisType::Qpxf => 31,
         AnalysisType::TransientNoise => 32,
         AnalysisType::DcMismatch => 33,
-    }
-}
-
-const fn saved_output_kind_tag(kind: SavedOutputKind) -> u8 {
-    match kind {
-        SavedOutputKind::RawVoltageOrCurrent => 0,
-        SavedOutputKind::DerivedExpression => 1,
-        SavedOutputKind::DeviceOperatingPointQuantity => 2,
-        SavedOutputKind::NoiseContributor => 3,
-        SavedOutputKind::RfPortQuantity => 4,
-    }
-}
-
-const fn saved_output_policy_tag(policy: SavedOutputPolicy) -> u8 {
-    match policy {
-        SavedOutputPolicy::EveryAcceptedPoint => 0,
-        SavedOutputPolicy::SelectedAndFinalPoints => 1,
-        SavedOutputPolicy::OnDemandFromRetainedState => 2,
-        SavedOutputPolicy::FailureDiagnosticsOnly => 3,
-    }
-}
-
-const fn saved_output_precision_tag(precision: SavedOutputPrecision) -> u8 {
-    match precision {
-        SavedOutputPrecision::FullSourcePrecision => 0,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision => 1,
-    }
-}
-
-const fn saved_output_streaming_tag(streaming: SavedOutputStreaming) -> u8 {
-    match streaming {
-        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation => 0,
-        SavedOutputStreaming::StoreOnly => 1,
     }
 }
 

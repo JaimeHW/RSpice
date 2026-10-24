@@ -35,7 +35,7 @@ use rspice_core::xspice::DigitalValue;
 use serde::Serialize;
 
 use crate::DetailedWasmResult;
-use crate::errors::WasmError;
+use crate::errors::{WasmError, allocation_error};
 
 /// The `$scope module` every RSpice dump declares its nodes under.
 ///
@@ -535,14 +535,6 @@ fn projection_error(message: String) -> Box<WasmError> {
     Box::new(WasmError::new(
         format!("this event history cannot be dumped exactly: {message}"),
         "invalid_event_projection",
-        "result_projection",
-    ))
-}
-
-fn allocation_error(object: &'static str) -> Box<WasmError> {
-    Box::new(WasmError::new(
-        format!("could not allocate {object}"),
-        "result_allocation_failed",
         "result_projection",
     ))
 }

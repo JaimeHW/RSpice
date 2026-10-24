@@ -115,6 +115,7 @@ mod browser_pdk_import_worker {
     use wasm_bindgen::prelude::*;
 
     use super::*;
+    use crate::js_error::js_error_message;
 
     const MAX_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
 
@@ -339,17 +340,6 @@ mod browser_pdk_import_worker {
                     && value.fract() == 0.0
             })
             .map(|value| value as u32)
-    }
-
-    fn js_error_message(error: JsValue) -> String {
-        error
-            .as_string()
-            .or_else(|| {
-                Reflect::get(&error, &JsValue::from_str("message"))
-                    .ok()
-                    .and_then(|message| message.as_string())
-            })
-            .unwrap_or_else(|| "unknown JavaScript error".to_owned())
     }
 }
 

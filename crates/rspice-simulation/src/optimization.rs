@@ -7,6 +7,7 @@ mod search;
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use rspice_core::{Value, abort_signal::AbortSignal};
 use rspice_results::optimization::OptimizationScore;
+use rspice_simulation_contract::mc_statistics::is_parameter_name;
 use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
 use search::{DesignVar, OptimizerEngine};
 use std::cell::{Cell, RefCell};
@@ -169,7 +170,7 @@ impl OptimizationRunConfig {
 
         let mut seen = HashSet::new();
         for var in &self.variables {
-            if !is_valid_param_identifier(&var.name) {
+            if !is_parameter_name(&var.name) {
                 return Err(format!(
                     "Invalid optimization variable name '{}': expected [A-Za-z_][A-Za-z0-9_]*",
                     var.name
@@ -594,17 +595,6 @@ pub fn objective_to_cost(
 
 fn optimizer_target_cost(goal: OptimizationGoalMode) -> Option<Value> {
     (goal == OptimizationGoalMode::Target).then_some(0.0)
-}
-
-fn is_valid_param_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]

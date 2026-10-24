@@ -17,7 +17,8 @@ use crate::DetailedWasmResult;
 use crate::abort::ensure_not_aborted;
 use crate::dto::NetlistSummary;
 use crate::errors::{
-    WasmError, diagnostic_summary, resource_limit_error, startup_diagnostic_summary,
+    WasmError, allocation_error, diagnostic_summary, resource_limit_error,
+    startup_diagnostic_summary,
 };
 use crate::options::WasmExecutionOptions;
 use crate::runners::deck::{
@@ -330,14 +331,6 @@ fn validate_frequency_grid(
         ))));
     }
     Ok(())
-}
-
-fn allocation_error(object: &'static str) -> Box<WasmError> {
-    Box::new(WasmError::new(
-        format!("could not allocate {object}"),
-        "result_allocation_failed",
-        "result_projection",
-    ))
 }
 
 #[cfg(test)]

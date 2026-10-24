@@ -43,7 +43,7 @@ use rspice_core::{AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceL
 
 use crate::DetailedWasmResult;
 use crate::abort::{aborted_error, ensure_not_aborted};
-use crate::errors::{WasmError, resource_limit_error};
+use crate::errors::{WasmError, allocation_error, resource_limit_error};
 use crate::hb_config::hb_config_for_card;
 use crate::options::WasmExecutionOptions;
 use crate::support::{engine_with_resource_limits, parse_netlist_with_control_detailed};
@@ -1261,14 +1261,6 @@ pub(crate) fn document_projection_error(error: ResultDocumentError) -> Box<WasmE
         ResultDocumentError::Aborted => aborted_error(),
         other => document_error(other.to_string()),
     }
-}
-
-fn allocation_error(object: &'static str) -> Box<WasmError> {
-    Box::new(WasmError::new(
-        format!("could not allocate {object}"),
-        "result_allocation_failed",
-        "result_projection",
-    ))
 }
 
 pub(crate) fn deck_plan_wasm_error(error: DeckPlanError) -> Box<WasmError> {
