@@ -68,8 +68,7 @@ pub use registry::resolve_generated_registry_model_names;
 
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::metrics::{
-    Measured, MetricsRecorder, NoPipelineControl, PerformanceBudget, PipelineControl,
-    PipelinePhase, usize_to_u64,
+    Measured, MetricsRecorder, NoPipelineControl, PipelineControl, PipelinePhase, usize_to_u64,
 };
 
 // Keep the existing tooling paths while reports can name these data-only
@@ -79,15 +78,12 @@ pub use crate::generated_source::{GeneratedRustDevice, GeneratedRustFile};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustTranspileOptions {
     pub runtime_path: String,
-    /// Optional wall-clock limits for offline lowering and emission.
-    pub performance_budget: PerformanceBudget,
 }
 
 impl Default for RustTranspileOptions {
     fn default() -> Self {
         Self {
             runtime_path: "crate::device::veriloga_builtins".to_string(),
-            performance_budget: PerformanceBudget::default(),
         }
     }
 }
@@ -124,8 +120,7 @@ impl RustTranspiler {
         artifact: &CanonicalIrArtifact,
         control: &dyn PipelineControl,
     ) -> Result<Measured<GeneratedRustDevice>, RustBackendError> {
-        let mut measurements =
-            MetricsRecorder::with_control(0, self.options.performance_budget.clone(), control);
+        let mut measurements = MetricsRecorder::with_control(0, control);
         let mut device =
             canonical::generate_device_measured(artifact, &self.options, &mut measurements)?;
         measurements
@@ -139,18 +134,10 @@ impl RustTranspiler {
             })?;
         let phase_started = web_time::Instant::now();
         state_file::finalize_checkpoint_identity(&mut device)?;
-        measurements
-            .record(
-                PipelinePhase::CheckpointFinalization,
-                phase_started.elapsed(),
-            )
-            .map_err(|error| {
-                RustBackendError::performance_budget(
-                    artifact.metadata.source_package.as_str(),
-                    artifact.mir.module_name.as_str(),
-                    error,
-                )
-            })?;
+        measurements.record(
+            PipelinePhase::CheckpointFinalization,
+            phase_started.elapsed(),
+        );
         let generated_bytes = device.files.iter().fold(0_usize, |total, file| {
             total.saturating_add(file.contents.len())
         });

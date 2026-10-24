@@ -93,7 +93,7 @@ pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
-    let mut measurements = MetricsRecorder::new(0, options.performance_budget.clone());
+    let mut measurements = MetricsRecorder::new(0);
     generate_device_measured(artifact, options, &mut measurements)
 }
 
@@ -124,12 +124,7 @@ pub(crate) fn generate_device_measured(
     checkpoint_phase(artifact, measurements, PipelinePhase::StampEmission)?;
     let phase_started = web_time::Instant::now();
     let stamp = plan.stamp_file(artifact, options, measurements.control())?;
-    record_phase(
-        artifact,
-        measurements,
-        PipelinePhase::StampEmission,
-        phase_started.elapsed(),
-    )?;
+    measurements.record(PipelinePhase::StampEmission, phase_started.elapsed());
     checkpoint_phase(artifact, measurements, PipelinePhase::StateEmission)?;
     let phase_started = web_time::Instant::now();
     let accepted_state_shape_identity = plan.accepted_state_shape_identity(artifact)?;
@@ -146,21 +141,11 @@ pub(crate) fn generate_device_measured(
         accepted_state_shape_identity,
         &state_extensions,
     )?;
-    record_phase(
-        artifact,
-        measurements,
-        PipelinePhase::StateEmission,
-        phase_started.elapsed(),
-    )?;
+    measurements.record(PipelinePhase::StateEmission, phase_started.elapsed());
     checkpoint_phase(artifact, measurements, PipelinePhase::NoiseEmission)?;
     let phase_started = web_time::Instant::now();
     let noise = plan.noise_file(artifact, options, measurements.control())?;
-    record_phase(
-        artifact,
-        measurements,
-        PipelinePhase::NoiseEmission,
-        phase_started.elapsed(),
-    )?;
+    measurements.record(PipelinePhase::NoiseEmission, phase_started.elapsed());
 
     let files = vec![
         GeneratedRustFile {
@@ -186,21 +171,6 @@ pub(crate) fn generate_device_measured(
         source_identity: artifact.metadata.source_identity.to_string(),
         accepted_state_shape_identity,
         files,
-    })
-}
-
-fn record_phase(
-    artifact: &CanonicalIrArtifact,
-    measurements: &mut MetricsRecorder,
-    phase: PipelinePhase,
-    elapsed: std::time::Duration,
-) -> Result<(), RustBackendError> {
-    measurements.record(phase, elapsed).map_err(|error| {
-        RustBackendError::performance_budget(
-            artifact.metadata.source_package.as_str(),
-            artifact.mir.module_name.as_str(),
-            error,
-        )
     })
 }
 
@@ -1047,12 +1017,7 @@ impl ModelPlan {
         let requires_nodeset_phase = cfg.function.values.iter().any(|value| {
             matches!(&value.kind, CfgValueKind::Analysis(name) if name.eq_ignore_ascii_case("nodeset"))
         });
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::CfgLowering,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::CfgLowering, phase_started.elapsed());
 
         checkpoint_phase(artifact, measurements, PipelinePhase::DerivativePreparation)?;
         let phase_started = web_time::Instant::now();
@@ -1182,12 +1147,10 @@ impl ModelPlan {
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
         measurements.metrics_mut().primal_cfg = cfg_structure_metrics(&cfg.function);
-        record_phase(
-            artifact,
-            measurements,
+        measurements.record(
             PipelinePhase::DerivativePreparation,
             phase_started.elapsed(),
-        )?;
+        );
 
         checkpoint_phase(artifact, measurements, PipelinePhase::Differentiation)?;
         let phase_started = web_time::Instant::now();
@@ -1209,12 +1172,7 @@ impl ModelPlan {
                 ));
             }
         };
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::Differentiation,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::Differentiation, phase_started.elapsed());
 
         checkpoint_phase(artifact, measurements, PipelinePhase::DerivativeExtraction)?;
         let phase_started = web_time::Instant::now();
@@ -1279,12 +1237,7 @@ impl ModelPlan {
         }
         measurements.metrics_mut().differentiated_cfg =
             cfg_structure_metrics(&differentiated.function);
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::DerivativeExtraction,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::DerivativeExtraction, phase_started.elapsed());
 
         checkpoint_phase(artifact, measurements, PipelinePhase::NoisePlanning)?;
         let phase_started = web_time::Instant::now();
@@ -1308,12 +1261,7 @@ impl ModelPlan {
             measurements.metrics_mut().noise_invalidation_value_count =
                 noise_schedule.census().map(crate::metrics::usize_to_u64);
         }
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::NoisePlanning,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::NoisePlanning, phase_started.elapsed());
 
         // A contribution with no `ddt` stores no charge. Its row is kept and
         // emptied rather than dropped, so both row lists stay parallel to
@@ -1343,12 +1291,7 @@ impl ModelPlan {
         if !charged || general_frequency {
             reactive.rows.clear();
         }
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::StampPlanning,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::StampPlanning, phase_started.elapsed());
 
         checkpoint_phase(artifact, measurements, PipelinePhase::CfgOptimization)?;
         let phase_started = web_time::Instant::now();
@@ -1454,12 +1397,7 @@ impl ModelPlan {
         metrics.derivative_lane_entry_count = crate::metrics::usize_to_u64(lane_entries);
         metrics.max_derivative_width = crate::metrics::usize_to_u64(max_width);
         metrics.optimized_cfg = cfg_structure_metrics(&function);
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::CfgOptimization,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::CfgOptimization, phase_started.elapsed());
 
         checkpoint_phase(artifact, measurements, PipelinePhase::Scheduling)?;
         let phase_started = web_time::Instant::now();
@@ -1583,12 +1521,7 @@ impl ModelPlan {
         }
 
         let (branch_equations, source_branch_groups) = plan_source_branches(artifact)?;
-        record_phase(
-            artifact,
-            measurements,
-            PipelinePhase::Scheduling,
-            phase_started.elapsed(),
-        )?;
+        measurements.record(PipelinePhase::Scheduling, phase_started.elapsed());
 
         let mut initialization = Vec::new();
         for phase in [
@@ -5921,8 +5854,7 @@ endmodule
         let artifact = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(source)
             .expect("conditional ddx fixture compiles");
-        let mut measurements =
-            MetricsRecorder::new(0, crate::metrics::PerformanceBudget::default());
+        let mut measurements = MetricsRecorder::new(0);
         let plan = ModelPlan::build(&artifact, &mut measurements)
             .expect("conditional ddx must survive generated-stamp planning");
         let residual = plan.conduction.rows[0].residual;

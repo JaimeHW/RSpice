@@ -1256,6 +1256,7 @@ pub enum CompileDiagnosticPhase {
     Semantic,
     CodeGeneration,
     BackendQualification,
+    /// No longer produced; kept so saved diagnostics that name it still load.
     PerformanceBudget,
     ModuleSelection,
 }
@@ -1364,14 +1365,6 @@ fn collect_compile_diagnostics(
             source,
             CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::BackendQualification,
-            code,
-            error.to_string(),
-            None,
-        )),
-        CompileError::PerformanceBudget(_) => diagnostics.push(diagnostic(
-            source,
-            CompileDiagnosticSeverity::Error,
-            CompileDiagnosticPhase::PerformanceBudget,
             code,
             error.to_string(),
             None,

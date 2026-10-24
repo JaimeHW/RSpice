@@ -4,7 +4,6 @@
 //! reported alongside compilation products but are never folded into source,
 //! compiler-contract, or runtime-contract digests.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
@@ -296,81 +295,6 @@ pub struct Measured<T> {
     pub metrics: PipelineMetrics,
 }
 
-/// Disabled-by-default wall-clock limits for a pipeline invocation.
-///
-/// Values are nanoseconds rather than [`Duration`] so the policy serializes
-/// identically on native and WebAssembly targets. A zero limit is valid and is
-/// useful for asserting that a phase is never entered.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PerformanceBudget {
-    pub max_total_nanos: Option<u64>,
-    pub max_phase_nanos: BTreeMap<PipelinePhase, u64>,
-}
-
-impl PerformanceBudget {
-    pub fn with_max_total(mut self, limit: Duration) -> Self {
-        self.max_total_nanos = Some(duration_nanos(limit));
-        self
-    }
-
-    pub fn with_phase_limit(mut self, phase: PipelinePhase, limit: Duration) -> Self {
-        self.max_phase_nanos.insert(phase, duration_nanos(limit));
-        self
-    }
-
-    pub fn validate(&self, metrics: &PipelineMetrics) -> Result<(), PerformanceBudgetExceeded> {
-        for (&phase, &limit_nanos) in &self.max_phase_nanos {
-            let elapsed_nanos = metrics.phase_elapsed_nanos(phase);
-            if elapsed_nanos > limit_nanos {
-                return Err(PerformanceBudgetExceeded {
-                    phase: Some(phase),
-                    elapsed_nanos,
-                    limit_nanos,
-                });
-            }
-        }
-        if let Some(limit_nanos) = self.max_total_nanos
-            && metrics.total_elapsed_nanos > limit_nanos
-        {
-            return Err(PerformanceBudgetExceeded {
-                phase: None,
-                elapsed_nanos: metrics.total_elapsed_nanos,
-                limit_nanos,
-            });
-        }
-        Ok(())
-    }
-}
-
-/// Evidence that an opt-in performance budget was exceeded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PerformanceBudgetExceeded {
-    pub phase: Option<PipelinePhase>,
-    pub elapsed_nanos: u64,
-    pub limit_nanos: u64,
-}
-
-impl fmt::Display for PerformanceBudgetExceeded {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.phase {
-            Some(phase) => write!(
-                f,
-                "pipeline phase {phase} took {:?}, exceeding its {:?} budget",
-                Duration::from_nanos(self.elapsed_nanos),
-                Duration::from_nanos(self.limit_nanos)
-            ),
-            None => write!(
-                f,
-                "pipeline took {:?}, exceeding its {:?} total budget",
-                Duration::from_nanos(self.elapsed_nanos),
-                Duration::from_nanos(self.limit_nanos)
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PerformanceBudgetExceeded {}
-
 /// A pipeline stopped at a cooperative cancellation checkpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PipelineCancelled {
@@ -388,29 +312,23 @@ impl std::error::Error for PipelineCancelled {}
 
 pub(crate) struct MetricsRecorder<'a> {
     metrics: PipelineMetrics,
-    budget: PerformanceBudget,
     control: &'a dyn PipelineControl,
 }
 
 #[cfg(any(test, feature = "rust-codegen"))]
 impl MetricsRecorder<'static> {
-    pub(crate) fn new(input_bytes: usize, budget: PerformanceBudget) -> Self {
-        Self::with_control(input_bytes, budget, &NO_PIPELINE_CONTROL)
+    pub(crate) fn new(input_bytes: usize) -> Self {
+        Self::with_control(input_bytes, &NO_PIPELINE_CONTROL)
     }
 }
 
 impl<'a> MetricsRecorder<'a> {
-    pub(crate) fn with_control(
-        input_bytes: usize,
-        budget: PerformanceBudget,
-        control: &'a dyn PipelineControl,
-    ) -> Self {
+    pub(crate) fn with_control(input_bytes: usize, control: &'a dyn PipelineControl) -> Self {
         Self {
             metrics: PipelineMetrics {
                 input_bytes: usize_to_u64(input_bytes),
                 ..PipelineMetrics::default()
             },
-            budget,
             control,
         }
     }
@@ -423,11 +341,7 @@ impl<'a> MetricsRecorder<'a> {
         }
     }
 
-    pub(crate) fn record(
-        &mut self,
-        phase: PipelinePhase,
-        elapsed: Duration,
-    ) -> Result<(), PerformanceBudgetExceeded> {
+    pub(crate) fn record(&mut self, phase: PipelinePhase, elapsed: Duration) {
         let elapsed_nanos = duration_nanos(elapsed);
         let timing = PhaseTiming {
             phase,
@@ -439,7 +353,6 @@ impl<'a> MetricsRecorder<'a> {
             .total_elapsed_nanos
             .saturating_add(elapsed_nanos);
         self.control.phase_completed(timing, &self.metrics);
-        self.budget.validate(&self.metrics)
     }
 
     pub(crate) fn metrics(&self) -> &PipelineMetrics {
@@ -474,16 +387,10 @@ mod tests {
 
     #[test]
     fn repeated_phases_are_accumulated_without_losing_order() {
-        let mut recorder = MetricsRecorder::new(17, PerformanceBudget::default());
-        recorder
-            .record(PipelinePhase::Lex, Duration::from_nanos(3))
-            .unwrap();
-        recorder
-            .record(PipelinePhase::Parse, Duration::from_nanos(5))
-            .unwrap();
-        recorder
-            .record(PipelinePhase::Lex, Duration::from_nanos(7))
-            .unwrap();
+        let mut recorder = MetricsRecorder::new(17);
+        recorder.record(PipelinePhase::Lex, Duration::from_nanos(3));
+        recorder.record(PipelinePhase::Parse, Duration::from_nanos(5));
+        recorder.record(PipelinePhase::Lex, Duration::from_nanos(7));
         let metrics = recorder.finish();
 
         assert_eq!(metrics.input_bytes, 17);
@@ -497,36 +404,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![PipelinePhase::Lex, PipelinePhase::Parse, PipelinePhase::Lex]
         );
-    }
-
-    #[test]
-    fn phase_budget_fails_as_soon_as_the_phase_exceeds_it() {
-        let budget = PerformanceBudget::default()
-            .with_phase_limit(PipelinePhase::Differentiation, Duration::from_nanos(9));
-        let mut recorder = MetricsRecorder::new(0, budget);
-        let error = recorder
-            .record(PipelinePhase::Differentiation, Duration::from_nanos(10))
-            .unwrap_err();
-
-        assert_eq!(error.phase, Some(PipelinePhase::Differentiation));
-        assert_eq!(error.elapsed_nanos, 10);
-        assert_eq!(error.limit_nanos, 9);
-    }
-
-    #[test]
-    fn total_budget_covers_the_sum_of_recorded_phases() {
-        let budget = PerformanceBudget::default().with_max_total(Duration::from_nanos(7));
-        let mut recorder = MetricsRecorder::new(0, budget);
-        recorder
-            .record(PipelinePhase::Lex, Duration::from_nanos(4))
-            .unwrap();
-        let error = recorder
-            .record(PipelinePhase::Parse, Duration::from_nanos(4))
-            .unwrap_err();
-
-        assert_eq!(error.phase, None);
-        assert_eq!(error.elapsed_nanos, 8);
-        assert_eq!(error.limit_nanos, 7);
     }
 
     #[test]

@@ -53,7 +53,7 @@ runtime ABI.
 | `connect` / `four_state` | Connect-module insertion at discipline boundaries, with its own clause-by-clause table of the LRM 2.4 clause 7 rules and what it refuses by name; and the four-state logic values of the discrete half |
 | `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, includes resolved inside the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract and runtime contract. The transport boundary for browser workers and retained run snapshots |
 | `runtime_report` | In-memory compilation reports: the simulator ABI an artifact exposes, user-facing diagnostics with source positions, and which backends have qualified for it. Performs no file-system access |
-| `specialist` / `metrics` | Structural specialization findings a model author sees; stable phase identifiers, timing and work-size reports, and opt-in performance budgets |
+| `specialist` / `metrics` | Structural specialization findings a model author sees; stable phase identifiers and timing and work-size reports |
 | `disciplines` / `stdlib` / `types` | Discipline database, the built-in headers (LRM 2.4 physical constants), the type system, function registry and parameter-range types |
 | `source` / `error` | Source maps and spans, and the `CompileError`/`CompileResult` types |
 | `analog_tasks` / `analog_occurrences` / `time_scale` | Ordered analog task calls and assignment notifications shared by every lowering; declared module timing and delay rounding |

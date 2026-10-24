@@ -1677,7 +1677,6 @@ fn dense_reactive_workspace_payload_bytes(
 fn builtin_transpiler() -> RustTranspiler {
     RustTranspiler::new(RustTranspileOptions {
         runtime_path: "rspice_veriloga_runtime".to_string(),
-        ..RustTranspileOptions::default()
     })
 }
 

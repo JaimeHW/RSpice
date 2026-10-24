@@ -176,11 +176,8 @@ impl PreparedVirtualSource {
             .map_err(CompileError::from)
             .map_err(VirtualRuntimeCompileFailure::unmapped)?;
         let compiler = VerilogACompiler::new(self.prepared.compiler_options.clone());
-        let mut measurements = crate::metrics::MetricsRecorder::with_control(
-            self.prepared.source.len(),
-            compiler.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements =
+            crate::metrics::MetricsRecorder::with_control(self.prepared.source.len(), control);
         *measurements.metrics_mut() = self.prepared.metrics.clone();
         let selected = self
             .prepared
@@ -284,11 +281,7 @@ impl VerilogACompiler {
         let limits = virtual_source::validate_bundle_request(bundle, limits)
             .map_err(CompileError::from)
             .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        let mut measurements = crate::metrics::MetricsRecorder::with_control(
-            input_bytes,
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = crate::metrics::MetricsRecorder::with_control(input_bytes, control);
         let provider = virtual_source::VirtualBundleProvider::new(bundle, limits);
         let mut preprocessor = self.configured_in_memory_preprocessor();
         measurements
@@ -304,10 +297,7 @@ impl VerilogACompiler {
                     preprocessor.dependency_documents(),
                 )
             })?;
-        measurements
-            .record(PipelinePhase::Preprocess, started.elapsed())
-            .map_err(CompileError::from)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        measurements.record(PipelinePhase::Preprocess, started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             crate::metrics::usize_to_u64(preprocessed.source.len());
         let dependency_closure = virtual_source::dependencies_from_preprocessor(

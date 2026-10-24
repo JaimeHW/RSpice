@@ -172,7 +172,7 @@ impl ConnectionConfiguration {
         };
         configured.source_specialization = analyzed.source_specialization.clone();
         configured.connection_configuration = Some(Box::new(self.clone()));
-        measurements.record(PipelinePhase::Semantic, started.elapsed())?;
+        measurements.record(PipelinePhase::Semantic, started.elapsed());
         Ok(configured)
     }
 }

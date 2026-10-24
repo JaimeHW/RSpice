@@ -51,10 +51,6 @@ pub enum CompileError {
     #[error(transparent)]
     BackendQualification(#[from] crate::runtime_report::BackendQualificationError),
 
-    /// An explicitly configured compiler performance budget was exceeded.
-    #[error(transparent)]
-    PerformanceBudget(#[from] crate::metrics::PerformanceBudgetExceeded),
-
     /// Compilation was stopped at a cooperative cancellation checkpoint.
     #[error(transparent)]
     Cancelled(#[from] crate::metrics::PipelineCancelled),
@@ -687,8 +683,6 @@ pub(crate) const COMPILE_MODULE_SELECTION_CODE: &str = "VA-MODULE-SELECTION";
 pub(crate) const SELECT_ONE_BY_NAME: &str = "select one by name";
 /// Diagnostic code for a required backend that did not qualify.
 const COMPILE_BACKEND_QUALIFICATION_CODE: &str = "VA-BACKEND-QUALIFICATION";
-/// Diagnostic code for an exceeded compiler performance budget.
-const COMPILE_PERFORMANCE_BUDGET_CODE: &str = "VA-BUDGET-EXCEEDED";
 /// Diagnostic code for a collected failure that carries no errors of its own.
 const COMPILE_MULTIPLE_CODE: &str = "VA-COMPILE-FAILED";
 
@@ -715,7 +709,6 @@ impl CompileError {
             Self::ModuleSelection(_) => COMPILE_MODULE_SELECTION_CODE,
             Self::VirtualSource(_) => COMPILE_VIRTUAL_SOURCE_CODE,
             Self::BackendQualification(_) => COMPILE_BACKEND_QUALIFICATION_CODE,
-            Self::PerformanceBudget(_) => COMPILE_PERFORMANCE_BUDGET_CODE,
             Self::Cancelled(_) => COMPILE_CANCELLED_CODE,
             Self::Multiple(errors) => errors
                 .first()

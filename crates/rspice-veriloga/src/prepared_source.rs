@@ -400,7 +400,7 @@ impl PreparedRuntimeSource {
             .discarding_output_tasks(self.analyzed.discard_output_tasks)
             .analyze_selected(&self.analyzed.source, Some(name))?;
         analyzed.source_specialization = self.analyzed.source_specialization.clone();
-        measurements.record(crate::PipelinePhase::Semantic, started.elapsed())?;
+        measurements.record(crate::PipelinePhase::Semantic, started.elapsed());
         measurements.metrics_mut().module_count =
             crate::metrics::usize_to_u64(analyzed.modules.len());
         Ok(std::borrow::Cow::Owned(analyzed))
@@ -600,11 +600,7 @@ impl VerilogACompiler {
                     "runtime has no retained hierarchy source; recompile it".into(),
                 )
             })?;
-        let mut measurements = crate::metrics::MetricsRecorder::with_control(
-            source.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = crate::metrics::MetricsRecorder::with_control(source.len(), control);
         let parameters: Vec<_> = artifact
             .source_specialization
             .iter()

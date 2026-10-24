@@ -167,8 +167,8 @@ pub use error::{CompileError, CompileResult};
 pub use external_cells::ExternalCell;
 pub use lexer::{Lexer, Token, TokenKind};
 pub use metrics::{
-    CfgStructureMetrics, Measured, NoPipelineControl, PerformanceBudget, PerformanceBudgetExceeded,
-    PhaseTiming, PipelineCancelled, PipelineControl, PipelineMetrics, PipelinePhase,
+    CfgStructureMetrics, Measured, NoPipelineControl, PhaseTiming, PipelineCancelled,
+    PipelineControl, PipelineMetrics, PipelinePhase,
 };
 pub use parameter_override::ScalarParameterValue;
 pub use parser::Parser;
@@ -319,9 +319,7 @@ pub struct VerilogACompiler {
 /// The preprocessor fields ([`include_paths`](Self::include_paths),
 /// [`defines`](Self::defines), [`undefines`](Self::undefines)) change generated
 /// artifacts. [`enable_ams`](Self::enable_ams) enables mixed runtime reports
-/// for hosts that execute both domains. [`performance_budget`](Self::performance_budget) is an
-/// operational policy and is deliberately excluded from artifact and compiler
-/// contract identities.
+/// for hosts that execute both domains.
 #[derive(Debug, Clone, Default)]
 pub struct CompilerOptions {
     /// Allow runtime compilation to emit the analog bytecode half of a mixed
@@ -343,9 +341,6 @@ pub struct CompilerOptions {
     /// applied, letting a caller replace a built-in definition rather than
     /// redefine it.
     pub undefines: Vec<String>,
-    /// Optional wall-clock limits. Empty by default, so ordinary compilation
-    /// is never rejected due to host load or timer resolution.
-    pub performance_budget: PerformanceBudget,
     /// Compile `$strobe`, `$display` and the other output tasks as warned
     /// no-ops instead of journaling them for the host to print. The built-in
     /// generator sets it: printing from the shipped compact models changes
@@ -585,18 +580,14 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         control: &dyn PipelineControl,
     ) -> CompileResult<Measured<CompiledModel>> {
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            source.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(source.len(), control);
         let mut pp = self.configured_preprocessor();
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_source_mapped(source)
             .map_err(CompileError::preprocess)?;
-        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         let (output, _, _) =
@@ -654,18 +645,14 @@ impl VerilogACompiler {
         qualifications: RuntimeQualificationOptions,
         control: &dyn PipelineControl,
     ) -> CompileResult<RuntimeCompileReport> {
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            source.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(source.len(), control);
         let mut pp = self.configured_in_memory_preprocessor();
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_source_mapped(source)
             .map_err(CompileError::preprocess)?;
-        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         // The processes, system calls and analog tasks of the text, and of
@@ -821,11 +808,7 @@ impl VerilogACompiler {
             .iter()
             .map(|&(name, value)| (name, ScalarParameterValue::Real(value)))
             .collect();
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            preprocessed.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(preprocessed.len(), control);
         let mut analyzed = self.analyze_preprocessed_with_parameters(
             source_package,
             preprocessed,
@@ -894,11 +877,7 @@ impl VerilogACompiler {
                         .into(),
                 )
             })?;
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            source.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(source.len(), control);
         let mut effective = artifact.source_specialization.clone();
         let mut assigned = std::collections::HashSet::new();
         for (name, value) in parameters {
@@ -1048,7 +1027,7 @@ impl VerilogACompiler {
         } else {
             generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
         };
-        measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             source_package,
             preprocessed,
@@ -1099,7 +1078,7 @@ impl VerilogACompiler {
                 )
             })
             .collect();
-        measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed());
         report.enforce_fallback_policy(qualifications)?;
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;
         let phase_started = web_time::Instant::now();
@@ -1108,7 +1087,7 @@ impl VerilogACompiler {
                 format!("runtime artifact integrity validation failed: {error}"),
             )))
         })?;
-        measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed());
         report.metrics = measurements.metrics().clone();
         Ok(report)
     }
@@ -1251,18 +1230,14 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         control: &dyn PipelineControl,
     ) -> CompileResult<Measured<canonical_ir::CanonicalIrArtifact>> {
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            source.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(source.len(), control);
         let mut pp = self.configured_preprocessor();
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_source(source)
             .map_err(CompileError::preprocess)?;
-        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed());
         measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
         let output = self.compile_canonical_ir_preprocessed_with_metadata_measured(
             "<input>",
@@ -1311,7 +1286,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let model = CodeGenerator::new()
             .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
-        measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
 
         Ok((
             model,
@@ -1387,7 +1362,7 @@ impl VerilogACompiler {
         // the text for diagnostics; a source-map copy is unnecessary here.
         let source_id = SourceId::new(0);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
-        measurements.record(PipelinePhase::Lex, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Lex, phase_started.elapsed());
         measurements.metrics_mut().token_count = metrics::usize_to_u64(tokens.len());
         trace_compiler_phase(
             trace,
@@ -1486,7 +1461,7 @@ impl VerilogACompiler {
         semantic::defparam::apply_to_roots(&mut source_file, &root_defparams)?;
         apply_wreal_resolution(&mut source_file, self.options.wreal_resolution);
         external_cells::extract(&mut source_file, self.options.external_cells.as_deref())?;
-        measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Parse, phase_started.elapsed());
         measurements.metrics_mut().top_level_item_count =
             metrics::usize_to_u64(source_file.items.len());
         trace_compiler_phase(
@@ -1513,7 +1488,7 @@ impl VerilogACompiler {
             front_end_warnings.append(&mut analyzed.warnings);
             analyzed.warnings = front_end_warnings;
         }
-        measurements.record(PipelinePhase::Semantic, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Semantic, phase_started.elapsed());
         measurements.metrics_mut().module_count = metrics::usize_to_u64(analyzed.modules.len());
         trace_compiler_phase(
             trace,
@@ -1652,13 +1627,13 @@ impl VerilogACompiler {
             .collect();
         hir.digital_observations.sort();
         hir.digital_observations.dedup();
-        measurements.record(PipelinePhase::HirLowering, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::HirLowering, phase_started.elapsed());
         trace_canonical_ir_phase(trace, &module.name, "hir", Some(phase_started.elapsed()));
         measurements.checkpoint(PipelinePhase::MirLowering)?;
         trace_canonical_ir_phase(trace, &module.name, "mir", None);
         let phase_started = web_time::Instant::now();
         let mut mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
-        measurements.record(PipelinePhase::MirLowering, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::MirLowering, phase_started.elapsed());
         trace_canonical_ir_phase(trace, &module.name, "mir", Some(phase_started.elapsed()));
         measurements.checkpoint(PipelinePhase::CanonicalNoisePlanning)?;
         let phase_started = web_time::Instant::now();
@@ -1668,7 +1643,7 @@ impl VerilogACompiler {
         measurements.record(
             PipelinePhase::CanonicalNoisePlanning,
             phase_started.elapsed(),
-        )?;
+        );
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;
         let phase_started = web_time::Instant::now();
         let mut artifact = canonical_ir::CanonicalIrArtifact::from_parts_with_noise_plan(
@@ -1711,7 +1686,7 @@ impl VerilogACompiler {
         {
             artifact.parameter_source = Some(source.into());
         }
-        measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed());
         Ok(artifact)
     }
 
@@ -1999,11 +1974,7 @@ impl VerilogACompiler {
             .ok()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
             .unwrap_or(0);
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            input_bytes,
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(input_bytes, control);
         let mut pp = self.configured_preprocessor();
 
         // Preprocess the file (handles `include, `define, `ifdef, etc.)
@@ -2013,7 +1984,7 @@ impl VerilogACompiler {
             .preprocess_provider_root_mapped(&preprocessor::FileSystemSourceProvider, path)
             .map_err(CompileError::preprocess)?;
         let dependencies = pp.take_dependencies();
-        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
@@ -2069,11 +2040,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         control: &dyn PipelineControl,
     ) -> Result<CompiledFile, ProviderCompileError> {
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            0,
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(0, control);
         measurements
             .checkpoint(PipelinePhase::Preprocess)
             .map_err(CompileError::from)?;
@@ -2081,9 +2048,7 @@ impl VerilogACompiler {
         let started = web_time::Instant::now();
         let preprocessed = pp.preprocess_provider_root_mapped(provider, root)?;
         let dependencies = pp.dependencies();
-        measurements
-            .record(PipelinePhase::Preprocess, started.elapsed())
-            .map_err(CompileError::from)?;
+        measurements.record(PipelinePhase::Preprocess, started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
@@ -2139,11 +2104,7 @@ impl VerilogACompiler {
             .ok()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
             .unwrap_or(0);
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            input_bytes,
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(input_bytes, control);
         let mut pp = self.configured_preprocessor();
 
         measurements.checkpoint(PipelinePhase::Preprocess)?;
@@ -2151,7 +2112,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let preprocessed = pp.preprocess_file(path).map_err(CompileError::preprocess)?;
         let dependencies = pp.take_dependencies();
-        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed());
         measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
         trace_compiler_phase(
@@ -2352,11 +2313,7 @@ impl VerilogACompiler {
                     .unwrap_or(0)
             })
             .fold(0_usize, usize::saturating_add);
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            input_bytes,
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements = metrics::MetricsRecorder::with_control(input_bytes, control);
         let mut pp = self.configured_preprocessor();
 
         measurements
@@ -2387,9 +2344,7 @@ impl VerilogACompiler {
                 content_identity: *blake3::hash(document.source.as_bytes()).as_bytes(),
             })
             .collect();
-        measurements
-            .record(PipelinePhase::Preprocess, phase_started.elapsed())
-            .map_err(CompileError::from)?;
+        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed());
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
@@ -2480,11 +2435,8 @@ impl VerilogACompiler {
         configuration: Option<&ConnectionConfiguration>,
         control: &dyn PipelineControl,
     ) -> CompileResult<CompiledRuntimeFile> {
-        let mut measurements = metrics::MetricsRecorder::with_control(
-            prepared.source.len(),
-            self.options.performance_budget.clone(),
-            control,
-        );
+        let mut measurements =
+            metrics::MetricsRecorder::with_control(prepared.source.len(), control);
         *measurements.metrics_mut() = prepared.metrics.clone();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         // External libraries may add helper modules. Resolve an implicit root
@@ -2518,7 +2470,7 @@ impl VerilogACompiler {
         } else {
             generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
         };
-        measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
+        measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             &prepared.source_package,
             &prepared.source,

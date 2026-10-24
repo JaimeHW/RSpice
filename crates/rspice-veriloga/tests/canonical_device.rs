@@ -6583,7 +6583,6 @@ fn stamp_of(source: &str, name: &str) -> String {
 fn options() -> RustTranspileOptions {
     RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
-        ..RustTranspileOptions::default()
     }
 }
 
