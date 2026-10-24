@@ -5,7 +5,8 @@
 //! Every format specification, width rule and `x`/`z` digit rule follows the
 //! standard; where it leaves a choice open the choice is Icarus Verilog's, so
 //! that a gold file written by Icarus reads the same here. Each expected string
-//! in the tests below is an Icarus 13.0 run of an RSpice-authored probe.
+//! in the tests below is the cited clause worked by hand or an Icarus 13.0 run
+//! of an RSpice-authored probe.
 
 use num_bigint::{BigInt, BigUint, Sign};
 use rspice_veriloga::canonical_ir::digital::DigitalRadix;
@@ -122,6 +123,8 @@ struct Spec {
     width: Option<usize>,
     precision: Option<usize>,
     alternate: bool,
+    /// Written in upper case: `%E`, `%F` and `%G` print as C's do.
+    upper: bool,
 }
 
 impl Spec {
@@ -133,6 +136,7 @@ impl Spec {
             width: None,
             precision: None,
             alternate: false,
+            upper: false,
         }
     }
 }
@@ -191,6 +195,7 @@ fn interpret(
             break;
         };
         spec.conversion = conversion.to_ascii_lowercase();
+        spec.upper = conversion.is_ascii_uppercase();
         match spec.conversion {
             '%' => out.push('%'),
             'm' => pad(out, context.scope, &spec, context.scope.len()),
@@ -214,9 +219,15 @@ fn interpret(
                         next += 1;
                         render(&spec, *argument, out, context);
                     }
-                    // No argument left: the specification has nothing to
-                    // print, so it is printed as written.
-                    None => out.push_str(&text[start..end + conversion.len_utf8()]),
+                    // No argument left. Section 17.1.1.2 requires one and
+                    // says nothing of what prints without it; as Icarus
+                    // Verilog does, the specification prints as written, in
+                    // angle brackets that mark it as unconsumed.
+                    None => {
+                        out.push('<');
+                        out.push_str(&text[start..end + conversion.len_utf8()]);
+                        out.push('>');
+                    }
                 }
             }
             _ => out.push_str(&text[start..end + conversion.len_utf8()]),
@@ -268,6 +279,37 @@ fn packed_string(text: &str) -> FourStateValue {
     value
 }
 
+/// `%s` text of a string's characters, most significant first. Section
+/// 17.1.1.7 makes each 8 bits one character and never prints leading zeros: a
+/// NUL has no character, so it keeps its column as a space, and the minimum
+/// width (`%0s`) drops the leading ones.
+fn string_text(characters: impl Iterator<Item = char>, minimum: bool) -> String {
+    let mut text = String::new();
+    for character in characters {
+        if character != '\0' {
+            text.push(character);
+        } else if !(minimum && text.is_empty()) {
+            text.push(' ');
+        }
+    }
+    text
+}
+
+/// An integral value's conversion to a real, with its `x` and `z` bits read
+/// as zero (section 4.8.2).
+fn real_of_bits(bits: &FourStateValue, signed: bool) -> Option<f64> {
+    if !bits.has_unknown() {
+        return bits.to_real(signed).ok();
+    }
+    let mut known = FourStateValue::zero(bits.width());
+    for index in 0..bits.width() {
+        if bits.bit(index) == FourStateBit::One {
+            known.set_bit(index, FourStateBit::One);
+        }
+    }
+    known.to_real(signed).ok()
+}
+
 /// Real-to-integer conversion for an integral specification: round half away
 /// from zero, as an assignment does.
 fn real_as_integer(value: f64) -> Option<BigInt> {
@@ -301,13 +343,10 @@ fn render(
         }
         FormatArgument::Literal(text) => {
             if spec.conversion == 's' {
-                // A literal printed as text keeps every character.
-                let natural = if spec.width.is_none() {
-                    0
-                } else {
-                    text.chars().count()
-                };
-                pad(out, text, spec, natural);
+                // A literal printed as text keeps every character, and its
+                // NULs print as a value's NUL bytes do.
+                let text = string_text(text.chars(), spec.width == Some(0));
+                pad(out, &text, spec, 0);
                 return;
             }
             let value = DigitalScalar::FourState(packed_string(text));
@@ -337,14 +376,21 @@ fn render_value(
         'e' | 'f' | 'g' => {
             let real = match value {
                 DigitalScalar::Real(real) => Some(*real),
-                DigitalScalar::FourState(bits) => bits.to_real(signed).ok(),
+                // An integral value converts to a real, and its `x` and `z`
+                // bits convert as zero (section 4.8.2).
+                DigitalScalar::FourState(bits) => real_of_bits(bits, signed),
                 DigitalScalar::Integer(integer) => Some(f64::from(*integer)),
                 DigitalScalar::Effect => None,
             };
-            let text = match real {
+            let mut text = match real {
                 Some(real) => format_real(real, spec),
                 None => "x".to_string(),
             };
+            if spec.upper {
+                // C's upper-case forms, which section 17.1.1.2 names:
+                // `1.5E+00`, `INF`, `NAN`.
+                text.make_ascii_uppercase();
+            }
             pad(out, &text, spec, 0);
         }
         't' => {
@@ -532,8 +578,7 @@ fn render_bits(spec: &Spec, bits: &FourStateValue, signed: bool, out: &mut Strin
         }
         's' => {
             let bytes = width.div_ceil(8);
-            let mut text = String::new();
-            for byte in (0..bytes).rev() {
+            let characters = (0..bytes).rev().map(|byte| {
                 let value = (0..8).fold(0u8, |value, bit| {
                     let index = byte * 8 + bit;
                     if index < width && bits.bit(index) == FourStateBit::One {
@@ -542,17 +587,10 @@ fn render_bits(spec: &Spec, bits: &FourStateValue, signed: bool, out: &mut Strin
                         value
                     }
                 });
-                // A NUL is no character; the field keeps its width.
-                if value != 0 {
-                    text.push(char::from(value));
-                }
-            }
-            let natural = if spec.width == Some(0) {
-                0
-            } else {
-                bytes as usize
-            };
-            pad(out, &text, spec, natural);
+                char::from(value)
+            });
+            let text = string_text(characters, spec.width == Some(0));
+            pad(out, &text, spec, 0);
         }
         'u' | 'z' => {
             // Raw words, least significant first, each in little-endian byte
@@ -949,6 +987,87 @@ mod tests {
         );
         assert_eq!(run(&[Literal("m:[%m]")]), "m:[f1]");
         assert_eq!(run(&[Literal("l:[%l]")]), "l:[work.f1]");
+    }
+
+    /// IEEE 1364-2005 section 17.1.1.7: `%s` prints each 8 bits as one
+    /// character and never prints leading zeros. A NUL byte, leading or not,
+    /// keeps its column as a space, the minimum width drops the leading ones,
+    /// and a string literal prints as the value it is (section 3.6).
+    #[test]
+    fn a_nul_byte_keeps_its_column_in_a_string() {
+        let packed = unsigned(32, 0x0061_0062);
+        assert_eq!(
+            run(&[
+                Literal("[%s][%0s][%6s][%-6s]"),
+                Value(&packed, false),
+                Value(&packed, false),
+                Value(&packed, false),
+                Value(&packed, false)
+            ]),
+            "[ a b][a b][   a b][ a b  ]"
+        );
+        assert_eq!(
+            run(&[Literal("[%s][%0s]"), Literal("\0a\0b"), Literal("\0a\0b")]),
+            "[ a b][a b]"
+        );
+        let blank = unsigned(16, 0);
+        assert_eq!(
+            run(&[
+                Literal("[%s][%0s]"),
+                Value(&blank, false),
+                Value(&blank, false)
+            ]),
+            "[  ][]"
+        );
+    }
+
+    /// IEEE 1364-2005 section 17.1.1.2 gives `%e`, `%f` and `%g` C's
+    /// formatting, so the upper-case forms print C's upper case.
+    #[test]
+    fn upper_case_real_specifications_print_upper_case() {
+        let r = DigitalScalar::Real(1_234_567_890.0);
+        let infinite = DigitalScalar::Real(f64::INFINITY);
+        assert_eq!(
+            run(&[
+                Literal("[%e][%E][%g][%G][%F][%f]"),
+                Value(&r, true),
+                Value(&r, true),
+                Value(&r, true),
+                Value(&r, true),
+                Value(&infinite, true),
+                Value(&infinite, true)
+            ]),
+            "[1.234568e+09][1.234568E+09][1.23457e+09][1.23457E+09][INF][inf]"
+        );
+    }
+
+    /// IEEE 1364-2005 section 4.8.2: an integral value converts to a real
+    /// with its `x` and `z` bits as zero, so a real specification of one
+    /// prints that real.
+    #[test]
+    fn a_real_specification_reads_unknown_bits_as_zero() {
+        let unknown = bits("xxxxxxxx");
+        let partly = bits("1x0z1");
+        assert_eq!(
+            run(&[
+                Literal("[%f][%g][%0.1f]"),
+                Value(&unknown, true),
+                Value(&partly, false),
+                Value(&partly, false)
+            ]),
+            "[0.000000][17][17.0]"
+        );
+    }
+
+    /// IEEE 1364-2005 section 17.1.1.2 requires an argument for every
+    /// specification; one without prints as written, marked `<%d>`.
+    #[test]
+    fn a_specification_without_an_argument_prints_marked() {
+        let a = unsigned(11, 16);
+        assert_eq!(
+            run(&[Literal("%d, %d|%0h"), Value(&a, false)]),
+            "  16, <%d>|<%0h>"
+        );
     }
 
     /// IEEE 1364-2005 section 13.6: `%l` prints `library.cell`. A module a
