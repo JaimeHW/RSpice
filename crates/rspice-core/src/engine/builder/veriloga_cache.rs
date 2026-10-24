@@ -525,7 +525,14 @@ use super::*;
 // declaration in an unnamed `begin` block (section 9.8.1). No artifact
 // changes shape, so the schema stays, but a cached artifact for such a
 // program would still be served, and the fail-closed reading is to rebuild.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 176;
+//
+// Version 177 lowers a one-bit reduction of `z` to `x`, a real `$itor`
+// argument through its rounded 32-bit integer, and a process written in a
+// generate block under that block's scope, which `%m` names. The serialized
+// form is unchanged, but an earlier record carries digital plans that
+// passed the `z` through, kept the real's fraction, and printed the module's
+// name.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 177;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
