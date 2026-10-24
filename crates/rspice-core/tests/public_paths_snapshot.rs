@@ -2262,8 +2262,6 @@ use rspice_core::solver::CscIndex as _;
 use rspice_core::solver::CscPatternToken as _;
 use rspice_core::solver::DivisionPolicy as _;
 use rspice_core::solver::FactorizationRequest as _;
-use rspice_core::solver::NewtonConfig as _;
-use rspice_core::solver::NewtonSolver as _;
 use rspice_core::solver::NumericFactorizationPolicy as _;
 use rspice_core::solver::PseudoTransient as _;
 use rspice_core::solver::RealSolverBackend as _;

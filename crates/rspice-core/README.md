@@ -41,7 +41,7 @@ netlist text
 | `netlist/` | Lexer and parser (element, command, conditional, scoping, source-spec, transmission-line and Laplace-synthesis submodules), the `Netlist` AST, subcircuit flattener, hierarchical paths, `.include`/`.lib` resolution, parameter scoping and the complex-valued `.PARAM` evaluator, `.ALTER`/`.DATA` multi-run expansion, SPEF parasitics, XSPICE cards, and the fail-closed Spectre model-library adapter |
 | `circuit/` | `CircuitData` struct-of-arrays storage (one typed array per device kind under `storage/`), construction, linear stamping, nonlinear device hooks, magnetic coupling, mixed-signal and XSPICE event scheduling, attachment of XSPICE, Verilog-A and generated devices, transient device noise, and read-only introspection including the `.OP` device report |
 | `device/` | Device models: passives (`passive/`, including coupled inductors and Jiles-Atherton cores), diode and BJT (`semiconductor/`), the MOS and FET family (`mosfet/`: Berkeley MOS, BSIM1 to BSIM4, BSIM-SOI, EKV, VDMOS, JFET, MESFET/HFET), independent, controlled and behavioral sources, transmission lines, memristors, switches, thermal elements, and the adapters for runtime (`veriloga`) and generated (`veriloga_builtins`) Verilog-A devices |
-| `solver/` | The Newton-Raphson loop, damping strategies, source-stepping and pseudo-transient controllers, arc-length continuation, and `SimulationResult`. Sparse LU is [`rspice-matrix`](../rspice-matrix), re-exported here |
+| `solver/` | Newton step limiting, damping strategies, source-stepping and pseudo-transient controllers, arc-length continuation, and `SimulationResult`. Sparse LU is [`rspice-matrix`](../rspice-matrix), re-exported here |
 | `engine/` | The orchestrator: `Engine`, one driver per analysis family, the builder that elaborates a `Netlist` and routes model cards, MNA reservation and stamping, independent-source evaluation, convergence aids, configuration resolution, the analysis-capability table, Verilog-A source loading and caching, and `ControlCircuit`, the host for ngspice control scripts |
 | `analysis/` | Analysis algorithms and result types, `.MEAS` evaluation (`measure`, `measure_signals`, `measurements`), Fourier and post-processing, temperature handling, process corners, and signal-integrity helpers |
 | `execution/` | Target-neutral deck planning (`DeckPlan`, run axes and coordinates), the typed result document every frontend publishes, signal schemas and projections, event and bus export, the resumable control-flow machine, and bounded, cancellable output sinks |
@@ -180,7 +180,7 @@ shooting `.PSS` and takes none.
   `.OPTIONS SOLVER=AUTO|KLU|FAER` or `RSPICE_SOLVER` selects the real backend.
   Left unstated, measured fill decides, and the Xyce dialect reproduces Xyce's
   own KLU factorization policy.
-- **Newton-Raphson** (`solver/newton.rs`), with tolerance, iteration-budget and
+- **Newton-Raphson**, with tolerance, iteration-budget and
   residual checks in `engine/convergence/`.
 - **Convergence aids**, tried in order of cost when plain Newton fails: GMIN
   stepping, source stepping, pseudo-transient and arc-length continuation,
