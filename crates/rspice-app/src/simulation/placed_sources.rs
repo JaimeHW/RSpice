@@ -1985,11 +1985,11 @@ mod tests {
     /// What the whole design places, as opposed to what one sheet does.
     mod whole_design {
         use super::*;
-        use crate::simulation::cost_probe::{Derivation, count, reset};
         use crate::state::{
             Cell, Library, LibraryCellInstance, LibraryManager, Point, ProjectWorkspace, View,
             ViewType,
         };
+        use rspice_simulation_contract::cost_probe::{Derivation, count, reset};
 
         /// One placed hierarchical instance, under the name the design gives
         /// it — which is the segment the occurrence path is spelled with.

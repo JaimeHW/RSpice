@@ -1482,7 +1482,7 @@ mod tests {
     #[test]
     fn replacing_yield_evidence_keeps_dataset_authority_in_sync() {
         let run = SimulationRun::new(1);
-        let monte_carlo = crate::simulation::SimulationResult::MonteCarlo {
+        let monte_carlo = rspice_simulation::results::SimulationResult::MonteCarlo {
             member_measurements: Vec::new(),
             seed: 19,
             runs_requested: 3,

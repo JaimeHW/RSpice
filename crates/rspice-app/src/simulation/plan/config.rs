@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn an_fft_specification_restores_from_the_wire_with_engine_defaults() {
-        use crate::simulation::multi_run::AnalysisSpec;
+        use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
         // The wire twin: an `AnalysisSpec::Fft` sealed before an optional
         // qualifier was authorable restores with that qualifier unauthored,
