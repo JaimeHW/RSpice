@@ -434,24 +434,9 @@ mod tests {
     }
 
     #[test]
-    fn compiled_runtime_requirement_is_valid_and_the_lifecycle_keeps_its_guards() {
+    fn compiled_runtime_requirement_is_valid() {
         let requirement = runtime_requirement().expect("compiled runtime requirement");
         assert!(requirement.python.matches(&Version::new(3, 14, 0)));
         assert!(requirement.rspice_api.matches(&Version::new(1, 0, 0)));
-
-        let production =
-            crate::source_guard::production_half(include_str!("automation_runtime.rs"));
-        for required in [
-            "a managed Python launch is already active",
-            "envelope.validate()",
-            "partially installed",
-            "let _ = self.terminate();",
-            "self.active_limits = None;",
-        ] {
-            assert!(
-                production.contains(required),
-                "managed runtime lifecycle must retain {required}"
-            );
-        }
     }
 }

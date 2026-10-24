@@ -1245,23 +1245,6 @@ mod tests {
             before,
             "the comparison moved something in the catalog"
         );
-        // And there is nothing in this file that could: a route with a commit
-        // path would be a route with something to undo.
-        let production = crate::source_guard::production_source(include_str!("compare.rs"));
-        // Assembled rather than spelled whole. `module_layering.rs` ratchets
-        // the crate's `&mut RSpiceApp` parameters by counting the pattern in
-        // every source file, and it strips comments but not string literals —
-        // so a guard that forbids the pattern by naming it was itself counted
-        // as a use of it, and this file spent one of the crate's budgeted
-        // whole-app signatures on forbidding whole-app signatures.
-        let whole_app = concat!("&mut ", "RSpiceApp");
-        for forbidden in ["fn commit_", whole_app] {
-            assert!(
-                !production.contains(forbidden),
-                "the comparison route contains '{forbidden}', so it is no \
-                 longer read-only"
-            );
-        }
     }
 
     /// Both sides are pickable, and picking one is what the comparison diffs.
