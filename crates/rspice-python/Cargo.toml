@@ -42,7 +42,7 @@ rspice-core = { path = "../rspice-core", version = "0.1.0" }
 rspice-output.workspace = true
 
 [build-dependencies]
-pyo3-build-config = { version = "0.29", features = ["resolve-config"] }
+pyo3-build-config = { version = "0.30", features = ["resolve-config"] }
 
 [lints]
 workspace = true
