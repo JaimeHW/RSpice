@@ -2101,40 +2101,9 @@ impl NativeProgram {
         let model = model.into();
         limits.validate_mir(&model, mir)?;
 
-        let equation = mir
-            .equations
-            .get(usize::from(equation_id))
-            .filter(|equation| equation.id == equation_id)
-            .ok_or_else(|| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: format!("MIR equation {equation_id} is outside equation arena").into(),
-            })?;
-
-        let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
-        lowerer.lower(equation.expression.id)?;
-
-        if lowerer.depth != 1 {
-            return Err(stack_error(
-                model.clone(),
-                entry_kind,
-                format!("final stack depth {}, expected 1", lowerer.depth),
-            ));
-        }
-        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
-        let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
-        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
-
-        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
-        Ok(Self {
-            ops: lowerer.ops,
-            max_stack_depth: optimized_max_stack_depth,
-            current_pair_dependencies: lowerer.current_pair_dependencies,
-            prior_current_dependencies: lowerer.prior_current_dependencies,
-            analog_occurrence_source: None,
-            branch_unknown_dependencies,
-        })
+        let mut lowerer = MirEquationLowerer::new(model, entry_kind, mir, equation_id, limits);
+        lowerer.lower(lowerer.equation_expression()?)?;
+        lowerer.finish()
     }
 
     pub(crate) fn from_mir_expression(
@@ -2165,31 +2134,9 @@ impl NativeProgram {
         let model = model.into();
         limits.validate_mir(&model, mir)?;
 
-        let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        let mut lowerer = MirEquationLowerer::new(model, entry_kind, mir, equation_id, limits);
         lowerer.lower(expr_id)?;
-
-        if lowerer.depth != 1 {
-            return Err(stack_error(
-                model.clone(),
-                entry_kind,
-                format!("final stack depth {}, expected 1", lowerer.depth),
-            ));
-        }
-        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
-        let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
-        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
-
-        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
-        Ok(Self {
-            ops: lowerer.ops,
-            max_stack_depth: optimized_max_stack_depth,
-            current_pair_dependencies: lowerer.current_pair_dependencies,
-            prior_current_dependencies: lowerer.prior_current_dependencies,
-            analog_occurrence_source: None,
-            branch_unknown_dependencies,
-        })
+        lowerer.finish()
     }
 
     #[cfg(test)]
@@ -2205,31 +2152,9 @@ impl NativeProgram {
         let model = model.into();
         limits.validate_mir(&model, mir)?;
 
-        let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        let mut lowerer = MirEquationLowerer::new(model, entry_kind, mir, equation_id, limits);
         lowerer.lower_derivative(expr_id, axis)?;
-
-        if lowerer.depth != 1 {
-            return Err(stack_error(
-                model.clone(),
-                entry_kind,
-                format!("final stack depth {}, expected 1", lowerer.depth),
-            ));
-        }
-        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
-        let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
-        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
-        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
-
-        Ok(Self {
-            ops: lowerer.ops,
-            max_stack_depth: optimized_max_stack_depth,
-            current_pair_dependencies: lowerer.current_pair_dependencies,
-            prior_current_dependencies: lowerer.prior_current_dependencies,
-            analog_occurrence_source: None,
-            branch_unknown_dependencies,
-        })
+        lowerer.finish()
     }
 
     #[cfg(test)]
@@ -2246,31 +2171,9 @@ impl NativeProgram {
         let model = model.into();
         limits.validate_mir(&model, mir)?;
 
-        let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        let mut lowerer = MirEquationLowerer::new(model, entry_kind, mir, equation_id, limits);
         lowerer.lower_second_derivative(expr_id, first, second)?;
-
-        if lowerer.depth != 1 {
-            return Err(stack_error(
-                model.clone(),
-                entry_kind,
-                format!("final stack depth {}, expected 1", lowerer.depth),
-            ));
-        }
-        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
-        let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
-        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
-        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
-
-        Ok(Self {
-            ops: lowerer.ops,
-            max_stack_depth: optimized_max_stack_depth,
-            current_pair_dependencies: lowerer.current_pair_dependencies,
-            prior_current_dependencies: lowerer.prior_current_dependencies,
-            analog_occurrence_source: None,
-            branch_unknown_dependencies,
-        })
+        lowerer.finish()
     }
 
     pub(crate) fn from_mir_expression_mixed_derivative(
@@ -2285,31 +2188,9 @@ impl NativeProgram {
         let model = model.into();
         limits.validate_mir(&model, mir)?;
 
-        let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        let mut lowerer = MirEquationLowerer::new(model, entry_kind, mir, equation_id, limits);
         lowerer.lower_mixed_derivative(expr_id, axes)?;
-
-        if lowerer.depth != 1 {
-            return Err(stack_error(
-                model.clone(),
-                entry_kind,
-                format!("final stack depth {}, expected 1", lowerer.depth),
-            ));
-        }
-        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
-        let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
-        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
-        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
-
-        Ok(Self {
-            ops: lowerer.ops,
-            max_stack_depth: optimized_max_stack_depth,
-            current_pair_dependencies: lowerer.current_pair_dependencies,
-            prior_current_dependencies: lowerer.prior_current_dependencies,
-            analog_occurrence_source: None,
-            branch_unknown_dependencies,
-        })
+        lowerer.finish()
     }
 
     pub(crate) fn from_mir_derivative(
@@ -2323,40 +2204,9 @@ impl NativeProgram {
         let model = model.into();
         limits.validate_mir(&model, mir)?;
 
-        let equation = mir
-            .equations
-            .get(usize::from(equation_id))
-            .filter(|equation| equation.id == equation_id)
-            .ok_or_else(|| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: format!("MIR equation {equation_id} is outside equation arena").into(),
-            })?;
-
-        let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
-        lowerer.lower_derivative(equation.expression.id, axis)?;
-
-        if lowerer.depth != 1 {
-            return Err(stack_error(
-                model.clone(),
-                entry_kind,
-                format!("final stack depth {}, expected 1", lowerer.depth),
-            ));
-        }
-        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
-        let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
-        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
-
-        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
-        Ok(Self {
-            ops: lowerer.ops,
-            max_stack_depth: optimized_max_stack_depth,
-            current_pair_dependencies: lowerer.current_pair_dependencies,
-            prior_current_dependencies: lowerer.prior_current_dependencies,
-            analog_occurrence_source: None,
-            branch_unknown_dependencies,
-        })
+        let mut lowerer = MirEquationLowerer::new(model, entry_kind, mir, equation_id, limits);
+        lowerer.lower_derivative(lowerer.equation_expression()?, axis)?;
+        lowerer.finish()
     }
 
     pub(crate) fn with_analog_occurrence_source(
@@ -2612,6 +2462,58 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             prior_current_dependencies: Vec::new(),
             limiter_context_stack: Vec::new(),
         }
+    }
+
+    /// The expression of the lowered equation, which must sit at its own
+    /// index in the MIR equation arena.
+    fn equation_expression(&self) -> JitResult<ExprId> {
+        self.mir
+            .equations
+            .get(usize::from(self.equation_id))
+            .filter(|equation| equation.id == self.equation_id)
+            .map(|equation| equation.expression.id)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!(
+                    "MIR equation {} is outside equation arena",
+                    self.equation_id
+                )
+                .into(),
+            })
+    }
+
+    /// Checks the finished lowering left exactly one value and publishes it as
+    /// a program.
+    fn finish(self) -> JitResult<NativeProgram> {
+        let Self {
+            model,
+            entry_kind,
+            ops,
+            depth,
+            max_stack_depth,
+            current_pair_dependencies,
+            prior_current_dependencies,
+            ..
+        } = self;
+        if depth != 1 {
+            return Err(stack_error(
+                model,
+                entry_kind,
+                format!("final stack depth {depth}, expected 1"),
+            ));
+        }
+        validate_entry_ops(model.clone(), entry_kind, &ops)?;
+        let optimized_max_stack_depth = compute_native_max_stack_depth(model, entry_kind, &ops)?;
+        debug_assert!(optimized_max_stack_depth <= max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&ops);
+        Ok(NativeProgram {
+            ops,
+            max_stack_depth: optimized_max_stack_depth,
+            current_pair_dependencies,
+            prior_current_dependencies,
+            analog_occurrence_source: None,
+            branch_unknown_dependencies,
+        })
     }
 
     fn lower(&mut self, expr_id: ExprId) -> JitResult<()> {
