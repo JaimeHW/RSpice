@@ -218,47 +218,6 @@ pub(crate) fn compile_value_function_artifact_from_ssa(
     Ok(artifact)
 }
 
-#[allow(dead_code)]
-pub(crate) fn compile_assignment_function(
-    var_index: usize,
-    program: &NativeProgram,
-) -> JitResult<Vec<u8>> {
-    Ok(compile_assignment_function_artifact(var_index, program)?.bytes)
-}
-
-fn compile_assignment_function_artifact(
-    var_index: usize,
-    program: &NativeProgram,
-) -> JitResult<CompiledX64Function> {
-    validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = X64SsaProgram::lower_executable(program)?;
-    validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
-    let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
-    let expression_spill_bytes = allocation_spill_frame_bytes(&allocation)?;
-    let local_frame_bytes = checked_local_frame_bytes(&[
-        expression_spill_bytes,
-        callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
-    ])?;
-    let mut compiler = FunctionCompiler::new(
-        ssa.uses_helper_calls(),
-        ssa.uses_helper_calls(),
-        ssa.uses_helper_calls() || expression_spill_bytes > 0,
-        local_frame_bytes,
-        LoopCounterBand::NONE,
-        (expression_spill_bytes > 0).then_some(0),
-        callee_saved_xmm_count,
-    )?;
-    // The postfix lift publishes one block, so this program has no back edge
-    // and needs no counter band.
-    compiler.emit_allocated_program(&ssa, &allocation, &[])?;
-    let windows_unwind = compiler.windows_unwind_info();
-    let body = compiler.finish_assignment_function(var_index)?;
-    let artifact = CompiledX64Function::new(body, windows_unwind);
-    super::verify_x64_function_artifact(&artifact, "generated assignment function")?;
-    Ok(artifact)
-}
-
 pub(super) fn compile_fused_stamp_kernel_artifact(
     kernel_image_offset: usize,
     assignment: Option<crate::native::model::CodeOffset>,
@@ -1986,13 +1945,6 @@ impl FunctionCompiler {
     }
 
     fn finish_value_function(mut self) -> JitResult<X64FunctionBody> {
-        self.patch_early_returns_to_current()?;
-        self.emit_return();
-        self.finish_with_literals()
-    }
-
-    fn finish_assignment_function(mut self, var_index: usize) -> JitResult<X64FunctionBody> {
-        self.emit_assignment_store(var_index)?;
         self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
@@ -5360,7 +5312,7 @@ mod tests {
         PARAMS_OFFSET, Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STACK_PROBE_INTERVAL_BYTES,
         THERMAL_VOLTAGE_PER_K, TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder,
         X64SsaProgram, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        compile_assignment_pass_function, compile_value_function,
         compile_value_function_artifact_from_ssa, entry_ctx_arg_reg, entry_vars_arg_reg,
         native_op_reads_entry_args, native_op_uses_helper_call, program_uses_helper_calls,
         rspice_exp, value_program_needs_saved_entry_args,
@@ -8293,32 +8245,6 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
-    }
-
-    #[test]
-    fn generated_assignment_leaf_stores_native_expression_result() {
-        let program = native_program(
-            EntryKind::Assignment,
-            vec![
-                Instruction::PushParam(0),
-                Instruction::PushVoltage(1, 0),
-                Instruction::Add,
-            ],
-            2,
-        );
-        let bytes = compile_assignment_function(2, &program).expect("compile assignment function");
-        let memory = ExecutableMemory::allocate(&bytes).expect("allocate assignment leaf");
-        let entry = memory.ptr_at(0).expect("entry point inside image");
-        let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
-
-        let params = [3.0_f64];
-        let voltages = [1.0_f64, 6.0_f64];
-        let mut vars = [0.0_f64; 3];
-        let ctx = eval_context(&params, &voltages, &[], &[]);
-
-        f(&ctx, vars.as_mut_ptr());
-
-        assert_eq!(vars[2], 8.0);
     }
 
     #[test]

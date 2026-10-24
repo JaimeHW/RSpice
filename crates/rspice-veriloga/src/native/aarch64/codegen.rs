@@ -316,24 +316,6 @@ pub(crate) fn compile_segmented_indexed_assignment_driver(
     Ok(bytes)
 }
 
-#[cfg(test)]
-pub(crate) fn compile_assignment_function(
-    variable_index: usize,
-    program: &NativeProgram,
-) -> JitResult<Vec<u8>> {
-    validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = Program::lower_executable(program)?;
-    validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
-    let frame_bytes = aligned_frame_bytes(allocation.spill_slot_count())?;
-    let mut compiler = FunctionCompiler::new(frame_bytes, ssa.requires_call_frame())?;
-    // The postfix lift publishes one block, so this program has no back edge.
-    compiler.emit_program(&ssa, &allocation, &[], BlockLoopCounters::NONE)?;
-    let bytes = compiler.finish_assignment(allocation.result(), variable_index)?;
-    verify_exact_function(&bytes, "assignment function")?;
-    Ok(bytes)
-}
-
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[NativeAssignment],
 ) -> JitResult<Vec<u8>> {
@@ -2989,25 +2971,6 @@ impl FunctionCompiler {
         self.finish_bytes()
     }
 
-    #[cfg(test)]
-    fn finish_assignment(
-        mut self,
-        result: ValueLocation,
-        variable_index: usize,
-    ) -> JitResult<Vec<u8>> {
-        let source = match result {
-            ValueLocation::Register(index) => logical_register(index)?,
-            ValueLocation::Spill(slot) => {
-                self.encoder
-                    .ldr_d_unsigned(DReg::D0, XReg::Sp, spill_slot_offset(slot)?)?;
-                DReg::D0
-            }
-        };
-        self.emit_array_store(source, self.variables_register(), variable_index)?;
-        self.emit_epilogue()?;
-        self.finish_bytes()
-    }
-
     fn finish_assignment_pass(mut self) -> JitResult<Vec<u8>> {
         self.emit_epilogue()?;
         self.finish_bytes()
@@ -4179,9 +4142,9 @@ mod tests {
         PreparedInstruction,
     };
     use super::{
-        compile_assignment_dispatch_function, compile_assignment_function,
-        compile_assignment_pass_function, compile_fused_evaluation_kernel,
-        compile_fused_stamp_kernel, compile_value_function, compile_value_function_from_ssa,
+        compile_assignment_dispatch_function, compile_assignment_pass_function,
+        compile_fused_evaluation_kernel, compile_fused_stamp_kernel, compile_value_function,
+        compile_value_function_from_ssa,
     };
     use crate::jit::plan_program::PlanProgram;
     use crate::native::EvalContext;
@@ -4218,23 +4181,6 @@ mod tests {
         let entry: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(memory.ptr_at(0).expect("AArch64 scalar entry pointer")) };
         entry(context, variables.as_ptr())
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn execute_assignment(
-        program: &NativeProgram,
-        variable_index: usize,
-        context: &EvalContext,
-        variables: &mut [f64],
-    ) {
-        let bytes = compile_assignment_function(variable_index, program)
-            .expect("compile AArch64 assignment function");
-        let memory =
-            ExecutableMemory::allocate(&bytes).expect("publish AArch64 assignment function");
-        let entry: extern "C" fn(*const EvalContext, *mut f64) = unsafe {
-            std::mem::transmute(memory.ptr_at(0).expect("AArch64 assignment entry pointer"))
-        };
-        entry(context, variables.as_mut_ptr());
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -4354,39 +4300,6 @@ mod tests {
             2,
         );
         assert_eq!(execute(&expression, &[19.5]), 42.0);
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    #[test]
-    fn assignment_entries_store_results_and_skip_failed_stores() {
-        let context = EvalContext::empty_for_test();
-        let assignment = program(vec![NativeOp::LoadVariable(0), NativeOp::MulConst(2.0)], 1);
-        let mut variables = [3.0_f64, 0.0];
-        execute_assignment(&assignment, 1, &context, &mut variables);
-        assert_eq!(variables, [3.0, 6.0]);
-        assert!(context.take_runtime_error().is_none());
-
-        let helper_assignment = program(
-            vec![
-                NativeOp::LoadVariable(0),
-                NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp),
-            ],
-            1,
-        );
-        execute_assignment(&helper_assignment, 1, &context, &mut variables);
-        assert!((variables[1] - 3.0_f64.exp()).abs() < 1.0e-14);
-        assert!(context.take_runtime_error().is_none());
-
-        variables[1] = 99.0;
-        let failed = NativeProgram::from_ops_for_test(
-            vec![NativeOp::LoadPriorCurrent(0)],
-            1,
-            Vec::new(),
-            vec![0],
-        );
-        execute_assignment(&failed, 1, &context, &mut variables);
-        assert_eq!(variables[1], 99.0);
-        assert!(context.take_runtime_error().is_some());
     }
 
     #[cfg(target_arch = "aarch64")]
