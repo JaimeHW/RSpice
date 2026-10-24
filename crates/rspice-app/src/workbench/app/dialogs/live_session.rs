@@ -806,7 +806,7 @@ fn bullet(ui: &mut egui::Ui, text: &str) {
     });
 }
 
-fn section_head(ui: &mut egui::Ui, label: &str) {
+pub(super) fn section_head(ui: &mut egui::Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
         egui::RichText::new(label)
@@ -816,7 +816,7 @@ fn section_head(ui: &mut egui::Ui, label: &str) {
     ui.add_space(4.0);
 }
 
-fn field_label(ui: &mut egui::Ui, label: &str) {
+pub(super) fn field_label(ui: &mut egui::Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(6.0);
     ui.label(

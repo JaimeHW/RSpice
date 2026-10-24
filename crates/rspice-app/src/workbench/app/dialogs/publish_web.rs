@@ -9,6 +9,7 @@
 
 use egui::Context;
 
+use super::live_session::{field_label, section_head};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::cloud_account::{
     CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, PublishRequest, PublishState, PublishTarget,
@@ -883,26 +884,6 @@ fn note(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
         egui::RichText::new(text)
             .font(resolve_note_font())
             .color(color),
-    );
-}
-
-fn section_head(ui: &mut egui::Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-    );
-    ui.add_space(4.0);
-}
-
-fn field_label(ui: &mut egui::Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
     );
 }
 
