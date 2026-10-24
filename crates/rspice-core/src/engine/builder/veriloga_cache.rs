@@ -532,7 +532,11 @@ use super::*;
 // form is unchanged, but an earlier record carries digital plans that
 // passed the `z` through, kept the real's fraction, and printed the module's
 // name.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 177;
+//
+// Version 178 follows the schema to 185, whose digital plan marks a net of
+// a SystemVerilog real nettype apart from a `wreal`, so that a deck's
+// `wreal_resolution` never refuses or folds one.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 178;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2216,6 +2220,9 @@ fn registered_at_default_resolution(
             signal.kind == DigitalSignalKind::Real(DigitalRealResolution::Single)
                 && !signal.procedurally_assignable
                 && signal.local.is_none()
+                // A real nettype net (IEEE 1800-2017 section 6.6.7) keeps its
+                // one driver under every `wreal_resolution`.
+                && !signal.nettype
         })
     });
     let Some(net) = plain.filter(|_| canonical.wreal_resolution != DigitalRealResolution::Single)

@@ -477,6 +477,12 @@ pub struct DigitalSignal {
     /// existed still decodes as the four-state design it was.
     #[serde(default, skip_serializing_if = "is_four_state")]
     pub kind: DigitalSignalKind,
+    /// A net of a user-defined nettype of `real` data (IEEE 1800-2017 section
+    /// 6.6.7). Such a nettype has no resolution function here, so the net
+    /// takes one driver and is never folded, whatever a VAMS `wreal`
+    /// declared beside it would do. Its kind is a single-resolution real.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nettype: bool,
     /// Declared width in bits. A scalar is one, and a real net is zero — it has
     /// no bits, and says so the same way a process-local `real` does.
     pub width: u32,

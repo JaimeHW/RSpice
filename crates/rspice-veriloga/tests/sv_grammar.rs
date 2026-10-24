@@ -2,6 +2,7 @@
 //! `` `begin_keywords `` selects (IEEE 1800-2017 section 22.14), packages and
 //! imports (clause 26), and real nettypes (section 6.6.7).
 
+use rspice_veriloga::canonical_ir::digital::DigitalRealResolution;
 use rspice_veriloga::{
     CompilerOptions, NoPipelineControl, PreparedRuntimeSource, ProviderCompileError,
     SourceCompileDiagnostic, SourceProviderLimits, VerilogACompiler,
@@ -33,9 +34,17 @@ impl Sources {
 
     /// The files, already written, prepared as one compilation unit.
     fn unit(&self, names: &[&str]) -> Result<PreparedRuntimeSource, ProviderCompileError> {
+        self.unit_with(&compiler(), names)
+    }
+
+    fn unit_with(
+        &self,
+        compiler: &VerilogACompiler,
+        names: &[&str],
+    ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
         let paths: Vec<PathBuf> = names.iter().map(|name| self.0.join(name)).collect();
         let paths: Vec<&std::path::Path> = paths.iter().map(PathBuf::as_path).collect();
-        compiler().prepare_unit_runtime_source_with_diagnostics(
+        compiler.prepare_unit_runtime_source_with_diagnostics(
             &paths,
             SourceProviderLimits::UNBOUNDED,
             &NoPipelineControl,
@@ -44,7 +53,21 @@ impl Sources {
 
     /// The first error diagnostic of preparing `names` and compiling `top`.
     fn refusal(&self, names: &[&str], top: &str) -> SourceCompileDiagnostic {
-        let diagnostics = match self.unit(names) {
+        self.refusals_with(&compiler(), names, top)
+            .into_iter()
+            .next()
+            .expect("an error diagnostic")
+    }
+
+    /// Every error diagnostic of preparing `names` with `compiler` and
+    /// compiling `top`.
+    fn refusals_with(
+        &self,
+        compiler: &VerilogACompiler,
+        names: &[&str],
+        top: &str,
+    ) -> Vec<SourceCompileDiagnostic> {
+        let diagnostics = match self.unit_with(compiler, names) {
             Err(ProviderCompileError::Compile { diagnostics, .. }) => diagnostics,
             Err(ProviderCompileError::Source(error)) => panic!("preprocessing failed: {error}"),
             Ok(prepared) => match prepared.compile_runtime(Some(top)) {
@@ -54,10 +77,10 @@ impl Sources {
         };
         diagnostics
             .into_iter()
-            .find(|diagnostic| {
+            .filter(|diagnostic| {
                 diagnostic.severity == rspice_veriloga::CompileDiagnosticSeverity::Error
             })
-            .expect("an error diagnostic")
+            .collect()
     }
 
     /// The preprocessor's refusal of `names`.
@@ -71,7 +94,13 @@ impl Sources {
 
     /// `top`, compiled from `names` as one unit.
     fn compiles(&self, names: &[&str], top: &str) {
-        let prepared = self.unit(names).unwrap_or_else(|error| panic!("{error}"));
+        self.compiles_with(&compiler(), names, top);
+    }
+
+    fn compiles_with(&self, compiler: &VerilogACompiler, names: &[&str], top: &str) {
+        let prepared = self
+            .unit_with(compiler, names)
+            .unwrap_or_else(|error| panic!("{error}"));
         if let Err(error) = prepared.compile_runtime(Some(top)) {
             panic!("{error}: {:?}", prepared.diagnostics_for_error(&error));
         }
@@ -422,4 +451,74 @@ fn a_duplicate_package_names_both_files() {
         refusal.message
     );
     assert_eq!((file_of(&refusal), refusal.line), ("two.sv", Some(2)));
+}
+
+/// Section 6.6.7: a real nettype declared without a resolution function
+/// admits one driver. Two are refused once at each, on its line, and a
+/// `wreal_resolution=sum`, which folds the plain `wreal` beside them, leaves
+/// that refusal as it is: the nettype net is never summed.
+#[test]
+fn a_real_nettype_net_with_two_drivers_is_refused_at_each_under_every_resolution() {
+    let files = Sources::new();
+    files.write(
+        "two.sv",
+        "package pk;\n  nettype real rnet;\nendpackage\nmodule two;\n  import pk::*;\n  \
+         rnet n;\n  real a, b;\n  assign n = a;\n  assign n = b;\nendmodule\n",
+    );
+    files.write(
+        "w.vams",
+        "module w;\n  wreal a, b, n;\n  assign n = a;\n  assign n = b;\nendmodule\n",
+    );
+    for resolution in [DigitalRealResolution::Single, DigitalRealResolution::Sum] {
+        let compiler = VerilogACompiler::new(CompilerOptions {
+            enable_ams: true,
+            wreal_resolution: resolution,
+            ..CompilerOptions::default()
+        });
+        let refusals = files.refusals_with(&compiler, &["two.sv"], "two");
+        let lines: Vec<_> = refusals.iter().map(|refusal| refusal.line).collect();
+        assert_eq!(lines, [Some(8), Some(9)], "{resolution:?}: {refusals:?}");
+        for (refusal, which) in refusals
+            .iter()
+            .zip(["driver 1 of its 2", "driver 2 of its 2"])
+        {
+            for expected in ["`n`", which, "section 6.6.7"] {
+                assert!(
+                    refusal.message.contains(expected),
+                    "{expected}: {}",
+                    refusal.message
+                );
+            }
+        }
+    }
+    let sum = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        wreal_resolution: DigitalRealResolution::Sum,
+        ..CompilerOptions::default()
+    });
+    files.compiles_with(&sum, &["w.vams"], "w");
+}
+
+/// A `.sv` file in a virtual bundle, as a project or the browser worker
+/// hands one over, is read under the 1800-2017 keywords too.
+#[test]
+fn a_virtual_systemverilog_file_reads_under_its_keywords() {
+    let bundle = rspice_veriloga::VirtualSourceBundle::new(
+        "m.sv",
+        [rspice_veriloga::VirtualSourceFile::new(
+            "m.sv",
+            "// a real nettype\n`timescale 1ns/1ps\npackage p;\n  nettype real rnet;\nendpackage\n\
+             module m(x, y);\n  import p::*;\n  input rnet x;\n  output rnet y;\n  \
+             assign y = 2.0 * x;\nendmodule\n",
+        )],
+    )
+    .unwrap();
+    let limits = rspice_veriloga::VirtualCompileLimits::default();
+    let prepared = compiler()
+        .prepare_virtual_runtime_source(&bundle, limits)
+        .unwrap_or_else(|failure| panic!("{failure}"));
+    assert_eq!(prepared.module_names().collect::<Vec<_>>(), ["m"]);
+    compiler()
+        .compile_virtual_runtime(&bundle, "m", limits)
+        .unwrap_or_else(|failure| panic!("{failure}"));
 }

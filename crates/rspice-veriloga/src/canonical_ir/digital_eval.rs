@@ -4311,6 +4311,7 @@ mod tests {
                 id: DigitalSignalId::from(0usize),
                 name: "q".into(),
                 kind: DigitalSignalKind::FourState,
+                nettype: false,
                 width,
                 bounds,
                 signed: false,

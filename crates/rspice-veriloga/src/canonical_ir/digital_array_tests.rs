@@ -77,6 +77,7 @@ fn signal(index: u32, name: String, real: bool, width: u32) -> DigitalSignal {
         } else {
             DigitalSignalKind::FourState
         },
+        nettype: false,
         width: if real { 0 } else { width },
         bounds: (!real).then_some((i64::from(width) - 1, 0)),
         signed: true,

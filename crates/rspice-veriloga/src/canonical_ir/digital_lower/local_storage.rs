@@ -100,6 +100,7 @@ impl ProcessLowerer<'_> {
                 } else {
                     DigitalSignalKind::FourState
                 },
+                nettype: false,
                 width: declaration.width,
                 bounds: declaration
                     .packed

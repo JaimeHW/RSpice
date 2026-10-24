@@ -245,6 +245,7 @@ fn static_signal(
         } else {
             DigitalSignalKind::FourState
         },
+        nettype: false,
         width: shape.width(),
         bounds: (!shape.real && shape.packed).then_some((shape.bounds.msb, shape.bounds.lsb)),
         signed: shape.signed,

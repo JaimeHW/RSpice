@@ -1477,7 +1477,8 @@ fn lower_with_analog_variables(
     })
 }
 
-/// Refuse a plain `wreal` that more than one driver drives.
+/// Refuse a plain `wreal`, or a net of a real nettype, that more than one
+/// driver drives.
 ///
 /// Verilog-AMS LRM 2.4 section 6.5.3: "There can be a maximum of one driver of
 /// a real-valued net." Section 3.7 gives no resolution function to combine two
@@ -1516,6 +1517,25 @@ fn reject_overdriven_real_nets(
             continue;
         };
         let count = on_this_net.len();
+        // A real nettype (IEEE 1800-2017 section 6.6.7) declared without a
+        // resolution function admits one driver, and `wreal_resolution` does
+        // not reach it, so the refusal names each driver where it stands.
+        if signal.nettype {
+            for (index, driver) in on_this_net.iter().enumerate() {
+                diagnostics.push(DigitalLoweringDiagnostic::refusal_with_kind(
+                    DigitalRefusalKind::InvalidContribution,
+                    format!(
+                        "`{}` is a net of a real nettype with no resolution function, and this \
+                         is driver {} of its {count}; IEEE 1800-2017 section 6.6.7 permits such \
+                         a net one driver, and `wreal_resolution` does not apply to it",
+                        signal.name,
+                        index + 1,
+                    ),
+                    driver.span,
+                ));
+            }
+            continue;
+        }
         // Not `UnsupportedFeature`: the LRM admits one driver of a real-valued
         // net and this design has two, so the program is illegal rather than
         // ahead of the compiler.
@@ -2207,6 +2227,10 @@ fn lower_signal(
             // apart everywhere it matters.
             (true, None) => DigitalSignalKind::Real(DigitalRealResolution::Single),
         },
+        nettype: matches!(
+            signal.class,
+            crate::semantic::DigitalSignalClass::Net(crate::ast::DigitalNetKind::Nettype)
+        ),
         width: signal.width,
         bounds: signal.range.map(|range| (range.msb, range.lsb)),
         signed: signal.signedness.is_signed(),

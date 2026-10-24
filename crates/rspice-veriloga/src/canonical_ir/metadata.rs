@@ -14,6 +14,12 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 185 marks a net of a SystemVerilog real nettype
+/// (`DigitalSignal::nettype`, IEEE 1800-2017 section 6.6.7) apart from a
+/// Verilog-AMS `wreal`, so that a `wreal_resolution` and the sealed runtime
+/// never treat the two alike: the nettype net keeps its one driver. Earlier
+/// artifacts had no such nets.
+///
 /// Version 184 computes a `$setuphold`'s and `$recrem`'s delayed signal
 /// delays across every check naming the same delayed nets
 /// (`DigitalTimingCheck::delays`, `limits_inconsistent`), and carries their
@@ -249,7 +255,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 184;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 185;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
