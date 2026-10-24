@@ -705,7 +705,8 @@ pub struct EventTarget {
 /// interning table is a lookup only: it is never iterated, and nothing
 /// observable is ordered by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct TargetId(u32);
+#[doc(hidden)]
+pub struct TargetId(u32);
 
 impl TargetId {
     /// The dense index this id is.
@@ -1644,8 +1645,9 @@ impl EventScheduler {
         }
     }
 
-    #[cfg(any(feature = "veriloga", test))]
-    pub(crate) fn limits(&self) -> SchedulerLimits {
+    #[cfg(any(feature = "veriloga", feature = "test-support", test))]
+    #[doc(hidden)]
+    pub fn limits(&self) -> SchedulerLimits {
         self.limits
     }
 

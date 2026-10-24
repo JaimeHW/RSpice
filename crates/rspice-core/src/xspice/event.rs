@@ -18,8 +18,9 @@ use crate::{NodeId, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[cfg(any(feature = "veriloga", test))]
-pub(crate) mod checkpoint;
+#[cfg(any(feature = "veriloga", feature = "test-support", test))]
+#[doc(hidden)]
+pub mod checkpoint;
 
 //=============================================================================
 // Event Types
@@ -95,7 +96,8 @@ fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
 /// ([`Instant`]'s "one instant, one key"). Off that path the key is the sum the
 /// code model computed, bit for bit.
 #[derive(Debug, Clone)]
-pub(crate) struct XspiceEventScheduler {
+#[doc(hidden)]
+pub struct XspiceEventScheduler {
     inner: EventScheduler,
     /// The tick lattice code-model outputs are canonical on, present exactly
     /// when the queue is coupled to a mixed module. Set by
@@ -526,7 +528,8 @@ pub(crate) type XspiceRealDrivers = EventNodeMap<CopyOnWrite<BTreeMap<XspiceDriv
 /// drain never produces. Grouping them is also what lets the whole set ride
 /// behind a single [`Arc`] — see [`SharedXspiceEventValues`].
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct XspiceEventValues {
+#[doc(hidden)]
+pub struct XspiceEventValues {
     pub(crate) traces: super::event_trace::EventTraceJournal,
     /// Resolved digital value of each event-driven node.
     pub(crate) digital_values: EventNodeMap<DigitalValue>,
@@ -559,7 +562,8 @@ pub(crate) struct XspiceEventValues {
 /// [`Self::make_mut`] is the only mutable view. `DerefMut` is deliberately not
 /// implemented, so every mutation site is spelled out.
 #[derive(Clone, Default)]
-pub(crate) struct SharedXspiceEventValues(Arc<XspiceEventValues>);
+#[doc(hidden)]
+pub struct SharedXspiceEventValues(Arc<XspiceEventValues>);
 
 impl SharedXspiceEventValues {
     /// Take a mutable view, copying the maps first if a snapshot still shares
@@ -614,7 +618,8 @@ impl std::fmt::Debug for SharedXspiceEventValues {
 /// view and there is no `DerefMut`, so a snapshot can never observe a write
 /// through a handle it aliases.
 #[derive(Clone)]
-pub(crate) struct SharedXspiceEventQueue(Arc<XspiceEventScheduler>);
+#[doc(hidden)]
+pub struct SharedXspiceEventQueue(Arc<XspiceEventScheduler>);
 
 impl SharedXspiceEventQueue {
     /// Create a circuit's empty event queue.

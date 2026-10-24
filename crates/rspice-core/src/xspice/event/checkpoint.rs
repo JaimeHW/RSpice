@@ -5,7 +5,8 @@ use super::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EventCheckpointLimits {
+#[doc(hidden)]
+pub struct EventCheckpointLimits {
     pub scheduler: SchedulerCheckpointLimits,
     pub max_nodes: usize,
     pub max_drivers: usize,
@@ -24,13 +25,15 @@ impl Default for EventCheckpointLimits {
 
 /// Built from the receiving circuit's elaborated output ports and its restored
 /// shared HDL owner. Saved bytes cannot declare new producers or node domains.
-pub(crate) struct EventCheckpointTopology {
+#[doc(hidden)]
+pub struct EventCheckpointTopology {
     drivers: BTreeMap<EventTarget, bool>,
     shared: BTreeMap<(NodeId, bool), ValueImage>,
     shared_drivers: BTreeMap<EventTarget, ValueImage>,
 }
 impl EventCheckpointTopology {
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         drivers: impl IntoIterator<Item = (EventTarget, bool)>,
         shared: impl IntoIterator<Item = (NodeId, EventValue)>,
         shared_drivers: impl IntoIterator<Item = (EventTarget, EventValue)>,
@@ -104,7 +107,8 @@ impl EventCheckpointTopology {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct XspiceEventCheckpoint {
+#[doc(hidden)]
+pub struct XspiceEventCheckpoint {
     version: u32,
     topology: [u8; 32],
     time: u64,
@@ -187,7 +191,8 @@ fn accepted_time(time: f64) -> Result<(), String> {
 }
 
 impl XspiceEventCheckpoint {
-    pub(crate) fn capture(
+    #[doc(hidden)]
+    pub fn capture(
         queue: &XspiceEventScheduler,
         values: &XspiceEventValues,
         time: f64,
@@ -270,7 +275,8 @@ impl XspiceEventCheckpoint {
 
     /// Decode into temporary values and a temporary queue. Input bytes and
     /// deserialization must be bounded by the enclosing circuit file reader.
-    pub(crate) fn restore(
+    #[doc(hidden)]
+    pub fn restore(
         &self,
         queue: &XspiceEventScheduler,
         values: &XspiceEventValues,

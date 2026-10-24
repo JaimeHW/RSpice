@@ -123,8 +123,9 @@ pub use data_file::{
 };
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::EventValue;
-#[cfg(any(feature = "veriloga", test))]
-pub(crate) use event::checkpoint as event_checkpoint;
+#[cfg(any(feature = "veriloga", feature = "test-support", test))]
+#[doc(hidden)]
+pub use event::checkpoint as event_checkpoint;
 pub(crate) use event::{
     EventLoads, EventNodeMap, SharedXspiceEventQueue, SharedXspiceEventValues,
     XspiceEventScheduler, XspiceEventValues,
