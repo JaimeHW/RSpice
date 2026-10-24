@@ -5,11 +5,9 @@
 
 use std::sync::Arc;
 
-use crate::state::symbol_context_cache::SymbolContextInputs;
-use crate::workbench::app::symbol_context_revision;
-
 use egui::Ui;
 
+use crate::workbench::app::symbol_context_revision;
 use crate::workbench::app_state::AppState;
 
 use super::symbols::SymbolLibrary;
@@ -110,38 +108,7 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
 /// The canvas and the Sheet inspector therefore share one context, and a
 /// steady frame resolves nothing.
 pub(crate) fn frame_symbol_context(state: &mut AppState) -> Arc<SchematicSymbolContext> {
-    let revision = symbol_context_revision(state);
-    let topology_version = state.model.schematic.topology_version();
-    let pending = state
-        .model
-        .schematic
-        .session
-        .editor
-        .pending_library_cell
-        .as_ref()
-        .map(|pending| &pending.binding);
-    if let Some(context) = state.model.schematic.session.symbol_context.current(
-        revision,
-        topology_version,
-        pending,
-        state.model.schematic.document(),
-    ) {
-        return context;
-    }
-    let inputs = SymbolContextInputs::capture(
-        revision,
-        topology_version,
-        pending,
-        state.model.schematic.document(),
-    );
-    let context = Arc::new(schematic_symbol_context(state));
-    state
-        .model
-        .schematic
-        .session
-        .symbol_context
-        .store(inputs, Arc::clone(&context));
-    context
+    state.model.frame_symbol_context()
 }
 
 /// Pick up whatever an interaction changed under the frame's symbols.

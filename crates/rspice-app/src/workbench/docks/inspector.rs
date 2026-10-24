@@ -10,6 +10,7 @@ pub(in crate::workbench) mod results;
 /// Visible to the dock layer: the data browser opens it from a run's row, and
 /// the frame draws it whichever dock is showing.
 pub(super) mod run_details;
+mod shared;
 pub(in crate::workbench) mod simulation;
 /// Visible to the dock layer so the library browser's own gate can render this
 /// pane beside it: the two docks state the same counts about the same design,

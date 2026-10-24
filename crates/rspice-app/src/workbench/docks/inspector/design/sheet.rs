@@ -19,7 +19,7 @@ mod format;
 
 use egui::Ui;
 
-use super::{
+use super::super::shared::{
     checks_status, count_label, findings_problem, sheet_floating_net_findings,
     sheet_open_pin_findings,
 };
@@ -715,12 +715,12 @@ pub(super) fn commit_pending_sheet_text(ctx: &egui::Context, state: &mut AppStat
 /// This sheet's open pins and floating nets from the last check, when it
 /// found any. The header says whether that check still describes the drawing.
 fn checks_section(ui: &mut Ui, state: &AppState) {
-    let open_pins = sheet_open_pin_findings(state);
-    let floating_nets = sheet_floating_net_findings(state);
+    let open_pins = sheet_open_pin_findings(&state.model);
+    let floating_nets = sheet_floating_net_findings(&state.model);
     if open_pins.is_empty() && floating_nets.is_empty() {
         return;
     }
-    section_header(ui, "Checks", checks_status(state).as_deref());
+    section_header(ui, "Checks", checks_status(&state.model).as_deref());
     if !open_pins.is_empty() {
         property_row_problem(
             ui,

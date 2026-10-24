@@ -3,8 +3,10 @@
 //! drawing's symbols, so each is one answer whichever part asks.
 
 use super::Model;
+use crate::state::symbol_context_cache::SymbolContextInputs;
 use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 
 /// The model is itself a holder of the model, so an operation that takes any
 /// holder (`impl AsRef<Model>`) takes a feature's model as it takes the whole
@@ -59,5 +61,40 @@ impl Model {
             &resolver,
             self.symbol_context_revision(),
         )
+    }
+
+    /// The resolved symbols a frame paints and hit-tests with: the context
+    /// the open document's session holds, while everything it was resolved
+    /// from stands still, and one resolved afresh and held otherwise.
+    pub(crate) fn frame_symbol_context(&mut self) -> Arc<SchematicSymbolContext> {
+        let revision = self.symbol_context_revision();
+        let topology_version = self.schematic.topology_version();
+        let pending = self
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .as_ref()
+            .map(|pending| &pending.binding);
+        if let Some(context) = self.schematic.session.symbol_context.current(
+            revision,
+            topology_version,
+            pending,
+            self.schematic.document(),
+        ) {
+            return context;
+        }
+        let inputs = SymbolContextInputs::capture(
+            revision,
+            topology_version,
+            pending,
+            self.schematic.document(),
+        );
+        let context = Arc::new(self.schematic_symbol_context());
+        self.schematic
+            .session
+            .symbol_context
+            .store(inputs, Arc::clone(&context));
+        context
     }
 }

@@ -8,11 +8,13 @@
 mod off_sheet_connectors;
 mod veriloga_modules;
 
+use super::super::shared::{checks_status, sheet_floating_net_findings, sheet_open_pin_findings};
 use super::*;
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
 };
+use rspice_design::drc::DrcSeverity;
 
 fn state_with_two_components() -> AppState {
     let mut state = AppState::default();
@@ -625,18 +627,18 @@ fn terminals_head_only_open_pins_and_vanish_without_terminals() {
 #[test]
 fn checks_header_speaks_only_when_the_check_is_not_current_and_clean() {
     let mut state = AppState::default();
-    assert!(!checks_current(&state));
-    assert_eq!(checks_status(&state).as_deref(), Some("not run"));
+    assert!(!checks_current(&state.model));
+    assert_eq!(checks_status(&state.model).as_deref(), Some("not run"));
 
     state.model.design_checks.drc_results = Some(rspice_design::drc::DrcResult::new());
     state.model.design_checks.drc_checked_version =
         state.model.schematic.topology_version().wrapping_add(1);
-    assert!(!checks_current(&state));
-    assert_eq!(checks_status(&state).as_deref(), Some("stale"));
+    assert!(!checks_current(&state.model));
+    assert_eq!(checks_status(&state.model).as_deref(), Some("stale"));
 
     state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
-    assert!(checks_current(&state));
-    assert_eq!(checks_status(&state), None);
+    assert!(checks_current(&state.model));
+    assert_eq!(checks_status(&state.model), None);
 }
 
 #[test]
@@ -700,12 +702,12 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
     state.model.design_checks.drc_results = Some(result);
     state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
 
-    assert_eq!(sheet_open_pin_findings(&state).len(), 1);
-    assert_eq!(sheet_floating_net_findings(&state).len(), 1);
+    assert_eq!(sheet_open_pin_findings(&state.model).len(), 1);
+    assert_eq!(sheet_floating_net_findings(&state.model).len(), 1);
 
     // A check of an earlier drawing reports nothing about this one.
     state.model.design_checks.drc_checked_version = state.model.schematic.topology_version() + 1;
-    assert!(sheet_open_pin_findings(&state).is_empty());
+    assert!(sheet_open_pin_findings(&state.model).is_empty());
 }
 
 /// A component's own findings are the ones located on it, or involving it on

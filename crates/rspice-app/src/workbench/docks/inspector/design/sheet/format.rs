@@ -4,13 +4,12 @@
 
 use egui::Ui;
 
-use super::super::action_stack;
+use super::super::super::shared::{action_stack, count_label};
 use super::{PanelEdit, SheetIdentity, SheetText, choice_row, text_row};
 use crate::schematic::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
     show_first_drawing_sheet_overflow,
 };
-use crate::schematic::view::frame_symbol_context;
 use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetFrameConvention, DrawingSheetInheritance, DrawingSheetPreset,
@@ -283,7 +282,7 @@ fn saved_sizes(ui: &Ui, state: &AppState) -> Vec<DrawingSheetPreset> {
 /// the review of them all.
 fn overflow_rows(ui: &mut Ui, state: &mut AppState, sheet: &ActiveDrawingSheet) {
     // The canvas's own cached context: the inspector resolves nothing.
-    let symbol_context = frame_symbol_context(state);
+    let symbol_context = state.model.frame_symbol_context();
     let overflow = drawing_sheet_overflow_summary(state, &symbol_context, sheet);
     if overflow.is_clear() {
         return;
@@ -409,7 +408,7 @@ fn drawing_sheet_overflow_text(summary: &DrawingSheetOverflowSummary) -> String 
     }
     let headline = format!(
         "{} outside the drawing area",
-        super::super::count_label(summary.finding_count(), "object")
+        count_label(summary.finding_count(), "object")
     );
     if details.is_empty() {
         headline

@@ -1330,7 +1330,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
 /// With neither, the section is absent: a clean or unchecked instance is the
 /// normal state, and the sheet's Checks section owns the check itself.
 pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
-    let findings = current_findings(&app.state, |violation| {
+    let findings = current_findings(&app.state.model, |violation| {
         violation_targets_component(violation, component)
     });
     let soa = retained_component_soa(&app.state, &component.name);

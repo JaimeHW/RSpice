@@ -1115,10 +1115,10 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
 
     // Only this net's own findings, and only from a check of the drawing as it
     // stands. A clean or unchecked net is the normal state.
-    let findings = current_findings(&app.state, |violation| {
+    let findings = current_findings(&app.state.model, |violation| {
         violation_targets_net(violation, net)
     });
-    let collisions = if checks_current(&app.state) {
+    let collisions = if checks_current(&app.state.model) {
         net_name_collision_count(&app.state, net)
     } else {
         0
