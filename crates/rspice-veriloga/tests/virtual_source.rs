@@ -1,6 +1,7 @@
 use rspice_veriloga::{
-    CompileError, CompilerOptions, Preprocessor, SourceDocumentOrigin, VerilogACompiler,
-    VirtualCompileLimits, VirtualSourceBundle, VirtualSourceError, VirtualSourceFile,
+    CompileError, CompilerOptions, Preprocessor, RuntimeQualificationOptions, SourceDocumentOrigin,
+    VerilogACompiler, VirtualCompileLimits, VirtualSourceBundle, VirtualSourceError,
+    VirtualSourceFile,
 };
 
 const TOP: &str = r#"`include "disciplines.vams"
@@ -178,7 +179,12 @@ fn included_file_diagnostic_retains_its_exact_path_content_and_location() {
     .expect("valid diagnostic fixture");
 
     let failure = VerilogACompiler::default()
-        .compile_virtual_runtime_diagnosed(&bundle, "selected", VirtualCompileLimits::default())
+        .compile_virtual_runtime_diagnosed_with_qualifications(
+            &bundle,
+            "selected",
+            VirtualCompileLimits::default(),
+            RuntimeQualificationOptions::NONE,
+        )
         .expect_err("invalid included source must fail");
     let diagnostic = failure
         .diagnostics

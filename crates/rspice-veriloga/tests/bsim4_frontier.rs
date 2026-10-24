@@ -36,8 +36,9 @@ fn bsim4_compiles_end_to_end() {
     };
 
     let model = VerilogACompiler::default()
-        .compile_file(path.as_path())
-        .expect("BSIM4.8 must compile end to end");
+        .compile_file_with_metadata(path.as_path())
+        .expect("BSIM4.8 must compile end to end")
+        .model;
 
     // Structural pins: drain/gate/source/bulk terminals, the model's
     // documented internal node set, and the substrate/gate-resistance

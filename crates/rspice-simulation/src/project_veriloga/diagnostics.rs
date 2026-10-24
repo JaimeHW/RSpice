@@ -324,10 +324,11 @@ mod tests {
         )
         .expect("valid virtual diagnostic fixture");
         let failure = VerilogACompiler::default()
-            .compile_virtual_runtime_diagnosed(
+            .compile_virtual_runtime_diagnosed_with_qualifications(
                 &bundle,
                 "selected",
                 rspice_veriloga::VirtualCompileLimits::default(),
+                rspice_veriloga::RuntimeQualificationOptions::NONE,
             )
             .expect_err("included syntax error must fail");
 

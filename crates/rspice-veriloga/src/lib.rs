@@ -750,24 +750,9 @@ impl VerilogACompiler {
         .map_err(|failure| failure.error)
     }
 
-    /// Compile a sealed virtual source bundle while retaining source-authentic
-    /// diagnostics when preprocessing or a later compiler phase fails.
-    pub fn compile_virtual_runtime_diagnosed(
-        &self,
-        bundle: &VirtualSourceBundle,
-        module_name: &str,
-        limits: VirtualCompileLimits,
-    ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
-        self.compile_virtual_runtime_diagnosed_with_qualifications(
-            bundle,
-            module_name,
-            limits,
-            RuntimeQualificationOptions::NONE,
-        )
-    }
-
-    /// Diagnosed virtual compilation with explicit optional backend
-    /// qualifications.
+    /// Compile a sealed virtual source bundle with explicit optional backend
+    /// qualifications, retaining source-authentic diagnostics when
+    /// preprocessing or a later compiler phase fails.
     pub fn compile_virtual_runtime_diagnosed_with_qualifications(
         &self,
         bundle: &VirtualSourceBundle,
@@ -2621,26 +2606,6 @@ impl VerilogACompiler {
             source_dependencies: prepared.dependencies.clone(),
             metrics: measurements.finish(),
         })
-    }
-
-    /// Compile a source file from disk with preprocessing
-    ///
-    /// The file must contain exactly one module; multi-module files
-    /// require [`Self::compile_file_module`].
-    pub fn compile_file(&self, path: &std::path::Path) -> CompileResult<CompiledModel> {
-        self.compile_file_with_metadata(path)
-            .map(|compiled| compiled.model)
-    }
-
-    /// Compile one module of a source file from disk. See
-    /// [`Self::compile_module`] for the module selection rules.
-    pub fn compile_file_module(
-        &self,
-        path: &std::path::Path,
-        module_name: Option<&str>,
-    ) -> CompileResult<CompiledModel> {
-        self.compile_file_module_with_metadata(path, module_name)
-            .map(|compiled| compiled.model)
     }
 }
 

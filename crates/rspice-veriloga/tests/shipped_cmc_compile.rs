@@ -245,7 +245,9 @@ fn compile_one_shipped_veriloga_module_child() {
     let result = if env::var_os(TIMINGS_ENV).is_some() {
         compile_file_module_with_timings(&source, &module, &options)
     } else {
-        VerilogACompiler::new(options).compile_file_module(&source, Some(&module))
+        VerilogACompiler::new(options)
+            .compile_file_module_with_metadata(&source, Some(&module))
+            .map(|compiled| compiled.model)
     };
 
     let model = match result {
