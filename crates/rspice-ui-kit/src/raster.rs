@@ -31,10 +31,6 @@
 
 use egui::{Color32, Rect, Vec2};
 
-mod measure;
-
-pub use measure::write_panel_review;
-
 /// A rasterized render, and the colour it was cleared to.
 #[derive(Clone)]
 pub struct Canvas {
@@ -299,41 +295,13 @@ pub fn render_with_pointer(
     render_at_pointer(super::Theme::default(), size, Some(pointer), pass)
 }
 
-/// [`render_with_pointer`] under an explicit theme, for a surface that is
-/// placed by the pointer rather than merely hovered by it: an in-canvas entry
-/// sits where the click was, so a render of one needs both the pointer and
-/// the mode it is reviewed in.
-pub fn render_with_pointer_themed(
-    theme: super::Theme,
-    size: Vec2,
-    pointer: egui::Pos2,
-    pass: impl FnMut(&mut egui::Ui, Color32),
-) -> Canvas {
-    render_at_pointer(theme, size, Some(pointer), pass)
-}
-
 fn render_at_pointer(
     theme: super::Theme,
     size: Vec2,
     pointer: Option<egui::Pos2>,
-    pass: impl FnMut(&mut egui::Ui, Color32),
-) -> Canvas {
-    render_with_output(theme, size, pointer, false, pass).0
-}
-
-/// [`render_at_pointer`], returning the rasterized pass's own output too, with
-/// the accessibility tree published when `accesskit` asks for it.
-fn render_with_output(
-    theme: super::Theme,
-    size: Vec2,
-    pointer: Option<egui::Pos2>,
-    accesskit: bool,
     mut pass: impl FnMut(&mut egui::Ui, Color32),
-) -> (Canvas, egui::FullOutput) {
+) -> Canvas {
     let ctx = egui::Context::default();
-    if accesskit {
-        ctx.enable_accesskit();
-    }
     // egui otherwise takes the operating system from the compiling target,
     // and surfaces read it into what they paint (a shortcut keycap says
     // "Cmd K" on macOS and "Ctrl K" elsewhere). A render must come out the
@@ -366,8 +334,7 @@ fn render_with_output(
         let _ = run();
     }
     let output = run();
-    let canvas = rasterize_onto(&ctx, size, background, &output);
-    (canvas, output)
+    rasterize_onto(&ctx, size, background, &output)
 }
 
 /// Rasterize the last pass of a context the caller drove itself.
