@@ -48,7 +48,7 @@ use crate::workbench::slots::{
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-pub(crate) use design_checks::DesignCheckStatus;
+pub(crate) use design_checks::{DesignCheckStatus, model_design_view, model_location_anchor};
 pub(crate) use design_history::{
     DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta, VerilogABuildSettingsHistoryEntry,
     VerilogAModuleBinding, publish_symbol_definition_candidate,

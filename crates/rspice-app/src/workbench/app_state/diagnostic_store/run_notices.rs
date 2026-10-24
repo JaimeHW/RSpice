@@ -456,7 +456,7 @@ impl Model {
         // route is, so a part on a later sheet brings that sheet forward.
         let route = located
             .and_then(|drawn| {
-                crate::schematic::view::violations::model_location_anchor(
+                crate::workbench::app_state::design_checks::model_location_anchor(
                     self,
                     review_markers,
                     &drawn.cell_view,

@@ -25,7 +25,9 @@ use super::model::{Model, SlotFacts};
 use super::waivers;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
+mod anchor;
 mod live;
+pub(crate) use anchor::{model_design_view, model_location_anchor};
 pub(in crate::workbench) use live::live_check_digest;
 
 /// Producer identity every schematic and electrical rule finding carries.
@@ -768,13 +770,8 @@ fn design_rule_records(
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
     let route_to = |location: &DrcLocation| {
         let (cell_view, location) = drawn_place(subject, location);
-        crate::schematic::view::violations::model_location_anchor(
-            model,
-            review_markers,
-            cell_view,
-            location,
-        )
-        .map(DiagnosticRoute::Anchor)
+        model_location_anchor(model, review_markers, cell_view, location)
+            .map(DiagnosticRoute::Anchor)
     };
     let mut records = result
         .violations()
