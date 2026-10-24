@@ -1882,9 +1882,24 @@ impl CanonicalDigitalPlan {
             // bit.
             let reads =
                 |condition: &super::digital::DigitalCheckCondition| four_state(condition.signal);
+            // A.7.5.3: a select names bits the signal has.
+            let selects = |event: &super::digital::DigitalCheckEvent| {
+                event.bits.is_none_or(|bits| {
+                    bits.width > 0
+                        && self.signal(event.signal).is_some_and(|signal| {
+                            bits.low
+                                .checked_add(bits.width)
+                                .is_some_and(|end| end <= signal.width)
+                        })
+                })
+            };
             if !std::iter::once(&check.reference)
                 .chain(&check.data)
-                .all(|event| four_state(event.signal) && event.condition.as_ref().is_none_or(reads))
+                .all(|event| {
+                    four_state(event.signal)
+                        && event.condition.as_ref().is_none_or(reads)
+                        && selects(event)
+                })
                 || !check.timestamp_condition.iter().all(reads)
                 || !check.timecheck_condition.iter().all(reads)
                 || check.notifier.is_some_and(|notifier| {
@@ -1895,8 +1910,9 @@ impl CanonicalDigitalPlan {
                 || check.exponent < precision
             {
                 return Err(error(
-                    "digital timing check names an undeclared or real signal, a notifier that \
-                     is no variable, or limits finer than the design's time grid",
+                    "digital timing check names an undeclared or real signal, bits its signal \
+                     does not have, a notifier that is no variable, or limits finer than the \
+                     design's time grid",
                 ));
             }
             // Section 15.5.1: delays that leave both limits non-negative

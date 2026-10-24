@@ -2647,9 +2647,10 @@ pub struct SpecifyPath {
 #[derive(Debug, Clone)]
 pub struct SpecifyTerminal {
     pub name: SmolStr,
-    /// The select written after the name. A module path and a timing check
-    /// event take the whole signal whatever it is; a delayed signal and the
-    /// signal it copies take a bit-select's bit (IEEE 1364-2005 A.7.5.2).
+    /// The select written after the name. A module path takes the whole
+    /// signal whatever it is; a timing check event takes the bits it selects,
+    /// and a delayed signal and the signal it copies a bit-select's bit (IEEE
+    /// 1364-2005 A.7.5.2 and A.7.5.3).
     pub select: Option<TerminalSelect>,
     pub span: Span,
 }
@@ -2662,8 +2663,15 @@ pub enum TerminalSelect {
         index: Box<Expression>,
         text: SmolStr,
     },
-    /// A part-select, constant or indexed.
-    Part,
+    /// A part-select (A.7.5.3 `constant_range_expression`): `[first:second]`,
+    /// or `[first +: second]` and `[first -: second]`, `indexed` saying
+    /// whether the indexed form ascends; and the select as written.
+    Part {
+        first: Box<Expression>,
+        second: Box<Expression>,
+        indexed: Option<bool>,
+        text: SmolStr,
+    },
 }
 
 /// A `PATHPULSE$` specparam (IEEE 1364-2005 section 14.6.1): the pulse

@@ -820,7 +820,7 @@ fn lower_with_analog_variables(
         .map_err(|diagnostic| vec![diagnostic])?;
         checks::lower_timing_checks(
             frame_checks,
-            (scope, instance),
+            (scope, instance, &signals),
             constants,
             timing.precision_exponent,
             (&mut timing_checks, &mut paths),

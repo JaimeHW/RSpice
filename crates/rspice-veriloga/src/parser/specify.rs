@@ -345,34 +345,43 @@ impl Parser<'_> {
         }
     }
 
-    /// One terminal: a name with an optional bit- or part-select, which
-    /// names the whole port.
+    /// One terminal: a name with an optional bit- or part-select (A.7.5.3
+    /// `constant_range_expression`).
     fn parse_specify_terminal(&mut self, context: &str) -> Result<SpecifyTerminal, ParseError> {
         let span = self.current_span();
         let name = self.expect_identifier(context)?;
         let mut select = None;
         if self.match_token(TokenKind::LBracket) {
             let start = self.pos;
-            let index = self.parse_expression()?;
-            select = Some(if self.check(TokenKind::RBracket) {
-                TerminalSelect::Bit {
-                    text: self.written_since(start).into(),
-                    index: Box::new(index),
+            let first = Box::new(self.parse_expression()?);
+            let first_text = self.written_since(start);
+            let indexed = self.indexed_part_select_follows();
+            let operator = match indexed {
+                Some(true) => "+:",
+                Some(false) => "-:",
+                None => ":",
+            };
+            if indexed.is_some() {
+                self.advance();
+            }
+            select = Some(if indexed.is_some() || self.check(TokenKind::Colon) {
+                self.advance();
+                let second_start = self.pos;
+                let second = Box::new(self.parse_expression()?);
+                TerminalSelect::Part {
+                    first,
+                    second,
+                    indexed,
+                    text: format!("{first_text}{operator}{}", self.written_since(second_start))
+                        .into(),
                 }
             } else {
-                TerminalSelect::Part
+                TerminalSelect::Bit {
+                    text: first_text.into(),
+                    index: first,
+                }
             });
-            let mut depth = 1;
-            while depth > 0 {
-                if self.at_end() {
-                    return Err(self.error(ParseErrorKind::UnexpectedEof));
-                }
-                match self.advance().kind {
-                    TokenKind::LBracket => depth += 1,
-                    TokenKind::RBracket => depth -= 1,
-                    _ => {}
-                }
-            }
+            self.expect(TokenKind::RBracket)?;
         }
         Ok(SpecifyTerminal {
             name: name.into(),
@@ -659,7 +668,7 @@ impl Parser<'_> {
                 continue;
             };
             let source = &source.terminal;
-            if matches!(source.select, Some(TerminalSelect::Part)) {
+            if matches!(source.select, Some(TerminalSelect::Part { .. })) {
                 return Err(refusal(
                     "`specify` timing check",
                     format!(

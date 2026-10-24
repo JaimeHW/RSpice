@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// naming `instance` (empty for the compiled module itself).
 pub(super) fn lower_timing_checks(
     checks: &[SpecifyTimingCheck],
-    (scope, instance): (&HashMap<&str, DigitalSignalId>, &str),
+    (scope, instance, signals): (&HashMap<&str, DigitalSignalId>, &str, &[DigitalSignal]),
     constants: (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
     precision: i8,
     (lowered, paths): (&mut Vec<DigitalTimingCheck>, &mut Vec<DigitalModulePath>),
@@ -44,10 +44,16 @@ pub(super) fn lower_timing_checks(
                 .transpose()
         };
         let event = |event: &TimingCheckEvent| -> Result<_, DigitalLoweringDiagnostic> {
+            let signal = resolve(&event.terminal.name, event.terminal.span)?;
             Ok(DigitalCheckEvent {
-                signal: resolve(&event.terminal.name, event.terminal.span)?,
+                signal,
                 edges: event.edges,
                 condition: condition(event.condition.as_ref())?,
+                bits: selected_bits(
+                    &event.terminal,
+                    signals.iter().find(|declared| declared.id == signal),
+                    constants,
+                )?,
             })
         };
         let signed = matches!(
@@ -109,6 +115,15 @@ pub(super) fn lower_timing_checks(
                 Some(edge) => format!("{edge} {}", event.terminal.name),
                 None => event.terminal.name.to_string(),
             };
+            if let Some(
+                crate::ast::TerminalSelect::Bit { text: select, .. }
+                | crate::ast::TerminalSelect::Part { text: select, .. },
+            ) = &event.terminal.select
+            {
+                text.push('[');
+                text.push_str(select);
+                text.push(']');
+            }
             if let Some(condition) = &event.condition {
                 text.push_str(" &&& ");
                 text.push_str(&condition.text);
@@ -352,6 +367,97 @@ fn delayed_signal_delays(
         .into_iter()
         .map(|(net, variable)| (net, delays[variable]))
         .collect()
+}
+
+/// The storage bits a timing check event's bit- or part-select names (IEEE
+/// 1364-2005 A.7.5.3 `constant_range_expression`), or `None` for a terminal
+/// that names its whole signal. The event is then a change of those bits
+/// only, and an edge of the least significant of them.
+///
+/// `[i +: w]` names indices `i` to `i + w - 1` and `[i -: w]` indices
+/// `i - w + 1` to `i` (section 5.2.1), whichever way the signal is declared;
+/// `[m:l]` must run the way the declaration does.
+fn selected_bits(
+    terminal: &crate::ast::SpecifyTerminal,
+    signal: Option<&DigitalSignal>,
+    (resolved, time_scale): (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
+) -> Result<Option<crate::canonical_ir::digital::DigitalCheckBits>, DigitalLoweringDiagnostic> {
+    use crate::ast::TerminalSelect;
+    let (Some(select), Some(signal)) = (&terminal.select, signal) else {
+        return Ok(None);
+    };
+    let refuse = |what: String| {
+        DigitalLoweringDiagnostic::refusal(
+            format!(
+                "timing check event `{}` {what} (IEEE 1364-2005 A.7.5.3 and section 5.2.1)",
+                terminal.name
+            ),
+            terminal.span.into(),
+        )
+    };
+    let index = |expression: &Expression| match constants::scalar(expression, resolved, time_scale)
+    {
+        Some(Integer(value)) => Ok(value),
+        _ => Err(refuse(
+            "selects bits by an expression that is not a constant integer".to_string(),
+        )),
+    };
+    let range = signal.declared_range();
+    let (left, right, text) = match select {
+        TerminalSelect::Bit { index: at, text } => {
+            let at = index(at)?;
+            (at, at, text)
+        }
+        TerminalSelect::Part {
+            first,
+            second,
+            indexed,
+            text,
+        } => {
+            let (base, other) = (index(first)?, index(second)?);
+            match indexed {
+                None => {
+                    if base != other && (base > other) != (range.msb > range.lsb) {
+                        return Err(refuse(format!(
+                            "selects `[{text}]` against the direction of its declaration \
+                             `[{}:{}]`",
+                            range.msb, range.lsb
+                        )));
+                    }
+                    (base, other, text)
+                }
+                Some(ascending) => {
+                    if other <= 0 {
+                        return Err(refuse(format!(
+                            "selects `[{text}]`, whose width is not positive"
+                        )));
+                    }
+                    let span = other - 1;
+                    let far = if *ascending {
+                        base.checked_add(span)
+                    } else {
+                        base.checked_sub(span)
+                    };
+                    let Some(far) = far else {
+                        return Err(refuse(format!("selects `[{text}]` beyond any index")));
+                    };
+                    (base, far, text)
+                }
+            }
+        }
+    };
+    if !range.contains(left) || !range.contains(right) {
+        return Err(refuse(format!(
+            "selects `[{text}]`, outside its declaration `[{}:{}]`",
+            range.msb, range.lsb
+        )));
+    }
+    let (first, second) = (range.position_of(left), range.position_of(right));
+    let (low, high) = (first.min(second), first.max(second));
+    Ok(Some(crate::canonical_ir::digital::DigitalCheckBits {
+        low: u32::try_from(low).map_err(|_| refuse(format!("selects `[{text}]`")))?,
+        width: u32::try_from(high - low + 1).map_err(|_| refuse(format!("selects `[{text}]`")))?,
+    }))
 }
 
 /// A timing check limit in ticks of `precision`, signed where the check

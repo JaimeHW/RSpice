@@ -672,3 +672,94 @@ endmodule
     expected.extend(violations(check, &[11]));
     assert_eq!(warnings(&report), expected);
 }
+
+/// A.7.5.3: an event on a bit-select is a change of that bit only. With
+/// `$setup` violated for -3 < rel < 0, `d[0]` changing at 10 is no event of
+/// `d[1]`, so the edge at 12 violates only the whole-signal check; `d[1]` at
+/// 23 against the edge at 24 (rel -1) violates both; `d[2]` at 30 against
+/// the edge at 31 again only the whole-signal one.
+#[test]
+fn a_bit_select_event_is_a_change_of_that_bit() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module b(input [3:0] d, input c);
+  specify
+    $setup(d, posedge c, 3);
+    $setup(d[1], posedge c, 3);
+  endspecify
+endmodule
+module t;
+  reg [3:0] d; reg c;
+  b u(d, c);
+  initial begin
+    d = 0; c = 0;
+    #10 d = 4'b0001;
+    #2 c = 1;
+    #5 c = 0;
+    #6 d = 4'b0011;
+    #1 c = 1;
+    #5 c = 0;
+    #1 d = 4'b0111;
+    #1 c = 1;
+    #5 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    let mut expected = violations("$setup(d, posedge c, 3)", &[12]);
+    expected.extend(violations("$setup(d, posedge c, 3)", &[24]));
+    expected.extend(violations("$setup(d[1], posedge c, 3)", &[24]));
+    expected.extend(violations("$setup(d, posedge c, 3)", &[31]));
+    assert_eq!(warnings(&report), expected);
+}
+
+/// A.7.5.3 and section 5.2.1: a part-select's event is a change of its bits,
+/// and its edge one of the least significant of them. `d[2:1]`, `d[1+:2]`
+/// and `d[2-:2]` all name bits 2 and 1 of `[3:0]`. With `$hold` violated
+/// for 0 <= rel < 2 after the rising edges at 10, 20 and 30: `d[2]` at 11
+/// (rel 1) changes the part but is no edge of its low bit `d[1]`; `d[1]`
+/// rising at 21 (rel 1) is both; `d[0]` at 31 is neither.
+#[test]
+fn a_part_select_event_is_a_change_of_its_bits() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module p(input [3:0] d, input c);
+  specify
+    $hold(posedge c, d[2:1], 2);
+    $hold(posedge c, d[1+:2], 2);
+    $hold(posedge c, d[2-:2], 2);
+    $hold(posedge c, posedge d[2:1], 2);
+  endspecify
+endmodule
+module t;
+  reg [3:0] d; reg c;
+  p u(d, c);
+  initial begin
+    d = 0; c = 0;
+    #10 c = 1;
+    #1 d = 4'b0100;
+    #4 c = 0;
+    #5 c = 1;
+    #1 d = 4'b0110;
+    #4 c = 0;
+    #5 c = 1;
+    #1 d = 4'b0111;
+    #5 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    let parts = ["d[2:1]", "d[1+:2]", "d[2-:2]"];
+    let mut expected = Vec::new();
+    for time in [11, 21] {
+        for part in parts {
+            expected.extend(violations(&format!("$hold(posedge c, {part}, 2)"), &[time]));
+        }
+        if time == 21 {
+            expected.extend(violations("$hold(posedge c, posedge d[2:1], 2)", &[21]));
+        }
+    }
+    assert_eq!(warnings(&report), expected);
+}

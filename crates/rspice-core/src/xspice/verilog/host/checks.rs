@@ -346,10 +346,15 @@ fn counts(
     let TransitionValues::FourState { previous, next } = &transition.values else {
         return false;
     };
-    let changed = match event.edges {
-        None => previous != next,
-        Some(edges) => {
-            let (from, to) = (previous.bit(0), next.bit(0));
+    // A.7.5.3: a select's event is a change of its bits, and an edge of the
+    // least significant of them.
+    let low = event.bits.map_or(0, |bits| bits.low);
+    let changed = match (event.edges, event.bits) {
+        (None, None) => previous != next,
+        (None, Some(bits)) => (bits.low..bits.low.saturating_add(bits.width))
+            .any(|bit| previous.bit(bit) != next.bit(bit)),
+        (Some(edges), _) => {
+            let (from, to) = (previous.bit(low), next.bit(low));
             from != to && edges & (1 << super::paths::transition_index(from, to)) != 0
         }
     };

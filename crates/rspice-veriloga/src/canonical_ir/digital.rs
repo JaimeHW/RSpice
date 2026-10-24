@@ -1229,13 +1229,26 @@ pub enum DigitalTimingCheckKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalCheckEvent {
     pub signal: DigitalSignalId,
-    /// The transitions of the signal's least significant bit that count,
-    /// one bit each in table 14-3's order; `None` counts every change.
+    /// The transitions of the least significant bit of `bits` that count,
+    /// one bit each in table 14-3's order; `None` counts every change of
+    /// `bits`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edges: Option<u16>,
     /// The `&&&` condition: the event counts only while it holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition: Option<DigitalCheckCondition>,
+    /// The bits a bit- or part-select of the terminal names (A.7.5.3);
+    /// `None` for the whole signal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits: Option<DigitalCheckBits>,
+}
+
+/// Bits `low` up to `low + width` of a signal's storage, `low` its least
+/// significant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalCheckBits {
+    pub low: u32,
+    pub width: u32,
 }
 
 /// A timing check condition (IEEE 1364-2005 section 15.6) on a signal's
