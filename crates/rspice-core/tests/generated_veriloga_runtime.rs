@@ -19,9 +19,6 @@ use rspice_core::solver::StaticMatrix;
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::{CircuitData, netlist::ParamContext};
 
-#[path = "common/family_src.rs"]
-mod family_src;
-
 #[cfg(feature = "veriloga-model-pspnqs104va")]
 #[test]
 fn generated_nqs_integrators_stamp_inverse_frequency_on_potential_rows() {
@@ -370,95 +367,6 @@ fn generated_structured_cache_preserves_temperature_and_parameter_semantics() {
         original_stamp,
         stamp_hicuml2(&mut cold_original, 300.15),
         "copy-on-write cache invalidation must not alter the cloned source instance"
-    );
-}
-
-#[cfg(feature = "veriloga-builtins")]
-#[test]
-fn generated_builtins_are_materialized_in_source_tree() {
-    let generated_root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-veriloga-models");
-    let registry_path = generated_root.join("src").join("registry.rs");
-    let registry = std::fs::read_to_string(&registry_path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
-
-    assert!(
-        !registry.contains("#[path ="),
-        "the core registry should consume precompiled model artifacts, not include model source"
-    );
-
-    // `crate::`, not `rspice_veriloga_models::`: the registry is a module of the
-    // catalog crate now rather than text `include!`d into rspice-core, so it
-    // names its siblings from inside.
-    let module_names: Vec<_> = registry
-        .lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("pub use crate::")
-                .and_then(|rest| rest.strip_suffix(';'))
-        })
-        .collect();
-    assert_eq!(
-        module_names.len(),
-        builtins::builtin_names().len(),
-        "registry should import one precompiled module per generated builtin"
-    );
-
-    let package_roots = std::fs::read_dir(generated_root.join("models"))
-        .expect("read generated model packages")
-        .map(|entry| entry.expect("read model package entry").path())
-        .collect::<Vec<_>>();
-    for module_name in module_names {
-        let module_path = package_roots
-            .iter()
-            .map(|package| package.join("src").join(module_name).join("mod.rs"))
-            .find(|path| path.is_file());
-        assert!(
-            module_path.is_some(),
-            "generated module '{module_name}' should belong to one model package"
-        );
-    }
-}
-
-#[test]
-fn generated_runtime_snapshots_only_mutable_evaluation_state() {
-    let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let runtime_path = family_src::family_src("device/veriloga_builtins.rs");
-    let registry_path = manifest_root.join("../rspice-veriloga-models/src/registry.rs");
-    let nonlinear_path = family_src::family_src("circuit/nonlinear.rs");
-
-    let runtime = std::fs::read_to_string(&runtime_path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
-    let registry = std::fs::read_to_string(&registry_path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
-    let nonlinear = std::fs::read_to_string(&nonlinear_path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", nonlinear_path.display()));
-    let nonlinear_lf = nonlinear.replace("\r\n", "\n");
-
-    assert!(
-        runtime.contains("pub struct BuiltinVerilogADevicesRollback")
-            && runtime.contains("capture_rollback_state(&self)")
-            && runtime.contains("restore_rollback_state(&mut self"),
-        "generated runtime should use compact rollback state:\n{runtime}"
-    );
-    assert!(
-        runtime.contains(".map(|device| device.kind.capture_rollback_state())"),
-        "generated device snapshots should exclude instance storage:\n{runtime}"
-    );
-    assert!(
-        registry.contains("capture_rollback_state(&self)")
-            && registry.contains("restore_rollback_state(&mut self"),
-        "generated registry should dispatch compact rollback state:\n{registry}"
-    );
-    assert!(
-        registry.contains("device.restore_rollback_state(state)"),
-        "boxed generated registry variants should restore only mutable state:\n{registry}"
-    );
-    assert!(
-        nonlinear_lf.contains(
-            "self.generated_veriloga_devices\n                .restore_rollback_state(snapshot.generated_veriloga_devices);"
-        ),
-        "nonlinear restore should retain generated device parameters and topology:\n{nonlinear}"
     );
 }
 

@@ -16,10 +16,8 @@
 //! Two kinds have no deck. `CacheCorrupt` needs a compiled artifact whose
 //! digest disagrees with its payload and `Internal` needs the engine to fail a
 //! step it expected to complete; a deck that produced either would be a bug
-//! report, not a fixture. Both are still classified — see
-//! [`the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures`] —
-//! and the sites that raise them are held by the source scan in
-//! `engine::builder::elaboration_scan`.
+//! report, not a fixture. Both are still classified: see
+//! [`the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures`].
 #![cfg(feature = "veriloga")]
 
 use rspice_core::{ElaborationError, ElaborationErrorKind, Engine, Netlist, SimulationError};

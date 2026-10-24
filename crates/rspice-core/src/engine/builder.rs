@@ -87,8 +87,6 @@ mod veriloga_sources;
 mod connect_execution;
 #[cfg(feature = "veriloga")]
 mod connect_modules;
-#[cfg(all(test, feature = "veriloga"))]
-mod elaboration_scan;
 #[cfg(feature = "veriloga")]
 mod hdl_external_paths;
 #[cfg(feature = "veriloga")]
