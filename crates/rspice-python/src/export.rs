@@ -28,6 +28,7 @@ use std::io;
 use std::path::Path;
 
 use rspice_core::Complex64;
+use rspice_core::io::raw_export;
 use rspice_output::{AtomicArtifactError, write_atomic};
 
 // The Touchstone writer lives in core so the CLI and the desktop runner emit
@@ -137,77 +138,43 @@ impl RawPlot {
         Ok(points)
     }
 
-    fn header(&self, points: usize) -> String {
-        let mut header = String::new();
-        let _ = writeln!(header, "Title: {}", self.title);
-        let _ = writeln!(
-            header,
-            "Date: {}",
-            self.timestamp.clone().unwrap_or_else(asctime_utc_now)
-        );
-        let _ = writeln!(header, "Plotname: {}", self.plot_name);
-        let _ = writeln!(
-            header,
-            "Flags: {}",
-            if self.complex { "complex" } else { "real" }
-        );
-        let _ = writeln!(header, "No. Variables: {}", self.variables.len());
-        let _ = writeln!(header, "No. Points: {points}");
-        let _ = writeln!(header, "Variables:");
-        for (index, variable) in self.variables.iter().enumerate() {
-            let _ = writeln!(
-                header,
-                "\t{index}\t{}\t{}",
-                variable.name,
-                variable.kind.keyword()
-            );
-        }
-        header
-    }
-
-    /// ASCII raw text. Complex values are written `re,im`, as ngspice does.
-    fn to_ascii(&self) -> Result<String, String> {
+    /// The plot in `format`, written by the engine's rawfile writer.
+    fn write(&self, format: RawFormat) -> Result<Vec<u8>, String> {
         let points = self.validate()?;
-        let mut output = self.header(points);
-        let _ = writeln!(output, "Values:");
-        for point in 0..points {
-            for (column, series) in self.series.iter().enumerate() {
-                let Some(&value) = series.get(point) else {
-                    continue;
-                };
-                let rendered = if self.complex {
-                    format!("{},{}", format_float(value.re), format_float(value.im))
-                } else {
-                    format_float(value.re)
-                };
-                if column == 0 {
-                    let _ = write!(output, "{point}\t{rendered}");
-                } else {
-                    let _ = write!(output, "\t{rendered}");
-                }
-            }
-            output.push('\n');
-        }
-        Ok(output)
-    }
-
-    /// Binary raw bytes: the same header, then little-endian f64 values.
-    fn to_binary(&self) -> Result<Vec<u8>, String> {
-        let points = self.validate()?;
-        let mut output = self.header(points).into_bytes();
-        output.extend_from_slice(b"Binary:\n");
-        for point in 0..points {
-            for series in &self.series {
-                let Some(&value) = series.get(point) else {
-                    continue;
-                };
-                output.extend_from_slice(&value.re.to_le_bytes());
-                if self.complex {
-                    output.extend_from_slice(&value.im.to_le_bytes());
-                }
-            }
-        }
-        Ok(output)
+        let date = self.timestamp.clone().unwrap_or_else(asctime_utc_now);
+        let variables: Vec<(&str, &str)> = self
+            .variables
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.kind.keyword()))
+            .collect();
+        let layout = raw_export::RawPlotLayout {
+            title: &self.title,
+            date: &date,
+            plot_name: &self.plot_name,
+            options: &[],
+            complex: self.complex,
+            variables: &variables,
+            points,
+        };
+        let format = match format {
+            RawFormat::Ascii => raw_export::RawFormat::Ascii,
+            RawFormat::Binary => raw_export::RawFormat::Binary,
+        };
+        let mut bytes = Vec::new();
+        raw_export::write_raw_plot(
+            &mut bytes,
+            &layout,
+            format,
+            |writer, value| writer.write_all(format_float(value).as_bytes()),
+            |point, variable| {
+                self.series
+                    .get(variable)
+                    .and_then(|series| series.get(point))
+                    .map_or((0.0, 0.0), |value| (value.re, value.im))
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(bytes)
     }
 }
 
@@ -230,10 +197,7 @@ impl RawFormat {
 
 /// Serialize a plot in the requested encoding.
 pub(crate) fn raw_bytes(plot: &RawPlot, format: RawFormat) -> Result<Vec<u8>, String> {
-    match format {
-        RawFormat::Ascii => plot.to_ascii().map(String::into_bytes),
-        RawFormat::Binary => plot.to_binary(),
-    }
+    plot.write(format)
 }
 
 //=============================================================================
@@ -465,12 +429,13 @@ mod tests {
             timestamp: None,
         };
 
-        let ascii = plot.to_ascii().expect("ascii raw");
+        let ascii = String::from_utf8(raw_bytes(&plot, RawFormat::Ascii).expect("ascii raw"))
+            .expect("utf-8");
         assert!(ascii.contains("Flags: real"));
         assert!(ascii.contains("No. Variables: 2"));
         assert!(ascii.contains("No. Points: 2"));
 
-        let binary = plot.to_binary().expect("binary raw");
+        let binary = raw_bytes(&plot, RawFormat::Binary).expect("binary raw");
         let marker = b"Binary:\n";
         let start = binary
             .windows(marker.len())
@@ -496,11 +461,12 @@ mod tests {
             complex: true,
             timestamp: Some("Thu Jan 1 00:00:00 1970".to_string()),
         };
-        let ascii = plot.to_ascii().expect("ascii raw");
+        let ascii = String::from_utf8(raw_bytes(&plot, RawFormat::Ascii).expect("ascii raw"))
+            .expect("utf-8");
         assert!(ascii.contains("Flags: complex"));
         assert!(ascii.lines().last().expect("value line").contains(','));
 
-        let binary = plot.to_binary().expect("binary raw");
+        let binary = raw_bytes(&plot, RawFormat::Binary).expect("binary raw");
         let marker = b"Binary:
 ";
         let start = binary
@@ -531,7 +497,7 @@ mod tests {
             complex: false,
             timestamp: None,
         };
-        assert!(plot.to_ascii().is_err());
+        assert!(raw_bytes(&plot, RawFormat::Ascii).is_err());
     }
 
     #[test]

@@ -405,30 +405,15 @@ impl RawExporter {
     /// Write to any writer
     pub fn write<W: Write + ?Sized>(&self, writer: &mut W, format: RawFormat) -> io::Result<()> {
         self.validate_data_shape()?;
-        self.write_header(writer)?;
-
-        match format {
-            RawFormat::Binary => {
-                writeln!(writer, "Binary:")?;
-                for point in &self.data {
-                    for &value in point {
-                        writer.write_all(&value.to_le_bytes())?;
-                    }
-                }
-            }
-            RawFormat::Ascii => {
-                writeln!(writer, "Values:")?;
-                for (i, point) in self.data.iter().enumerate() {
-                    write!(writer, "{}", i)?;
-                    for &value in point {
-                        write!(writer, "\t{:.17e}", value)?;
-                    }
-                    writeln!(writer)?;
-                }
-            }
-        }
-
-        Ok(())
+        self.with_layout(|layout| {
+            write_raw_plot(
+                writer,
+                layout,
+                format,
+                write_raw_exponent,
+                |point, variable| (self.data[point][variable], 0.0),
+            )
+        })
     }
 
     /// Write Xyce-compatible ASCII RAW data.
@@ -440,7 +425,7 @@ impl RawExporter {
     /// and typed variable schema.
     pub fn write_xyce_ascii<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
         self.validate_data_shape()?;
-        self.write_header(writer)?;
+        self.with_layout(|layout| write_raw_header(writer, layout))?;
         writeln!(writer, "Values:")?;
         for (index, point) in self.data.iter().enumerate() {
             let Some((axis, signals)) = point.split_first() else {
@@ -457,27 +442,30 @@ impl RawExporter {
         Ok(())
     }
 
-    fn write_header<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, "Title: {}", self.title)?;
-        writeln!(writer, "Date: {}", chrono_date())?;
-        writeln!(writer, "Plotname: {}", self.plot_name)?;
+    /// This exporter's header, stamped now, handed to `write`.
+    fn with_layout<R>(
+        &self,
+        write: impl FnOnce(&RawPlotLayout<'_>) -> io::Result<R>,
+    ) -> io::Result<R> {
+        let date = chrono_date();
+        let mut options = Vec::new();
         if let Some(metadata) = &self.metadata {
-            crate::io::ltspice_raw::write_raw_metadata_options(writer, metadata)?;
+            crate::io::ltspice_raw::write_raw_metadata_options(&mut options, metadata)?;
         }
-        writeln!(writer, "Flags: real")?;
-        writeln!(writer, "No. Variables: {}", self.variables.len())?;
-        writeln!(writer, "No. Points: {}", self.data.len())?;
-        writeln!(writer, "Variables:")?;
-        for (index, variable) in self.variables.iter().enumerate() {
-            writeln!(
-                writer,
-                "\t{}\t{}\t{}",
-                index,
-                variable.name,
-                variable.var_type.as_str()
-            )?;
-        }
-        Ok(())
+        let variables: Vec<(&str, &str)> = self
+            .variables
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.var_type.as_str()))
+            .collect();
+        write(&RawPlotLayout {
+            title: &self.title,
+            date: &date,
+            plot_name: &self.plot_name,
+            options: &options,
+            complex: false,
+            variables: &variables,
+            points: self.data.len(),
+        })
     }
 
     fn validate_data_shape(&self) -> io::Result<()> {
@@ -492,6 +480,97 @@ impl RawExporter {
         }
         Ok(())
     }
+}
+
+/// One plot as its rawfile header declares it.
+pub struct RawPlotLayout<'a> {
+    pub title: &'a str,
+    /// The `Date:` text.
+    pub date: &'a str,
+    pub plot_name: &'a str,
+    /// Inert `Option:` lines, already rendered, written between `Plotname:`
+    /// and `Flags:`.
+    pub options: &'a [u8],
+    /// `Flags: complex`: every value is a real/imaginary pair.
+    pub complex: bool,
+    /// The `(name, type)` of every variable, scale first.
+    pub variables: &'a [(&'a str, &'a str)],
+    pub points: usize,
+}
+
+/// How an ASCII plot spells one number.
+pub type RawNumberFormat = fn(&mut dyn Write, Value) -> io::Result<()>;
+
+/// Every bit of the value, `{:.17e}`, as the engine and the CLI write it.
+pub fn write_raw_exponent(writer: &mut dyn Write, value: Value) -> io::Result<()> {
+    write!(writer, "{value:.17e}")
+}
+
+/// Write one plot: its header, then `layout.points` rows of
+/// `value(point, variable)` as `(real, imaginary)`.
+///
+/// A real plot writes only the real half. A complex one writes both, as two
+/// little-endian doubles or as `re,im` in ASCII.
+pub fn write_raw_plot<W: Write + ?Sized>(
+    writer: &mut W,
+    layout: &RawPlotLayout<'_>,
+    format: RawFormat,
+    number: RawNumberFormat,
+    mut value: impl FnMut(usize, usize) -> (Value, Value),
+) -> io::Result<()> {
+    let mut writer = writer;
+    write_raw_header(&mut writer, layout)?;
+    let variables = layout.variables.len();
+    match format {
+        RawFormat::Binary => {
+            writeln!(writer, "Binary:")?;
+            for point in 0..layout.points {
+                for variable in 0..variables {
+                    let (re, im) = value(point, variable);
+                    writer.write_all(&re.to_le_bytes())?;
+                    if layout.complex {
+                        writer.write_all(&im.to_le_bytes())?;
+                    }
+                }
+            }
+        }
+        RawFormat::Ascii => {
+            writeln!(writer, "Values:")?;
+            for point in 0..layout.points {
+                write!(writer, "{point}")?;
+                for variable in 0..variables {
+                    let (re, im) = value(point, variable);
+                    writer.write_all(b"\t")?;
+                    number(&mut writer, re)?;
+                    if layout.complex {
+                        writer.write_all(b",")?;
+                        number(&mut writer, im)?;
+                    }
+                }
+                writeln!(writer)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_raw_header<W: Write + ?Sized>(
+    writer: &mut W,
+    layout: &RawPlotLayout<'_>,
+) -> io::Result<()> {
+    writeln!(writer, "Title: {}", layout.title)?;
+    writeln!(writer, "Date: {}", layout.date)?;
+    writeln!(writer, "Plotname: {}", layout.plot_name)?;
+    writer.write_all(layout.options)?;
+    let flags = if layout.complex { "complex" } else { "real" };
+    writeln!(writer, "Flags: {flags}")?;
+    writeln!(writer, "No. Variables: {}", layout.variables.len())?;
+    writeln!(writer, "No. Points: {}", layout.points)?;
+    writeln!(writer, "Variables:")?;
+    for (index, (name, var_type)) in layout.variables.iter().enumerate() {
+        writeln!(writer, "\t{index}\t{name}\t{var_type}")?;
+    }
+    Ok(())
 }
 
 fn invalid_data(message: impl Into<String>) -> io::Error {
