@@ -2,12 +2,10 @@
 
 mod codec;
 mod error;
-mod library;
 pub use codec::{
     CheckpointInspection, Observations, StudyMonteCarloCheckpoint, failed_observations,
 };
 pub use error::CheckpointError;
-pub use library::MonteCarloCheckpointLibrary;
 
 use crate::analysis_type::AnalysisType;
 use crate::family_metadata::AnalysisResultFamilyMetadata;
@@ -18,6 +16,13 @@ use rspice_core::{NoAbort, ResourceLimits};
 use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::sync::Arc;
+
+crate::checkpoint_library::checkpoint_library!(
+    MonteCarloCheckpointLibrary,
+    ImportedMonteCarloCheckpoint,
+    MonteCarloCheckpointEvidence,
+    "Monte Carlo"
+);
 
 /// The retained analysis facts required to admit a trial journal.
 pub struct MonteCarloCheckpointValidationRef<'a> {

@@ -6,8 +6,12 @@ use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::sync::Arc;
 
-mod library;
-pub use library::{ImportedTransientCheckpoint, TransientCheckpointLibrary};
+crate::checkpoint_library::checkpoint_library!(
+    TransientCheckpointLibrary,
+    ImportedTransientCheckpoint,
+    TransientCheckpointEvidence,
+    "transient"
+);
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransientCheckpointError {

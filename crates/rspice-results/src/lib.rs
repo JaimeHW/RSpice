@@ -12,6 +12,8 @@ pub mod analysis_tag;
 pub mod analysis_type;
 pub mod bode;
 pub mod calculator;
+#[cfg(feature = "engine-evidence")]
+mod checkpoint_library;
 pub mod convergence_attribution;
 #[cfg(feature = "engine-evidence")]
 pub mod convergence_quality;
