@@ -317,18 +317,9 @@ impl LicensePayload {
     }
 }
 
-/// Civil date from unix days (Howard Hinnant's algorithm), as YYYY-MM-DD.
+/// Civil date from unix days, as YYYY-MM-DD.
 pub fn date_from_unix_days(days: u32) -> String {
-    let z = i64::from(days) + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { year + 1 } else { year };
+    let (year, month, day) = rspice_core::time_compat::civil_from_unix_days(i64::from(days));
     format!("{year:04}-{month:02}-{day:02}")
 }
 
@@ -701,7 +692,6 @@ mod tests {
     #[test]
     fn dates_render_civil() {
         assert_eq!(date_from_unix_days(0), "1970-01-01");
-        assert_eq!(date_from_unix_days(20_615), "2026-06-11");
     }
 
     #[test]

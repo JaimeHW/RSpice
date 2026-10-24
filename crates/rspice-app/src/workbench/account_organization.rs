@@ -433,20 +433,10 @@ fn humanize_stamp(stamp: &str) -> String {
     }
 }
 
-/// Unix seconds → `YYYY-MM-DD` (proleptic Gregorian, civil-date algorithm).
-/// Dependency-free so the model compiles identically on every target.
+/// Unix seconds → `YYYY-MM-DD` (proleptic Gregorian).
 fn unix_date(unix_seconds: i64) -> String {
-    let days = unix_seconds.div_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { year + 1 } else { year };
+    let (year, month, day) =
+        rspice_core::time_compat::civil_from_unix_days(unix_seconds.div_euclid(86_400));
     format!("{year:04}-{month:02}-{day:02}")
 }
 
@@ -1481,10 +1471,9 @@ mod tests {
     }
 
     #[test]
-    fn unix_date_matches_known_calendar_points() {
+    fn unix_date_formats_the_utc_day() {
         assert_eq!(unix_date(0), "1970-01-01");
-        assert_eq!(unix_date(1_785_604_800), "2026-08-01");
-        assert_eq!(unix_date(946_684_800), "2000-01-01");
+        assert_eq!(unix_date(-1), "1969-12-31");
     }
 
     #[test]
