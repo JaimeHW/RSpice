@@ -223,7 +223,8 @@ SLICE_RULES = [
     (W + r"simulation_analysis_tabs", "simulate"),
     # Top-level modules.
     (r"^state(\.rs$|/)", "model"),
-    (r"^(product|quantity|time_compat|source_revision|results|diagnostics|fixture_root|source_guard)(\.rs$|/)", "model"),
+    (r"^source_guard\.rs$", "shell"),
+    (r"^(product|quantity|time_compat|source_revision|results|diagnostics|fixture_root)(\.rs$|/)", "model"),
     (r"^simulation/dialog", "simulate"),
     (r"^simulation/(plan|placed_sources|stimulus_realize|table_route)", "model"),
     (r"^simulation(\.rs$|/)", "run"),
