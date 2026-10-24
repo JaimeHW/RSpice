@@ -114,12 +114,20 @@ def run(browser, fault, cancel_startup=False):
     if cancel_startup:
         browser.click("Stop", "button")
     fault.release.set()
-    retry_label = "Engine stopped" if cancel_startup else "Engine unavailable"
+    # A failed engine announces its severity before its state; a stopped one has none.
+    retry_label = "Engine stopped" if cancel_startup else "Error: Engine unavailable"
     wait_for(lambda: has_control(browser, retry_label), "retirement of the initial worker")
     wait_for(lambda: has_control(browser, "Run deck"), "termination of the queued run")
     browser.capture("retired")
     browser.click(retry_label, "button")
-    wait_for(lambda: has_control(browser, "Engine ready"), "explicit engine retry", 120)
+    # A ready engine has no status cell: the retry and starting cells leave, and
+    # the worker publishes its own readiness.
+    def ready():
+        labels = {control["label"] for control in controls(browser.snapshot())}
+        return (not labels & {retry_label, "Engine starting"}
+                and browser.script("return window.__RSPICE_SIM_WORKER_READY === true"))
+
+    wait_for(ready, "explicit engine retry", 120)
     if has_control(browser, "Stop"):
         raise AssertionError("Retrying engine startup queued a simulation")
     if not browser.script("return window.__RSPICE_SIM_WORKER_READY === true"):
@@ -130,8 +138,13 @@ def run(browser, fault, cancel_startup=False):
     # Prepared execution authorization is consumed by the first launch.
     browser.click("Validate source", "button")
     browser.click("Run deck", "button")
-    wait_for(lambda: any("Run 2" in control["value"] and "completed" in control["value"]
-                        for control in controls(browser.snapshot())), "the recovered run's results")
+    # A finished run is a DONE row in the Task log.
+    task_log = next(control for control in controls(browser.snapshot())
+                    if control["label"].startswith("Task log"))
+    browser.click(task_log["label"], task_log["role"])
+    wait_for(lambda: any(text.startswith("DONE · Run 2 ")
+                         for control in controls(browser.snapshot())
+                         for text in (control["label"], control["value"])), "the recovered run's results")
     browser.capture("completed")
     choose_command(browser, "Open recovery center")
     wait_for(lambda: has_control(browser, "Create checkpoint"), "the recovery workspace")
