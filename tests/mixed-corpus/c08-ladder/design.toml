@@ -27,7 +27,7 @@ today = "runs"
 [[variant]]
 name = "sv"
 families = ["vams-digital", "vams-analog", "sv-rnm"]
-today = "parse:P5"
+today = "runs"
 
 # Budgets are about five times the slower route's measured case time (tran:
 # tr 30 s interp, 19 s native; ac 0.2 s and its O5 run 0.6 s, floored at

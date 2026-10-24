@@ -1443,8 +1443,15 @@ fn printed_after(
 /// The mixed corpus's C12 testbench (`full`), its stop time, maximum step
 /// and startup mode.
 fn ldo_testbench() -> (Netlist, f64, f64, TransientStartupMode) {
+    corpus_transient("c12-ldo-tb/deck/full.tran.cir")
+}
+
+/// The mixed corpus's transient deck at `deck`, its stop time, maximum step
+/// and startup mode.
+fn corpus_transient(deck: &str) -> (Netlist, f64, f64, TransientStartupMode) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/mixed-corpus/c12-ldo-tb/deck/full.tran.cir");
+        .join("../../tests/mixed-corpus")
+        .join(deck);
     let netlist = Netlist::parse_file(&path)
         .unwrap_or_else(|error| panic!("{} parses: {error}", path.display()));
     let (step, stop, start, max_step, uic) = netlist
@@ -1543,6 +1550,41 @@ fn a_checkpointed_ldo_testbench_completes_at_its_finish() {
     assert_eq!(checkpointed_finish, finish);
     assert_runs_bit_for_bit(&plain, &checkpointed);
     assert_eq!(checkpointed_printed, printed);
+}
+
+/// The mixed corpus's C8 rung (d), the biquad on SystemVerilog real nettype
+/// nets (IEEE 1800-2017 section 6.6.7), runs bit for bit as rung (c), the
+/// same biquad on Verilog-AMS `wreal` nets: a real net with one driver
+/// carries the same values whichever way it is declared. Same accepted
+/// times, every node and branch, every event trace and every printed line.
+#[test]
+fn the_ladders_nettype_biquad_runs_bit_for_bit_as_its_wreal_twin() {
+    let run = |variant: &str| {
+        let (netlist, stop, max_step, startup) =
+            corpus_transient(&format!("c08-ladder/deck/{variant}.tran.cir"));
+        let (outcome, printed) = recorded(|engine, abort| {
+            engine.run_tran_with_startup_mode_and_abort(&netlist, stop, max_step, startup, abort)
+        });
+        match outcome {
+            Ok(rspice_core::SimulationOutcome::Completed(result)) => (result, printed),
+            Ok(rspice_core::SimulationOutcome::Finished { finish, .. }) => {
+                panic!("{variant} finished early: {finish:?}")
+            }
+            Err(error) => panic!("{variant} failed: {error}"),
+        }
+    };
+    let (wreal, wreal_printed) = run("wr");
+    let (nettype, nettype_printed) = run("sv");
+    assert_runs_bit_for_bit(&wreal, &nettype);
+    assert_eq!(nettype_printed, wreal_printed);
+    // The biquad's output reaches the quantizer: the step overshoots 0.6 V.
+    let out = wreal.node_index_named("out").unwrap();
+    let peak = wreal
+        .voltage_waveform(out)
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(peak > 0.6, "out peaks at {peak}");
 }
 
 /// A clock divider that ends its run with `task` at 137 ns, between two

@@ -8,7 +8,8 @@
 //! sampled at the rise before.
 //!
 //! Rungs (a) `tr` and (b) `va` are the continuous filter; rung (c) `wr` is
-//! its bilinear transform at 1 MHz, updated at 0.5 µs + n·1 µs.
+//! its bilinear transform at 1 MHz, updated at 0.5 µs + n·1 µs, and rung (d)
+//! `sv` is the same biquad on SystemVerilog real nettype nets.
 
 use num_complex::Complex64;
 
@@ -105,8 +106,13 @@ fn discrete_output(segments: &[(f64, f64)], time: f64) -> f64 {
     }
 }
 
+/// Whether the rung is the sampled biquad rather than the continuous filter.
+fn discrete(variant: &str) -> bool {
+    matches!(variant, "wr" | "sv")
+}
+
 fn output(variant: &str, segments: &[(f64, f64)], time: f64) -> f64 {
-    if variant == "wr" {
+    if discrete(variant) {
         discrete_output(segments, time)
     } else {
         continuous_output(segments, time)
@@ -114,7 +120,7 @@ fn output(variant: &str, segments: &[(f64, f64)], time: f64) -> f64 {
 }
 
 /// −(peak after the step): 0.6·(1 + e^−π) for the continuous filter; the
-/// biquad's largest held sample for `wr`.
+/// biquad's largest held sample for `wr` and `sv`.
 fn ovs(context: &Context<'_>) -> Result<Expected, String> {
     let [start, stop] = context
         .quantity
@@ -122,7 +128,7 @@ fn ovs(context: &Context<'_>) -> Result<Expected, String> {
         .window
         .ok_or("c08::ovs needs the quantity's window")?;
     let segments = stimulus();
-    let peak = if context.variant == "wr" {
+    let peak = if discrete(context.variant) {
         let first = ((start - BQ_OFFSET) / UPDATE).ceil().max(0.0) as usize;
         let last = ((stop - BQ_OFFSET) / UPDATE).floor() as usize;
         (first..=last)

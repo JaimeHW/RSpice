@@ -8,14 +8,14 @@ time_precision = 1e-12
 [[q]]
 id = "ovs"
 analysis = "tran"
-variants = ["va", "wr"]
+variants = ["va", "wr", "sv"]
 kind = "min"
 signal = "-v(out)"
 window = [2e-5, 1.5e-4]
 oracle = "O6"
 expect = "c08::ovs"
 abs = 2e-3
-why = "0.6·(1 + e^−π) = 0.62593 V at ζ = 0.7071 (the biquad's own largest sample for wr); bilinear warping and staircase input"
+why = "0.6·(1 + e^−π) = 0.62593 V at ζ = 0.7071 (the biquad's own largest sample for wr and sv); bilinear warping and staircase input"
 
 [[q]]
 id = "ovs"
@@ -34,7 +34,7 @@ why = "as va; the op-amp follower's finite gain and input gate leakage through R
 [[q]]
 id = "codes"
 analysis = "tran"
-variants = ["tr", "va", "wr"]
+variants = ["tr", "va", "wr", "sv"]
 kind = "codes"
 nets = ["q3", "q2", "q1", "q0"]
 strobe = "clk"
@@ -46,7 +46,7 @@ why = "floor(16·v) of the rung's ideal output at the previous clock rise, exact
 [[q]]
 id = "xab"
 analysis = "tran"
-variants = ["tr", "va", "wr"]
+variants = ["tr", "va", "wr", "sv"]
 kind = "codes"
 nets = ["q3", "q2", "q1", "q0"]
 strobe = "clk"

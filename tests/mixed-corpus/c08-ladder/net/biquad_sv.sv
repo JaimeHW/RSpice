@@ -1,6 +1,6 @@
 // C8 rung (d): the wreal biquad of biquad_wr.vams written with a
 // SystemVerilog real-number-modelling nettype (RSpice-authored). The
-// SV-RNM subset arrives at P5; today the source is refused.
+// source reads as SystemVerilog: a package, a real nettype and an import.
 `timescale 1ns/1ps
 package c8_rnm;
   nettype real rnet;
