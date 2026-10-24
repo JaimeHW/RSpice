@@ -16,6 +16,12 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
 
+mod names;
+mod values;
+
+use names::SpectreNames;
+use values::{card_value, lower_spectre_value, spectre_value_identifiers};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpectreModelAdapterError {
     pub line: usize,
@@ -152,7 +158,8 @@ pub fn adapt_spectre_model_library<'a>(
 
     let lexed_lines = preprocess_spectre_comments(path, source)?;
     let lines = lexed_lines.iter().map(String::as_str).collect::<Vec<_>>();
-    let statements = parse_spectre_statements(path, &lines)?;
+    let (statements, names) = parse_spectre_statements(path, &lines)?;
+    names.check(path)?;
     let symbols = SpectreSymbols::from_statements(&statements)?;
     let mut output = Vec::<String>::with_capacity(lines.len());
     for statement in statements {
@@ -195,7 +202,8 @@ pub fn adapt_spectre_model_library<'a>(
 fn parse_spectre_statements(
     path: &Path,
     lines: &[&str],
-) -> Result<Vec<SpectreStatement>, SpectreModelAdapterError> {
+) -> Result<(Vec<SpectreStatement>, SpectreNames), SpectreModelAdapterError> {
+    let mut names = SpectreNames::default();
     let is_scs = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -265,15 +273,28 @@ fn parse_spectre_statements(
 
         let (head, rest) = split_head(trimmed);
         let head_lower = head.to_ascii_lowercase();
-        match head_lower.as_str() {
+        // Spectre keywords are case-sensitive, so `Model` is not `model`.
+        // Read as Spectre reads it, such a head would name an instance and
+        // fail somewhere less helpful; say what it is instead.
+        if let Some(keyword) = SpectreConstruct::case_variant(SpectreNamespace::Statement, head) {
+            return Err(error(
+                line_number,
+                format!(
+                    "'{head}' is not the Spectre keyword '{keyword}': Spectre keywords are case-sensitive, so write '{keyword}'"
+                ),
+            ));
+        }
+        match head {
             "library" | "endlibrary" => {
                 statements.push(lowered_statement(line_number, adapter_receipt(trimmed)))
             }
             "section" => {
                 let name = one_identifier(rest, line_number, "section")?;
+                names.enter_section(name);
                 statements.push(lowered_statement(line_number, format!(".lib {name}")));
             }
             "endsection" => {
+                names.leave_section();
                 let name = rest.split_whitespace().next().unwrap_or_default();
                 statements.push(lowered_statement(
                     line_number,
@@ -289,8 +310,12 @@ fn parse_spectre_statements(
                 adapt_include(rest, line_number)?,
             )),
             "model" => {
-                let (adapted, source_family, consumed) = adapt_model(lines, index)?;
+                let (adapted, source_family, consumed, references) = adapt_model(lines, index)?;
                 let (name, canonical_type) = adapted_model_identity(&adapted, line_number)?;
+                names.model(&name, line_number);
+                for reference in &references {
+                    names.parameter(reference, line_number, false);
+                }
                 statements.push(SpectreStatement {
                     line: line_number,
                     consumed_lines: consumed,
@@ -314,6 +339,10 @@ fn parse_spectre_statements(
                         "Spectre parameters statement has no assignments",
                     ));
                 }
+                for assignment in &assignments {
+                    names.parameter(&assignment.name, line_number, true);
+                    names.value(&assignment.value, line_number);
+                }
                 statements.push(SpectreStatement {
                     line: line_number,
                     consumed_lines: consumed,
@@ -325,30 +354,36 @@ fn parse_spectre_statements(
                 index += consumed;
                 continue;
             }
-            "subckt" => {
-                let (name, lowered) = adapt_subcircuit(rest, line_number)?;
-                statements.push(SpectreStatement {
-                    line: line_number,
-                    consumed_lines: 1,
-                    kind: SpectreStatementKind::Subcircuit { name, lowered },
-                });
-            }
-            "inline" => {
-                let (nested_head, nested_rest) = split_head(rest);
-                if !nested_head.eq_ignore_ascii_case("subckt") {
-                    return Err(error(
-                        line_number,
-                        "Spectre inline statement must declare a subckt",
-                    ));
+            "subckt" | "inline" => {
+                let declaration = if head == "inline" {
+                    let (nested_head, nested_rest) = split_head(rest);
+                    if nested_head != "subckt" {
+                        return Err(error(
+                            line_number,
+                            "Spectre inline statement must declare a subckt",
+                        ));
+                    }
+                    nested_rest
+                } else {
+                    rest
+                };
+                let subcircuit = adapt_subcircuit(declaration, line_number)?;
+                names.enter_subcircuit(&subcircuit.name, &subcircuit.ports, line_number);
+                for default in &subcircuit.defaults {
+                    names.parameter(&default.name, line_number, true);
+                    names.value(&default.value, line_number);
                 }
-                let (name, lowered) = adapt_subcircuit(nested_rest, line_number)?;
                 statements.push(SpectreStatement {
                     line: line_number,
                     consumed_lines: 1,
-                    kind: SpectreStatementKind::Subcircuit { name, lowered },
+                    kind: SpectreStatementKind::Subcircuit {
+                        name: subcircuit.name,
+                        lowered: subcircuit.lowered,
+                    },
                 });
             }
             "ends" => {
+                names.leave_subcircuit();
                 let name = rest.split_whitespace().next().unwrap_or_default();
                 statements.push(lowered_statement(
                     line_number,
@@ -362,6 +397,9 @@ fn parse_spectre_statements(
             "global" => {
                 if rest.is_empty() {
                     return Err(error(line_number, "Spectre global statement has no nodes"));
+                }
+                for node in split_node_list(rest, line_number)? {
+                    names.global_node(&node, line_number);
                 }
                 statements.push(lowered_statement(line_number, format!(".global {rest}")));
             }
@@ -377,6 +415,17 @@ fn parse_spectre_statements(
             }
             "statistics" => {
                 let (statistics, consumed) = parse_statistics_block(lines, index)?;
+                for variation in &statistics.variations {
+                    names.parameter(&variation.parameter, variation.line, false);
+                    for attribute in &variation.attributes {
+                        names.value(&attribute.value, variation.line);
+                    }
+                }
+                for correlation in &statistics.correlations {
+                    for parameter in &correlation.parameters {
+                        names.parameter(parameter, correlation.line, false);
+                    }
+                }
                 statements.push(SpectreStatement {
                     line: line_number,
                     consumed_lines: consumed,
@@ -388,10 +437,14 @@ fn parse_spectre_statements(
             "save" => {
                 let (logical, consumed) = collect_continued_statement(lines, index, false);
                 let (_, entries) = split_head(&logical);
+                let lowered = adapt_save(entries, line_number)?;
+                for node in split_node_list(entries, line_number)? {
+                    names.node(&node, line_number);
+                }
                 statements.push(SpectreStatement {
                     line: line_number,
                     consumed_lines: consumed,
-                    kind: SpectreStatementKind::Lowered(adapt_save(entries, line_number)?),
+                    kind: SpectreStatementKind::Lowered(lowered),
                 });
                 index += consumed;
                 continue;
@@ -410,13 +463,12 @@ fn parse_spectre_statements(
             }
             _ => {
                 let (logical, consumed) = collect_continued_statement(lines, index, false);
+                let instance = parse_spectre_instance(&logical, line_number)?;
+                record_instance_names(&mut names, &instance, line_number);
                 statements.push(SpectreStatement {
                     line: line_number,
                     consumed_lines: consumed,
-                    kind: SpectreStatementKind::Instance(parse_spectre_instance(
-                        &logical,
-                        line_number,
-                    )?),
+                    kind: SpectreStatementKind::Instance(instance),
                 });
                 index += consumed;
                 continue;
@@ -424,7 +476,37 @@ fn parse_spectre_statements(
         }
         index += 1;
     }
-    Ok(statements)
+    Ok((statements, names))
+}
+
+/// Record the names one instance or analysis statement spells: its own name,
+/// its nodes, its master unless that is a Spectre primitive, and the names its
+/// parameter values refer to.
+fn record_instance_names(names: &mut SpectreNames, instance: &SpectreInstance, line: usize) {
+    names.instance(&instance.name, line, true);
+    for node in &instance.nodes {
+        names.node(node, line);
+    }
+    let analysis = matches!(
+        instance.master.as_str(),
+        "tran" | "dc" | "ac" | "noise" | "sweep"
+    );
+    let primitive = SpectreConstruct::exact(SpectreNamespace::Master, &instance.master).is_some();
+    if !primitive {
+        names.master_reference(&instance.master, line);
+    }
+    for parameter in &instance.parameters {
+        match parameter.name.as_str() {
+            "dev" | "iprobe" if analysis => names.instance(&parameter.value, line, false),
+            "param" if analysis => names.parameter(&parameter.value, line, false),
+            _ => {
+                if !primitive {
+                    names.subcircuit_override(&instance.master, &parameter.name, line);
+                }
+                names.value(&parameter.value, line);
+            }
+        }
+    }
 }
 
 fn parse_statistics_block(
@@ -1197,6 +1279,29 @@ impl SpectreConstruct {
                     .any(|candidate| candidate.eq_ignore_ascii_case(name))
         })
     }
+
+    /// Resolve a name inside a namespace in its exact Spectre spelling.
+    fn exact(namespace: SpectreNamespace, name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|construct| {
+            construct.namespace() == namespace && construct.names().contains(&name)
+        })
+    }
+
+    /// The lowered Spectre keyword or primitive that `name` spells in another
+    /// case, if it spells one: Spectre names are case-sensitive, so it is not
+    /// that construct.
+    fn case_variant(namespace: SpectreNamespace, name: &str) -> Option<&'static str> {
+        if Self::exact(namespace, name).is_some() {
+            return None;
+        }
+        Self::ALL
+            .iter()
+            .filter(|construct| {
+                construct.namespace() == namespace && construct.support() == SpectreSupport::Lowered
+            })
+            .flat_map(|construct| construct.names().iter().copied())
+            .find(|candidate| candidate.eq_ignore_ascii_case(name))
+    }
 }
 
 /// The refusal for a name this adapter does not lower, answered from the
@@ -1208,6 +1313,14 @@ fn unsupported_construct(
     line: usize,
 ) -> SpectreModelAdapterError {
     let description = namespace.description();
+    if let Some(spelling) = SpectreConstruct::case_variant(namespace, name) {
+        return error(
+            line,
+            format!(
+                "native Spectre {description} '{name}' is not declared, and Spectre names are case-sensitive, so it is not '{spelling}'; write '{spelling}', or declare '{name}'"
+            ),
+        );
+    }
     match SpectreConstruct::classify(namespace, &name.to_ascii_lowercase())
         .map(SpectreConstruct::support)
     {
@@ -1347,7 +1460,17 @@ fn collect_continued_statement(lines: &[&str], start: usize, plus_lines: bool) -
     (logical, consumed.max(1))
 }
 
-fn adapt_subcircuit(rest: &str, line: usize) -> Result<(String, String), SpectreModelAdapterError> {
+struct AdaptedSubcircuit {
+    name: String,
+    ports: Vec<String>,
+    defaults: Vec<SpectreModelAssignment>,
+    lowered: String,
+}
+
+fn adapt_subcircuit(
+    rest: &str,
+    line: usize,
+) -> Result<AdaptedSubcircuit, SpectreModelAdapterError> {
     let (name, remainder) =
         take_token(rest).ok_or_else(|| error(line, "Spectre subckt declaration has no name"))?;
     let (ports, parameters) = if remainder.trim_start().starts_with('(') {
@@ -1370,7 +1493,12 @@ fn adapt_subcircuit(rest: &str, line: usize) -> Result<(String, String), Spectre
         lowered.push_str(" PARAMS: ");
         lowered.push_str(&render_assignments(&defaults));
     }
-    Ok((name.to_owned(), lowered))
+    Ok(AdaptedSubcircuit {
+        name: name.to_owned(),
+        ports,
+        defaults,
+        lowered,
+    })
 }
 
 fn parse_spectre_instance(
@@ -1468,8 +1596,12 @@ fn lower_spectre_instance(
     symbols: &SpectreSymbols,
     line: usize,
 ) -> Result<String, SpectreModelAdapterError> {
+    // Primitives match in their exact Spectre spelling: `Resistor` is not
+    // `resistor` but a master the deck must declare. The deck's own masters
+    // are looked up without case, which the name check has made exact by
+    // refusing any reference spelled differently from its declaration.
     let master = instance.master.to_ascii_lowercase();
-    match master.as_str() {
+    match instance.master.as_str() {
         "resistor" | "res" => lower_two_terminal_primitive(instance, "R", "r", line),
         "capacitor" | "cap" => lower_two_terminal_primitive(instance, "C", "c", line),
         "inductor" | "ind" => lower_two_terminal_primitive(instance, "L", "l", line),
@@ -1565,7 +1697,7 @@ fn lower_voltage_controlled_source(
         "{prefix}{} {} {}",
         instance.name,
         instance.nodes.join(" "),
-        value.value
+        card_value(&value.value)
     ))
 }
 
@@ -1610,11 +1742,17 @@ fn lower_behavioral_source(
         }
     };
     reject_remaining_parameters(&parameters, instance, line)?;
+    // A quoted equation is still a Spectre expression, so its literals take
+    // Spectre scale factors once the quotes are off.
+    let equation = lower_spectre_value(
+        equation.trim_matches(['\'', '"']),
+        &kind.to_ascii_lowercase(),
+        line,
+    )?;
     Ok(format!(
-        "B{} {} {kind}={{{}}}",
+        "B{} {} {kind}={{{equation}}}",
         instance.name,
         instance.nodes.join(" "),
-        equation.trim_matches(['\'', '"'])
     ))
 }
 
@@ -1953,11 +2091,17 @@ fn lower_two_terminal_primitive(
         "{prefix}{} {} {}",
         instance.name,
         instance.nodes.join(" "),
-        value.value
+        card_value(&value.value)
     );
     if !parameters.is_empty() {
         lowered.push(' ');
-        lowered.push_str(&render_assignments(&parameters));
+        lowered.push_str(
+            &parameters
+                .iter()
+                .map(|assignment| format!("{}={}", assignment.name, card_value(&assignment.value)))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
     }
     Ok(lowered)
 }
@@ -1979,7 +2123,7 @@ fn render_model_or_subcircuit_instance(instance: &SpectreInstance, prefix: &str)
                     format!(
                         "{}={}",
                         canonical_instance_parameter_name(&assignment.name),
-                        assignment.value
+                        card_value(&assignment.value)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2029,7 +2173,19 @@ fn lower_independent_source(
             ),
         ));
     }
-    let mut parameters = instance.parameters.clone();
+    // Every value below lands on the element card itself.
+    let mut parameters = instance
+        .parameters
+        .iter()
+        .map(|assignment| SpectreModelAssignment {
+            name: assignment.name.clone(),
+            value: if assignment.name.eq_ignore_ascii_case("type") {
+                assignment.value.clone()
+            } else {
+                card_value(&assignment.value).into_owned()
+            },
+        })
+        .collect::<Vec<_>>();
     let source_type = take_assignment(&mut parameters, "type")
         .map(|value| value.value.trim_matches(['\'', '"']).to_ascii_lowercase())
         .unwrap_or_else(|| "dc".to_owned());
@@ -2179,10 +2335,12 @@ fn adapt_ahdl_include(rest: &str, line: usize) -> Result<String, SpectreModelAda
     Ok(format!(".veriloga \"{path}\""))
 }
 
+/// Lower one `model` statement. Beside the card, its family and the lines it
+/// spans, this returns every name the card's parameter values refer to.
 fn adapt_model(
     lines: &[&str],
     start: usize,
-) -> Result<(String, String, usize), SpectreModelAdapterError> {
+) -> Result<(String, String, usize, Vec<String>), SpectreModelAdapterError> {
     let line_number = start + 1;
     let first = lines[start].trim();
     let (_, rest) = split_head(first);
@@ -2233,10 +2391,12 @@ fn adapt_model(
         }
     }
 
+    let (lowered, references) = render_model(name, model_type, &parameters, line_number)?;
     Ok((
-        render_model(name, model_type, &parameters, line_number)?,
+        lowered,
         model_type.to_ascii_lowercase(),
         consumed,
+        references,
     ))
 }
 
@@ -2245,7 +2405,7 @@ fn render_model(
     model_type: &str,
     parameters: &str,
     line: usize,
-) -> Result<String, SpectreModelAdapterError> {
+) -> Result<(String, Vec<String>), SpectreModelAdapterError> {
     let parameters = parameters.trim().trim_end_matches(';').trim();
     let parameters = parameters
         .strip_prefix('{')
@@ -2254,18 +2414,24 @@ fn render_model(
         .trim();
     let mut assignments = parse_spectre_model_assignments(parameters, line)?;
     let canonical_type = canonical_model_type(model_type, &mut assignments, line)?;
-    if assignments.is_empty() {
-        Ok(format!(".model {name} {canonical_type}"))
+    let references = assignments
+        .iter()
+        .flat_map(|assignment| spectre_value_identifiers(&assignment.value))
+        .map(str::to_owned)
+        .collect();
+    let lowered = if assignments.is_empty() {
+        format!(".model {name} {canonical_type}")
     } else {
-        Ok(format!(
+        format!(
             ".model {name} {canonical_type} ( {} )",
             assignments
                 .iter()
                 .map(|assignment| format!("{}={}", assignment.name, assignment.value))
                 .collect::<Vec<_>>()
                 .join(" ")
-        ))
-    }
+        )
+    };
+    Ok((lowered, references))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2344,18 +2510,34 @@ fn parse_spectre_model_assignments(
                 format!("Spectre model parameter '{name}' has an empty value"),
             ));
         }
-        if assignments
+        if let Some(existing) = assignments
             .iter()
-            .any(|assignment: &SpectreModelAssignment| assignment.name.eq_ignore_ascii_case(name))
+            .find(|assignment: &&SpectreModelAssignment| assignment.name.eq_ignore_ascii_case(name))
         {
             return Err(error(
                 line,
-                format!("Spectre model parameter '{name}' is declared more than once"),
+                if existing.name == name {
+                    format!("Spectre model parameter '{name}' is declared more than once")
+                } else {
+                    format!(
+                        "Spectre parameter names '{}' and '{name}' on one line differ only in case; Spectre names are case-sensitive, but RSpice reads names without case and would merge them",
+                        existing.name
+                    )
+                },
             ));
         }
+        // A quoted value is a string and passes as written; every other
+        // value is a number or an expression, whose literals carry Spectre
+        // scale factors.
+        let written = &parameters[value_start..index];
+        let value = if matches!(opening, b'\'' | b'"') {
+            written.to_owned()
+        } else {
+            lower_spectre_value(written, name, line)?
+        };
         assignments.push(SpectreModelAssignment {
             name: name.to_owned(),
-            value: parameters[value_start..index].to_owned(),
+            value,
         });
     }
     Ok(assignments)
