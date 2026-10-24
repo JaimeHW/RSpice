@@ -7,7 +7,7 @@
 //! the analysis always extracts them and reports them as measurements, so a
 //! control that claimed to enable them would only be able to lie.
 
-use crate::options::parse_si_value;
+use crate::options::{format_freq, parse_si_value};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Frequency sweep shape for the loop-gain sweep.
@@ -297,18 +297,6 @@ impl StbDialogState {
         if !self.initialized {
             *self = Self::from_config(&StbConfig::default());
         }
-    }
-}
-
-fn format_freq(f: f64) -> String {
-    if f >= 1e9 {
-        format!("{}G", f / 1e9)
-    } else if f >= 1e6 {
-        format!("{}Meg", f / 1e6)
-    } else if f >= 1e3 {
-        format!("{}k", f / 1e3)
-    } else {
-        format!("{}", f)
     }
 }
 

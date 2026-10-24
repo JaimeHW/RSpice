@@ -20,7 +20,7 @@
 
 use crate::periodic_carrier::PeriodicCarrier;
 
-use crate::options::parse_si_value;
+use crate::options::{format_freq, parse_si_value};
 pub mod sampling;
 use rspice_core::analysis::pnoise::PeriodicNoiseSampling;
 use sampling::SamplingDraft;
@@ -478,22 +478,6 @@ impl PnoiseDialogState {
         if !self.initialized {
             *self = Self::from_config(&PnoiseConfig::default());
         }
-    }
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-fn format_freq(freq: f64) -> String {
-    if freq >= 1e9 {
-        format!("{}G", freq / 1e9)
-    } else if freq >= 1e6 {
-        format!("{}Meg", freq / 1e6)
-    } else if freq >= 1e3 {
-        format!("{}k", freq / 1e3)
-    } else {
-        format!("{}", freq)
     }
 }
 

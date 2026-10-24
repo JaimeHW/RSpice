@@ -11,7 +11,7 @@ use crate::envelope_multirate::EnvelopeMultirateConfig;
 use crate::envelope_policy::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
 };
-use crate::options::parse_si_value;
+use crate::options::{format_freq, parse_si_value};
 use rspice_vocabulary::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
@@ -416,18 +416,6 @@ fn default_envelope_step_text() -> String {
 
 fn default_harmonic_order_text() -> String {
     "9".to_owned()
-}
-
-fn format_freq(frequency: f64) -> String {
-    if frequency >= 1.0e9 {
-        format!("{}G", frequency / 1.0e9)
-    } else if frequency >= 1.0e6 {
-        format!("{}Meg", frequency / 1.0e6)
-    } else if frequency >= 1.0e3 {
-        format!("{}k", frequency / 1.0e3)
-    } else {
-        frequency.to_string()
-    }
 }
 
 fn format_frequency_field(frequency: f64) -> String {

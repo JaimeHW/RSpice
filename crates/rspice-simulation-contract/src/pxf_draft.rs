@@ -41,7 +41,7 @@
 
 use crate::periodic_carrier::PeriodicCarrier;
 
-use crate::options::parse_si_value;
+use crate::options::{format_freq, parse_si_value};
 // The two tolerance wells whose emptiness means "the plan's policy" are read
 // the `.PAC` form's way rather than restated here: the two cards carry the
 // identical pair at the identical defaults, and a second reading of "empty" is
@@ -363,22 +363,6 @@ impl PxfDialogState {
         if !self.initialized {
             *self = Self::from_config(&PxfConfig::default());
         }
-    }
-}
-
-// =============================================================================
-// Helper
-// =============================================================================
-
-fn format_freq(freq: f64) -> String {
-    if freq >= 1e9 {
-        format!("{}G", freq / 1e9)
-    } else if freq >= 1e6 {
-        format!("{}Meg", freq / 1e6)
-    } else if freq >= 1e3 {
-        format!("{}k", freq / 1e3)
-    } else {
-        format!("{}", freq)
     }
 }
 

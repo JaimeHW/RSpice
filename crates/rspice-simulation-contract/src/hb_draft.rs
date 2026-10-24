@@ -21,7 +21,6 @@
 //! ```
 
 mod config;
-mod format;
 mod state;
 
 pub use config::{HbConfig, HbSolverType, HbToneConfig};

@@ -4,7 +4,7 @@
 //! Computes harmonic distortion (THD), spectral content, and fundamental metrics.
 
 use crate::fourier_output::{fourier_card_output, split_fourier_output};
-use crate::options::parse_si_value;
+use crate::options::{format_freq, parse_si_value};
 
 /// Fourier analysis configuration
 #[derive(Debug, Clone)]
@@ -217,18 +217,6 @@ impl FourierDialogState {
         if !self.initialized {
             *self = Self::from_config(&FourierConfig::default());
         }
-    }
-}
-
-fn format_freq(f: f64) -> String {
-    if f >= 1e9 {
-        format!("{}G", f / 1e9)
-    } else if f >= 1e6 {
-        format!("{}Meg", f / 1e6)
-    } else if f >= 1e3 {
-        format!("{}k", f / 1e3)
-    } else {
-        format!("{}", f)
     }
 }
 

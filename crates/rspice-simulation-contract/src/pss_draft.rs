@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::options::{IntegrationMethod, parse_si_value};
+use crate::options::{IntegrationMethod, format_freq, parse_si_value};
 
 /// Fully parsed PSS contract.
 #[derive(Debug, Clone, PartialEq)]
@@ -581,18 +581,6 @@ fn default_pss_damping() -> String {
 
 fn default_pss_max_period_change() -> String {
     "0.1".to_owned()
-}
-
-fn format_freq(frequency: f64) -> String {
-    if frequency >= 1e9 {
-        format!("{}G", frequency / 1e9)
-    } else if frequency >= 1e6 {
-        format!("{}Meg", frequency / 1e6)
-    } else if frequency >= 1e3 {
-        format!("{}k", frequency / 1e3)
-    } else {
-        format!("{frequency}")
-    }
 }
 
 #[cfg(test)]

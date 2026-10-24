@@ -203,6 +203,20 @@ fn shift_decimal_point(mantissa: &str, places: u32) -> String {
     }
 }
 
+/// Spell a frequency for an analysis directive with the largest of `G`, `Meg`
+/// and `k` it reaches, or as a plain number below 1 kHz.
+pub(crate) fn format_freq(frequency: f64) -> String {
+    if frequency >= 1e9 {
+        format!("{}G", frequency / 1e9)
+    } else if frequency >= 1e6 {
+        format!("{}Meg", frequency / 1e6)
+    } else if frequency >= 1e3 {
+        format!("{}k", frequency / 1e3)
+    } else {
+        frequency.to_string()
+    }
+}
+
 /// Parse error types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {

@@ -3,6 +3,8 @@
 //! Configuration for sensitivity analysis (.sens).
 //! Computes the sensitivity of an output to all circuit parameters.
 
+use crate::options::format_freq;
+
 /// Sensitivity analysis type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SensType {
@@ -237,18 +239,6 @@ impl SensDialogState {
         if !self.initialized {
             *self = Self::from_config(&SensConfig::default());
         }
-    }
-}
-
-fn format_freq(f: f64) -> String {
-    if f >= 1e9 {
-        format!("{}G", f / 1e9)
-    } else if f >= 1e6 {
-        format!("{}Meg", f / 1e6)
-    } else if f >= 1e3 {
-        format!("{}k", f / 1e3)
-    } else {
-        format!("{}", f)
     }
 }
 
