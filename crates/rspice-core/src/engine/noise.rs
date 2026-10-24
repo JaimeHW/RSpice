@@ -7292,54 +7292,141 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         let netlist = Netlist::parse(deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
         let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        {
+            circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
+            circuit
+                .prepare_veriloga_equilibrium_analysis_point(3, true, false)
+                .unwrap();
+        }
         let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
         let solution = engine
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        {
+            engine
+                .try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)
+                .unwrap();
+            circuit.accept_veriloga_analysis_point().unwrap();
+            circuit
+                .finish_veriloga_equilibrium_operating_point(3)
+                .unwrap();
+        }
         circuit.update_nonlinear(&solution);
 
-        let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
         // Which implementation serves LEVEL=260 is a build decision — a build
         // carrying the generated catalog routes this card to the compiled
         // `ekv_va` artifact — so both ports are held to the same oracle here.
-        // Each port names its mechanisms in its own canonical vocabulary
-        // (`thermal`/`flicker` against the generated `WHITE_D_S_THERMAL`/
-        // `FLICKER_D_S_FLICKER` the code generator composes from the module's
-        // own node and label names), and what has to agree is that M1 is the
-        // device, that it exports exactly one source per physical mechanism,
-        // and that every one of them names a mechanism at all.
-        let ekv26 = sources
-            .iter()
-            .filter(|source| source.identity.device.eq_ignore_ascii_case("m1"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            ekv26.len(),
-            2,
-            "EKV26 exports one thermal and one flicker source under M1; got {:?}",
+        // They present M1's noise differently: the native device as elementary
+        // sources, and the generated module as one grouped process per noise
+        // call, which is what `.NOISE` reports it from. Each port names its
+        // mechanisms in its own canonical vocabulary (`thermal`/`flicker`
+        // against the generated module's upper-cased labels), and what has to
+        // agree is that M1 is the device, that it exports exactly one source
+        // per physical mechanism between the drain and the source with the
+        // oracle's density, and that every one of them names a mechanism.
+        struct Exported {
+            mechanism: String,
+            kind: crate::analysis::NoiseSourceType,
+            /// The pair of nodes the source reaches; one uncorrelated source
+            /// has no orientation its density depends on.
+            nodes: [usize; 2],
+            exponent: Option<f64>,
+            /// The density at 1 Hz and at 10 Hz.
+            density: [f64; 2],
+        }
+        #[cfg(not(feature = "veriloga-model-ekv-va"))]
+        let exported = {
+            let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
             sources
                 .iter()
-                .map(|source| (
-                    source.identity.device.as_str(),
-                    source.identity.mechanism.as_deref()
-                ))
+                .filter(|source| source.identity.device.eq_ignore_ascii_case("m1"))
+                .map(|source| {
+                    let flicker = source.noise_type == crate::analysis::NoiseSourceType::Flicker;
+                    if flicker {
+                        // The 1 Hz density is the coefficient over a unit current.
+                        assert_eq!(source.af, 1.0);
+                        assert_eq!(source.current, 1.0);
+                    }
+                    Exported {
+                        mechanism: source
+                            .identity
+                            .mechanism
+                            .clone()
+                            .expect("every EKV26 noise source names its mechanism"),
+                        kind: source.noise_type,
+                        nodes: [source.node_pos, source.node_neg],
+                        exponent: flicker.then_some(source.ef),
+                        density: [source.parameter, source.spectral_density(10.0, 300.15)],
+                    }
+                })
                 .collect::<Vec<_>>()
+        };
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        let exported = {
+            let at = |frequency| {
+                super::collect_noise_processes(&circuit, &solution, frequency)
+                    .expect("EKV26 generated noise evaluates")
+                    .into_iter()
+                    .filter(|process| process.instance.eq_ignore_ascii_case("m1"))
+                    .collect::<Vec<_>>()
+            };
+            let density = |process: &CollectedNoiseProcess, frequency| {
+                Engine::collected_process_density(process, frequency).unwrap()
+                    * process
+                        .injections
+                        .iter()
+                        .map(|injection| injection.gain.norm_sqr())
+                        .sum::<f64>()
+            };
+            let (at_1hz, at_10hz) = (at(1.0), at(10.0));
+            assert_eq!(at_1hz.len(), at_10hz.len());
+            at_1hz
+                .iter()
+                .zip(&at_10hz)
+                .map(|(process, later)| {
+                    assert_eq!(process.mechanism, later.mechanism);
+                    let [injection] = process.injections.as_slice() else {
+                        panic!("{} reaches one branch", process.mechanism);
+                    };
+                    // A direct contribution reaches its branch through a real
+                    // transfer.
+                    assert_eq!(injection.gain.im, 0.0);
+                    Exported {
+                        mechanism: process.mechanism.clone(),
+                        kind: Engine::collected_process_noise_type(process),
+                        nodes: [injection.node_pos, injection.node_neg],
+                        exponent: match process.spectrum {
+                            NoiseProcessSpectrum::Flicker { exponent } => Some(exponent),
+                            _ => None,
+                        },
+                        density: [density(process, 1.0), density(later, 10.0)],
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let exported_names = exported
+            .iter()
+            .map(|source| (source.mechanism.as_str(), source.kind))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            exported.len(),
+            2,
+            "EKV26 exports one thermal and one flicker source under M1; got {exported_names:?}"
         );
         let by_type = |kind: crate::analysis::NoiseSourceType| {
-            let matching = ekv26
+            let matching = exported
                 .iter()
-                .filter(|source| source.noise_type == kind)
+                .filter(|source| source.kind == kind)
                 .collect::<Vec<_>>();
             assert_eq!(
                 matching.len(),
                 1,
-                "M1 exports exactly one {kind:?} source; got {:?}",
-                ekv26
-                    .iter()
-                    .map(|source| (source.noise_type, source.identity.mechanism.as_deref()))
-                    .collect::<Vec<_>>()
+                "M1 exports exactly one {kind:?} source; got {exported_names:?}"
             );
-            *matching[0]
+            matching[0]
         };
         let thermal = by_type(crate::analysis::NoiseSourceType::White);
         let flicker = by_type(crate::analysis::NoiseSourceType::Flicker);
@@ -7347,11 +7434,7 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
             (thermal, "thermal", "WHITE_D_S_THERMAL"),
             (flicker, "flicker", "FLICKER_D_S_FLICKER"),
         ] {
-            let mechanism = source
-                .identity
-                .mechanism
-                .as_deref()
-                .expect("every EKV26 noise source names its mechanism");
+            let mechanism = source.mechanism.as_str();
             assert!(
                 mechanism.eq_ignore_ascii_case(native) || mechanism.eq_ignore_ascii_case(generated),
                 "M1 must name its mechanism '{native}' or '{generated}', got '{mechanism}'"
@@ -7361,41 +7444,60 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
                 "'{mechanism}' is a mechanism no saved result can be written with"
             );
         }
+        // The per-device report lists a grouped process whether or not it is
+        // active at the bias, so a generated M1 keeps both of its rows.
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        {
+            let reported = Engine::veriloga_noise_process_catalog(&circuit)
+                .into_iter()
+                .filter(|identity| identity.device.eq_ignore_ascii_case("m1"))
+                .filter_map(|identity| identity.mechanism)
+                .collect::<Vec<_>>();
+            assert_eq!(reported.len(), 2, "M1's report rows: {reported:?}");
+            for source in [thermal, flicker] {
+                assert!(reported.contains(&source.mechanism), "{reported:?}");
+            }
+        }
 
-        assert_eq!(thermal.noise_type, crate::analysis::NoiseSourceType::White);
-        assert_eq!(
-            flicker.noise_type,
-            crate::analysis::NoiseSourceType::Flicker
-        );
-        assert_eq!(thermal.node_pos, circuit.get_node_by_name("d").unwrap());
-        assert_eq!(thermal.node_neg, circuit.get_node_by_name("s").unwrap());
-        assert_eq!(flicker.node_pos, thermal.node_pos);
-        assert_eq!(flicker.node_neg, thermal.node_neg);
-        assert_eq!(flicker.af, 1.0);
-        assert_eq!(flicker.ef, 1.3);
-        assert_eq!(flicker.current, 1.0);
+        let drain_source = [
+            circuit.get_node_by_name("d").unwrap(),
+            circuit.get_node_by_name("s").unwrap(),
+        ];
+        for source in [thermal, flicker] {
+            let mut nodes = source.nodes;
+            nodes.sort_unstable();
+            let mut expected = drain_source;
+            expected.sort_unstable();
+            assert_eq!(
+                nodes, expected,
+                "{} reaches the drain and the source",
+                source.mechanism
+            );
+        }
+        assert_eq!(thermal.exponent, None);
+        assert_eq!(flicker.exponent, Some(1.3));
 
         let expected_thermal = 3.426_240_019_709_936_4e-24;
         let expected_flicker_at_1hz = 8.503_778_042_345_18e-16;
-        let thermal_rel = (thermal.parameter - expected_thermal).abs() / expected_thermal;
+        let thermal_rel = (thermal.density[0] - expected_thermal).abs() / expected_thermal;
         let flicker_rel =
-            (flicker.parameter - expected_flicker_at_1hz).abs() / expected_flicker_at_1hz;
+            (flicker.density[0] - expected_flicker_at_1hz).abs() / expected_flicker_at_1hz;
         assert!(
             thermal_rel <= 2.0e-6,
             "EKV26 thermal PSD should follow Xyce Gn: got {:e}, want {:e}, rel {:.3e}",
-            thermal.parameter,
+            thermal.density[0],
             expected_thermal,
             thermal_rel
         );
         assert!(
             flicker_rel <= 2.0e-4,
             "EKV26 flicker 1Hz PSD should follow Xyce gm^2 formula: got {:e}, want {:e}, rel {:.3e}",
-            flicker.parameter,
+            flicker.density[0],
             expected_flicker_at_1hz,
             flicker_rel
         );
         let expected_10hz = 4.261_984_992_423_322e-17;
-        let flicker_10hz = flicker.spectral_density(10.0, 300.15);
+        let flicker_10hz = flicker.density[1];
         let flicker_10hz_rel = (flicker_10hz - expected_10hz).abs() / expected_10hz;
         assert!(
             flicker_10hz_rel <= 2.0e-4,
@@ -7574,6 +7676,101 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
                         result.output_noise_density
                     );
                 }
+            }
+        }
+    }
+
+    /// A device of multiplicity M stands for M independent copies (Verilog-AMS
+    /// LRM 2.4 §6.3.6): it carries M times the current, and every noise
+    /// process M times the power. Every generated module that declares no
+    /// `m` of its own receives the instance multiplicity the same way, so one
+    /// with white and flicker noise pins it for all of them. Every terminal is
+    /// driven, so the copies share the single device's operating point, and
+    /// both instances are evaluated at that one solution.
+    #[cfg(all(
+        feature = "veriloga-model-vbic13",
+        feature = "veriloga-model-vbic13-3t-et",
+        feature = "veriloga-model-vbic13-4t",
+        feature = "veriloga-builtins-noise"
+    ))]
+    #[test]
+    fn generated_noise_power_scales_once_with_instance_multiplicity() {
+        let build = |m: f64| {
+            let netlist = Netlist::parse(&format!(
+                "Generated noise multiplicity\nVc c 0 3\nVb b 0 0.7\nQ1 c b 0 vm SW_ET=0 M={m}\n\
+                 .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 KFN=1e-8 AFN=1.5 BFN=0.8)\n.temp 27\n.options gmin=0\n.end\n"
+            ))
+            .unwrap();
+            let engine = xyce_engine().resolved_for_netlist(&netlist);
+            let mut circuit = engine.build_circuit(&netlist).unwrap();
+            circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
+            circuit
+                .prepare_veriloga_equilibrium_analysis_point(3, true, false)
+                .unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let solution = engine
+                .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+                .unwrap();
+            engine
+                .try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)
+                .unwrap();
+            circuit.accept_veriloga_analysis_point().unwrap();
+            circuit
+                .finish_veriloga_equilibrium_operating_point(3)
+                .unwrap();
+            (circuit, solution)
+        };
+        let (single, solution) = build(1.0);
+        let m = 3.0;
+        let (multiple, _) = build(m);
+        for frequency in [1.0, 1e6] {
+            let powers = |circuit: &crate::CircuitData| {
+                super::collect_noise_processes(circuit, &solution, frequency)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|process| process.instance.eq_ignore_ascii_case("q1"))
+                    .map(|process| {
+                        let power = Engine::collected_process_density(&process, frequency).unwrap()
+                            * process
+                                .injections
+                                .iter()
+                                .map(|injection| injection.gain.norm_sqr())
+                                .sum::<f64>();
+                        (process.mechanism.clone(), process.spectrum.clone(), power)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let (reference, scaled) = (powers(&single), powers(&multiple));
+            assert_eq!(reference.len(), scaled.len());
+            for kind in ["white", "flicker"] {
+                assert!(
+                    reference.iter().any(|(_, spectrum, power)| *power > 0.0
+                        && match spectrum {
+                            NoiseProcessSpectrum::White => kind == "white",
+                            NoiseProcessSpectrum::Flicker { .. } => kind == "flicker",
+                            NoiseProcessSpectrum::Table { .. } => false,
+                        }),
+                    "the device carries active {kind} noise"
+                );
+            }
+            let device = |powers: &[(String, NoiseProcessSpectrum, f64)]| {
+                powers.iter().map(|(_, _, power)| power).sum::<f64>()
+            };
+            let pairs = reference
+                .iter()
+                .zip(&scaled)
+                .map(|((mechanism, _, one), (other, _, many))| {
+                    assert_eq!(mechanism, other);
+                    (mechanism.as_str(), *one, *many)
+                })
+                .chain([("device", device(&reference), device(&scaled))]);
+            for (mechanism, one, many) in pairs {
+                let expected = m * one;
+                assert!(
+                    (many - expected).abs() <= 1e-12 * expected.abs(),
+                    "{mechanism} at {frequency} Hz: M={m} gives {many:e}, want {m} x {one:e}"
+                );
             }
         }
     }
