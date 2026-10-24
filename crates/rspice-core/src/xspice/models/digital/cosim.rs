@@ -43,6 +43,9 @@ const STATE_PREV_INPUT_START: usize = 1;
 const COSIM_NOT_INITIALIZED: i64 = 0;
 const COSIM_INPUTS_INITIALIZED: i64 = 1;
 const COSIM_STARTUP_STEP_DONE: i64 = 2;
+/// How far apart two input event times must be to be two events. Not a test
+/// of the clock, so not the window a landing spans: inputs come from the
+/// queue, which delivers each at or after its own time.
 const EVENT_TIME_EPSILON: Value = 1.0e-18;
 const COSIM_DELAY_MIN: Value = 1.0e-12;
 const COSIM_QUEUE_SIZE_MIN: i64 = 1;
@@ -335,7 +338,7 @@ fn collect_input_events(
             continue;
         };
         let state_index = index;
-        if time <= ctx.time + EVENT_TIME_EPSILON
+        if ctx.is_due(time)
             && event_is_new(time, ctx.state(state_index))
             && digital_value_code(value) != ctx.int_state(layout.previous_input_start + state_index)
         {
@@ -353,7 +356,7 @@ fn collect_input_events(
             continue;
         };
         let state_index = unified_index;
-        if time <= ctx.time + EVENT_TIME_EPSILON
+        if ctx.is_due(time)
             && event_is_new(time, ctx.state(state_index))
             && digital_value_code(value) != ctx.int_state(layout.previous_input_start + state_index)
         {

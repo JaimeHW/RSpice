@@ -476,7 +476,7 @@ impl CodeModel for RealToVoltage {
                 next_start_value,
                 next_target,
                 transition_time,
-            ) && completion_time > ctx.time + 1.0e-18
+            ) && ctx.is_ahead(completion_time)
             {
                 ctx.request_breakpoint(completion_time);
             }

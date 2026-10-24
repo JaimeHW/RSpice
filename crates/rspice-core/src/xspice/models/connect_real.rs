@@ -179,7 +179,7 @@ fn commit_ramp(ctx: &mut CmContext, ramp: Ramp, law: RampLaw, base: usize) {
     if ctx.is_transient()
         && committed(ctx)
         && let Some(end) = ramp.end(law)
-        && end > ctx.time + 1.0e-18
+        && ctx.is_ahead(end)
     {
         ctx.request_breakpoint(end);
     }

@@ -101,7 +101,7 @@ fn latest_gate_input_event_time(ctx: &CmContext) -> Option<Value> {
     scalar
         .into_iter()
         .chain(vector)
-        .filter(|time| time.is_finite() && *time <= ctx.time)
+        .filter(|time| time.is_finite() && ctx.is_due(*time))
         .max_by(|a, b| a.total_cmp(b))
 }
 

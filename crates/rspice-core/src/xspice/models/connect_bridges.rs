@@ -443,7 +443,7 @@ fn evaluate_adc(
         } else {
             NO_BAND_ENTRY
         };
-        let expired = entry >= 0.0 && ctx.time >= law.band.deadline(entry);
+        let expired = entry >= 0.0 && ctx.is_due(law.band.deadline(entry));
         let decision = law.band.decision(
             term,
             (ctx.time > 0.0).then(|| ctx.state_prev(slots.state + index)),
@@ -474,9 +474,12 @@ fn evaluate_adc(
                 _ => DigitalValue::unknown(),
             };
             // An X the timeout or the supply causes is published at its own
-            // instant; the edge delays belong to the thresholds.
-            let delay = if state == -1 && (unpowered || (timed && expired)) {
+            // instant, the timeout's even on a step landed just before it;
+            // the edge delays belong to the thresholds.
+            let delay = if state == -1 && unpowered {
                 0.0
+            } else if state == -1 && timed && expired {
+                (law.band.deadline(entry) - ctx.time).max(0.0)
             } else {
                 adc_bridge_delay_for_transition(ctx.time, previous, state, law.rise, law.fall)
             };
@@ -487,7 +490,7 @@ fn evaluate_adc(
         ctx.set_state(entry_slot, entry);
         if timed && entry >= 0.0 && state != -1 {
             let deadline = law.band.deadline(entry);
-            if deadline > ctx.time {
+            if ctx.is_ahead(deadline) {
                 ctx.request_breakpoint(deadline);
             }
         }
@@ -984,7 +987,7 @@ fn dac_drive(
         event.unwrap_or(ctx.time)
     };
     let start = event + law.delay;
-    if ctx.time < start {
+    if ctx.is_ahead(start) {
         return DacDrive {
             pending: Some(start),
             ..held(accepted)
@@ -1067,12 +1070,12 @@ fn request_dac_breakpoints(
     let duration = law.duration(change.from, change.target, supply);
     if duration > 0.0 {
         let end = change.start + duration;
-        if end > ctx.time + 1.0e-18 {
+        if ctx.is_ahead(end) {
             ctx.request_breakpoint(end);
         }
     } else {
         let done = change.start + OFFICIAL_BRIDGE_TIMING_MIN;
-        if done > ctx.time + 1.0e-18 {
+        if ctx.is_ahead(done) {
             ctx.request_edge_completion(done);
         }
     }

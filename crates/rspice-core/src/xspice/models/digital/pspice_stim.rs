@@ -51,6 +51,9 @@ const STIM_NO_ROW: i64 = -1;
 const STIM_BEFORE_FIRST_ROW: i64 = -2;
 const STIM_EMITTED_ROW: usize = 0;
 const STIM_SCHEDULED_ROW: usize = 1;
+/// How far past the horizon a transition still counts as at it, when the
+/// program is expanded. Not a test of the clock: a row a little past the stop
+/// time is expanded and never reached, which costs one row.
 const STIM_TIME_EPSILON: Value = 1e-18;
 
 /// Interpreter step budget beyond the emitted-row budget.
@@ -517,20 +520,26 @@ fn load_rows(ctx: &mut CmContext) -> CmResult<Arc<StimRows>> {
     Ok(rows)
 }
 
-/// Index of the row in effect at `time`, and of the next row after it.
+/// Index of the row in effect at the current instant, and of the next row
+/// after it. A row the clock is within the landing window of is in effect
+/// ([`CmContext::is_due`]); it is emitted at its own time either way.
 ///
 /// The scan restarts from the beginning whenever the emitted cursor is ahead of
-/// `time`, so a rejected step that rewinds the clock re-derives the correct row
-/// instead of holding a value the circuit has not reached yet.
-fn row_indices(times: &[Value], time: Value, emitted_row: i64) -> (Option<usize>, Option<usize>) {
+/// the clock, so a rejected step that rewinds the clock re-derives the correct
+/// row instead of holding a value the circuit has not reached yet.
+fn row_indices(
+    times: &[Value],
+    ctx: &CmContext,
+    emitted_row: i64,
+) -> (Option<usize>, Option<usize>) {
     let start = match usize::try_from(emitted_row)
         .ok()
         .filter(|index| *index < times.len())
     {
-        Some(index) if times[index] <= time + STIM_TIME_EPSILON => index.saturating_add(1),
+        Some(index) if ctx.is_due(times[index]) => index.saturating_add(1),
         _ => 0,
     };
-    let upper = times[start..].partition_point(|row| *row <= time + STIM_TIME_EPSILON);
+    let upper = times[start..].partition_point(|row| ctx.is_due(*row));
     let next = start + upper;
     (next.checked_sub(1), (next < times.len()).then_some(next))
 }
@@ -577,7 +586,7 @@ impl CodeModel for PspiceDigitalStimulus {
         let width = rows.width;
         let emitted_row = ctx.int_state(STIM_EMITTED_ROW);
         let scheduled_row = ctx.int_state(STIM_SCHEDULED_ROW);
-        let (active, next) = row_indices(&rows.times, ctx.time, emitted_row);
+        let (active, next) = row_indices(&rows.times, ctx, emitted_row);
 
         match active {
             Some(index) if emitted_row != index as i64 => {
@@ -805,8 +814,13 @@ mod tests {
     #[test]
     fn row_lookup_rewinds_when_the_clock_goes_backwards() {
         let times = [0.0, 1.0e-8, 2.0e-8];
-        assert_eq!(row_indices(&times, 2.0e-8, 1), (Some(2), None));
+        let at = |time: Value| {
+            let mut ctx = CmContext::new();
+            ctx.time = time;
+            ctx
+        };
+        assert_eq!(row_indices(&times, &at(2.0e-8), 1), (Some(2), None));
         // A rejected step rewound the clock: the cursor must not stay ahead.
-        assert_eq!(row_indices(&times, 0.5e-8, 2), (Some(0), Some(1)));
+        assert_eq!(row_indices(&times, &at(0.5e-8), 2), (Some(0), Some(1)));
     }
 }

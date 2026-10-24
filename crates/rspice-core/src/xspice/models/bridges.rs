@@ -1736,10 +1736,10 @@ fn evaluate_dac_bridge(
                 transition_target,
                 ramp,
             ) {
-                Some(DacBridgeCompletion::Ramp(time)) if time > ctx.time + 1.0e-18 => {
+                Some(DacBridgeCompletion::Ramp(time)) if ctx.is_ahead(time) => {
                     ctx.request_breakpoint(time);
                 }
-                Some(DacBridgeCompletion::Edge(time)) if time > ctx.time + 1.0e-18 => {
+                Some(DacBridgeCompletion::Edge(time)) if ctx.is_ahead(time) => {
                     ctx.request_edge_completion(time);
                 }
                 _ => {}
@@ -1937,7 +1937,7 @@ impl CodeModel for BidiBridge {
                 && let Some(event_time) = drive_time
                 && let Some(completion_time) =
                     bidi_analog_transition_breakpoint(event_time, drive, params)
-                && completion_time > ctx.time + 1.0e-18
+                && ctx.is_ahead(completion_time)
             {
                 ctx.request_breakpoint(completion_time);
             }

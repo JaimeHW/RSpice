@@ -612,9 +612,9 @@ fn load_d_source_rows_for_context(
     Ok(rows)
 }
 
-const D_SOURCE_TIME_EPSILON: Value = 1e-18;
-
-fn d_source_scan_start(rows: &[DSourceRow], time: Value, emitted_row: i64) -> usize {
+/// Where the row search starts: past the row last emitted, if the clock has
+/// reached it.
+fn d_source_scan_start(rows: &[DSourceRow], ctx: &CmContext, emitted_row: i64) -> usize {
     let Some(index) = usize::try_from(emitted_row)
         .ok()
         .filter(|&index| index < rows.len())
@@ -622,20 +622,23 @@ fn d_source_scan_start(rows: &[DSourceRow], time: Value, emitted_row: i64) -> us
         return 0;
     };
 
-    if rows[index].time <= time + D_SOURCE_TIME_EPSILON {
+    if ctx.is_due(rows[index].time) {
         index.saturating_add(1)
     } else {
         0
     }
 }
 
+/// The row in force at the current instant and the one after it. A row the
+/// clock is within the landing window of is in force
+/// ([`CmContext::is_due`]); it is emitted at its own time either way.
 fn d_source_row_indices(
     rows: &[DSourceRow],
-    time: Value,
+    ctx: &CmContext,
     emitted_row: i64,
 ) -> (Option<usize>, Option<usize>) {
-    let start = d_source_scan_start(rows, time, emitted_row);
-    let upper = rows[start..].partition_point(|row| row.time <= time + D_SOURCE_TIME_EPSILON);
+    let start = d_source_scan_start(rows, ctx, emitted_row);
+    let upper = rows[start..].partition_point(|row| ctx.is_due(row.time));
     let next = start + upper;
     (next.checked_sub(1), (next < rows.len()).then_some(next))
 }
@@ -752,7 +755,7 @@ impl CodeModel for DigitalSource {
         }
         let emitted_row = ctx.int_state(D_SOURCE_EMITTED_ROW);
         let scheduled_row = ctx.int_state(D_SOURCE_SCHEDULED_ROW);
-        let (active_idx, next_idx) = d_source_row_indices(&rows.rows, ctx.time, emitted_row);
+        let (active_idx, next_idx) = d_source_row_indices(&rows.rows, ctx, emitted_row);
 
         if let Some(idx) = active_idx {
             if emitted_row != idx as i64 {
@@ -2580,15 +2583,27 @@ mod tests {
             DSourceRow { time: 3.0e-9 },
         ];
 
-        assert_eq!(d_source_scan_start(&rows, 2.5e-9, 1), 2);
-        assert_eq!(d_source_row_indices(&rows, 2.5e-9, 1), (Some(2), Some(3)));
-        assert_eq!(d_source_row_indices(&rows, 4.0e-9, 3), (Some(3), None));
-        assert_eq!(d_source_row_indices(&rows, 3.5e-9, 0), (Some(3), None));
+        let at = |time: Value| {
+            let mut ctx = CmContext::new();
+            ctx.time = time;
+            ctx
+        };
 
-        assert_eq!(d_source_scan_start(&rows, 0.5e-9, 2), 0);
-        assert_eq!(d_source_row_indices(&rows, 0.5e-9, 2), (Some(0), Some(1)));
+        assert_eq!(d_source_scan_start(&rows, &at(2.5e-9), 1), 2);
         assert_eq!(
-            d_source_row_indices(&rows, -1.0e-9, D_SOURCE_BEFORE_FIRST_ROW),
+            d_source_row_indices(&rows, &at(2.5e-9), 1),
+            (Some(2), Some(3))
+        );
+        assert_eq!(d_source_row_indices(&rows, &at(4.0e-9), 3), (Some(3), None));
+        assert_eq!(d_source_row_indices(&rows, &at(3.5e-9), 0), (Some(3), None));
+
+        assert_eq!(d_source_scan_start(&rows, &at(0.5e-9), 2), 0);
+        assert_eq!(
+            d_source_row_indices(&rows, &at(0.5e-9), 2),
+            (Some(0), Some(1))
+        );
+        assert_eq!(
+            d_source_row_indices(&rows, &at(-1.0e-9), D_SOURCE_BEFORE_FIRST_ROW),
             (None, Some(0))
         );
     }

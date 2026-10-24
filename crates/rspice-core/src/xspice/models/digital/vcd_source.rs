@@ -433,21 +433,23 @@ fn delay_landing_on(now: Value, at: Value) -> Option<Value> {
     None
 }
 
-/// The change in force at `time` and the next one after it, for an element
-/// whose cursor last drove change `driven`.
+/// The change in force at the current instant and the next one after it, for
+/// an element whose cursor last drove change `driven`. A change the clock is
+/// within the landing window of is in force ([`CmContext::is_due`]).
 ///
 /// The search restarts from the first change when the cursor is ahead of
-/// `time`, so a clock that moved back re-derives the change in force.
-fn changes_around(times: &[i64], time: Value, driven: i64) -> (Option<usize>, Option<usize>) {
+/// the clock, so a clock that moved back re-derives the change in force.
+fn changes_around(times: &[i64], ctx: &CmContext, driven: i64) -> (Option<usize>, Option<usize>) {
     let at = |index: usize| f64::from_bits(times[index] as u64);
     let start = match usize::try_from(driven)
         .ok()
         .filter(|index| *index < times.len())
     {
-        Some(index) if at(index) <= time => index + 1,
+        Some(index) if ctx.is_due(at(index)) => index + 1,
         _ => 0,
     };
-    let reached = times[start..].partition_point(|change| f64::from_bits(*change as u64) <= time);
+    let reached =
+        times[start..].partition_point(|change| ctx.is_due(f64::from_bits(*change as u64)));
     let next = start + reached;
     (next.checked_sub(1), (next < times.len()).then_some(next))
 }
@@ -547,17 +549,25 @@ impl CodeModel for DigitalVcdSource {
                 let (times, values) = (&times[start..end], &values[start..end]);
                 let driven = ctx.int_state(2 * element);
                 let queued = ctx.int_state(2 * element + 1);
-                let (current, next) = changes_around(times, now, driven);
+                let (current, next) = changes_around(times, ctx, driven);
                 match current {
                     // Queued ahead at its exact time, and reached: already driven.
                     Some(index) if driven != index as i64 && queued == index as i64 => {
                         cursors.push((2 * element, index as i64));
                     }
                     Some(index) if driven != index as i64 => {
+                        // In force on a step landed just before it: still
+                        // driven at its own time where a delay reaches it.
+                        let at = f64::from_bits(times[index] as u64);
+                        let delay = if at > now {
+                            delay_landing_on(now, at).unwrap_or(0.0)
+                        } else {
+                            0.0
+                        };
                         drives.push(Drive {
                             element,
                             value: values[index],
-                            delay: 0.0,
+                            delay,
                         });
                         cursors.push((2 * element, index as i64));
                     }
@@ -727,10 +737,18 @@ mod tests {
             .iter()
             .map(|time: &f64| time.to_bits() as i64)
             .collect();
-        assert_eq!(changes_around(&times, 0.5e-9, NOTHING), (None, Some(0)));
-        assert_eq!(changes_around(&times, 2.0e-9, 0), (Some(1), Some(2)));
-        assert_eq!(changes_around(&times, 1.5e-9, 1), (Some(0), Some(1)));
-        assert_eq!(changes_around(&times, 9.0e-9, 1), (Some(2), None));
+        let at = |time: Value| {
+            let mut ctx = CmContext::new();
+            ctx.time = time;
+            ctx
+        };
+        assert_eq!(
+            changes_around(&times, &at(0.5e-9), NOTHING),
+            (None, Some(0))
+        );
+        assert_eq!(changes_around(&times, &at(2.0e-9), 0), (Some(1), Some(2)));
+        assert_eq!(changes_around(&times, &at(1.5e-9), 1), (Some(0), Some(1)));
+        assert_eq!(changes_around(&times, &at(9.0e-9), 1), (Some(2), None));
     }
 
     #[test]

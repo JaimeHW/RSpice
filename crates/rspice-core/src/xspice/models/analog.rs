@@ -1848,6 +1848,9 @@ pub struct AnalogDelayLine;
 const DELAY_WRITE_INDEX: usize = 0;
 const DELAY_COUNT: usize = 1;
 const DELAY_INITIALIZED: usize = 2;
+/// Two history samples closer than this are one, and a delay shorter than
+/// this is none. Neither is a test of the clock against a scheduled instant:
+/// accepted points are never this close together.
 const DELAY_TIME_EPSILON: Value = 1.0e-18;
 
 fn delay_buffer_size(ctx: &CmContext) -> CmResult<usize> {
@@ -2723,6 +2726,8 @@ fn reset_oneshot_state(ctx: &mut CmContext, output_low: Value) {
 /// can render the past.
 fn request_oneshot_breakpoints(ctx: &mut CmContext, times: &[Value]) {
     for &time in times {
+        // Behind the clock, not ahead of it: a step landed early moves the
+        // clock back, so it never drops a time the one-shot is still owed.
         if time >= ctx.time - 1.0e-18 {
             ctx.request_breakpoint(time);
         }
