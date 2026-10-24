@@ -516,7 +516,16 @@ use super::*;
 // their timestamp and timecheck conditions, and whose conditions read any
 // discrete signal. A version-174 record refused a delayed net two checks
 // name, both conditions, and a condition other than a scalar signal's.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 175;
+//
+// Version 176 is version 147's situation the other way round: the front end
+// now refuses programs that IEEE 1364-2005 makes illegal and that it used to
+// compile, among them a port whose two declarations state different ranges
+// (section 12.3.3), a name used above its declaration (section 4.5), an
+// unsized or real concatenation operand (sections 5.1.14 and 5.1.1) and a
+// declaration in an unnamed `begin` block (section 9.8.1). No artifact
+// changes shape, so the schema stays, but a cached artifact for such a
+// program would still be served, and the fail-closed reading is to rebuild.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 176;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
