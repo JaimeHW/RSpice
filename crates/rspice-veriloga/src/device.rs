@@ -6148,16 +6148,6 @@ impl VerilogADevice {
         self.context.variables.get(idx).copied()
     }
 
-    /// Executed assignment notifications from the latest numerical candidate.
-    /// This is an observation of retained data, not a second model evaluation.
-    pub fn analog_assignment_occurrences(
-        &self,
-    ) -> Result<impl Iterator<Item = (&str, u32)>, VmError> {
-        Ok(self
-            .analog_assignment_occurrence_groups()?
-            .map(|(name, counter, _)| (name, counter)))
-    }
-
     /// Assignment notifications with an evaluation-local group identity.
     /// Members of one whole-array source assignment share a group and must be
     /// delivered together before digital processes resume.

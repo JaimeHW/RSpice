@@ -756,26 +756,6 @@ impl VerilogACompiler {
         )
     }
 
-    /// Compile a selected connection declaration from its prepared source.
-    /// Parameter overrides precede hierarchy, generate and digital folding.
-    pub fn compile_connect_runtime(
-        &self,
-        source_package: &str,
-        preprocessed: &str,
-        module: &str,
-        parameters: &[(&str, f64)],
-        control: &dyn PipelineControl,
-    ) -> CompileResult<RuntimeCompileReport> {
-        self.compile_connect_runtime_selected(
-            source_package,
-            preprocessed,
-            module,
-            parameters,
-            None,
-            control,
-        )
-    }
-
     pub fn compile_connect_runtime_with_configuration(
         &self,
         source_package: &str,

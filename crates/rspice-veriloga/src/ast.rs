@@ -2506,14 +2506,6 @@ impl WrealResolution {
             _ => return None,
         })
     }
-
-    /// Whether more than one driver on such a net is well formed.
-    ///
-    /// False for `wreal` alone: LRM 2.4 section 6.5.3 permits one driver, and
-    /// combining two would be inventing a rule the standard declined to state.
-    pub const fn admits_multiple_drivers(self) -> bool {
-        !matches!(self, Self::Single)
-    }
 }
 
 /// Net type keyword.
@@ -3010,14 +3002,6 @@ impl DigitalProcess {
             _ => None,
         }
     }
-
-    /// Whether the process contains any timing control at all.
-    ///
-    /// An `always` process with none never suspends, so it cannot advance
-    /// simulation time (IEEE 1364-2005 section 9.9.2).
-    pub fn has_timing_control(&self) -> bool {
-        self.body.contains_timing_control()
-    }
 }
 
 /// A statement inside a procedural process.
@@ -3210,47 +3194,6 @@ impl DigitalStatement {
             Self::EventTrigger(trigger) => trigger.span,
             Self::ProceduralContinuous(statement) => statement.span,
             Self::Null(span) => *span,
-        }
-    }
-
-    /// Whether this statement, or anything under it, suspends.
-    pub fn contains_timing_control(&self) -> bool {
-        match self {
-            Self::Timing(_) | Self::Wait(_) => true,
-            Self::Block(block) | Self::Fork(block) => {
-                block.statements.iter().any(Self::contains_timing_control)
-            }
-            Self::Conditional(conditional) => {
-                conditional.then_branch.contains_timing_control()
-                    || conditional
-                        .else_branch
-                        .as_ref()
-                        .is_some_and(|branch| branch.contains_timing_control())
-            }
-            Self::Case(case) => {
-                case.items
-                    .iter()
-                    .any(|item| item.statement.contains_timing_control())
-                    || case
-                        .default
-                        .as_ref()
-                        .is_some_and(|statement| statement.contains_timing_control())
-            }
-            Self::For(statement) => statement.body.contains_timing_control(),
-            Self::While(statement) => statement.body.contains_timing_control(),
-            Self::Repeat(statement) => statement.body.contains_timing_control(),
-            Self::Forever(statement) => statement.body.contains_timing_control(),
-            Self::BlockingAssign(assign) | Self::NonblockingAssign(assign) => {
-                assign.timing.is_some()
-            }
-            // A task enable suspends when the task's body does, which only
-            // the analyzer, holding the module's routines, can answer.
-            Self::SystemTask(_)
-            | Self::TaskEnable(_)
-            | Self::Disable(_)
-            | Self::EventTrigger(_)
-            | Self::ProceduralContinuous(_)
-            | Self::Null(_) => false,
         }
     }
 }

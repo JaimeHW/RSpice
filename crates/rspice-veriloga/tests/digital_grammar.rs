@@ -736,10 +736,12 @@ fn forever_loops_parse_around_a_suspension_point() {
          \x20   always forever @(posedge clk) q <= ~q;",
     ));
     let process = &only_module(&analyzed).digital.processes[0];
-    assert!(matches!(process.body, DigitalStatement::Forever(_)));
-    // The suspension point is inside the loop, which is what keeps the process
+    // The suspension point is the loop body, which is what keeps the process
     // from spinning.
-    assert!(process.body.contains_timing_control());
+    let DigitalStatement::Forever(forever) = &process.body else {
+        panic!("expected a forever loop, got {:?}", process.body);
+    };
+    assert!(matches!(*forever.body, DigitalStatement::Timing(_)));
 }
 
 /// IEEE 1364-2005 section 9.2: `=` and `<=` are different statements, and the
