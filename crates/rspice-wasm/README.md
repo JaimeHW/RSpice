@@ -194,9 +194,8 @@ diagnostic errors keep their unresolved output symbols.
 
 The crate declares none. It depends on `rspice-core` with
 `default-features = false`, which drops the `parallel` and `faer-parallel`
-backends this target cannot use, and with the `wasm` feature, which
-wires up `wasm-bindgen`. The build is single-threaded and enables no Verilog-A
-backend.
+backends this target cannot use, and with the `wasm` feature. The build is
+single-threaded and enables no Verilog-A backend.
 
 ## Building and testing
 

@@ -5511,10 +5511,8 @@ dependencies = [
  "libm",
  "log",
  "miniz_oxide 0.8.9",
- "nom 8.0.0",
  "num-bigint 0.4.8",
  "num-complex",
- "portable-atomic",
  "proptest",
  "rayon",
  "rspice-core-base",
@@ -5528,13 +5526,10 @@ dependencies = [
  "rspice-veriloga-runtime",
  "rustc-hash 2.1.3",
  "rustfft",
- "rustyhdf5",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "wasm-bindgen",
  "wasm-bindgen-test",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5975,7 +5970,6 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "cc",
- "indexmap",
  "libc",
  "log",
  "num-bigint 0.4.8",

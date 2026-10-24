@@ -1,7 +1,6 @@
 //! Netlist parsing module
 //!
 //! Parses SPICE-compatible netlist files into an AST representation.
-//! Uses a robust nom-based lexer for proper tokenization.
 //!
 //! Supports:
 //! - Standard SPICE elements (R, L, C, V, I, D, Q, M, X)

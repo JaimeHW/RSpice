@@ -15,14 +15,12 @@ rust-version.workspace = true
 # rspice-wasm opts out via default-features = false.
 default = ["faer-parallel", "parallel"]
 wasm = [
-    "wasm-bindgen",
     "rspice-core-base/wasm",
     "rspice-core-netlist/wasm",
     "rspice-core-devices/wasm",
 ]
 parallel = [
     "rayon",
-    "portable-atomic",
     "rspice-core-base/parallel",
     "rspice-core-netlist/parallel",
     "rspice-core-devices/parallel",
@@ -453,7 +451,6 @@ doctest = false
 faer.workspace = true
 thiserror.workspace = true
 log.workspace = true
-nom.workspace = true
 num-complex.workspace = true
 # Exact sparse rank decisions for ideal-source shooting constraints.
 num-bigint = "0.4.8"
@@ -461,10 +458,6 @@ libm = "0.2"
 rustfft.workspace = true
 rustc-hash.workspace = true
 getrandom = { workspace = true, features = ["wasm_js"] }
-# Pure-Rust HDF5, MIT, no C dependency. `mmap` is a default feature and is off
-# here: `io::hdf5` builds a document in memory and hands the bytes to a writer,
-# so nothing on the wasm path reaches for a file or a mapping.
-rustyhdf5 = { version = "1.93", default-features = false }
 rspice-core-base = { workspace = true, default-features = false }
 rspice-core-netlist = { workspace = true, default-features = false }
 rspice-core-devices = { workspace = true, default-features = false }
@@ -484,16 +477,9 @@ dirs = { version = "7.0", optional = true }
 
 # Parallel computation (optional)
 rayon = { workspace = true, optional = true }
-portable-atomic = { workspace = true, optional = true }
-
-# WASM support (optional)
-wasm-bindgen = { version = "0.2", optional = true }
 
 # Verilog-A support (optional)
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = true, default-features = false }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 # `execution_properties` states the planner, schema and bounded-IO laws as

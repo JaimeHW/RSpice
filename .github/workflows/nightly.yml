@@ -312,8 +312,8 @@ jobs:
           --test tri_family_events
           --test veriloga_mixed_signal_hardening
           -- --nocapture --test-threads 1 | tee parallel.log
-      # The same suites with rayon, portable-atomic and faer/rayon compiled
-      # out. faer's serial reductions may sum a row in a
+      # The same suites with rayon and faer/rayon compiled out. faer's
+      # serial reductions may sum a row in a
       # different order than its parallel ones, and a summation order that
       # reaches the accepted grid is exactly what a per-fixture hash is shaped
       # to catch: nothing else in the tree runs these decks serially.

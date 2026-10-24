@@ -222,7 +222,7 @@ wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
 # zeroization without carrying that table in either browser image.
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 
-# No rayon on wasm; the "wasm" feature wires up wasm-bindgen. The
+# No rayon on wasm; the "wasm" feature states the browser build. The
 # interactive image retains portable Verilog-A artifacts and validation, while
 # secondary-module emission and verification are owned exclusively by the
 # `rspice-worker` package. Keeping that ownership explicit prevents the
