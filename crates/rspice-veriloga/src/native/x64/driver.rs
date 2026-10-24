@@ -1,9 +1,11 @@
-//! Whole-pass native entry-point drivers.
+//! The whole-pass native evaluation driver.
 //!
 //! Scalar expression entry points remain useful for diagnostics and narrowly
-//! scoped evaluation APIs. The hot stamping path instead enters one driver,
-//! which invokes the assignment, contribution, and Jacobian entries inside
-//! the executable image and writes into caller-owned, preallocated buffers.
+//! scoped evaluation APIs. The evaluation path instead enters one driver,
+//! which invokes the assignment and contribution entries inside the
+//! executable image and writes into caller-owned, preallocated buffers. The
+//! stamp kernel inlines its value and Jacobian programs instead (see
+//! `codegen::compile_fused_stamp_kernel_artifact`).
 
 use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
 use super::{CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation};
@@ -15,7 +17,6 @@ const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const BRANCH_CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_currents) as i32;
 const CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, currents) as i32;
 const ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_active) as i32;
-const JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
 
 #[cfg(windows)]
 const DRIVER_FRAME_BYTES: i32 = 64;
@@ -26,43 +27,8 @@ const DRIVER_VARIABLES_SLOT: i32 = 40;
 #[cfg(windows)]
 const DRIVER_IO_SLOT: i32 = 48;
 
-/// Compiles a driver whose address will be `driver_image_offset` in the final
-/// executable image.
-#[cfg(test)]
-pub(crate) fn compile_stamp_kernel(
-    driver_image_offset: usize,
-    assignment: Option<CodeOffset>,
-    stamp_values: &[CodeOffset],
-    jacobians: &[Vec<CodeOffset>],
-    published_current_pairs: &[Option<(usize, usize)>],
-) -> JitResult<Vec<u8>> {
-    Ok(compile_stamp_kernel_artifact(
-        driver_image_offset,
-        assignment,
-        stamp_values,
-        jacobians,
-        published_current_pairs,
-    )?
-    .bytes)
-}
-
-#[allow(dead_code)]
-pub(crate) fn compile_evaluation_kernel(
-    driver_image_offset: usize,
-    assignment: Option<CodeOffset>,
-    stamp_values: &[CodeOffset],
-    published_current_pairs: &[Option<(usize, usize)>],
-) -> JitResult<Vec<u8>> {
-    Ok(compile_evaluation_kernel_artifact(
-        driver_image_offset,
-        assignment,
-        None,
-        stamp_values,
-        published_current_pairs,
-    )?
-    .bytes)
-}
-
+/// Compiles the evaluation driver whose address will be `driver_image_offset`
+/// in the final executable image.
 pub(super) fn compile_evaluation_kernel_artifact(
     driver_image_offset: usize,
     assignment: Option<CodeOffset>,
@@ -70,52 +36,9 @@ pub(super) fn compile_evaluation_kernel_artifact(
     stamp_values: &[CodeOffset],
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<CompiledX64Function> {
-    compile_kernel_artifact(
-        driver_image_offset,
-        assignment,
-        prelude,
-        stamp_values,
-        None,
-        published_current_pairs,
-        "evaluation",
-    )
-}
-
-// Only `compile_stamp_kernel` above reaches this; the x64 image builder
-// publishes the evaluation kernel. Both are test-only until it does.
-#[cfg(test)]
-pub(super) fn compile_stamp_kernel_artifact(
-    driver_image_offset: usize,
-    assignment: Option<CodeOffset>,
-    stamp_values: &[CodeOffset],
-    jacobians: &[Vec<CodeOffset>],
-    published_current_pairs: &[Option<(usize, usize)>],
-) -> JitResult<CompiledX64Function> {
-    compile_kernel_artifact(
-        driver_image_offset,
-        assignment,
-        None,
-        stamp_values,
-        Some(jacobians),
-        published_current_pairs,
-        "stamp",
-    )
-}
-
-fn compile_kernel_artifact(
-    driver_image_offset: usize,
-    assignment: Option<CodeOffset>,
-    prelude: Option<CodeOffset>,
-    stamp_values: &[CodeOffset],
-    jacobians: Option<&[Vec<CodeOffset>]>,
-    published_current_pairs: &[Option<(usize, usize)>],
-    driver_name: &str,
-) -> JitResult<CompiledX64Function> {
-    if stamp_values.len() != published_current_pairs.len()
-        || jacobians.is_some_and(|entries| stamp_values.len() != entries.len())
-    {
+    if stamp_values.len() != published_current_pairs.len() {
         return Err(internal_error(
-            "native kernel value, Jacobian, and publication entry shapes differ",
+            "native kernel value and publication entry shapes differ",
         ));
     }
     let runtime_failed_offset = std::mem::offset_of!(EvalContext, runtime_status)
@@ -171,7 +94,6 @@ fn compile_kernel_artifact(
         abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
     }
 
-    let mut jacobian_index = 0usize;
     for (stamp_index, (value_entry, current_pair)) in
         stamp_values.iter().zip(published_current_pairs).enumerate()
     {
@@ -209,18 +131,6 @@ fn compile_kernel_artifact(
             }
         }
 
-        if let Some(stamp_jacobians) = jacobians.map(|entries| &entries[stamp_index]) {
-            for entry in stamp_jacobians {
-                emit_entry_call(&mut encoder, driver_image_offset, *entry)?;
-                restore_internal_args(&mut encoder);
-                abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
-                let jacobian_disp = word_offset(jacobian_index, "Jacobian value")?;
-                encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::R14, JACOBIANS_OFFSET);
-                encoder.movsd_m64_base_disp32_xmm(Gpr::R11, jacobian_disp, Xmm::Xmm0);
-                jacobian_index += 1;
-            }
-        }
-
         patch_local_branch(&mut encoder, skip_stamp)?;
     }
 
@@ -239,7 +149,7 @@ fn compile_kernel_artifact(
         windows_unwind_info(windows_unwind_prologue_size, windows_unwind_operations);
     let bytes = encoder.into_bytes();
     let artifact = CompiledX64Function::code_only(bytes, windows_unwind);
-    super::verify_x64_function_artifact(&artifact, &format!("{driver_name} driver"))?;
+    super::verify_x64_function_artifact(&artifact, "evaluation driver")?;
     Ok(artifact)
 }
 
@@ -427,17 +337,17 @@ fn host_io_arg_reg() -> Gpr {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_evaluation_kernel, compile_stamp_kernel};
+    use super::compile_evaluation_kernel_artifact;
     use crate::native::model::CodeOffset;
 
     #[test]
     fn rejects_mismatched_entry_shapes() {
-        let error = compile_stamp_kernel(
+        let error = compile_evaluation_kernel_artifact(
             128,
             Some(CodeOffset::new(0)),
+            None,
             &[CodeOffset::new(16)],
             &[],
-            &[None],
         )
         .expect_err("shape mismatch must fail");
         assert!(error.to_string().contains("entry shapes differ"));
@@ -445,17 +355,15 @@ mod tests {
 
     #[test]
     fn guards_every_direct_call_with_a_runtime_failure_abort() {
-        let bytes = compile_stamp_kernel(
+        let bytes = compile_evaluation_kernel_artifact(
             128,
             Some(CodeOffset::new(0)),
+            Some(CodeOffset::new(48)),
             &[CodeOffset::new(16), CodeOffset::new(32)],
-            &[
-                vec![CodeOffset::new(48), CodeOffset::new(64)],
-                vec![CodeOffset::new(80)],
-            ],
-            &[None, None],
+            &[None, Some((0, 1))],
         )
-        .expect("compile driver");
+        .expect("compile evaluation driver")
+        .bytes;
 
         let failure_aborts = bytes
             .windows(2)
@@ -463,36 +371,8 @@ mod tests {
             .count();
         // Absolute helper addresses are embedded in the image and can
         // coincidentally contain this byte pair, so this is a lower bound.
-        assert!(failure_aborts >= 6);
+        assert!(failure_aborts >= 4);
         assert_eq!(bytes.last(), Some(&0xC3));
-    }
-
-    #[test]
-    fn evaluation_driver_omits_jacobian_calls_and_guards_every_entry() {
-        let bytes = compile_evaluation_kernel(
-            128,
-            Some(CodeOffset::new(0)),
-            &[CodeOffset::new(16), CodeOffset::new(32)],
-            &[None, Some((0, 1))],
-        )
-        .expect("compile evaluation driver");
-
-        let failure_aborts = bytes
-            .windows(2)
-            .filter(|window| *window == [0x0F, 0x85])
-            .count();
-        assert!(failure_aborts >= 3);
-        assert_eq!(bytes.last(), Some(&0xC3));
-
-        let stamp_bytes = compile_stamp_kernel(
-            128,
-            Some(CodeOffset::new(0)),
-            &[CodeOffset::new(16), CodeOffset::new(32)],
-            &[vec![CodeOffset::new(48)], vec![CodeOffset::new(64)]],
-            &[None, Some((0, 1))],
-        )
-        .expect("compile stamp driver");
-        assert!(bytes.len() < stamp_bytes.len());
     }
 
     #[cfg(windows)]
@@ -501,17 +381,15 @@ mod tests {
         use super::restore_internal_args;
         use crate::native::x64::encoder::X64Encoder;
 
-        let bytes = compile_stamp_kernel(
+        let bytes = compile_evaluation_kernel_artifact(
             256,
             Some(CodeOffset::new(0)),
+            Some(CodeOffset::new(48)),
             &[CodeOffset::new(16), CodeOffset::new(32)],
-            &[
-                vec![CodeOffset::new(48), CodeOffset::new(64)],
-                vec![CodeOffset::new(80)],
-            ],
             &[None, Some((0, 1))],
         )
-        .expect("compile hardened Win64 driver");
+        .expect("compile hardened Win64 driver")
+        .bytes;
 
         let mut expected = X64Encoder::new();
         restore_internal_args(&mut expected);
@@ -521,7 +399,7 @@ mod tests {
             .filter(|window| *window == expected)
             .count();
 
-        // One assignment, two values, and three Jacobian entries.
-        assert_eq!(restore_count, 6);
+        // One assignment, one prelude, and two value entries.
+        assert_eq!(restore_count, 4);
     }
 }
