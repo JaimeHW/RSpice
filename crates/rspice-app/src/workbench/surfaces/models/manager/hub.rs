@@ -1072,6 +1072,61 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             reissuable: false,
             landing_pack: None,
         });
+    let text_dim = Tokens::get(ui.ctx()).color.text_dim;
+    refusal_frame(
+        ui,
+        state,
+        &reason,
+        |ui| {
+            announced(
+                ui,
+                RichText::new(&attempted.label)
+                    .small()
+                    .monospace()
+                    .color(text_dim),
+                &attempted.label,
+            );
+        },
+        |ui| {
+            if attempted.reissuable
+                && Button::new("Retry the catalog refresh")
+                    .enabled(!app.state.models.models_view.model_import_in_progress)
+                    .show(ui)
+                    .on_disabled_hover_text("Another model-source operation is still running.")
+                    .clicked()
+            {
+                app.queue_model_hub(ModelHubRequest::FetchSnapshot);
+            }
+        },
+    );
+}
+
+/// A refused action on any other manager page, stated on the page it was
+/// taken from: what refused it and what that left behind. Those pages name
+/// their actions in their own toolbars, and offer no retry here.
+pub(super) fn page_refusal(ui: &mut Ui, state: &AppState) {
+    let Some(Err(reason)) = &state.models.models_view.action_receipt else {
+        return;
+    };
+    refusal_frame(
+        ui,
+        state.models.models_view.operational_state,
+        reason,
+        |_| {},
+        |_| {},
+    );
+}
+
+/// A refusal's frame: the failure mark and its state, `beside` them whatever
+/// names the operation, then the reason and its consequence, and `after` them
+/// whatever offers to run it again.
+fn refusal_frame(
+    ui: &mut Ui,
+    state: ModelsOperationalState,
+    reason: &str,
+    beside: impl FnOnce(&mut Ui),
+    after: impl FnOnce(&mut Ui),
+) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_inset)
@@ -1083,19 +1138,12 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 marked_line(ui, Problem::Failure, state.label());
-                announced(
-                    ui,
-                    RichText::new(&attempted.label)
-                        .small()
-                        .monospace()
-                        .color(t.color.text_dim),
-                    &attempted.label,
-                );
+                beside(ui);
             });
             announced(
                 ui,
-                RichText::new(&reason).small().color(t.color.text),
-                &reason,
+                RichText::new(reason).small().color(t.color.text),
+                reason,
             );
             announced(
                 ui,
@@ -1104,15 +1152,7 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     .color(t.color.text_dim),
                 state.consequence(),
             );
-            if attempted.reissuable
-                && Button::new("Retry the catalog refresh")
-                    .enabled(!app.state.models.models_view.model_import_in_progress)
-                    .show(ui)
-                    .on_disabled_hover_text("Another model-source operation is still running.")
-                    .clicked()
-            {
-                app.queue_model_hub(ModelHubRequest::FetchSnapshot);
-            }
+            after(ui);
         });
 }
 

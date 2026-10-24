@@ -700,6 +700,55 @@ fn the_bind_primary_names_the_instance_it_would_bind() {
     );
 }
 
+/// A refused action is stated, once, on the page it was taken from.
+///
+/// Only the packs view drew a refusal, so a refused corner, symbol, bin or
+/// include action was shown nowhere at all.
+#[test]
+fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
+    let reason = "the system clock cannot timestamp model validation";
+    for (page, scope) in [
+        (ModelsPage::Models, ModelsCatalogScope::Project),
+        (ModelsPage::Models, ModelsCatalogScope::InstalledPacks),
+        (ModelsPage::Models, ModelsCatalogScope::RSpiceLibrary),
+        (ModelsPage::Symbols, ModelsCatalogScope::Project),
+        (ModelsPage::Corners, ModelsCatalogScope::Project),
+        (ModelsPage::Bins, ModelsCatalogScope::Project),
+        (ModelsPage::Include, ModelsCatalogScope::Project),
+    ] {
+        let mut app = RSpiceApp::test_instance();
+        app.state.models.models_page = page;
+        app.state.models.models_view.catalog_scope = scope;
+        apply_receipt(&mut app.state, Err(reason.to_owned()));
+        let consequence = app.state.models.models_view.operational_state.consequence();
+        let studio = ModelsStudio::open(app);
+        let stated = studio
+            .announcements()
+            .into_iter()
+            .filter(|label| *label == reason)
+            .count();
+        assert_eq!(
+            stated,
+            1,
+            "{page:?} / {} states the refusal once; the page announces {:#?}",
+            scope.label(),
+            studio.announcements()
+        );
+        assert!(
+            studio.announces(|label| label == consequence),
+            "{page:?} / {} says what the refusal left behind",
+            scope.label()
+        );
+    }
+
+    // An action that worked says nothing.
+    let mut app = RSpiceApp::test_instance();
+    app.state.models.models_page = ModelsPage::Corners;
+    apply_receipt(&mut app.state, Ok("validated".to_owned()));
+    let studio = ModelsStudio::open(app);
+    assert!(!studio.announces(|label| label == ModelsOperationalState::Ready.consequence()));
+}
+
 /// A qualification count is a way into the page that holds it.
 ///
 /// The card stated five numbers a reader could not act on where they were

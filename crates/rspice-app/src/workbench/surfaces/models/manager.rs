@@ -248,6 +248,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let page = app.state.models.models_page;
+    // A refused action is stated on the page it was taken from. The packs view
+    // raises its own banner, with the operation and its retry; Qualification
+    // reports its own actions, not through this receipt.
+    let packs_view = page == ModelsPage::Models
+        && app.state.models.models_view.catalog_scope == ModelsCatalogScope::InstalledPacks;
+    if page != ModelsPage::Qualification && !packs_view {
+        hub::page_refusal(ui, &app.state);
+    }
     let include_diagnostics = (page == ModelsPage::Include)
         .then(|| closure_facts(app.state.model.model_library_manager.libraries_sorted()));
     // Projected before the render borrow, and settled there too: both the
