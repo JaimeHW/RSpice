@@ -196,12 +196,12 @@ br_gh1117	vlg	ce	L1	refused:generate-region	Parse error: Unsupported generate re
 br_gh1173	vlg	ce	L4	pass	language error: Parse error: Expected port name, found ')'
 br_gh1174a	vlg	ce	L1	refused:case	Parse error: Unsupported module item: case
 br_gh1174b	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `id_8`, which is a Parameter of the continuous-domain module and is not a discrete-domain assignment ...
-br_gh1175a	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175a.v` declares no digital nets, processes or drivers
-br_gh1175b	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175b.v` declares no digital nets, processes or drivers
-br_gh1175c	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175c.v` declares no digital nets, processes or drivers
-br_gh1175d	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175d.v` declares no digital nets, processes or drivers
-br_gh1175e	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175e.v` declares no digital nets, processes or drivers
-br_gh1175f	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175f.v` declares no digital nets, processes or drivers
+br_gh1175a	vlg	ce	L7	pass	language error: Parse error: Expected a table row of primitive `id_0` in the form IEEE 1364-2005 section 8.1.4 gives one, found a row with 6 input symbols for 1 inputs
+br_gh1175b	vlg	ce	L7	pass	language error: Parse error: Expected a table row of primitive `id_0` in the form IEEE 1364-2005 section 8.1.4 gives one, found a row with 6 input symbols for 1 inputs
+br_gh1175c	vlg	ce	L7	pass	language error: Parse error: Expected a table row of primitive `id_0` in the form IEEE 1364-2005 section 8.1.4 gives one, found a row with an output that is not one symbol
+br_gh1175d	vlg	ce	L7	pass	language error: Parse error: Expected a table row of primitive `id_0` in the form IEEE 1364-2005 section 8.1.4 gives one, found a row with a state that is not one symbol
+br_gh1175e	vlg	ce	L7	pass	language error: Parse error: Expected a table row of primitive `id_0` in the form IEEE 1364-2005 section 8.1.4 gives one, found a row with an output that is not one symbol
+br_gh1175f	vlg	ce	L7	pass	language error: Parse error: Duplicate primitive declaration: 'id_0'
 br_gh1178a	vlg	ce	-	excluded:systemverilog:logic	
 br_gh1178b	vlg	passed	-	excluded:systemverilog:logic	
 br_gh1178c	vlg	passed	-	excluded:systemverilog:logic	
@@ -239,7 +239,7 @@ br_gh244a	vlg	passed	L1	pass	PASSED
 br_gh244b	vlg	passed	L1	pass	PASSED
 br_gh25a	vlg	ce	L3	pass	language error: Parse error: Unexpected token: 'function'
 br_gh25b	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
-br_gh26	vlg	ce	L1	fail	compiled without error; ran to quiescence
+br_gh26	vlg	ce	L1	pass	language error: Semantic error: Port 'b' has no direction declaration; IEEE 1364-2005 section 12.3.3 declares each port as input, output or inout
 br_gh277a	vlg	passed	L4	pass	PASSED
 br_gh28	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: \test_str="hello"
 br_gh283a	vlg	passed	L1	pass	PASSED
@@ -352,7 +352,7 @@ check_constant_19	vlg	ce	L1	pass	language error: Semantic error: Invalid express
 check_constant_2	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `Value2` is not a constant; IEEE 1364-2005 section 12.2 makes a parameter value a constant expression, which a net or variab...
 check_constant_20	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `Out` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant e...
 check_constant_3	vlg	ce	-	excluded:flag-g1995	
-check_constant_4	vlg	ce	L1	fail	compiled without error; ran to quiescence
+check_constant_4	vlg	ce	L1	pass	language error: Parse error: Expected a constant expression as the value of attribute `attr` (IEEE 1364-2005 section 3.8), found `N`, a variable or net of the module
 check_constant_5	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
 check_constant_6	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
 check_constant_7	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
@@ -551,7 +551,7 @@ ifdef_fail	vlg	ce	L1	pass	language error: line 0: Unclosed conditional (1 `endif
 include1	vlg	passed	L1	fail	nothing to run: module `ivltests/include1.v` declares no digital nets, processes or drivers
 include2	vlg	passed	L1	fail	nothing to run: module `ivltests/include2.v` declares no digital nets, processes or drivers
 include3	vlg	passed	L1	fail	nothing to run: module `ivltests/include3.v` declares no digital nets, processes or drivers
-indef_width_concat	vlg	ce	L1	fail	compiled without error; ran to quiescence
+indef_width_concat	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: the unsized constant `2` is an operand of a concatenation; IEEE 1364-2005 section 5.1.14 allows no unsized constant number i...
 initmod	vlg	gold	L4	pass	matches the gold file
 initmod2	vlg	gold	L1	pass	matches the gold file
 inout	vlg	passed	L1	fail	compile error: Semantic error: Duplicate symbol: 'a' already defined
@@ -630,19 +630,19 @@ module_nonansi_fail8	vlg	ce	L1	pass	language error: Semantic error: Duplicate sy
 module_nonansi_fail9	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_integer1	vlg	passed	-	excluded:systemverilog-systf:$bits	
 module_nonansi_integer2	vlg	passed	-	excluded:systemverilog-systf:$bits	
-module_nonansi_integer_fail	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_nonansi_integer_fail	vlg	ce	L1	pass	language error: Semantic error: Port 'x' is declared with range [31:0] and redeclared as an `integer`, which has no range; IEEE 1364-2005 section 12.3.3 makes the ranges of a p...
 module_nonansi_time1	vlg	passed	-	excluded:systemverilog-systf:$bits	
 module_nonansi_time2	vlg	passed	-	excluded:systemverilog-systf:$bits	
 module_nonansi_time_fail	vlg	ce	L3	pass	language error: Parse error: Expected a port `x` declared without a range, as a `time` declaration of it requires (IEEE 1364-2005 section 12.3.3), found a ranged port declarati...
 module_nonansi_vec1	vlg	passed	-	excluded:systemverilog-systf:$bits	
 module_nonansi_vec2	vlg	passed	-	excluded:systemverilog-systf:$bits	
-module_nonansi_vec_fail1	vlg	ce	L1	fail	compiled without error; ran to quiescence
-module_nonansi_vec_fail2	vlg	ce	L1	fail	compiled without error; ran to quiescence
-module_nonansi_vec_fail3	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_nonansi_vec_fail1	vlg	ce	L1	pass	language error: Semantic error: Port 'x' is declared with range [3:0] and redeclared with range [7:0]; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaratio...
+module_nonansi_vec_fail2	vlg	ce	L1	pass	language error: Semantic error: Port 'x' is declared without a range and redeclared with range [7:0]; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaration...
+module_nonansi_vec_fail3	vlg	ce	L1	pass	language error: Semantic error: Port 'x' is declared with range [7:0] and redeclared without a range; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaration...
 module_output_port_list_def	vlg	passed	L4	pass	PASSED
 module_output_port_var1	vlg	passed	L3	pass	PASSED
 module_output_port_var2	vlg	passed	L3	pass	PASSED
-module_port_range_mismatch	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_port_range_mismatch	vlg	ce	L1	pass	language error: Semantic error: Port 'x' is declared with range [1:0] and redeclared with range [3:0]; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaratio...
 modulus	vlg	passed	L1	pass	PASSED
 modulus2	vlg	passed	L1	pass	PASSED
 monitor	vlg	gold	L1	pass	matches the gold file
@@ -854,7 +854,7 @@ pr1702593	vlg	gold	L1	pass	matches the gold file
 pr1703120	vlg	gold	L1	fail	differs from the gold file at line 2 (19 lines against 19)
 pr1703346	vlg	passed	L7	pass	PASSED
 pr1703959	vlg	passed	L7	pass	PASSED
-pr1704013	vlg	ce	L1	fail	compiled without error; ran to quiescence
+pr1704013	vlg	ce	L1	pass	language error: Semantic error: Port 'a' is declared without a range and redeclared with range [1:0]; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaration...
 pr1704726a	vlg	ce	L6	refused:generate-scope	Parse error: Unsupported generate scope: block name 'task_blk' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
 pr1704726b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `name_func` is not declared in the selected scope
 pr1704726c	vlg	ce	L3	refused:generate-scope	Parse error: Unsupported generate scope: block name 'name_gl' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
@@ -912,7 +912,7 @@ pr1831724	vlg	gold	L1	pass	matches the gold file
 pr1832097a	vlg	passed	L4	pass	PASSED
 pr1832097b	vlg	passed	L4	refused:force	Semantic error: Unsupported feature: a `force` names a bit- or part-select of the variable `bus`; IEEE 1364-2005 section 9.3 allows a select of a net only
 pr1833024	vlg	ce	L7	refused:tran	Parse error: Unsupported `tran` gate output: an expression; a gate drives a net, so its output terminal must be a name or a bit select of one
-pr1833754	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+pr1833754	vlg	ce	L1	pass	language error: Parse error: Expected a block name the module's scope does not already declare (IEEE 1364-2005 section 12.7), found `block1`, the name of a generate block of th...
 pr1841300	vlg	gold	-	excluded:flag-gno-io-range-error	
 pr1845683	vlg	gold	L1	pass	matches the gold file
 pr1851310	vlg	gold	L1	pass	matches the gold file
@@ -952,8 +952,8 @@ pr1903324	vlg	passed	L4	pass	PASSED
 pr1903343	vlg	gold	L3	pass	matches the gold file
 pr1903520	vlg	passed	L1	pass	PASSED
 pr1907192	vlg	passed	L4	pass	PASSED
-pr1909940	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
-pr1909940b	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+pr1909940	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: `in` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no ...
+pr1909940b	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: `in` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no ...
 pr1912843	vlg	passed	L1	pass	PASSED
 pr1913918a	vlg	passed	L1	pass	PASSED
 pr1913918b	vlg	passed	L1	pass	PASSED
@@ -1156,7 +1156,7 @@ pr2788686	vlg	passed	L3	pass	PASSED
 pr2790236	vlg	passed	L1	pass	PASSED
 pr2792883	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: a parameter declaration cannot reference outside its module (VAMS-2023 6.7.1)
 pr2792897	vlg	passed	L5	pass	PASSED
-pr2794144	vlg	ce	L1	fail	compiled without error; ran to quiescence
+pr2794144	vlg	ce	L1	pass	language error: Parse error: Expected a primary as the operand of a unary operator (IEEE 1364-2005 A.8.3); parenthesize the reduction, found '|'
 pr2800985a	vlg	passed	-	excluded:nonstandard-systf:$fputc	
 pr2801134	vlg	passed	L1	pass	PASSED
 pr2801662	vlg	passed	L6	pass	PASSED
@@ -1448,7 +1448,7 @@ real9	vlg	passed	L1	pass	PASSED
 real_array_multi_dim	vlg	passed	L1	pass	PASSED
 real_array_store_after_cmp	vlg	passed	L1	pass	PASSED
 real_assign_deassign	vlg	passed	L4	pass	PASSED
-real_concat_invalid2	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/real_concat_invalid2.v` declares no digital nets, processes or drivers
+real_concat_invalid2	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: the real value `rpar2` is an operand of a concatenation; IEEE 1364-2005 section 5.1.1 gives no real operand to a concatenati...
 real_delay	vlg	gold	-	excluded:sdf-annotate	
 real_events	vlg	gold	L3	refused:fork	Semantic error: Unsupported feature: `fork` inside an automatic task has no executable form yet: its branches would share the activation's frame
 real_force_rel	vlg	passed	L4	pass	PASSED
@@ -1489,7 +1489,7 @@ sched2	vlg	passed	L1	pass	PASSED
 schedule	vlg	passed	L3	pass	PASSED
 scope1	vlg	passed	L4	pass	PASSED
 scope2	vlg	passed	L1	pass	PASSED
-scope2b	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+scope2b	vlg	ce	-	excluded:flag-g1	
 scope4	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `test2.test3` is not a continuous net, branch, parameter or analog function
 scope5	vlg	passed	-	excluded:systemverilog:bit	
 scoped_events	vlg	gold	L4	refused:parameter	Parse error: Verilog-AMS digital construct not yet supported: `parameter`
@@ -1671,7 +1671,7 @@ timeform1	vlg	gold	L1	pass	matches the gold file
 timeform2	vlg	gold	L3	pass	matches the gold file
 timescale1	vlg	passed	L1	pass	PASSED
 timescale2	vlg	passed	L1	pass	PASSED
-timescale3	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/timescale3.v` declares no digital nets, processes or drivers
+timescale3	vlg	ce	L1	pass	language error: line 3: time units and precision must be powers of ten from 1 fs to 100 s, with precision no coarser than the time unit
 tran	vlg	gold	L7	pass	matches the gold file
 tran-keeper	vlg	passed	L7	pass	PASSED
 tranif0	vlg	gold	L7	pass	matches the gold file
@@ -1726,7 +1726,7 @@ undef_lval_select4b	vlg	ce	L4	refused:feature	Semantic error: Unsupported featur
 undef_lval_select4c	vlg	ce	L4	refused:feature	Semantic error: Unsupported feature: a bit or part select must have constant bounds representable as signed 64-bit integers
 undef_lval_select5	vlg	passed	L4	racy	testbench gap: no defines (__ICARUS__); passes in reverse order only; no PASSED line (6 output lines)
 undefined_shift	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (12 output lines)
-unnamed_block_var_decl	vlg	ce	L1	fail	compiled without error; ran to quiescence
+unnamed_block_var_decl	vlg	ce	L1	pass	language error: Parse error: Expected a statement: an unnamed `begin` block declares nothing (IEEE 1364-2005 section 9.8.1), found 'integer'
 unnamed_fork_var_decl	vlg	ce	L3	pass	language error: Parse error: Expected a statement: an unnamed `fork` block declares nothing (IEEE 1364-2005 section 9.8.2), found 'integer'
 urand_r	vlg	gold	-	excluded:systemverilog:var	
 urand_r2	vlg	gold	-	excluded:systemverilog:var	
@@ -1862,7 +1862,7 @@ br_gh1097	vvp	passed	-	excluded:flag-g2009
 br_gh1099a	vvp	passed	L1	pass	PASSED
 br_gh1099b	vvp	passed	L1	pass	PASSED
 br_gh1099c	vvp	passed	L1	pass	PASSED
-br_gh1104	vvp	ce	L1	fail	compiled without error; nothing to run: module `ivltests/br_gh1104_src2.v` declares no digital nets, processes or drivers
+br_gh1104	vvp	ce	L1	pass	language error: line 1: Include file not found: non-existant.v
 br_gh1122	vvp	passed	L7	pass	PASSED
 br_gh1143a	vvp	passed	-	excluded:flag-g2012	
 br_gh1143b	vvp	passed	-	excluded:flag-g2012	
@@ -1924,11 +1924,11 @@ constfunc6_ams	vvp	passed	-	excluded:nonstandard-systf:$abs
 constfunccall1	vvp	passed	L3	pass	PASSED
 constfunccall2	vvp	passed	-	excluded:flag-g2009	
 constfunccall3	vvp	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `m1` is not declared in this module or its generated ancestors or enclosing instances
-decl_before_use1	vvp	ce	L1	fail	compiled without error; ran to quiescence
-decl_before_use2	vvp	ce	L1	fail	compiled without error; ran to quiescence
+decl_before_use1	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: `v` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no d...
+decl_before_use2	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: `w` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no d...
 decl_before_use3	vvp	ce	L3	pass	language error: Semantic error: Invalid expression: the named event `e` is used before its declaration (IEEE 1364-2005 section 4.5 declares only nets implicitly)
 decl_before_use4	vvp	ce	L3	pass	language error: Semantic error: Invalid expression: the named event `e` is used before its declaration (IEEE 1364-2005 section 4.5 declares only nets implicitly)
-decl_before_use5	vvp	ce	L1	fail	compiled without error; ran to quiescence
+decl_before_use5	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: `w` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no d...
 decl_before_use6	vvp	passed	L3	refused:task	Parse error: Unsupported task: a parameter declared inside a task or function; declare it in the module
 delayed_sfunc	vvp	gold	L6	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
 dffsynth	vvp	passed	L1	pass	PASSED
