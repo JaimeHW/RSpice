@@ -1519,3 +1519,66 @@ fn a_zero_duration_edge_on_a_tick_completes_on_the_next_tick_image() {
         "a {shortest:e} s step in the nanosecond after the completion"
     );
 }
+
+/// A `transition` an HDL edge on a tick starts ends at a float sum an ulp past
+/// the image of the tick it ends on: `8.104 us + 1 ns` is one ulp above the
+/// image of 8 105 000 ps. A code model clocked by the same edge keys its
+/// output on that image, and the queue breakpoints it there. The two are one
+/// instant, landed on the later of them; stopping on the image left the end
+/// a sliver no step could cross, landed one floor later, and the stepper
+/// regrew from the floor one doubling at a time — the sigma-delta corpus
+/// testbench's counter took two floor landings on each of 680 feedback edges.
+#[test]
+fn a_transition_end_an_ulp_past_a_coupled_output_is_one_landing() {
+    let source = AmsFile::new(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module drive(b, a);\n\
+           output b; reg b;\n\
+           output a; electrical a;\n\
+           initial begin b = 1'b0; #8104 b = 1'b1; end\n\
+           analog V(a) <+ transition(b ? 1.0 : 0.0, 0, 1n, 1n);\n\
+         endmodule\n",
+    );
+    let text = format!(
+        "one landing for a transition end and a coupled output\n\
+         .hdl \"{}\"\n\
+         xd b a drive\n\
+         abuf b bd buf1\n\
+         .model buf1 d_buffer(rise_delay=1n fall_delay=1n)\n\
+         ra a 0 1k\n\
+         .tran 1n 8.2u\n\
+         .end\n",
+        source.path()
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let result = Engine::default().run_tran(&deck, 8.2e-6, 1e-8).unwrap();
+    let image = picosecond(8_105_000);
+    let end = picosecond(8_104_000) + 1.0e-9;
+    assert_eq!(
+        end,
+        image.next_up(),
+        "the transition ends an ulp past the image"
+    );
+    assert_eq!(
+        edges(&result, "bd"),
+        [(image, true)],
+        "the buffer's output is keyed on the image"
+    );
+    let near = result
+        .time
+        .iter()
+        .filter(|time| (**time - image).abs() <= 1.0e-15)
+        .collect::<Vec<_>>();
+    assert_eq!(near, [&end], "one point for both instants: {near:?}");
+    let shortest = result
+        .time
+        .windows(2)
+        .filter(|pair| pair[0] >= end && pair[0] < end + 1.0e-9)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        shortest >= 1.0e-12,
+        "a {shortest:e} s step in the nanosecond after the end"
+    );
+}

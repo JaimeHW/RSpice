@@ -196,9 +196,10 @@ fn xyce_iteration_retry_timestep(rejected_dt: Value, hard_min_dt: Value, max_dt:
     (rejected_dt * 0.125).clamp(hard_min_dt, max_dt)
 }
 
-/// The exact target the stepper lands on next, and whether a Verilog-A analog
+/// The exact target the stepper lands on next, whether a Verilog-A analog
 /// event owns it rather than a discrete activation
-/// ([`BreakpointLanding::AnalogModelEvent`]).
+/// ([`BreakpointLanding::AnalogModelEvent`]), and whether a discrete activation
+/// is among the instants it serves.
 fn accepted_veriloga_event_time(
     circuit: &crate::circuit::CircuitData,
     floor_grid: &mut FloorLandingGrid,
@@ -206,7 +207,7 @@ fn accepted_veriloga_event_time(
     hard_min_dt: Value,
     stop_time: Value,
     next_breakpoint: Option<Value>,
-) -> Result<(Option<Value>, bool), SimulationError> {
+) -> Result<(Option<Value>, bool, bool), SimulationError> {
     // An analog event less than one floor before the next scheduled
     // breakpoint is that breakpoint's instant computed another way
     // ([`crate::numerics::integration::coincides_before`]): no interval
@@ -244,7 +245,7 @@ fn accepted_veriloga_event_time(
         .chain(activation)
         .reduce(Value::min)
     else {
-        return Ok((None, false));
+        return Ok((None, false, false));
     };
     // One instant, one landing. The analog event, the discrete activation and
     // the next breakpoint are folded by the rule the physical clocks are
@@ -261,9 +262,14 @@ fn accepted_veriloga_event_time(
     // activation — cannot be folded here, because the landing is never moved
     // before an event. The step cut at that breakpoint is carried on to the
     // activation instead, where the breakpoint is solved with it (see the
-    // step's `breakpoint_before_activation`). An analog event keeps the one
-    // direction it always had, so a run without discrete lanes lands where it
-    // did.
+    // step's `breakpoint_before_activation`). So is a step cut at a breakpoint
+    // just before an analog event that the fold reached from a discrete
+    // activation: an HDL edge on a tick drives a `transition` whose end is a
+    // float sum an ulp past the image of the tick it ends on, where the
+    // code-model outputs of that tick are keyed and breakpointed, and stopping
+    // on the image left the end a sliver no step could cross. An analog event
+    // no activation joins keeps the one direction it always had, so a run
+    // without discrete lanes lands where it did.
     let members = [analog_event, activation, next_breakpoint];
     let target = latest_coincident_instant(
         earliest,
@@ -286,6 +292,7 @@ fn accepted_veriloga_event_time(
             stop_time,
         )?),
         analog_event.is_some_and(|event| event <= target),
+        activation.is_some_and(|activation| activation <= target),
     ))
 }
 
@@ -5753,6 +5760,9 @@ impl Engine {
         // Whether that target is a Verilog-A analog event, whose body runs in
         // the solve that lands on it, rather than a discrete activation.
         let mut pending_analog_model_event = false;
+        // Whether a discrete activation is among the instants that target
+        // serves: the fold reached it from one.
+        let mut pending_landing_serves_activation = false;
         // The floor grid the current run of sub-minimum landings walks. It
         // belongs to the run rather than to any one point, which is what keeps
         // a march at the minimum from drifting off the grid it started on, and
@@ -6119,15 +6129,18 @@ impl Engine {
                     tstop,
                     true,
                 )?;
-                (pending_veriloga_event_time, pending_analog_model_event) =
-                    accepted_veriloga_event_time(
-                        &circuit,
-                        &mut veriloga_floor_grid,
-                        resume_time,
-                        timestep.hard_min_dt(),
-                        tstop,
-                        breakpoints.next_after(resume_time),
-                    )?;
+                (
+                    pending_veriloga_event_time,
+                    pending_analog_model_event,
+                    pending_landing_serves_activation,
+                ) = accepted_veriloga_event_time(
+                    &circuit,
+                    &mut veriloga_floor_grid,
+                    resume_time,
+                    timestep.hard_min_dt(),
+                    tstop,
+                    breakpoints.next_after(resume_time),
+                )?;
                 if circuit.has_any_veriloga_devices()
                     && let Some(bound) = circuit
                         .veriloga_timestep_bound()
@@ -6586,15 +6599,18 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
-            (pending_veriloga_event_time, pending_analog_model_event) =
-                accepted_veriloga_event_time(
-                    &circuit,
-                    &mut veriloga_floor_grid,
-                    resume_time,
-                    timestep.hard_min_dt(),
-                    tstop,
-                    breakpoints.next_after(resume_time),
-                )?;
+            (
+                pending_veriloga_event_time,
+                pending_analog_model_event,
+                pending_landing_serves_activation,
+            ) = accepted_veriloga_event_time(
+                &circuit,
+                &mut veriloga_floor_grid,
+                resume_time,
+                timestep.hard_min_dt(),
+                tstop,
+                breakpoints.next_after(resume_time),
+            )?;
             if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
@@ -8109,8 +8125,9 @@ impl Engine {
             // latest member, so a step cut at the breakpoint is carried on to
             // the activation and the breakpoint is solved there with it.
             // Stopping on the breakpoint left the activation a sliver no step
-            // could cross, landed one floor late. An analog model's event keeps
-            // the landing it always had.
+            // could cross, landed one floor late. An analog model's event the
+            // fold reached from an activation is carried the same way; one no
+            // activation joins keeps the landing it always had.
             //
             // A transmission-line arrival is carried the same way. The schedule
             // propagates a source corner through the delay by rounded addition
@@ -8121,7 +8138,7 @@ impl Engine {
             // A GP phase arrival keeps its own landing.
             let breakpoint_before_activation = |target: Value| {
                 let carried = if pending_veriloga_event_time == Some(target) {
-                    !pending_analog_model_event
+                    !pending_analog_model_event || pending_landing_serves_activation
                 } else {
                     physical_event_time == Some(target)
                         && phase_arrival.is_none_or(|arrival| arrival.time != target)
@@ -8818,6 +8835,7 @@ impl Engine {
                             }
                             pending_veriloga_event_time = Some(target);
                             pending_analog_model_event = model_candidate.analog_event_root;
+                            pending_landing_serves_activation = false;
                             // Recorded before the chase's first cut, so the
                             // step this root interrupted survives it.
                             veriloga_refinement_approach_step
@@ -11934,15 +11952,18 @@ impl Engine {
                             breakpoints.mark_external_breakpoint_solved(t, interrupted)
                         });
                     hit_breakpoint |= model_discontinuity.restarts_integration();
-                    (pending_veriloga_event_time, pending_analog_model_event) =
-                        accepted_veriloga_event_time(
-                            &circuit,
-                            &mut veriloga_floor_grid,
-                            t,
-                            timestep.hard_min_dt(),
-                            tstop,
-                            breakpoints.next_after(t),
-                        )?;
+                    (
+                        pending_veriloga_event_time,
+                        pending_analog_model_event,
+                        pending_landing_serves_activation,
+                    ) = accepted_veriloga_event_time(
+                        &circuit,
+                        &mut veriloga_floor_grid,
+                        t,
+                        timestep.hard_min_dt(),
+                        tstop,
+                        breakpoints.next_after(t),
+                    )?;
                     if analysis_final_step {
                         Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
                     }
@@ -12647,15 +12668,18 @@ impl Engine {
                     true,
                 )?;
             }
-            (pending_veriloga_event_time, pending_analog_model_event) =
-                accepted_veriloga_event_time(
-                    &circuit,
-                    &mut veriloga_floor_grid,
-                    t,
-                    timestep.hard_min_dt(),
-                    tstop,
-                    breakpoints.next_after(t),
-                )?;
+            (
+                pending_veriloga_event_time,
+                pending_analog_model_event,
+                pending_landing_serves_activation,
+            ) = accepted_veriloga_event_time(
+                &circuit,
+                &mut veriloga_floor_grid,
+                t,
+                timestep.hard_min_dt(),
+                tstop,
+                breakpoints.next_after(t),
+            )?;
             if analysis_final_step {
                 Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
             }
