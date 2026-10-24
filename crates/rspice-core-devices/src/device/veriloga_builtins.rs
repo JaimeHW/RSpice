@@ -850,7 +850,13 @@ impl BuiltinVerilogADevices {
         Ok(())
     }
 
-    #[cfg(all(test, feature = "veriloga-model-diode-cmc"))]
+    #[cfg(all(
+        test,
+        any(
+            feature = "veriloga-model-diode-cmc",
+            feature = "veriloga-model-r2-cmc"
+        )
+    ))]
     #[inline]
     pub(crate) fn advance_state(&mut self) -> Result<(), String> {
         self.validate_state_acceptance()?;
@@ -2604,10 +2610,14 @@ mod tests {
     // instantiates a model, so each import names the models that reach it.
     // A build with `veriloga-builtins-base` and no model compiles every one
     // of those tests out.
+    #[cfg(any(
+        feature = "veriloga-model-diode-cmc",
+        feature = "veriloga-model-r2-cmc"
+    ))]
+    use super::BuiltinVerilogADevices;
     #[cfg(feature = "veriloga-model-diode-cmc")]
     use super::{
-        BuiltinVerilogADevices, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
-        GeneratedVerilogAAcceptedStateShapeIdentity,
+        GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GeneratedVerilogAAcceptedStateShapeIdentity,
     };
 
     #[cfg(feature = "veriloga-model-vbic13")]
@@ -2615,6 +2625,7 @@ mod tests {
     #[cfg(any(
         feature = "veriloga-model-diode-cmc",
         feature = "veriloga-model-ekv-va",
+        feature = "veriloga-model-r2-cmc",
         feature = "veriloga-model-vbic13",
     ))]
     use super::instantiate_builtin;
@@ -2627,6 +2638,7 @@ mod tests {
     #[cfg(any(
         feature = "veriloga-model-diode-cmc",
         feature = "veriloga-model-ekv-va",
+        feature = "veriloga-model-r2-cmc",
         feature = "veriloga-model-vbic13",
     ))]
     #[derive(Default)]
@@ -2653,6 +2665,7 @@ mod tests {
     #[cfg(any(
         feature = "veriloga-model-diode-cmc",
         feature = "veriloga-model-ekv-va",
+        feature = "veriloga-model-r2-cmc",
         feature = "veriloga-model-vbic13",
     ))]
     impl super::BuiltinTopology for TestTopology {
