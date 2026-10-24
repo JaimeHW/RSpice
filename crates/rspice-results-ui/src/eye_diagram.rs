@@ -139,22 +139,18 @@ mod tests {
         state.set_show_mask(true);
         assert_eq!(state.mask.total_samples, 3);
         assert_eq!(state.mask.violation_count, 3);
-        assert_eq!(state.mask.pass_rate(), Some(0.0));
         let margin = state.mask.margin.expect("a tested mask has a margin");
         assert!(margin < 0.0, "a violated mask reported {margin} margin");
 
         state.set_show_mask(false);
         assert_eq!(state.mask.total_samples, 0);
-        assert_eq!(state.mask.pass_rate(), None, "0/0 must not read as a pass");
         assert_eq!(state.mask.margin, None);
     }
 
-    /// An untested mask has no verdict. Reporting 100 % for an empty test is
-    /// how a compliance number comes to mean nothing.
+    /// An untested mask has no verdict: no margin, rather than a perfect one.
     #[test]
-    fn an_untested_mask_reports_no_pass_rate() {
+    fn an_untested_mask_reports_no_margin() {
         let mask = EyeMask::default();
-        assert_eq!(mask.pass_rate(), None);
         assert_eq!(mask.margin, None);
     }
 }

@@ -139,20 +139,6 @@ impl EyeMask {
                 .collect(),
         }
     }
-
-    /// Fraction of tested samples that stayed out of the mask.
-    ///
-    /// This is a pass rate, not a margin, and it is labelled as one. The
-    /// distinction matters: an eye that grazes the mask with one sample in a
-    /// hundred thousand has a pass rate of 99.999 % and a margin of zero.
-    ///
-    /// `None` when nothing has been tested — a mask with no samples has not
-    /// passed, and reporting 100 % for an empty test is how a mask verdict
-    /// comes to mean nothing.
-    pub fn pass_rate(&self) -> Option<f64> {
-        (self.total_samples > 0)
-            .then(|| 1.0 - (self.violation_count as f64 / self.total_samples as f64))
-    }
 }
 
 /// How far the mask can be scaled about its centre before the first sample

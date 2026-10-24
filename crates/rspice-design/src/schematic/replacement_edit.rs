@@ -175,10 +175,7 @@ fn build_instance_replacement(
     let mut replacement = source.clone();
     replacement.kind = target.kind();
     replacement.name = replacement_reference_name(document, source, target.kind())?;
-    replacement.value = match target.value_policy() {
-        SchematicReplacementValuePolicy::UseTarget => target.value().to_owned(),
-        SchematicReplacementValuePolicy::PreserveSource => source.value.clone(),
-    };
+    replacement.value = target.value().to_owned();
     replacement.symbol_variant = target.symbol_variant().map(str::to_owned);
     replacement.library_cell = target.library_binding().cloned();
 

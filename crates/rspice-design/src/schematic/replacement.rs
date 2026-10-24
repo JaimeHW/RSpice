@@ -165,16 +165,6 @@ impl SchematicReplacementSourceSpec {
     }
 }
 
-/// How the target's primary value/model field is populated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SchematicReplacementValuePolicy {
-    /// Use the value authored by the replacement target.
-    #[default]
-    UseTarget,
-    /// Retain the placed source value. Useful for symbol-compatible primitive swaps.
-    PreserveSource,
-}
-
 /// Self-contained primitive or library-cell replacement target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchematicReplacementTargetSpec {
@@ -185,7 +175,6 @@ pub struct SchematicReplacementTargetSpec {
     library_cell: Option<LibraryCellInstance>,
     terminals: Vec<SchematicReplacementTerminal>,
     parameters: Vec<SchematicReplacementParameter>,
-    value_policy: SchematicReplacementValuePolicy,
 }
 
 impl SchematicReplacementTargetSpec {
@@ -200,7 +189,6 @@ impl SchematicReplacementTargetSpec {
             library_cell: None,
             terminals: default_component_terminals(&component),
             parameters: Vec::new(),
-            value_policy: SchematicReplacementValuePolicy::UseTarget,
         }
     }
 
@@ -216,7 +204,6 @@ impl SchematicReplacementTargetSpec {
             library_cell: Some(binding),
             terminals: default_component_terminals(&component),
             parameters: Vec::new(),
-            value_policy: SchematicReplacementValuePolicy::UseTarget,
         }
     }
 
@@ -271,10 +258,6 @@ impl SchematicReplacementTargetSpec {
 
     pub fn parameters(&self) -> &[SchematicReplacementParameter] {
         &self.parameters
-    }
-
-    pub const fn value_policy(&self) -> SchematicReplacementValuePolicy {
-        self.value_policy
     }
 }
 

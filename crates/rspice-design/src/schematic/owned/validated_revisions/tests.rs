@@ -130,27 +130,6 @@ fn semantic_delta_reports_stable_object_changes() {
 }
 
 #[test]
-fn unpublished_removal_is_tail_only() {
-    let project_id = Uuid::new_v4();
-    let mut state = Schematic::default();
-    place(&mut state, ComponentType::Resistor, Point::origin());
-    let first = state
-        .append_validated_revision(request(&state, project_id), || Ok(1))
-        .expect("first revision");
-    let second = state
-        .append_validated_revision(request(&state, project_id), || Ok(1))
-        .expect("second revision");
-    assert_eq!(
-        state.remove_unpublished_validated_revision(first),
-        Err(ValidatedRevisionError::NotUnpublishedTail)
-    );
-    state
-        .remove_unpublished_validated_revision(second)
-        .expect("remove exact tail");
-    assert_eq!(state.document().validated_revisions.records().len(), 1);
-}
-
-#[test]
 fn migrated_baseline_preserves_prior_accepted_design() {
     let project_id = Uuid::new_v4();
     let mut accepted = Schematic::default();

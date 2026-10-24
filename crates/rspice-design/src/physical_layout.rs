@@ -766,36 +766,21 @@ impl PhysicalLayoutDocument {
             LayoutEdit::InsertNet { id, value } => {
                 insert(&mut self.nets, *id, value.clone(), "net")
             }
-            LayoutEdit::ReplaceNet { id, value } => {
-                replace(&mut self.nets, *id, value.clone(), "net")
-            }
             LayoutEdit::RemoveNet { id } => remove(&mut self.nets, *id, "net"),
             LayoutEdit::InsertShape { id, value } => {
                 insert(&mut self.shapes, *id, value.clone(), "shape")
-            }
-            LayoutEdit::ReplaceShape { id, value } => {
-                replace(&mut self.shapes, *id, value.clone(), "shape")
             }
             LayoutEdit::RemoveShape { id } => remove(&mut self.shapes, *id, "shape"),
             LayoutEdit::InsertInstance { id, value } => {
                 insert(&mut self.instances, *id, value.clone(), "instance")
             }
-            LayoutEdit::ReplaceInstance { id, value } => {
-                replace(&mut self.instances, *id, value.clone(), "instance")
-            }
             LayoutEdit::RemoveInstance { id } => remove(&mut self.instances, *id, "instance"),
             LayoutEdit::InsertText { id, value } => {
                 insert(&mut self.texts, *id, value.clone(), "text")
             }
-            LayoutEdit::ReplaceText { id, value } => {
-                replace(&mut self.texts, *id, value.clone(), "text")
-            }
             LayoutEdit::RemoveText { id } => remove(&mut self.texts, *id, "text"),
             LayoutEdit::InsertTerminal { id, value } => {
                 insert(&mut self.terminals, *id, value.clone(), "terminal")
-            }
-            LayoutEdit::ReplaceTerminal { id, value } => {
-                replace(&mut self.terminals, *id, value.clone(), "terminal")
             }
             LayoutEdit::RemoveTerminal { id } => remove(&mut self.terminals, *id, "terminal"),
             LayoutEdit::SetProperty { key, value } => {
@@ -803,14 +788,6 @@ impl PhysicalLayoutDocument {
                 validate_text("property.value", value, MAX_LAYOUT_TEXT_BYTES)?;
                 self.properties.insert(key.clone(), value.clone());
                 Ok(())
-            }
-            LayoutEdit::RemoveProperty { key } => {
-                self.properties.remove(key).map(|_| ()).ok_or_else(|| {
-                    LayoutDocumentError::MissingObject {
-                        kind: "property",
-                        id: key.clone(),
-                    }
-                })
             }
         }
     }
@@ -822,18 +799,10 @@ pub enum LayoutEdit {
         id: LayoutNetId,
         value: LayoutNet,
     },
-    ReplaceNet {
-        id: LayoutNetId,
-        value: LayoutNet,
-    },
     RemoveNet {
         id: LayoutNetId,
     },
     InsertShape {
-        id: LayoutObjectId,
-        value: LayoutShape,
-    },
-    ReplaceShape {
         id: LayoutObjectId,
         value: LayoutShape,
     },
@@ -844,18 +813,10 @@ pub enum LayoutEdit {
         id: LayoutObjectId,
         value: LayoutInstance,
     },
-    ReplaceInstance {
-        id: LayoutObjectId,
-        value: LayoutInstance,
-    },
     RemoveInstance {
         id: LayoutObjectId,
     },
     InsertText {
-        id: LayoutObjectId,
-        value: LayoutText,
-    },
-    ReplaceText {
         id: LayoutObjectId,
         value: LayoutText,
     },
@@ -866,19 +827,12 @@ pub enum LayoutEdit {
         id: LayoutObjectId,
         value: LayoutTerminal,
     },
-    ReplaceTerminal {
-        id: LayoutObjectId,
-        value: LayoutTerminal,
-    },
     RemoveTerminal {
         id: LayoutObjectId,
     },
     SetProperty {
         key: String,
         value: String,
-    },
-    RemoveProperty {
-        key: String,
     },
 }
 
@@ -923,25 +877,6 @@ where
         });
     }
     map.insert(id, value);
-    Ok(())
-}
-
-fn replace<K, V>(
-    map: &mut BTreeMap<K, V>,
-    id: K,
-    value: V,
-    kind: &'static str,
-) -> Result<(), LayoutDocumentError>
-where
-    K: Ord + Copy + fmt::Display,
-{
-    let slot = map
-        .get_mut(&id)
-        .ok_or_else(|| LayoutDocumentError::MissingObject {
-            kind,
-            id: id.to_string(),
-        })?;
-    *slot = value;
     Ok(())
 }
 

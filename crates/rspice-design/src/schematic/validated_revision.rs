@@ -641,22 +641,6 @@ impl ValidatedRevisionJournal {
         self.records.push(record);
         Ok(id)
     }
-
-    pub fn remove_unpublished_tail(
-        &mut self,
-        id: ValidatedSchematicRevisionId,
-    ) -> Result<(), ValidatedRevisionError> {
-        self.validate()?;
-        let tail = self
-            .records
-            .last()
-            .ok_or(ValidatedRevisionError::RevisionNotFound)?;
-        if tail.id != id || tail.kind != ValidatedRevisionKind::ValidatedSave {
-            return Err(ValidatedRevisionError::NotUnpublishedTail);
-        }
-        self.records.pop();
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -709,8 +693,6 @@ pub enum ValidatedRevisionError {
     ReadOnly,
     #[error("the selected validated revision already matches the active schematic")]
     AlreadyCurrent,
-    #[error("only the exact unpublished tail revision may be removed")]
-    NotUnpublishedTail,
     #[error("validated revision serialization failed: {0}")]
     Serialization(String),
 }

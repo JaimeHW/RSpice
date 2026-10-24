@@ -75,14 +75,6 @@ impl Schematic {
         let id = validated_revisions.append_validated_revision(request, source, clock)?;
         Ok(id)
     }
-    pub fn remove_unpublished_validated_revision(
-        &mut self,
-        id: ValidatedSchematicRevisionId,
-    ) -> Result<(), ValidatedRevisionError> {
-        self.document
-            .validated_revisions
-            .remove_unpublished_tail(id)
-    }
     /// Restore a validated drawing while preserving live output probes.
     /// Returns whether this scope committed an undo entry; nested restores
     /// leave publication to the pending outer operation.
