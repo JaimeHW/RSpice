@@ -30,10 +30,7 @@ pub fn execute(
         .then(|| usage_source_path(&args.input))
         .transpose()?;
     // Configure compiler options
-    let mut options = CompilerOptions {
-        strict_mode: args.strict,
-        ..CompilerOptions::default()
-    };
+    let mut options = CompilerOptions::default();
 
     // Add include paths (CLI flags first, then config paths.veriloga_includes)
     for include_dir in &args.includes {
@@ -50,7 +47,6 @@ pub fn execute(
 
     if verbose && !quiet {
         crate::console::line(format_args!("Verilog-A Compiler Options:"))?;
-        crate::console::line(format_args!("  Strict mode: {}", options.strict_mode))?;
         crate::console::line(format_args!("  Include paths: {:?}", options.include_paths))?;
         crate::console::line(format_args!(""))?;
     }

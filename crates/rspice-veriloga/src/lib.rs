@@ -321,8 +321,7 @@ pub struct VerilogACompiler {
 /// artifacts. [`enable_ams`](Self::enable_ams) enables mixed runtime reports
 /// for hosts that execute both domains. [`performance_budget`](Self::performance_budget) is an
 /// operational policy and is deliberately excluded from artifact and compiler
-/// contract identities. The remaining fields are reserved and are folded into
-/// the compiler-contract identity.
+/// contract identities.
 #[derive(Debug, Clone, Default)]
 pub struct CompilerOptions {
     /// Allow runtime compilation to emit the analog bytecode half of a mixed
@@ -344,14 +343,6 @@ pub struct CompilerOptions {
     /// applied, letting a caller replace a built-in definition rather than
     /// redefine it.
     pub undefines: Vec<String>,
-    /// Reserved for strict LRM compliance (erroring on vendor extensions).
-    /// Gates no behavior today.
-    pub strict_mode: bool,
-    /// Reserved for selecting the companion-model integration rule. Gates no
-    /// behavior today: `ddt`/`idt` compile to integration-agnostic state slots
-    /// and the engine supplies the coefficients per timestep through
-    /// [`vm::IntegrationCoefficients`].
-    pub integration_order: IntegrationOrder,
     /// Optional wall-clock limits. Empty by default, so ordinary compilation
     /// is never rejected due to host load or timer resolution.
     pub performance_budget: PerformanceBudget,
@@ -420,19 +411,6 @@ fn apply_wreal_resolution(
             }
         }
     }
-}
-
-/// Integration order for the `idt` and `ddt` companion models.
-///
-/// Reserved — see [`CompilerOptions::integration_order`]. The effective
-/// integration rule is chosen by the engine at run time, not here.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum IntegrationOrder {
-    /// First-order (Gear-1, Backward Euler)
-    First,
-    /// Second-order (Gear-2, Trapezoidal)
-    #[default]
-    Second,
 }
 
 fn compiler_phase_trace_enabled() -> bool {

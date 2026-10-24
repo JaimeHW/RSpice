@@ -18,7 +18,7 @@ use crate::preprocessor::{
 };
 use crate::source_diagnostics::source_line_range;
 use crate::{CompileDiagnosticPhase, PreprocessorError};
-use crate::{CompileError, CompileResult, CompilerOptions, IntegrationOrder, RuntimeCompileReport};
+use crate::{CompileError, CompileResult, CompilerOptions, RuntimeCompileReport};
 
 const CONTRACT_SCHEMA: &str = "rspice.veriloga.virtual-runtime-contract.v1";
 
@@ -769,7 +769,9 @@ pub(crate) fn compiler_contract_identity(
     hasher.field(module_name.as_bytes());
     hasher.field(closure_identity.as_bytes());
     hasher.byte(u8::from(options.enable_ams));
-    hasher.byte(u8::from(options.strict_mode));
+    // The bytes of two retired options keep their only values, strict mode off
+    // here and second-order integration below, so every identity is unchanged.
+    hasher.byte(0);
     // Folded in only when set, so every existing identity is unchanged.
     if options.discard_output_tasks {
         hasher.field(b"discard-output-tasks");
@@ -795,10 +797,7 @@ pub(crate) fn compiler_contract_identity(
         hasher.field(b"delay-select");
         hasher.field(options.delay_select.keyword().as_bytes());
     }
-    hasher.byte(match options.integration_order {
-        IntegrationOrder::First => 1,
-        IntegrationOrder::Second => 2,
-    });
+    hasher.byte(2);
     hasher.usize(options.defines.len());
     for (name, value) in &options.defines {
         hasher.field(name.as_bytes());
