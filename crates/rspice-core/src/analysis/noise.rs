@@ -1399,24 +1399,6 @@ impl NoiseResult {
     pub fn input_referred_rms(&self) -> Value {
         self.input_referred_density.sqrt()
     }
-
-    /// Get total output noise in dBV/Hz
-    pub fn output_noise_dbv(&self) -> Value {
-        if self.output_noise_density > 0.0 {
-            10.0 * self.output_noise_density.log10()
-        } else {
-            -200.0
-        }
-    }
-
-    /// Get the dominant noise source
-    pub fn dominant_source(&self) -> Option<&NoiseContribution> {
-        self.contributions.iter().max_by(|a, b| {
-            a.output_contribution
-                .partial_cmp(&b.output_contribution)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-    }
 }
 
 //=============================================================================

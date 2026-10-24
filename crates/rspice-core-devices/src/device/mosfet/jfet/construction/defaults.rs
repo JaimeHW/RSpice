@@ -129,12 +129,6 @@ impl Jfet {
         self
     }
 
-    /// Set area factor
-    pub fn with_area(mut self, area: Value) -> Self {
-        self.area = area;
-        self
-    }
-
     /// Enable ngspice JFET2 Parker-Skellern defaults (`NJF`/`PJF LEVEL=2`).
     pub fn enable_jfet2_model(mut self) -> Self {
         self.params.channel_model = JfetChannelModel::ParkerSkellern;

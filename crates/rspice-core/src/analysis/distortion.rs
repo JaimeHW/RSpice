@@ -140,27 +140,6 @@ impl DistortionPointResult {
     pub fn product(&self, product: DistortionProduct) -> Option<&DistortionProductResult> {
         self.products.iter().find(|value| value.product == product)
     }
-
-    /// Voltage distortion ratio at a matrix-aligned, one-based node.
-    /// Ground returns zero. A zero fundamental produces infinity for a
-    /// nonzero product and zero for a zero product.
-    pub fn voltage_ratio(&self, product: DistortionProduct, node: usize) -> Option<Value> {
-        let product_value = self.product(product)?;
-        if node == 0 {
-            return Some(0.0);
-        }
-        let numerator = product_value.response.voltages.get(node - 1)?.norm();
-        let denominator = self.fundamental_f1.voltages.get(node - 1)?.norm();
-        Some(if denominator == 0.0 {
-            if numerator == 0.0 {
-                0.0
-            } else {
-                Value::INFINITY
-            }
-        } else {
-            numerator / denominator
-        })
-    }
 }
 
 /// Complete harmonic or two-tone `.DISTO` sweep.

@@ -180,23 +180,6 @@ impl SpectralVoltage {
         self.coefficients.get(k).map(|c| c.arg()).unwrap_or(0.0)
     }
 
-    /// Get magnitude in dBV at harmonic k
-    pub fn magnitude_dbv(&self, k: usize) -> Value {
-        let mag = self.magnitude(k);
-        if mag > 1e-15 {
-            20.0 * mag.log10()
-        } else {
-            -300.0 // Floor
-        }
-    }
-
-    /// Get peak-to-peak voltage (approximation from harmonics)
-    pub fn peak_to_peak(&self) -> Value {
-        // Sum of all harmonic amplitudes * 2 (approximate)
-        let ac_sum: Value = self.coefficients.iter().skip(1).map(|c| c.norm()).sum();
-        2.0 * ac_sum // Peak-to-peak of AC component
-    }
-
     /// Get RMS voltage
     pub fn rms(&self) -> Value {
         // RMS = sqrt(DC² + Σ|Hk|²/2)
@@ -355,15 +338,6 @@ impl HbResult {
     /// Get number of nodes
     pub fn num_nodes(&self) -> usize {
         self.spectral_voltages.len()
-    }
-
-    /// Get DC operating point for all nodes
-    pub fn dc_operating_point(&self) -> Vec<(String, Value)> {
-        self.spectral_voltages
-            .iter()
-            .zip(self.node_names.iter())
-            .map(|(sv, name)| (name.clone(), sv.dc()))
-            .collect()
     }
 
     /// Check whether this is a complete, structurally consistent, finite HB

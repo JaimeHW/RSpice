@@ -3967,19 +3967,6 @@ pub struct DeviceInitialConditionDirective {
     pub entries: Vec<DeviceInitialConditionEntry>,
 }
 
-impl DeviceInitialConditionDirective {
-    /// Whether an external-file directive still requires source resolution.
-    pub fn requires_source_resolution(&self) -> bool {
-        matches!(
-            self.source,
-            DeviceInitialConditionSource::File {
-                resolved_path: None,
-                ..
-            }
-        )
-    }
-}
-
 /// Nodeset hint for operating point
 #[derive(Debug, Clone)]
 pub struct NodeSet {
@@ -5409,24 +5396,6 @@ pub struct SubcircuitDef {
     pub library_ref: Option<String>,
     /// Nested subcircuit definitions (for hierarchical parsing)
     pub nested_subcircuits: Vec<SubcircuitDef>,
-}
-
-//======================================================================// Include/Lib Directives
-//======================================================================
-/// Include directive: .INCLUDE "filename"
-#[derive(Debug, Clone)]
-pub struct IncludeDirective {
-    /// File path (relative or absolute)
-    pub path: String,
-}
-
-/// Library directive: `.LIB "filename" [section]`
-#[derive(Debug, Clone)]
-pub struct LibDirective {
-    /// File path
-    pub path: String,
-    /// Optional section name within the library
-    pub section: Option<String>,
 }
 
 //======================================================================// Tests

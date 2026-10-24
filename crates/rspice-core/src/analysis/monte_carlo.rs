@@ -340,14 +340,6 @@ impl VariableStatistics {
         let idx = ((pct / 100.0) * (sorted.len() - 1) as Value).floor() as usize;
         sorted[idx.min(sorted.len() - 1)]
     }
-
-    /// Get 3-sigma range (mean ± 3*std_dev)
-    pub fn three_sigma_range(&self) -> (Value, Value) {
-        (
-            self.mean - 3.0 * self.std_dev,
-            self.mean + 3.0 * self.std_dev,
-        )
-    }
 }
 
 /// Seed and versioned sampling policy needed to reproduce a batch.

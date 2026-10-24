@@ -1527,18 +1527,6 @@ impl TransmissionLine {
         1.0 / r
     }
 
-    /// Get propagation velocity (if freq and nl are set)
-    pub fn velocity(&self) -> Option<Value> {
-        match (self.freq, self.nl) {
-            (Some(f), Some(nl)) => {
-                // v = wavelength * freq = (length/nl) * freq
-                // But we don't have physical length, just normalized
-                Some(f / nl * self.td)
-            }
-            _ => None,
-        }
-    }
-
     #[inline]
     fn initial_state(&self) -> TlineStateSample {
         self.initial_state.unwrap_or(TlineStateSample {
@@ -2060,11 +2048,6 @@ impl TransmissionLine {
             }
         }
         self.current_time = time;
-    }
-
-    /// Get delayed forward wave (arrives at port 2)
-    pub fn delayed_forward(&self) -> Value {
-        self.delayed_forward_at(self.current_time)
     }
 
     /// Get delayed forward wave at an explicit simulation time.

@@ -32,11 +32,6 @@ use faer::Mat;
 use std::f64::consts::PI;
 use thiserror::Error;
 
-/// A root counts as real when its imaginary part sits inside this band. The
-/// eigen solvers hand back conjugate pairs carrying a residual imaginary part,
-/// so an exact zero test would report every real root as complex.
-const REAL_ROOT_TOLERANCE: Value = 1e-10;
-
 /// A pole-zero extraction failure that must not be represented as an empty
 /// or estimated root set.
 #[derive(Debug, Error)]
@@ -394,14 +389,6 @@ impl PoleZeroResult {
         }
     }
 
-    /// Get real poles only
-    pub fn real_poles(&self) -> Vec<&Complex64> {
-        self.poles
-            .iter()
-            .filter(|p| p.im.abs() < REAL_ROOT_TOLERANCE)
-            .collect()
-    }
-
     /// Get dominant pole (slowest, closest to imaginary axis)
     pub fn dominant_pole(&self) -> Option<&Complex64> {
         self.poles
@@ -436,11 +423,6 @@ impl PoleZeroResult {
         self.zeros = spectrum.finite;
         self.zero_evidence = spectrum.evidence;
         debug_assert!(self.zero_evidence.is_consistent_with(&self.zeros));
-    }
-
-    /// Get bandwidth (frequency of dominant pole)
-    pub fn bandwidth_hz(&self) -> Option<Value> {
-        self.dominant_pole().map(|p| p.re.abs() / (2.0 * PI))
     }
 
     /// Sort poles by magnitude. Complex-conjugate pairs compare equal in

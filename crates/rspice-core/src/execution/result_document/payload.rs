@@ -25,7 +25,7 @@ use crate::analysis::sensitivity::{ElementType, SensitivityUnavailability, Sensi
 use crate::engine::waveform::{
     TransientCompressionAlgorithm, TransientCompressionErrorObservation,
     TransientCompressionPolicy, TransientCompressionReport, TransientCompressionSampleDomain,
-    TransientCompressionSignal, TransientCompressionSignalKind,
+    TransientCompressionSignalKind,
 };
 use crate::engine::{
     DigitalBusDeclaration, DigitalBusSource, HbEnvelopeStateGuarantee, HdlDriverKind,
@@ -1205,13 +1205,6 @@ impl From<&TransientCompressionErrorObservation> for CompressionObservationDocum
             allowed_tolerance: observation.allowed_tolerance,
             tolerance_utilization: observation.tolerance_utilization,
         }
-    }
-}
-
-impl CompressionObservationDocument {
-    /// Rebuild the core observation identity this document projected.
-    pub fn to_signal(&self) -> Result<TransientCompressionSignal, String> {
-        TransientCompressionSignal::new(self.signal_kind.into(), self.signal_canonical_name.clone())
     }
 }
 

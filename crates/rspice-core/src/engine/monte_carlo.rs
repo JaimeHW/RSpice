@@ -242,31 +242,6 @@ impl Engine {
         self.run_monte_carlo_voltages_with_abort(netlist, &options, abort)
     }
 
-    /// Redraw the circuit's statistical expressions and native process/mismatch
-    /// declarations independently for each trial, then report DC voltages.
-    pub fn run_monte_carlo_deck_statistics_with_abort(
-        &self,
-        netlist: &Netlist,
-        num_runs: usize,
-        seed: u64,
-        environment: Option<&MonteCarloEnvironment>,
-        abort: &dyn AbortSignal,
-    ) -> Result<MonteCarloResult, SimulationError> {
-        self.run_monte_carlo_voltages_with_abort(
-            netlist,
-            &MonteCarloRunConfig {
-                first_trial: 0,
-                num_runs,
-                seed,
-                distribution: Distribution::Uniform { tolerance: 0.0 },
-                variation_source: MonteCarloVariationSource::DeckStatistics,
-                parameter_filter: None,
-                environment,
-            },
-            abort,
-        )
-    }
-
     /// Run a contiguous batch, preserving original sample identities.
     /// Earlier parameter-stream draws are advanced without solving their circuits.
     pub fn run_monte_carlo_voltages_with_abort(
