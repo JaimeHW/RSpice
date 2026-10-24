@@ -23,7 +23,7 @@ pub(crate) mod pdk_config;
 use rspice_design::physical_layout;
 mod preflight_report;
 mod project_open;
-pub(crate) use rspice_design::project_sources;
+pub use rspice_design::project_sources;
 pub use rspice_design::properties as property_types;
 pub use rspice_results::result_presentation;
 mod schematic;
@@ -37,10 +37,10 @@ pub(crate) mod workspace;
 pub(crate) mod write_policy;
 
 #[cfg(test)]
-pub(crate) use rspice_design::symbol::SYMBOL_VIEW_PARSES;
+pub use rspice_design::symbol::SYMBOL_VIEW_PARSES;
 
 #[cfg(test)]
-pub(crate) use rspice_model_library::CATALOG_LIBRARY_SERIALIZATIONS;
+pub use rspice_model_library::CATALOG_LIBRARY_SERIALIZATIONS;
 
 pub use active_viewer::ActiveViewer;
 pub use configuration_set::{
@@ -69,7 +69,7 @@ pub use library_browser::{
     View, ViewType, library_cell_placement_candidates,
 };
 #[cfg(test)]
-pub(crate) use model_bound_symbol::store_model_bound_symbol;
+pub use model_bound_symbol::store_model_bound_symbol;
 pub use model_bound_symbol::{
     GeneratedSymbolViews, MODEL_BOUND_SYMBOL_METADATA_KEY, MODEL_BOUND_SYMBOL_SCHEMA_VERSION,
     ModelBoundSymbolDefinition, ParameterInheritance, SymbolDefinitionImport, SymbolElectricalType,
@@ -173,7 +173,7 @@ pub use simulation::SensitivityStudyRow;
 #[cfg(test)]
 pub use simulation::TransientConvergenceEvidence;
 #[cfg(test)]
-pub(crate) use simulation::current_impulse_history_fixture;
+pub use simulation::current_impulse_history_fixture;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, ConvergenceAttribution, CrossProbeIndex,

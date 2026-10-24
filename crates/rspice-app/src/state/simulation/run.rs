@@ -61,7 +61,7 @@ impl SimulationRun {
         }
     }
 
-    pub(crate) fn new_prepared(run_number: u64, receipt: PreparedRunReceipt) -> Self {
+    pub fn new_prepared(run_number: u64, receipt: PreparedRunReceipt) -> Self {
         let timestamp = Self::current_timestamp();
         Self {
             data: RetainedRun::new_prepared(

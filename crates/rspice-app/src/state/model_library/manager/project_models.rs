@@ -102,7 +102,7 @@ impl ModelLibraryManager {
 #[cfg(test)]
 impl ModelLibraryManager {
     /// Seed a sectionless test model through the production revision transaction.
-    pub(crate) fn create_project_model(
+    pub fn create_project_model(
         &mut self,
         library_name: &str,
         definition: &ProjectModelDefinition,

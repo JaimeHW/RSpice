@@ -3,7 +3,7 @@
 use rspice_core::{CurrentImpulseOwner, CurrentImpulseTrace};
 use rspice_results::current_impulses::CurrentImpulseHistoryEvidence;
 
-pub(crate) fn current_impulse_history_fixture() -> CurrentImpulseHistoryEvidence {
+pub fn current_impulse_history_fixture() -> CurrentImpulseHistoryEvidence {
     CurrentImpulseHistoryEvidence {
         start_time_s: 0.0,
         stop_time_s: 1.0,

@@ -7,14 +7,20 @@ pub(crate) mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use ed25519_dalek::{Signer as _, SigningKey};
 
+    #[cfg(test)]
     use super::*;
-    use rspice_model_library::pdk::contracts::{PdkExecutionTarget, SignedPdkTechnologyArchive};
+    #[cfg(test)]
+    use rspice_model_library::pdk::contracts::PdkExecutionTarget;
+    use rspice_model_library::pdk::contracts::SignedPdkTechnologyArchive;
     use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
     use rspice_model_library::pdk::{PdkAdministrativeAuthority, PdkPublisherTrustStore};
-    use rspice_simulation::pdk::test_fixtures::{fixture_archive, fixture_signed_symbol};
+    use rspice_simulation::pdk::test_fixtures::fixture_archive;
+    #[cfg(test)]
+    use rspice_simulation::pdk::test_fixtures::fixture_signed_symbol;
+    #[cfg(test)]
     use rspice_simulation::pdk::{ValidatedPdkTechnologyPackage, validate_archive_bytes};
 
-    pub(crate) fn fixture_revision_archives() -> (
+    pub fn fixture_revision_archives() -> (
         Vec<u8>,
         Vec<u8>,
         PdkPublisherTrustStore,
@@ -27,6 +33,7 @@ pub(crate) mod tests {
         (baseline, candidate, trust, authority)
     }
 
+    #[cfg(test)]
     fn pair(
         mutate: impl FnOnce(&mut PdkTechnologyManifest),
     ) -> (ValidatedPdkTechnologyPackage, ValidatedPdkTechnologyPackage) {

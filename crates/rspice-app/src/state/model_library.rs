@@ -50,7 +50,7 @@ pub use rspice_model_library::first_unreachable_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub use rspice_model_library::is_foreign_platform_absolute_path;
 #[cfg(test)]
-pub(crate) use rspice_model_library::is_portable_absolute_path;
+pub use rspice_model_library::is_portable_absolute_path;
 pub use rspice_model_library::qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,

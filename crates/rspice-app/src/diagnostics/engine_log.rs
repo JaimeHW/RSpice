@@ -64,7 +64,7 @@ pub fn publish(
 /// Neither can change what the other sees: the stderr decision is the inner
 /// logger's, unchanged, and the Console's is the run sink's.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) struct StudioLogger {
+pub struct StudioLogger {
     inner: env_logger::Logger,
 }
 
@@ -151,7 +151,7 @@ pub fn install_studio_logger(inner: env_logger::Logger) {
 /// test installed the logger first would otherwise decide what every other
 /// test's stderr half does.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) fn studio_logger_for_tests() -> &'static StudioLogger {
+pub fn studio_logger_for_tests() -> &'static StudioLogger {
     static LOGGER: std::sync::OnceLock<&'static StudioLogger> = std::sync::OnceLock::new();
     LOGGER.get_or_init(|| {
         let mut builder = env_logger::Builder::new();
@@ -169,7 +169,7 @@ pub(crate) fn studio_logger_for_tests() -> &'static StudioLogger {
 
 /// The filter the test logger's stderr half is held to.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) const TEST_STDERR_FILTER: &str = "warn,rspice_core=warn";
+pub const TEST_STDERR_FILTER: &str = "warn,rspice_core=warn";
 
 #[cfg(test)]
 mod tests {

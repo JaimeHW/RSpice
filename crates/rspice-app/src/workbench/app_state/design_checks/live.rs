@@ -105,7 +105,7 @@ impl Model {
     }
 
     /// Check one cellview's drawing against the live rules, and publish it.
-    pub(in crate::workbench) fn run_live_check(
+    pub fn run_live_check(
         &mut self,
         subject: CellViewRef,
         facts: SlotFacts,
@@ -179,7 +179,7 @@ impl Model {
     }
 
     /// The live pass of `subject`, while it still describes the drawing.
-    pub(in crate::workbench::app_state) fn current_live_receipt(
+    pub fn current_live_receipt(
         &self,
         subject: &CellViewRef,
         facts: SlotFacts,

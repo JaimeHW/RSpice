@@ -22,7 +22,7 @@ pub const MANUAL_JUNCTION_DOTS: usize = 1;
 pub const ANY_ANGLE_ROUTING: usize = 2;
 
 /// Drag-selection behaviour in stored index order.
-pub(crate) const SELECTION_CROSSING: [SelectionCrossingPolicy; 3] = [
+pub const SELECTION_CROSSING: [SelectionCrossingPolicy; 3] = [
     SelectionCrossingPolicy::Directional,
     SelectionCrossingPolicy::EnclosedOnly,
     SelectionCrossingPolicy::Intersecting,

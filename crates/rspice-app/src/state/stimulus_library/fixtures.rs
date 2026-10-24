@@ -138,7 +138,7 @@ pub(crate) fn definition(name: &str) -> StimulusDefinition {
 }
 
 /// Every fixture definition, in the order the mockup lists them.
-pub(crate) fn library() -> StimulusLibrary {
+pub fn library() -> StimulusLibrary {
     let mut library = StimulusLibrary::default();
     for (name, ..) in ROWS {
         library
@@ -149,6 +149,6 @@ pub(crate) fn library() -> StimulusLibrary {
 }
 
 /// The name of every fixture definition.
-pub(crate) fn names() -> Vec<&'static str> {
+pub fn names() -> Vec<&'static str> {
     ROWS.into_iter().map(|(name, ..)| name).collect()
 }

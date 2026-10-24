@@ -607,7 +607,7 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
-    pub(crate) const ALL: [Self; 59] = [
+    pub const ALL: [Self; 59] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -832,7 +832,7 @@ pub enum TogglePreference {
 }
 
 impl TogglePreference {
-    pub(crate) const ALL: [Self; 14] = [
+    pub const ALL: [Self; 14] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -956,7 +956,7 @@ pub enum FolderListPreference {
 
 impl FolderListPreference {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 1] = [Self::LibraryFolders];
+    pub const ALL: [Self; 1] = [Self::LibraryFolders];
 
     pub const fn stable_id(self) -> &'static str {
         match self {
@@ -1165,7 +1165,7 @@ impl UserPreferences {
     }
 
     #[cfg(test)]
-    pub(crate) fn choose_schematic_full_crosshair(&mut self, on: bool) {
+    pub fn choose_schematic_full_crosshair(&mut self, on: bool) {
         self.set_choice(ChoicePreference::SchematicCursor, usize::from(on))
             .expect("the cursor choice has two options");
     }
@@ -1598,7 +1598,7 @@ impl UserPreferences {
     }
 
     #[cfg(test)]
-    pub(crate) fn choose_right_button_pan(&mut self) {
+    pub fn choose_right_button_pan(&mut self) {
         self.set_choice(ChoicePreference::CanvasPanButton, 1)
             .expect("the right button is a pan button");
     }

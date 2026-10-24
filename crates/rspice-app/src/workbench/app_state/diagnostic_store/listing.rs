@@ -629,7 +629,7 @@ fn netlist_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) 
 /// Every batch's standing is decided here, from the live design, through the
 /// store's digest memo. A surface drawn every frame reads
 /// [`listing_in_pass`] instead, which decides them once per pass.
-pub(in crate::workbench) fn listing(source: &impl ListingSource) -> DiagnosticListing<'_> {
+pub fn listing(source: &impl ListingSource) -> DiagnosticListing<'_> {
     listing_of(source.listing_inputs())
 }
 

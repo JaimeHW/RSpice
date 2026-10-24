@@ -2,7 +2,9 @@
 
 use super::SchematicState;
 #[cfg(test)]
-use super::schematic::{SchematicEditorMut, SchematicEditorRef};
+use super::schematic::SchematicEditorMut;
+#[cfg(test)]
+use super::schematic::SchematicEditorRef;
 use super::workspace::WorkspaceSession;
 #[cfg(test)]
 use super::{LibraryManager, ProjectWorkspace};
@@ -67,7 +69,7 @@ impl ProjectSnapshot {
     }
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn with_result_presentation(
+    pub fn with_result_presentation(
         mut self,
         presentation: rspice_results::result_presentation::ResultPresentation,
     ) -> Self {
@@ -111,12 +113,12 @@ impl ProjectSnapshot {
             .clone_schematic_editor(&self.file.workspace, key)
     }
     #[cfg(test)]
-    pub(crate) fn schematic_editor_mut(&mut self, key: &str) -> Option<SchematicEditorMut<'_>> {
+    pub fn schematic_editor_mut(&mut self, key: &str) -> Option<SchematicEditorMut<'_>> {
         self.workspace_session
             .schematic_editor_mut(&mut self.file.workspace, key)
     }
     #[cfg(test)]
-    pub(crate) fn insert_schematic_editor(
+    pub fn insert_schematic_editor(
         &mut self,
         key: String,
         editor: SchematicState,
@@ -125,7 +127,7 @@ impl ProjectSnapshot {
             .insert_schematic_editor(&mut self.file.workspace, key, editor)
     }
     #[cfg(test)]
-    pub(crate) fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
+    pub fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
         self.workspace_session
             .remove_schematic_editor(&mut self.file.workspace, key)
     }
@@ -134,7 +136,7 @@ impl ProjectSnapshot {
             .ensure_library_model(&mut self.file.workspace, &mut self.file.libraries)
     }
     #[cfg(test)]
-    pub(crate) fn restore_pending_annotation(&mut self) -> Result<usize, String> {
+    pub fn restore_pending_annotation(&mut self) -> Result<usize, String> {
         self.workspace_session
             .restore_pending_annotation(&mut self.file.workspace, &self.file.libraries)
     }

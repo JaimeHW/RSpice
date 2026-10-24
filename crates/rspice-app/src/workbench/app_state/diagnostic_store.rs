@@ -142,8 +142,8 @@ impl From<rspice_design::drc::DrcSeverity> for DiagnosticLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticSubject {
     pub(in crate::workbench) project: ProjectId,
-    pub(in crate::workbench) cell_view: Option<CellViewRef>,
-    pub(in crate::workbench) object: String,
+    pub cell_view: Option<CellViewRef>,
+    pub object: String,
 }
 
 impl DiagnosticSubject {
@@ -207,7 +207,7 @@ pub enum DiagnosticRoute {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FindingKey {
     pub(in crate::workbench) producer: Arc<str>,
-    pub(in crate::workbench) code: Arc<str>,
+    pub code: Arc<str>,
     pub(in crate::workbench) document: Arc<str>,
     pub(in crate::workbench) object: Arc<str>,
 }
@@ -268,13 +268,13 @@ pub struct DiagnosticRecord {
     /// What the finding is about, as its identity was minted from it. A
     /// republication that re-mints the current finding under a new
     /// occurrence finds it again by this.
-    pub(in crate::workbench) key: FindingKey,
+    pub key: FindingKey,
     pub level: DiagnosticLevel,
-    pub(in crate::workbench) subject: DiagnosticSubject,
+    pub subject: DiagnosticSubject,
     pub message: String,
     /// What else the reader needs, shown on hover. Empty when the message is
     /// the whole finding.
-    pub(in crate::workbench) details: String,
+    pub details: String,
     /// What the rule itself requires, in the words the rule is written in.
     ///
     /// Not the message and not the fix: the message says what this instance
@@ -288,7 +288,7 @@ pub struct DiagnosticRecord {
     /// What the reader may do about this finding's waiver: waive it, remove
     /// the waiver covering it, or — `None` — nothing, because it is not a
     /// design-rule finding or its rule may not be waived.
-    pub(in crate::workbench) waiver_action: Option<super::waivers::WaiverAction>,
+    pub waiver_action: Option<super::waivers::WaiverAction>,
     /// The cellview the object a design-rule finding is about is drawn in,
     /// which is not the checked subject for a finding stated inside an
     /// instance. A later check that states that cellview's findings takes
@@ -303,10 +303,10 @@ pub struct DiagnosticRecord {
     /// Every other object the finding involves, in the order its producer
     /// stated them: each source in a loop, each instance carrying a
     /// duplicated name. Empty where it involves only what it is about.
-    pub(in crate::workbench) related_places: Vec<RelatedPlace>,
+    pub related_places: Vec<RelatedPlace>,
     /// The line of a run's own log that states the finding, for a condition
     /// a run raised and logged. `None` where no line of a log states it.
-    pub(in crate::workbench) log_place: Option<RunLogPlace>,
+    pub log_place: Option<RunLogPlace>,
 }
 
 /// One line of a run's own log.
@@ -316,10 +316,10 @@ pub struct DiagnosticRecord {
 /// line stays where it is for as long as the run is held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunLogPlace {
-    pub(in crate::workbench) run_sequence: u64,
+    pub run_sequence: u64,
     /// Its position in the run's log, from zero, which is how the Console
     /// addresses a run's lines.
-    pub(in crate::workbench) line: usize,
+    pub line: usize,
 }
 
 impl RunLogPlace {
@@ -352,12 +352,12 @@ pub struct RelatedPlace {
     pub label: String,
     /// The cellview the object is drawn in, which for a finding stated inside
     /// an instance is that instance's master, not the checked subject.
-    pub(in crate::workbench) cell_view: CellViewRef,
+    pub cell_view: CellViewRef,
     /// Where the object is in that cellview.
-    pub(in crate::workbench) location: rspice_design::drc::DrcLocation,
+    pub location: rspice_design::drc::DrcLocation,
     /// Where following it goes, where the drawing can say: the same
     /// resolution a record's own route is made by.
-    pub(in crate::workbench) route: Option<DiagnosticRoute>,
+    pub route: Option<DiagnosticRoute>,
 }
 
 impl DiagnosticRecord {
@@ -442,7 +442,7 @@ impl DiagnosticRecord {
     }
 
     /// State the line of a run's log that states the finding, where one does.
-    pub(in crate::workbench) fn with_log_place(mut self, place: Option<RunLogPlace>) -> Self {
+    pub fn with_log_place(mut self, place: Option<RunLogPlace>) -> Self {
         self.log_place = place;
         self
     }
@@ -455,7 +455,7 @@ impl DiagnosticRecord {
     /// canonical record's suppression, so there is exactly one place a waiver
     /// can be stated: the design-rule producers state there the waiver stored
     /// with the cellview that covers the finding.
-    pub(in crate::workbench) const fn waived(&self) -> bool {
+    pub const fn waived(&self) -> bool {
         self.canonical.suppression.is_some()
     }
 }
@@ -465,7 +465,7 @@ impl DiagnosticRecord {
 /// findings were derived from, and `canonical.source` is what says which one
 /// reported a given record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(in crate::workbench) enum DiagnosticOwner {
+pub enum DiagnosticOwner {
     /// The schematic and electrical rule checks, per cell view.
     DesignRules,
     /// One symbol's pin contract against the interface its cell declares,
@@ -495,7 +495,7 @@ impl DiagnosticOwner {
     /// the assertion below holds this list to one owner per place. The tests
     /// that must drive every owner walk this list rather than naming the
     /// owners they happen to know about.
-    pub(in crate::workbench) const ALL: [Self; 5] = [
+    pub const ALL: [Self; 5] = [
         Self::DesignRules,
         Self::SymbolPins,
         Self::Dispatch,
@@ -571,7 +571,7 @@ pub enum DiagnosticInputs {
 }
 
 impl DiagnosticInputs {
-    pub(in crate::workbench) const fn owner(&self) -> DiagnosticOwner {
+    pub const fn owner(&self) -> DiagnosticOwner {
         match self {
             Self::DesignCheck { .. } | Self::LiveCheck { .. } => DiagnosticOwner::DesignRules,
             Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
@@ -842,7 +842,7 @@ pub(super) fn digest_of(material: &impl serde::Serialize) -> Result<ContentDiges
 /// whether it still describes the design in front of the reader.
 #[derive(Debug, Clone)]
 pub struct DiagnosticBatch {
-    pub(in crate::workbench) inputs: DiagnosticInputs,
+    pub inputs: DiagnosticInputs,
     input_digest: ContentDigest,
     pub records: Vec<DiagnosticRecord>,
     /// What the records say about themselves, folded once when the batch is
@@ -873,7 +873,7 @@ fn fingerprint(records: &[DiagnosticRecord]) -> u64 {
 
 /// Where a published batch stands against the live design.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum BatchStanding {
+pub enum BatchStanding {
     Current,
     /// The inputs moved under it. Its findings usually still point at
     /// something real, so they are kept and said to be stale.
@@ -883,7 +883,7 @@ pub(in crate::workbench) enum BatchStanding {
 }
 
 impl BatchStanding {
-    pub(in crate::workbench) const fn is_current(&self) -> bool {
+    pub const fn is_current(&self) -> bool {
         matches!(self, Self::Current)
     }
 }
@@ -1016,9 +1016,7 @@ impl std::fmt::Debug for PassMemoCell {
 }
 
 impl DiagnosticStore {
-    pub(in crate::workbench) fn batches(
-        &self,
-    ) -> impl Iterator<Item = &DiagnosticBatch> + Clone + '_ {
+    pub fn batches(&self) -> impl Iterator<Item = &DiagnosticBatch> + Clone + '_ {
         self.batches.values()
     }
 
@@ -1049,7 +1047,7 @@ impl DiagnosticStore {
     /// egui context counts passes from zero again, and would otherwise read
     /// the first context's memo for a pass of the same number.
     #[cfg(test)]
-    pub(in crate::workbench) fn forget_pass(&self) {
+    pub fn forget_pass(&self) {
         *self
             .pass_memo
             .0
@@ -1069,7 +1067,7 @@ impl DiagnosticStore {
     /// for the controller's tests: the controller sits below the shell and
     /// cannot name a batch.
     #[cfg(test)]
-    pub(crate) fn published_run_failures(&self, run_sequence: u64) -> Vec<(String, String)> {
+    pub fn published_run_failures(&self, run_sequence: u64) -> Vec<(String, String)> {
         self.batches
             .values()
             .filter(|batch| batch.inputs == DiagnosticInputs::Run { run_sequence })
@@ -1081,7 +1079,7 @@ impl DiagnosticStore {
     /// The campaign members the store holds as refused, as (the place each
     /// stands in, subject, message), for the controller's tests.
     #[cfg(test)]
-    pub(crate) fn published_member_refusals(&self) -> Vec<(String, String, String)> {
+    pub fn published_member_refusals(&self) -> Vec<(String, String, String)> {
         self.batches
             .values()
             .filter(|batch| matches!(batch.inputs, DiagnosticInputs::CampaignMember { .. }))
@@ -1465,7 +1463,7 @@ impl Model {
     }
 
     /// Where one published batch stands against the live design.
-    pub(in crate::workbench) fn diagnostic_batch_standing(
+    pub fn diagnostic_batch_standing(
         &self,
         batch: &DiagnosticBatch,
         facts: SlotFacts,

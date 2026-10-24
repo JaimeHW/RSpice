@@ -37,9 +37,9 @@ pub struct WaiverTarget {
     /// The cellview whose document stores the waiver.
     pub cell_view: CellViewRef,
     /// The code of the rule the finding is an instance of.
-    pub(in crate::workbench) rule: Arc<str>,
+    pub rule: Arc<str>,
     /// The object inside that cellview the finding is located at.
-    pub(in crate::workbench) object: String,
+    pub object: String,
 }
 
 /// What the page may do about a finding's waiver.

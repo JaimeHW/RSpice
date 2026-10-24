@@ -203,11 +203,11 @@ pub(super) fn count_computed() {
 
 /// Batch digests computed on this thread since the last reset.
 #[cfg(test)]
-pub(in crate::workbench) fn computed_digests() -> u64 {
+pub fn computed_digests() -> u64 {
     COMPUTED.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]
-pub(in crate::workbench) fn reset_computed_digests() {
+pub fn reset_computed_digests() {
     COMPUTED.with(|count| count.set(0));
 }

@@ -658,7 +658,7 @@ impl ShortcutPolicies {
 
     /// Unknown execution-affecting policy values are preserved for forward
     /// compatibility, but must fail closed until this build understands them.
-    pub(crate) fn unknown_execution_policy_names(&self) -> Vec<&'static str> {
+    pub fn unknown_execution_policy_names(&self) -> Vec<&'static str> {
         let mut names = Vec::new();
         if self.single_key_canvas.has_unknown() {
             names.push("single-key-canvas");

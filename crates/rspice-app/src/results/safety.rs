@@ -9,7 +9,7 @@ pub use rspice_results::safety::{
     SoaVoltageInterpolation,
 };
 
-pub(crate) fn soa_current_envelope_test_fixture() -> SoaCurrentEnvelope {
+pub fn soa_current_envelope_test_fixture() -> SoaCurrentEnvelope {
     SoaCurrentEnvelope {
         source: "Synthetic SOA fixture".into(),
         conditions: "Synthetic fixed case temperature; single window".into(),

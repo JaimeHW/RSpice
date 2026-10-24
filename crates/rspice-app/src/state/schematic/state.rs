@@ -92,7 +92,7 @@ impl<'a> SchematicEditorRef<'a> {
         SchematicState::from_parts(design, self.session.cloned().unwrap_or_default())
     }
 
-    pub(crate) fn is_dirty(&self) -> bool {
+    pub fn is_dirty(&self) -> bool {
         self.session.is_some_and(|session| session.is_dirty)
     }
 
@@ -137,9 +137,7 @@ impl SchematicState {
         Self { design, session }
     }
 
-    pub(crate) fn into_parts(
-        self,
-    ) -> (rspice_design::schematic::owned::Schematic, SchematicSession) {
+    pub fn into_parts(self) -> (rspice_design::schematic::owned::Schematic, SchematicSession) {
         (self.design, self.session)
     }
 
@@ -217,7 +215,7 @@ impl SchematicState {
     /// Fixtures can model invalid or externally changed content without a
     /// mutable document accessor in production.
     #[cfg(test)]
-    pub(crate) fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
+    pub fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
         self.design.document_mut_for_test()
     }
 

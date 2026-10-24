@@ -29,7 +29,7 @@ const RETIRED_DEMO_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_br
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredModule {
     pub name: String,
-    pub(crate) ports: Vec<String>,
+    pub ports: Vec<String>,
 }
 
 /// What a Verilog-A source declares: its top modules, the ones no other

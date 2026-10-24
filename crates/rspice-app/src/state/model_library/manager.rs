@@ -32,14 +32,14 @@ use rspice_model_library::{
     ModelValidationReceipt, ModelValidationReceiptInput, SimulationPlanModelBinding,
 };
 
+#[cfg(test)]
+use super::ProjectModelDefinition;
 use super::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
     ModelSourceAuthority, ModelType, ProcessCorner, ProjectModelRevisionDefinition,
 };
 #[cfg(test)]
-use super::{
-    ModelLevel, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ProjectModelDefinition,
-};
+use super::{ModelLevel, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 #[cfg(test)]
 use rspice_model_library::CornerModelBinding;

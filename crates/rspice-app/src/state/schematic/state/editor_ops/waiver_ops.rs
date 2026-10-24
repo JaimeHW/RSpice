@@ -7,7 +7,7 @@ use crate::state::SchematicState;
 
 impl SchematicState {
     /// Record `waiver` on this schematic as one undoable edit.
-    pub(crate) fn waive(&mut self, waiver: DrcWaiver) -> Result<(), String> {
+    pub fn waive(&mut self, waiver: DrcWaiver) -> Result<(), String> {
         if self.session.read_only {
             return Err("the schematic that stores this waiver is read-only".to_owned());
         }

@@ -28,7 +28,7 @@ use std::path::PathBuf;
 ///
 /// An unresolvable temporary directory is returned as reported: a fixture that
 /// cannot create its root should fail on that, not here.
-pub(crate) fn canonical_temp_dir() -> PathBuf {
+pub fn canonical_temp_dir() -> PathBuf {
     let reported = std::env::temp_dir();
     std::fs::canonicalize(&reported).map_or(reported, without_verbatim_prefix)
 }

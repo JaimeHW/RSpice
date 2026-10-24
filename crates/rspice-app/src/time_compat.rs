@@ -175,10 +175,11 @@ fn zone_offset_seconds(unix_seconds: i64) -> i32 {
 }
 
 #[cfg(test)]
-pub(crate) use tests::with_unix_epoch;
+pub use tests::with_unix_epoch;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(test)]
     use super::*;
     use std::time::Duration;
 
@@ -189,7 +190,7 @@ mod tests {
     }
 
     /// Scoped, thread-local fault injection for synchronous transaction tests.
-    pub(crate) fn with_unix_epoch<R>(
+    pub fn with_unix_epoch<R>(
         epoch: Result<Duration, &'static str>,
         operation: impl FnOnce() -> R,
     ) -> R {
