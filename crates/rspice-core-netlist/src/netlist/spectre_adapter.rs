@@ -20,6 +20,7 @@ mod names;
 mod values;
 
 use names::SpectreNames;
+pub(crate) use names::{SpectreDeckNames, SpectreSourceNames};
 use values::{card_value, lower_spectre_value, spectre_value_identifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,14 +153,24 @@ pub fn adapt_spectre_model_library<'a>(
     path: &Path,
     source: &'a str,
 ) -> Result<Cow<'a, str>, SpectreModelAdapterError> {
+    adapt_spectre_source(path, source).map(|(adapted, _)| adapted)
+}
+
+/// Adapt a source as [`adapt_spectre_model_library`] does, and hand back the
+/// top-level names a Spectre source spells, which a deck shares with every
+/// source it includes (see [`SpectreDeckNames`]).
+pub(crate) fn adapt_spectre_source<'a>(
+    path: &Path,
+    source: &'a str,
+) -> Result<(Cow<'a, str>, Option<SpectreSourceNames>), SpectreModelAdapterError> {
     if !is_native_spectre_source(path, source) {
-        return Ok(Cow::Borrowed(source));
+        return Ok((Cow::Borrowed(source), None));
     }
 
     let lexed_lines = preprocess_spectre_comments(path, source)?;
     let lines = lexed_lines.iter().map(String::as_str).collect::<Vec<_>>();
     let (statements, names) = parse_spectre_statements(path, &lines)?;
-    names.check(path)?;
+    let names = names.check(path)?;
     let symbols = SpectreSymbols::from_statements(&statements)?;
     let mut output = Vec::<String>::with_capacity(lines.len());
     for statement in statements {
@@ -196,7 +207,7 @@ pub fn adapt_spectre_model_library<'a>(
         adapted.push('\n');
     }
     debug_assert_eq!(adapted.lines().count(), source.lines().count());
-    Ok(Cow::Owned(adapted))
+    Ok((Cow::Owned(adapted), Some(names)))
 }
 
 fn parse_spectre_statements(

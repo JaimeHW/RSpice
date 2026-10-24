@@ -8,7 +8,7 @@
 //! spelling used consistently is accepted as written; nothing is renamed.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{SpectreModelAdapterError, error, values::spectre_value_identifiers};
 
@@ -204,8 +204,12 @@ impl SpectreNames {
     }
 
     /// Refuse the first two spellings that differ only in case within one
-    /// namespace and scope, naming both with their lines.
-    pub(super) fn check(mut self, path: &Path) -> Result<(), SpectreModelAdapterError> {
+    /// namespace and scope, naming both with their lines. What passes is the
+    /// part of the source a deck that includes it shares: its top-level names.
+    pub(super) fn check(
+        mut self,
+        path: &Path,
+    ) -> Result<SpectreSourceNames, SpectreModelAdapterError> {
         for entry in std::mem::take(&mut self.overrides) {
             if self.subcircuits.contains(&entry.master) {
                 self.names.push(SpectreName {
@@ -255,45 +259,100 @@ impl SpectreNames {
 
         let mut first: Option<(&SpectreName, &SpectreName, &SpectreNameScope)> = None;
         for ((_, scope, _), members) in &groups {
-            for (index, later) in members.iter().enumerate() {
-                let Some(earlier) = members[..index].iter().find(|earlier| {
-                    earlier.spelling != later.spelling && sections_meet(earlier, later)
-                }) else {
-                    continue;
-                };
-                let (earlier, later) = if earlier.line <= later.line {
-                    (*earlier, *later)
-                } else {
-                    (*later, *earlier)
-                };
-                if first.is_none_or(|(first_earlier, first_later, first_scope)| {
-                    clash_order(earlier, later, scope)
-                        < clash_order(first_earlier, first_later, first_scope)
+            // The first use of each spelling stands for every later one, so a
+            // name used ten thousand times costs ten thousand steps.
+            let mut spellings = Vec::<&SpectreName>::new();
+            for member in members {
+                for spelling in &spellings {
+                    if spelling.spelling == member.spelling || !sections_meet(spelling, member) {
+                        continue;
+                    }
+                    let (earlier, later) = if spelling.line <= member.line {
+                        (*spelling, *member)
+                    } else {
+                        (*member, *spelling)
+                    };
+                    if first.is_none_or(|(first_earlier, first_later, first_scope)| {
+                        clash_order(earlier, later, scope)
+                            < clash_order(first_earlier, first_later, first_scope)
+                    }) {
+                        first = Some((earlier, later, scope));
+                    }
+                }
+                if !spellings.iter().any(|spelling| {
+                    spelling.spelling == member.spelling && spelling.section == member.section
                 }) {
-                    first = Some((earlier, later, scope));
+                    spellings.push(member);
                 }
             }
         }
-        let Some((earlier, later, scope)) = first else {
-            return Ok(());
-        };
-        let noun = earlier.kind.noun();
-        let within = match scope {
-            SpectreNameScope::Top => String::new(),
-            SpectreNameScope::Subcircuit(name) => format!(" inside subckt '{name}'"),
-        };
-        Err(error(
-            later.line,
-            format!(
-                "Spectre {noun} names '{}' ({path}:{}) and '{}' ({path}:{}) differ only in case{within}; Spectre names are case-sensitive, so they are two different {noun}s, but RSpice reads names without case and would merge them; spell one {noun} one way, and give different {noun}s different names",
-                earlier.spelling,
-                earlier.line,
-                later.spelling,
-                later.line,
-                path = path.display(),
-            ),
-        ))
+        if let Some((earlier, later, scope)) = first {
+            let within = match scope {
+                SpectreNameScope::Top => String::new(),
+                SpectreNameScope::Subcircuit(name) => format!(" inside subckt '{name}'"),
+            };
+            return Err(clash(
+                earlier.kind,
+                &within,
+                (&earlier.spelling, path, earlier.line),
+                (&later.spelling, path, later.line),
+            ));
+        }
+
+        // A subckt body's reference to a parameter it does not declare names
+        // a top-level one, which may live in another file.
+        let declared_locally = self
+            .names
+            .iter()
+            .filter(|name| name.kind == SpectreNameKind::Parameter && name.declared)
+            .filter_map(|name| match &name.scope {
+                SpectreNameScope::Subcircuit(subcircuit) => {
+                    Some((subcircuit.clone(), name.spelling.to_ascii_lowercase()))
+                }
+                SpectreNameScope::Top => None,
+            })
+            .collect::<HashSet<_>>();
+        let names = self
+            .names
+            .into_iter()
+            .filter(|name| match &name.scope {
+                SpectreNameScope::Top => true,
+                SpectreNameScope::Subcircuit(subcircuit) => {
+                    name.kind == SpectreNameKind::Parameter
+                        && !declared_locally
+                            .contains(&(subcircuit.clone(), name.spelling.to_ascii_lowercase()))
+                }
+            })
+            .map(|name| SpectreSourceName {
+                kind: name.kind,
+                spelling: name.spelling,
+                line: name.line,
+                section: name.section,
+            })
+            .collect();
+        Ok(SpectreSourceNames {
+            path: path.to_path_buf(),
+            names,
+        })
     }
+}
+
+/// The refusal for two spellings of one name, each with its file and line.
+fn clash(
+    kind: SpectreNameKind,
+    within: &str,
+    (earlier, earlier_path, earlier_line): (&str, &Path, usize),
+    (later, later_path, later_line): (&str, &Path, usize),
+) -> SpectreModelAdapterError {
+    let noun = kind.noun();
+    error(
+        later_line,
+        format!(
+            "Spectre {noun} names '{earlier}' ({}:{earlier_line}) and '{later}' ({}:{later_line}) differ only in case{within}; Spectre names are case-sensitive, so they are two different {noun}s, but RSpice reads names without case and would merge them; spell one {noun} one way, and give different {noun}s different names",
+            earlier_path.display(),
+            later_path.display(),
+        ),
+    )
 }
 
 /// The order clashes are reported in: the one met first in reading order. A
@@ -318,6 +377,75 @@ fn sections_meet(first: &SpectreName, second: &SpectreName) -> bool {
     match (&first.section, &second.section) {
         (Some(first), Some(second)) => first == second,
         _ => true,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SpectreSourceName {
+    kind: SpectreNameKind,
+    spelling: String,
+    line: usize,
+    section: Option<String>,
+}
+
+/// The top-level names of one Spectre source: what a deck that reads it,
+/// directly or through an include, shares with it.
+#[derive(Debug)]
+pub(crate) struct SpectreSourceNames {
+    path: PathBuf,
+    names: Vec<SpectreSourceName>,
+}
+
+/// Every top-level Spectre name one deck expansion has read so far, across
+/// the deck and every source it includes. An included source shares the
+/// including deck's top level, so a node `a` in one file and `A` in another
+/// would merge exactly as they would within one file.
+#[derive(Debug, Default)]
+pub(crate) struct SpectreDeckNames {
+    spellings: HashMap<(SpectreNameKind, String), (String, PathBuf, usize)>,
+}
+
+impl SpectreDeckNames {
+    pub(crate) fn clear(&mut self) {
+        self.spellings.clear();
+    }
+
+    /// Add the names of one source read with `selected_section` (a library
+    /// read through `.lib`) or whole, and refuse the first that another file
+    /// spells in a different case. A source's own clashes were refused when
+    /// it was adapted, so each name has one spelling per source here.
+    pub(crate) fn merge(
+        &mut self,
+        source: SpectreSourceNames,
+        selected_section: Option<&str>,
+    ) -> Result<(), SpectreModelAdapterError> {
+        for name in source.names {
+            let read = match (&name.section, selected_section) {
+                (None, _) => true,
+                (Some(section), Some(selected)) => section.eq_ignore_ascii_case(selected),
+                (Some(_), None) => false,
+            };
+            if !read {
+                continue;
+            }
+            let key = (name.kind, name.spelling.to_ascii_lowercase());
+            match self.spellings.get(&key) {
+                Some((spelling, path, line)) if *spelling != name.spelling => {
+                    return Err(clash(
+                        name.kind,
+                        " across the deck's files",
+                        (spelling, path, *line),
+                        (&name.spelling, &source.path, name.line),
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    self.spellings
+                        .insert(key, (name.spelling, source.path.clone(), name.line));
+                }
+            }
+        }
+        Ok(())
     }
 }
 

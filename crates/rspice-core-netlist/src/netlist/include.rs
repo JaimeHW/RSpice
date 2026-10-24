@@ -321,6 +321,10 @@ pub struct IncludeProcessor {
     /// does: Xyce stops reading that source there, ngspice comments the card
     /// out and reads on.
     expression_dialect: ExpressionDialect,
+    /// Top-level Spectre names read so far in this expansion. An included
+    /// Spectre source shares the deck's top level, so two of its files that
+    /// spell one name in two cases are refused as one file would be.
+    spectre_names: super::spectre_adapter::SpectreDeckNames,
 }
 
 #[derive(Debug, Default)]
@@ -741,6 +745,7 @@ impl IncludeProcessor {
             current_depth: 0,
             resolved_dependencies: Vec::new(),
             expression_dialect: ExpressionDialect::default(),
+            spectre_names: super::spectre_adapter::SpectreDeckNames::default(),
         }
     }
 
@@ -758,6 +763,7 @@ impl IncludeProcessor {
 
     fn begin_source_operation(&mut self) {
         self.active_includes.clear();
+        self.spectre_names.clear();
         self.current_depth = 0;
         self.resolved_dependencies.clear();
         let cache = self
@@ -1435,18 +1441,25 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        let adapted = super::spectre_adapter::adapt_spectre_model_library(current_path, content)
-            .map_err(|error| {
-                ParseWithAbortError::from(ParseError::Syntax {
-                    line: error.line,
-                    message: format!(
-                        "{}:{}: Spectre model-library adaptation failed: {}",
-                        display_source_path(current_path),
-                        error.line,
-                        error.message
-                    ),
-                })
-            })?;
+        let adaptation_failed = |error: super::spectre_adapter::SpectreModelAdapterError| {
+            ParseWithAbortError::from(ParseError::Syntax {
+                line: error.line,
+                message: format!(
+                    "{}:{}: Spectre model-library adaptation failed: {}",
+                    display_source_path(current_path),
+                    error.line,
+                    error.message
+                ),
+            })
+        };
+        let (adapted, spectre_names) =
+            super::spectre_adapter::adapt_spectre_source(current_path, content)
+                .map_err(adaptation_failed)?;
+        if let Some(names) = spectre_names {
+            self.spectre_names
+                .merge(names, selected_section)
+                .map_err(adaptation_failed)?;
+        }
         let content = adapted.as_ref();
         ResourceLimitError::ensure(
             ResourceKind::ExpandedSourceBytes,
@@ -2644,6 +2657,76 @@ R1 1 0 {selected}
         );
         assert!(!expanded.lines().any(|line| line == "simulator lang=spice"));
         assert!(expanded.contains(".model nch"), "{expanded}");
+    }
+
+    /// Expand a sealed Spectre deck whose `include` reads `child`.
+    fn expand_spectre_with_child(
+        top: &str,
+        child_name: &str,
+        child: &str,
+    ) -> Result<String, ParseError> {
+        let root = sealed_test_path("top.scs");
+        let child_path = sealed_test_path(child_name);
+        let bundle = sealed_bundle(
+            vec![
+                (root.clone(), top.to_owned()),
+                (child_path.clone(), child.to_owned()),
+            ],
+            vec![SealedSourceEdge {
+                owner: root.clone(),
+                requested_path: child_name.to_owned(),
+                target: child_path,
+            }],
+        );
+        IncludeProcessor::new_sealed(&root, bundle).process_sealed_root(&root, None)
+    }
+
+    #[test]
+    fn an_included_spectre_source_shares_the_deck_top_level_names() {
+        let error = expand_spectre_with_child(
+            "simulator lang=spectre\nv1 (a 0) vsource dc=1\ninclude \"child.scs\"\n",
+            "child.scs",
+            "simulator lang=spectre\nr1 (A 0) resistor r=1k\n",
+        )
+        .expect_err("a node spelled in two cases across files is refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("Spectre node names 'a' (")
+                && message.contains("top.scs:2) and 'A' (")
+                && message.contains("child.scs:2) differ only in case across the deck's files"),
+            "{message}"
+        );
+
+        expand_spectre_with_child(
+            "simulator lang=spectre\nv1 (a 0) vsource dc=1\ninclude \"child.scs\"\n",
+            "child.scs",
+            "simulator lang=spectre\nr1 (a 0) resistor r=1k\n",
+        )
+        .expect("one spelling across files is accepted");
+    }
+
+    #[test]
+    fn only_the_selected_library_section_meets_the_deck() {
+        let library = "simulator lang=spectre\nlibrary corners\nsection tt\nparameters vth=0.4\nendsection tt\nsection ff\nparameters VTH=0.3\nendsection ff\nendlibrary\n";
+        expand_spectre_with_child(
+            "simulator lang=spectre\ninclude \"corners.scs\" section=tt\nparameters w=vth*2\n",
+            "corners.scs",
+            library,
+        )
+        .expect("the unselected section's spelling never meets the deck");
+        let error = expand_spectre_with_child(
+            "simulator lang=spectre\ninclude \"corners.scs\" section=ff\nparameters w=vth*2\n",
+            "corners.scs",
+            library,
+        )
+        .expect_err("the selected section's spelling meets the deck's");
+        let message = error.to_string();
+        assert!(
+            message.contains("Spectre parameter names 'vth' (")
+                && message.contains("top.scs:3) and 'VTH' (")
+                && message.contains("corners.scs:7)"),
+            "{message}"
+        );
     }
 
     #[cfg(not(windows))]
