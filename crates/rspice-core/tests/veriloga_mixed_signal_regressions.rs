@@ -1100,3 +1100,368 @@ fn a_zero_duration_d_a_edge_into_a_transistor_is_crossed_in_one_step() {
     );
     assert!(worst <= 1.0e-2, "v(c) is {worst:e} V from the reference");
 }
+
+// ---------------------------------------------------------------------------
+// One instant, one key
+//
+// Where code models share event nets with an HDL module, a discrete instant
+// less than one coincidence window from an HDL tick image is that tick image
+// (`xspice::event_scheduler::Instant`'s "one instant, one key"). The decks
+// below put a code-model float sum, an HDL tick and a PULSE corner on one
+// nanosecond, the way the sigma-delta corpus testbench does.
+// ---------------------------------------------------------------------------
+
+/// A Verilog-AMS source in a scratch file, removed when dropped.
+struct AmsFile(std::path::PathBuf);
+impl AmsFile {
+    fn new(source: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rspice_one_instant_{}_{}.vams",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, source).unwrap();
+        Self(path)
+    }
+    fn path(&self) -> String {
+        self.0.display().to_string().replace('\\', "/")
+    }
+}
+impl Drop for AmsFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The seconds of a picosecond tick, as the HDL kernel names them.
+fn picosecond(tick: u64) -> f64 {
+    rspice_core::xspice::event_scheduler::TimeResolution::new(-12)
+        .unwrap()
+        .ticks_to_seconds(tick)
+        .unwrap()
+}
+
+/// A toggle flip-flop on `clk`: `q <= #1 ~q` at every rising edge.
+const TOGGLE: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module toggle(clk, q);\n\
+  input clk; wire clk;\n\
+  output q; reg q;\n\
+  initial q = 1'b0;\n\
+  always @(posedge clk) q <= #1 ~q;\n\
+endmodule\n";
+
+/// A 200 ns PULSE clock whose rising edge crosses half its level at 101 ns,
+/// converted by an `adc_bridge` with its 1 ns delay onto `clk` at 102 ns; the
+/// HDL toggle's `#1` puts `q` on 103 ns, and a `d_and` with a 1 ns delay puts
+/// the gated clock `gclk` there too, where a `d_dff` samples `q`. Three
+/// computations of one instant: the tick image `103000 + 200000 k` ps, the
+/// float sum `crossing + 1n + 1n`, and the HDL's `#1` from the wake.
+fn gated_clock_deck(source: &AmsFile, tstop: &str) -> Netlist {
+    let text = format!(
+        "one instant, one key\n\
+         .hdl \"{}\"\n\
+         vclk aclk 0 pulse(0 1 100n 2n 2n 98n 200n)\n\
+         vone aone 0 dc 1\n\
+         vzero azero 0 dc 0\n\
+         abridge [aclk aone azero] [clk en dlow] adc_buff\n\
+         .model adc_buff adc_bridge(in_low=0.5 in_high=0.5)\n\
+         agate [clk en] gclk and1\n\
+         .model and1 d_and(rise_delay=1n fall_delay=1n)\n\
+         aflop q gclk dlow dlow sq sqb flop\n\
+         .model flop d_dff(clk_delay=1n set_delay=1n reset_delay=1n ic=0 rise_delay=1n fall_delay=1n)\n\
+         xt clk q toggle\n\
+         .tran 1n {tstop}\n\
+         .end\n",
+        source.path()
+    );
+    Netlist::parse(&text).unwrap_or_else(|error| panic!("deck parses: {error}\n{text}"))
+}
+
+/// The instants and levels a digital net took after time zero.
+fn edges(result: &rspice_core::engine::TransientResult, node: &str) -> Vec<(f64, bool)> {
+    result
+        .digital_trace_named(node)
+        .unwrap_or_else(|| panic!("no digital trace `{node}`"))
+        .iter()
+        .filter(|point| point.time > 0.0)
+        .map(|point| (point.time, point.value.state.is_high()))
+        .collect()
+}
+
+/// The `#1` the HDL schedules off a code model's clock and the code model's
+/// own 1 ns gate delay are one instant: on every edge the converter puts on
+/// its tick image, both are the exact image a nanosecond later, and the
+/// flip-flop sampling one on the other samples the same side of it on every
+/// such edge rather than whichever ulp order two roundings gave. That side is
+/// the old level: `q <= #1 ~q` is a nonblocking update, which lands after the
+/// active events of its instant (IEEE 1364-2005 section 11.3), and every
+/// code-model output is one of those.
+///
+/// A converter that reads its input a rounding below the threshold at the
+/// crossing switches one solver floor later, off the lattice; the HDL's
+/// ceiling then puts `q` a tick later, a different instant from `gclk`, as
+/// the language says. Such an edge says nothing about keying and is skipped,
+/// but most edges are on their image.
+#[test]
+fn an_hdl_delay_and_a_gated_clock_on_one_nanosecond_are_one_instant() {
+    const CYCLES: u64 = 200;
+    let source = AmsFile::new(TOGGLE);
+    let deck = gated_clock_deck(&source, "40.2u");
+    let result = Engine::default().run_tran(&deck, 40.2e-6, 10e-9).unwrap();
+    let rising = |node: &str| {
+        edges(&result, node)
+            .into_iter()
+            .filter(|(_, high)| *high)
+            .collect::<Vec<_>>()
+    };
+    let clk = rising("clk");
+    let q = edges(&result, "q");
+    let gclk = rising("gclk");
+    let sampled = edges(&result, "sq");
+    assert!(
+        [clk.len(), q.len(), gclk.len()]
+            .iter()
+            .all(|count| *count as u64 >= CYCLES)
+    );
+    let mut mixed = Vec::new();
+    let mut on_image = 0;
+    for k in 0..CYCLES {
+        if clk[k as usize].0.to_bits() != picosecond(102_000 + 200_000 * k).to_bits() {
+            continue;
+        }
+        on_image += 1;
+        let image = picosecond(103_000 + 200_000 * k);
+        let (q_time, q_level) = q[k as usize];
+        assert_eq!(q_time.to_bits(), image.to_bits(), "q edge {k}: {q_time:e}");
+        let (gate_time, _) = gclk[k as usize];
+        assert_eq!(
+            gate_time.to_bits(),
+            image.to_bits(),
+            "gclk edge {k}: {gate_time:e}"
+        );
+        // What the flop holds once it has answered this edge and before the
+        // next one: the level the HDL replaced, or its new one.
+        let next = picosecond(103_000 + 200_000 * (k + 1));
+        let held = sampled
+            .iter()
+            .rev()
+            .find(|(time, _)| *time > image && *time < next)
+            .map_or_else(
+                || {
+                    sampled
+                        .iter()
+                        .rev()
+                        .find(|(time, _)| *time <= image)
+                        .is_some_and(|(_, high)| *high)
+                },
+                |(_, high)| *high,
+            );
+        if held == q_level {
+            mixed.push(k);
+        }
+    }
+    assert!(
+        on_image * 2 >= CYCLES,
+        "the converter put only {on_image} of {CYCLES} edges on their image"
+    );
+    assert!(
+        mixed.is_empty(),
+        "the flop sampled the new level of q on edges {mixed:?} and the old one on the rest"
+    );
+}
+
+/// A checkpoint at the accepted point just before a coincident edge, and one
+/// on the edge itself, both resume onto the uninterrupted run's axis and
+/// events bit for bit. An image from before the format that keys coupled
+/// events on the tick lattice is refused, naming the format.
+#[test]
+fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
+    use rspice_core::engine::TransientStartupMode;
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    let source = AmsFile::new(TOGGLE);
+    let deck = gated_clock_deck(&source, "4.2u");
+    let (tstop, max_step) = (4.2e-6, 10e-9);
+    let engine = Engine::default();
+    assert!(
+        engine
+            .preflight_transient_checkpoint(&deck)
+            .unwrap()
+            .is_resumable()
+    );
+    let plain = engine.run_tran(&deck, tstop, max_step).unwrap();
+    let edge = picosecond(103_000 + 200_000 * 10);
+    let on_edge = plain
+        .time
+        .iter()
+        .position(|time| *time == edge)
+        .expect("an accepted point on the edge");
+    let before = plain.time[on_edge - 1];
+
+    let (full, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &deck,
+            tstop,
+            max_step,
+            TransientStartupMode::OperatingPoint,
+            &[before, edge],
+        )
+        .unwrap();
+    assert_eq!(full.time, plain.time, "checkpointing moves no point");
+    assert_eq!(scheduled.len(), 2);
+    let nets = ["clk", "q", "gclk", "sq"];
+    for checkpoint in scheduled.iter().map(|scheduled| &scheduled.checkpoint) {
+        let seam = checkpoint.time;
+        assert!(seam == before || seam == edge, "a checkpoint at {seam:e}");
+        let bytes = checkpoint
+            .to_bytes(TransientCheckpointEncoding::Unpacked)
+            .unwrap();
+        let restored = TransientCheckpoint::from_bytes(&bytes).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &restored, tstop, max_step)
+            .unwrap();
+        let at = full.time.iter().position(|time| *time == seam).unwrap();
+        let bits = |times: &[f64]| times.iter().map(|time| time.to_bits()).collect::<Vec<_>>();
+        assert_eq!(
+            bits(&resumed.time),
+            bits(&full.time[at..]),
+            "axis from {seam:e}"
+        );
+        for net in nets {
+            let after = |result: &rspice_core::engine::TransientResult| {
+                edges(result, net)
+                    .into_iter()
+                    .filter(|(time, _)| *time > seam)
+                    .map(|(time, high)| (time.to_bits(), high))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                after(&resumed),
+                after(&full),
+                "`{net}` events from {seam:e}"
+            );
+        }
+
+        let text = String::from_utf8(bytes).unwrap();
+        let older = text
+            .replacen("RSPICE-CHECKPOINT 63\n", "RSPICE-CHECKPOINT 62\n", 1)
+            .lines()
+            .filter(|line| !line.starts_with("floor_march "))
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
+        let older = TransientCheckpoint::from_bytes(older.as_bytes()).expect("a format-62 image");
+        let refusal = engine
+            .run_tran_resume(&deck, &older, tstop, max_step)
+            .expect_err("an older image of a coupled circuit is refused")
+            .to_string();
+        assert!(refusal.contains("format 63"), "{refusal}");
+    }
+}
+
+/// An HDL edge on a tick that drives both a `transition()` output and a code
+/// model's `dac_bridge` is one breakpoint: one accepted point within a
+/// femtosecond of the tick, the tick's own bits, and no step after it shorter
+/// than the picosecond a zero-time edge completes in.
+#[test]
+fn an_hdl_edge_driving_a_transition_and_a_dac_bridge_is_one_breakpoint() {
+    let source = AmsFile::new(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module drive(b, a);\n\
+           output b; reg b;\n\
+           output a; electrical a;\n\
+           initial begin b = 1'b0; #5 b = 1'b1; end\n\
+           analog V(a) <+ transition(b ? 1.0 : 0.0, 0, 1n, 1n);\n\
+         endmodule\n",
+    );
+    let text = format!(
+        "one breakpoint per tick\n\
+         .hdl \"{}\"\n\
+         xd b a drive\n\
+         adac [b] [ad] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1)\n\
+         rl ad 0 1k\n\
+         ra a 0 1k\n\
+         .tran 0.1n 20n\n\
+         .end\n",
+        source.path()
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let result = Engine::default().run_tran(&deck, 20e-9, 0.1e-9).unwrap();
+    let tick = picosecond(5_000);
+    let near = result
+        .time
+        .iter()
+        .filter(|time| (**time - tick).abs() <= 1.0e-15)
+        .collect::<Vec<_>>();
+    assert_eq!(near, [&tick], "one point on the tick: {near:?}");
+    let landing = result.time.iter().position(|time| *time == tick).unwrap();
+    let shortest = result.time[landing..]
+        .windows(2)
+        .take_while(|pair| pair[0] < tick + 1.0e-9)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        shortest >= 1.0e-12 * (1.0 - 1.0e-9),
+        "a {shortest:e} s step in the nanosecond after the tick"
+    );
+}
+
+/// A solver floor near the precision itself moves no code-model event by
+/// more than the coincidence cap, a thousandth of a tick. The converter's
+/// 1.0004 ns delay puts `clk` 0.4 ps past the image of the instant it
+/// converted at, inside the 0.9 ps floor a 90 ms maximum step leaves the
+/// solver; a snap as wide as that floor would put the edge on the image. The
+/// edge is also 0.4 ps past the PULSE corner at 102 ns, less than one floor:
+/// the corner is solved at the edge, which is delivered at its own key.
+#[test]
+fn a_floor_near_the_precision_moves_no_coupled_event_by_more_than_the_cap() {
+    let source = AmsFile::new(TOGGLE);
+    let text = format!(
+        "a semantic floor\n\
+         .hdl \"{}\"\n\
+         vclk aclk 0 pulse(0 1 100n 2n 2n 98n 200n)\n\
+         abridge [aclk] [clk] adc_late\n\
+         .model adc_late adc_bridge(in_low=0.5 in_high=0.5 rise_delay=1.0004n fall_delay=1.0004n)\n\
+         xt clk q toggle\n\
+         .tran 1n 2.2u\n\
+         .end\n",
+        source.path()
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let result = Engine::default().run_tran(&deck, 2.2e-6, 0.09).unwrap();
+    let cap = 1.0e-12 * 1.0e-3;
+    let rising = edges(&result, "clk")
+        .into_iter()
+        .filter(|(_, high)| *high)
+        .map(|(time, _)| time)
+        .collect::<Vec<_>>();
+    assert!(rising.len() >= 10, "{rising:?}");
+    for (k, time) in rising.iter().enumerate() {
+        let image = picosecond(102_000 + 200_000 * k as u64);
+        // The accepted point the converter switched at: the crossing, or
+        // one floor after it when the crossing read a rounding below the
+        // threshold.
+        let converted = result
+            .time
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                (a - (time - 1.0004e-9))
+                    .abs()
+                    .total_cmp(&(b - (time - 1.0004e-9)).abs())
+            })
+            .expect("accepted points");
+        let sum = converted + 1.0004e-9;
+        assert!(
+            (time - sum).abs() <= cap,
+            "edge {k} at {time:e} moved {:e} s from its {sum:e} s sum",
+            time - sum
+        );
+        assert_ne!(
+            time.to_bits(),
+            image.to_bits(),
+            "edge {k} was snapped onto its image"
+        );
+    }
+}

@@ -14179,6 +14179,67 @@ mod tests {
         );
     }
 
+    /// A coupled code-model event computed one or two ulps past the stop time
+    /// is keyed on the tick image it is a rounding from, at or before the
+    /// stop time, and is then delivered there: less than one floor apart is
+    /// one instant, whichever side of the horizon the rounding fell. An
+    /// uncoupled queue keys the sum itself, past the horizon, where no step
+    /// lands. Both spellings of a 100 ns stop time are covered: the double
+    /// nearest 100 ns, which is the tick's own image, and `100 * 1e-9`, one ulp
+    /// above it.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn a_coupled_event_a_rounding_past_the_stop_time_is_delivered_at_it() {
+        use crate::xspice::event_scheduler::{EventLattice, TimeResolution};
+        use crate::xspice::{DigitalValue, XspiceEventScheduler};
+        let resolution = TimeResolution::new(-12).expect("1 ps");
+        let image = resolution.ticks_to_seconds(100_000).expect("100 ns");
+        for stop in [image, 100.0 * 1.0e-9] {
+            let max_step = 1.0e-9;
+            let accepted = 99.0e-9;
+            let floor = hard_min_at_clock(
+                Engine::ngspice_hard_min_timestep(max_step, 1.0e-15),
+                0.0,
+                accepted,
+            );
+            for ulps in 1..=2 {
+                let mut sum = stop;
+                for _ in 0..ulps {
+                    sum = sum.next_up();
+                }
+                // A crossing at the accepted point and the delay that puts
+                // its output `ulps` past the stop time: the subtraction is
+                // exact, so the code model's sum is that instant.
+                let delay = sum - accepted;
+                assert_eq!(accepted + delay, sum);
+
+                let mut uncoupled = XspiceEventScheduler::new();
+                uncoupled.schedule_delayed(accepted, delay, 1, "y", "abuf", DigitalValue::one());
+                assert_eq!(uncoupled.next_event_time(), Some(sum));
+                assert!(sum > stop, "an uncoupled sum stays past the horizon");
+
+                let mut coupled = XspiceEventScheduler::new();
+                coupled.set_lattice(Some(EventLattice::new(resolution, floor)));
+                coupled.schedule_delayed(accepted, delay, 1, "y", "abuf", DigitalValue::one());
+                let key = coupled.next_event_time().expect("the output is queued");
+                assert_eq!(key.to_bits(), image.to_bits(), "{ulps} ulps past {stop:e}");
+                assert!(key <= stop);
+                assert_eq!(
+                    landed_veriloga_event_time(
+                        &mut FloorLandingGrid::default(),
+                        key,
+                        accepted,
+                        floor,
+                        stop
+                    )
+                    .expect("the event lands"),
+                    stop,
+                    "the coupled event is delivered at the stop time"
+                );
+            }
+        }
+    }
+
     /// BUG 662's pulse corner at 25.1 ns and its line arrival, the corner
     /// launched at 5.1 ns and carried through two 10 ns delays, are one instant
     /// one ulp apart (2.51e-8 against 2.5100000000000003e-8, under a Xyce
