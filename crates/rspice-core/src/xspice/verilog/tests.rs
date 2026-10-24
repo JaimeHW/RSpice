@@ -1557,6 +1557,52 @@ fn a_testbench_prints_what_icarus_prints() {
     assert_eq!(finish.origin.scope, "tb");
 }
 
+/// IEEE 1364-2005 section 17.1.3: `$monitor` prints at the end of a step in
+/// which one of its arguments changed value, `$time` excepted. A change of
+/// `bs` that leaves `bs[1]` as it was prints nothing.
+#[test]
+fn a_monitor_prints_when_an_argument_changes_value() {
+    let report = bench(
+        "module tb;\n\
+         \x20 reg [7:0] bs;\n\
+         \x20 initial begin\n\
+         \x20   bs = 0;\n\
+         \x20   $monitor(\"%0t %b\", $time, bs[1]);\n\
+         \x20   #1 bs[0] = 1'b1;\n\
+         \x20   #1 bs[1] = 1'b1;\n\
+         \x20   #1 bs[3:2] = 2'b11;\n\
+         \x20   #1 bs[1] = 1'b0;\n\
+         \x20 end\n\
+         endmodule\n",
+        &[],
+    );
+    assert_eq!(stdout(&report), "0 0\n2 1\n4 0\n");
+}
+
+/// IEEE 1364-2005 section 17.1.3: `$monitoroff` stops the watching, and
+/// `$monitoron` prints at once whether or not anything changed. A change made
+/// before `$monitoroff` in the same step still prints at the step's end:
+/// the section does not withdraw a display already due.
+#[test]
+fn monitoroff_stops_the_watching_and_monitoron_prints() {
+    let report = bench(
+        "module tb;\n\
+         \x20 integer b;\n\
+         \x20 initial begin\n\
+         \x20   b = 0;\n\
+         \x20   $monitor(\"%0t %0d\", $time, b);\n\
+         \x20   #1 b = 1;\n\
+         \x20   #1 b = 2; $monitoroff;\n\
+         \x20   #1 b = 3;\n\
+         \x20   #1 $monitoron;\n\
+         \x20   #1 b = 5;\n\
+         \x20 end\n\
+         endmodule\n",
+        &[],
+    );
+    assert_eq!(stdout(&report), "0 0\n1 1\n2 2\n4 3\n5 5\n");
+}
+
 /// Without plusargs neither function matches, and `$value$plusargs` leaves
 /// its variable alone.
 #[test]

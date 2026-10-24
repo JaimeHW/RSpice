@@ -172,6 +172,9 @@ impl HdlEffects {
             }
             Kind::Fstrobe(radix) | Kind::Fmonitor(radix) => match origin {
                 CallOrigin::Observer => {
+                    if !self.monitor_has_news(plan, args) {
+                        return Ok(outcome);
+                    }
                     let descriptor = match self.evaluating_monitor() {
                         Some(monitor) => match monitor.descriptor {
                             Some(descriptor) => Some(descriptor),
@@ -210,6 +213,7 @@ impl HdlEffects {
                             observer,
                             descriptor: None,
                             queued: true,
+                            shown: None,
                         });
                         self.queue.push(MonitorTask::FileMonitor(serial));
                     }

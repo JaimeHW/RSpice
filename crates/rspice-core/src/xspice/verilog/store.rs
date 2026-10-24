@@ -1085,6 +1085,14 @@ impl DigitalSignalStore {
         std::mem::take(&mut self.transitions)
     }
 
+    /// Whether a signal of `signals` (ascending) changed since the last
+    /// drain: a change a running process made that has not been dispatched.
+    pub(crate) fn changed_since_drain(&self, signals: &[DigitalSignalId]) -> bool {
+        self.transitions
+            .iter()
+            .any(|transition| signals.binary_search(&transition.signal).is_ok())
+    }
+
     /// Drain the value changes into a buffer the caller owns.
     ///
     /// The same drain as [`Self::take_transitions`] with the allocation taken

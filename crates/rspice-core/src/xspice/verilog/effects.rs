@@ -17,8 +17,10 @@
 //! 17.1.2 and 17.1.3), from argument functions the compiler built for them.
 //! Both join one queue, in the order they were scheduled within the step:
 //! a `$strobe` when it runs, the active `$monitor` when it is set up, turned
-//! back on, or when the first change of one of its operands happens. That is
-//! the order Icarus Verilog prints them in, and a deterministic one.
+//! back on, or when the first change of a signal it reads happens. That is
+//! the order Icarus Verilog prints them in, and a deterministic one. A queued
+//! monitor prints only when one of its operands' values moved since its last
+//! display (`HdlEffects::monitor_has_news`).
 //! `$fstrobe` and `$fmonitor` join the same queue; any number of
 //! `$fmonitor`s may be active at once (section 17.2.2).
 //!
@@ -36,6 +38,7 @@ pub(crate) mod random;
 
 use std::sync::Arc;
 
+use rspice_veriloga::canonical_ir::cfg::{CfgFunction, CfgValueKind};
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalRadix, DigitalSystemArgument, DigitalSystemCall,
     DigitalSystemCallId, DigitalSystemCallKind, DigitalSystemLane, DigitalValueClass,
@@ -46,7 +49,7 @@ use rspice_veriloga::canonical_ir::digital_eval::{
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalProcessId;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
+use rspice_veriloga::canonical_ir::ids::{DigitalSignalId, ValueId};
 use rspice_veriloga::four_state::FourStateBit;
 
 pub(crate) use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
@@ -104,6 +107,9 @@ pub(crate) struct FileMonitor {
     /// Whether it is in this step's queue.
     #[serde(skip)]
     pub queued: bool,
+    /// What it last printed; see [`ActiveMonitor::shown`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<Vec<ShownValue>>,
 }
 
 /// The active `$monitor` (section 17.1.3: only one at a time).
@@ -111,6 +117,20 @@ pub(crate) struct FileMonitor {
 pub(crate) struct ActiveMonitor {
     pub observer: u32,
     pub enabled: bool,
+    /// The values of the operands it watches as it last printed them, or
+    /// `None` when its next display prints whatever changed: the first one,
+    /// and the one `$monitoron` asks for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<Vec<ShownValue>>,
+}
+
+/// One watched operand's value as a monitor printed it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum ShownValue {
+    Bits(FourStateValue),
+    Integer(i32),
+    /// A real, by its bit pattern.
+    Real(u64),
 }
 
 /// Severity task counts, for a front end's exit status.
@@ -281,7 +301,9 @@ impl HdlEffects {
     pub(crate) fn observer_for(&mut self, task: MonitorTask) -> Option<u32> {
         let observer = match task {
             MonitorTask::Strobe(observer) => Some(observer),
-            MonitorTask::Monitor => self.enabled_monitor(),
+            // A display a change made due while monitoring was on still
+            // prints if `$monitoroff` ran later in the step.
+            MonitorTask::Monitor => self.monitor.as_ref().map(|monitor| monitor.observer),
             MonitorTask::FileMonitor(serial) => self
                 .file_monitors
                 .iter()
@@ -363,6 +385,36 @@ impl HdlEffects {
             self.monitor_queued = true;
             self.queue.push(MonitorTask::Monitor);
         }
+    }
+
+    /// Whether the monitor-region task being evaluated prints `args`.
+    ///
+    /// A `$monitor` or `$fmonitor` prints at the end of a step in which one
+    /// of its operands changed value (sections 17.1.3 and 17.2.2). A change
+    /// of a signal it reads queues it, but need not change an operand: a
+    /// change of `bs[0]` leaves `bs[1]` as it was. So it prints when an
+    /// operand that reads a signal differs from what it last printed, or when
+    /// nothing has printed since it was set up or turned back on. `$time`,
+    /// `$stime` and `$realtime`, which the section excepts, read no signal,
+    /// and neither does a constant. A `$strobe` always prints.
+    fn monitor_has_news(&mut self, plan: &CanonicalDigitalPlan, args: &[DigitalScalar]) -> bool {
+        let watching = match self.evaluating {
+            Some(MonitorTask::Monitor) => self
+                .monitor
+                .as_mut()
+                .map(|monitor| (monitor.observer, &mut monitor.shown)),
+            Some(MonitorTask::FileMonitor(_)) => self
+                .evaluating_monitor_mut()
+                .map(|monitor| (monitor.observer, &mut monitor.shown)),
+            _ => None,
+        };
+        let Some((observer, shown)) = watching else {
+            return true;
+        };
+        let now = watched_values(plan, observer, args);
+        let news = shown.as_ref() != Some(&now);
+        *shown = Some(now);
+        news
     }
 
     fn origin(plan: &CanonicalDigitalPlan, site: &DigitalSystemCall) -> HdlOrigin {
@@ -560,6 +612,9 @@ impl HdlEffects {
             DigitalSystemCallKind::Strobe(radix) | DigitalSystemCallKind::Monitor(radix) => {
                 match origin {
                     CallOrigin::Observer => {
+                        if !self.monitor_has_news(plan, args) {
+                            return Ok(outcome);
+                        }
                         let mut text = self.format(plan, site, args, 0, (radix, store))?;
                         text.push('\n');
                         self.record(plan, site, clock, HdlStream::Stdout, text);
@@ -577,6 +632,7 @@ impl HdlEffects {
                             self.monitor = Some(ActiveMonitor {
                                 observer,
                                 enabled: true,
+                                shown: None,
                             });
                             self.queue.retain(|task| *task != MonitorTask::Monitor);
                             self.monitor_queued = false;
@@ -588,17 +644,29 @@ impl HdlEffects {
             DigitalSystemCallKind::MonitorOn => {
                 if let Some(monitor) = &mut self.monitor {
                     monitor.enabled = true;
+                    monitor.shown = None;
                 }
                 // Section 17.1.3: turning monitoring on prints the arguments
                 // at the end of this step whether or not they changed.
                 self.queue_monitor();
             }
             DigitalSystemCallKind::MonitorOff => {
+                // Section 17.1.3 turns the watching off. A display an earlier
+                // change in this step made due is left to print, as Icarus
+                // Verilog prints it; the section does not withdraw it. A
+                // change the running process made is not dispatched until it
+                // yields, so it is found among the store's changes.
+                if let Some(observer) = self.enabled_monitor()
+                    && plan
+                        .observers
+                        .get(observer as usize)
+                        .is_some_and(|observer| store.changed_since_drain(&observer.dependencies))
+                {
+                    self.monitor_operand_changed();
+                }
                 if let Some(monitor) = &mut self.monitor {
                     monitor.enabled = false;
                 }
-                self.queue.retain(|task| *task != MonitorTask::Monitor);
-                self.monitor_queued = false;
             }
             DigitalSystemCallKind::Finish | DigitalSystemCallKind::Stop => {
                 let stop = site.kind == DigitalSystemCallKind::Stop;
@@ -1027,6 +1095,68 @@ impl HdlEffects {
     ) -> Result<(), String> {
         image.restore_into(plan, self)
     }
+}
+
+/// The values of observer `observer`'s operands that read a signal, from the
+/// operands `args` its system task node received.
+fn watched_values(
+    plan: &CanonicalDigitalPlan,
+    observer: u32,
+    args: &[DigitalScalar],
+) -> Vec<ShownValue> {
+    let Some(function) = plan
+        .observers
+        .get(observer as usize)
+        .map(|observer| &observer.function)
+    else {
+        return Vec::new();
+    };
+    let Some(operands) = function
+        .values
+        .iter()
+        .rev()
+        .find_map(|value| match &value.kind {
+            CfgValueKind::DigitalSystemTask { args, .. } => Some(args),
+            _ => None,
+        })
+    else {
+        return Vec::new();
+    };
+    let mut memo = vec![None; function.values.len()];
+    operands
+        .iter()
+        .zip(args)
+        .filter(|(operand, _)| reads_signal(function, **operand, &mut memo))
+        .map(|(_, value)| match value {
+            DigitalScalar::FourState(bits) => ShownValue::Bits(bits.clone()),
+            DigitalScalar::Integer(integer) => ShownValue::Integer(*integer),
+            DigitalScalar::Real(real) => ShownValue::Real(real.to_bits()),
+            DigitalScalar::Effect => ShownValue::Integer(0),
+        })
+        .collect()
+}
+
+/// Whether `value` reads a signal, directly or through its operands: the
+/// reads an observer's dependencies are made of.
+fn reads_signal(function: &CfgFunction, value: ValueId, memo: &mut [Option<bool>]) -> bool {
+    let index = usize::from(value);
+    if let Some(known) = memo.get(index).copied().flatten() {
+        return known;
+    }
+    let kind = &function.value(value).kind;
+    let reads = matches!(
+        kind,
+        CfgValueKind::DigitalSignalRead { .. }
+            | CfgValueKind::DigitalRealSignalRead { .. }
+            | CfgValueKind::DigitalArrayRead { .. }
+    ) || kind
+        .operands()
+        .into_iter()
+        .any(|operand| reads_signal(function, operand, memo));
+    if let Some(slot) = memo.get_mut(index) {
+        *slot = Some(reads);
+    }
+    reads
 }
 
 fn unknown_of(class: DigitalValueClass) -> DigitalScalar {
