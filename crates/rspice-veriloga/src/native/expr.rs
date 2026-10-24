@@ -565,33 +565,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
             identifier_index: Some(identifier_index),
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -643,33 +618,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -681,33 +631,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
             available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -719,33 +644,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
             prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -764,33 +664,10 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
             variable_names,
             identifier_index: None,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
             available_current_pairs: &[],
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -816,33 +693,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -854,33 +706,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -892,33 +719,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -930,33 +732,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
             canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -968,33 +745,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
             canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1006,33 +758,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1044,33 +771,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1082,33 +784,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
             canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1120,33 +797,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
             canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1158,33 +810,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
             canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1196,33 +823,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1234,33 +836,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots,
-            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
@@ -1272,33 +849,8 @@ impl<'a> NativeLoweringLimits<'a> {
         'a: 'b,
     {
         NativeLoweringLimits {
-            terminal_count: self.terminal_count,
-            internal_node_count: self.internal_node_count,
-            parameter_count: self.parameter_count,
-            variable_count: self.variable_count,
-            variable_names: self.variable_names,
-            identifier_index: self.identifier_index,
-            branch_unknown_count: self.branch_unknown_count,
-            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
-            lookup_table_count: self.lookup_table_count,
-            laplace_filter_count: self.laplace_filter_count,
-            zi_filter_count: self.zi_filter_count,
-            available_current_pairs: self.available_current_pairs,
-            prior_current_probes: self.prior_current_probes,
-            canonical_ddt_slots: self.canonical_ddt_slots,
-            canonical_idt_slots: self.canonical_idt_slots,
-            canonical_idtmod_slots: self.canonical_idtmod_slots,
-            canonical_transition_slots: self.canonical_transition_slots,
-            canonical_slew_slots: self.canonical_slew_slots,
-            canonical_absdelay_slots: self.canonical_absdelay_slots,
-            canonical_laplace_slots: self.canonical_laplace_slots,
-            canonical_zi_slots: self.canonical_zi_slots,
-            canonical_cross_slots: self.canonical_cross_slots,
-            canonical_above_slots: self.canonical_above_slots,
-            canonical_timer_slots: self.canonical_timer_slots,
-            canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots,
-            mir_prevalidated: self.mir_prevalidated,
+            ..self
         }
     }
 
