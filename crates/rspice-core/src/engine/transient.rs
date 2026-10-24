@@ -321,8 +321,9 @@ fn latest_coincident_instant(
 /// One run of consecutive landings on the solver's floor.
 ///
 /// See [`landed_veriloga_event_time`] for why a run of them is a grid rather
-/// than a chain.
-#[derive(Clone, Copy)]
+/// than a chain. A checkpoint carries the run in progress (`checkpoint`'s
+/// `floor_march.rs`), so a resumed run keeps walking the same grid.
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct FloorMarch {
     /// The accepted time this run started from, and the floor that spaces it.
     /// A floor that moves — Xyce derives its own from the clock — starts a new
@@ -341,8 +342,8 @@ struct FloorMarch {
 }
 
 /// The floor grid the current run of landings walks, carried across accepted
-/// points by the transient loop.
-#[derive(Clone, Copy, Default)]
+/// points by the transient loop and across a checkpoint by its image.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct FloorLandingGrid {
     march: Option<FloorMarch>,
 }
@@ -1276,6 +1277,8 @@ struct ScheduledCheckpointIntegration<'a> {
     dynamic_tline_breakpoints_added: usize,
     /// Asked for its edge completions only when a checkpoint is due.
     breakpoints: &'a BreakpointManager,
+    /// The run of floor landings in progress, which a resumed run continues.
+    floor_grid: FloorLandingGrid,
 }
 
 /// The device histories it must carry.
@@ -4413,6 +4416,7 @@ impl Engine {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             breakpoints,
+            floor_grid,
         } = integration;
         let ScheduledCheckpointState {
             solution,
@@ -4543,6 +4547,7 @@ impl Engine {
                 dynamic_tline_breakpoints_added,
                 edge_completions: &breakpoints.edge_completion_schedule(accepted_time),
                 requested_breakpoints: &breakpoints.model_request_schedule(accepted_time),
+                floor_grid,
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: Some(
@@ -4892,6 +4897,7 @@ impl Engine {
                         edge_completions:
                             &crate::numerics::integration::EdgeCompletionSchedule::default(),
                         requested_breakpoints: &[],
+                        floor_grid: FloorLandingGrid::default(),
                     },
                     AcceptedTransientRuntime {
                         accepted_solver_state: None,
@@ -5652,8 +5658,12 @@ impl Engine {
         let mut pending_analog_model_event = false;
         // The floor grid the current run of sub-minimum landings walks. It
         // belongs to the run rather than to any one point, which is what keeps
-        // a march at the minimum from drifting off the grid it started on.
-        let mut veriloga_floor_grid = FloorLandingGrid::default();
+        // a march at the minimum from drifting off the grid it started on, and
+        // a resumed run continues the march its checkpoint was taken inside.
+        let mut veriloga_floor_grid = resume.map_or_else(
+            FloorLandingGrid::default,
+            TransientCheckpoint::floor_landing_grid,
+        );
         let mut dynamic_tline_breakpoints_added = resume
             .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
             .unwrap_or(0);
@@ -7124,6 +7134,7 @@ impl Engine {
                 pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                 dynamic_tline_breakpoints_added,
                 breakpoints: &breakpoints,
+                floor_grid: veriloga_floor_grid,
             },
             ScheduledCheckpointHistories {
                 bsim3_history: &bsim3_history,
@@ -11914,6 +11925,7 @@ impl Engine {
                             pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                             dynamic_tline_breakpoints_added,
                             breakpoints: &breakpoints,
+                            floor_grid: veriloga_floor_grid,
                         },
                         ScheduledCheckpointHistories {
                             bsim3_history: &bsim3_history,
@@ -12745,6 +12757,7 @@ impl Engine {
                     pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                     dynamic_tline_breakpoints_added,
                     breakpoints: &breakpoints,
+                    floor_grid: veriloga_floor_grid,
                 },
                 ScheduledCheckpointHistories {
                     bsim3_history: &bsim3_history,
@@ -12981,6 +12994,7 @@ impl Engine {
                         dynamic_tline_breakpoints_added,
                         edge_completions: &breakpoints.edge_completion_schedule(t),
                         requested_breakpoints: &breakpoints.model_request_schedule(t),
+                        floor_grid: veriloga_floor_grid,
                     },
                     AcceptedTransientRuntime {
                         accepted_solver_state: Some(

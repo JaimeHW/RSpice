@@ -1217,9 +1217,10 @@ fn a_checkpoint_just_before_a_deadline_resumes_onto_the_uninterrupted_run() {
 /// An image from before the format that carries those breakpoints is
 /// refused when the circuit holds a connect-rule converter, naming it: one
 /// of its deadlines may have been pending. A circuit on stock XSPICE cards
-/// resumes from one as it always did.
+/// coupled to the module is refused too, for the format that keys its
+/// events on the HDL ticks: the image predates it.
 #[test]
-fn an_image_without_the_model_breakpoints_resumes_only_stock_converters() {
+fn an_image_without_the_model_breakpoints_is_refused_naming_why() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     let directory = TempDirectory::new("older-image");
     let engine = Engine::default();
@@ -1236,10 +1237,12 @@ fn an_image_without_the_model_breakpoints_resumes_only_stock_converters() {
         )
         .expect("canonical text");
         let (header, body) = text.split_once('\n').expect("a header line");
-        assert_eq!(header, "RSPICE-CHECKPOINT 62");
+        assert_eq!(header, "RSPICE-CHECKPOINT 63");
         let mut older = String::from("RSPICE-CHECKPOINT 60\n");
         for line in body.lines().filter(|line| {
-            !line.starts_with("pending_model_breakpoints ") && !line.starts_with("vcd_files ")
+            !line.starts_with("pending_model_breakpoints ")
+                && !line.starts_with("vcd_files ")
+                && !line.starts_with("floor_march ")
         }) {
             older.push_str(line);
             older.push('\n');
@@ -1247,7 +1250,14 @@ fn an_image_without_the_model_breakpoints_resumes_only_stock_converters() {
         let image = TransientCheckpoint::from_bytes(older.as_bytes()).expect("a format-60 image");
         let outcome = engine.run_tran_resume(&netlist, &image, 4e-6, 10e-9);
         if stock {
-            outcome.expect("an image on stock cards resumes");
+            let refusal = match outcome {
+                Ok(_) => panic!("an older image of coupled stock cards is refused"),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                refusal.contains("predates format 63"),
+                "the refusal names the format: {refusal}"
+            );
         } else {
             let refusal = match outcome {
                 Ok(_) => panic!("an older image with a connect-rule converter is refused"),

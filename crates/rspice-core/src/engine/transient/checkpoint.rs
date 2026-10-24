@@ -46,6 +46,7 @@ mod bsim3;
 mod bsim4;
 mod capacitor_sdt;
 mod edge;
+mod floor_march;
 mod mixed;
 mod mosfet;
 #[cfg(test)]
@@ -218,13 +219,16 @@ fn checkpoint_operation_result<T>(
 /// Version 60 retains the pending completions of zero-duration edges.
 /// Version 61 retains the other breakpoints the code models asked for.
 /// Version 62 binds the files the `d_vcd` stimuli replay.
-const FORMAT_VERSION: u32 = vcd::FORMAT_VERSION;
+/// Version 63 retains the run of floor landings in progress, and keys coupled
+/// code-model events on the HDL tick lattice.
+const FORMAT_VERSION: u32 = floor_march::FORMAT_VERSION;
 // The newest section's format is the file format; the sections before it
 // were added in order.
 const _: () = assert!(mixed::FORMAT_VERSION < switch::FORMAT_VERSION);
 const _: () = assert!(switch::FORMAT_VERSION < edge::FORMAT_VERSION);
 const _: () = assert!(edge::FORMAT_VERSION < requested::FORMAT_VERSION);
-const _: () = assert!(requested::FORMAT_VERSION < FORMAT_VERSION);
+const _: () = assert!(requested::FORMAT_VERSION < vcd::FORMAT_VERSION);
+const _: () = assert!(vcd::FORMAT_VERSION < FORMAT_VERSION);
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -366,6 +370,7 @@ pub(super) struct CheckpointIntegrationState<'a> {
     pub dynamic_tline_breakpoints_added: usize,
     pub edge_completions: &'a EdgeCompletionSchedule,
     pub requested_breakpoints: &'a [Value],
+    pub floor_grid: super::FloorLandingGrid,
 }
 
 /// The accepted-step runtime a resumed run reseeds from.
@@ -675,6 +680,10 @@ pub struct TransientCheckpoint {
     /// The file each `d_vcd` stimulus replays and the digest of the bytes it
     /// read (see `vcd.rs`). Empty in files older than format 62.
     vcd_files: Vec<vcd::ReplayedFile>,
+    /// The run of floor landings in progress at `time` (see
+    /// `floor_march.rs`). `None` in files older than format 63, which did not
+    /// record it.
+    floor_grid: Option<super::FloorLandingGrid>,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -5878,6 +5887,7 @@ impl TransientCheckpoint {
         switch::validate(self.switch_states.as_deref())?;
         edge::validate(&self.edge_completions, self.time)?;
         requested::validate(self.requested_breakpoints.as_deref(), self.time)?;
+        floor_march::validate(self.floor_grid.as_ref(), self.time)?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6704,6 +6714,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
                 requested_breakpoints: &[],
+                floor_grid: super::FloorLandingGrid::default(),
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: None,
@@ -6748,6 +6759,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
+            floor_grid,
         } = integration;
         let CheckpointState {
             time,
@@ -6893,6 +6905,7 @@ impl TransientCheckpoint {
             edge_completions: edge::capture(edge_completions, time),
             requested_breakpoints: Some(requested::capture(requested_breakpoints, time)),
             vcd_files: vcd::capture(circuit),
+            floor_grid: Some(floor_grid),
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -6968,6 +6981,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
+            floor_grid,
         } = integration;
         let CheckpointState {
             time,
@@ -7001,6 +7015,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added,
                 edge_completions,
                 requested_breakpoints,
+                floor_grid,
             },
             AcceptedTransientRuntime {
                 accepted_solver_state,
@@ -7328,6 +7343,7 @@ impl TransientCheckpoint {
         }
         switch::validate_target(circuit, self.switch_states.as_deref())?;
         requested::validate_target(circuit, self.requested_breakpoints.as_deref())?;
+        floor_march::validate_target(circuit, self.floor_grid.as_ref())?;
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
@@ -7876,6 +7892,12 @@ impl TransientCheckpoint {
         self.requested_breakpoints.as_deref().unwrap_or_default()
     }
 
+    /// The run of floor landings in progress at the checkpoint, or a fresh
+    /// grid for an image too old to say.
+    pub(super) fn floor_landing_grid(&self) -> super::FloorLandingGrid {
+        self.floor_grid.unwrap_or_default()
+    }
+
     pub(super) fn restore_solver_state(
         &self,
         matrix: &mut crate::solver::StaticMatrix,
@@ -8164,6 +8186,7 @@ impl TransientCheckpoint {
             self.requested_breakpoints.as_deref(),
         ));
         count = count.saturating_add(vcd::retained_values(&self.vcd_files));
+        count = count.saturating_add(floor_march::retained_values(self.floor_grid.as_ref()));
         for instance in &self.xspice_instance_states {
             count = count
                 .saturating_add(2)
@@ -8946,6 +8969,7 @@ impl TransientCheckpoint {
         edge::write(&mut out, &self.edge_completions, abort)?;
         requested::write(&mut out, self.requested_breakpoints.as_deref(), abort)?;
         vcd::write(&mut out, &self.vcd_files, abort)?;
+        floor_march::write(&mut out, self.floor_grid.as_ref());
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9792,6 +9816,7 @@ impl TransientCheckpoint {
         let edge_completions = edge::read(lines, version, budget)?;
         let requested_breakpoints = requested::read(lines, version, budget)?;
         let vcd_files = vcd::read(lines, version, budget)?;
+        let floor_grid = floor_march::read(lines, version)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9823,6 +9848,7 @@ impl TransientCheckpoint {
             edge_completions,
             requested_breakpoints,
             vcd_files,
+            floor_grid,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -11955,6 +11981,66 @@ mod tests {
         }
     }
 
+    /// The run of floor landings in progress round-trips bit for bit, idle
+    /// or mid-march; a file from before the format reads as unknown, which
+    /// resumes on a fresh grid as such a file always did; and a march that
+    /// describes no run of landings is refused.
+    #[test]
+    fn the_floor_march_round_trips_and_reads_unknown_from_older_files() {
+        let mut checkpoint = sample();
+        let time = checkpoint.time;
+        let floor = 1.0e-17;
+        let marching = super::super::FloorLandingGrid {
+            march: Some(super::super::FloorMarch {
+                origin: time - 3.0 * floor,
+                hard_min_dt: floor,
+                steps: 3.0,
+                accepted: time,
+                landed: (time - 3.0 * floor) + 4.0 * floor,
+            }),
+        };
+        for grid in [super::super::FloorLandingGrid::default(), marching] {
+            checkpoint.floor_grid = Some(grid);
+            let text = checkpoint.to_text();
+            let restored = TransientCheckpoint::from_text(&text).unwrap();
+            assert_eq!(restored, checkpoint);
+            assert_eq!(restored.floor_landing_grid(), grid);
+        }
+
+        let legacy =
+            TransientCheckpoint::from_text(&legacy_text(&checkpoint, vcd::FORMAT_VERSION)).unwrap();
+        assert_eq!(legacy.floor_grid, None);
+        assert_eq!(
+            legacy.floor_landing_grid(),
+            super::super::FloorLandingGrid::default()
+        );
+        assert!(legacy.to_text().contains("\nfloor_march unknown\n"));
+
+        for march in [
+            super::super::FloorMarch {
+                hard_min_dt: 0.0,
+                ..marching.march.unwrap()
+            },
+            super::super::FloorMarch {
+                steps: 2.5,
+                ..marching.march.unwrap()
+            },
+            super::super::FloorMarch {
+                accepted: time + floor,
+                landed: time + 2.0 * floor,
+                ..marching.march.unwrap()
+            },
+            super::super::FloorMarch {
+                landed: time,
+                ..marching.march.unwrap()
+            },
+        ] {
+            let mut invalid = checkpoint.clone();
+            invalid.floor_grid = Some(super::super::FloorLandingGrid { march: Some(march) });
+            assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
+        }
+    }
+
     /// The files the `d_vcd` stimuli replay round-trip, a path with a space,
     /// a quote and a backslash included; a file from before the section reads
     /// with none; and a row whose digest is not BLAKE3 hex is refused.
@@ -11981,7 +12067,7 @@ mod tests {
             assert_eq!(TransientCheckpoint::from_bytes(&bytes).unwrap(), checkpoint);
         }
         let text = checkpoint.to_text();
-        assert!(text.ends_with(&format!(
+        assert!(text.contains(&format!(
             "vcd_files 2\nvcd_file a1 {} \"C:\\\\stimuli\\\\two \\\"words\\\".vcd\"\n\
              vcd_file x1.a2 {} \"/runs/stim.vcd\"\n",
             blake3::hash(b"first").to_hex(),
@@ -12131,6 +12217,7 @@ mod tests {
             edge_completions: EdgeCompletionSchedule::default(),
             requested_breakpoints: Some(Vec::new()),
             vcd_files: Vec::new(),
+            floor_grid: Some(super::super::FloorLandingGrid::default()),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -12430,6 +12517,9 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < floor_march::FORMAT_VERSION && line.starts_with("floor_march ") {
+                continue;
+            }
             if version < vcd::FORMAT_VERSION
                 && (line.starts_with("vcd_files ") || line.starts_with("vcd_file "))
             {
@@ -15060,7 +15150,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 46] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 47] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -15107,6 +15197,7 @@ mod tests {
         (60, 13),
         (61, 13),
         (62, 13),
+        (63, 13),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -15618,6 +15709,7 @@ mod tests {
                 dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
                 requested_breakpoints: &[],
+                floor_grid: super::super::FloorLandingGrid::default(),
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: None,

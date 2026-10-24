@@ -491,7 +491,7 @@ mod mixed {
             .to_bytes(TransientCheckpointEncoding::Unpacked)
             .expect("serializes");
         let text = String::from_utf8(saved.clone()).expect("canonical text");
-        assert!(text.starts_with("RSPICE-CHECKPOINT 62\n"));
+        assert!(text.starts_with("RSPICE-CHECKPOINT 63\n"));
         let bound: Vec<&str> = text
             .lines()
             .filter(|line| line.starts_with("vcd_file"))
@@ -532,6 +532,6 @@ mod mixed {
             .run_tran_checkpointed(&netlist, 1e-6, 0.1e-6)
             .expect("checkpoints");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
-        assert!(checkpoint.to_text().ends_with("\nvcd_files 0\n"));
+        assert!(checkpoint.to_text().contains("\nvcd_files 0\n"));
     }
 }
