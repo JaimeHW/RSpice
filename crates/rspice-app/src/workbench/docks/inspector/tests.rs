@@ -4,6 +4,7 @@
 //! `documents/result_document/axis_range.rs`. Scroll memory is per subject and
 //! bounded, so two schematic subjects cannot inherit each other's offset.
 
+use super::design::bind_component_model_from_catalog;
 use super::*;
 use crate::state::{Component, ComponentType};
 

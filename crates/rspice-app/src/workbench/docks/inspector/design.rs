@@ -9,7 +9,7 @@
 mod component;
 mod model_evidence;
 
-pub(crate) use component::{analysis_soa_display, apply_bound_model_choice};
+pub(crate) use component::{analysis_soa_display, bind_component_model_from_catalog};
 
 use component::*;
 use model_evidence::{ComponentModelEvidence, component_model_evidence};

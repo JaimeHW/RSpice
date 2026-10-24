@@ -332,13 +332,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 library,
                 model,
             } => {
-                let result = crate::workbench::docks::bind_component_model_from_catalog(
-                    app,
-                    component_id,
-                    &library,
-                    &model,
-                )
-                .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
+                let result =
+                    crate::workbench::docks::inspector::design::bind_component_model_from_catalog(
+                        app,
+                        component_id,
+                        &library,
+                        &model,
+                    )
+                    .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
                 apply_receipt(&mut app.state, result);
             }
             ManagerAction::ScanSourceDrift => drift::scan(&mut app.state),
