@@ -10,6 +10,9 @@ use super::{
     cache::{cached_fft_plan, cached_window},
     error::MIN_FFT_DATA_SAMPLES,
 };
+use crate::fft::binary_parts::{
+    materialize_binary_parts, normalize_binary_parts, positive_binary_parts,
+};
 use crate::fft::window::WindowFunction;
 // =============================================================================
 // FFT Data
@@ -448,74 +451,6 @@ fn positive_product_ratio<const N: usize, const D: usize>(
         normalize_binary_parts(&mut mantissa, &mut exponent)?;
     }
     materialize_binary_parts(mantissa, exponent)
-}
-
-fn positive_binary_parts(value: f64) -> Option<(f64, i32)> {
-    const FRACTION_MASK: u64 = (1_u64 << 52) - 1;
-    const EXPONENT_ONE: u64 = 1023_u64 << 52;
-
-    if !value.is_finite() || value <= 0.0 {
-        return None;
-    }
-    let bits = value.to_bits();
-    let raw_exponent = ((bits >> 52) & 0x7ff) as i32;
-    let fraction = bits & FRACTION_MASK;
-    if raw_exponent != 0 {
-        return Some((f64::from_bits(EXPONENT_ONE | fraction), raw_exponent - 1023));
-    }
-
-    let highest_bit = 63_i32 - fraction.leading_zeros() as i32;
-    let shift = u32::try_from(52_i32 - highest_bit).ok()?;
-    let normalized_significand = fraction.checked_shl(shift)?;
-    Some((
-        f64::from_bits(EXPONENT_ONE | (normalized_significand & FRACTION_MASK)),
-        highest_bit - 1074,
-    ))
-}
-
-fn normalize_binary_parts(mantissa: &mut f64, exponent: &mut i32) -> Option<()> {
-    if !mantissa.is_finite() || *mantissa <= 0.0 {
-        return None;
-    }
-    while *mantissa >= 2.0 {
-        *mantissa *= 0.5;
-        *exponent = exponent.checked_add(1)?;
-    }
-    while *mantissa < 1.0 {
-        *mantissa *= 2.0;
-        *exponent = exponent.checked_sub(1)?;
-    }
-    Some(())
-}
-
-fn materialize_binary_parts(mantissa: f64, exponent: i32) -> Option<f64> {
-    const FRACTION_MASK: u64 = (1_u64 << 52) - 1;
-    const MAX_MANTISSA: f64 = f64::from_bits((1023_u64 << 52) | FRACTION_MASK);
-
-    if !(1.0..2.0).contains(&mantissa) || !(-1075..=1023).contains(&exponent) {
-        return None;
-    }
-    if exponent == 1023 && mantissa > MAX_MANTISSA {
-        return None;
-    }
-
-    let fraction = mantissa.to_bits() & FRACTION_MASK;
-    if exponent >= -1022 {
-        let raw_exponent = u64::try_from(exponent + 1023).ok()?;
-        let value = f64::from_bits((raw_exponent << 52) | fraction);
-        return (value.is_finite() && value > 0.0).then_some(value);
-    }
-
-    let significand = (1_u64 << 52) | fraction;
-    let shift = u32::try_from(-1022 - exponent).ok()?;
-    let truncated = significand >> shift;
-    let remainder_mask = (1_u64 << shift) - 1;
-    let remainder = significand & remainder_mask;
-    let halfway = 1_u64 << (shift - 1);
-    let round_up = remainder > halfway || (remainder == halfway && !truncated.is_multiple_of(2));
-    let rounded = truncated.checked_add(u64::from(round_up))?;
-    let value = f64::from_bits(rounded);
-    (value > 0.0).then_some(value)
 }
 
 fn try_owned_name(name: &str) -> Result<String, FftBuildError> {
