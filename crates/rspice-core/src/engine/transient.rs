@@ -5622,6 +5622,7 @@ impl Engine {
             Self::collect_xspice_runtime_breakpoints(
                 &mut circuit,
                 &mut breakpoints,
+                resume_time,
                 tstop,
                 resume.is_none(),
             )?;
@@ -6114,6 +6115,7 @@ impl Engine {
                 Self::collect_xspice_runtime_breakpoints(
                     &mut circuit,
                     &mut breakpoints,
+                    resume_time,
                     tstop,
                     true,
                 )?;
@@ -11911,6 +11913,7 @@ impl Engine {
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
                             &mut breakpoints,
+                            t,
                             tstop,
                             true,
                         )?;
@@ -12639,6 +12642,7 @@ impl Engine {
                 Self::collect_xspice_runtime_breakpoints(
                     &mut circuit,
                     &mut breakpoints,
+                    t,
                     tstop,
                     true,
                 )?;

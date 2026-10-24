@@ -414,9 +414,55 @@ impl CircuitScheduler {
     pub(crate) fn analog_step_floor(&self) -> Value {
         self.analog_step_floor
     }
+
+    /// How an instant a code model or a mixed module asks the stepper to land
+    /// on is keyed, for the requests made at `requested_at`.
+    ///
+    /// A request is a discrete instant like an output, and a coupled run keys
+    /// it by the outputs' rule ([`Instant::canonical`], "one instant, one
+    /// key"): within one coincidence window of an HDL tick image it is that
+    /// image. A zero-duration D/A edge on a tick completes a picosecond later
+    /// as a sum, which can fall an ulp either side of the next tick's image,
+    /// and that image is where the outputs read off the completed edge are
+    /// keyed. Requested at the sum, the stepper landed on it and then again one
+    /// floor later for those outputs, and restarted from that floor-sized step;
+    /// requested at the image, one point serves both.
+    ///
+    /// The instant itself in an uncoupled run, which has no lattice to be
+    /// canonical on.
+    pub(crate) fn request_key(
+        &self,
+        requested_at: Value,
+    ) -> impl Fn(Value) -> Value + Copy + use<> {
+        #[cfg(feature = "veriloga")]
+        let keyed = self
+            .xspice_event_queue
+            .lattice()
+            .zip(Instant::from_seconds(requested_at));
+        #[cfg(not(feature = "veriloga"))]
+        let _ = requested_at;
+        move |seconds| {
+            #[cfg(feature = "veriloga")]
+            if let Some((lattice, from)) = keyed
+                && let Some(at) = Instant::from_seconds(seconds)
+            {
+                return at.canonical(lattice, from).seconds();
+            }
+            seconds
+        }
+    }
 }
 
 impl super::CircuitData {
+    /// [`CircuitScheduler::request_key`], for the stepper that holds the
+    /// circuit rather than the scheduler.
+    pub(crate) fn breakpoint_request_key(
+        &self,
+        requested_at: Value,
+    ) -> impl Fn(Value) -> Value + Copy + use<> {
+        self.scheduler.request_key(requested_at)
+    }
+
     /// [`CircuitScheduler::next_activation`], for the stepper that holds the
     /// circuit rather than the scheduler.
     pub(crate) fn next_activation(

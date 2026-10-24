@@ -362,9 +362,14 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // double nearest its decimal: the same 353 points, QD's 20 values
         // unchanged with 10 of their instants one ulp away, 180 grid points
         // one ulp away, and the voltage hash unchanged.
+        //
+        // And again when an edge's completion became the tick image its
+        // `edge + 1 ps` sum is within a floor of: the same 353 points and
+        // voltage hash, with 10 of QD's 19 completions one ulp onto their
+        // image.
         Fingerprint {
             points: 353,
-            grid_hash: 0xf183_6a01_1734_ed29,
+            grid_hash: 0x768f_bd6e_6faa_0c6b,
             volt_hash: 0xd37d_277c_dc23_aa1c,
         },
     ),

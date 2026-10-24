@@ -1465,3 +1465,57 @@ fn a_floor_near_the_precision_moves_no_coupled_event_by_more_than_the_cap() {
         );
     }
 }
+
+/// A zero-duration D/A edge on a tick completes a picosecond later at the
+/// next tick's image, not at the sum: `250 ns + 1 ps` rounds one ulp below the
+/// image of 250 001 ps, which is where a code model reading the completed edge
+/// keys its outputs. Requested at the sum, the completion was one accepted
+/// point and such an output a second, one solver floor later, which the
+/// stepper then had to regrow from: the SAR corpus testbench's A/D bridges
+/// reading the register's bits back took 59 of them in a 32-conversion run.
+#[test]
+fn a_zero_duration_edge_on_a_tick_completes_on_the_next_tick_image() {
+    let source = AmsFile::new(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module drv(b);\n\
+           output b; reg b;\n\
+           initial begin b = 1'b0; #250 b = 1'b1; end\n\
+         endmodule\n",
+    );
+    let text = format!(
+        "a completion on the tick lattice\n\
+         .hdl \"{}\"\n\
+         xd b drv\n\
+         bload l 0 v = v(b)\n\
+         rl l 0 1k\n\
+         .tran 1n 400n\n\
+         .end\n",
+        source.path()
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let result = Engine::default().run_tran(&deck, 400e-9, 1e-9).unwrap();
+    let edge = picosecond(250_000);
+    let image = picosecond(250_001);
+    assert_ne!(
+        (edge + 1.0e-12).to_bits(),
+        image.to_bits(),
+        "the completion's sum is off the image"
+    );
+    let near = result
+        .time
+        .iter()
+        .filter(|time| (**time - image).abs() <= 1.0e-15)
+        .collect::<Vec<_>>();
+    assert_eq!(near, [&image], "one point on the completion: {near:?}");
+    let shortest = result
+        .time
+        .windows(2)
+        .filter(|pair| pair[0] >= image && pair[0] < edge + 1.0e-9)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        shortest >= 1.0e-12 * (1.0 - 1.0e-9),
+        "a {shortest:e} s step in the nanosecond after the completion"
+    );
+}

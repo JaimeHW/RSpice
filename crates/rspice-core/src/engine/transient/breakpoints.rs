@@ -318,12 +318,18 @@ impl Engine {
     /// interrupted run asked for there, and a module rebuilt from it cannot
     /// tell a sampled-and-held input's new sample, which asks for none, from
     /// an edge.
+    ///
+    /// Every request is keyed as a coupled run keys its outputs
+    /// ([`crate::circuit::CircuitData::breakpoint_request_key`]), from
+    /// `accepted_time`, the point the requests were made at.
     pub(super) fn collect_xspice_runtime_breakpoints(
         circuit: &mut crate::circuit::CircuitData,
         breakpoints: &mut BreakpointManager,
+        accepted_time: Value,
         tstop: Value,
         read_step_completions: bool,
     ) -> Result<(), crate::engine::SimulationError> {
+        let key = circuit.breakpoint_request_key(accepted_time);
         let mut runtime_breakpoints = Vec::new();
         // Each lane's own next activation, not the earliest of the two: this
         // list carries both so that neither is hidden behind the other, and it
@@ -352,18 +358,19 @@ impl Engine {
         let mut model_requests = Vec::new();
         circuit.drain_xspice_requested_breakpoints(
             |time| {
+                let time = key(time);
                 model_requests.push(time);
                 if time.is_finite() && time >= 0.0 && time <= tstop {
                     runtime_breakpoints.push(time);
                 }
             },
-            |time| edge_completions.push(time),
+            |time| edge_completions.push(key(time)),
         );
         // A discrete value a mixed module's analog block read at its left
         // limit completes its step as a D/A edge does.
         #[cfg(feature = "veriloga")]
         if read_step_completions {
-            for time in circuit.mixed_read_step_completions() {
+            for time in circuit.mixed_read_step_completions().map(key) {
                 if time.is_finite() && time >= 0.0 && time <= tstop {
                     runtime_breakpoints.push(time);
                     edge_completions.push(time);
