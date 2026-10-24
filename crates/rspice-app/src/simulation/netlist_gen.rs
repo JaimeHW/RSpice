@@ -7,8 +7,7 @@ use rspice_design::connectivity::summary::projection_nets;
 use rspice_design::hierarchy::{ConfigurationExecutionPlan, HierarchySource};
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_simulation::netlist_gen::{
-    NetlistDefect, NetlistGenerator, NetlistResult, NetlistSourceData,
-    generate_netlist_hierarchical,
+    NetlistDefect, NetlistResult, NetlistSourceData, generate_netlist_hierarchical,
 };
 use std::collections::HashMap;
 
@@ -19,15 +18,8 @@ mod source_tables;
 #[path = "netlist_gen/subcircuits/tests.rs"]
 mod subcircuits;
 
-/// Flat generation for application integration fixtures through the real file host.
 #[cfg(test)]
-pub(crate) fn generate_netlist(schematic: &impl AsRef<SchematicDocument>) -> NetlistResult {
-    NetlistGenerator::new(
-        schematic,
-        NetlistSourceData::new(&crate::simulation::table_route::SourceFiles),
-    )
-    .finish(&[], &[])
-}
+pub(crate) use crate::simulation::table_route::generate_netlist;
 
 #[cfg(test)]
 mod tests {

@@ -44,7 +44,7 @@ impl HierarchyExtractionCandidate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::netlist_gen::generate_netlist;
+    use crate::simulation::table_route::generate_netlist;
     use crate::state::WireConnection;
 
     fn terminals(schematic: &SchematicState) -> Vec<HierarchyExtractionTerminal> {

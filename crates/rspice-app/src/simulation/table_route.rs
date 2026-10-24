@@ -299,6 +299,15 @@ fn publish(_path: &Path, _bytes: &[u8]) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
+/// Flat generation for application integration fixtures through the real file host.
+#[cfg(test)]
+pub fn generate_netlist(
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+) -> rspice_simulation::netlist_gen::NetlistResult {
+    use rspice_simulation::netlist_gen::{NetlistGenerator, NetlistSourceData};
+    NetlistGenerator::new(schematic, NetlistSourceData::new(&SourceFiles)).finish(&[], &[])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
