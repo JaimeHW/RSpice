@@ -1913,7 +1913,7 @@ cast_real_invalid1	vvp	ce	-	excluded:flag-g2005-sv
 cast_real_invalid2	vvp	ce	-	excluded:flag-g2005-sv	
 cast_real_invalid3	vvp	ce	-	excluded:flag-g2005-sv	
 cast_real_invalid4	vvp	ce	-	excluded:flag-g2005-sv	
-comment1	vvp	ce	L1	fail	compiled without error; ran to quiescence
+comment1	vvp	ce	L1	deviation	IEEE 1364-2005 §3.3: a block comment ends at the first `*/`, so a `/*` inside one is comment text and the program is legal; Icarus refuses it as a possible nested comment
 constfunc16	vvp	passed	-	excluded:flag-g2009	
 constfunc17	vvp	passed	-	excluded:flag-g2009	
 constfunc18	vvp	passed	-	excluded:flag-g2009	
