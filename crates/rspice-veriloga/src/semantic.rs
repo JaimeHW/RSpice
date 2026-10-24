@@ -408,6 +408,7 @@ pub(crate) mod library_binding;
 mod net_types;
 mod node_aliases;
 mod node_vectors;
+pub(crate) mod packages;
 mod parameter_arrays;
 mod port_attributes;
 pub(crate) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {

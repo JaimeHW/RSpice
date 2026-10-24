@@ -270,3 +270,156 @@ fn the_discipline_header_is_refused_in_systemverilog_text() {
     );
     assert_eq!(error.line, 1);
 }
+
+/// `` `begin_keywords "1800-2017" `` in a `.v` file makes `package`, `import`
+/// and `nettype` the keywords they are; without it they are names, and a
+/// package is no declaration at all.
+#[test]
+fn begin_keywords_in_a_verilog_file_makes_package_parse() {
+    let files = Sources::new();
+    let body = "package p;\n  nettype real rnet;\n  localparam real K = 1.5;\nendpackage\nmodule m;\n  \
+                import p::*;\n  rnet n;\n  assign n = K;\nendmodule\n";
+    files.write(
+        "selected.v",
+        &format!("`begin_keywords \"1800-2017\"\n{body}`end_keywords\n"),
+    );
+    files.compiles(&["selected.v"], "m");
+    files.write("plain.v", body);
+    let refusal = files.refusal(&["plain.v"], "m");
+    assert_eq!((file_of(&refusal), refusal.line), ("plain.v", Some(1)));
+}
+
+/// Nettype nets and ports, ANSI and not (IEEE 1800-2017 sections 6.6.7 and
+/// 23.2.2), through a package, a scoped name and an alias.
+#[test]
+fn nettype_nets_and_ports_compile() {
+    let files = Sources::new();
+    files.write("pk.sv", "package pk;\n  nettype real rnet;\nendpackage\n");
+    files.write(
+        "ansi.sv",
+        "module ansi import pk::*; (input rnet x, output pk::rnet y);\n  assign y = 2.0 * x;\n\
+         endmodule\n",
+    );
+    files.compiles(&["pk.sv", "ansi.sv"], "ansi");
+    files.write(
+        "plain.sv",
+        "module plain(x, y);\n  import pk::*;\n  nettype rnet alias_net;\n  input rnet x;\n  \
+         output alias_net y;\n  assign y = x;\nendmodule\n",
+    );
+    files.compiles(&["plain.sv", "pk.sv"], "plain");
+}
+
+/// What the subset does not read yet is refused by name: a resolution
+/// function, struct and integral nettype data, package variables and
+/// `export`; and every other SystemVerilog word with one refusal that names
+/// it.
+#[test]
+fn constructs_outside_the_subset_are_refused_by_name() {
+    let files = Sources::new();
+    let refusal = |name: &str, source: &str| {
+        files.write(name, source);
+        files.refusal(&[name], "m")
+    };
+    let with = refusal(
+        "with.sv",
+        "module m;\n  nettype real r with resolve;\nendmodule\n",
+    );
+    assert_eq!(with.code, "VA-PARSE-SV-UNSUPPORTED");
+    assert!(
+        with.message.contains("resolution functions"),
+        "{}",
+        with.message
+    );
+    assert_eq!(with.line, Some(2));
+    let structured = refusal(
+        "struct.sv",
+        "module m;\n  nettype struct { real v; } s;\nendmodule\n",
+    );
+    assert!(
+        structured.message.contains("struct data"),
+        "{}",
+        structured.message
+    );
+    let integral = refusal("logic.sv", "module m;\n  nettype logic l;\nendmodule\n");
+    assert!(
+        integral.message.contains("integral data"),
+        "{}",
+        integral.message
+    );
+    let variable = refusal(
+        "variable.sv",
+        "package p;\n  real v;\nendpackage\nmodule m;\nendmodule\n",
+    );
+    assert!(
+        variable.message.contains("package variables"),
+        "{}",
+        variable.message
+    );
+    let export = refusal(
+        "export.sv",
+        "package p;\n  export q::*;\nendpackage\nmodule m;\nendmodule\n",
+    );
+    assert!(export.message.contains("`export`"), "{}", export.message);
+    let outside = refusal("outside.sv", "module m;\n  logic l;\nendmodule\n");
+    assert_eq!(outside.code, "VA-PARSE-SV-OUTSIDE-SUBSET");
+    assert!(
+        outside.message.contains("`logic`")
+            && outside.message.contains("outside the RSpice SV-RNM subset"),
+        "{}",
+        outside.message
+    );
+    assert_eq!((outside.line, outside.column), (Some(2), Some(3)));
+}
+
+/// A Verilog-AMS discipline is analog content wherever it types a net of a
+/// SystemVerilog module, and `wreal` is told it is Verilog-AMS's.
+#[test]
+fn disciplines_and_wreal_are_not_nettypes() {
+    let files = Sources::new();
+    files.write(
+        "disc.sv",
+        "module m(p);\n  inout p;\n  electrical p;\nendmodule\n",
+    );
+    let refusal = files.refusal(&["disc.sv"], "m");
+    assert_eq!(refusal.code, "VA-SV-ANALOG", "{refusal:?}");
+    assert_eq!(refusal.line, Some(3));
+    files.write("wreal.sv", "module m;\n  wreal w;\nendmodule\n");
+    let refusal = files.refusal(&["wreal.sv"], "m");
+    assert_eq!(refusal.code, "VA-SEM-SV-NETTYPE");
+    assert!(
+        refusal.message.contains("Verilog-AMS net type"),
+        "{}",
+        refusal.message
+    );
+    files.write("unknown.sv", "module m;\n  missing_type w;\nendmodule\n");
+    let refusal = files.refusal(&["unknown.sv"], "m");
+    assert!(
+        refusal.message.contains("no nettype `missing_type`"),
+        "{}",
+        refusal.message
+    );
+}
+
+/// IEEE 1800-2017 section 26.2: a package name is declared once in the
+/// compilation unit, and the refusal names both files that declare it.
+#[test]
+fn a_duplicate_package_names_both_files() {
+    let files = Sources::new();
+    files.write(
+        "one.sv",
+        "package p;\n  localparam real K = 1.0;\nendpackage\n",
+    );
+    files.write(
+        "two.sv",
+        "// again\npackage p;\n  localparam real K = 2.0;\nendpackage\n",
+    );
+    files.write("m.sv", "module m;\nendmodule\n");
+    let refusal = files.refusal(&["one.sv", "two.sv", "m.sv"], "m");
+    assert_eq!(refusal.code, "VA-UNIT-DUPLICATE-PACKAGE");
+    assert!(
+        refusal.message.contains("one.sv") && refusal.message.contains("two.sv"),
+        "{}",
+        refusal.message
+    );
+    assert_eq!((file_of(&refusal), refusal.line), ("two.sv", Some(2)));
+}

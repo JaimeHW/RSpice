@@ -274,6 +274,12 @@ pub enum ParseErrorKind {
     #[error("SystemVerilog construct `{word}` is outside the RSpice SV-RNM subset")]
     SvOutsideSubset { word: String },
 
+    /// A SystemVerilog construct of the subset's own words that this
+    /// compiler does not read yet, refused by what it is: a package variable,
+    /// `export`, a resolution function, a nettype of struct or integral data.
+    #[error("{0}")]
+    SvRefused(String),
+
     /// Verilog-AMS analog content in a SystemVerilog design element.
     #[error(
         "Verilog-AMS analog constructs are not SystemVerilog; put module `{module}` in a `.vams` \
@@ -349,6 +355,7 @@ impl ParseErrorKind {
             Self::UnsupportedAmsConstruct { .. } => "VA-PARSE-UNSUPPORTED-AMS-DIGITAL",
             Self::SvOutsideSubset { .. } => "VA-PARSE-SV-OUTSIDE-SUBSET",
             Self::SvAnalog { .. } => "VA-SV-ANALOG",
+            Self::SvRefused(_) => "VA-PARSE-SV-UNSUPPORTED",
             Self::NestingLimit { .. } => "VA-PARSE-NESTING-LIMIT",
             Self::Unclosed { .. } => "VA-PARSE-UNCLOSED",
         }
@@ -374,6 +381,23 @@ impl SemanticError {
 pub enum SemanticErrorKind {
     #[error("Undeclared symbol: '{name}'")]
     UndeclaredSymbol { name: smol_str::SmolStr },
+
+    /// A SystemVerilog package, import or scoped name that the visibility
+    /// rules of IEEE 1800-2017 section 26.3 refuse.
+    #[error("{0}")]
+    SvPackage(String),
+
+    /// A SystemVerilog net type name that names no real nettype (IEEE
+    /// 1800-2017 section 6.6.7).
+    #[error("{0}")]
+    SvNettype(String),
+
+    /// A Verilog-AMS discipline typing a net of a SystemVerilog module.
+    #[error(
+        "Verilog-AMS analog constructs are not SystemVerilog; put module `{module}` in a \
+         `.vams` file and instantiate it"
+    )]
+    SvAnalog { module: String },
 
     #[error("Undefined module: '{0}'")]
     UndefinedModule(String),
@@ -536,6 +560,9 @@ impl SemanticErrorKind {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::UndeclaredSymbol { .. } => "VA-SEM-UNDECLARED-SYMBOL",
+            Self::SvPackage(_) => "VA-SEM-SV-PACKAGE",
+            Self::SvNettype(_) => "VA-SEM-SV-NETTYPE",
+            Self::SvAnalog { .. } => "VA-SV-ANALOG",
             Self::UndefinedModule(_) => "VA-SEM-UNDEFINED-MODULE",
             Self::UndefinedDiscipline(_) => "VA-SEM-UNDEFINED-DISCIPLINE",
             Self::TypeMismatch { .. } => "VA-SEM-TYPE-MISMATCH",

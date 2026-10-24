@@ -532,6 +532,7 @@ impl Parser<'_> {
             }
         }
         Ok(DigitalNetDecl {
+            nettype: None,
             kind,
             signedness,
             range,
@@ -566,6 +567,7 @@ impl Parser<'_> {
             start.extend(self.previous_span()),
         );
         Ok(DigitalNetDecl {
+            nettype: None,
             kind: DigitalNetKind::Wreal(resolution),
             signedness: Signedness::Unsigned,
             range,

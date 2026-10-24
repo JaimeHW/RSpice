@@ -246,7 +246,11 @@ fn module_outline(module: &Module, text: &SourceText<'_>, rows: &mut Vec<SourceO
         let mut words = Vec::new();
         if let Some(declaration) = declaration {
             words.push(declaration.direction.label().to_owned());
-            if let Some(net_type) = declaration.net_type {
+            // A nettype port reads as the nettype it names (IEEE 1800-2017
+            // section 6.6.7), as it was written.
+            if let Some(nettype) = &declaration.nettype {
+                words.push(nettype.written());
+            } else if let Some(net_type) = declaration.net_type {
                 words.push(port_net_type(net_type).to_owned());
             }
         }
@@ -489,6 +493,7 @@ const fn port_net_type(net_type: rspice_veriloga::ast::PortNetType) -> &'static 
             rspice_veriloga::ast::DigitalNetKind::Wreal(resolution).keyword()
         }
         PortNetType::Real => "real",
+        PortNetType::Nettype => rspice_veriloga::ast::DigitalNetKind::Nettype.keyword(),
     }
 }
 

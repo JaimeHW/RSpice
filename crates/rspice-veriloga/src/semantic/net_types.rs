@@ -231,9 +231,12 @@ pub(super) fn resolve(
         .map(|(index, net)| (index, net.kind))
         .chain(selected_types)
     {
-        let DigitalNetKind::Wreal(resolution) = kind else {
+        // A real net's kind is its resolution policy: a `wreal` spelling, or
+        // a SystemVerilog nettype.
+        if !kind.is_real() {
             continue;
-        };
+        }
+        let resolution = kind;
         let root = representative(&mut parents, index);
         if let Some(previous) = real_types.insert(root, resolution) {
             if previous != resolution {
@@ -279,7 +282,7 @@ pub(super) fn resolve(
             ));
         }
     }
-    let mut promotions: BTreeMap<usize, BTreeMap<SmolStr, WrealResolution>> = BTreeMap::new();
+    let mut promotions: BTreeMap<usize, BTreeMap<SmolStr, DigitalNetKind>> = BTreeMap::new();
     for (index, net) in nets.iter().enumerate() {
         if net.kind != DigitalNetKind::Wire {
             continue;
@@ -349,9 +352,12 @@ fn selected_real_type(
         .signals
         .iter()
         .find(|signal| signal.name == *name)?;
-    let DigitalSignalClass::Net(kind @ DigitalNetKind::Wreal(_)) = signal.class else {
+    let DigitalSignalClass::Net(kind) = signal.class else {
         return None;
     };
+    if !kind.is_real() {
+        return None;
+    }
     let constants = super::instance_parameters::constants(&module.source);
     let integer = |expression| match crate::canonical_ir::digital_lower::elaboration_constant(
         expression,
@@ -437,7 +443,7 @@ fn selected_wire<'a>(
     ))
 }
 
-fn promote(source: &mut Module, types: &BTreeMap<SmolStr, WrealResolution>) {
+fn promote(source: &mut Module, types: &BTreeMap<SmolStr, DigitalNetKind>) {
     let mut declared = std::collections::HashSet::new();
     source.digital_nets = source
         .digital_nets
@@ -449,8 +455,8 @@ fn promote(source: &mut Module, types: &BTreeMap<SmolStr, WrealResolution>) {
                 .map(|item| {
                     let mut net = declaration.clone();
                     net.items = vec![item.clone()];
-                    if let Some(&resolution) = types.get(&item.name) {
-                        net.kind = DigitalNetKind::Wreal(resolution);
+                    if let Some(&kind) = types.get(&item.name) {
+                        net.kind = kind;
                         net.signedness = Signedness::Unsigned;
                         declared.insert(item.name.clone());
                     }
@@ -467,15 +473,20 @@ fn promote(source: &mut Module, types: &BTreeMap<SmolStr, WrealResolution>) {
                 let mut port = declaration.clone();
                 port.names = vec![name.clone()];
                 port.initializers.retain(|(target, _)| target == name);
-                if let Some(&resolution) = types.get(name) {
-                    port.net_type = Some(PortNetType::Wreal(resolution));
+                if let Some(&kind) = types.get(name) {
+                    port.net_type = Some(match kind {
+                        DigitalNetKind::Nettype => PortNetType::Nettype,
+                        kind => {
+                            PortNetType::Wreal(kind.resolution().unwrap_or(WrealResolution::Single))
+                        }
+                    });
                     port.signedness = Signedness::Unsigned;
                 }
                 port
             })
         })
         .collect();
-    for (name, &resolution) in types {
+    for (name, &kind) in types {
         if declared.contains(name) {
             continue;
         }
@@ -492,7 +503,8 @@ fn promote(source: &mut Module, types: &BTreeMap<SmolStr, WrealResolution>) {
             .or_else(|| port.map(|port| port.span))
             .unwrap_or(source.span);
         source.digital_nets.push(DigitalNetDecl {
-            kind: DigitalNetKind::Wreal(resolution),
+            nettype: None,
+            kind,
             signedness: Signedness::Unsigned,
             range,
             items: vec![DigitalDeclItem {

@@ -304,6 +304,7 @@ impl Parser<'_> {
             // to several bits decides by its least significant bit, which
             // is what a one-bit net assigned from it keeps.
             module.digital_nets.push(DigitalNetDecl {
+                nettype: None,
                 kind: DigitalNetKind::Wire,
                 signedness: Signedness::Unsigned,
                 range: None,
@@ -504,6 +505,7 @@ impl Parser<'_> {
                 .into();
                 let span = operand.span();
                 module.digital_nets.push(DigitalNetDecl {
+                    nettype: None,
                     kind: DigitalNetKind::Wire,
                     signedness: Signedness::Unsigned,
                     range: None,

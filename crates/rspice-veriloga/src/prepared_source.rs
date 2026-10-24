@@ -107,12 +107,50 @@ pub(crate) fn unit_duplicate_module(
         .ok()?;
     let mut declared: std::collections::HashMap<(Option<&str>, &str), usize> =
         std::collections::HashMap::new();
+    let mut packages: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut library = None;
     for (index, token) in tokens.iter().enumerate() {
         if token.kind == TokenKind::Identifier
             && token.text.as_deref() == Some(crate::preprocessor::LIBRARY_MARKER)
         {
             library = tokens.get(index + 2).and_then(|name| name.text.as_deref());
+            continue;
+        }
+        // IEEE 1800-2017 section 26.2: a package name is declared once in
+        // the compilation unit, which every file of a run shares.
+        if token.kind == TokenKind::Package
+            && let Some(declaration) = tokens.get(index + 1)
+            && let Some(name) = declaration.text.as_deref()
+            && let Some(file) = ranges
+                .iter()
+                .position(|range| range.contains(&(declaration.span.start as usize)))
+        {
+            let first = *packages.entry(name).or_insert(file);
+            if first != file {
+                let message = format!(
+                    "package '{name}' is declared in both '{}' and '{}'; the HDL sources of a \
+                     run form one compilation unit, in which a package name is declared once \
+                     (IEEE 1800-2017 section 26.2)",
+                    paths[first].display(),
+                    paths[file].display()
+                );
+                let location = preprocessed.segment_at(declaration.span.start as usize);
+                let diagnostic = crate::SourceCompileDiagnostic {
+                    severity: crate::CompileDiagnosticSeverity::Error,
+                    phase: crate::CompileDiagnosticPhase::ModuleSelection,
+                    code: "VA-UNIT-DUPLICATE-PACKAGE".to_owned(),
+                    message: message.clone(),
+                    path: Some(location.map_or_else(
+                        || paths[file].display().to_string(),
+                        |segment| segment.logical_path.display().to_string(),
+                    )),
+                    byte_start: None,
+                    byte_end: None,
+                    line: location.map(|segment| segment.source_line),
+                    column: None,
+                };
+                return Some((message, diagnostic));
+            }
             continue;
         }
         if !matches!(token.kind, TokenKind::Module | TokenKind::Macromodule) {

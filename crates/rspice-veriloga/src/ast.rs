@@ -123,6 +123,80 @@ pub enum Item {
     ConnectRules(ConnectRulesDecl),
     /// Paramset definition
     ParamSet(ParamSetDef),
+    /// A SystemVerilog `package` (IEEE 1800-2017 section 26.2).
+    Package(PackageDecl),
+    /// A SystemVerilog declaration outside every design element, in the
+    /// compilation-unit scope (section 3.12.1).
+    UnitItem(UnitItem),
+}
+
+/// `package p; ... endpackage` (IEEE 1800-2017 section 26.2): the
+/// declarations other scopes import.
+#[derive(Debug, Clone)]
+pub struct PackageDecl {
+    pub name: SmolStr,
+    /// The package's own imports, which its declarations read and which a
+    /// scope importing the package does not see (section 26.3).
+    pub imports: Vec<ImportDecl>,
+    pub nettypes: Vec<NettypeDecl>,
+    /// Its parameters, every one of them local (section 26.2).
+    pub parameters: Vec<ParameterDecl>,
+    pub span: Span,
+}
+
+/// One item of an `import` declaration (IEEE 1800-2017 section 26.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportDecl {
+    pub package: SmolStr,
+    /// The name imported, or `None` for the wildcard `p::*`.
+    pub name: Option<SmolStr>,
+    pub span: Span,
+}
+
+/// `nettype real n;` or `nettype other n;` (IEEE 1800-2017 section 6.6.7).
+#[derive(Debug, Clone)]
+pub struct NettypeDecl {
+    pub name: SmolStr,
+    pub data: NettypeData,
+    pub span: Span,
+}
+
+/// What a nettype declaration says its nets carry.
+#[derive(Debug, Clone)]
+pub enum NettypeData {
+    /// `real`, with no resolution function: a net of it takes one driver.
+    Real,
+    /// The name of another nettype, which this one is an alias of.
+    Alias(TypeRef),
+}
+
+/// A type named in a declaration, directly or through a package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeRef {
+    /// `p` of the scoped name `p::name`, or `$unit`; `None` for a plain name.
+    pub package: Option<SmolStr>,
+    pub name: SmolStr,
+    pub span: Span,
+}
+
+impl TypeRef {
+    /// The name as written.
+    pub fn written(&self) -> String {
+        match &self.package {
+            Some(package) => format!("{package}::{}", self.name),
+            None => self.name.to_string(),
+        }
+    }
+}
+
+/// A declaration in the compilation-unit scope (IEEE 1800-2017 section
+/// 3.12.1).
+#[derive(Debug, Clone)]
+pub enum UnitItem {
+    Import(ImportDecl),
+    Nettype(NettypeDecl),
+    /// A parameter there is local, as in a package.
+    Parameter(Box<ParameterDecl>),
 }
 
 /// One `connectrules` … `endconnectrules` block.
@@ -360,6 +434,16 @@ pub struct Module {
     /// its `module` keyword (IEEE 1800-2017 section 22.14), which cannot
     /// change before its `endmodule`.
     pub language: SourceLanguage,
+    /// Its `import` declarations, those of its header first (IEEE
+    /// 1800-2017 section 26.3).
+    pub imports: Vec<ImportDecl>,
+    /// The nettypes it declares (section 6.6.7).
+    pub nettypes: Vec<NettypeDecl>,
+    /// Each identifier a SystemVerilog module's text names, with the byte
+    /// offset of each place it does, outside member and port-connection
+    /// names and the parts of a scoped name: what the visibility rules of
+    /// section 26.3 count as references. Empty for a Verilog-AMS module.
+    pub(crate) identifier_uses: Vec<(SmolStr, Span)>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -486,6 +570,9 @@ impl Module {
             unconnected_drive: None,
             binding: None,
             language: SourceLanguage::VerilogAms,
+            imports: Vec::new(),
+            nettypes: Vec::new(),
+            identifier_uses: Vec::new(),
             attributes: Vec::new(),
             span,
         }
@@ -767,6 +854,8 @@ pub struct PortDeclaration {
     /// `None` is a port with no type of its own, which section 12.3.3 makes an
     /// implicit net.
     pub net_type: Option<PortNetType>,
+    /// The nettype a [`PortNetType::Nettype`] port names.
+    pub nettype: Option<TypeRef>,
     /// Port names
     pub names: Vec<SmolStr>,
     /// Constant initializers on output variable ports, keyed by port name.
@@ -811,6 +900,10 @@ pub enum PortNetType {
     /// a procedural assignment write a variable and not a net, so `output real`
     /// is the port a process can write and `output wreal` is not.
     Real,
+    /// `input rnet x;`: a net of a SystemVerilog user-defined nettype (IEEE
+    /// 1800-2017 section 23.2.2), which the declaration's
+    /// [`PortDeclaration::nettype`] names.
+    Nettype,
 }
 
 /// Port direction
@@ -2448,6 +2541,15 @@ pub enum DigitalNetKind {
     Uwire,
     /// A real-valued net: `wreal`, and the four resolved spellings.
     Wreal(WrealResolution),
+    /// A net of a SystemVerilog user-defined nettype (IEEE 1800-2017
+    /// section 6.6.7): `rnet y;` after `nettype real rnet;`. The nettype it
+    /// names is the declaration's [`DigitalNetDecl::nettype`].
+    ///
+    /// A kind of its own and never a `wreal`: it carries a real like one and
+    /// takes one driver like a plain `wreal`, since a nettype without a
+    /// resolution function admits one, but `.options wreal_resolution`
+    /// reads `wreal` and not this.
+    Nettype,
 }
 
 impl DigitalNetKind {
@@ -2463,6 +2565,7 @@ impl DigitalNetKind {
             Self::Uwire => "uwire",
             Self::Trireg { .. } => "trireg",
             Self::Wreal(resolution) => resolution.keyword(),
+            Self::Nettype => "nettype",
         }
     }
 
@@ -2483,13 +2586,16 @@ impl DigitalNetKind {
 
     /// Whether the net carries a real value rather than four-state bits.
     pub const fn is_real(self) -> bool {
-        matches!(self, Self::Wreal(_))
+        matches!(self, Self::Wreal(_) | Self::Nettype)
     }
 
     /// How the net combines its drivers, for a real net.
     pub const fn resolution(self) -> Option<WrealResolution> {
         match self {
             Self::Wreal(resolution) => Some(resolution),
+            // One driver, as section 6.6.7 gives a nettype with no
+            // resolution function.
+            Self::Nettype => Some(WrealResolution::Single),
             _ => None,
         }
     }
@@ -2519,6 +2625,8 @@ pub struct DigitalNetDecl {
     pub signedness: Signedness,
     pub range: Option<VectorRange>,
     pub items: Vec<DigitalDeclItem>,
+    /// The nettype a [`DigitalNetKind::Nettype`] declaration names.
+    pub nettype: Option<TypeRef>,
     pub span: Span,
 }
 

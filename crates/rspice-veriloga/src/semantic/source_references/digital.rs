@@ -106,6 +106,7 @@ impl Resolver {
                 dependencies.extend(net.range.iter().flat_map(|r| [&r.msb, &r.lsb]));
                 dependencies.extend(item.dimensions.iter().flat_map(|d| [&d.start, &d.end]));
                 borrowed = Some(Borrowed::Net(DigitalNetDecl {
+                    nettype: None,
                     kind: net.kind,
                     signedness: net.signedness,
                     range: close_range(&net.range)?,
@@ -166,6 +167,7 @@ impl Resolver {
         {
             dependencies.extend(port.range.iter().flat_map(|r| [&r.msb, &r.lsb]));
             borrowed = Some(Borrowed::Net(DigitalNetDecl {
+                nettype: None,
                 kind: DigitalNetKind::Wire,
                 signedness: port.signedness,
                 range: close_range(&port.range)?,

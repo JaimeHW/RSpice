@@ -17,6 +17,7 @@ mod gate_arrays;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
+mod packages;
 mod scope_rules;
 mod specify;
 mod udp;
@@ -93,6 +94,7 @@ struct AnsiPortContext {
     signedness: Signedness,
     range: Option<VectorRange>,
     net_type: Option<PortNetType>,
+    nettype: Option<TypeRef>,
 }
 
 /// Parser for Verilog-A/AMS
@@ -223,9 +225,20 @@ impl<'a> Parser<'a> {
         let index = self
             .tokens
             .partition_point(|token| token.span.start < error.span.start);
+        let generic = matches!(
+            error.kind,
+            ParseErrorKind::Expected { .. }
+                | ParseErrorKind::UnexpectedToken(_)
+                | ParseErrorKind::UnsupportedConstruct { .. }
+                | ParseErrorKind::InvalidModule
+                | ParseErrorKind::InvalidPort
+                | ParseErrorKind::InvalidExpression
+        );
         match self.tokens.get(index) {
             Some(token)
-                if token.kind == TokenKind::SvReserved && token.span.start == error.span.start =>
+                if generic
+                    && token.kind == TokenKind::SvReserved
+                    && token.span.start == error.span.start =>
             {
                 ParseError::new(
                     ParseErrorKind::SvOutsideSubset {
@@ -310,6 +323,29 @@ impl<'a> Parser<'a> {
                 items.push(Item::DefaultDiscipline(
                     self.parse_default_discipline_directive()?,
                 ));
+            } else if self.check(TokenKind::Package) {
+                items.push(Item::Package(self.parse_package()?));
+            } else if self.check(TokenKind::Import) {
+                items.extend(
+                    self.parse_import_declaration()?
+                        .into_iter()
+                        .map(|import| Item::UnitItem(UnitItem::Import(import))),
+                );
+            } else if self.check(TokenKind::Nettype) {
+                items.push(Item::UnitItem(UnitItem::Nettype(
+                    self.parse_nettype_declaration()?,
+                )));
+            } else if self.language == SourceLanguage::SystemVerilog
+                && matches!(
+                    self.current().kind,
+                    TokenKind::Parameter | TokenKind::Localparam
+                )
+            {
+                items.extend(
+                    self.parse_parameter(&attributes)?
+                        .into_iter()
+                        .map(|parameter| Item::UnitItem(UnitItem::Parameter(Box::new(parameter)))),
+                );
             } else if self.check(TokenKind::Module) || self.check(TokenKind::Macromodule) {
                 let mut module = self.parse_module()?;
                 let mut combined_attributes = attributes;
@@ -674,6 +710,13 @@ impl<'a> Parser<'a> {
         module.time_scale = self.time_scale;
         module.unconnected_drive = self.unconnected_drive;
         module.language = self.language;
+        let first_token = self.pos;
+        // IEEE 1800-2017 section 26.4: imports in the header precede the
+        // parameter and port lists, which may use what they import.
+        while self.check(TokenKind::Import) {
+            let imports = self.parse_import_declaration()?;
+            module.imports.extend(imports);
+        }
 
         let port_parameters = if self.check(TokenKind::Hash) {
             self.parse_parameter_port_list(&mut module)?;
@@ -719,6 +762,9 @@ impl<'a> Parser<'a> {
                 .sort_by_key(|parameter| parameter.span.start);
         }
 
+        if module.language == SourceLanguage::SystemVerilog {
+            module.identifier_uses = self.identifier_uses(first_token);
+        }
         module.hierarchical_names = std::mem::take(&mut self.hierarchical_names);
         module.reserved_identifiers = self.authored_identifiers.clone();
         implicit_nets::declare(&mut module, &self.net_defaults)?;
@@ -790,7 +836,12 @@ impl<'a> Parser<'a> {
                 };
 
                 if let Some(direction) = direction {
-                    let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
+                    let nettype = self.parse_port_nettype()?;
+                    let (net_type, discipline) = if nettype.is_some() {
+                        (Some(PortNetType::Nettype), None)
+                    } else {
+                        self.parse_port_type_and_discipline(direction)?
+                    };
                     let (signedness, range) = self.parse_port_shape(net_type, span)?;
                     attributes.extend(self.parse_attributes()?);
 
@@ -807,6 +858,7 @@ impl<'a> Parser<'a> {
                         range: range.clone(),
                         signedness,
                         net_type,
+                        nettype: nettype.clone(),
                         names: vec![name],
                         initializers,
                         attributes,
@@ -820,6 +872,7 @@ impl<'a> Parser<'a> {
                         signedness,
                         range,
                         net_type,
+                        nettype,
                     });
                 } else {
                     let name: SmolStr = self.expect_identifier("port name")?.into();
@@ -843,6 +896,7 @@ impl<'a> Parser<'a> {
                             range: context.range.clone(),
                             signedness: context.signedness,
                             net_type: context.net_type,
+                            nettype: context.nettype.clone(),
                             names: vec![name],
                             initializers,
                             attributes: Vec::new(),
@@ -984,6 +1038,21 @@ impl<'a> Parser<'a> {
         let nets_before = module.nets.len();
 
         match self.current().kind {
+            TokenKind::Import => {
+                let imports = self.parse_import_declaration()?;
+                module.imports.extend(imports);
+            }
+            TokenKind::Nettype => {
+                let nettype = self.parse_nettype_declaration()?;
+                module.nettypes.push(nettype);
+            }
+            TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::SystemIdentifier
+                if module.language == SourceLanguage::SystemVerilog
+                    && self.at_typed_net_declaration() =>
+            {
+                let net = self.parse_typed_net_declaration()?;
+                module.digital_nets.push(net);
+            }
             TokenKind::Input | TokenKind::Output | TokenKind::Inout => {
                 let mut decl = self.parse_port_declaration()?;
                 decl.attributes.splice(0..0, attributes.iter().cloned());
@@ -1578,7 +1647,12 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error(ParseErrorKind::InvalidPort)),
         };
 
-        let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
+        let nettype = self.parse_port_nettype()?;
+        let (net_type, discipline) = if nettype.is_some() {
+            (Some(PortNetType::Nettype), None)
+        } else {
+            self.parse_port_type_and_discipline(direction)?
+        };
 
         // IEEE 1364-2005 section 12.3.3: `input [signed] [range] names;`
         let (signedness, range) = self.parse_port_shape(net_type, start)?;
@@ -1605,6 +1679,7 @@ impl<'a> Parser<'a> {
             range,
             signedness,
             net_type,
+            nettype,
             names,
             initializers,
             attributes,
@@ -1811,6 +1886,7 @@ impl<'a> Parser<'a> {
             .collect();
         match net_type {
             PortNetType::Wire(kind) => module.digital_nets.push(DigitalNetDecl {
+                nettype: None,
                 kind,
                 signedness: declaration.signedness,
                 range: declaration.range.clone(),
@@ -1820,7 +1896,17 @@ impl<'a> Parser<'a> {
             // `input wreal in;` stands for `input in; wreal in;` the same way
             // `output reg q;` stands for its pair, so it expands into the
             // declaration the rest of the compiler already reads.
+            // `input rnet x;` stands for `input x; rnet x;` in the same way.
+            PortNetType::Nettype => module.digital_nets.push(DigitalNetDecl {
+                nettype: declaration.nettype.clone(),
+                kind: DigitalNetKind::Nettype,
+                signedness: Signedness::Unsigned,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
             PortNetType::Wreal(resolution) => module.digital_nets.push(DigitalNetDecl {
+                nettype: None,
                 kind: DigitalNetKind::Wreal(resolution),
                 signedness: Signedness::Unsigned,
                 range: declaration.range.clone(),
@@ -3696,6 +3782,9 @@ impl<'a> Parser<'a> {
     /// Parse primary expression
     fn parse_primary(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
+        if self.scoped_name_follows() {
+            return self.parse_scoped_identifier();
+        }
 
         match self.current().kind {
             TokenKind::IntegerLiteral | TokenKind::RealLiteral => {

@@ -121,6 +121,7 @@ pub(super) fn temporary_net(
         span,
     });
     prepared.digital_nets.push(DigitalNetDecl {
+        nettype: None,
         kind: formal.net_kind.expect("a discrete formal"),
         signedness: declared.signedness,
         range,

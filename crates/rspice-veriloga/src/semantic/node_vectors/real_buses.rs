@@ -133,6 +133,7 @@ pub(super) fn expand(
                 lanes.push(lane);
             }
             added.push(DigitalNetDecl {
+                nettype: None,
                 kind: declaration.kind,
                 signedness: declaration.signedness,
                 range: None,

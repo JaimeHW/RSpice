@@ -130,6 +130,7 @@ fn scope(
         }
         known.insert(name.clone());
         module.digital_nets.push(DigitalNetDecl {
+            nettype: None,
             kind: DigitalNetKind::Wire,
             signedness: Signedness::Unsigned,
             range: None,

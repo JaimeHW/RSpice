@@ -1441,6 +1441,9 @@ impl VerilogACompiler {
         let mut source_file = Parser::new(&tokens)
             .selecting_delays(self.options.delay_select)
             .parse()?;
+        // Packages, imports and nettypes (IEEE 1800-2017 clause 26), once the
+        // whole unit is read, so a package may follow its importer.
+        semantic::packages::resolve(&mut source_file)?;
         // Library maps and configurations (IEEE 1364-2005 clause 13) leave an
         // ordinary module set, which a configuration's name selects from.
         semantic::library_binding::bind(&mut source_file)?;

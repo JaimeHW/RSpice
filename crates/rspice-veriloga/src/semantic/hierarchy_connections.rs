@@ -556,6 +556,7 @@ fn prepare_boundaries(
             });
             if let Some(kind) = lower_kind {
                 prepared.digital_nets.push(DigitalNetDecl {
+                    nettype: None,
                     kind,
                     signedness: Signedness::Unsigned,
                     range: None,
@@ -622,6 +623,7 @@ fn prepare_boundaries(
                     span,
                 });
                 prepared.digital_nets.push(DigitalNetDecl {
+                    nettype: None,
                     kind: boundary.upper_kind.expect("selected discrete actual"),
                     signedness: Signedness::Unsigned,
                     range: None,
