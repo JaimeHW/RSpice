@@ -525,6 +525,8 @@ pub struct SemanticAnalyzer {
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
     discrete_validity: HashMap<SmolStr, SmolStr>,
+    /// Analog reads of discrete signals so far (`AnalyzedModule::discrete_reads`).
+    discrete_reads: Vec<(SmolStr, Span)>,
     discrete_projection: discrete_projection::ProjectionBuilder,
     /// Digital edges the module's analog event controls wait on, as (flag
     /// name, signal, edge). Storage is allocated after the body's locals.
@@ -626,6 +628,7 @@ impl SemanticAnalyzer {
             current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
             discrete_validity: HashMap::new(),
+            discrete_reads: Vec::new(),
             discrete_projection: Default::default(),
             digital_edges: Vec::new(),
             analog_owned_ports: HashSet::new(),
@@ -1212,6 +1215,7 @@ impl SemanticAnalyzer {
             symbol_table: SymbolTable::new(),
             digital: AnalyzedDigital::default(),
             discrete_inputs: Vec::new(),
+            discrete_reads: Vec::new(),
             discrete_bindings: HashMap::new(),
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
@@ -1238,6 +1242,7 @@ impl SemanticAnalyzer {
         self.implicit_integrators.clear();
         self.arrays.clear();
         self.discrete_validity.clear();
+        self.discrete_reads.clear();
         self.discrete_projection = Default::default();
         self.digital_edges.clear();
         self.analog_owned_ports.clear();
@@ -2536,6 +2541,11 @@ impl SemanticAnalyzer {
         self.finish_discrete_projections(&mut analyzed);
         self.finish_digital_edges(&mut analyzed);
         self.finish_discrete_event_reads(&mut analyzed);
+        // Unrolling and inlining walk one read more than once.
+        let mut reads = std::mem::take(&mut self.discrete_reads);
+        reads.sort_by_key(|(name, span)| (span.start, name.clone()));
+        reads.dedup();
+        analyzed.discrete_reads = reads;
         self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();

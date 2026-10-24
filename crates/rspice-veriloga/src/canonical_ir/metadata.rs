@@ -257,7 +257,12 @@ use smol_str::SmolStr;
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
 /// Version 186 ties to ground an internal node that no contribution reaches.
 /// Version 187 records which module variables are operating-point outputs.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 188;
+/// Version 189 records where the analog code reads each discrete value
+/// (`HirModel::discrete_reads`: the signal, the read's span and the file and
+/// line it is written on), which a refusal of a read that found `x` or `z`
+/// names. On a replay a read is placed where the artifact placed its span's
+/// offset. Earlier artifacts carry no read lines and must be rebuilt.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 189;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

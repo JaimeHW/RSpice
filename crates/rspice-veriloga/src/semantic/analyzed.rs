@@ -185,6 +185,10 @@ pub struct AnalyzedModule {
     pub digital: AnalyzedDigital,
     /// Numeric discrete inputs: (value slot, validity slot), both transactional.
     pub discrete_inputs: Vec<(usize, usize)>,
+    /// Every analog read of a discrete signal: the signal and where the read
+    /// is written, in source order, for a refusal of a read that found `x` or
+    /// `z` to name the line.
+    pub discrete_reads: Vec<(SmolStr, Span)>,
     /// Source signal of relocated numeric storage; root slots default to their name.
     pub discrete_bindings: HashMap<usize, SmolStr>,
     /// Explicit packed selection behind a numeric input; whole-value inputs omit it.

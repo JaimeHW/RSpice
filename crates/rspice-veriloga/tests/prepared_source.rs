@@ -862,6 +862,67 @@ fn a_replay_places_processes_and_system_calls_where_they_were_written() {
     assert_eq!(replay.content_identity, original.content_identity);
 }
 
+/// An analog read of a discrete value is placed on the file and line it is
+/// written on, and a replay or a specialization of the artifact keeps that
+/// place: a refusal of a read that found `x` names the author's line, not a
+/// line of the retained expanded text, which the included header shifts.
+#[test]
+fn a_replay_places_analog_reads_of_discrete_values_where_they_were_written() {
+    use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
+
+    let files = Sources::new();
+    let root = files.write(
+        "reads.vams",
+        "`include \"disciplines.vams\"\n\
+         module reads(a, b);\n\
+         \x20 output a, b; electrical a, b;\n\
+         \x20 parameter real G = 1.0;\n\
+         \x20 reg d; reg [3:0] v;\n\
+         \x20 initial begin d = 0; v = 4'd5; end\n\
+         \x20 analog begin\n\
+         \x20   V(a) <+ G * (d ? 1.0 : 0.0);\n\
+         \x20   V(b) <+ v;\n\
+         \x20 end\n\
+         endmodule\n",
+    );
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let placed = |artifact: &CanonicalIrArtifact| {
+        artifact
+            .hir
+            .discrete_reads
+            .iter()
+            .map(|read| {
+                assert!(read.origin.file.ends_with("reads.vams"), "{read:?}");
+                (read.signal.to_string(), read.origin.line)
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = prepare(&compiler, &root)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap()
+        .canonical_ir;
+    assert_eq!(
+        placed(&original),
+        [("d".to_string(), 8), ("v".to_string(), 9)]
+    );
+    let replay = compiler
+        .prepare_artifact_runtime_source(&original, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap()
+        .canonical_ir;
+    assert_eq!(replay.hir.discrete_reads, original.hir.discrete_reads);
+    let specialized = compiler
+        .specialize_mixed_runtime(&original, &[("G", 2.0)], &NoPipelineControl)
+        .unwrap()
+        .canonical_ir;
+    assert_eq!(specialized.hir.discrete_reads, original.hir.discrete_reads);
+}
+
 /// A signal declared in an `` `include ``d file is placed on that file's
 /// line, not on the line of the expanded text, and a replay of the artifact
 /// places it there too.

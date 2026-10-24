@@ -2063,6 +2063,7 @@ mod tests {
     fn empty_state() -> CfgStateAllocation {
         let hir = HirModel {
             digital_observations: Vec::new(),
+            discrete_reads: Vec::new(),
             discrete_inputs: Vec::new(),
             discrete_bindings: Default::default(),
             discrete_selections: Vec::new(),

@@ -85,9 +85,9 @@ pub use digital_value::FourStateValue;
 pub use ground_reference::{GroundReferenceSummary, ground_reference};
 pub use hir::{
     CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
-    HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirExternalLeaf, HirExternalNet,
-    HirFormalPort, HirHoistedPort, HirInternalNode, HirLimiterArgument, HirLoop, HirModel,
-    HirNodeAlias, HirOutputScaling, HirOutputVariable, HirParamRange, HirParameter,
+    HirContributionKind, HirDiscreteRead, HirExprKind, HirExprRef, HirExpression, HirExternalLeaf,
+    HirExternalNet, HirFormalPort, HirHoistedPort, HirInternalNode, HirLimiterArgument, HirLoop,
+    HirModel, HirNodeAlias, HirOutputScaling, HirOutputVariable, HirParamRange, HirParameter,
     HirParameterDimension, HirPort, HirStatement, HirVariable,
 };
 pub use ids::{

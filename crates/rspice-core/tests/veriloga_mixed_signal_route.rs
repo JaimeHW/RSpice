@@ -2210,6 +2210,21 @@ endmodule
             && !error.contains("discrete input"),
         "{error}"
     );
+    // And the line each one is read on: `d` in the first contribution (line
+    // 9 of the file), `v` in the second.
+    let file = model
+        .0
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("the model file has a name");
+    assert!(
+        error.contains("`d` = x (read at ") && error.contains(&format!("{file}:9)")),
+        "{error}"
+    );
+    assert!(
+        error.contains("`v` = 4'b01x1 (read at ") && error.contains(&format!("{file}:10)")),
+        "{error}"
+    );
 }
 
 #[test]

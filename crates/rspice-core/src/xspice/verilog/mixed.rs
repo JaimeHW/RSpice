@@ -1723,6 +1723,9 @@ struct DiscreteAnalogInput {
     /// but its moves are no steps of the equations: they restart no
     /// integration and ask for no edge completion.
     feeds_equations: bool,
+    /// Where the analog code reads this signal, `file:line` in source order,
+    /// for a refusal of a read that found `x` or `z`.
+    read_at: Vec<String>,
 }
 
 impl DiscreteAnalogInput {
@@ -2060,6 +2063,25 @@ impl MixedSignalHost {
                     analog_sample: false,
                     feeds_equations: analog.equations_read_variable(usize::from(*value))
                         || analog.equations_read_variable(usize::from(*validity)),
+                    read_at: canonical_ir
+                        .hir
+                        .discrete_reads
+                        .iter()
+                        .filter(|read| read.signal.as_str() == signal_name)
+                        .map(|read| {
+                            // Named without its directory, as a process is.
+                            let file = std::path::Path::new(read.origin.file.as_str())
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or(read.origin.file.as_str());
+                            format!("{file}:{}", read.origin.line)
+                        })
+                        .fold(Vec::new(), |mut lines, line| {
+                            if !lines.contains(&line) {
+                                lines.push(line);
+                            }
+                            lines
+                        }),
                 })
             })
             .collect::<Result<Vec<_>, MixedSignalError>>()?;
@@ -2357,7 +2379,7 @@ impl MixedSignalHost {
     /// it and refuses with one fixed sentence, the same on every backend,
     /// naming neither the quantity nor the time. The host knows both: every
     /// analog-read input whose lane holds "unknown" at the failed evaluation
-    /// is named with its four-state value.
+    /// is named with its four-state value and the lines that read it.
     #[doc(hidden)]
     pub fn explain_analog_refusal(&self, error: MixedSignalError) -> MixedSignalError {
         const UNKNOWN_READ: &str = "analog read of discrete input has an X, Z, or non-finite value";
@@ -2389,9 +2411,16 @@ impl MixedSignalHost {
                         _ => format!("{}'b{bits}", value.width()),
                     }
                 });
-                match value {
+                let named = match value {
                     Some(value) => format!("`{}` = {value}", input.name),
                     None => format!("`{}`", input.name),
+                };
+                // The analog code refuses without saying which read it was,
+                // so every line that reads the quantity is named.
+                if input.read_at.is_empty() {
+                    named
+                } else {
+                    format!("{named} (read at {})", input.read_at.join(", "))
                 }
             })
             .collect();

@@ -893,9 +893,10 @@ impl VerilogACompiler {
         if let Some(configuration) = artifact.connections.configuration() {
             analyzed = configuration.apply(source, &analyzed, &mut measurements)?;
         }
-        // The source is the artifact's retained expanded text, so a process or
-        // system call is placed where the artifact's own plan placed it, in
-        // the file and on the line it was written, as a replay places it.
+        // The source is the artifact's retained expanded text, so a process,
+        // a system call or an analog read of a discrete value is placed where
+        // the artifact placed it, in the file and on the line it was written,
+        // as a replay places it.
         self.compile_runtime_analyzed_measured(
             &artifact.metadata.source_package,
             source,
@@ -905,9 +906,10 @@ impl VerilogACompiler {
             RuntimeQualificationOptions::default(),
             &mut measurements,
             None,
-            Some(&canonical_ir::digital::DigitalSourceOrigins::of(
-                &artifact.digital,
-            )),
+            Some(
+                &canonical_ir::digital::DigitalSourceOrigins::of(&artifact.digital)
+                    .with_reads(&artifact.hir.discrete_reads),
+            ),
         )
     }
 
@@ -1564,45 +1566,46 @@ impl VerilogACompiler {
         let digital = canonical_ir::digital_lower::lower_module(module)
             .map_err(Self::digital_lowering_error)?;
         // A signal reports the file and line it was declared on, and a
-        // process and a system call the ones they were written on. A replay
-        // keeps where its artifact placed them. The
-        // prepared source map knows the original document behind each
-        // expanded line; without one, the line is the preprocessed text's,
-        // counted from its newlines once.
+        // process, a system call and an analog read of a discrete value the
+        // ones they were written on. A replay keeps where its artifact placed
+        // them. The prepared source map knows the original document behind
+        // each expanded line; without one, the line is the preprocessed
+        // text's, counted from its newlines once.
         let newlines = std::cell::OnceCell::new();
-        let digital = digital
-            .locate_sources(|span| {
-                // Only the compiled document's own text is indexed here; a
-                // span in a connection library has no line in it.
-                if span.source_file_id != 0 {
-                    return None;
-                }
-                if let Some(origin) = replay_origins.and_then(|origins| origins.get(span)) {
-                    return origin;
-                }
-                let offset = span.start as usize;
-                if let Some(map) = source_map {
-                    return map.locate(offset).map(|(path, line)| {
-                        canonical_ir::digital::DigitalSourceLine {
-                            file: crate::source::display_path(path).into(),
-                            line: line as u32,
-                        }
-                    });
-                }
-                source.get(..offset)?;
-                let newlines: &Vec<usize> = newlines.get_or_init(|| {
-                    source
-                        .bytes()
-                        .enumerate()
-                        .filter(|(_, byte)| *byte == b'\n')
-                        .map(|(at, _)| at)
-                        .collect()
+        let locate = |span: canonical_ir::SourceSpanRef| {
+            // Only the compiled document's own text is indexed here; a
+            // span in a connection library has no line in it.
+            if span.source_file_id != 0 {
+                return None;
+            }
+            if let Some(origin) = replay_origins.and_then(|origins| origins.get(span)) {
+                return origin;
+            }
+            let offset = span.start as usize;
+            if let Some(map) = source_map {
+                return map.locate(offset).map(|(path, line)| {
+                    canonical_ir::digital::DigitalSourceLine {
+                        file: crate::source::display_path(path).into(),
+                        line: line as u32,
+                    }
                 });
-                Some(canonical_ir::digital::DigitalSourceLine {
-                    file: source_package.into(),
-                    line: newlines.partition_point(|at| *at < offset) as u32 + 1,
-                })
+            }
+            source.get(..offset)?;
+            let newlines: &Vec<usize> = newlines.get_or_init(|| {
+                source
+                    .bytes()
+                    .enumerate()
+                    .filter(|(_, byte)| *byte == b'\n')
+                    .map(|(at, _)| at)
+                    .collect()
+            });
+            Some(canonical_ir::digital::DigitalSourceLine {
+                file: source_package.into(),
+                line: newlines.partition_point(|at| *at < offset) as u32 + 1,
             })
+        };
+        let digital = digital
+            .locate_sources(locate)
             .map_err(Self::canonical_ir_error)?;
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
@@ -1612,6 +1615,18 @@ impl VerilogACompiler {
         let mut hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
         hir.record_parameter_source_text(source);
         hir.record_nature_units(&analyzed.disciplines);
+        hir.discrete_reads = module
+            .discrete_reads
+            .iter()
+            .filter_map(|(signal, span)| {
+                let span = canonical_ir::SourceSpanRef::from(*span);
+                Some(canonical_ir::HirDiscreteRead {
+                    signal: signal.clone(),
+                    span,
+                    origin: locate(span)?,
+                })
+            })
+            .collect();
         hir.digital_observations = digital
             .analog_probes
             .iter()

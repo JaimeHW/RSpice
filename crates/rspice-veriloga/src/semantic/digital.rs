@@ -1345,13 +1345,15 @@ impl SemanticAnalyzer {
         }
     }
 
-    pub(super) fn checked_discrete_read(&self, mut value: Expression) -> Expression {
+    pub(super) fn checked_discrete_read(&mut self, mut value: Expression) -> Expression {
         if let Expression::ArrayAccess(access) = &mut value {
             if access.packed.is_some() {
                 return value;
             }
             if let Some(validity) = self.discrete_validity.get(&access.array) {
                 access.discrete_validity = Some(validity.clone());
+                self.discrete_reads
+                    .push((access.array.clone(), access.span));
             }
             return value;
         }
@@ -1366,6 +1368,15 @@ impl SemanticAnalyzer {
             }
             _ => None,
         };
+        if let (Some(_), Expression::Identifier(identifier)) = (&validity, &value) {
+            // An element of an unpacked array is read by its element name;
+            // the read is of the array.
+            let signal = identifier
+                .name
+                .split_once('[')
+                .map_or(identifier.name.clone(), |(array, _)| array.into());
+            self.discrete_reads.push((signal, identifier.span));
+        }
         match validity {
             Some(validity) => Self::binary_expr(BinaryOp::DiscreteValue, validity, value),
             None => value,

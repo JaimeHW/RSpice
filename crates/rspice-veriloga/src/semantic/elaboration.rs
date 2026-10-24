@@ -1178,6 +1178,10 @@ impl<'a> HierarchyElaborator<'a> {
                 .iter()
                 .map(|value| variable_base + value),
         );
+        for (signal, span) in &child.discrete_reads {
+            let signal = self.digital_signal_name(relative, signal)?;
+            self.flattened.discrete_reads.push((signal, *span));
+        }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
         for &slot in &child.switch_branch_variables {

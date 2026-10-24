@@ -632,7 +632,8 @@ impl VerilogACompiler {
             unit_files: Vec::new(),
             replay_origins: crate::canonical_ir::digital::DigitalSourceOrigins::of(
                 &artifact.digital,
-            ),
+            )
+            .with_reads(&artifact.hir.discrete_reads),
         })
     }
 }

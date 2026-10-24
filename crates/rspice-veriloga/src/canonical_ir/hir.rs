@@ -1045,6 +1045,21 @@ pub struct HirAnalogDriver {
     pub signal: SmolStr,
 }
 
+/// An analog read of a discrete signal and where it is written, for a refusal
+/// of a read that found `x` or `z` to name the line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirDiscreteRead {
+    /// The signal read, as the mixed host names its inputs: an unpacked
+    /// array's element read is a read of the array, and a child instance's
+    /// read carries the instance's name for the signal.
+    pub signal: SmolStr,
+    /// The read in the compiled document, which a replay of the artifact
+    /// places it by.
+    pub span: SourceSpanRef,
+    /// The file and line it is written on.
+    pub origin: super::digital::DigitalSourceLine,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirModel {
     pub module_id: ModuleId,
@@ -1087,6 +1102,10 @@ pub struct HirModel {
     /// instant after it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discrete_event_reads: Vec<VariableId>,
+    /// Every analog read of a discrete signal, in source order. Filled by the
+    /// compile that owns the source map.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discrete_reads: Vec<HirDiscreteRead>,
     /// Sorted names whose values must be published during ordinary analog
     /// evaluation for discrete-domain readers. They are not electrical unknowns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1496,6 +1515,7 @@ impl HirModel {
             node_aliases: module.node_aliases.clone(),
             noise_branches: module.noise_branches.clone(),
             digital_observations: Vec::new(),
+            discrete_reads: Vec::new(),
             discrete_selections: module
                 .discrete_selections
                 .iter()

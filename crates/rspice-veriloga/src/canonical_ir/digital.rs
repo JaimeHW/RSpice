@@ -2036,9 +2036,10 @@ pub struct DigitalSourceLine {
     pub line: u32,
 }
 
-/// Where a located plan placed its signals, processes and system calls, by
-/// the byte offset of each one's span in the compiled document. Two sites at
-/// one offset are on one line, so they share an entry.
+/// Where a located plan placed its signals, processes and system calls, and
+/// where its compile placed the analog code's reads of discrete values, by the
+/// byte offset of each one's span in the compiled document. Two sites at one
+/// offset are on one line, so they share an entry.
 ///
 /// A replay compiles the expanded text an artifact retained, not the
 /// documents that text was expanded from, so it cannot place a site itself;
@@ -2069,6 +2070,19 @@ impl DigitalSourceOrigins {
                 .map(|(span, origin)| (span.start, origin.clone()))
                 .collect(),
         )
+    }
+
+    /// Add where the compile placed each analog read of a discrete value
+    /// ([`HirModel::discrete_reads`](super::HirModel::discrete_reads)).
+    pub(crate) fn with_reads(mut self, reads: &[super::HirDiscreteRead]) -> Self {
+        for read in reads {
+            if read.span.source_file_id == 0 {
+                self.0
+                    .entry(read.span.start)
+                    .or_insert_with(|| Some(read.origin.clone()));
+            }
+        }
+        self
     }
 
     /// The place the located plan gave a site at `span`, or `None` when it

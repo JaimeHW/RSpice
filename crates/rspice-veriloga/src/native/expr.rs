@@ -9760,6 +9760,7 @@ mod tests {
             symbol_table: SymbolTable::new(),
             digital: Default::default(),
             discrete_inputs: Vec::new(),
+            discrete_reads: Vec::new(),
             discrete_bindings: Default::default(),
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
