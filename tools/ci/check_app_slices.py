@@ -73,12 +73,11 @@ SLICE_RULES = [
     (D + r"state(\.rs$|/)", "session"),
     # AppState sub-owners.
     (W + r"app_state/model\.rs$", "model"),
-    (W + r"app_state/(sim_setup|design_history|cell_usage)", "model"),
-    (W + r"app_state/(design_checks|diagnostic_store|waivers|rule_deck)", "model"),
+    (W + r"app_state/(sim_setup|design_history|cell_usage|run_identity)", "model"),
+    (W + r"app_state/(design_checks|diagnostic_store|waivers|rule_deck|schematic_preferences)", "model"),
     (W + r"app_state/(problems_view|full_screen|active_viewer|interaction_state)", "framework"),
     (W + r"app_state/viewer_capabilities", "results"),
-    (W + r"app_state/(run_identity|run_preflight)", "run"),
-    (W + r"app_state/schematic_preferences", "settings"),
+    (W + r"app_state/run_preflight", "run"),
     (W + r"app_state/session/(autosave|session_store)", "services"),
     (W + r"app_state/session/calculator", "results"),
     (W + r"app_state/session/pdk_settings", "models"),
@@ -223,7 +222,6 @@ SLICE_RULES = [
     (W + r"preflight", "run"),
     (W + r"simulation_analysis_tabs", "simulate"),
     # Top-level modules.
-    (r"^state/stimulus_library", "design"),
     (r"^state(\.rs$|/)", "model"),
     (r"^(product|quantity|time_compat|source_revision|results|diagnostics|fixture_root|source_guard)(\.rs$|/)", "model"),
     (r"^simulation/dialog", "simulate"),

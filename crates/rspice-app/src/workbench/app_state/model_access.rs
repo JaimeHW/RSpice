@@ -28,6 +28,11 @@ impl AsRef<Model> for AppState {
 }
 
 impl AppState {
+    /// [`Model::apply_schematic_editing_preferences`] for the session's model.
+    pub(crate) fn apply_schematic_editing_preferences(&mut self) {
+        self.model.apply_schematic_editing_preferences();
+    }
+
     /// What model code reads of the features' state, as it stands now.
     pub(crate) fn slot_facts(&self) -> SlotFacts {
         SlotFacts {

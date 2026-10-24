@@ -38,7 +38,6 @@
     "settings->sheets": 1,
     "sheets->design": 21,
     "sheets->hardcopy": 3,
-    "sheets->settings": 2,
     "sheets->simulate": 6,
     "simulate->code": 2,
     "simulate->design": 4,
@@ -57,7 +56,7 @@
   "whole-app": {
     "&RSpiceApp params outside shell": 285,
     "&mut RSpiceApp params outside shell": 610,
-    "impl AppState methods outside session": 241,
+    "impl AppState methods outside session": 240,
     "impl RSpiceApp methods outside shell": 207
   }
 }

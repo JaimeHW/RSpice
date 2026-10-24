@@ -38,7 +38,8 @@ class SliceRuleTests(unittest.TestCase):
     def test_sample_paths_land_in_their_slice(self) -> None:
         expected = {
             "model": ["state/schematic/state.rs", "workbench/preferences.rs", "simulation/table_route.rs",
-                      "workbench/app/schematic/edit_authority.rs"],
+                      "workbench/app/schematic/edit_authority.rs", "state/stimulus_library.rs",
+                      "workbench/app_state/run_identity.rs"],
             "services": ["io/file_exchange.rs", "workbench/workflows/export_workflow.rs",
                          "workbench/lifecycle/project_lifecycle.rs"],
             "run": ["simulation/controller.rs", "workbench/app_state/run_preflight.rs"],
@@ -46,8 +47,7 @@ class SliceRuleTests(unittest.TestCase):
                           "workbench/framework/requests.rs"],
             "session": ["workbench/app_state.rs", "workbench/state.rs", "workbench/app/dialogs/state.rs"],
             "design": ["schematic/view/interaction.rs", "schematic/view/sheet_visibility.rs",
-                       "schematic/symbol_editor/canvas.rs", "workbench/surfaces/stimulus.rs",
-                       "state/stimulus_library.rs"],
+                       "schematic/symbol_editor/canvas.rs", "workbench/surfaces/stimulus.rs"],
             "code": ["workbench/surfaces/netlist.rs", "workbench/documents/code_workspace.rs"],
             "simulate": ["workbench/surfaces/verify.rs", "workbench/tools/jobs_manager.rs"],
             "results": ["workbench/menu_bar/waveform_export.rs", "analysis/calculator.rs"],

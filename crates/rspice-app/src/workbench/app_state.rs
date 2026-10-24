@@ -28,7 +28,7 @@ mod rule_deck;
 mod run_access;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
-pub(in crate::workbench) mod schematic_preferences;
+pub(crate) mod schematic_preferences;
 pub(crate) mod services_access;
 pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;

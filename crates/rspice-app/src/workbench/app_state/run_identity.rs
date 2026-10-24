@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::product::ContentDigest;
 use crate::state::ComponentType;
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::Model;
 
 impl Model {
     /// Plan identity and revision of the active analysis plan, if one is
