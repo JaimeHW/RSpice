@@ -7151,6 +7151,12 @@ R2 OUT 0 1k
         assert_noise_matches_oracle(&nlev0_deck, MOS_FLICKER_NLEV0_ORACLE, "nlev0");
     }
 
+    // A build carrying `ekv_va` routes this card to it, and a generated module
+    // exports noise only with the shared noise runtime compiled in.
+    #[cfg(any(
+        not(feature = "veriloga-model-ekv-va"),
+        feature = "veriloga-builtins-noise"
+    ))]
     #[test]
     fn ekv26_noise_sources_match_xyce26_equation_oracle() {
         let deck = "\
@@ -7292,6 +7298,21 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
     /// The VBIC parasitic-resistance thermal sources and internal-node shot
     /// sources must reproduce the official binary on a deck designed to
     /// expose them.
+    ///
+    /// Under Xyce compatibility `LEVEL=11` and `LEVEL=12` select the generated
+    /// VBIC 1.3 modules whenever the generated catalog is compiled in, and a
+    /// build carrying the catalog without all three refuses these decks by
+    /// design. This test and the two after it run where the decks reach a
+    /// device: the native one, or the three generated modules with their noise.
+    #[cfg(any(
+        not(feature = "veriloga-builtins-base"),
+        all(
+            feature = "veriloga-model-vbic13",
+            feature = "veriloga-model-vbic13-3t-et",
+            feature = "veriloga-model-vbic13-4t",
+            feature = "veriloga-builtins-noise"
+        )
+    ))]
     #[test]
     fn vbic13_noise_sources_match_xyce710_across_scaling_temperature_and_substrate() {
         // Independent total and device PSDs from the Xyce 7.10 executable.
@@ -7357,6 +7378,15 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         }
     }
 
+    #[cfg(any(
+        not(feature = "veriloga-builtins-base"),
+        all(
+            feature = "veriloga-model-vbic13",
+            feature = "veriloga-model-vbic13-3t-et",
+            feature = "veriloga-model-vbic13-4t",
+            feature = "veriloga-builtins-noise"
+        )
+    ))]
     #[test]
     fn vbic_tnf_noise_temperature_counts_the_instance_offset_once() {
         for (pnjmaxi, expected) in [
@@ -7401,6 +7431,15 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         }
     }
 
+    #[cfg(any(
+        not(feature = "veriloga-builtins-base"),
+        all(
+            feature = "veriloga-model-vbic13",
+            feature = "veriloga-model-vbic13-3t-et",
+            feature = "veriloga-model-vbic13-4t",
+            feature = "veriloga-builtins-noise"
+        )
+    ))]
     #[test]
     fn vbic13_reverse_transport_shot_noise_matches_xyce710() {
         for level in [11, 12] {
