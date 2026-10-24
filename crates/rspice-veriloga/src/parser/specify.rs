@@ -8,7 +8,8 @@
 //! declaration [`Module::specify_pulse_styles`] (section 14.6). A timing
 //! check joins [`Module::timing_checks`] (section 15), and each delayed
 //! signal it names is driven by a copy of its signal, which a module path
-//! delays (section 15.8).
+//! delays (section 15.8). A condition of a timing check other than one
+//! signal becomes a one-bit net, as a path's does (section 15.6).
 
 use super::Parser;
 use crate::ast::*;
@@ -21,6 +22,10 @@ use smol_str::SmolStr;
 /// legal inside an identifier, so the names stay apart from the author's
 /// only by convention, as a primitive instance's nets do.
 const CONDITION_PREFIX: &str = "specify$if";
+
+/// The prefix of the net a timing check condition other than one signal
+/// drives, named as [`CONDITION_PREFIX`]'s are.
+const CHECK_CONDITION_PREFIX: &str = "specify$tc";
 
 fn refusal(context: &str, found: impl Into<String>, span: Span) -> ParseError {
     ParseError::new(
@@ -356,84 +361,110 @@ impl Parser<'_> {
         })
     }
 
-    /// A timing check event's `&&&` condition (A.7.5.3
-    /// `scalar_timing_check_condition`): a scalar signal, `~` it, or it
-    /// compared with a scalar constant by `==`, `!=`, `===` or `!==`.
-    fn timing_check_condition(expression: &Expression) -> Result<TimingCheckCondition, ParseError> {
-        let signal = |expression: &Expression| match expression {
-            Expression::Identifier(identifier) => Some(SpecifyTerminal {
-                name: identifier.name.clone(),
-                span: identifier.span,
-            }),
-            _ => None,
-        };
-        fn constant(expression: &Expression) -> Option<(bool, &str)> {
+    /// A timing check condition, parsed from the cursor: an event's `&&&`
+    /// condition (A.7.5.3 `timing_check_condition`), or with `mintypmax` a
+    /// `$setuphold`'s or `$recrem`'s timestamp or timecheck condition
+    /// (A.7.5.2).
+    ///
+    /// Section 15.6 and A.7.5.3: an expression `E`, `~E`, or `E` compared
+    /// with a scalar constant by `==`, `!=`, `===` or `!==`, in parentheses
+    /// or not. The least significant bit of `E` conditions the check. `E`,
+    /// `~E`, `===` and `!==` are deterministic, so `x` or `z` on that bit
+    /// disables the check; `==` and `!=` are nondeterministic, so it enables
+    /// it (OVI Verilog LRM 1.0 B.9.10). An `E` other than one signal becomes
+    /// a one-bit net the module drives from it, which keeps that bit.
+    fn parse_timing_check_condition(
+        &mut self,
+        module: &mut Module,
+        mintypmax: bool,
+    ) -> Result<TimingCheckCondition, ParseError> {
+        fn constant(expression: &Expression) -> Option<bool> {
             let raw = match expression {
                 Expression::Number(number) => number.raw.as_str(),
                 Expression::Digital(DigitalExpr::FourState(literal)) => literal.value.raw.as_str(),
                 _ => return None,
             };
-            let value = match raw.to_ascii_lowercase().as_str() {
-                "0" | "1'b0" | "'b0" => false,
-                "1" | "1'b1" | "'b1" => true,
-                _ => return None,
-            };
-            Some((value, raw))
-        }
-        // OVI Verilog LRM 1.0 B.9.10 (IEEE 1364-2005 section 15.6): `x` or
-        // `z` on the signal enables the check only through the
-        // nondeterministic `==` and `!=`.
-        let compared = |signal: SpecifyTerminal, (value, raw): (bool, &str), operator: &str| {
-            let text = format!("{} {operator} {raw}", signal.name);
-            let equal = matches!(operator, "==" | "===");
-            (signal, value == equal, operator.len() == 2, text)
-        };
-        let found = match expression {
-            Expression::Identifier(identifier) => {
-                signal(expression).map(|signal| (signal, true, false, identifier.name.to_string()))
+            match raw.to_ascii_lowercase().as_str() {
+                "0" | "1'b0" | "'b0" => Some(false),
+                "1" | "1'b1" | "'b1" => Some(true),
+                _ => None,
             }
+        }
+        let start = self.pos;
+        let expression = if mintypmax {
+            self.parse_mintypmax_expression()?
+        } else {
+            self.parse_expression()?
+        };
+        let text = self.written_since(start);
+        let (operand, enabling, unknown_enables) = match expression {
             Expression::Unary(UnaryExpr {
                 op: UnaryOp::BitNot,
                 operand,
                 ..
-            }) => signal(operand).map(|signal| {
-                let text = format!("~{}", signal.name);
-                (signal, false, false, text)
-            }),
+            }) => (*operand, false, false),
             Expression::Binary(BinaryExpr {
                 op: op @ (BinaryOp::Eq | BinaryOp::Ne),
                 left,
                 right,
                 ..
-            }) => signal(left).zip(constant(right)).map(|(signal, constant)| {
-                compared(
-                    signal,
-                    constant,
-                    if matches!(op, BinaryOp::Eq) {
-                        "=="
-                    } else {
-                        "!="
-                    },
+            }) if constant(&right).is_some() => (
+                *left,
+                constant(&right) == Some(matches!(op, BinaryOp::Eq)),
+                true,
+            ),
+            Expression::Digital(DigitalExpr::CaseEquality(equality))
+                if constant(&equality.right).is_some() =>
+            {
+                (
+                    *equality.left,
+                    constant(&equality.right) == Some(!equality.negate),
+                    false,
                 )
-            }),
-            Expression::Digital(DigitalExpr::CaseEquality(equality)) => signal(&equality.left)
-                .zip(constant(&equality.right))
-                .map(|(signal, constant)| {
-                    compared(
-                        signal,
-                        constant,
-                        if equality.negate { "!==" } else { "===" },
-                    )
-                }),
-            _ => None,
+            }
+            expression => (expression, true, false),
         };
-        let Some((signal, enabling, unknown_enables, text)) = found else {
-            return Err(refusal(
-                "`specify` timing check",
-                "a condition other than a scalar signal, `~` one, or one compared with a scalar \
-                 constant (IEEE 1364-2005 section 15.6)",
-                expression.span(),
-            ));
+        // A parameter names no signal, so it is an expression like any other.
+        let constant_name = |name: &str| {
+            module
+                .parameters
+                .iter()
+                .chain(&module.localparams)
+                .any(|parameter| parameter.name == name)
+        };
+        let signal = match operand {
+            Expression::Identifier(identifier) if !constant_name(&identifier.name) => {
+                SpecifyTerminal {
+                    name: identifier.name,
+                    span: identifier.span,
+                }
+            }
+            operand => {
+                let name: SmolStr = format!(
+                    "{CHECK_CONDITION_PREFIX}{}",
+                    module
+                        .digital_nets
+                        .iter()
+                        .flat_map(|net| &net.items)
+                        .filter(|item| item.name.starts_with(CHECK_CONDITION_PREFIX))
+                        .count()
+                )
+                .into();
+                let span = operand.span();
+                module.digital_nets.push(DigitalNetDecl {
+                    kind: DigitalNetKind::Wire,
+                    signedness: Signedness::Unsigned,
+                    range: None,
+                    items: vec![DigitalDeclItem {
+                        name: name.clone(),
+                        dimensions: Vec::new(),
+                        init: Some(operand),
+                        span,
+                    }],
+                    span,
+                });
+                SpecifyTerminal { name, span }
+            }
         };
         Ok(TimingCheckCondition {
             signal,
@@ -441,6 +472,33 @@ impl Parser<'_> {
             unknown_enables,
             text: text.into(),
         })
+    }
+
+    /// The tokens from `start` to the cursor as written: a space between
+    /// two, but none after an opening bracket or a unary `~` or `!`, and
+    /// none before a closing bracket or a select's `[`.
+    fn written_since(&self, start: usize) -> String {
+        let mut text = String::new();
+        let mut glued = true;
+        for token in &self.tokens[start..self.pos] {
+            if !glued
+                && !matches!(
+                    token.kind,
+                    TokenKind::RParen | TokenKind::RBracket | TokenKind::LBracket
+                )
+            {
+                text.push(' ');
+            }
+            match &token.text {
+                Some(written) => text.push_str(written),
+                None => text.push_str(token.kind.spelling().trim_matches('\'')),
+            }
+            glued = matches!(
+                token.kind,
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::BitNot | TokenKind::Not
+            );
+        }
+        text
     }
 
     /// A timing check (section 15 and A.7.5), at its system task name.
@@ -469,12 +527,12 @@ impl Parser<'_> {
         };
         self.advance();
         self.expect(TokenKind::LParen)?;
-        let first = self.parse_timing_check_event()?;
+        let first = self.parse_timing_check_event(module)?;
         let second = if matches!(kind, Period | Width) {
             None
         } else {
             self.expect(TokenKind::Comma)?;
-            Some(self.parse_timing_check_event()?)
+            Some(self.parse_timing_check_event(module)?)
         };
         // `$setup(data, reference, ...)`; every other names the reference
         // first.
@@ -530,7 +588,7 @@ impl Parser<'_> {
                 // A.7.5.2: `stamptime_condition` and `checktime_condition`
                 // are mintypmax expressions.
                 condition => {
-                    let parsed = Self::timing_check_condition(&self.parse_mintypmax_expression()?)?;
+                    let parsed = self.parse_timing_check_condition(module, true)?;
                     if condition == "timestamp condition" {
                         timestamp_condition = Some(parsed);
                     } else {
@@ -602,7 +660,10 @@ impl Parser<'_> {
 
     /// A timing check event (A.7.5.3): an optional edge control, a
     /// terminal and an optional `&&& condition`.
-    fn parse_timing_check_event(&mut self) -> Result<TimingCheckEvent, ParseError> {
+    fn parse_timing_check_event(
+        &mut self,
+        module: &mut Module,
+    ) -> Result<TimingCheckEvent, ParseError> {
         let (edges, edge_text) = if self.match_token(TokenKind::Posedge) {
             (
                 Some(TimingCheckEvent::POSEDGE),
@@ -630,7 +691,7 @@ impl Parser<'_> {
         {
             self.advance();
             self.advance();
-            Some(Self::timing_check_condition(&self.parse_expression()?)?)
+            Some(self.parse_timing_check_condition(module, false)?)
         } else {
             None
         };

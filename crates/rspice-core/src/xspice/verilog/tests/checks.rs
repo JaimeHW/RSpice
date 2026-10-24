@@ -315,6 +315,63 @@ fn an_unknown_condition_enables_only_a_nondeterministic_check() {
     assert_eq!(warnings(&report), expected);
 }
 
+const WIDE_CONDITIONS: &str = r#"`timescale 1ns/1ns
+module wc(input d, input c, input [1:0] v, input e);
+  specify
+    $hold(posedge c &&& v, d, 5);
+    $hold(posedge c &&& (v[1] & e), d, 5);
+    $hold(posedge c &&& v + e == 1'b1, d, 5);
+  endspecify
+endmodule
+module t;
+  reg d, c, e;
+  reg [1:0] v;
+  wc u(d, c, v, e);
+  initial begin
+    d = 0; c = 0; v = 2'b01; e = 0;
+    #10 c = 1;
+    #2 d = 1;
+    #3 c = 0; v = 2'b10; e = 1;
+    #5 c = 1;
+    #2 d = 0;
+    #3 c = 0; v = 2'b0x; e = 0;
+    #5 c = 1;
+    #2 d = 1;
+    #3 c = 0; v = 2'b11; e = 1;
+    #5 c = 1;
+    #2 d = 0;
+    #5 $finish;
+  end
+endmodule
+"#;
+
+/// Section 15.6: a condition reads the least significant bit of its
+/// expression. `v` reads `v[0]`; `(v[1] & e)` is deterministic and
+/// `v + e == 1'b1` compares the sum's low bit, nondeterministically. At the
+/// edges at 10, 20, 30 and 40, `v` and `e` are 01 and 0, 10 and 1, 0x and 0,
+/// and 11 and 1, so the low bit of `v + e` is 1, 1, `x` and 0: `d` 2 after
+/// each edge violates the first check at 12 and 42, the second at 22 and
+/// 42, and the third at 12, 22 and 32.
+#[test]
+fn a_condition_reads_the_low_bit_of_any_expression() {
+    let report = bench(WIDE_CONDITIONS, &[]);
+    let vector = "$hold(posedge c &&& v, d, 5)";
+    let compound = "$hold(posedge c &&& (v[1] & e), d, 5)";
+    let sum = "$hold(posedge c &&& v + e == 1'b1, d, 5)";
+    let mut expected = Vec::new();
+    for (time, checks) in [
+        (12, &[vector, sum][..]),
+        (22, &[compound, sum][..]),
+        (32, &[sum][..]),
+        (42, &[vector, compound][..]),
+    ] {
+        for check in checks {
+            expected.extend(violations(check, &[time]));
+        }
+    }
+    assert_eq!(warnings(&report), expected);
+}
+
 const DELAYED: &str = r#"`timescale 1ns/1ns
 module ff(output reg q, input d, input clk);
   wire dclk, dd;

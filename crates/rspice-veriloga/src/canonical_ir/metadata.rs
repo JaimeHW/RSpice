@@ -18,9 +18,10 @@ use smol_str::SmolStr;
 /// delays across every check naming the same delayed nets
 /// (`DigitalTimingCheck::delays`, `limits_inconsistent`), and carries their
 /// timestamp and timecheck conditions (`timestamp_condition`,
-/// `timecheck_condition`). Earlier artifacts refused a delayed net named
-/// twice and both conditions, and left the host to derive one check's delays
-/// from its own limits.
+/// `timecheck_condition`). A condition reads any discrete signal's least
+/// significant bit, not only a one-bit signal's. Earlier artifacts refused a
+/// delayed net named twice, both conditions and wider ones, and left the
+/// host to derive one check's delays from its own limits.
 ///
 /// Version 183 records where each digital signal was declared
 /// (`DigitalSignal::origin`), as version 172 did for processes: the file and

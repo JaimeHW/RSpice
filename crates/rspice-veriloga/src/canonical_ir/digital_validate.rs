@@ -1878,17 +1878,15 @@ impl CanonicalDigitalPlan {
                 self.signal(signal)
                     .is_some_and(|signal: &DigitalSignal| !signal.kind.is_real())
             };
-            let scalar = |condition: &super::digital::DigitalCheckCondition| {
-                self.signal(condition.signal)
-                    .is_some_and(|signal| !signal.kind.is_real() && signal.width == 1)
-            };
+            // Section 15.6: a condition reads its signal's least significant
+            // bit.
+            let reads =
+                |condition: &super::digital::DigitalCheckCondition| four_state(condition.signal);
             if !std::iter::once(&check.reference)
                 .chain(&check.data)
-                .all(|event| {
-                    four_state(event.signal) && event.condition.as_ref().is_none_or(scalar)
-                })
-                || !check.timestamp_condition.iter().all(scalar)
-                || !check.timecheck_condition.iter().all(scalar)
+                .all(|event| four_state(event.signal) && event.condition.as_ref().is_none_or(reads))
+                || !check.timestamp_condition.iter().all(reads)
+                || !check.timecheck_condition.iter().all(reads)
                 || check.notifier.is_some_and(|notifier| {
                     !self.signal(notifier).is_some_and(|signal| {
                         !signal.kind.is_real() && signal.procedurally_assignable

@@ -4772,10 +4772,6 @@ fn specify_items_outside_paths_are_refused() {
             "Unsupported `specify` timing check: `$fullskew`",
         ),
         (
-            "$hold(posedge c &&& (a & c), a, 1);",
-            "a condition other than a scalar signal",
-        ),
-        (
             "$width(c, 2);",
             "`$width` takes an edge-controlled reference event",
         ),
@@ -4830,7 +4826,7 @@ fn specify_items_outside_paths_are_refused() {
     analyze(&source("*>"));
 }
 
-/// Section 15: a timing check's `&&&` condition reads a scalar (15.6), its
+/// Section 15: a timing check's condition reads a signal (15.6), its
 /// notifier is a `reg` (15.5), and only `$setuphold`, `$recrem` and
 /// `$nochange` take a negative limit (15.8). A negative `$nochange` end
 /// offset is refused too: its window would close before the trailing edge
@@ -4845,8 +4841,12 @@ fn timing_check_operands_follow_section_15() {
     };
     for (items, expected) in [
         (
-            "$hold(posedge c &&& v, a, 1);",
-            "condition signal `v` is no scalar",
+            "$hold(posedge c &&& w, a, 1);",
+            "condition signal `w` is no discrete signal",
+        ),
+        (
+            "$setuphold(posedge c, a, 1, 1, , , w);",
+            "condition signal `w` is no discrete signal",
         ),
         ("$setup(a, posedge c, 1, a);", "notifier `a` is not a `reg`"),
     ] {
@@ -4869,4 +4869,68 @@ fn timing_check_operands_follow_section_15() {
     analyze(&module(
         "$setuphold(posedge c &&& n === 1'b1, a, -1, 2, n); $nochange(posedge c, a, -1, 1);",
     ));
+}
+
+/// Section 15.6: a condition is any expression, `~` it, or it compared with
+/// a scalar constant, read at its least significant bit. A vector signal is
+/// read directly; any other expression, a parameter among them, drives a
+/// one-bit net of its own. Each keeps its form's handling of `x` and `z`,
+/// and a violation names it as written.
+#[test]
+fn timing_check_conditions_take_any_expression() {
+    let plan = plan(
+        "module m(input a, input c, input e, input [1:0] v);\n  parameter P = 1;\n  \
+         specify\n    $hold(posedge c &&& v, a, 1);\n    $hold(posedge c &&& (a & e), a, 1);\n    \
+         $hold(posedge c &&& ~(a | e), a, 1);\n    $hold(posedge c &&& v[1] != 1'b0, a, 1);\n    \
+         $setuphold(posedge c, a, 1, 1, , P, e === 1'b1);\n  endspecify\nendmodule\n",
+        "m",
+    );
+    let name = |id| plan.signal(id).unwrap().name.to_string();
+    let conditions: Vec<_> = plan
+        .delays
+        .checks
+        .iter()
+        .flat_map(|check| {
+            [
+                check.reference.condition,
+                check.timestamp_condition,
+                check.timecheck_condition,
+            ]
+        })
+        .flatten()
+        .map(|condition| {
+            (
+                name(condition.signal),
+                condition.enabling,
+                condition.unknown_enables,
+            )
+        })
+        .collect();
+    assert_eq!(
+        conditions,
+        [
+            ("v".into(), true, false),
+            ("specify$tc0".into(), true, false),
+            ("specify$tc1".into(), false, false),
+            ("specify$tc2".into(), true, true),
+            ("specify$tc3".into(), true, false),
+            ("e".into(), true, false),
+        ]
+    );
+    let labels: Vec<_> = plan
+        .delays
+        .checks
+        .iter()
+        .map(|check| check.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "$hold(posedge c &&& v, a, 1)",
+            "$hold(posedge c &&& (a & e), a, 1)",
+            "$hold(posedge c &&& ~(a | e), a, 1)",
+            "$hold(posedge c &&& v[1] != 1'b0, a, 1)",
+            "$setuphold(posedge c, a, 1, 1)",
+        ]
+    );
 }

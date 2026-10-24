@@ -1849,11 +1849,12 @@ impl SemanticAnalyzer {
                 .chain(&check.timestamp_condition)
                 .chain(&check.timecheck_condition);
             for condition in conditions {
-                if signal(&condition.signal.name).is_none_or(|found| found.width != 1) {
+                // Section 15.6: a vector's least significant bit counts.
+                if signal(&condition.signal.name).is_none() {
                     problems.push((
                         format!(
-                            "`{name}` condition signal `{}` is no scalar signal of module `{}`; \
-                             IEEE 1364-2005 section 15.6 conditions a check on a scalar",
+                            "`{name}` condition signal `{}` is no discrete signal of module \
+                             `{}`; IEEE 1364-2005 section 15.6 conditions a check on a signal",
                             condition.signal.name, module.name
                         ),
                         condition.signal.span,

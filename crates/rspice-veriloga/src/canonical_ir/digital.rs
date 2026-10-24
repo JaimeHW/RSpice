@@ -1238,8 +1238,8 @@ pub struct DigitalCheckEvent {
     pub condition: Option<DigitalCheckCondition>,
 }
 
-/// A timing check event's `&&&` condition (IEEE 1364-2005 section 15.6) on
-/// a one-bit signal: it holds while the signal is `enabling`, and while it
+/// A timing check condition (IEEE 1364-2005 section 15.6) on a signal's
+/// least significant bit: it holds while the bit is `enabling`, and while it
 /// is `x` or `z` only if `unknown_enables` (OVI Verilog LRM 1.0 B.9.10: the
 /// nondeterministic `==` and `!=` only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

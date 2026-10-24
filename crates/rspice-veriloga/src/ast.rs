@@ -2755,11 +2755,14 @@ pub struct TimingCheckEvent {
     pub condition: Option<TimingCheckCondition>,
 }
 
-/// A timing check event's `&&&` condition (IEEE 1364-2005 section 15.6): a
-/// scalar signal, `~` it, or it compared with a scalar constant.
+/// A timing check condition (IEEE 1364-2005 section 15.6): an expression,
+/// `~` it, or it compared with a scalar constant, on the least significant
+/// bit of the expression.
 #[derive(Debug, Clone)]
 pub struct TimingCheckCondition {
-    /// The conditioning signal, which must be scalar.
+    /// The conditioning signal, whose least significant bit counts: the
+    /// expression's one signal, or the one-bit net the module drives from
+    /// it.
     pub signal: SpecifyTerminal,
     /// The value of the signal that enables the check.
     pub enabling: bool,
