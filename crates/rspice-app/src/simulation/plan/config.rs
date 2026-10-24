@@ -5,11 +5,11 @@
 //! checks against the application.
 
 #[cfg(test)]
-use crate::simulation::config::{
+use rspice_simulation_contract::config::{
     AcSweepType, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };
-use crate::simulation::dialog::PssDialogState;
 use rspice_simulation_contract::plan_dependency::PlanDependencySourceContext;
+use rspice_simulation_contract::pss_draft::PssDialogState;
 
 #[cfg(test)]
 use super::AnalysisKind;
@@ -692,7 +692,7 @@ mod tests {
             serde_json::from_value(saved).expect("a plan that stated only its axis still opens");
         assert_eq!(
             draft.table_name,
-            crate::simulation::config::AC_FREQUENCY_TABLE
+            rspice_simulation_contract::config::AC_FREQUENCY_TABLE
         );
         assert_eq!(draft.frequencies, "1k, 10k, 100k");
         let config = draft.to_config().expect("the restored plan is executable");

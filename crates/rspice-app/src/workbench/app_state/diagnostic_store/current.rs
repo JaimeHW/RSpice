@@ -18,7 +18,7 @@ use super::FindingKey;
 use crate::product::ProjectId;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::Model;
 
 /// The source editors' findings, as the store reads them where the editors
 /// keep them: the netlist editor's, and the Code & Automation page's.

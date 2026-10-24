@@ -48,13 +48,12 @@ use crate::workbench::slots::{
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
+pub(crate) use design_checks::DesignCheckStatus;
 pub(crate) use design_history::{
     DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta, VerilogABuildSettingsHistoryEntry,
     VerilogAModuleBinding, publish_symbol_definition_candidate,
     publish_symbol_definition_candidate_with_fixture,
 };
-pub(crate) use diagnostic_store::DiagnosticStore;
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
 pub(crate) use model::{Model, SlotFacts};

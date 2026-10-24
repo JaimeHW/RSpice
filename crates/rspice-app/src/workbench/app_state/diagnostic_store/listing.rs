@@ -23,7 +23,7 @@ use rspice_vocabulary::diagnostics::{
 use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute, SourceCollections};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
-use crate::workbench::app_state::{Model, SlotFacts};
+use crate::workbench::app_state::model::{Model, SlotFacts};
 
 /// What the list is assembled from: the model, the source editors'
 /// findings, and the facts of the features' state the digests read.

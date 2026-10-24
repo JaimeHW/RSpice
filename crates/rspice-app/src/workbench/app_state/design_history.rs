@@ -48,7 +48,7 @@ use crate::state::{
     ModelLibraryManager, OpenCellView, SchematicSnapshot, SchematicState, UndoSequence,
 };
 
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::Model;
 
 const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 

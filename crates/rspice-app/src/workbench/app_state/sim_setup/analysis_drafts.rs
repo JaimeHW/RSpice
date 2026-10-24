@@ -7,7 +7,7 @@
 
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 
-use crate::workbench::app_state::SimSetupState;
+use super::SimSetupState;
 
 impl SimSetupState {
     /// Validate one raw instance draft with the same parser used by the

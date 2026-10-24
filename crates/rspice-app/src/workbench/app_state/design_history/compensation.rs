@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use crate::state::{CellViewRef, SheetId, UndoSequence, next_undo_sequence};
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::Model;
 
 use super::schematic_for_reference;
 

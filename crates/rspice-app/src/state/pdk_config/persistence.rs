@@ -131,7 +131,7 @@ pub fn load() -> Result<PdkConfig, ConfigError> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_from(path: &Path) -> Result<PdkConfig, ConfigError> {
-    crate::io::durable_file::reconcile_publication(path)
+    rspice_output::durable_file::reconcile_publication(path)
         .map_err(|e| ConfigError::Io(e.to_string()))?;
     if !path.exists() {
         return Ok(PdkConfig::default());
@@ -162,7 +162,7 @@ fn save_to(config: &PdkConfig, path: &Path) -> Result<(), ConfigError> {
             std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io(e.to_string()))?;
         }
 
-        let expected = crate::io::durable_file::observe_expected_content(path)
+        let expected = rspice_output::durable_file::observe_expected_content(path)
             .map_err(|e| ConfigError::Io(e.to_string()))?;
         let content =
             serde_json::to_vec_pretty(config).map_err(|e| ConfigError::Serialize(e.to_string()))?;
@@ -174,10 +174,10 @@ fn save_to(config: &PdkConfig, path: &Path) -> Result<(), ConfigError> {
 #[cfg(not(target_arch = "wasm32"))]
 fn publish_pdk_config(
     path: &Path,
-    expected: crate::io::durable_file::ExpectedContent,
+    expected: rspice_output::durable_file::ExpectedContent,
     content: &[u8],
 ) -> Result<(), ConfigError> {
-    crate::io::durable_file::compare_exchange_bytes(path, expected, content)
+    rspice_output::durable_file::compare_exchange_bytes(path, expected, content)
         .map_err(|e| ConfigError::Io(e.to_string()))
 }
 
@@ -740,8 +740,8 @@ mod tests {
         let root = unique_temp_dir("late-change");
         let path = root.join(CONFIG_FILE_NAME);
         std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
-        let expected =
-            crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
+        let expected = rspice_output::durable_file::observe_expected_content(&path)
+            .expect("observe destination");
         let content = serde_json::to_vec_pretty(&PdkConfig::default()).expect("serialize config");
         std::fs::write(&path, b"late external edit").expect("race destination");
 

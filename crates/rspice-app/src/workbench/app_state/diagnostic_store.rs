@@ -41,7 +41,8 @@ use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
 
 pub(in crate::workbench) use current::SourceCollections;
 
-use super::{Model, SlotFacts, design_checks};
+use super::design_checks;
+use super::model::{Model, SlotFacts};
 
 const DIAGNOSTIC_INPUT_DIGEST_DOMAIN: &[u8] = b"rspice-diagnostic-inputs/v1\0";
 

@@ -27,7 +27,7 @@ use crate::quantity::engineering::{EngineeringPrecision, format_engineering_disp
 use crate::state::PreflightRemediation;
 use crate::state::{CellViewRef, InstancePath};
 
-use super::super::{Model, SlotFacts};
+use super::super::model::{Model, SlotFacts};
 use super::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,

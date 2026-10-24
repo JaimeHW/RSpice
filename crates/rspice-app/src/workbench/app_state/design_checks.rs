@@ -21,8 +21,8 @@ use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
     RelatedPlace, mint_canonical,
 };
+use super::model::{Model, SlotFacts};
 use super::waivers;
-use super::{Model, SlotFacts};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 mod live;

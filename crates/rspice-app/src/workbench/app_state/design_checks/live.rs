@@ -20,7 +20,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::ContentDigest;
 use crate::state::{CanonicalCellViewOwnerKey, CellViewRef, ViewType};
 use crate::time_compat::Instant;
-use crate::workbench::TogglePreference;
+use crate::workbench::preferences::TogglePreference;
 use rspice_design::drc::{DrcConfig, DrcResult};
 
 /// How long a drawing stands still before it is checked, so a drag is

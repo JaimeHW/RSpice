@@ -16,7 +16,7 @@ use crate::state::{
     PreflightRemediation, PreflightReport,
 };
 
-use super::super::{Model, SlotFacts};
+use super::super::model::{Model, SlotFacts};
 use super::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,

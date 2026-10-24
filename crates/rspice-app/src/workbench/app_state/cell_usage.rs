@@ -9,7 +9,7 @@
 use rspice_design::schematic::document::SchematicDocument;
 
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::Model;
 
 /// One placed instance of a library cell.
 #[derive(Debug, Clone, PartialEq, Eq)]

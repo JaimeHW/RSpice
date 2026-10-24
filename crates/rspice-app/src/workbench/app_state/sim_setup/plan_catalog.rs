@@ -3,7 +3,7 @@
 use super::SimSetupState;
 use crate::product::SimulationPlanId;
 #[cfg(test)]
-use crate::simulation::dialog::SimulationOptions;
+use rspice_simulation_contract::options::SimulationOptions;
 pub use rspice_simulation_contract::plan_catalog::{
     SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
     SimulationPlanImportDocument, SimulationPlanLineage, SimulationPlanName,

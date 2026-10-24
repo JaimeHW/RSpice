@@ -87,7 +87,9 @@ impl SimSetupState {
     /// Create a fresh project-owned plan using the user's retained numerical
     /// default. The resulting options are copied into the plan: later changes
     /// to Preferences never mutate an existing plan or its reproducibility.
-    pub fn new_with_user_preferences(preferences: &crate::workbench::UserPreferences) -> Self {
+    pub fn new_with_user_preferences(
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) -> Self {
         let mut setup = Self::new();
         setup.save_policy.retained_dataset_limit = preferences.runs_kept();
         let mut options = Self::preferred_solver_options(preferences);
@@ -101,10 +103,12 @@ impl SimSetupState {
     /// The solver options of the user's default preset, which every new plan
     /// starts from unless it copies another plan's.
     pub(crate) fn preferred_solver_options(
-        preferences: &crate::workbench::UserPreferences,
-    ) -> crate::simulation::dialog::SimulationOptions {
-        use crate::simulation::dialog::SimulationOptions;
-        match preferences.choice(crate::workbench::ChoicePreference::DefaultSolverPreset) {
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) -> rspice_simulation_contract::options::SimulationOptions {
+        use rspice_simulation_contract::options::SimulationOptions;
+        match preferences
+            .choice(crate::workbench::preferences::ChoicePreference::DefaultSolverPreset)
+        {
             1 => SimulationOptions::fast(),
             2 => SimulationOptions::accurate(),
             3 => SimulationOptions::robust(),
@@ -198,11 +202,11 @@ impl SimSetupState {
             // reading the sheet's placed ports would name a count the run
             // never has.
             12 => match self.sp.port_source_idx.and_then(|index| {
-                crate::simulation::dialog::SpPortSource::ALL
+                rspice_simulation_contract::sp_draft::SpPortSource::ALL
                     .get(index)
                     .copied()
             }) {
-                Some(crate::simulation::dialog::SpPortSource::Placed) => {
+                Some(rspice_simulation_contract::sp_draft::SpPortSource::Placed) => {
                     format!("placed RF ports · Z0 {}", self.sp.z0)
                 }
                 _ => format!("{} ports · Z0 {}", self.sp.ports.len(), self.sp.z0),
@@ -618,7 +622,7 @@ mod tests {
     /// the shipped number is the one a plan has always kept.
     #[test]
     fn a_new_plan_keeps_the_runs_preferences_set() {
-        let mut preferences = crate::workbench::UserPreferences::default();
+        let mut preferences = crate::workbench::preferences::UserPreferences::default();
         assert_eq!(
             SimSetupState::new_with_user_preferences(&preferences)
                 .save_policy
@@ -626,7 +630,10 @@ mod tests {
             SimulationSavePolicy::default().retained_dataset_limit
         );
         preferences
-            .set_scalar(crate::workbench::ScalarPreference::RunsKept, 50)
+            .set_scalar(
+                crate::workbench::preferences::ScalarPreference::RunsKept,
+                50,
+            )
             .expect("fifty runs is an offered count");
         assert_eq!(
             SimSetupState::new_with_user_preferences(&preferences)

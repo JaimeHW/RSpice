@@ -16,7 +16,7 @@ use super::diagnostic_store::{
 };
 use crate::product::ContentDigest;
 use crate::state::PreflightRemediation;
-use crate::workbench::app_state::{Model, SlotFacts};
+use crate::workbench::app_state::model::{Model, SlotFacts};
 
 /// Producer identity every rule-deck record carries.
 const RULE_DECK_PRODUCER: &str = "rspice.design.rule-deck";

@@ -353,7 +353,7 @@ fn guided_prerequisite_configuration_is_atomic_bound_and_fail_closed() {
     })
     .expect("phase-noise state edits");
     let before_len = plan.instances().len();
-    let mut pss = crate::simulation::dialog::PssDialogState::default();
+    let mut pss = rspice_simulation_contract::pss_draft::PssDialogState::default();
     pss.osc_mode = true;
     pss.osc_node.clear();
     pss.tone_sources.clear();

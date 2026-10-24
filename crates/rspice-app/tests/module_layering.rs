@@ -192,7 +192,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("io", "workbench", 15),
     // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 7),
-    ("state", "io", 5),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Project I/O now imports the lower-owned analysis kind directly; its

@@ -11,8 +11,10 @@
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
 
+use super::design_checks::DesignCheckRuntime;
 use super::design_history::ProjectDesignHistory;
-use super::{DesignCheckRuntime, DiagnosticStore, SimSetupState};
+use super::diagnostic_store::DiagnosticStore;
+use super::sim_setup::SimSetupState;
 
 /// The project model every feature reads.
 #[derive(Clone)]
@@ -129,7 +131,7 @@ impl Model {
     /// The folders searched for includes after every project's own paths.
     pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
         self.preferences
-            .folders(crate::workbench::FolderListPreference::LibraryFolders)
+            .folders(crate::workbench::preferences::FolderListPreference::LibraryFolders)
     }
 
     /// Report a failure of something the user asked for, as

@@ -19,10 +19,10 @@ use rspice_design::drc::{
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_vocabulary::diagnostics::DiagnosticSuppression;
 
-use super::Model;
 use super::diagnostic_store::{
     DiagnosticLevel, DiagnosticRecord, DiagnosticSubject, FindingKey, mint_canonical,
 };
+use super::model::Model;
 use crate::state::{CellViewRef, ViewType};
 
 #[cfg(test)]

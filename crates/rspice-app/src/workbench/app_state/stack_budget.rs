@@ -89,7 +89,10 @@ fn model_field_sizes() -> Vec<(&'static str, usize)> {
             "project_design_history",
             size_of::<a::design_history::ProjectDesignHistory>(),
         ),
-        ("design_checks", size_of::<a::DesignCheckRuntime>()),
+        (
+            "design_checks",
+            size_of::<a::design_checks::DesignCheckRuntime>(),
+        ),
         ("sim_setup", size_of::<a::SimSetupState>()),
         ("log_buffer", size_of::<crate::diagnostics::LogBuffer>()),
         ("library_manager", size_of::<crate::state::LibraryManager>()),

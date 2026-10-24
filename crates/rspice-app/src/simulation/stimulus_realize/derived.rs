@@ -34,7 +34,7 @@ use crate::state::format_engineering_display;
 use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
 };
-use crate::ui::plot::tick_with_unit;
+use rspice_results::number_format::tick_with_unit;
 
 /// How many points the proof surface asks the engine for.
 ///
