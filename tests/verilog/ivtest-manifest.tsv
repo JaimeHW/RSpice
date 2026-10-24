@@ -492,7 +492,7 @@ force_release_wire_pv	vlg	passed	L4	pass	PASSED
 fork1	vlg	passed	L3	pass	PASSED
 fork3.19A	vlg	passed	L3	pass	PASSED
 fork3.19B	vlg	passed	L3	pass	PASSED
-format	vlg	gold	L1	fail	differs from the gold file at line 5 (5 lines against 5)
+format	vlg	gold	L1	pass	matches the gold file
 fr47	vlg	passed	L3	pass	PASSED
 fread	vlg	passed	-	excluded:systemverilog:string	
 fscanf_u	vlg	passed	L5	pass	PASSED
@@ -564,7 +564,7 @@ integer2le	vlg	passed	L1	pass	PASSED
 integer3gt	vlg	passed	L1	pass	PASSED
 integer4ge	vlg	passed	L1	pass	PASSED
 integer5	vlg	passed	L1	pass	PASSED
-itor_rtoi	vlg	gold	L1	fail	differs from the gold file at line 5 (51 lines against 51)
+itor_rtoi	vlg	gold	L1	pass	matches the gold file
 land2	vlg	passed	L1	pass	PASSED
 land3	vlg	passed	L1	pass	PASSED
 land4	vlg	gold	L1	pass	matches the gold file
@@ -845,13 +845,13 @@ pr1698658	vlg	gold	L1	pass	matches the gold file
 pr1698659	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `othertop` is not declared in this module or its generated ancestors or enclosing instances
 pr1698820	vlg	gold	-	excluded:systemverilog:var	
 pr1699444	vlg	gold	L1	pass	matches the gold file
-pr1699519	vlg	gold	L1	fail	differs from the gold file at line 3 (4 lines against 4)
+pr1699519	vlg	gold	L1	pass	matches the gold file
 pr1701855	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.dut` is not a continuous net, branch, parameter or analog function
 pr1701855b	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `dummy` is not declared in this module or its generated ancestors or enclosing instances
 pr1701889	vlg	gold	L3	pass	matches the gold file
 pr1701921	vlg	passed	L1	pass	PASSED
 pr1702593	vlg	gold	L1	pass	matches the gold file
-pr1703120	vlg	gold	L1	fail	differs from the gold file at line 2 (19 lines against 19)
+pr1703120	vlg	gold	L1	pass	matches the gold file
 pr1703346	vlg	passed	L7	pass	PASSED
 pr1703959	vlg	passed	L7	pass	PASSED
 pr1704013	vlg	ce	L1	pass	language error: Semantic error: Port 'a' is declared without a range and redeclared with range [1:0]; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaration...
@@ -1029,7 +1029,7 @@ pr2076363	vlg	passed	L4	pass	PASSED
 pr2076391	vlg	gold	L1	pass	matches the gold file
 pr2076425	vlg	passed	L4	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 pr2085984	vlg	passed	L1	pass	PASSED
-pr2091455	vlg	gold	L1	fail	differs from the gold file at line 1 (2 lines against 2)
+pr2091455	vlg	gold	L1	pass	matches the gold file
 pr2109179	vlg	passed	L1	pass	PASSED
 pr2117473	vlg	passed	L1	pass	PASSED
 pr2117488	vlg	passed	L1	pass	PASSED
@@ -1088,9 +1088,9 @@ pr2257003b	vlg	passed	L4	pass	PASSED
 pr2270035	vlg	passed	L1	pass	PASSED
 pr2276163	vlg	passed	L3	pass	PASSED
 pr2281479	vlg	passed	L1	pass	PASSED
-pr2305307	vlg	passed	L4	fail	no PASSED line (3 output lines)
+pr2305307	vlg	passed	L4	pass	PASSED
 pr2305307b	vlg	passed	-	excluded:systemverilog:rand	
-pr2305307c	vlg	passed	L1	fail	no PASSED line (3 output lines)
+pr2305307c	vlg	passed	L1	pass	PASSED
 pr2306259	vlg	passed	L1	pass	PASSED
 pr2350934	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
 pr2350934b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
@@ -1151,7 +1151,7 @@ pr2728812c	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in
 pr273	vlg	passed	L1	pass	PASSED
 pr2745281	vlg	passed	L1	pass	PASSED
 pr2781595	vlg	passed	L6	pass	PASSED
-pr2785294	vlg	gold	L1	fail	differs from the gold file at line 2 (25 lines against 5)
+pr2785294	vlg	gold	L1	pass	matches the gold file
 pr2788686	vlg	passed	L3	pass	PASSED
 pr2790236	vlg	passed	L1	pass	PASSED
 pr2792883	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: a parameter declaration cannot reference outside its module (VAMS-2023 6.7.1)
@@ -1580,7 +1580,7 @@ string1	vlg	passed	L1	pass	PASSED
 string10	vlg	gold	L1	pass	matches the gold file
 string11	vlg	gold	L1	pass	matches the gold file
 string12	vlg	passed	L1	pass	PASSED
-string13	vlg	passed	L5	fail	no PASSED line (8 output lines)
+string13	vlg	passed	L5	racy	passes in reverse order only; no PASSED line (2 output lines)
 string14	vlg	passed	-	excluded:systemverilog-systf:$bits	
 string2	vlg	passed	L1	pass	PASSED
 string3	vlg	passed	L1	pass	PASSED
@@ -1977,7 +1977,7 @@ module_ordered_list1	vvp	passed	-	excluded:flag-g2005-sv
 module_ordered_list2	vvp	ce	L1	pass	language error: Semantic error: Function 'i_M' expects at most 2 port connections argument(s), got 3
 module_port_array1	vvp	passed	-	excluded:flag-g2009	
 module_port_array_init1	vvp	passed	-	excluded:flag-g2005-sv	
-monitor4	vvp	gold	L1	fail	differs from the gold file at line 11 (16 lines against 17)
+monitor4	vvp	gold	L1	pass	matches the gold file
 non-polymorphic-abs	vvp	passed	-	excluded:nonstandard-systf:$abs	
 param-width	vvp	gold	L4	deviation	IEEE 1364-2005 §5.4.1 and §12.2: a parameter with no type or range takes the width of its final value, so `a + b` of 3-bit values is 3 bits and `c + d` after `defparam c = 2'd2; defparam d = 2'd3;` is 2 bits; Icarus's default gold widens without loss, its strict gold (param-width_std) is this output
 param_test3	vvp	gold	L1	fail	compile error: Semantic error: Function 'am' expects at most 0 parameter overrides argument(s), got 3
