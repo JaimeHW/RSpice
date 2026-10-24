@@ -3030,20 +3030,36 @@ impl Engine {
             circuit.fill_xspice_real_snapshot(real_snapshot);
             // The accepted endpoint wins any same-time delta publications.
             // Keep snapshots for live samples as well as complete event traces.
+            // An event the queue delivered a hair before its own instant
+            // (`CmContext::is_due`) is published at that instant, so its node's
+            // endpoint value, which is already the event's, stays out of the
+            // way instead of dating the change at the endpoint.
+            let ahead: Vec<(bool, usize)> = points
+                .iter()
+                .filter(|point| point.time > time)
+                .map(|point| (matches!(point.value, EventValue::Real(_)), point.node))
+                .collect();
+            let ahead = |real: bool, node: usize| ahead.contains(&(real, node));
             points.extend(
                 digital_snapshot
                     .iter()
+                    .filter(|&&(node, _)| !ahead(false, node))
                     .map(|&(node, value)| EventTracePoint {
                         time,
                         node,
                         value: EventValue::Digital(value),
                     }),
             );
-            points.extend(real_snapshot.iter().map(|&(node, value)| EventTracePoint {
-                time,
-                node,
-                value: EventValue::Real(value),
-            }));
+            points.extend(
+                real_snapshot
+                    .iter()
+                    .filter(|&&(node, _)| !ahead(true, node))
+                    .map(|&(node, value)| EventTracePoint {
+                        time,
+                        node,
+                        value: EventValue::Real(value),
+                    }),
+            );
             settle_trace_points(points);
             for point in points.drain(..) {
                 let added = match point.value {

@@ -573,8 +573,10 @@ fn apply_xspice_event_slot(
                 }
             }
         })
+        // Named by the instant whose events would not settle: `bound` reaches
+        // past the timepoint by the window its models count as now.
         .map_err(|error| {
-            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(bound, &error))
+            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(time, &error))
         })?;
     if touched_digital_nodes.len() > 1 {
         touched_digital_nodes.sort_unstable();
@@ -1742,6 +1744,19 @@ impl CircuitData {
         let companion_coefficients = wave.coefficients;
         let xyce_one_step_order2 = wave.xyce_one_step_order2;
         let coincidence = wave.coincidence;
+        // An event no further ahead than the window the wave's models count
+        // as now is delivered at this timepoint, as the model that scheduled
+        // it acts on its own instants (`CmContext::is_due`); a consumer dates
+        // its response from the event's own time. Coupled event nets keep the
+        // exact drain: their keys are landed on the analog lattice, and the
+        // accepted queue a checkpoint carries is settled at the accepted time.
+        let drain_through = if analysis == crate::xspice::AnalysisType::Transient
+            && !self.has_coupled_event_nets()
+        {
+            time + coincidence
+        } else {
+            time
+        };
         let current_source_values = &wave.current_source_values;
         let analog_transitions = &mut wave.analog_transitions;
         let pass = wave.pass;
@@ -1774,7 +1789,7 @@ impl CircuitData {
             event_queue,
             touched_digital_nodes,
             touched_real_nodes,
-            time,
+            drain_through,
             resolver,
         ) {
             Ok(changed) => changed,
@@ -1954,7 +1969,7 @@ impl CircuitData {
                 event_queue,
                 touched_digital_nodes,
                 touched_real_nodes,
-                time,
+                drain_through,
                 resolver,
             ) {
                 Ok(changed) => changed,
@@ -2014,7 +2029,7 @@ impl CircuitData {
                 event_queue,
                 touched_digital_nodes,
                 touched_real_nodes,
-                time,
+                drain_through,
                 resolver,
             );
             mark_drained_fanout_dirty(
@@ -2044,7 +2059,8 @@ impl CircuitData {
         // `true`, which it can only do past its emptiness check, so the
         // scheduler is already unshared and this mutable view copies
         // nothing.
-        if let Err(error) = event_queue.make_mut().note_delta_cycle(time) {
+        // The slot is the one the drains opened, at the same bound.
+        if let Err(error) = event_queue.make_mut().note_delta_cycle(drain_through) {
             let message = xspice_event_settling_message(time, &error);
             if self.xspice_evaluation_error.is_none() {
                 self.xspice_evaluation_error = Some(message.clone());

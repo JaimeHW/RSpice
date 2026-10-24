@@ -5131,3 +5131,57 @@ fn an_nco_toggle_keeps_its_phase_under_the_xyce_schedule() {
     .expect("transient solves");
     assert_nco_keeps_its_phase("xyce", &result, 39);
 }
+
+#[test]
+fn a_flip_flop_clocked_by_an_absorbed_oscillator_edge_dates_its_output_from_the_edge() {
+    // The rising edges of d_osc, `0.5m + k * 1m` chained as `last + 5e-4`,
+    // fall a hair after the PULSE's rising corners from the sixth on, as the
+    // nco's do. A toggle flip-flop on that clock owes its output
+    // `clk_delay + rise_delay` after each edge it sees.
+    let netlist = Netlist::parse(
+        "\
+* d_osc edges a hair after PULSE corners clock a flip-flop
+v1 cntl 0 dc 0.5
+a1 cntl clk osc
+.model osc d_osc(cntl_array=[0 1] freq_array=[1e3 1e3] duty_cycle=0.5 init_phase=0)
+a2 nq clk NULL NULL q nq ff
+.model ff d_dff(clk_delay=1e-9 rise_delay=1e-12 fall_delay=1e-12)
+a3 [clk] [aclk] dac1
+.model dac1 dac_bridge(out_low=0 out_high=1 out_undef=0.5 t_rise=1e-9 t_fall=1e-9)
+r1 aclk 0 1k
+v2 p 0 pulse(0 1 0.5m 1n 1n 0.2m 1m)
+r2 p 0 1k
+.end
+",
+    )
+    .expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 20.0e-3, 1.0e-6)
+        .expect("transient solves");
+    let rising: Vec<f64> = digital_tokens(&result, "clk")
+        .into_iter()
+        .filter(|(time, token)| *time > 0.0 && token == "1s")
+        .map(|(time, _)| time)
+        .collect();
+    let outputs: Vec<f64> = digital_tokens(&result, "q")
+        .into_iter()
+        .filter(|(time, _)| *time > 0.0)
+        .map(|(time, _)| time)
+        .collect();
+    assert_eq!(rising.len(), 20, "rising clock edges {rising:?}");
+    assert_eq!(outputs.len(), rising.len(), "q events {outputs:?}");
+    let output_delay: f64 = 1.0e-9 + 1.0e-12;
+    let offsets: Vec<f64> = rising
+        .iter()
+        .zip(&outputs)
+        .map(|(edge, output)| output - (edge + output_delay))
+        .collect();
+    for (index, (edge, output)) in rising.iter().zip(&outputs).enumerate() {
+        assert_eq!(
+            output.to_bits(),
+            (edge + output_delay).to_bits(),
+            "rising edge {} at {edge:e}: q at {output:e}; every offset {offsets:?}",
+            index + 1
+        );
+    }
+}

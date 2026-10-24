@@ -134,6 +134,27 @@ fn drive_outputs(ctx: &mut CmContext, output: i64, out_delay: Value, nout_delay:
     }
 }
 
+/// Drive `next` on the outputs `base_delay` plus the edge delays after the
+/// latest event on `triggers`, the input change that caused it
+/// ([`delay_from_input_event`]).
+fn drive_outputs_after(
+    ctx: &mut CmContext,
+    triggers: &[&str],
+    old: i64,
+    next: i64,
+    base_delay: Value,
+) -> CmResult<()> {
+    let (out_delay, nout_delay) = transition_delays(ctx, old, next, base_delay)?;
+    let cause = latest_input_event_time(ctx, triggers);
+    drive_outputs(
+        ctx,
+        next,
+        delay_from_input_event(ctx, cause, out_delay),
+        delay_from_input_event(ctx, cause, nout_delay),
+    );
+    Ok(())
+}
+
 fn initial_async_output(ic: i64, set: i64, reset: i64) -> i64 {
     let mut output = ic;
     if set == 1 && reset == 0 {
@@ -214,18 +235,18 @@ fn evaluate_edge_model(
         let (next, base_delay) = if set != old_set {
             (
                 set_edge_output(old_output, set, reset),
-                Some(official_sequential_delay(ctx, "set_delay")?),
+                Some((official_sequential_delay(ctx, "set_delay")?, "set")),
             )
         } else if reset != old_reset {
             (
                 reset_edge_output(old_output, set, reset),
-                Some(official_sequential_delay(ctx, "reset_delay")?),
+                Some((official_sequential_delay(ctx, "reset_delay")?, "reset")),
             )
         } else if clk != old_clk && reset != 1 && set != 1 {
             if clk == 1 {
                 (
                     next_on_rising_clock(ctx, old_output),
-                    Some(official_sequential_delay(ctx, "clk_delay")?),
+                    Some((official_sequential_delay(ctx, "clk_delay")?, "clk")),
                 )
             } else {
                 (old_output, None)
@@ -235,10 +256,9 @@ fn evaluate_edge_model(
         };
 
         if next != old_output
-            && let Some(base_delay) = base_delay
+            && let Some((base_delay, trigger)) = base_delay
         {
-            let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay)?;
-            drive_outputs(ctx, next, out_delay, nout_delay);
+            drive_outputs_after(ctx, &[trigger], old_output, next, base_delay)?;
         }
 
         next
@@ -1068,6 +1088,8 @@ impl CodeModel for DigitalFrequencyDivider {
         if next_output != output
             && let Some(delay) = delay
         {
+            let cause = latest_input_event_time(ctx, &["freq_in"]);
+            let delay = delay_from_input_event(ctx, cause, delay);
             ctx.set_output_digital("freq_out", output_value(next_output), delay);
             output = next_output;
         }
@@ -1258,22 +1280,28 @@ impl CodeModel for DLatch {
             let (next, base_delay) = if set != old_set {
                 (
                     dlatch_set_edge_output(old_output, data, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "set_delay")?),
+                    Some((official_sequential_delay(ctx, "set_delay")?, "set")),
                 )
             } else if reset != old_reset {
                 (
                     dlatch_reset_edge_output(old_output, data, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "reset_delay")?),
+                    Some((official_sequential_delay(ctx, "reset_delay")?, "reset")),
                 )
             } else if enable != old_enable && reset != 1 && set != 1 {
                 if enable == 1 {
-                    (data, Some(official_sequential_delay(ctx, "enable_delay")?))
+                    (
+                        data,
+                        Some((official_sequential_delay(ctx, "enable_delay")?, "enable")),
+                    )
                 } else {
                     (old_output, None)
                 }
             } else if data != old_data && reset != 1 && set != 1 {
                 if enable == 1 {
-                    (data, Some(official_sequential_delay(ctx, "data_delay")?))
+                    (
+                        data,
+                        Some((official_sequential_delay(ctx, "data_delay")?, "data")),
+                    )
                 } else {
                     (old_output, None)
                 }
@@ -1282,10 +1310,9 @@ impl CodeModel for DLatch {
             };
 
             if next != old_output
-                && let Some(base_delay) = base_delay
+                && let Some((base_delay, trigger)) = base_delay
             {
-                let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay)?;
-                drive_outputs(ctx, next, out_delay, nout_delay);
+                drive_outputs_after(ctx, &[trigger], old_output, next, base_delay)?;
             }
 
             next
@@ -1436,27 +1463,34 @@ impl CodeModel for SrLatch {
             let (next, base_delay) = if set != old_set {
                 (
                     srlatch_set_edge_output(old_output, s, r, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "set_delay")?),
+                    Some((official_sequential_delay(ctx, "set_delay")?, &["set"][..])),
                 )
             } else if reset != old_reset {
                 (
                     srlatch_reset_edge_output(old_output, s, r, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "reset_delay")?),
+                    Some((
+                        official_sequential_delay(ctx, "reset_delay")?,
+                        &["reset"][..],
+                    )),
                 )
             } else if enable != old_enable && reset != 1 && set != 1 {
                 if enable == 1 {
                     (
                         sr_result(s, r, old_output),
-                        Some(official_sequential_delay(ctx, "enable_delay")?),
+                        Some((
+                            official_sequential_delay(ctx, "enable_delay")?,
+                            &["enable"][..],
+                        )),
                     )
                 } else {
                     (old_output, None)
                 }
             } else if (s != old_s || r != old_r) && reset != 1 && set != 1 {
                 if enable == 1 {
+                    // Whichever of the two changed last caused the output.
                     (
                         sr_result(s, r, old_output),
-                        Some(official_sequential_delay(ctx, "sr_delay")?),
+                        Some((official_sequential_delay(ctx, "sr_delay")?, &["s", "r"][..])),
                     )
                 } else {
                     (old_output, None)
@@ -1466,10 +1500,9 @@ impl CodeModel for SrLatch {
             };
 
             if next != old_output
-                && let Some(base_delay) = base_delay
+                && let Some((base_delay, triggers)) = base_delay
             {
-                let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay)?;
-                drive_outputs(ctx, next, out_delay, nout_delay);
+                drive_outputs_after(ctx, triggers, old_output, next, base_delay)?;
             }
 
             next

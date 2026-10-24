@@ -1948,6 +1948,8 @@ impl CodeModel for DigitalStateMachine {
         if reset_state_code != prev_reset {
             if reset_state_code == 1 {
                 current_state = reset_state;
+                let cause = latest_input_event_time(ctx, &["reset"]);
+                let reset_delay = delay_from_input_event(ctx, cause, reset_delay);
                 if let Some(outputs) = d_state_outputs(&table, current_state) {
                     ctx.set_output_digital_vector_from_slice("out", outputs, reset_delay);
                 } else {
@@ -1961,6 +1963,8 @@ impl CodeModel for DigitalStateMachine {
             let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
             if let Some(next_state) = d_state_next(&table, current_state, inputs) {
                 current_state = next_state;
+                let cause = latest_input_event_time(ctx, &["clk"]);
+                let clk_delay = delay_from_input_event(ctx, cause, clk_delay);
                 if let Some(outputs) = d_state_outputs(&table, current_state) {
                     ctx.set_output_digital_vector_from_slice("out", outputs, clk_delay);
                 } else {

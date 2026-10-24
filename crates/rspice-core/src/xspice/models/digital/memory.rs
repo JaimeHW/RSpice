@@ -680,7 +680,10 @@ impl CodeModel for DigitalRam {
             let select = d_ram_select_code(ctx, shape, &inputs.select)?;
             let address_index = d_ram_address_index(&inputs.address);
             let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX)?;
-            let read_delay = d_ram_read_delay(ctx)?;
+            // A read answers the latest change on any input, and is owed its
+            // delay after that change rather than after the timepoint.
+            let cause = latest_input_event_time(ctx, &["data_in", "address", "write_en", "select"]);
+            let read_delay = delay_from_input_event(ctx, cause, d_ram_read_delay(ctx)?);
 
             if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
                 let mut scratch = {
