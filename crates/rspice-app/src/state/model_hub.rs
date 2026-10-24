@@ -65,15 +65,15 @@ pub use release_diff::{ChangedPart, PartFact, PartStanding, ReleaseDiff, Release
 pub(crate) use store::NO_CATALOG_SERIAL;
 pub use store::{InstalledPack, MemoryModelHubStore, ModelHubStore};
 pub(crate) use transport::require_exact_bytes;
-pub use transport::{ModelHubTransport, OfflineTransport};
+pub use transport::{
+    ArchiveProgress, ModelHubTransport, ModelHubTransportProvider, OfflineTransport,
+};
 pub use trust::TrustAnchor;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use store::FilesystemModelHubStore;
 #[cfg(target_arch = "wasm32")]
-pub use transport::BrowserModelHubTransport;
-#[cfg(not(target_arch = "wasm32"))]
-pub use transport::CloudModelHubTransport;
+pub use transport::PrimingTransport;
 
 /// Every reason the Model Hub runtime refuses to act.
 ///

@@ -26,7 +26,9 @@
 //! the hub is not — two hubs over one store always agree, because the store is
 //! where the state actually lives.
 
-use crate::state::model_hub::{ModelHub, ModelHubError, ModelHubStore, TrustAnchor};
+use crate::state::model_hub::{
+    ModelHub, ModelHubError, ModelHubStore, ModelHubTransportProvider, TrustAnchor,
+};
 
 /// How long a cached catalog may go unrefreshed before a workspace says so.
 pub(crate) const CATALOG_STALE_AFTER_DAYS: u64 = 7;
@@ -162,30 +164,39 @@ pub(crate) struct ModelHubService {
     store: Option<ModelHubStoreHandle>,
     hub: Option<ModelHub>,
     unavailable: Option<String>,
+    /// Where an operation opens its transport. Every production constructor
+    /// takes it from the shell, so a session never holds a service that
+    /// cannot reach the network its build has.
+    transport_provider: &'static dyn ModelHubTransportProvider,
 }
 
 impl ModelHubService {
-    /// Opens the session hub, sweeping any interrupted install.
-    pub(crate) fn open() -> Self {
-        match ModelHubStoreHandle::production().and_then(|store| {
+    /// Opens the session hub, sweeping any interrupted install, with the
+    /// transport provider the shell installs.
+    pub(crate) fn open(transport_provider: &'static dyn ModelHubTransportProvider) -> Self {
+        let (store, hub, unavailable) = match ModelHubStoreHandle::production().and_then(|store| {
             let hub = store.open()?;
             Ok((store, hub))
         }) {
-            Ok((store, hub)) => Self {
-                store: Some(store),
-                hub: Some(hub),
-                unavailable: None,
-            },
-            Err(error) => Self::unavailable(unavailable_reason(&error)),
+            Ok((store, hub)) => (Some(store), Some(hub), None),
+            Err(error) => (None, None, Some(unavailable_reason(&error))),
+        };
+        Self {
+            store,
+            hub,
+            unavailable,
+            transport_provider,
         }
     }
 
-    /// A service with no hub at all, for tests and unconfigured builds.
+    /// A service with no hub at all, for tests.
+    #[cfg(test)]
     pub(crate) fn unavailable(reason: impl Into<String>) -> Self {
         Self {
             store: None,
             hub: None,
             unavailable: Some(reason.into()),
+            transport_provider: &OfflineTransportProvider,
         }
     }
 
@@ -197,11 +208,20 @@ impl ModelHubService {
             store: Some(store),
             hub: Some(hub),
             unavailable: None,
+            transport_provider: &OfflineTransportProvider,
         }
     }
 
     pub(crate) fn hub(&self) -> Option<&ModelHub> {
         self.hub.as_ref()
+    }
+
+    /// The provider an operation opens its transport through.
+    ///
+    /// A worker takes it with the store when the operation starts, so the
+    /// lookup is a copied reference and never an allocation.
+    pub(crate) fn transport_provider(&self) -> &'static dyn ModelHubTransportProvider {
+        self.transport_provider
     }
 
     /// The unified part index, whether or not this machine has a pack store.
@@ -373,6 +393,39 @@ fn unavailable_reason(error: &ModelHubError) -> String {
             format!("RSpice could not open its model-pack storage: {detail}")
         }
         other => format!("The model hub is unavailable: {other}"),
+    }
+}
+
+/// The provider a test service opens its transports through: always offline.
+///
+/// A test that drives the pipeline hands it a fixture transport directly, so
+/// a service built for one has no network to reach. It exists only in test
+/// builds, which leaves the shell's provider the only one a running
+/// application can hold.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct OfflineTransportProvider;
+
+#[cfg(test)]
+impl ModelHubTransportProvider for OfflineTransportProvider {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open(
+        &self,
+        _progress: crate::state::model_hub::ArchiveProgress,
+    ) -> Result<Box<dyn crate::state::model_hub::ModelHubTransport>, String> {
+        Ok(Box::new(crate::state::model_hub::OfflineTransport))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn prime(
+        &self,
+        _catalog: bool,
+        _archive: Option<(String, String, u64)>,
+        _progress: crate::state::model_hub::ArchiveProgress,
+    ) -> crate::state::model_hub::PrimingTransport<'_> {
+        let transport: Box<dyn crate::state::model_hub::ModelHubTransport> =
+            Box::new(crate::state::model_hub::OfflineTransport);
+        Box::pin(std::future::ready(Ok(transport)))
     }
 }
 

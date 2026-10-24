@@ -576,8 +576,12 @@ impl RSpiceApp {
             )),
             // Opening sweeps whatever a killed install left behind. A failure
             // here is recorded as a reason and nothing else: a machine that
-            // cannot store packs still edits, simulates, and saves.
-            model_hub: crate::services::model_hub::ModelHubService::open(),
+            // cannot store packs still edits, simulates, and saves. The hub
+            // fetches through the cloud's transports, the only network a
+            // running application has.
+            model_hub: crate::services::model_hub::ModelHubService::open(
+                &crate::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider,
+            ),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,

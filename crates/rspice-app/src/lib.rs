@@ -141,7 +141,9 @@ pub use product::{AnalysisInstanceId, ContentDigest, ObjectRevision, ProjectId, 
 pub use state::workspace::ProjectLibraryPublicationReceipt;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use state::model_hub::{CloudModelHubTransport, FilesystemModelHubStore};
+pub use services::cloud_account::model_hub_transport::CloudModelHubTransport;
+#[cfg(not(target_arch = "wasm32"))]
+pub use state::model_hub::FilesystemModelHubStore;
 /// The Model Hub client runtime: signed catalog, verified installation, and
 /// the unified part shelf over foundation, installed, catalog, and retained
 /// parts. This is the crate's model-distribution boundary — the surfaces that

@@ -811,6 +811,7 @@ impl RSpiceApp {
         let authority = capture_native_model_import_authority(&self.state);
         let candidate = self.state.model.model_library_manager.clone();
         let store = self.model_hub.store().cloned();
+        let transport_provider = self.model_hub.transport_provider();
         note_models_operation(
             &mut self.state,
             operation.description(),
@@ -833,6 +834,7 @@ impl RSpiceApp {
                         candidate,
                         &worker_operation,
                         store.as_ref(),
+                        transport_provider,
                         model_hub_progress(),
                     )
                 }))
@@ -936,6 +938,7 @@ fn run_native_model_catalog_operation(
     mut candidate: crate::state::model_library::ModelLibraryManager,
     operation: &NativeModelCatalogOperation,
     store: Option<&crate::services::model_hub::ModelHubStoreHandle>,
+    transport_provider: &dyn crate::state::model_hub::ModelHubTransportProvider,
     progress: &ModelHubProgress,
 ) -> Result<NativeModelCatalogOutput, Vec<String>> {
     if let NativeModelCatalogOperation::ModelHub(request) = operation {
@@ -946,7 +949,7 @@ fn run_native_model_catalog_operation(
                     .to_owned(),
             ]
         })?;
-        return run_model_hub_operation(store, candidate, request, progress)
+        return run_model_hub_operation(store, transport_provider, candidate, request, progress)
             .map(|output| NativeModelCatalogOutput::ModelHub(Box::new(output)))
             .map_err(|error| vec![error]);
     }
@@ -1625,6 +1628,7 @@ impl RSpiceApp {
                 .execution_catalog_digest(),
             replace_library: None,
         };
+        let transport_provider = self.model_hub.transport_provider();
         let candidate = self.state.model.model_library_manager.clone();
         note_models_operation(
             &mut self.state,
@@ -1637,8 +1641,13 @@ impl RSpiceApp {
         model_hub_progress().clear();
         let repaint = ctx.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            let result =
-                model_hub::run_browser_model_hub_operation(&store, candidate, &request).await;
+            let result = model_hub::run_browser_model_hub_operation(
+                &store,
+                transport_provider,
+                candidate,
+                &request,
+            )
+            .await;
             BROWSER_MODEL_HUB.with(|queue| {
                 queue.borrow_mut().push_back(BrowserModelHubCompletion {
                     authority,
@@ -2359,6 +2368,7 @@ mod tests {
             state.model.model_library_manager.clone(),
             &NativeModelCatalogOperation::ImportFile { path: path.clone() },
             None,
+            &crate::services::model_hub::OfflineTransportProvider,
             model_hub_progress(),
         )
         .expect("background candidate parses");

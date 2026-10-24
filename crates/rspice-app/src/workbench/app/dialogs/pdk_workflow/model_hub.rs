@@ -250,15 +250,17 @@ fn byte_size(bytes: u64) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn run_model_hub_operation(
     store: &crate::services::model_hub::ModelHubStoreHandle,
+    transport_provider: &dyn crate::state::model_hub::ModelHubTransportProvider,
     candidate: crate::state::model_library::ModelLibraryManager,
     request: &ModelHubRequest,
     progress: &ModelHubProgress,
 ) -> Result<ModelHubOutput, String> {
     let mut hub = store.open().map_err(|error| error.to_string())?;
-    // The runtime is bound here so it outlives the transport that drives it:
-    // dropping it first would leave a client whose executor is already gone.
-    let (_runtime, transport) = model_hub_transport(progress)?;
-    execute(&mut hub, candidate, request, &transport)
+    let transport = transport_provider.open(std::sync::Arc::new(|received, total| {
+        model_hub_progress().record(received, total);
+    }))?;
+    progress.clear();
+    execute(&mut hub, candidate, request, transport.as_ref())
 }
 
 /// Executes one request against an open hub and a ready transport.
@@ -511,39 +513,6 @@ fn retain_part(
     })
 }
 
-/// The transport this platform drives the hub through.
-///
-/// It is built per operation because a download capability is short lived and
-/// because a session that never installs a pack should never have opened a
-/// network client at all.
-#[cfg(not(target_arch = "wasm32"))]
-fn model_hub_transport(
-    progress: &ModelHubProgress,
-) -> Result<
-    (
-        tokio::runtime::Runtime,
-        crate::state::model_hub::CloudModelHubTransport,
-    ),
-    String,
-> {
-    // The hub pipeline is synchronous, so it needs a runtime whose own threads
-    // drive IO — a current-thread runtime cannot be driven through a `Handle`
-    // from outside, which is exactly how this worker uses it.
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|error| format!("The model-hub transfer runtime could not start: {error}"))?;
-    let client = crate::services::cloud_account::CloudAccountService::unauthenticated_client()?;
-    let handle = runtime.handle().clone();
-    progress.clear();
-    let transport = crate::state::model_hub::CloudModelHubTransport::new(client, handle)
-        .with_progress(std::sync::Arc::new(|received, total| {
-            model_hub_progress().record(received, total);
-        }));
-    Ok((runtime, transport))
-}
-
 /// Everything the browser has to fetch before the pipeline can run.
 ///
 /// It is derived from the request and the hub's current state rather than
@@ -603,36 +572,33 @@ fn priming_plan(
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn run_browser_model_hub_operation(
     store: &crate::services::model_hub::ModelHubStoreHandle,
+    transport_provider: &dyn crate::state::model_hub::ModelHubTransportProvider,
     candidate: crate::state::model_library::ModelLibraryManager,
     request: &ModelHubRequest,
 ) -> Result<ModelHubOutput, String> {
     let mut hub = store.open().map_err(|error| error.to_string())?;
     let (catalog, archive) = priming_plan(&hub, request);
     let transport = if catalog || archive.is_some() {
-        let client = crate::services::cloud_account::CloudAccountService::unauthenticated_client()?;
-        let transport = crate::state::model_hub::BrowserModelHubTransport::new(client)
-            .with_progress(std::rc::Rc::new(|received, declared| {
-                model_hub_progress().record(received, declared);
-            }));
-        if catalog {
-            transport
-                .prime_catalog()
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        if let Some((pack_id, version)) = archive.as_ref() {
-            // Read before the fetch and from the *snapshot*, so the
-            // denominator is the catalog's number rather than the download's
-            // claim about itself. A session that had to fetch the catalog in
-            // this same operation has no snapshot to read yet and reports an
-            // indeterminate transfer instead of a made-up fraction.
-            let declared = catalog_archive_length(&hub, pack_id, version);
-            transport
-                .prime_archive(pack_id, version, declared)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        Some(transport)
+        // Read before the fetch and from the *snapshot*, so the denominator is
+        // the catalog's number rather than the download's claim about itself.
+        // A session that had to fetch the catalog in this same operation has
+        // no snapshot to read yet and reports an indeterminate transfer
+        // instead of a made-up fraction.
+        let archive = archive.map(|(pack_id, version)| {
+            let declared = catalog_archive_length(&hub, &pack_id, &version);
+            (pack_id, version, declared)
+        });
+        Some(
+            transport_provider
+                .prime(
+                    catalog,
+                    archive,
+                    std::rc::Rc::new(|received, declared| {
+                        model_hub_progress().record(received, declared);
+                    }),
+                )
+                .await?,
+        )
     } else {
         None
     };
@@ -640,7 +606,7 @@ pub(super) async fn run_browser_model_hub_operation(
     // an already-installed release is already proved. The offline transport
     // makes that explicit rather than leaving a client open with no work.
     match transport {
-        Some(transport) => execute(&mut hub, candidate, request, &transport),
+        Some(transport) => execute(&mut hub, candidate, request, transport.as_ref()),
         None => execute(
             &mut hub,
             candidate,

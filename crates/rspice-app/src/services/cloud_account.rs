@@ -24,6 +24,7 @@ pub(crate) mod config;
 mod executor;
 #[cfg(not(target_arch = "wasm32"))]
 mod live_relay;
+pub(crate) mod model_hub_transport;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_login;
 mod oidc;
@@ -768,7 +769,7 @@ impl CloudAccountService {
     /// this deployment's endpoints and nothing else. It is not a session: it
     /// holds no token, cannot act as the signed-in principal, and returns
     /// nothing that is believed without a signature.
-    pub(crate) fn unauthenticated_client() -> Result<rspice_cloud_client::CloudClient, String> {
+    fn unauthenticated_client() -> Result<rspice_cloud_client::CloudClient, String> {
         let configuration = config::CloudAccountConfig::resolve()
             .ok_or_else(|| "This build carries no cloud endpoints.".to_owned())?;
         #[cfg(not(target_arch = "wasm32"))]
