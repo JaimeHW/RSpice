@@ -1240,10 +1240,17 @@ fn schematic_has_authored_content(
         || !schematic.validated_revisions.is_empty()
 }
 
-impl crate::state::command_catalog::ShortcutContext {
+/// Whether a shortcut context is live, which the session answers: the context
+/// is the model's vocabulary, but the workspace in front of the reader that it
+/// is matched against is the session's.
+pub(crate) trait ShortcutContextMatch {
     /// Whether this context is live for the workspace and document in front
     /// of the reader, as menus and the palette ask it.
-    pub fn matches(self, workbench: &crate::workbench::WorkbenchSession, model: &Model) -> bool {
+    fn matches(self, workbench: &crate::workbench::WorkbenchSession, model: &Model) -> bool;
+}
+
+impl ShortcutContextMatch for crate::state::command_catalog::ShortcutContext {
+    fn matches(self, workbench: &crate::workbench::WorkbenchSession, model: &Model) -> bool {
         use crate::state::ViewType;
         use crate::workbench::state::Workspace;
 

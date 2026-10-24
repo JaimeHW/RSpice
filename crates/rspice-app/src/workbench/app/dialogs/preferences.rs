@@ -19,13 +19,13 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::preferences_file::{
     MAX_SETTINGS_FILE_BYTES, SETTINGS_FILE,
 };
 use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
 };
+use crate::workbench::app_state::{AppState, ShortcutContextMatch};
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
 const SETTINGS_IMPORT_ID: &str = "rspice.preferences.settings-file.import";
