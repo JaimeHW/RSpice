@@ -1,13 +1,17 @@
 // C1 vams: mod1's latched comparator, D flip-flop and +/-1 V feedback DAC as one
 // Verilog-AMS module. RSpice-authored; the behaviour is that of mod1-ct.cir's
 // BComp + adc_bridge (threshold 0) + d_dff (clk_delay 1 ns, ic=0) + dac_bridge
-// (out_low -1, out_high +1).
+// (out_low -1, out_high +1). A d_dff output follows its clock edge by clk_delay
+// plus rise_delay or fall_delay (1 ns each in mod1-ct.cir), so dq moves 2 ns
+// after the edge. One nanosecond would put it on the counter's clock, which the
+// sinc filter gates through a 1 ns d_and, and the count would then depend on
+// which of two simultaneous events lands first.
 `include "disciplines.vams"
 `timescale 1ns/1ps
 module sdq(ip, in, clk, fp, fn, dq, dqb);
   input ip, in; electrical ip, in;  input clk; wire clk;
   output fp, fn; electrical fp, fn; output dq, dqb; reg dq, dqb;
   initial begin dq = 1'b0; dqb = 1'b1; end            // d_dff ic=0
-  always @(posedge clk) begin dq <= #1 (V(ip, in) >= 0.0); dqb <= #1 (V(ip, in) < 0.0); end
+  always @(posedge clk) begin dq <= #2 (V(ip, in) >= 0.0); dqb <= #2 (V(ip, in) < 0.0); end
   analog begin V(fp) <+ transition(dq ? 1.0 : -1.0, 0, 1n, 1n); V(fn) <+ transition(dq ? -1.0 : 1.0, 0, 1n, 1n); end
 endmodule

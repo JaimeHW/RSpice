@@ -1,8 +1,8 @@
 # variant	analysis	route	outcome	detail
 xs	tran	interp	pass	code (O1) [12] |a−e|=2.000e0 allowed 2.000e0 (a=4.100000e2, e=4.120000e2)
 xs	tran	native	pass	code (O1) [12] |a−e|=2.000e0 allowed 2.000e0 (a=4.100000e2, e=4.120000e2)
-vams	tran	interp	wrong	code (O1) [9] |a−e|=8.000e0 allowed 2.000e0 (a=5.100000e2, e=5.180000e2)
-vams	tran	native	wrong	code (O1) [9] |a−e|=8.000e0 allowed 2.000e0 (a=5.100000e2, e=5.180000e2)
+vams	tran	interp	wrong	code (O1) [15] |a−e|=3.000e0 allowed 2.000e0 (a=3.750000e2, e=3.780000e2)
+vams	tran	native	wrong	code (O1) [15] |a−e|=3.000e0 allowed 2.000e0 (a=3.750000e2, e=3.780000e2)
 xs	op	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
 xs	op	native	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
 vams	op	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
