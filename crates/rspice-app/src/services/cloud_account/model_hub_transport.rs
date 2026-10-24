@@ -17,9 +17,13 @@
 //! is unchanged — the same digests are checked in the same order against the
 //! same signed snapshot — and the only difference is *when* the bytes arrived.
 
+use rspice_cloud_client::{ArtifactTransferError, CloudError};
+
 #[cfg(target_arch = "wasm32")]
 use crate::state::model_hub::PrimingTransport;
-use crate::state::model_hub::{ArchiveProgress, ModelHubTransport, ModelHubTransportProvider};
+use crate::state::model_hub::{
+    ArchiveProgress, ModelHubError, ModelHubTransport, ModelHubTransportProvider,
+};
 
 /// Opens the cloud transport each Model Hub operation runs through.
 ///
@@ -75,6 +79,31 @@ impl ModelHubTransportProvider for CloudModelHubTransportProvider {
     }
 }
 
+fn classify(error: CloudError) -> ModelHubError {
+    match error {
+        CloudError::Transport { .. } => ModelHubError::Offline,
+        CloudError::Problem { details, .. } => ModelHubError::Rejected(details.title.clone()),
+        other => ModelHubError::Transport(format!("{other}")),
+    }
+}
+
+fn classify_transfer(error: ArtifactTransferError) -> ModelHubError {
+    use rspice_cloud_client::ArtifactTransferFailure;
+
+    match error.failure() {
+        ArtifactTransferFailure::Connect
+        | ArtifactTransferFailure::Timeout
+        | ArtifactTransferFailure::Request
+        | ArtifactTransferFailure::Body => ModelHubError::Offline,
+        ArtifactTransferFailure::ResponseDigestMismatch
+        | ArtifactTransferFailure::ResponseLengthMismatch => ModelHubError::DigestMismatch {
+            expected: "the digest the handoff declared".to_owned(),
+            actual: "the bytes object storage returned".to_owned(),
+        },
+        other => ModelHubError::Transport(format!("{other:?}")),
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub use browser::BrowserModelHubTransport;
 
@@ -90,10 +119,9 @@ pub use browser::BrowserModelHubTransport;
 mod browser {
     use std::cell::RefCell;
 
-    use rspice_cloud_client::{
-        ArtifactTransferError, CloudClient, CloudError, PackId, PackVersion,
-        contract::ArtifactDownload,
-    };
+    use rspice_cloud_client::{CloudClient, PackId, PackVersion, contract::ArtifactDownload};
+
+    use super::{classify, classify_transfer};
 
     use crate::state::model_hub::ModelHubError;
     use crate::state::model_hub::transport::{
@@ -300,31 +328,6 @@ mod browser {
     fn transport(detail: &str) -> ModelHubError {
         ModelHubError::Transport(detail.to_owned())
     }
-
-    fn classify(error: CloudError) -> ModelHubError {
-        match error {
-            CloudError::Transport { .. } => ModelHubError::Offline,
-            CloudError::Problem { details, .. } => ModelHubError::Rejected(details.title.clone()),
-            other => ModelHubError::Transport(format!("{other}")),
-        }
-    }
-
-    fn classify_transfer(error: ArtifactTransferError) -> ModelHubError {
-        use rspice_cloud_client::ArtifactTransferFailure;
-
-        match error.failure() {
-            ArtifactTransferFailure::Connect
-            | ArtifactTransferFailure::Timeout
-            | ArtifactTransferFailure::Request
-            | ArtifactTransferFailure::Body => ModelHubError::Offline,
-            ArtifactTransferFailure::ResponseDigestMismatch
-            | ArtifactTransferFailure::ResponseLengthMismatch => ModelHubError::DigestMismatch {
-                expected: "the digest the handoff declared".to_owned(),
-                actual: "the bytes object storage returned".to_owned(),
-            },
-            other => ModelHubError::Transport(format!("{other:?}")),
-        }
-    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -337,10 +340,9 @@ mod native {
         ArchiveHandoff, ArchiveProgress, CatalogHandoff, ModelHubTransport,
     };
 
-    use rspice_cloud_client::{
-        ArtifactTransferError, CloudClient, CloudError, PackId, PackVersion,
-        contract::ArtifactDownload,
-    };
+    use rspice_cloud_client::{CloudClient, PackId, PackVersion, contract::ArtifactDownload};
+
+    use super::{classify, classify_transfer};
 
     /// The production transport: the typed cloud client, driven on a runtime
     /// the caller owns.
@@ -532,30 +534,5 @@ mod native {
             });
         }
         Ok(bytes.to_vec())
-    }
-
-    fn classify(error: CloudError) -> ModelHubError {
-        match error {
-            CloudError::Transport { .. } => ModelHubError::Offline,
-            CloudError::Problem { details, .. } => ModelHubError::Rejected(details.title.clone()),
-            other => ModelHubError::Transport(format!("{other}")),
-        }
-    }
-
-    fn classify_transfer(error: ArtifactTransferError) -> ModelHubError {
-        use rspice_cloud_client::ArtifactTransferFailure;
-
-        match error.failure() {
-            ArtifactTransferFailure::Connect
-            | ArtifactTransferFailure::Timeout
-            | ArtifactTransferFailure::Request
-            | ArtifactTransferFailure::Body => ModelHubError::Offline,
-            ArtifactTransferFailure::ResponseDigestMismatch
-            | ArtifactTransferFailure::ResponseLengthMismatch => ModelHubError::DigestMismatch {
-                expected: "the digest the handoff declared".to_owned(),
-                actual: "the bytes object storage returned".to_owned(),
-            },
-            other => ModelHubError::Transport(format!("{other:?}")),
-        }
     }
 }
