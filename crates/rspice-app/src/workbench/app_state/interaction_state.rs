@@ -84,9 +84,8 @@ mod tests {
 // =============================================================================
 
 /// State for drag operations (moving selection, rubber-banding)
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct DragState {
-    #[serde(skip)]
     owner: Option<SchematicDragOwner>,
     /// Starting position of the drag (grid coordinates)
     pub start_pos: Option<(i32, i32)>,
@@ -100,7 +99,6 @@ pub struct DragState {
     /// The document's undo baseline, copied when the button went down on
     /// the canvas, for the drag that press may start. Copying it then keeps
     /// the copy off the drag's first move frame.
-    #[serde(skip)]
     prepared: Option<rspice_design::schematic::owned::PreparedBaseline>,
 }
 

@@ -349,12 +349,6 @@ impl SnapEngine {
         }
     }
 
-    /// Set the snap radius
-    pub fn with_radius(mut self, radius: i32) -> Self {
-        self.snap_radius = radius.max(1);
-        self
-    }
-
     /// Find the best snap target for a given position
     ///
     /// # Arguments
@@ -892,14 +886,6 @@ mod tests {
         assert_eq!(result.snapped_position, Point::origin());
     }
 
-    /// with_radius clamps non-positive radii to 1.
-    #[test]
-    fn with_radius_clamps_to_minimum_one() {
-        assert_eq!(SnapEngine::new().with_radius(0).snap_radius, 1);
-        assert_eq!(SnapEngine::new().with_radius(-5).snap_radius, 1);
-        assert_eq!(SnapEngine::new().with_radius(3).snap_radius, 3);
-    }
-
     /// A larger radius captures targets the default radius rejects.
     #[test]
     fn larger_radius_extends_capture() {
@@ -911,7 +897,8 @@ mod tests {
                 .target
                 .is_none()
         );
-        let wide = SnapEngine::new().with_radius(3);
+        let mut wide = SnapEngine::new();
+        wide.snap_radius = 3;
         let result = wide.find_snap_target(Point::origin(), &[], &[], &junctions);
         assert_eq!(result.snapped_position, Point::new(3, 0));
     }
