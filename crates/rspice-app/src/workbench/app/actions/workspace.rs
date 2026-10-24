@@ -321,10 +321,14 @@ impl AppState {
                 // the reader cannot see. A sheet that will not come forward
                 // has said why, and the reader stays where they were.
                 if let Some(sheet) = sheet
-                    && super::sheets::active_sheet_id(self) != Some(sheet)
-                    && super::sheets::activate_sheet(self, sheet).is_err()
+                    && self.model.active_sheet_id() != Some(sheet)
                 {
-                    return;
+                    let outcome = self
+                        .model
+                        .activate_sheet(sheet, self.workbench.interaction.drag.let_go());
+                    if self.workbench.report(outcome).is_err() {
+                        return;
+                    }
                 }
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);

@@ -10,6 +10,7 @@
 
 mod drawing_sheet;
 mod schematic_sync;
+mod sheet_catalog;
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};

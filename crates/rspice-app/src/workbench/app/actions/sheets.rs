@@ -6,23 +6,20 @@
 //! row and the design manager act on the same sheet without three of them
 //! holding a private copy of the catalog.
 //!
-//! Activation is the exception that proves the rule: it is navigation, not
-//! authoring, so it syncs the live schematic into its buffer first, then
-//! retires selection and net highlighting — stale identities from the sheet
-//! being left must never reach a command run on the sheet being entered.
+//! Activation, and the transaction each edit publishes, are the model's own
+//! operations ([`Model::activate_sheet`], [`Model::edit_sheet_catalog`]),
+//! since other features bring a sheet forward too; this module states their
+//! outcome on the status bar.
 
 use crate::state::{
     CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition, CrossSheetPortDirection,
-    CrossSheetPortEndpoint, CrossSheetSignalType, DesignManagementCatalog, DrawingSheetInheritance,
+    CrossSheetPortEndpoint, CrossSheetSignalType, DrawingSheetInheritance,
     DrawingSheetNewSheetPolicy, MoveBoundaryResolution, MoveSelectionRequest, PortDirection,
     PortDiscipline, ReorderPageNumbering, SchematicSheetFormat, SheetCatalog, SheetDefinition,
     SheetDeleteBehavior, SheetDeleteResolution, SheetId, SheetMoveConnectivityPlan,
     SheetPortPolicy, SheetTemplate,
 };
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
-
-const NO_CATALOG: &str = "The active cell view has no governed sheet catalog.";
-const NO_SHEET: &str = "That sheet is no longer part of the governed catalog.";
+use crate::workbench::app_state::{AppState, Model};
 
 /// One sheet as the navigation surfaces present it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,19 +46,7 @@ pub(in crate::workbench) enum SheetDeletePlan {
 }
 
 pub(in crate::workbench) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    state
-        .model
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(
-            &state
-                .model
-                .workspace
-                .content
-                .active_schematic_reference()
-                .key(),
-        )
+    state.model.active_sheet_catalog()
 }
 
 pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
@@ -98,45 +83,47 @@ pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
 }
 
 pub(in crate::workbench) fn active_sheet_id(state: &AppState) -> Option<SheetId> {
-    active_sheet_catalog(state).and_then(SheetCatalog::active_sheet_id)
+    state.model.active_sheet_id()
 }
 
 pub(in crate::workbench) fn sheet_count(state: &AppState) -> usize {
     active_sheet_catalog(state).map_or(0, |catalog| catalog.sheets().len())
 }
 
-/// Make one sheet the canvas the session is editing.
-///
-/// Re-activating the sheet already active is inert: it publishes nothing, so
-/// a chip redrawn every frame cannot advance the project revision.
+/// Make one sheet the canvas the session is editing: [`Model::activate_sheet`],
+/// stated on the status bar.
 pub(in crate::workbench) fn activate_sheet(
     state: &mut AppState,
     id: SheetId,
 ) -> Result<String, String> {
-    let name = state_sheet_name(state, id);
-    let outcome = activate(state, id, name);
-    report(state, outcome)
+    let outcome = state
+        .model
+        .activate_sheet(id, state.workbench.interaction.drag.let_go());
+    state.workbench.report(outcome)
 }
 
 pub(in crate::workbench) fn next_sheet(state: &mut AppState) -> Result<String, String> {
-    step(state, 1)
+    let outcome = state
+        .model
+        .step_sheet(1, state.workbench.interaction.drag.let_go());
+    state.workbench.report(outcome)
 }
 
 pub(in crate::workbench) fn previous_sheet(state: &mut AppState) -> Result<String, String> {
-    step(state, -1)
+    let outcome = state
+        .model
+        .step_sheet(-1, state.workbench.interaction.drag.let_go());
+    state.workbench.report(outcome)
 }
 
-pub(in crate::workbench) fn go_to_sheet(
-    state: &mut AppState,
-    index: usize,
-) -> Result<String, String> {
-    let Some(id) = active_sheet_catalog(state)
-        .and_then(|catalog| catalog.sheets().get(index))
-        .map(|sheet| sheet.id())
-    else {
-        return report(state, Err(NO_SHEET.to_owned()));
-    };
-    activate_sheet(state, id)
+/// [`Model::go_to_sheet`], stated on the status bar. Page navigation reaches
+/// it through [`next_sheet`] and [`previous_sheet`].
+#[cfg(test)]
+fn go_to_sheet(state: &mut AppState, index: usize) -> Result<String, String> {
+    let outcome = state
+        .model
+        .go_to_sheet(index, state.workbench.interaction.drag.let_go());
+    state.workbench.report(outcome)
 }
 
 /// Create a sheet after the active one and enter it.
@@ -152,14 +139,18 @@ pub(in crate::workbench) fn new_sheet_after(
 ) -> Result<String, String> {
     if active_sheet_catalog(state).is_none() {
         let outcome = second_sheet(state).map(|name| format!("Created sheet `{name}`."));
-        return report(state, outcome);
+        return state.workbench.report(outcome);
     }
     match create(state, after) {
         Ok((id, name)) => {
-            let _ = activate(state, id, name.clone());
-            report(state, Ok(format!("Created sheet `{name}`.")))
+            let _ = state
+                .model
+                .activate_sheet(id, state.workbench.interaction.drag.let_go());
+            state
+                .workbench
+                .report(Ok(format!("Created sheet `{name}`.")))
         }
-        Err(error) => report(state, Err(error)),
+        Err(error) => state.workbench.report(Err(error)),
     }
 }
 
@@ -169,17 +160,19 @@ pub(in crate::workbench) fn rename_sheet(
     name: String,
 ) -> Result<String, String> {
     let name = name.trim().to_owned();
-    let outcome = edit_catalog(state, "rename sheet", |catalog| {
-        let revision = catalog
-            .find(id)
-            .map(|sheet| sheet.revision())
-            .ok_or_else(|| NO_SHEET.to_owned())?;
-        catalog
-            .rename_sheet(id, revision, name.clone())
-            .map_err(|error| error.to_string())
-    })
-    .map(|_| format!("Renamed sheet to `{name}`."));
-    report(state, outcome)
+    let outcome = state
+        .model
+        .edit_sheet_catalog("rename sheet", |catalog| {
+            let revision = catalog
+                .find(id)
+                .map(|sheet| sheet.revision())
+                .ok_or_else(|| Model::NO_SUCH_SHEET.to_owned())?;
+            catalog
+                .rename_sheet(id, revision, name.clone())
+                .map_err(|error| error.to_string())
+        })
+        .map(|_| format!("Renamed sheet to `{name}`."));
+    state.workbench.report(outcome)
 }
 
 /// What [`delete_sheet`] would do, under the catalog's own delete policy.
@@ -226,7 +219,7 @@ pub(in crate::workbench) fn delete_sheet(
         destination_name,
     } = plan_delete(state, id)
     {
-        let name = state_sheet_name(state, id);
+        let name = state.model.sheet_name(id);
         let message = format!("Deleting sheet `{name}` waits for confirmation.");
         state.sheets.delete_sheet = Some(
             crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
@@ -250,36 +243,38 @@ pub(in crate::workbench) fn commit_delete_sheet(
     state: &mut AppState,
     id: SheetId,
 ) -> Result<String, String> {
-    let name = state_sheet_name(state, id);
-    let outcome = edit_catalog(state, "delete sheet", |catalog| {
-        let resolution = match catalog.settings().delete_behavior {
-            SheetDeleteBehavior::BlockWhileReferenced => SheetDeleteResolution::BlockIfNotEmpty,
-            SheetDeleteBehavior::MoveReferencesToReviewedReplacement => {
-                match replacement_sheet(catalog, id) {
-                    Some(destination) => SheetDeleteResolution::MoveObjectsTo(destination),
-                    None => SheetDeleteResolution::BlockIfNotEmpty,
+    let name = state.model.sheet_name(id);
+    let outcome = state
+        .model
+        .edit_sheet_catalog("delete sheet", |catalog| {
+            let resolution = match catalog.settings().delete_behavior {
+                SheetDeleteBehavior::BlockWhileReferenced => SheetDeleteResolution::BlockIfNotEmpty,
+                SheetDeleteBehavior::MoveReferencesToReviewedReplacement => {
+                    match replacement_sheet(catalog, id) {
+                        Some(destination) => SheetDeleteResolution::MoveObjectsTo(destination),
+                        None => SheetDeleteResolution::BlockIfNotEmpty,
+                    }
                 }
+            };
+            catalog
+                .delete_sheet(catalog.revision(), id, resolution)
+                .map_err(|error| error.to_string())
+        })
+        .map(|receipt| {
+            if receipt.moved_object_ids.is_empty() {
+                format!("Deleted sheet `{name}`.")
+            } else {
+                format!(
+                    "Deleted sheet `{name}` and moved {} object(s) to the adjacent sheet.",
+                    receipt.moved_object_ids.len()
+                )
             }
-        };
-        catalog
-            .delete_sheet(catalog.revision(), id, resolution)
-            .map_err(|error| error.to_string())
-    })
-    .map(|receipt| {
-        if receipt.moved_object_ids.is_empty() {
-            format!("Deleted sheet `{name}`.")
-        } else {
-            format!(
-                "Deleted sheet `{name}` and moved {} object(s) to the adjacent sheet.",
-                receipt.moved_object_ids.len()
-            )
-        }
-    });
-    let outcome = report(state, outcome);
+        });
+    let outcome = state.workbench.report(outcome);
     if outcome.is_ok() {
         // Deleting the active sheet moves activation inside the catalog's own
         // transaction, so the canvas is entering a sheet it never activated.
-        enter_active_sheet(state);
+        state.model.enter_active_sheet();
     }
     outcome
 }
@@ -289,19 +284,21 @@ pub(in crate::workbench) fn move_sheet(
     id: SheetId,
     to_index: usize,
 ) -> Result<String, String> {
-    let name = state_sheet_name(state, id);
-    let outcome = edit_catalog(state, "reorder sheets", |catalog| {
-        catalog
-            .move_sheet(
-                catalog.revision(),
-                id,
-                to_index,
-                ReorderPageNumbering::UpdatePrintPageNumbers,
-            )
-            .map_err(|error| error.to_string())
-    })
-    .map(|_| format!("Moved sheet `{name}` to position {}.", to_index + 1));
-    report(state, outcome)
+    let name = state.model.sheet_name(id);
+    let outcome = state
+        .model
+        .edit_sheet_catalog("reorder sheets", |catalog| {
+            catalog
+                .move_sheet(
+                    catalog.revision(),
+                    id,
+                    to_index,
+                    ReorderPageNumbering::UpdatePrintPageNumbers,
+                )
+                .map_err(|error| error.to_string())
+        })
+        .map(|_| format!("Moved sheet `{name}` to position {}.", to_index + 1));
+    state.workbench.report(outcome)
 }
 
 /// Move the retained instance selection onto `destination`, creating the typed
@@ -311,7 +308,7 @@ pub(in crate::workbench) fn move_selection_to_sheet(
     destination: SheetId,
 ) -> Result<String, String> {
     let outcome = move_selection(state, destination);
-    report(state, outcome)
+    state.workbench.report(outcome)
 }
 
 /// The explicit boundary-port contract for one sheet move.
@@ -383,81 +380,34 @@ fn move_selection(state: &mut AppState, destination: SheetId) -> Result<String, 
                 .and_then(|object_id| catalog.sheet_for_object(*object_id))
                 .or_else(|| catalog.active_sheet_id())
         })
-        .ok_or_else(|| NO_CATALOG.to_owned())?;
+        .ok_or_else(|| Model::NO_SHEET_CATALOG.to_owned())?;
     if source == destination {
         return Err("The selection already lives on that sheet.".to_owned());
     }
     let resolution = boundary_resolution(&connectivity, source, destination);
     let moved = connectivity.moved_object_ids.clone();
-    let receipt = edit_catalog(state, "move selection to sheet", move |catalog| {
-        let active = catalog.active_sheet_id();
-        catalog
-            .reconcile_object_assignments(catalog.revision(), all_objects, active)
-            .map_err(|error| error.to_string())?;
-        catalog
-            .move_selection(MoveSelectionRequest {
-                expected_catalog_revision: catalog.revision(),
-                object_ids: moved,
-                destination_sheet_id: destination,
-                boundary_resolution: resolution,
-            })
-            .map_err(|error| error.to_string())
-    })?;
+    let receipt = state
+        .model
+        .edit_sheet_catalog("move selection to sheet", move |catalog| {
+            let active = catalog.active_sheet_id();
+            catalog
+                .reconcile_object_assignments(catalog.revision(), all_objects, active)
+                .map_err(|error| error.to_string())?;
+            catalog
+                .move_selection(MoveSelectionRequest {
+                    expected_catalog_revision: catalog.revision(),
+                    object_ids: moved,
+                    destination_sheet_id: destination,
+                    boundary_resolution: resolution,
+                })
+                .map_err(|error| error.to_string())
+        })?;
     Ok(format!(
         "Moved {} object(s) to `{}` with {} explicit boundary port(s).",
         receipt.object_ids.len(),
-        state_sheet_name(state, destination),
+        state.model.sheet_name(destination),
         receipt.created_port_ids.len()
     ))
-}
-
-fn step(state: &mut AppState, delta: isize) -> Result<String, String> {
-    let Some(catalog) = active_sheet_catalog(state) else {
-        return report(state, Err(NO_CATALOG.to_owned()));
-    };
-    let count = catalog.sheets().len();
-    if count < 2 {
-        return report(
-            state,
-            Err("The active cell view has a single sheet.".to_owned()),
-        );
-    }
-    let current = catalog
-        .active_sheet_id()
-        .and_then(|active| {
-            catalog
-                .sheets()
-                .iter()
-                .position(|sheet| sheet.id() == active)
-        })
-        .unwrap_or_default();
-    // Wrapping is the surface's choice, not the catalog's: `next_sheet` stops
-    // at the ends so the durable order stays a line rather than a ring.
-    let index = (current as isize + delta).rem_euclid(count as isize) as usize;
-    go_to_sheet(state, index)
-}
-
-fn activate(state: &mut AppState, id: SheetId, name: String) -> Result<String, String> {
-    if active_sheet_id(state) == Some(id) {
-        return Ok(format!("Sheet `{name}` is already active."));
-    }
-    // Objects authored on the sheet being left take their membership from the
-    // sheet that is still active, so the buffer is synchronized first.
-    state.cancel_schematic_drag();
-    state.sync_active_schematic_to_workspace();
-    edit_catalog(state, "activate sheet", |catalog| {
-        catalog.set_active(id).map_err(|error| error.to_string())
-    })?;
-    enter_active_sheet(state);
-    Ok(format!("Sheet `{name}` is active."))
-}
-
-/// Retire everything that named the sheet just left and frame the new one.
-fn enter_active_sheet(state: &mut AppState) {
-    state.model.schematic.session.editor.selection.clear();
-    state.model.schematic.session.editor.net_highlight.clear();
-    state.model.schematic.session.editor.needs_drawing_sheet_fit = true;
-    state.model.schematic.session.editor.needs_fit = false;
 }
 
 /// Give a drawing with no sheet catalog its catalog: everything already
@@ -482,7 +432,9 @@ pub(in crate::workbench) fn ensure_sheet_catalog(state: &mut AppState) -> Result
     candidate
         .bootstrap_for_cell_view(&key, "Sheet 1", objects)
         .map_err(|error| error.to_string())?;
-    commit(state, "create sheet catalog", before, candidate)
+    state
+        .model
+        .commit_sheet_catalog("create sheet catalog", before, candidate)
 }
 
 /// A drawing with no sheet catalog is one sheet. Its first new sheet creates
@@ -507,7 +459,7 @@ fn second_sheet(state: &mut AppState) -> Result<String, String> {
     let settings = candidate.drawing_sheet_settings().clone();
     let catalog = candidate
         .sheet_catalog_mut(&key)
-        .ok_or_else(|| NO_CATALOG.to_owned())?;
+        .ok_or_else(|| Model::NO_SHEET_CATALOG.to_owned())?;
     let name = unique_sheet_name(catalog);
     let page_format = new_sheet_page_format(&settings, catalog)?;
     let page_number = first_free_page_number(catalog)?;
@@ -526,8 +478,10 @@ fn second_sheet(state: &mut AppState) -> Result<String, String> {
     catalog
         .set_active(second)
         .map_err(|error| error.to_string())?;
-    commit(state, "create sheet", before, candidate)?;
-    enter_active_sheet(state);
+    state
+        .model
+        .commit_sheet_catalog("create sheet", before, candidate)?;
+    state.model.enter_active_sheet();
     Ok(name)
 }
 
@@ -543,27 +497,29 @@ fn create(
         .drawing_sheet_settings()
         .clone();
     let Some(catalog) = active_sheet_catalog(state) else {
-        return Err(NO_CATALOG.to_owned());
+        return Err(Model::NO_SHEET_CATALOG.to_owned());
     };
     let name = unique_sheet_name(catalog);
     let insert_after = insert_after.or_else(|| catalog.active_sheet_id());
     let page_format = new_sheet_page_format(&settings, catalog)?;
     let page_number = first_free_page_number(catalog)?;
     let created = name.clone();
-    let id = edit_catalog(state, "create sheet", move |catalog| {
-        catalog
-            .create_sheet_with_page_format(
-                SheetDefinition {
-                    name: created,
-                    template: SheetTemplate::AnalogSchematic,
-                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                    explicit_page_number: Some(page_number),
-                },
-                insert_after,
-                page_format,
-            )
-            .map_err(|error| error.to_string())
-    })?;
+    let id = state
+        .model
+        .edit_sheet_catalog("create sheet", move |catalog| {
+            catalog
+                .create_sheet_with_page_format(
+                    SheetDefinition {
+                        name: created,
+                        template: SheetTemplate::AnalogSchematic,
+                        port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                        explicit_page_number: Some(page_number),
+                    },
+                    insert_after,
+                    page_format,
+                )
+                .map_err(|error| error.to_string())
+        })?;
     Ok((id, name))
 }
 
@@ -637,12 +593,6 @@ fn replacement_sheet(catalog: &SheetCatalog, id: SheetId) -> Option<SheetId> {
         .or_else(|| catalog.next_sheet(id))
 }
 
-fn state_sheet_name(state: &AppState, id: SheetId) -> String {
-    active_sheet_catalog(state)
-        .and_then(|catalog| catalog.find(id))
-        .map_or_else(|| id.to_string(), |sheet| sheet.name().to_owned())
-}
-
 fn live_object_ids(state: &AppState) -> Vec<u64> {
     let schematic = &state.model.schematic;
     let mut ids = std::collections::BTreeSet::new();
@@ -686,72 +636,6 @@ fn live_object_ids(state: &AppState) -> Vec<u64> {
     );
     ids.extend(schematic.document().probes.iter().map(|object| object.id));
     ids.into_iter().collect()
-}
-
-/// Apply one edit to the active cell view's sheet catalog and publish the
-/// result as a single project transaction, so undo restores the whole change.
-fn edit_catalog<T>(
-    state: &mut AppState,
-    description: &str,
-    edit: impl FnOnce(&mut SheetCatalog) -> Result<T, String>,
-) -> Result<T, String> {
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let before = (*state.model.workspace.content.design_management).clone();
-    let mut candidate = before.clone();
-    let catalog = candidate
-        .sheet_catalog_mut(&key)
-        .ok_or_else(|| NO_CATALOG.to_owned())?;
-    let outcome = edit(catalog)?;
-    commit(state, description, before, candidate)?;
-    Ok(outcome)
-}
-
-fn commit(
-    state: &mut AppState,
-    description: &str,
-    before: DesignManagementCatalog,
-    candidate: DesignManagementCatalog,
-) -> Result<(), String> {
-    candidate.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = state
-        .model
-        .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = state.model.workspace.content.active_schematic_reference();
-    let committed_revision = state
-        .model
-        .workspace
-        .content
-        .replace_design_management(candidate)
-        .map_err(|error| error.to_string())?;
-    state
-        .model
-        .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*state.model.workspace.content.design_management).clone();
-    state
-        .model
-        .record_design_management_transaction(DesignManagementHistoryEntry {
-            description: description.to_owned(),
-            owner,
-            before,
-            after,
-            before_schematics: schematic_tx.before,
-            after_schematics: schematic_tx.after,
-            references: schematic_tx.references,
-            committed_revision,
-        });
-    Ok(())
-}
-
-fn report(state: &mut AppState, outcome: Result<String, String>) -> Result<String, String> {
-    match &outcome {
-        Ok(message) | Err(message) => state.prompt(message.clone()),
-    }
-    outcome
 }
 
 #[cfg(test)]

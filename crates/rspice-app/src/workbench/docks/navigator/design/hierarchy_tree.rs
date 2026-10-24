@@ -1015,7 +1015,11 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
 
     if let Some((occurrence, sheet)) = enter_sheet {
         open_occurrence(&mut app.state, &occurrence);
-        let _ = crate::workbench::app::sheets::activate_sheet(&mut app.state, sheet);
+        let state = &mut app.state;
+        let outcome = state
+            .model
+            .activate_sheet(sheet, state.workbench.interaction.drag.let_go());
+        let _ = state.workbench.report(outcome);
     } else if let Some(path) = descend {
         open_occurrence(&mut app.state, &path);
     }

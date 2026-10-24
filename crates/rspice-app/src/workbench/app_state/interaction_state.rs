@@ -136,6 +136,44 @@ impl DragState {
         self.last_pos = None;
         self.drag_type = DragType::None;
     }
+
+    /// Whether the drag owns the open schematic's pending operation.
+    fn operation_is_current(&self, model: &super::Model) -> bool {
+        self.owner.as_ref().is_some_and(|owner| {
+            owner.project == model.workspace.content.project.id()
+                && owner.document == model.workspace.content.active_schematic_reference()
+                && Some(owner.operation_id) == model.schematic.pending_operation_id()
+        })
+    }
+
+    /// Let go of the schematic drag, rolling back the operation it holds in
+    /// whichever buffer holds it. Answers whether there was a drag.
+    pub(crate) fn cancel_schematic_drag(&mut self, model: &mut super::Model) -> bool {
+        // Occurrence/sheet changes invalidate input but still roll back the
+        // matching active transaction rather than an inactive buffer copy.
+        let active = self.operation_is_current(model);
+        let Some(owner) = self.owner.take() else {
+            return false;
+        };
+        if active {
+            model.schematic.cancel_operation();
+        } else if owner.project == model.workspace.content.project.id()
+            && let Some(mut schematic) = model.workspace.schematic_editor_mut(&owner.document.key())
+            && schematic.editor.pending_operation_id() == Some(owner.operation_id)
+        {
+            schematic.editor.cancel_operation();
+        }
+        self.cancel();
+        true
+    }
+
+    /// [`Self::cancel_schematic_drag`], for a model operation that leaves the
+    /// drawing to run once it knows it will.
+    pub(crate) fn let_go(&mut self) -> impl FnOnce(&mut super::Model) + '_ {
+        |model| {
+            self.cancel_schematic_drag(model);
+        }
+    }
 }
 
 impl super::AppState {
@@ -191,13 +229,7 @@ impl super::AppState {
         self.workbench
             .interaction
             .drag
-            .owner
-            .as_ref()
-            .is_some_and(|owner| {
-                owner.project == self.model.workspace.content.project.id()
-                    && owner.document == self.model.workspace.content.active_schematic_reference()
-                    && Some(owner.operation_id) == self.model.schematic.pending_operation_id()
-            })
+            .operation_is_current(&self.model)
     }
 
     fn schematic_drag_sheet(
@@ -266,25 +298,10 @@ impl super::AppState {
     /// Cancel only the transaction owned by this pointer gesture. A stale
     /// release must never modify a newly opened document or another operation.
     pub(crate) fn cancel_schematic_drag(&mut self) -> bool {
-        // Occurrence/sheet changes invalidate input but still roll back the
-        // matching active transaction rather than an inactive buffer copy.
-        let active = self.schematic_drag_operation_is_current();
-        let Some(owner) = self.workbench.interaction.drag.owner.take() else {
-            return false;
-        };
-        if active {
-            self.model.schematic.cancel_operation();
-        } else if owner.project == self.model.workspace.content.project.id()
-            && let Some(mut schematic) = self
-                .model
-                .workspace
-                .schematic_editor_mut(&owner.document.key())
-            && schematic.editor.pending_operation_id() == Some(owner.operation_id)
-        {
-            schematic.editor.cancel_operation();
-        }
-        self.workbench.interaction.drag.cancel();
-        true
+        self.workbench
+            .interaction
+            .drag
+            .cancel_schematic_drag(&mut self.model)
     }
 
     pub(crate) fn cancel_schematic_drag_in_window(

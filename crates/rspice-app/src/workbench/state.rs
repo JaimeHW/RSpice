@@ -978,6 +978,25 @@ impl WorkbenchSession {
 }
 
 impl WorkbenchSession {
+    /// Answer the gesture just made, on the status bar, as
+    /// [`AppState::prompt`](crate::workbench::app_state::AppState::prompt)
+    /// states it.
+    pub fn prompt(&mut self, text: impl Into<String>) {
+        self.prompt = Some(StatusPrompt {
+            text: text.into(),
+            issued: crate::time_compat::Instant::now(),
+        });
+    }
+
+    /// [`Self::prompt`] what an operation that answers either way said,
+    /// whether it was done or refused, and hand the outcome on.
+    pub(crate) fn report(&mut self, outcome: Result<String, String>) -> Result<String, String> {
+        match &outcome {
+            Ok(message) | Err(message) => self.prompt(message.clone()),
+        }
+        outcome
+    }
+
     /// Show the bottom dock, at its own height and out of focus mode, on
     /// whichever page it last showed.
     pub(crate) fn open_console(&mut self) {

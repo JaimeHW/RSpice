@@ -945,10 +945,7 @@ impl AppState {
     /// replaces it or it expires, and it is never logged or notified, because
     /// it is about the gesture, not an event in the session.
     pub fn prompt(&mut self, text: impl Into<String>) {
-        self.workbench.prompt = Some(crate::workbench::state::StatusPrompt {
-            text: text.into(),
-            issued: crate::time_compat::Instant::now(),
-        });
+        self.workbench.prompt(text);
     }
 
     /// Close a route-owned transient surface without stranding its canonical
