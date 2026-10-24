@@ -905,6 +905,19 @@ pub fn run_digital_testbench(
     };
     let mut plans = Vec::new();
     let (declared, mut instantiated) = declared_modules(&unit)?;
+    // A unit that declares no module still goes through the front end: a
+    // directive, an included file or a primitive in it can be in error, and
+    // only the absence of a module is the absence of a design.
+    if declared.is_empty() {
+        match compiler.compile_canonical_ir_module(&unit, None) {
+            Err(rspice_veriloga::CompileError::ModuleSelection(_)) | Ok(_) => {}
+            Err(error) => {
+                return Err(DigitalRunError::Compile {
+                    detail: error.to_string(),
+                });
+            }
+        }
+    }
     // A module the source instantiates is compiled inside its root, never as
     // a design of its own: on its own, an upward name in it (IEEE 1364-2005
     // section 12.6) has no scope above it to reach.

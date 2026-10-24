@@ -96,7 +96,7 @@ struct Row {
 /// One `primitive ... endprimitive`.
 #[derive(Debug, Clone)]
 pub(super) struct UdpDefinition {
-    name: SmolStr,
+    pub(super) name: SmolStr,
     /// The output, then the inputs, as the header names them.
     ports: Vec<SmolStr>,
     inputs: usize,
@@ -109,6 +109,22 @@ fn refusal(context: &str, found: impl Into<String>, span: Span) -> ParseError {
     ParseError::new(
         ParseErrorKind::UnsupportedConstruct {
             context: context.to_string(),
+            found: found.into(),
+        },
+        span,
+    )
+}
+
+/// A table row the language does not allow: IEEE 1364-2005 section 8.1.4
+/// writes a combinational row `inputs : output ;` and a sequential one
+/// `inputs : state : next ;`, with one symbol for each input and one each for
+/// the state and the output.
+fn malformed(context: &str, found: impl Into<String>, span: Span) -> ParseError {
+    ParseError::new(
+        ParseErrorKind::Expected {
+            expected: format!(
+                "a table row of {context} in the form IEEE 1364-2005 section 8.1.4 gives one"
+            ),
             found: found.into(),
         },
         span,
@@ -236,10 +252,10 @@ impl Parser<'_> {
         }
         for row in &rows {
             if row.0.inputs.len() != inputs {
-                return Err(refusal(
+                return Err(malformed(
                     &context,
                     format!(
-                        "a table row with {} input symbols for {inputs} inputs",
+                        "a row with {} input symbols for {inputs} inputs",
                         row.0.inputs.len()
                     ),
                     row.1,
@@ -257,7 +273,7 @@ impl Parser<'_> {
                 || (registered && !sequential_row)
                 || (!registered && row.0.output == Output::Unchanged)
             {
-                return Err(refusal(
+                return Err(malformed(
                     &context,
                     "a table row of the wrong form; IEEE 1364-2005 sections 8.1.6 and 8.2-8.4 \
                      give a combinational row `inputs : output`, and a sequential one `inputs \
@@ -362,7 +378,7 @@ impl Parser<'_> {
 
     fn udp_row(row: &[(char, Span)], context: &str, span: Span) -> Result<Row, ParseError> {
         let fields: Vec<&[(char, Span)]> = row.split(|(character, _)| *character == ':').collect();
-        let bad = |what: &str| refusal(context, format!("{what} in a table row"), span);
+        let bad = |what: &str| malformed(context, format!("a row with {what}"), span);
         let output = |field: &[(char, Span)]| match field {
             [(character, _)] => match character.to_ascii_lowercase() {
                 '0' => Ok(Output::Zero),

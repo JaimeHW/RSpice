@@ -3367,6 +3367,41 @@ fn primitive_misuse_is_refused_by_name() {
     }
 }
 
+/// A table row of the wrong shape and a second definition of a primitive's
+/// name are language errors (IEEE 1364-2005 sections 8.1.4 and 4.11), not
+/// constructs refused by name.
+#[test]
+fn a_malformed_primitive_is_a_language_error() {
+    let table = |header: &str, row: &str| {
+        format!("primitive p({header});\n  table\n    {row};\n  endtable\nendprimitive\n")
+    };
+    let defined = table("output o, input a", "0 : 1");
+    for (source, expected) in [
+        (
+            table("output o, input a", "? 1 ? 0 0 0 : 0"),
+            "a row with 6 input symbols for 1 inputs",
+        ),
+        (
+            table("output o, input a", "0 : 0 0"),
+            "a row with an output that is not one symbol",
+        ),
+        (
+            table("output reg o, input a", "0 : 0 0 : 0"),
+            "a row with a state that is not one symbol",
+        ),
+        (
+            format!("{defined}{defined}"),
+            "Duplicate primitive declaration: 'p'",
+        ),
+    ] {
+        let error = parse_error(&source);
+        assert!(
+            error.contains(expected) && !error.contains("Unsupported"),
+            "{source}\n{error}"
+        );
+    }
+}
+
 /// A bidirectional switch joins two net bits, so a terminal that is an
 /// expression or a whole vector is refused by the clause.
 #[test]

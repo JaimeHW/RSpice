@@ -310,7 +310,23 @@ impl<'a> Parser<'a> {
                 // accept it in a `.v` source, and it declares nothing.
                 self.advance();
             } else if self.at_primitive() {
-                primitives.push(self.parse_primitive()?);
+                let start = self.current_span();
+                let primitive = self.parse_primitive()?;
+                // IEEE 1364-2005 section 4.11: the definitions name space
+                // holds one definition of a name.
+                if primitives
+                    .iter()
+                    .any(|defined: &udp::UdpDefinition| defined.name == primitive.name)
+                {
+                    return Err(ParseError::new(
+                        ParseErrorKind::Duplicate {
+                            kind: "primitive".to_string(),
+                            name: primitive.name.to_string(),
+                        },
+                        start,
+                    ));
+                }
+                primitives.push(primitive);
             } else if Self::is_digital_construct_keyword(self.current().kind) {
                 // `connectmodule`, `always`, ... at file scope.
                 return Err(self.unsupported_ams_construct());

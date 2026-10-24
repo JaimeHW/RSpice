@@ -1908,6 +1908,44 @@ endmodule
     assert_eq!(stdout(&report), "s=-1474936480 n=30000 t=0\n");
 }
 
+/// A unit that declares no module still goes through the front end: a
+/// directive, a missing include or a primitive in it can be in error, and only
+/// a unit with nothing wrong in it has nothing to run.
+#[test]
+fn a_unit_without_a_module_reports_its_front_end_errors() {
+    let run = |text: &str| {
+        run_digital_testbench(
+            &[("unit.v".into(), text.to_owned())],
+            &HdlTestbenchOptions::default(),
+        )
+        .expect_err("a unit without a module runs nothing")
+    };
+    for (text, expected) in [
+        (
+            "`timescale 1ns/10ns",
+            "precision no coarser than the time unit",
+        ),
+        ("`include \"absent.v\"\n", "Include file not found"),
+        (
+            "primitive p(output o, input a);\n  table\n    0 0 : 1;\n  endtable\nendprimitive\n",
+            "2 input symbols for 1 inputs",
+        ),
+    ] {
+        match run(text) {
+            DigitalRunError::Compile { detail } => {
+                assert!(detail.contains(expected), "{text}: {detail}");
+            }
+            other => panic!("{text}: expected a compile error, got {other:?}"),
+        }
+    }
+    let defined =
+        "primitive p(output o, input a);\n  table\n    0 : 1;\n  endtable\nendprimitive\n";
+    match run(defined) {
+        DigitalRunError::NoDigitalContent { .. } => {}
+        other => panic!("expected nothing to run, got {other:?}"),
+    }
+}
+
 /// Two processes that wake each other with no `#0` between them never settle
 /// (Icarus 13 runs the same source forever); the run reports the oscillation
 /// at the ten-thousandth delta cycle, not at the per-tick ceiling.
