@@ -31,7 +31,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 
 use super::super::commands::vocabulary::Command;
-use super::super::design_system::{WorkbenchIcon, property_card, property_row};
+use super::super::design_system::{WorkbenchIcon, elide_text, property_card, property_row};
 use super::super::state::{ProjectPage, Workspace};
 use recovery::recovery;
 use technology::{open_technology_attachment_dialog, show_technology_attachment_dialog};
@@ -896,46 +896,6 @@ fn muted(ui: &mut Ui, text: &str) {
             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
             .color(tokens.color.text_faint),
     );
-}
-
-fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
-    if max_width <= 0.0 {
-        return String::new();
-    }
-    if ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
-        .size()
-        .x
-        <= max_width
-    {
-        return text.to_owned();
-    }
-    let ellipsis = "\u{2026}";
-    if ui
-        .painter()
-        .layout_no_wrap(ellipsis.to_owned(), font.clone(), Color32::WHITE)
-        .size()
-        .x
-        > max_width
-    {
-        return String::new();
-    }
-    let mut output = text.to_owned();
-    while !output.is_empty() {
-        output.pop();
-        let candidate = format!("{output}{ellipsis}");
-        if ui
-            .painter()
-            .layout_no_wrap(candidate.clone(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-            <= max_width
-        {
-            return candidate;
-        }
-    }
-    ellipsis.to_owned()
 }
 
 #[cfg(test)]

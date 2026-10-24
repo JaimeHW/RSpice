@@ -17,6 +17,7 @@ use egui::{Rect, Sense, Ui, pos2, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
+use crate::workbench::design_system::elide_text;
 
 /// Height of a table's head band.
 pub(super) const TABLE_HEAD_H: f32 = 24.0;
@@ -515,7 +516,7 @@ fn paint_words(ui: &Ui, cell: Rect, span: egui::Rangef, words: Words<'_>) -> Opt
         return None;
     }
     let mark_room = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
-    let shown = elide(ui, text, &font, (span.span() - mark_room).max(0.0));
+    let shown = elide_text(ui, text, &font, (span.span() - mark_room).max(0.0));
     let galley = ui.painter().layout_no_wrap(shown, font, color);
     let text_width = galley.size().x;
     let left = match align {
@@ -537,9 +538,4 @@ fn paint_words(ui: &Ui, cell: Rect, span: egui::Rangef, words: Words<'_>) -> Opt
     let landed = Rect::from_min_size(pos2(left, top), galley.size());
     painter.galley(landed.min, galley, color);
     Some(landed)
-}
-
-/// `text` shortened with an ellipsis until it fits `max_width`.
-pub(super) fn elide(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
-    crate::workbench::design_system::elide_text(ui, text, font, max_width)
 }

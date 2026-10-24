@@ -13,8 +13,9 @@ use egui::{Rect, Sense, Ui, pos2, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark, select};
+use crate::workbench::design_system::elide_text;
 
-use super::table::{TABLE_EDGE_INSET, elide};
+use super::table::TABLE_EDGE_INSET;
 
 /// Height of the toolbar row: a control and its padding above and below.
 pub(super) const TOOLBAR_H: f32 = 36.0;
@@ -299,7 +300,7 @@ fn paint_summary(ui: &mut Ui, line: Rect, summary: &Summary) {
     } else {
         0.0
     };
-    let words = elide(
+    let words = elide_text(
         ui,
         &summary.text,
         &font,
@@ -355,7 +356,7 @@ pub(super) fn empty_line(ui: &mut Ui, text: &str, action: Option<&str>) -> bool 
     super::raster::probe(ui, "empty", rect);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let button_width = action.map_or(0.0, |label| Button::new(label).measured_width(ui) + 12.0);
-    let words = elide(
+    let words = elide_text(
         ui,
         text,
         &font,

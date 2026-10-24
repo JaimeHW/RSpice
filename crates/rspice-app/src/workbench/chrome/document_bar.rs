@@ -17,7 +17,7 @@ use crate::workbench::AppState;
 use crate::workbench::framework::host::DocumentHost;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::WorkbenchIcon;
+use super::super::design_system::{WorkbenchIcon, elide_text};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
 
@@ -938,8 +938,7 @@ fn document_tab(
         egui::pos2(label_x, rect.top()),
         egui::pos2(suffix_left.max(label_x), rect.bottom()),
     );
-    let painted_label =
-        ellipsize_document_label(ui.painter(), shown, &font, (suffix_left - label_x).max(0.0));
+    let painted_label = elide_text(ui, shown, &font, (suffix_left - label_x).max(0.0));
     let shortened = painted_label != label;
     let galley = ui
         .painter()
@@ -1008,60 +1007,6 @@ fn document_tab(
         response,
         close_clicked,
     }
-}
-
-fn ellipsize_document_label(
-    painter: &egui::Painter,
-    value: &str,
-    font: &egui::FontId,
-    maximum_width: f32,
-) -> String {
-    if maximum_width <= 0.0 {
-        return String::new();
-    }
-    if painter
-        .layout_no_wrap(value.to_owned(), font.clone(), egui::Color32::WHITE)
-        .size()
-        .x
-        <= maximum_width
-    {
-        return value.to_owned();
-    }
-    let ellipsis = "\u{2026}";
-    if painter
-        .layout_no_wrap(ellipsis.to_owned(), font.clone(), egui::Color32::WHITE)
-        .size()
-        .x
-        > maximum_width
-    {
-        return String::new();
-    }
-    let characters = value.chars().collect::<Vec<_>>();
-    let mut low = 0_usize;
-    let mut high = characters.len();
-    while low < high {
-        let mid = (low + high).div_ceil(2);
-        let candidate = characters[..mid]
-            .iter()
-            .copied()
-            .chain(std::iter::once('\u{2026}'))
-            .collect::<String>();
-        if painter
-            .layout_no_wrap(candidate, font.clone(), egui::Color32::WHITE)
-            .size()
-            .x
-            <= maximum_width
-        {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    characters[..low]
-        .iter()
-        .copied()
-        .chain(std::iter::once('\u{2026}'))
-        .collect()
 }
 
 fn suffix_width(dirty: bool, closable: bool) -> f32 {
@@ -1422,12 +1367,7 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-                fitted = ellipsize_document_label(
-                    ui.painter(),
-                    "precision_sensor_front_end · schematic",
-                    &font,
-                    72.0,
-                );
+                fitted = elide_text(ui, "precision_sensor_front_end · schematic", &font, 72.0);
                 let width = ui
                     .painter()
                     .layout_no_wrap(fitted.clone(), font, egui::Color32::WHITE)
