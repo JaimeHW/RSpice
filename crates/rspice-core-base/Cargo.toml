@@ -85,7 +85,7 @@ thiserror.workspace = true
 log.workspace = true
 num-complex.workspace = true
 # Exact sparse rank decisions for ideal-source shooting constraints.
-num-bigint = "0.4.8"
+num-bigint = "0.5.1"
 libm = "0.2"
 # Pure-Rust HDF5, MIT, no C dependency. `mmap` is a default feature and is off
 # here: `io::hdf5` builds a document in memory and hands the bytes to a writer,
