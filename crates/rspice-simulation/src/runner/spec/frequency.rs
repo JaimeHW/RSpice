@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use rspice_core::abort_signal::AbortSignal;
 
+use super::insert_scalar_waveform;
 use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
@@ -232,7 +233,6 @@ fn run_sparameter(
                     frequencies.clone(),
                     values,
                     unit,
-                    "Hz",
                 );
             }
             let mut optimum = complex_waveform(
@@ -536,7 +536,6 @@ fn project_pxf(
         "Converted Output Frequency".to_owned(),
         data.offset_frequencies.clone(),
         data.output_frequencies,
-        "Hz",
         "Hz",
     );
     insert_group_delay(&mut waveforms, data.group_delay, abort)?;
@@ -1049,7 +1048,6 @@ fn project_pstb(
         data.mode_indices.clone(),
         data.multiplier_magnitude,
         "",
-        "mode",
     );
     insert_scalar_waveform(
         &mut waveforms,
@@ -1057,7 +1055,6 @@ fn project_pstb(
         data.mode_indices.clone(),
         data.multiplier_phase_deg,
         "deg",
-        "mode",
     );
     insert_scalar_waveform(
         &mut waveforms,
@@ -1065,7 +1062,6 @@ fn project_pstb(
         data.mode_indices.clone(),
         data.stability_margin_db,
         "dB",
-        "mode",
     );
     insert_scalar_waveform(
         &mut waveforms,
@@ -1073,7 +1069,6 @@ fn project_pstb(
         data.mode_indices.clone(),
         data.mode_damping,
         "1/s",
-        "mode",
     );
     insert_scalar_waveform(
         &mut waveforms,
@@ -1081,7 +1076,6 @@ fn project_pstb(
         data.mode_indices.clone(),
         data.mode_frequency_hz,
         "Hz",
-        "mode",
     );
     insert_scalar_waveform(
         &mut waveforms,
@@ -1089,7 +1083,6 @@ fn project_pstb(
         data.mode_indices.clone(),
         data.probe_mode_participation,
         "",
-        "mode",
     );
 
     let modes = data
@@ -1291,7 +1284,6 @@ fn insert_group_delay(
             frequencies,
             delays,
             "s",
-            "Hz",
         );
     }
     Ok(())
@@ -1411,27 +1403,6 @@ fn required_execution_option<T>(
     let option = option.ok_or_else(|| SimulationError::InvalidConfig(message.to_string()));
     super::ensure_not_aborted(abort)?;
     option
-}
-
-fn insert_scalar_waveform(
-    waveforms: &mut HashMap<String, SampledWaveform>,
-    name: String,
-    x_values: Vec<f64>,
-    y_values: Vec<f64>,
-    y_unit: &str,
-    _x_unit: &str,
-) {
-    waveforms.insert(
-        name.clone(),
-        SampledWaveform {
-            name,
-            x_values,
-            y_values,
-            y_unit: y_unit.to_string(),
-            is_complex: false,
-            y_imag: None,
-        },
-    );
 }
 
 #[cfg(test)]

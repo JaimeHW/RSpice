@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use rspice_core::abort_signal::AbortSignal;
 
 use super::frequency::frequency_measurement;
+use super::insert_scalar_waveform;
 use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
@@ -1205,7 +1206,6 @@ fn run_fourier(
                 vec![fundamental_freq],
                 vec![thd_percent],
                 "%",
-                "Hz",
             );
         }
         insert_scalar_waveform(
@@ -1218,7 +1218,6 @@ fn run_fourier(
             vec![0.0],
             vec![data.dc_component],
             output_unit,
-            "Hz",
         );
         if harmonic_frequencies.is_empty() {
             harmonic_frequencies = data.frequencies;
@@ -1604,27 +1603,6 @@ fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), Simula
         super::ensure_not_aborted(abort)?;
     }
     Ok(())
-}
-
-fn insert_scalar_waveform(
-    waveforms: &mut HashMap<String, SampledWaveform>,
-    name: String,
-    x_values: Vec<f64>,
-    y_values: Vec<f64>,
-    y_unit: &str,
-    _x_unit: &str,
-) {
-    waveforms.insert(
-        name.clone(),
-        SampledWaveform {
-            name,
-            x_values,
-            y_values,
-            y_unit: y_unit.to_string(),
-            is_complex: false,
-            y_imag: None,
-        },
-    );
 }
 
 fn fourier_output_unit(output_expression: &str) -> &'static str {

@@ -15,7 +15,7 @@ use super::AnalysisExecutionEnvironment;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
 use crate::execution_options::SpecExecutionOptions;
-use crate::results::SimulationResult;
+use crate::results::{SampledWaveform, SimulationResult};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
 type CheckpointObserver<'a> = dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync + 'a;
@@ -396,6 +396,27 @@ pub(super) fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), Simulati
     } else {
         Ok(())
     }
+}
+
+/// Record one real-valued trace under its own name.
+fn insert_scalar_waveform(
+    waveforms: &mut std::collections::HashMap<String, SampledWaveform>,
+    name: String,
+    x_values: Vec<f64>,
+    y_values: Vec<f64>,
+    y_unit: &str,
+) {
+    waveforms.insert(
+        name.clone(),
+        SampledWaveform {
+            name,
+            x_values,
+            y_values,
+            y_unit: y_unit.to_string(),
+            is_complex: false,
+            y_imag: None,
+        },
+    );
 }
 
 pub(super) use crate::error::run_abort_aware_service;

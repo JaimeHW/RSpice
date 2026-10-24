@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 
+use super::insert_scalar_waveform;
 use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
-use crate::results::{SampledWaveform, SimulationResult};
+use crate::results::SimulationResult;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::OptimizationAlgorithm;
 use rspice_simulation_contract::analysis_spec::OptimizationGoal;
@@ -270,7 +271,6 @@ fn run_optimization(
         data.iterations.clone(),
         data.costs.clone(),
         "cost",
-        "iter",
     );
     for (name, values) in &data.variable_traces {
         super::ensure_not_aborted(abort)?;
@@ -280,7 +280,6 @@ fn run_optimization(
             data.iterations.clone(),
             values.clone(),
             "value",
-            "iter",
         );
     }
 
@@ -312,7 +311,6 @@ fn run_soa(
         data.time.clone(),
         data.violation_count.clone(),
         "count",
-        "s",
     );
     for trace in &data.stress_history {
         super::ensure_not_aborted(abort)?;
@@ -326,7 +324,6 @@ fn run_soa(
                 data.time.clone(),
                 envelope.limits_a.clone(),
                 "A",
-                "s",
             );
             insert_scalar_waveform(
                 &mut waveforms,
@@ -337,7 +334,6 @@ fn run_soa(
                 data.time.clone(),
                 envelope.voltages_v.clone(),
                 "V",
-                "s",
             );
         }
         if let Some(derating) = &trace.derating {
@@ -347,7 +343,6 @@ fn run_soa(
                 data.time.clone(),
                 derating.limits_w.clone(),
                 "W",
-                "s",
             );
             insert_scalar_waveform(
                 &mut waveforms,
@@ -355,7 +350,6 @@ fn run_soa(
                 data.time.clone(),
                 derating.temperatures_kelvin.clone(),
                 "K",
-                "s",
             );
         }
         insert_scalar_waveform(
@@ -364,7 +358,6 @@ fn run_soa(
             data.time.clone(),
             trace.values.clone(),
             &trace.unit,
-            "s",
         );
     }
 
@@ -394,7 +387,6 @@ fn run_soa(
                 reporting.times().to_vec(),
                 values,
                 &wave.unit,
-                "s",
             );
         }
         (
@@ -412,27 +404,6 @@ fn run_soa(
         violations: data.violations,
         evaluations: data.evaluations,
     })
-}
-
-fn insert_scalar_waveform(
-    waveforms: &mut HashMap<String, SampledWaveform>,
-    name: String,
-    x_values: Vec<f64>,
-    y_values: Vec<f64>,
-    y_unit: &str,
-    _x_unit: &str,
-) {
-    waveforms.insert(
-        name.clone(),
-        SampledWaveform {
-            name,
-            x_values,
-            y_values,
-            y_unit: y_unit.to_string(),
-            is_complex: false,
-            y_imag: None,
-        },
-    );
 }
 
 #[cfg(test)]
