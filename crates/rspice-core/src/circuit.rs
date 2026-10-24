@@ -723,6 +723,13 @@ pub struct CircuitData {
     /// compares. Deliberately outside every rollback image, for the reason
     /// [`XspiceOutputIterates`] gives.
     pub(crate) xspice_output_iterates: XspiceOutputIterates,
+    /// How far ahead of the clock an instant a code model scheduled is still
+    /// the current instant in a transient evaluation
+    /// ([`crate::numerics::integration::code_model_coincidence`]). The
+    /// transient stepper sets it for each attempt from its floor and its
+    /// breakpoint schedule; every other analysis evaluates with the
+    /// compatibility window.
+    pub(crate) xspice_code_model_coincidence: Value,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.

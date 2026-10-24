@@ -198,7 +198,6 @@ pub(crate) struct CircuitScheduler {
         Option<std::sync::Arc<super::external_models::XspiceDigitalBindings>>,
     /// Smallest interval the analog solver may advance by, or zero when
     /// nothing has declared one. See [`Self::set_analog_step_floor`].
-    #[cfg(feature = "veriloga")]
     analog_step_floor: Value,
     /// One candidate ledger per enrolled mixed instance, in circuit
     /// registration order.
@@ -233,7 +232,6 @@ impl CircuitScheduler {
             mixed_digital_coordinator: None,
             #[cfg(feature = "veriloga")]
             mixed_xspice_bindings: None,
-            #[cfg(feature = "veriloga")]
             analog_step_floor: 0.0,
             #[cfg(feature = "veriloga")]
             ledgers: Vec::new(),
@@ -369,18 +367,22 @@ impl CircuitScheduler {
     /// here and stored once here; the coordinator holds a published copy of
     /// this one value so that its own missed-breakpoint guard can read it
     /// without the circuit, and [`Self::analog_step_floor`] is what everything
-    /// else reads.
-    #[cfg(feature = "veriloga")]
+    /// else reads: the event lattice below, and the window every code model
+    /// counts as its current instant, coupled or not, which is why the floor
+    /// is kept in a build without mixed modules too.
     pub(crate) fn set_analog_step_floor(&mut self, floor: Value) {
         self.analog_step_floor = if floor.is_finite() && floor > 0.0 {
             floor
         } else {
             0.0
         };
-        if let Some(coordinator) = self.mixed_digital_coordinator.as_mut() {
-            coordinator.set_analog_step_floor(self.analog_step_floor);
+        #[cfg(feature = "veriloga")]
+        {
+            if let Some(coordinator) = self.mixed_digital_coordinator.as_mut() {
+                coordinator.set_analog_step_floor(self.analog_step_floor);
+            }
+            self.publish_event_lattice();
         }
-        self.publish_event_lattice();
     }
 
     /// Hand the code-model queue the HDL tick lattice it keys outputs on, or
@@ -409,7 +411,6 @@ impl CircuitScheduler {
 
     /// The floor every lane measures a stepped-past activation against, or
     /// zero when no solver has declared one.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn analog_step_floor(&self) -> Value {
         self.analog_step_floor
     }
@@ -443,12 +444,14 @@ impl super::CircuitData {
     /// published copy of that one value, because a host's own
     /// missed-breakpoint guard runs deep inside a trial where the circuit is
     /// split apart and the scheduler is not reachable.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn set_analog_step_floor(&mut self, floor: Value) {
         self.scheduler.set_analog_step_floor(floor);
-        let floor = self.scheduler.analog_step_floor();
-        for host in &mut self.mixed_signal_hosts {
-            host.set_analog_step_floor(floor);
+        #[cfg(feature = "veriloga")]
+        {
+            let floor = self.scheduler.analog_step_floor();
+            for host in &mut self.mixed_signal_hosts {
+                host.set_analog_step_floor(floor);
+            }
         }
     }
 

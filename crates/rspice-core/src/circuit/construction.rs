@@ -102,6 +102,9 @@ impl CircuitData {
             xspice_dispatch_pending: Vec::new(),
             xspice_dispatch_next_pending: Vec::new(),
             xspice_output_iterates: XspiceOutputIterates::default(),
+            xspice_code_model_coincidence: crate::numerics::integration::code_model_coincidence(
+                0.0, 0.0,
+            ),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,
             xspice_evaluation_warning: None,

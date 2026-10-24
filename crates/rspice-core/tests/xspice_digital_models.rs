@@ -5043,3 +5043,91 @@ fn d_cosim_without_a_runtime_provider_is_refused_at_elaboration() {
         assert!(text.contains(expected), "missing {expected:?} in {text}");
     }
 }
+
+/// A 2 kHz nco (`mult_factor` makes the half period `5e-4` exactly) behind a
+/// 1 ns DAC, beside a 1 kHz PULSE whose rising corners `0.5m + k * 1m` fall
+/// just before the nco's chained toggles `sum 5e-4` from the eleventh on:
+/// 1.7e-18 s before it, growing to 1.4e-17 s by the 39th. Each gap is inside
+/// the breakpoint schedule's merge tolerance at a 1 us or 10 us maximum step,
+/// so the toggle's request is absorbed into the corner and the step lands
+/// early.
+const NCO_BESIDE_PULSE_CORNERS: &str = "\
+* nco toggles a hair after PULSE corners
+vz z 0 dc 0
+a0 [z z z z z z z] [n0 n1 n2 n3 n4 n5 n6] adc1
+.model adc1 adc_bridge(in_low=0.3 in_high=0.7)
+a1 [n0 n1 n2 n3 n4 n5 n6] dout nco1
+.model nco1 nco(delay=1e-9 mult_factor=244.62497767797078)
+a2 [dout] [aout] dac1
+.model dac1 dac_bridge(out_low=0 out_high=1 out_undef=0.5 t_rise=1e-9 t_fall=1e-9)
+r1 aout 0 1k
+v2 p 0 pulse(0 1 0.5m 1n 1n 0.2m 1m)
+r2 p 0 1k
+.end
+";
+
+/// Each time `values` crosses `level`, interpolated linearly between the
+/// accepted points either side of it, as `.meas ... cross=` counts them.
+fn level_crossings(times: &[f64], values: &[f64], level: f64) -> Vec<f64> {
+    times
+        .windows(2)
+        .zip(values.windows(2))
+        .filter_map(|(time, value)| {
+            let (before, after) = (value[0] - level, value[1] - level);
+            ((before < 0.0 && after >= 0.0) || (before > 0.0 && after <= 0.0))
+                .then(|| time[0] + (time[1] - time[0]) * before / (before - after))
+        })
+        .collect()
+}
+
+/// How long after each nominal toggle `j * 0.5 ms` the DAC output crosses its
+/// midpoint: the nco's 1 ns delay plus half the 1 ns ramp, 1.5 ns, at every
+/// edge whose phase is kept.
+fn nco_edge_delays(result: &TransientResult) -> Vec<f64> {
+    level_crossings(&result.time, transient_node_series(result, "aout"), 0.5)
+        .into_iter()
+        .enumerate()
+        .map(|(index, crossing)| crossing - (index + 1) as f64 * 0.5e-3)
+        .collect()
+}
+
+fn assert_nco_keeps_its_phase(label: &str, result: &TransientResult, edges: usize) {
+    let delays = nco_edge_delays(result);
+    assert_eq!(delays.len(), edges, "{label}: crossings {delays:?}");
+    for (index, delay) in delays.iter().enumerate() {
+        assert!(
+            (delay - 1.5e-9).abs() <= 1.0e-13,
+            "{label}: edge {} crosses {delay:e} s after its nominal toggle, not 1.5 ns: \
+             {delays:?}",
+            index + 1
+        );
+    }
+}
+
+#[test]
+fn an_nco_toggle_absorbed_into_an_earlier_pulse_corner_keeps_its_phase() {
+    let netlist = Netlist::parse(NCO_BESIDE_PULSE_CORNERS).expect("deck parses");
+    // At a 1 us maximum step the merge tolerance (1e-16) is what absorbs the
+    // toggle; at 10 us (1e-15) it is so ten times over, while the floor alone
+    // (1e-16) would still leave a 3e-16 absorption unhandled.
+    for max_step in [1.0e-6, 10.0e-6] {
+        let result = Engine::default()
+            .run_tran(&netlist, 20.0e-3, max_step)
+            .expect("transient solves");
+        assert_nco_keeps_its_phase(&format!("max step {max_step:e}"), &result, 39);
+    }
+}
+
+#[test]
+fn an_nco_toggle_keeps_its_phase_under_the_xyce_schedule() {
+    // Xyce's merge tolerance is 1e-20, so nothing is absorbed early; the
+    // window is the clock-relative floor alone and must change nothing.
+    let netlist = Netlist::parse(NCO_BESIDE_PULSE_CORNERS).expect("deck parses");
+    let result = Engine::new(rspice_core::engine::SimulationConfig {
+        spice_dialect: rspice_core::engine::SpiceDialect::Xyce,
+        ..rspice_core::engine::SimulationConfig::default()
+    })
+    .run_tran(&netlist, 20.0e-3, 1.0e-6)
+    .expect("transient solves");
+    assert_nco_keeps_its_phase("xyce", &result, 39);
+}

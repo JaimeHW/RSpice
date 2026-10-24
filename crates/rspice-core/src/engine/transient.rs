@@ -505,6 +505,28 @@ fn hard_min_at_clock(dialect_min_dt: Value, model_min_dt: Value, time: Value) ->
         .max(crate::numerics::integration::clock_resolution(time))
 }
 
+/// Tell every code model what it counts as the current instant in the attempt
+/// about to start: an instant no further ahead than the schedule lands a step
+/// early, or than the solver floor lets a step reach
+/// ([`crate::numerics::integration::code_model_coincidence`]).
+///
+/// The floor is the one the scheduler was last told
+/// (`CircuitData::set_analog_step_floor`), the same value the coupled event
+/// queue's tick lattice and every mixed module's missed-breakpoint guard are
+/// built from, so the window and the lattice can never disagree about it. It
+/// is the attempt's own, fixed for its trial and acceptance evaluations alike,
+/// so one instant gets one answer from both.
+fn publish_code_model_coincidence(
+    circuit: &mut crate::circuit::CircuitData,
+    breakpoints: &BreakpointManager,
+) {
+    let floor = circuit.scheduler.analog_step_floor();
+    circuit.set_code_model_coincidence(crate::numerics::integration::code_model_coincidence(
+        floor,
+        breakpoints.merge_tolerance(),
+    ));
+}
+
 /// A Verilog-A step bound, carried onto the instant its event was reconciled
 /// onto.
 ///
@@ -5599,9 +5621,10 @@ impl Engine {
         // A mixed module's discrete half schedules on its own declared
         // precision, which can be far finer than this. Tell it what the analog
         // side can resolve so an activation inside that window is landed
-        // instead of reported as a breakpoint the stepper skipped.
-        #[cfg(feature = "veriloga")]
+        // instead of reported as a breakpoint the stepper skipped. A code
+        // model's window is built from the same floor.
         circuit.set_analog_step_floor(hard_min_dt);
+        publish_code_model_coincidence(&mut circuit, &breakpoints);
         let mut xyce_breakpoint_span_ceiling = XyceBreakpointSpanCeiling::new(
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
@@ -7630,7 +7653,6 @@ impl Engine {
                     let floor = hard_min_at_clock(dialect_min_dt, model_min_dt, t);
                     if floor > timestep.hard_min_dt() {
                         timestep.set_hard_min_dt(floor);
-                        #[cfg(feature = "veriloga")]
                         circuit.set_analog_step_floor(timestep.hard_min_dt());
                     }
                 }
@@ -7653,9 +7675,9 @@ impl Engine {
                 // below the clock's resolution either.
                 dialect_min_dt = xyce_hard_min_timestep(t);
                 timestep.set_hard_min_dt(dialect_min_dt.max(model_min_dt));
-                // Xyce's floor moves with the clock, so the mixed modules'
-                // copy of it moves with every accepted point.
-                #[cfg(feature = "veriloga")]
+                // Xyce's floor moves with the clock, so the scheduler's copy
+                // of it, and the mixed modules', move with every accepted
+                // point.
                 circuit.set_analog_step_floor(timestep.hard_min_dt());
                 let breakpoint_tolerance = 2.0 * dialect_min_dt;
                 circuit
@@ -7665,6 +7687,7 @@ impl Engine {
                     .current_sources
                     .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
             }
+            publish_code_model_coincidence(&mut circuit, &breakpoints);
             if let Some(target) = pending_veriloga_event_time {
                 let event_dt = target - t;
                 if !target.is_finite() || target <= t || !event_dt.is_finite() {

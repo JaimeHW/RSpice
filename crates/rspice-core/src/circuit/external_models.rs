@@ -137,6 +137,9 @@ pub(crate) struct XspiceActiveWave {
     phase: crate::xspice::EvaluationPhase,
     coefficients: crate::numerics::integration::CompanionCoefficients,
     xyce_one_step_order2: bool,
+    /// The window the wave's code models count as the current instant
+    /// ([`crate::xspice::CmContext::is_due`]).
+    coincidence: Value,
     current_source_values: Vec<Value>,
     analog_transitions: crate::xspice::AnalogTransitionMap,
     pass: usize,
@@ -1514,6 +1517,13 @@ impl CircuitData {
         iterates.have_current = true;
     }
 
+    /// Set the window every code model counts as the current instant in the
+    /// transient evaluations that follow
+    /// ([`crate::numerics::integration::code_model_coincidence`]).
+    pub(crate) fn set_code_model_coincidence(&mut self, window: Value) {
+        self.xspice_code_model_coincidence = window;
+    }
+
     pub(crate) fn begin_xspice_active_wave(
         &mut self,
         time: Value,
@@ -1542,6 +1552,13 @@ impl CircuitData {
             phase,
             coefficients: *companion.coefficients,
             xyce_one_step_order2: companion.xyce_one_step_order2,
+            // Only the transient stepper lands steps early; every other
+            // analysis evaluates at the instant it names.
+            coincidence: if analysis == crate::xspice::AnalysisType::Transient {
+                self.xspice_code_model_coincidence
+            } else {
+                crate::numerics::integration::code_model_coincidence(0.0, 0.0)
+            },
             current_source_values: self.current_sources.values_at_time(time),
             analog_transitions: Default::default(),
             pass: 0,
@@ -1724,6 +1741,7 @@ impl CircuitData {
         let phase = wave.phase;
         let companion_coefficients = wave.coefficients;
         let xyce_one_step_order2 = wave.xyce_one_step_order2;
+        let coincidence = wave.coincidence;
         let current_source_values = &wave.current_source_values;
         let analog_transitions = &mut wave.analog_transitions;
         let pass = wave.pass;
@@ -1861,6 +1879,7 @@ impl CircuitData {
             }
             instance.set_transient_companion_coefficients(companion_coefficients);
             instance.set_xyce_one_step_order2(xyce_one_step_order2);
+            instance.set_code_model_coincidence(coincidence);
             if let Err(e) = instance.update_inputs_with_analog_transitions(
                 solution,
                 num_nodes,

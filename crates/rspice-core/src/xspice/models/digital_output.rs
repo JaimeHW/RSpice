@@ -603,7 +603,7 @@ impl XyceDTff {
             let input_transition_time = clk_transition_time.max(t_transition_time);
             let target = !q.unwrap_or(false);
             let pending_time = input_transition_time + params.delay;
-            if pending_time <= ctx.time + 1.0e-18 {
+            if ctx.is_due(pending_time) {
                 transition_from = q;
                 q = Some(target);
                 transition_start = pending_time;
@@ -617,7 +617,7 @@ impl XyceDTff {
 
         if let Some(target) = pending_q {
             let pending_time = ctx.state_prev(STATE_PENDING_TIME);
-            if pending_time.is_finite() && pending_time <= ctx.time + 1.0e-18 {
+            if pending_time.is_finite() && ctx.is_due(pending_time) {
                 transition_from = q;
                 q = Some(target);
                 transition_start = pending_time;
@@ -805,7 +805,7 @@ impl CodeModel for XyceDTff {
         if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
             && let Some(q) = q
             && let Some(end) = transition_time_for_state(q, transition_start, params)
-            && end > ctx.time + 1.0e-18
+            && ctx.is_ahead(end)
         {
             ctx.request_breakpoint(end);
         }
@@ -1130,7 +1130,7 @@ impl XyceDGate {
         } else {
             if let Some(target) = pending_q
                 && pending_time.is_finite()
-                && pending_time <= ctx.time + 1.0e-18
+                && ctx.is_due(pending_time)
             {
                 transition_from = q;
                 q = Some(target);
@@ -1140,7 +1140,7 @@ impl XyceDGate {
             match desired {
                 Some(target) if Some(target) != q => {
                     let event_time = last_input_transition_time + params.delay;
-                    if event_time <= ctx.time + 1.0e-18 {
+                    if ctx.is_due(event_time) {
                         transition_from = q;
                         q = Some(target);
                         transition_start = event_time;
@@ -1500,7 +1500,7 @@ impl XyceDAdd {
         } else {
             if let Some(target) = pending_q
                 && pending_time.is_finite()
-                && pending_time <= ctx.time + 1.0e-18
+                && ctx.is_due(pending_time)
             {
                 transition_from = q;
                 q = Some(target);
@@ -1510,7 +1510,7 @@ impl XyceDAdd {
             match desired {
                 Some(target) if Some(target) != q => {
                     let event_time = last_input_transition_time + params.delay;
-                    if event_time <= ctx.time + 1.0e-18 {
+                    if ctx.is_due(event_time) {
                         transition_from = q;
                         q = Some(target);
                         transition_start = event_time;
@@ -1789,7 +1789,7 @@ impl CodeModel for XyceDAdd {
             for (state, start) in [(sum, sum_start), (carry, carry_start)] {
                 if let Some(state) = state
                     && let Some(end) = transition_time_for_state(state, start, params)
-                    && end > ctx.time + 1.0e-18
+                    && ctx.is_ahead(end)
                 {
                     ctx.request_breakpoint(end);
                 }
@@ -2070,7 +2070,7 @@ impl XyceDLegacyGate {
         } else {
             if let Some(target) = pending_q
                 && pending_time.is_finite()
-                && pending_time <= ctx.time + 1.0e-18
+                && ctx.is_due(pending_time)
             {
                 transition_from = q;
                 q = Some(target);
@@ -2079,7 +2079,7 @@ impl XyceDLegacyGate {
             match desired {
                 Some(target) if Some(target) != q => {
                     let event_time = last_input_transition_time + params.delay;
-                    if event_time <= ctx.time + 1.0e-18 {
+                    if ctx.is_due(event_time) {
                         transition_from = q;
                         q = Some(target);
                         transition_start = event_time;
@@ -2842,7 +2842,9 @@ impl XyceDLegacyDff {
                 // Xyce recomputes the output event from the latest input
                 // transition on every trial.  A later input transition can
                 // therefore move an already scheduled event forward while
-                // the truth-table target remains unchanged.
+                // the truth-table target remains unchanged. Two scheduled
+                // instants are compared here, not an instant with the clock,
+                // so the window a landing spans does not apply.
                 let event_time = last_input_transition_time + event_delay;
                 if event_time.is_finite() && event_time > pending_time + 1.0e-18 {
                     pending_time = event_time;
@@ -2864,7 +2866,7 @@ impl XyceDLegacyDff {
                 // transition through the exact breakpoint evaluation while
                 // the current-state vector remains unchanged.  Activate the
                 // finite-output transition at the scheduled event time.
-                && pending_time <= ctx.time + 1.0e-18
+                && ctx.is_due(pending_time)
                 && (!deferred_until.is_finite()
                     || ctx.evaluation_phase() == EvaluationPhase::AcceptedStep)
             {
@@ -2890,7 +2892,7 @@ impl XyceDLegacyDff {
                 && ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
                 && pending_q.is_some()
                 && pending_time.is_finite()
-                && pending_time > ctx.time + 1.0e-18
+                && ctx.is_ahead(pending_time)
             {
                 ctx.request_breakpoint(pending_time);
             }
@@ -2898,18 +2900,21 @@ impl XyceDLegacyDff {
             if !pending_applied {
                 match desired {
                     Some(target) if Some(target) != q => {
+                        // Whether the scheduled event is behind the clock: an
+                        // early landing moves the clock back, so it never
+                        // turns an event still owed into a past one.
                         let pending_active = pending_q == Some(target)
                             && pending_time.is_finite()
                             && pending_time >= ctx.time - 1.0e-18;
                         if !pending_active {
                             let event_time = last_input_transition_time + event_delay;
-                            if deferred_until.is_finite() && event_time <= ctx.time + 1.0e-18 {
+                            if deferred_until.is_finite() && ctx.is_due(event_time) {
                                 transition_from = q;
                                 transition_start = event_time;
                                 pending_q = Some(target);
                                 pending_time = deferred_until.max(event_time);
                                 pending_start = event_time;
-                            } else if event_time <= ctx.time + 1.0e-18 {
+                            } else if ctx.is_due(event_time) {
                                 transition_from = q;
                                 q = Some(target);
                                 transition_start = event_time;
@@ -2926,7 +2931,7 @@ impl XyceDLegacyDff {
                     Some(_)
                         if !(pending_q.is_some()
                             && pending_time.is_finite()
-                            && pending_time > ctx.time + 1.0e-18) =>
+                            && ctx.is_ahead(pending_time)) =>
                     {
                         pending_q = None;
                         pending_time = f64::NAN;
@@ -2935,7 +2940,7 @@ impl XyceDLegacyDff {
                     Some(_) => {}
                     None if !(pending_q.is_some()
                         && pending_time.is_finite()
-                        && pending_time > ctx.time + 1.0e-18) =>
+                        && ctx.is_ahead(pending_time)) =>
                     {
                         pending_q = None;
                         pending_time = f64::NAN;

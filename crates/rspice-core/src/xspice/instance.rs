@@ -1803,6 +1803,12 @@ impl XspiceInstance {
         self.context.set_xyce_one_step_order2(enabled);
     }
 
+    /// Set the window the model counts as the current instant
+    /// ([`super::CmContext::is_due`]) for the evaluations that follow.
+    pub(crate) fn set_code_model_coincidence(&mut self, window: Value) {
+        self.context.coincidence = window;
+    }
+
     /// Apply the owning engine's resource policy before model initialization.
     pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
         self.context.set_resource_limits(resource_limits);

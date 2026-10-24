@@ -19,7 +19,6 @@ const MIN_FREQUENCY: Value = 1.0e-16;
 const CONTROL_TABLE_RESOURCE: &str = "xspice.digital_oscillator.control_table";
 const FACTOR1: Value = 0.75;
 const FACTOR2: Value = 0.8;
-const TIME_EPSILON: Value = 1.0e-18;
 const NCO_BASE_FREQUENCY: Value = 8.17578;
 const NCO_SEMITONE_RATIO: Value = 1.059_463_094;
 const CONTROL_TABLE_UNSET_UPPER_INDEX: usize = usize::MAX;
@@ -550,7 +549,7 @@ fn request_future_breakpoint(ctx: &mut CmContext, time: Value) {
     if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
         return;
     }
-    if time.is_finite() && time > ctx.time + TIME_EPSILON {
+    if time.is_finite() && ctx.is_ahead(time) {
         ctx.request_breakpoint(time);
     }
 }
@@ -623,7 +622,7 @@ fn evaluate_digital_oscillator(
     let last_time = initialized
         .map(|(last_time, _)| last_time)
         .unwrap_or_else(|| ctx.state(OSC_LAST_TIME));
-    if ctx.time + TIME_EPSILON < last_time {
+    if ctx.is_ahead(last_time) {
         request_future_breakpoint(ctx, last_time);
         return Ok(());
     }
@@ -644,7 +643,7 @@ fn evaluate_digital_oscillator(
     }
 
     let threshold = last_time + FACTOR1 * interval;
-    if ctx.time + TIME_EPSILON < threshold {
+    if ctx.is_ahead(threshold) {
         request_future_breakpoint(ctx, last_time + FACTOR2 * interval);
         return Ok(());
     }
@@ -707,19 +706,24 @@ impl CodeModel for NumericallyControlledOscillator {
         }
 
         let next_time = ctx.state(NCO_NEXT_TIME);
-        if ctx.time + TIME_EPSILON < next_time {
+        if ctx.is_ahead(next_time) {
             request_future_breakpoint(ctx, next_time);
             return Ok(());
         }
 
+        // The toggle is owed at `next_time`, which a step the schedule landed
+        // early reaches before the clock does. The output edge and the next
+        // toggle are both dated from that instant, never from the clock, so
+        // an early or late landing leaves the oscillator's phase where it was.
         let output_state = 1 - ctx.int_state(NCO_OUTPUT_STATE);
-        let following_time = ctx.time + half_period;
+        let following_time = next_time + half_period;
         nco_set_state(ctx, following_time, output_state);
         request_future_breakpoint(ctx, following_time);
+        let delay = nco_param_min(ctx, "delay", 1.0e-9, 1.0e-15)?;
         ctx.set_output_digital(
             "out",
             state_to_value(output_state),
-            nco_param_min(ctx, "delay", 1.0e-9, 1.0e-15)?,
+            (next_time - ctx.time).max(0.0) + delay,
         );
         Ok(())
     }
@@ -1268,6 +1272,56 @@ mod tests {
         assert_eq!(events[0].delay, 2.0e-12);
         assert_eq!(ctx.int_state(NCO_OUTPUT_STATE), 1);
         assert!((ctx.state(NCO_NEXT_TIME) - 2.0 * first_toggle).abs() <= 1.0e-18);
+    }
+
+    #[test]
+    fn nco_toggles_on_a_step_landed_early_and_keeps_its_phase() {
+        // ngspice: CKTminBreak = 1e-10 * maxstep at a 1 us maximum step, a
+        // floor of 1e-17; Xyce: its own tolerance and a clock-relative floor.
+        let windows = [
+            crate::numerics::integration::code_model_coincidence(1.0e-17, 1.0e-6 * 1.0e-10),
+            crate::numerics::integration::code_model_coincidence(
+                1.2e-17,
+                crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE,
+            ),
+        ];
+        for window in windows {
+            let mut ctx = nco_context_for_bits([DigitalValue::zero(); 7]);
+            ctx.coincidence = window;
+            NumericallyControlledOscillator
+                .evaluate(&mut ctx)
+                .expect("initial nco evaluation");
+            let first_toggle = ctx.state(NCO_NEXT_TIME);
+            let _ = ctx.take_pending_events();
+            let _ = ctx.take_requested_breakpoints();
+
+            ctx.time = first_toggle - 2.0 * window;
+            assert!(!ctx.is_due(first_toggle) && ctx.is_ahead(first_toggle));
+            NumericallyControlledOscillator
+                .evaluate(&mut ctx)
+                .expect("nco ahead of its toggle");
+            assert!(ctx.take_pending_events().is_empty(), "window {window:e}");
+            assert_eq!(ctx.state(NCO_NEXT_TIME), first_toggle);
+            assert_eq!(ctx.take_requested_breakpoints(), vec![first_toggle]);
+
+            ctx.time = first_toggle - 0.5 * window;
+            assert!(ctx.is_due(first_toggle) && !ctx.is_ahead(first_toggle));
+            NumericallyControlledOscillator
+                .evaluate(&mut ctx)
+                .expect("nco toggle on an early landing");
+            let events = ctx.take_pending_events();
+            assert_eq!(scalar_event(&events), DigitalValue::one());
+            assert_eq!(
+                events[0].delay,
+                (first_toggle - ctx.time) + 2.0e-12,
+                "the edge is dated from the toggle, not the clock"
+            );
+            assert_eq!(
+                ctx.state(NCO_NEXT_TIME),
+                first_toggle + first_toggle,
+                "the next toggle is dated from this one, not the clock"
+            );
+        }
     }
 
     #[test]

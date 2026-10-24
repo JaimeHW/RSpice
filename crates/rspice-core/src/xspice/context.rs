@@ -560,6 +560,11 @@ pub struct CmContext {
     pub time_prev: Value,
     /// Current timestep
     pub timestep: Value,
+    /// How far ahead of `time` an instant this model scheduled is still the
+    /// current instant ([`Self::is_due`]); the transient engine sets it from
+    /// the stepper's floor and breakpoint tolerance
+    /// ([`crate::numerics::integration::code_model_coincidence`]).
+    pub(crate) coincidence: Value,
     /// Companion-model coefficients selected by the transient integrator.
     ///
     /// Code models that own reactive state use these coefficients to assemble
@@ -766,6 +771,8 @@ impl CmContext {
             time: 0.0,
             time_prev: 0.0,
             timestep: 1e-9,
+            // No floor and no schedule: the compatibility window alone.
+            coincidence: crate::numerics::integration::code_model_coincidence(0.0, 0.0),
             transient_companion: CompanionCoefficients::backward_euler(),
             xyce_one_step_order2: false,
             transient_step_hint: None,
@@ -810,6 +817,21 @@ impl CmContext {
             static_stamps: Vec::new(),
             static_rhs: Vec::new(),
         }
+    }
+
+    /// Whether an instant this model scheduled, `at`, has been reached: it is
+    /// no further ahead of the clock than the stepper can land a step early
+    /// ([`crate::numerics::integration::code_model_coincidence`]). A model
+    /// that acts on it dates what follows from `at`, not from the clock.
+    pub(crate) fn is_due(&self, at: Value) -> bool {
+        at <= self.time + self.coincidence
+    }
+
+    /// Whether `at` is still ahead of the current instant, so a breakpoint
+    /// there is one the stepper can land on: the complement of
+    /// [`Self::is_due`] for every instant that is a number.
+    pub(crate) fn is_ahead(&self, at: Value) -> bool {
+        at > self.time + self.coincidence
     }
 
     /// Return the rollback/commit phase for the current model evaluation.
