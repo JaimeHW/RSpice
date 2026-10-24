@@ -498,9 +498,6 @@ pub struct RawPlotLayout<'a> {
     pub points: usize,
 }
 
-/// How an ASCII plot spells one number.
-pub type RawNumberFormat = fn(&mut dyn Write, Value) -> io::Result<()>;
-
 /// Every bit of the value, `{:.17e}`, as the engine and the CLI write it.
 pub fn write_raw_exponent(writer: &mut dyn Write, value: Value) -> io::Result<()> {
     write!(writer, "{value:.17e}")
@@ -510,12 +507,13 @@ pub fn write_raw_exponent(writer: &mut dyn Write, value: Value) -> io::Result<()
 /// `value(point, variable)` as `(real, imaginary)`.
 ///
 /// A real plot writes only the real half. A complex one writes both, as two
-/// little-endian doubles or as `re,im` in ASCII.
+/// little-endian doubles or as `re,im` in ASCII, each number spelled by
+/// `number`.
 pub fn write_raw_plot<W: Write + ?Sized>(
     writer: &mut W,
     layout: &RawPlotLayout<'_>,
     format: RawFormat,
-    number: RawNumberFormat,
+    number: fn(&mut dyn Write, Value) -> io::Result<()>,
     mut value: impl FnMut(usize, usize) -> (Value, Value),
 ) -> io::Result<()> {
     let mut writer = writer;

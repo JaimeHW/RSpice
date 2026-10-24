@@ -349,7 +349,14 @@ use rspice_core::analysis::harmonic_balance::{
 // with none, which `Engine::run_tran_checkpointed` and `run_tran_resume`
 // return and the CLI's `--checkpoint`, the Python bindings and the PSS and HB
 // continuations read. The census is 5,455, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5455;
+// One civil calendar and one rawfile writer add five, each replacing private
+// copies in the frontends: `time_compat::civil_from_unix_days`, which the
+// hardcopy timestamp and the app's licence dates call, and `asctime_utc`, the
+// Python binding's raw `Date:`; `raw_export::write_raw_plot`, its
+// `RawPlotLayout` and `write_raw_exponent`, through which the CLI table
+// export and the Python binding write their real and complex plots. The
+// census is 5,460, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5460;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
