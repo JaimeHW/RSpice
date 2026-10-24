@@ -431,6 +431,9 @@ enum Operation {
     Math(super::super::digital_value::DigitalMathFunction),
     /// `$rtoi`: truncate toward zero, then take the 32-bit integer.
     RealToIntegerTruncated,
+    /// A real `$itor` argument: round half away from zero, then take the
+    /// 32-bit integer.
+    RealToInteger,
     /// `$clog2` of a self-determined operand.
     Clog2,
 }
@@ -1030,6 +1033,20 @@ pub(super) fn lower_prepared(
             }
             Expression::SystemFunction(function) if function.name == "$itor" && real => {
                 match function.args.as_slice() {
+                    // IEEE 1364-2005 section 17.8: the argument is an
+                    // integer, so a real one converts as an assignment to an
+                    // `integer` does (section 4.8.2), rounded half away from
+                    // zero to 32 bits, before it converts back.
+                    [argument] if shapes.get(argument).real => {
+                        pending.push(Work::Apply(block, Operation::ToReal(true)));
+                        push_unary(
+                            &mut pending,
+                            block,
+                            Operation::RealToInteger,
+                            argument,
+                            Mode::Real,
+                        );
+                    }
                     [argument] => pending.push(Work::Expression(block, argument, Mode::Real)),
                     _ => values.push(lowerer.real_constant(0.0)),
                 }
@@ -1586,6 +1603,13 @@ fn apply(
                 },
             )
         }
+        Operation::RealToInteger => (
+            bits(32),
+            CfgValueKind::DigitalRealToInteger {
+                input: right,
+                width: 32,
+            },
+        ),
         Operation::Clog2 => (
             bits(32),
             CfgValueKind::DigitalPure {

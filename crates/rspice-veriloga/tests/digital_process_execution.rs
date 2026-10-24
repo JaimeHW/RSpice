@@ -8930,6 +8930,37 @@ fn pure_system_functions_compute_without_the_host() {
     assert_eq!(harness.get_real("h"), 1024.0);
 }
 
+/// IEEE 1364-2005 section 17.8: `$itor` takes an integer, so a real argument
+/// first converts as an assignment to an `integer` does (section 4.8.2):
+/// rounded half away from zero to 32 bits. A NaN or infinity has no integer
+/// and converts to `x`, whose bits read as 0 on the way back to a real.
+#[test]
+fn itor_rounds_a_real_argument_to_an_integer() {
+    let mut harness = Harness::rnm(
+        "module itor;\n\
+         \x20 real a, b, c, d, e, f, g, h; real v;\n\
+         \x20 initial begin\n\
+         \x20   a = $itor(10.4); b = $itor(10.5); c = $itor(-1.4); d = $itor(-1.5);\n\
+         \x20   e = $itor(0.0 / 0.0); f = $itor(1.0 / 0.0); g = $itor((33'b1 << 32) + 3.0);\n\
+         \x20   v = 2.5; h = $itor(v);\n\
+         \x20 end\n\
+         endmodule",
+    );
+    expect_finished(harness.run());
+    assert_eq!(harness.get_real("a"), 10.0);
+    assert_eq!(harness.get_real("b"), 11.0);
+    assert_eq!(harness.get_real("c"), -1.0);
+    assert_eq!(harness.get_real("d"), -2.0);
+    assert_eq!(harness.get_real("e"), 0.0);
+    assert_eq!(harness.get_real("f"), 0.0);
+    assert_eq!(
+        harness.get_real("g"),
+        3.0,
+        "2**32 + 3 keeps its low 32 bits"
+    );
+    assert_eq!(harness.get_real("h"), 3.0);
+}
+
 /// IEEE 1800-2017 sections 11.4.1-2: each compound or step form executes as
 /// the blocking assignment it abbreviates, including as a `for` step.
 #[test]
