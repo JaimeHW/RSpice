@@ -81,7 +81,7 @@ use super::{
 #[cfg(target_arch = "wasm32")]
 mod browser;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::{BrowserPackMirror, start_browser_pack_restore};
+pub use browser::{BrowserPackMirror, start_browser_pack_restore};
 
 #[cfg(test)]
 mod tests;
@@ -124,7 +124,7 @@ pub(crate) const UNAVAILABLE_AFTER_WRITE: &str = "Durable storage for model pack
 /// [`hydrate`]'s job and involves refusing some of it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) struct PersistedHubState {
+pub struct PersistedHubState {
     /// The highest catalog serial this origin recorded accepting.
     pub(crate) serial: u64,
     /// The cached catalog snapshot, exactly as it was published.
@@ -171,15 +171,15 @@ pub(crate) struct RejectedArchive {
 /// discarded, and the digests to delete them by.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) struct HydrationReport {
-    pub(crate) restored: usize,
+pub struct HydrationReport {
+    pub restored: usize,
     pub(crate) rejected: Vec<RejectedArchive>,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
 impl HydrationReport {
     /// Whether this session recovered nothing and had nothing to recover.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.restored == 0 && self.rejected.is_empty()
     }
 
@@ -191,7 +191,7 @@ impl HydrationReport {
     /// "corrupted" because that is the rung this belongs on — the bytes are
     /// authentic-looking and do not describe what they claim to — and
     /// `ModelsOperationalState::from_failure` reads that word to reach it.
-    pub(crate) fn refusal(&self) -> Option<String> {
+    pub fn refusal(&self) -> Option<String> {
         let rejected = self.rejected.len();
         if rejected == 0 {
             return None;
@@ -294,7 +294,7 @@ pub(crate) fn hydrate(
 /// store, which is what makes two hubs agree, and it cannot do that with a
 /// mirror bolted to one thread.
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) trait DurableHubMirror: std::fmt::Debug + Send + Sync {
+pub trait DurableHubMirror: std::fmt::Debug + Send + Sync {
     fn put_snapshot(&self, bytes: &[u8]);
     fn put_serial(&self, serial: u64);
     /// Keeps one archive under its own digest. Content-addressed, so writing
@@ -326,7 +326,7 @@ pub(crate) trait DurableHubMirror: std::fmt::Debug + Send + Sync {
     allow(dead_code, reason = "only a browser store constructs the other three")
 )]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) enum PackStorageStanding {
+pub enum PackStorageStanding {
     /// No durable store on this host, or none asked for yet.
     #[default]
     NotApplicable,
@@ -356,7 +356,7 @@ pub(crate) enum PackStorageStanding {
 /// background, which is all of them.
 #[derive(Debug)]
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) struct MirroredModelHubStore {
+pub struct MirroredModelHubStore {
     inner: MemoryModelHubStore,
     mirror: Box<dyn DurableHubMirror>,
     /// Archive bytes handed to `stage_pack` and not yet resolved, keyed by the
@@ -391,7 +391,7 @@ pub(crate) struct MirroredModelHubStore {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 impl MirroredModelHubStore {
-    pub(crate) fn new(mirror: Box<dyn DurableHubMirror>) -> Self {
+    pub fn new(mirror: Box<dyn DurableHubMirror>) -> Self {
         Self {
             inner: MemoryModelHubStore::new(),
             mirror,
@@ -413,7 +413,7 @@ impl MirroredModelHubStore {
     ///
     /// The latch and the counter are claimed and advanced here, together, so
     /// there is no arrangement of callers that gets one without the other.
-    pub(crate) fn restore_from(
+    pub fn restore_from(
         &self,
         anchor: &TrustAnchor,
         persisted: PersistedHubState,
@@ -463,7 +463,7 @@ impl MirroredModelHubStore {
         self.proved.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub(crate) fn standing(&self) -> PackStorageStanding {
+    pub fn standing(&self) -> PackStorageStanding {
         self.mirror.standing()
     }
 

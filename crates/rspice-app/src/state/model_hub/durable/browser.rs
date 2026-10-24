@@ -105,7 +105,7 @@ fn record_write_failure(operation: &str, error: &str) {
 
 /// The browser's mirror. Every write is spawned and none is awaited.
 #[derive(Debug, Default)]
-pub(crate) struct BrowserPackMirror;
+pub struct BrowserPackMirror;
 
 impl DurableHubMirror for BrowserPackMirror {
     fn put_snapshot(&self, bytes: &[u8]) {
@@ -161,7 +161,7 @@ fn spawn_put(key: String, bytes: Vec<u8>, operation: &'static str) {
 /// The state arrives with the reason for each stored pack that could not be
 /// read, for the Console: one unreadable pack is one pack fewer, not a failed
 /// restore.
-pub(crate) fn start_browser_pack_restore(
+pub fn start_browser_pack_restore(
     complete: impl FnOnce(Result<(PersistedHubState, Vec<String>), String>) + 'static,
 ) {
     wasm_bindgen_futures::spawn_local(async move {

@@ -59,7 +59,7 @@ use std::collections::BTreeMap;
 use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 
 pub use placement::{PartPlacement, plan_library_placement, plan_part_placement, refusal_sentence};
-pub(crate) use provider::precedence;
+pub use provider::precedence;
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
 pub use release_diff::{ChangedPart, PartFact, PartStanding, ReleaseDiff, ReleaseDiffKey};
 pub(crate) use store::NO_CATALOG_SERIAL;

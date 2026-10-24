@@ -113,7 +113,7 @@ pub fn missing_capabilities(required: &[String]) -> Vec<String> {
 /// comparison ranks `9.0.0` above `10.0.0` and a pre-release above its own
 /// release, and a shelf that disagrees with the index about which release is
 /// current offers an update that does not exist or hides one that does.
-pub(crate) fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
+pub fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
     fn split(value: &str) -> (Vec<u64>, Option<String>) {
         let core = value
             .split(['-', '+'])
@@ -193,7 +193,7 @@ fn newest_release<'a>(
 /// unexpired one. Neither touches the rows for what is already here, which is
 /// the point — a client that stopped listing a project's own parts because a
 /// date passed would have made a trust check into an outage.
-pub(crate) fn part_index(
+pub fn part_index(
     libraries: &[&ModelLibrary],
     installed: &[InstalledPack],
     snapshot: Option<&Snapshot>,
