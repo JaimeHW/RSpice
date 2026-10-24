@@ -46,6 +46,7 @@ pub(crate) mod documents;
 // The bundled circuits Help's Examples dialog opens as projects, which the
 // tests also build from.
 pub(crate) mod examples;
+mod features;
 pub(crate) mod frame;
 pub(crate) mod framework;
 pub(crate) mod hardcopy_adapters;
@@ -60,6 +61,7 @@ mod preferences;
 mod preflight;
 pub(crate) mod publication_snapshot;
 pub(crate) mod routing;
+pub(crate) mod sheets;
 mod shell_host;
 pub(crate) mod shortcuts;
 pub(crate) mod simulation_analysis_tabs;

@@ -33,7 +33,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::DrawingSheetPersonalPreferences;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
+use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model};
 
 use super::drawing_sheet_preview::{drawing_sheet_preview, sheet_desk_color};
 
@@ -60,22 +60,26 @@ pub(crate) struct DrawingSheetDefaultsDialogState {
     error: Option<String>,
 }
 
-pub(crate) fn open_drawing_sheet_defaults(state: &mut AppState) -> bool {
-    if state.sheets.drawing_sheet_defaults.open {
+/// Open the drawing-sheet defaults on the open drawing, unless they are
+/// already open.
+pub(crate) fn open_drawing_sheet_defaults(
+    defaults: &mut DrawingSheetDefaultsDialogState,
+    model: &Model,
+) -> bool {
+    if defaults.open {
         return false;
     }
-    let project = state
-        .model
+    let project = model
         .workspace
         .content
         .design_management
         .drawing_sheet_settings()
         .clone();
-    let personal = state.model.preferences.drawing_sheet_personal_preferences();
-    state.sheets.drawing_sheet_defaults = DrawingSheetDefaultsDialogState {
+    let personal = model.preferences.drawing_sheet_personal_preferences();
+    *defaults = DrawingSheetDefaultsDialogState {
         open: true,
-        edit: Some(SchematicEditAuthority::capture(state)),
-        catalog_revision: state.model.workspace.content.design_management.revision(),
+        edit: Some(SchematicEditAuthority::capture(model)),
+        catalog_revision: model.workspace.content.design_management.revision(),
         baseline_project: project.clone(),
         draft_project: project,
         baseline_personal: personal.clone(),
@@ -162,7 +166,10 @@ impl RSpiceApp {
                 );
             });
         if open_presets {
-            super::drawing_sheet_presets::open_custom_sheet_size_library(&mut self.state);
+            super::drawing_sheet_presets::open_custom_sheet_size_library(
+                &mut self.state.sheets.drawing_sheet_presets,
+                &self.state.model,
+            );
         }
         match choice {
             DialogChoice::Primary => match apply_drawing_sheet_defaults(self) {
@@ -1876,7 +1883,10 @@ mod tests {
         assert_eq!(reach.following_text(), "Sheet 1");
         assert_eq!(reach.own_text().as_deref(), Some("Sheet 2"));
 
-        open_drawing_sheet_defaults(&mut app.state);
+        open_drawing_sheet_defaults(
+            &mut app.state.sheets.drawing_sheet_defaults,
+            &app.state.model,
+        );
         app.state
             .sheets
             .drawing_sheet_defaults
@@ -1941,7 +1951,10 @@ mod tests {
     #[test]
     fn unchanged_defaults_are_a_real_no_op() {
         let mut app = RSpiceApp::test_instance();
-        open_drawing_sheet_defaults(&mut app.state);
+        open_drawing_sheet_defaults(
+            &mut app.state.sheets.drawing_sheet_defaults,
+            &app.state.model,
+        );
         let revision = app
             .state
             .model
@@ -1968,7 +1981,10 @@ mod tests {
     #[test]
     fn project_default_is_one_history_transaction_and_personal_uses_preferences() {
         let mut app = RSpiceApp::test_instance();
-        open_drawing_sheet_defaults(&mut app.state);
+        open_drawing_sheet_defaults(
+            &mut app.state.sheets.drawing_sheet_defaults,
+            &app.state.model,
+        );
         app.state
             .sheets
             .drawing_sheet_defaults
@@ -2056,7 +2072,10 @@ mod tests {
             .design_management
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
-        open_drawing_sheet_defaults(&mut app.state);
+        open_drawing_sheet_defaults(
+            &mut app.state.sheets.drawing_sheet_defaults,
+            &app.state.model,
+        );
         let draft = &mut app
             .state
             .sheets

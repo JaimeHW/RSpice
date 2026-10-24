@@ -68,7 +68,7 @@ fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlock
 pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     let sheet = state.model.active_drawing_sheet();
     let identity = sheet_identity(state);
-    let editable = drawing_sheet_editable(state);
+    let editable = drawing_sheet_editable(&state.workbench, &state.model);
     let cut = cut_fields(state, &sheet);
     let mut edit = None;
     let mut schematic_edit = None;

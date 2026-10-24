@@ -78,10 +78,6 @@ const SAVE_ALL: &[ShortcutBinding] = &[primary(
     chord(Key::S, true, false, true, "Ctrl+Shift+S"),
     ALL,
 )];
-const SHEET_PROPERTIES: &[ShortcutBinding] = &[primary(
-    chord(Key::P, true, true, true, "Ctrl+Shift+Alt+P"),
-    ALL,
-)];
 const CLOSE_DOCUMENT: &[ShortcutBinding] = &[
     primary(chord(Key::W, true, false, false, "Ctrl+W"), DESKTOP),
     alternate(
@@ -390,17 +386,6 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
     chord(Key::Enter, false, false, false, "Enter"),
     ALL,
 )];
-// Paging through the sheets of one drawing is what an unmodified Page
-// Up/Page Down means on an engineering canvas. The document strip's browser
-// alternates are Ctrl+Alt+Page Up/Down, so neither chord is shadowed.
-const PREVIOUS_SHEET: &[ShortcutBinding] = &[primary(
-    chord(Key::PageUp, false, false, false, "Page Up"),
-    ALL,
-)];
-const NEXT_SHEET: &[ShortcutBinding] = &[primary(
-    chord(Key::PageDown, false, false, false, "Page Down"),
-    ALL,
-)];
 
 impl Command {
     /// Commands whose owning surface or dialog has no valid lifecycle without
@@ -427,10 +412,6 @@ impl Command {
                 | Self::ExportPublicationSnapshot
                 | Self::PublishToWeb
                 | Self::ExportNetlist(_)
-                | Self::SheetProperties
-                | Self::SheetFormatManager
-                | Self::CustomSheetSizes
-                | Self::SheetDefaults
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::FindInDesign
@@ -446,10 +427,6 @@ impl Command {
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
-                | Self::NextSheet
-                | Self::PreviousSheet
-                | Self::NewSheet
-                | Self::DeleteSheet
                 | Self::ProjectPage(_)
                 | Self::SimulationPage(_)
                 | Self::PreflightChecks
@@ -528,10 +505,6 @@ impl Command {
                 | Self::ImportResultDataset
                 | Self::CreateResultDocument
                 | Self::RescanModelLibraries
-                | Self::SheetProperties
-                | Self::SheetFormatManager
-                | Self::CustomSheetSizes
-                | Self::SheetDefaults
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::CheckAndSave
@@ -544,10 +517,6 @@ impl Command {
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
-                | Self::NextSheet
-                | Self::PreviousSheet
-                | Self::NewSheet
-                | Self::DeleteSheet
                 | Self::ModelCreateProjectCopy
                 | Self::ModelEditor
                 | Self::ModelSaveRevision
@@ -626,10 +595,6 @@ impl Command {
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid
             | Self::RepeatLastCommand
-            | Self::NextSheet
-            | Self::PreviousSheet
-            | Self::NewSheet
-            | Self::DeleteSheet
             | Self::ZoomToSelection
             | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
@@ -638,12 +603,7 @@ impl Command {
             | Self::DescendHierarchyDirect
             | Self::EditSymbolInPlace
             | Self::ShowInNetlist
-            | Self::SheetProperties
-            | Self::SheetFormatManager
-            | Self::CustomSheetSizes
-            | Self::SheetDefaults
             | Self::GridSnapRouting
-            | Self::DrawingSheetLayers
             | Self::VisibilityOptions
             | Self::CheckCellview
             | Self::CheckDesign
@@ -762,8 +722,6 @@ impl Command {
             Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::CloseProject => CLOSE_PROJECT,
-            Self::SheetProperties => SHEET_PROPERTIES,
-            Self::SheetFormatManager | Self::CustomSheetSizes | Self::SheetDefaults => NONE,
             Self::PrintHardcopy => PRINT_HARDCOPY,
             Self::ExportActiveView => EXPORT_ACTIVE_VIEW,
             Self::Exit => EXIT,
@@ -792,7 +750,6 @@ impl Command {
             Self::MirrorSelectionVertical => MIRROR_SELECTION_VERTICAL,
             Self::CycleGrid => GRID,
             Self::GridSnapRouting => NONE,
-            Self::DrawingSheetLayers => NONE,
             Self::VisibilityOptions => NONE,
             Self::ToggleFullScreen => FULL_SCREEN,
             Self::EngineeringTableView => ENGINEERING_TABLE_VIEW,
@@ -825,11 +782,6 @@ impl Command {
             Self::ReplaceInstance => NONE,
             Self::UpdateInstanceInterface => NONE,
             Self::CreateHierarchy => NONE,
-            Self::NextSheet => NEXT_SHEET,
-            Self::PreviousSheet => PREVIOUS_SHEET,
-            // Sheet authoring has no free mnemonic left in the canvas family;
-            // the strip, the Design menu and the palette are its routes.
-            Self::NewSheet | Self::DeleteSheet => NONE,
             Self::ConnectivityManager => NONE,
             Self::DesignManagement => NONE,
             Self::SelectionBulkEdit => NONE,
@@ -1049,18 +1001,6 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid => "select an editable object",
-            Self::NextSheet | Self::PreviousSheet if !super::active_schematic_editor(app) => {
-                "open a schematic or testbench"
-            }
-            Self::NewSheet | Self::DeleteSheet if !super::active_schematic_editor(app) => {
-                "open an editable schematic or testbench"
-            }
-            Self::NewSheet | Self::DeleteSheet if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
-            }
-            Self::NextSheet | Self::PreviousSheet | Self::DeleteSheet => {
-                "the active cell view has a single sheet"
-            }
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
             Self::PublishToWeb => match app.cloud_account.availability() {
@@ -1091,37 +1031,6 @@ impl Command {
                     }
                 }
             },
-            Self::SheetProperties if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
-            }
-            Self::SheetProperties => "open an editable schematic or testbench drawing sheet",
-            Self::SheetFormatManager if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
-            }
-            Self::SheetFormatManager
-                if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(
-                    &app.state,
-                ) =>
-            {
-                "open an editable schematic or testbench drawing sheet"
-            }
-            Self::SheetFormatManager if app.state.sheets.drawing_sheet_support.manager.open => {
-                "Sheet Format Manager is already open"
-            }
-            Self::SheetFormatManager
-                if app
-                    .state
-                    .model
-                    .workspace
-                    .content
-                    .design_management
-                    .sheet_catalog(&app.state.model.workspace.content.active_key())
-                    .and_then(|catalog| catalog.active())
-                    .is_none() =>
-            {
-                "give the open sheet a property of its own in Sheet properties first"
-            }
-            Self::SheetFormatManager => "command is unavailable in this context",
             Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets | Self::RuleSetup => "open a project",
             Self::ReviewComments => "open a schematic project",

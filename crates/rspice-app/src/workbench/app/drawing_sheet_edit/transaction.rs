@@ -12,20 +12,20 @@ use crate::state::{
     drawing_sheet_sizes_mixed,
 };
 use crate::workbench::SurfaceId;
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
-use crate::workbench::state::Workspace;
+use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model};
+use crate::workbench::state::{WorkbenchSession, Workspace};
 
 use super::draft::{DrawingSheetDraft, SheetSizeChoice};
 
 /// Whether the active sheet can be edited: a writable schematic or testbench
 /// on the design surface. Print and Export own output media and never stand
 /// in for the sheet.
-pub(crate) fn drawing_sheet_editable(state: &AppState) -> bool {
-    state.workbench.workspace == Workspace::Design
-        && state.workbench.current_route().surface_id() == SurfaceId::Design
-        && !state.schematic_edit_read_only()
+pub(crate) fn drawing_sheet_editable(workbench: &WorkbenchSession, model: &Model) -> bool {
+    workbench.workspace == Workspace::Design
+        && workbench.current_route().surface_id() == SurfaceId::Design
+        && !model.schematic_edit_read_only()
         && matches!(
-            state.model.workspace.content.active_view_type(),
+            model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
 }
@@ -86,7 +86,7 @@ pub(crate) fn apply_drawing_sheet_edit(
     state: &mut AppState,
     edit: DrawingSheetEdit,
 ) -> Result<String, String> {
-    if !drawing_sheet_editable(state) {
+    if !drawing_sheet_editable(&state.workbench, &state.model) {
         return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
     let mut transaction = SheetTransaction::open(state);

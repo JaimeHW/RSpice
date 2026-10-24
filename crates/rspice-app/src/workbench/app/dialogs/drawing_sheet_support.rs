@@ -17,7 +17,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
+use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model};
+use crate::workbench::state::WorkbenchSession;
 
 use super::drawing_sheet_preview::{
     DrawingSheetPreviewContent, drawing_sheet_preview_at_common_scale,
@@ -71,28 +72,35 @@ impl DrawingSheetSupportState {
     }
 }
 
-pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), String> {
-    crate::workbench::app::SchematicEditAuthority::capture(state)
-        .validate(state, "Sheet Format Manager")?;
+/// Open the Sheet Format Manager on the open drawing, whose sheets it
+/// previews as the drawing shows `review_markers`.
+pub(crate) fn open_sheet_format_manager(
+    support: &mut DrawingSheetSupportState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+) -> Result<(), String> {
+    crate::workbench::app::SchematicEditAuthority::capture(model)
+        .validate(model, "Sheet Format Manager")?;
     // A drawing that never used a sheet workflow has no catalog; nothing
     // creates one on load. Managing its format is the first use, so it
     // creates the catalog here, as one undoable step, with everything drawn
     // as Sheet 1.
-    if state
-        .model
+    if model
         .workspace
         .content
         .design_management
-        .sheet_catalog(&state.model.workspace.content.active_key())
+        .sheet_catalog(&model.workspace.content.active_key())
         .is_none()
     {
-        crate::workbench::app::sheets::ensure_sheet_catalog(state)?;
+        crate::workbench::app::sheets::ensure_sheet_catalog(model, workbench)?;
     }
-    let designs = &state.model.workspace.content.design_management;
-    let edit = crate::workbench::app::SchematicEditAuthority::capture(state);
-    edit.validate(state, "Sheet Format Manager")?;
-    let preview_content = DrawingSheetPreviewContent::from_state(state);
-    let owner_key = state.model.workspace.content.active_key();
+    let model = &*model;
+    let designs = &model.workspace.content.design_management;
+    let edit = crate::workbench::app::SchematicEditAuthority::capture(model);
+    edit.validate(model, "Sheet Format Manager")?;
+    let preview_content = DrawingSheetPreviewContent::from_model(model, review_markers);
+    let owner_key = model.workspace.content.active_key();
     let catalog = designs.sheet_catalog(&owner_key).ok_or_else(|| {
         "Give the open sheet a property in Sheet properties before managing document formats."
             .to_owned()
@@ -125,7 +133,7 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
         .find(active_id)
         .map(|sheet| sheet.page_format().clone())
         .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
-    state.sheets.drawing_sheet_support.manager = SheetFormatManagerState {
+    support.manager = SheetFormatManagerState {
         open: true,
         edit: Some(edit),
         owner_key,
@@ -906,6 +914,16 @@ mod tests {
         SchematicPageOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
 
+    /// [`open_sheet_format_manager`] on the application's own parts.
+    fn open_manager(state: &mut crate::workbench::app_state::AppState) -> Result<(), String> {
+        open_sheet_format_manager(
+            &mut state.sheets.drawing_sheet_support,
+            &mut state.model,
+            &mut state.workbench,
+            state.design.schematic_visibility.review_markers,
+        )
+    }
+
     #[test]
     fn sheet_format_manager_controls_stack_at_phone_width() {
         assert!(sheet_format_manager_controls_stack(366.0));
@@ -1006,7 +1024,7 @@ mod tests {
             .unwrap();
         app.state.model.schematic.session.read_only = true;
 
-        let error = open_sheet_format_manager(&mut app.state)
+        let error = open_manager(&mut app.state)
             .expect_err("read-only documents must not start an edit transaction");
 
         assert_eq!(error, "The active schematic is read-only.");
@@ -1038,7 +1056,7 @@ mod tests {
                 .is_none()
         );
 
-        open_sheet_format_manager(&mut app.state).expect("the first use creates the catalog");
+        open_manager(&mut app.state).expect("the first use creates the catalog");
 
         let catalog = app
             .state
@@ -1142,7 +1160,7 @@ mod tests {
             catalog.set_active(first).unwrap();
         }
         let topology = app.state.model.schematic.topology_version();
-        open_sheet_format_manager(&mut app.state).unwrap();
+        open_manager(&mut app.state).unwrap();
         for row in &mut app.state.sheets.drawing_sheet_support.manager.rows {
             row.selected = true;
         }
@@ -1204,7 +1222,7 @@ mod tests {
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
-        open_sheet_format_manager(&mut app.state).unwrap();
+        open_manager(&mut app.state).unwrap();
         app.state.sheets.drawing_sheet_support.manager.source =
             SheetManagerFormatSource::SheetProperties;
         assert_eq!(

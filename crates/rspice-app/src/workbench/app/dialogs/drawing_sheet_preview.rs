@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 /// Immutable schematic geometry captured before a modal borrows its own state.
 ///
@@ -26,10 +26,15 @@ pub(super) struct DrawingSheetPreviewContent {
 }
 
 impl DrawingSheetPreviewContent {
-    pub(super) fn from_state(state: &AppState) -> Self {
+    /// The open sheet's printable objects and page number, read through the
+    /// drawing as it shows `review_markers`.
+    pub(super) fn from_model(
+        model: &Model,
+        review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+    ) -> Self {
         Self {
-            objects: drawing_sheet_printable_preview(state),
-            page_label: state.model.active_drawing_sheet().page_label,
+            objects: drawing_sheet_printable_preview(model, review_markers),
+            page_label: model.active_drawing_sheet().page_label,
         }
     }
 
@@ -630,6 +635,7 @@ mod tests {
         DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction,
         NetLabel, Point, SchematicProbe,
     };
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn the_preview_letters_the_zones_the_sheet_model_letters() {
@@ -725,7 +731,10 @@ mod tests {
             .expect("valid probe"),
         );
 
-        let content = DrawingSheetPreviewContent::from_state(&state);
+        let content = DrawingSheetPreviewContent::from_model(
+            &state.model,
+            state.design.schematic_visibility.review_markers,
+        );
         let drawing = SchematicSheetFormat::default()
             .geometry()
             .expect("default sheet geometry")

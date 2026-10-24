@@ -60,6 +60,15 @@ impl CommandFlags {
     /// A browser keeps the command's primary chord for itself, so a browser
     /// profile needs an alternate for it.
     pub(crate) const PRIMARY_RESERVED_BY_BROWSER: Self = Self(1 << 1);
+    /// Runs only while a project is open.
+    pub(crate) const REQUIRES_OPEN_PROJECT: Self = Self(1 << 2);
+    /// Held back while a project operation is still in progress.
+    pub(crate) const BLOCKED_BY_PROJECT_OPERATION: Self = Self(1 << 3);
+    /// Edits the active schematic, so a read-only one refuses it.
+    pub(crate) const EDITS_ACTIVE_DOCUMENT: Self = Self(1 << 4);
+    /// Commits the inspector's pending edit first, and does not run when that
+    /// edit cannot be applied.
+    pub(crate) const COMMITS_INSPECTOR_EDIT: Self = Self(1 << 5);
 
     /// These flags, with `flag` set when `set` holds.
     #[must_use]
@@ -264,6 +273,7 @@ pub(crate) mod ids {
         RESET_LAYOUT = "reset-workspace-layout";
         RESULTS_WORKSPACE = "results";
         SAVE = "save-project";
+        SHEET_PROPERTIES = "page-setup";
         SIMULATE_WORKSPACE = "simulate";
         SPECIALIST_TOOL_BROWSER = "specialist-tool-browser";
         STIMULUS_WORKSPACE = "stimulus";
@@ -271,6 +281,7 @@ pub(crate) mod ids {
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";
         VERIFY_WORKSPACE = "verify";
+        VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";
     }
 }

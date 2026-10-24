@@ -19,7 +19,9 @@ use crate::state::{
     SheetDeleteBehavior, SheetDeleteResolution, SheetId, SheetMoveConnectivityPlan,
     SheetPortPolicy, SheetTemplate,
 };
+use crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete;
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 /// One sheet as the navigation surfaces present it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,14 +74,26 @@ pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
 /// is closed, and it is scrolled to its Sheet section. Only an editable sheet
 /// is shown so; anywhere else nothing changes.
 pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
-    if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state) {
-        return;
+    if reveal_sheet_properties_on(&mut state.model, &mut state.workbench) {
+        state.sheets.reveal_sheet_section = true;
     }
-    state.model.schematic.session.editor.selection.clear();
-    state.model.schematic.session.editor.net_highlight.clear();
-    state.workbench.inspector_visible = true;
-    state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
-    state.sheets.reveal_sheet_section = true;
+}
+
+/// [`reveal_sheet_properties`] up to the inspector's own Sheet section,
+/// answering whether the sheet was shown, so the caller asks that section to
+/// come into view.
+pub(crate) fn reveal_sheet_properties_on(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> bool {
+    if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(workbench, model) {
+        return false;
+    }
+    model.schematic.session.editor.selection.clear();
+    model.schematic.session.editor.net_highlight.clear();
+    workbench.inspector_visible = true;
+    workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+    true
 }
 
 pub(in crate::workbench) fn active_sheet_id(state: &AppState) -> Option<SheetId> {
@@ -102,55 +116,68 @@ pub(in crate::workbench) fn activate_sheet(
     state.workbench.report(outcome)
 }
 
-pub(in crate::workbench) fn next_sheet(state: &mut AppState) -> Result<String, String> {
-    let outcome = state
-        .model
-        .step_sheet(1, state.workbench.interaction.drag.let_go());
-    state.workbench.report(outcome)
+pub(in crate::workbench) fn next_sheet(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<String, String> {
+    let outcome = model.step_sheet(1, workbench.interaction.drag.let_go());
+    workbench.report(outcome)
 }
 
-pub(in crate::workbench) fn previous_sheet(state: &mut AppState) -> Result<String, String> {
-    let outcome = state
-        .model
-        .step_sheet(-1, state.workbench.interaction.drag.let_go());
-    state.workbench.report(outcome)
+pub(in crate::workbench) fn previous_sheet(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<String, String> {
+    let outcome = model.step_sheet(-1, workbench.interaction.drag.let_go());
+    workbench.report(outcome)
 }
 
 /// [`Model::go_to_sheet`], stated on the status bar. Page navigation reaches
 /// it through [`next_sheet`] and [`previous_sheet`].
 #[cfg(test)]
-fn go_to_sheet(state: &mut AppState, index: usize) -> Result<String, String> {
-    let outcome = state
-        .model
-        .go_to_sheet(index, state.workbench.interaction.drag.let_go());
-    state.workbench.report(outcome)
+fn go_to_sheet(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    index: usize,
+) -> Result<String, String> {
+    let outcome = model.go_to_sheet(index, workbench.interaction.drag.let_go());
+    workbench.report(outcome)
 }
 
 /// Create a sheet after the active one and enter it.
-pub(in crate::workbench) fn new_sheet(state: &mut AppState) -> Result<String, String> {
-    let after = active_sheet_id(state);
-    new_sheet_after(state, after)
+pub(in crate::workbench) fn new_sheet(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<String, String> {
+    let after = model.active_sheet_id();
+    new_sheet_after(model, workbench, after)
 }
 
 /// Create a sheet directly after `after` and enter it.
 pub(in crate::workbench) fn new_sheet_after(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     after: Option<SheetId>,
 ) -> Result<String, String> {
-    if active_sheet_catalog(state).is_none() {
-        let outcome = second_sheet(state).map(|name| format!("Created sheet `{name}`."));
-        return state.workbench.report(outcome);
+    if model.active_sheet_catalog().is_none() {
+        let outcome = second_sheet(model, workbench).map(|name| format!("Created sheet `{name}`."));
+        return workbench.report(outcome);
     }
-    match create(state, after) {
+    match create(model, after) {
         Ok((id, name)) => {
-            let _ = state
-                .model
-                .activate_sheet(id, state.workbench.interaction.drag.let_go());
-            state
-                .workbench
-                .report(Ok(format!("Created sheet `{name}`.")))
+            let _ = model.activate_sheet(id, workbench.interaction.drag.let_go());
+            workbench.report(Ok(format!("Created sheet `{name}`.")))
         }
-        Err(error) => state.workbench.report(Err(error)),
+        Err(error) => workbench.report(Err(error)),
+    }
+}
+
+/// Let go of any gesture under way and write the open drawing back to the
+/// project, before an edit of the catalog reads it.
+fn settle_drawing(model: &mut Model, workbench: &mut WorkbenchSession) {
+    workbench.interaction.drag.cancel_schematic_drag(model);
+    if let Some(prompt) = model.sync_active_schematic_to_workspace() {
+        workbench.prompt(prompt);
     }
 }
 
@@ -176,8 +203,8 @@ pub(in crate::workbench) fn rename_sheet(
 }
 
 /// What [`delete_sheet`] would do, under the catalog's own delete policy.
-pub(in crate::workbench) fn plan_delete(state: &AppState, id: SheetId) -> SheetDeletePlan {
-    let Some(catalog) = active_sheet_catalog(state) else {
+pub(in crate::workbench) fn plan_delete(model: &Model, id: SheetId) -> SheetDeletePlan {
+    let Some(catalog) = model.active_sheet_catalog() else {
         return SheetDeletePlan::LastSheet;
     };
     if catalog.sheets().len() < 2 {
@@ -210,29 +237,29 @@ pub(in crate::workbench) fn plan_delete(state: &AppState, id: SheetId) -> SheetD
 /// neighbouring sheet waits for a confirmation naming how many and where;
 /// any other outcome (an empty sheet, a refusal) is run, or reported, now.
 pub(in crate::workbench) fn delete_sheet(
-    state: &mut AppState,
+    pending: &mut Option<PendingSheetDelete>,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     id: SheetId,
 ) -> Result<String, String> {
     if let SheetDeletePlan::MovesObjects {
         objects,
         destination,
         destination_name,
-    } = plan_delete(state, id)
+    } = plan_delete(model, id)
     {
-        let name = state.model.sheet_name(id);
+        let name = model.sheet_name(id);
         let message = format!("Deleting sheet `{name}` waits for confirmation.");
-        state.sheets.delete_sheet = Some(
-            crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
-                sheet: id,
-                name,
-                objects,
-                destination,
-                destination_name,
-            },
-        );
+        *pending = Some(PendingSheetDelete {
+            sheet: id,
+            name,
+            objects,
+            destination,
+            destination_name,
+        });
         return Ok(message);
     }
-    commit_delete_sheet(state, id)
+    commit_delete_sheet(model, workbench, id)
 }
 
 /// Delete a sheet now, under the catalog's own delete policy.
@@ -240,12 +267,12 @@ pub(in crate::workbench) fn delete_sheet(
 /// For a caller that has already shown the outcome (the sheet strip's menu
 /// row names it) or had it confirmed.
 pub(in crate::workbench) fn commit_delete_sheet(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     id: SheetId,
 ) -> Result<String, String> {
-    let name = state.model.sheet_name(id);
-    let outcome = state
-        .model
+    let name = model.sheet_name(id);
+    let outcome = model
         .edit_sheet_catalog("delete sheet", |catalog| {
             let resolution = match catalog.settings().delete_behavior {
                 SheetDeleteBehavior::BlockWhileReferenced => SheetDeleteResolution::BlockIfNotEmpty,
@@ -270,11 +297,11 @@ pub(in crate::workbench) fn commit_delete_sheet(
                 )
             }
         });
-    let outcome = state.workbench.report(outcome);
+    let outcome = workbench.report(outcome);
     if outcome.is_ok() {
         // Deleting the active sheet moves activation inside the catalog's own
         // transaction, so the canvas is entering a sheet it never activated.
-        state.model.enter_active_sheet();
+        model.enter_active_sheet();
     }
     outcome
 }
@@ -371,7 +398,7 @@ fn move_selection(state: &mut AppState, destination: SheetId) -> Result<String, 
         crate::workbench::app::dialogs::hierarchy::create::selected_component_sheet_move_plan(
             state,
         )?;
-    let all_objects = live_object_ids(state);
+    let all_objects = live_object_ids(&state.model);
     let source = active_sheet_catalog(state)
         .and_then(|catalog| {
             connectivity
@@ -414,44 +441,33 @@ fn move_selection(state: &mut AppState, destination: SheetId) -> Result<String, 
 /// drawn becomes Sheet 1, as one undoable transaction. For a sheet workflow
 /// used for the first time (Sheet formats…); a catalog is never created on
 /// load. Does nothing where the catalog exists.
-pub(in crate::workbench) fn ensure_sheet_catalog(state: &mut AppState) -> Result<(), String> {
-    if active_sheet_catalog(state).is_some() {
+pub(in crate::workbench) fn ensure_sheet_catalog(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<(), String> {
+    if model.active_sheet_catalog().is_some() {
         return Ok(());
     }
-    state.cancel_schematic_drag();
-    state.sync_active_schematic_to_workspace();
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let objects = live_object_ids(state);
-    let before = (*state.model.workspace.content.design_management).clone();
+    settle_drawing(model, workbench);
+    let key = model.workspace.content.active_schematic_reference().key();
+    let objects = live_object_ids(model);
+    let before = (*model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     candidate
         .bootstrap_for_cell_view(&key, "Sheet 1", objects)
         .map_err(|error| error.to_string())?;
-    state
-        .model
-        .commit_sheet_catalog("create sheet catalog", before, candidate)
+    model.commit_sheet_catalog("create sheet catalog", before, candidate)
 }
 
 /// A drawing with no sheet catalog is one sheet. Its first new sheet creates
 /// the catalog with everything already drawn as Sheet 1, adds Sheet 2 after
 /// it and enters it, as one transaction, so one undo gives back the single
 /// drawing.
-fn second_sheet(state: &mut AppState) -> Result<String, String> {
-    state.cancel_schematic_drag();
-    state.sync_active_schematic_to_workspace();
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let objects = live_object_ids(state);
-    let before = (*state.model.workspace.content.design_management).clone();
+fn second_sheet(model: &mut Model, workbench: &mut WorkbenchSession) -> Result<String, String> {
+    settle_drawing(model, workbench);
+    let key = model.workspace.content.active_schematic_reference().key();
+    let objects = live_object_ids(model);
+    let before = (*model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let first = candidate
         .bootstrap_for_cell_view(&key, "Sheet 1", objects)
@@ -478,25 +494,19 @@ fn second_sheet(state: &mut AppState) -> Result<String, String> {
     catalog
         .set_active(second)
         .map_err(|error| error.to_string())?;
-    state
-        .model
-        .commit_sheet_catalog("create sheet", before, candidate)?;
-    state.model.enter_active_sheet();
+    model.commit_sheet_catalog("create sheet", before, candidate)?;
+    model.enter_active_sheet();
     Ok(name)
 }
 
-fn create(
-    state: &mut AppState,
-    insert_after: Option<SheetId>,
-) -> Result<(SheetId, String), String> {
-    let settings = state
-        .model
+fn create(model: &mut Model, insert_after: Option<SheetId>) -> Result<(SheetId, String), String> {
+    let settings = model
         .workspace
         .content
         .design_management
         .drawing_sheet_settings()
         .clone();
-    let Some(catalog) = active_sheet_catalog(state) else {
+    let Some(catalog) = model.active_sheet_catalog() else {
         return Err(Model::NO_SHEET_CATALOG.to_owned());
     };
     let name = unique_sheet_name(catalog);
@@ -504,22 +514,20 @@ fn create(
     let page_format = new_sheet_page_format(&settings, catalog)?;
     let page_number = first_free_page_number(catalog)?;
     let created = name.clone();
-    let id = state
-        .model
-        .edit_sheet_catalog("create sheet", move |catalog| {
-            catalog
-                .create_sheet_with_page_format(
-                    SheetDefinition {
-                        name: created,
-                        template: SheetTemplate::AnalogSchematic,
-                        port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                        explicit_page_number: Some(page_number),
-                    },
-                    insert_after,
-                    page_format,
-                )
-                .map_err(|error| error.to_string())
-        })?;
+    let id = model.edit_sheet_catalog("create sheet", move |catalog| {
+        catalog
+            .create_sheet_with_page_format(
+                SheetDefinition {
+                    name: created,
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(page_number),
+                },
+                insert_after,
+                page_format,
+            )
+            .map_err(|error| error.to_string())
+    })?;
     Ok((id, name))
 }
 
@@ -593,8 +601,8 @@ fn replacement_sheet(catalog: &SheetCatalog, id: SheetId) -> Option<SheetId> {
         .or_else(|| catalog.next_sheet(id))
 }
 
-fn live_object_ids(state: &AppState) -> Vec<u64> {
-    let schematic = &state.model.schematic;
+fn live_object_ids(model: &Model) -> Vec<u64> {
+    let schematic = &model.schematic;
     let mut ids = std::collections::BTreeSet::new();
     ids.extend(
         schematic

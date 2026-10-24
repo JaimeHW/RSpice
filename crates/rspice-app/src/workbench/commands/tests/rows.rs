@@ -23,8 +23,11 @@ use crate::workbench::app_state::ShortcutContextMatch;
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandRegistry, command_registry};
-use crate::workbench::framework::command_registry::{CommandFlags, ids};
+use crate::workbench::commands::vocabulary::{
+    COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
+};
+use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec, ids};
+use crate::workbench::framework::host::Host;
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
@@ -100,16 +103,28 @@ pub(crate) struct CommandRow {
     pub(crate) results_retained: StateRow,
 }
 
-/// One row per [`COMMAND_REGISTRY`] entry, in registry order.
+/// One row per command the registry orders, in order: a shell command read
+/// from its [`Command`] value, a feature's from what its command set
+/// declares.
 pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
     let no_project = no_project_app();
     let project_open = project_open_app();
     let results_retained = results_retained_app();
-    COMMAND_REGISTRY
+    let apps = [&no_project, &project_open, &results_retained];
+    command_registry()
+        .order()
         .iter()
         .copied()
         .enumerate()
-        .map(|(index, command)| {
+        .map(|(index, key)| {
+            let Some(command) = legacy_command(key) else {
+                let spec = SheetsCommand::ALL
+                    .into_iter()
+                    .find(|command| command.key() == key)
+                    .map(SheetsCommand::declared_spec)
+                    .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
+                return feature_row(index, &spec, apps);
+            };
             let spec = command.spec();
             let context = command.shortcut_context();
             CommandRow {
@@ -158,6 +173,7 @@ fn registry_command_rows() -> Vec<CommandRow> {
     let no_project = no_project_app();
     let project_open = project_open_app();
     let results_retained = results_retained_app();
+    let apps = [&no_project, &project_open, &results_retained];
     let registry = command_registry();
     let catalog = CommandRegistry;
     catalog
@@ -170,8 +186,9 @@ fn registry_command_rows() -> Vec<CommandRow> {
             let spec = registry
                 .spec(key)
                 .unwrap_or_else(|| panic!("{id} is ordered but has no spec"));
-            let command = Command::from_stable_id(id)
-                .unwrap_or_else(|| panic!("{id} resolves to no command"));
+            let Some(command) = Command::from_stable_id(id) else {
+                return feature_row(index, spec, apps);
+            };
             let context = catalog
                 .context(key)
                 .unwrap_or_else(|| panic!("{id} has no shortcut context"));
@@ -214,6 +231,52 @@ fn registry_command_rows() -> Vec<CommandRow> {
             }
         })
         .collect()
+}
+
+/// The row of a command a feature declares as `spec`, its answers read from
+/// the dispatcher by key in each of `apps`. A feature's command declares no
+/// window, source-editor or repeat facts.
+fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> CommandRow {
+    let state = |app: &RSpiceApp| StateRow {
+        availability: app.command_availability(spec.key).into(),
+        enabled: app.command_key_enabled(spec.key),
+        checked: Host::checked(app, spec.key),
+        context_live: spec.context.matches(&app.state.workbench, &app.state.model),
+    };
+    CommandRow {
+        index,
+        id: spec.key.as_str(),
+        label: spec.label,
+        group: spec.group,
+        requires_open_project: spec.flags.contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+        blocked_by_project_operation: spec
+            .flags
+            .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION),
+        mutates_window_session: false,
+        palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
+        source_editor_only: false,
+        navigates_source_language: false,
+        repeatable: false,
+        commits_inspector_edit: spec.flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT),
+        edits_active_document: spec.flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT),
+        source_editor_request: None,
+        context: spec.context.label(),
+        context_suppressed_by_text_focus: spec.context.suppressed_by_text_focus(),
+        bindings: spec.bindings.iter().map(binding_row).collect(),
+        primary_reserved_on: CommandPlatform::ALL
+            .into_iter()
+            .filter(|platform| {
+                platform.has_browser_reserved_primary()
+                    && spec
+                        .flags
+                        .contains(CommandFlags::PRIMARY_RESERVED_BY_BROWSER)
+            })
+            .map(CommandPlatform::label)
+            .collect(),
+        no_project: state(apps[0]),
+        project_open: state(apps[1]),
+        results_retained: state(apps[2]),
+    }
 }
 
 fn state_row(command: Command, app: &RSpiceApp) -> StateRow {
@@ -299,10 +362,11 @@ fn aliases_answered_by_from_stable_id() -> BTreeSet<&'static str> {
 #[test]
 fn legacy_rows_cover_the_registry_in_order() {
     let rows = legacy_command_rows();
-    assert_eq!(rows.len(), COMMAND_REGISTRY.len());
-    for (index, (row, command)) in rows.iter().zip(COMMAND_REGISTRY).enumerate() {
+    let order = command_registry().order();
+    assert_eq!(rows.len(), order.len());
+    for (index, (row, key)) in rows.iter().zip(order).enumerate() {
         assert_eq!(row.index, index);
-        assert_eq!(row.id, command.stable_id(), "row {index} is {command:?}");
+        assert_eq!(row.id, key.as_str(), "row {index} is {key:?}");
     }
 
     // The three states are three different answers, not one state three times.
@@ -392,15 +456,20 @@ fn the_registry_answers_every_legacy_alias_with_a_live_key() {
     }
 }
 
-/// The shortcut resolver breaks equal-precedence ties by position in
-/// [`COMMAND_REGISTRY`]; the registry's order puts every command in the same
-/// position, so ties break the same way when the resolver reads it instead.
+/// The shortcut resolver breaks equal-precedence ties by position in the
+/// registry's order, which lists the shell's own commands in
+/// [`COMMAND_REGISTRY`]'s order, so ties among them break as they always did.
 // Refactor scaffolding: deleted when the split completes.
 #[test]
 fn the_registry_order_breaks_ties_as_the_command_registry_does() {
     let order = command_registry().order();
-    assert_eq!(order.len(), COMMAND_REGISTRY.len());
-    for (index, (key, command)) in order.iter().zip(COMMAND_REGISTRY).enumerate() {
+    let shell_order = order
+        .iter()
+        .copied()
+        .filter(|key| legacy_command(*key).is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(shell_order.len(), COMMAND_REGISTRY.len());
+    for (index, (key, command)) in shell_order.iter().zip(COMMAND_REGISTRY).enumerate() {
         assert_eq!(*key, command.key(), "position {index} is {command:?}");
     }
     let position = |command: Command| {

@@ -195,7 +195,7 @@ fn select_a_veriloga_instance(state: &mut AppState) -> (u64, crate::state::CellV
     (id, reference)
 }
 
-fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<Command>)> {
+fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<CommandKey>)> {
     entries
         .iter()
         .filter_map(|entry| match entry {
@@ -216,33 +216,42 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<Command>)> 
 #[test]
 fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let head = [
-        ("Object properties…", Some(Command::ObjectProperties)),
-        ("Rotate 90°", Some(Command::RotateSelection)),
-        ("Mirror", Some(Command::MirrorSelectionHorizontal)),
-        ("Mirror vertically", Some(Command::MirrorSelectionVertical)),
+        ("Object properties…", Some(Command::ObjectProperties.key())),
+        ("Rotate 90°", Some(Command::RotateSelection.key())),
+        ("Mirror", Some(Command::MirrorSelectionHorizontal.key())),
+        (
+            "Mirror vertically",
+            Some(Command::MirrorSelectionVertical.key()),
+        ),
         // G-12: the Arrange page, which a phone reaches only from here.
         ("Arrange", None),
-        ("Cut selection", Some(Command::Cut)),
-        ("Copy selection", Some(Command::Copy)),
-        ("Paste here", Some(Command::Paste)),
-        ("Duplicate", Some(Command::Duplicate)),
-        ("Delete", Some(Command::Delete)),
+        ("Cut selection", Some(Command::Cut.key())),
+        ("Copy selection", Some(Command::Copy.key())),
+        ("Paste here", Some(Command::Paste.key())),
+        ("Duplicate", Some(Command::Duplicate.key())),
+        ("Delete", Some(Command::Delete.key())),
     ];
     let tail = [
         (
             "Create hierarchy from selection…",
-            Some(Command::CreateHierarchy),
+            Some(Command::CreateHierarchy.key()),
         ),
-        ("Sheet properties", Some(Command::SheetProperties)),
-        ("Fit schematic content", Some(Command::FitSchematicContent)),
-        ("Show in netlist", Some(Command::ShowInNetlist)),
-        ("Add voltage or current probe…", Some(Command::PlaceProbe)),
+        ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
+        (
+            "Fit schematic content",
+            Some(Command::FitSchematicContent.key()),
+        ),
+        ("Show in netlist", Some(Command::ShowInNetlist.key())),
+        (
+            "Add voltage or current probe…",
+            Some(Command::PlaceProbe.key()),
+        ),
         (
             "Open operating point",
-            Some(Command::ResultViewer(ResultViewer::Op)),
+            Some(Command::ResultViewer(ResultViewer::Op).key()),
         ),
     ];
-    let menu = |slot: &[(&'static str, Option<Command>)]| {
+    let menu = |slot: &[(&'static str, Option<CommandKey>)]| {
         head.iter()
             .chain(slot)
             .chain(tail.iter())
@@ -250,28 +259,37 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             .collect::<Vec<_>>()
     };
     let master_rows = [
-        ("Edit symbol in place", Some(Command::EditSymbolInPlace)),
+        (
+            "Edit symbol in place",
+            Some(Command::EditSymbolInPlace.key()),
+        ),
         (
             "Update instance interface",
-            Some(Command::UpdateInstanceInterface),
+            Some(Command::UpdateInstanceInterface.key()),
         ),
-        ("Replace instance…", Some(Command::ReplaceInstance)),
+        ("Replace instance…", Some(Command::ReplaceInstance.key())),
     ];
     let descend = (
         "Descend into selected instance",
-        Some(Command::DescendHierarchyDirect),
+        Some(Command::DescendHierarchyDirect.key()),
     );
-    let open_veriloga = ("Open Verilog-A view", Some(Command::DescendHierarchyDirect));
+    let open_veriloga = (
+        "Open Verilog-A view",
+        Some(Command::DescendHierarchyDirect.key()),
+    );
 
     // The empty canvas, which alone offers the zoom box: a finger has no Z.
     let state = AppState::default();
     let canvas = menu_entries(&state, ContextTarget::Canvas);
-    let mut expected = menu(&[("New Verilog-A device…", Some(Command::NewVerilogADevice))]);
+    let mut expected = menu(&[(
+        "New Verilog-A device…",
+        Some(Command::NewVerilogADevice.key()),
+    )]);
     let fit = expected
         .iter()
         .position(|(label, _)| *label == "Fit schematic content")
         .expect("the canvas menu fits the content");
-    expected.insert(fit + 1, ("Zoom box", Some(Command::ZoomBox)));
+    expected.insert(fit + 1, ("Zoom box", Some(Command::ZoomBox.key())));
     // A symbol from the sheet's ports is the sheet's verb.
     let hierarchy = expected
         .iter()
@@ -1665,7 +1683,7 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
         .iter()
         .find_map(|entry| match entry {
             ContextEntry::Command(command)
-                if command.shortcut_command == Some(Command::SnapSelectionToGrid) =>
+                if command.shortcut_command == Some(Command::SnapSelectionToGrid.key()) =>
             {
                 Some(command)
             }

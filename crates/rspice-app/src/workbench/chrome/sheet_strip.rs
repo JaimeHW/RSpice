@@ -55,7 +55,12 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let plans = DeletePlans(
         entries
             .iter()
-            .map(|entry| (entry.id, sheet_actions::plan_delete(&app.state, entry.id)))
+            .map(|entry| {
+                (
+                    entry.id,
+                    sheet_actions::plan_delete(&app.state.model, entry.id),
+                )
+            })
             .collect(),
     );
     ctx.data_mut(|data| data.insert_temp(delete_plans_id(), plans));
@@ -131,11 +136,19 @@ fn apply(app: &mut RSpiceApp, action: StripAction, entries: &[SheetEntry]) {
             let _ = sheet_actions::activate_sheet(&mut app.state, id);
         }
         StripAction::NewSheetAfter(after) => {
-            let _ = sheet_actions::new_sheet_after(&mut app.state, after);
+            let _ = sheet_actions::new_sheet_after(
+                &mut app.state.model,
+                &mut app.state.workbench,
+                after,
+            );
         }
         // The menu row the delete was chosen from named its outcome.
         StripAction::Delete(id) => {
-            let _ = sheet_actions::commit_delete_sheet(&mut app.state, id);
+            let _ = sheet_actions::commit_delete_sheet(
+                &mut app.state.model,
+                &mut app.state.workbench,
+                id,
+            );
         }
         StripAction::MoveSelection(id) => {
             let _ = sheet_actions::move_selection_to_sheet(&mut app.state, id);

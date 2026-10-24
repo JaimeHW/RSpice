@@ -23,7 +23,7 @@ use crate::state::{
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::DrawingSheetPersonalPreferences;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 
 pub(crate) use model::capture_personal_preset_into_project;
 
@@ -91,16 +91,21 @@ impl DrawingSheetPresetDialogsState {
     }
 }
 
-pub(crate) fn open_custom_sheet_size_library(state: &mut AppState) -> bool {
-    if state.sheets.drawing_sheet_presets.any_open() {
+/// Open the custom sheet size library on the open drawing, unless one of its
+/// dialogs is already open.
+pub(crate) fn open_custom_sheet_size_library(
+    presets: &mut DrawingSheetPresetDialogsState,
+    model: &Model,
+) -> bool {
+    if presets.any_open() {
         return false;
     }
-    let personal = state.model.preferences.drawing_sheet_personal_preferences();
-    state.sheets.drawing_sheet_presets = DrawingSheetPresetDialogsState {
+    let personal = model.preferences.drawing_sheet_personal_preferences();
+    *presets = DrawingSheetPresetDialogsState {
         library_open: true,
         search: String::new(),
-        edit: Some(SchematicEditAuthority::capture(state)),
-        catalog_revision: state.model.workspace.content.design_management.revision(),
+        edit: Some(SchematicEditAuthority::capture(model)),
+        catalog_revision: model.workspace.content.design_management.revision(),
         baseline_personal: personal,
         editor: None,
         transfer: PresetTransferState::default(),
@@ -1387,7 +1392,10 @@ mod tests {
             .content
             .replace_design_management(seeded)
             .unwrap();
-        assert!(open_custom_sheet_size_library(&mut app.state));
+        assert!(open_custom_sheet_size_library(
+            &mut app.state.sheets.drawing_sheet_presets,
+            &app.state.model
+        ));
 
         app.handle_preset_library_action(LibraryBodyAction::Use(PresetKey::from(&preset)));
 
@@ -1584,7 +1592,10 @@ mod tests {
         app.state.model.pdk_config.publisher_trust_store = trust;
         let source = encode_package(&package).unwrap();
 
-        assert!(open_custom_sheet_size_library(&mut app.state));
+        assert!(open_custom_sheet_size_library(
+            &mut app.state.sheets.drawing_sheet_presets,
+            &app.state.model
+        ));
         let personal = app
             .state
             .model

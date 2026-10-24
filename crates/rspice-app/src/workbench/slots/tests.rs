@@ -177,7 +177,8 @@ fn open_drawing_sheet_presets_alone(dialogs: &mut AppState) {
     let mut state = crate::workbench::app_state::AppState::default();
     assert!(
         crate::workbench::app::dialogs::drawing_sheet_presets::open_custom_sheet_size_library(
-            &mut state
+            &mut state.sheets.drawing_sheet_presets,
+            &state.model
         )
     );
     dialogs.sheets.drawing_sheet_presets = state.sheets.drawing_sheet_presets.clone();

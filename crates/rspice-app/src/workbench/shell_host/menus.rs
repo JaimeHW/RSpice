@@ -8,6 +8,7 @@ use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry, palette_scope};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
 
 /// The command's row under the vocabulary's label.
@@ -18,6 +19,11 @@ const fn command(command: Command) -> MenuEntry {
 /// The command's row under a label of the menu's own.
 const fn command_as(command: Command, label: &'static str) -> MenuEntry {
     MenuEntry::command_as(command.key(), label)
+}
+
+/// The sheets feature's command's row under the label it declares.
+const fn sheets(command: SheetsCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
 }
 
 impl ApplicationMenu {
@@ -69,10 +75,10 @@ const FILE_MENU: &[MenuEntry] = &[
     command(Command::CloseProject),
     Separator,
     // The drawing sheet's workflows, in the order the sheet is set up.
-    command(Command::SheetProperties),
-    command(Command::SheetFormatManager),
-    command(Command::CustomSheetSizes),
-    command(Command::SheetDefaults),
+    sheets(SheetsCommand::SheetProperties),
+    sheets(SheetsCommand::SheetFormatManager),
+    sheets(SheetsCommand::CustomSheetSizes),
+    sheets(SheetsCommand::SheetDefaults),
     command(Command::PrintHardcopy),
     command(Command::ExportActiveView),
     MenuEntry::Only(
@@ -130,7 +136,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     command(Command::ZoomBox),
     command(Command::CycleGrid),
     command(Command::GridSnapRouting),
-    command(Command::DrawingSheetLayers),
+    sheets(SheetsCommand::DrawingSheetLayers),
     command(Command::VisibilityOptions),
     // Folding, offered while a source editor is the document on screen.
     MenuEntry::Only(
@@ -181,10 +187,10 @@ const DESIGN_MENU: &[MenuEntry] = &[
     Separator,
     // The sheets of the active drawing, in the order the strip shows them:
     // navigate first, then author.
-    command(Command::PreviousSheet),
-    command(Command::NextSheet),
-    command(Command::NewSheet),
-    command(Command::DeleteSheet),
+    sheets(SheetsCommand::PreviousSheet),
+    sheets(SheetsCommand::NextSheet),
+    sheets(SheetsCommand::NewSheet),
+    sheets(SheetsCommand::DeleteSheet),
     Separator,
     command(Command::CreateHierarchy),
     command(Command::DesignManagement),

@@ -71,27 +71,6 @@ impl Command {
                     crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
                 )
             }
-            Self::SheetProperties => {
-                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
-            }
-            Self::SheetFormatManager => {
-                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
-                    && !state.schematic_edit_read_only()
-                    && !state.sheets.drawing_sheet_support.manager.open
-                    && state
-                        .model.workspace
-                        .content.design_management
-                        .sheet_catalog(&state.model.workspace.content.active_key())
-                        .is_some_and(|catalog| catalog.active().is_some())
-            }
-            Self::CustomSheetSizes => {
-                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
-                    && !state.sheets.drawing_sheet_presets.any_open()
-            }
-            Self::SheetDefaults => {
-                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
-                    && !state.sheets.drawing_sheet_defaults.open
-            }
             Self::ExportActiveView => {
                 crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(state)
             }
@@ -308,7 +287,7 @@ impl Command {
                     || (state.workbench.workspace == Workspace::Results
                         && crate::workbench::documents::result_document::fit_gesture_available(state))
             }
-            Self::FitSchematicContent | Self::DrawingSheetLayers => active_schematic_editor(app),
+            Self::FitSchematicContent => active_schematic_editor(app),
             // Magnifying a result viewport needs the sheet's own extents, so
             // it is offered on the unit-pane stack and nowhere it could not
             // be carried out.
@@ -401,18 +380,6 @@ impl Command {
             | Self::PlaceOffSheetConnector
             | Self::Place(_) => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
-            }
-            // Sheet navigation is offered only where there is a second sheet
-            // to reach. A drawing with no sheet catalog is one sheet, and a
-            // new sheet there creates the catalog.
-            Self::NextSheet | Self::PreviousSheet => {
-                active_schematic_editor(app) && sheet_actions::sheet_count(state) > 1
-            }
-            Self::NewSheet => active_schematic_editor(app) && !state.schematic_edit_read_only(),
-            Self::DeleteSheet => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && sheet_actions::sheet_count(state) > 1
             }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool

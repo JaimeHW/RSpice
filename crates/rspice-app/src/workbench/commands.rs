@@ -9,7 +9,6 @@ use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
 use crate::state::{ComponentType, Tool};
-use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::CommandOwner;
 use crate::workbench::framework::requests::{
@@ -144,8 +143,6 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::ReplaceInstance
             | Command::UpdateInstanceInterface
             | Command::CreateHierarchy
-            | Command::NewSheet
-            | Command::DeleteSheet
             | Command::DesignManagement
             | Command::CheckAndSave
             | Command::Place(_)
@@ -631,15 +628,6 @@ impl Command {
             | Self::StimulusValidateLibrary
             | Self::StimulusPlaceDefinition
             | Self::StimulusShowAdopter => CommandOwner::Design,
-            Self::SheetProperties
-            | Self::SheetFormatManager
-            | Self::CustomSheetSizes
-            | Self::SheetDefaults
-            | Self::DrawingSheetLayers
-            | Self::NextSheet
-            | Self::PreviousSheet
-            | Self::NewSheet
-            | Self::DeleteSheet => CommandOwner::Sheets,
             Self::RunSimulation
             | Self::StopSimulation
             | Self::JobsManager
@@ -796,21 +784,6 @@ impl Command {
                         app.export_workflow_io.as_ref(),
                     );
                 }
-            }
-            // Sheet properties and custom sheet sizes are disabled whenever
-            // they would refuse, so a refusal here needs no words.
-            Self::SheetProperties => crate::workbench::app::reveal_sheet_properties(&mut app.state),
-            Self::SheetFormatManager => {
-                if let Err(error) = crate::workbench::app::open_sheet_format_manager(&mut app.state)
-                {
-                    app.state.prompt(error);
-                }
-            }
-            Self::CustomSheetSizes => {
-                crate::workbench::app::open_custom_sheet_size_library(&mut app.state);
-            }
-            Self::SheetDefaults => {
-                crate::workbench::app::open_drawing_sheet_defaults(&mut app.state);
             }
             Self::PrintHardcopy => crate::workbench::app::open_hardcopy_workflow(
                 app,
@@ -1018,9 +991,6 @@ impl Command {
             Self::CycleGrid => cycle_canvas_grid(app),
             Self::GridSnapRouting => {
                 crate::workbench::app::open_grid_snap_routing_dialog(&mut app.state);
-            }
-            Self::DrawingSheetLayers => {
-                crate::workbench::app::open_drawing_sheet_layers_dialog(&mut app.state);
             }
             Self::VisibilityOptions => {
                 crate::workbench::app::open_schematic_visibility_options(&mut app.state);
@@ -1259,22 +1229,6 @@ impl Command {
             }
             Self::CreateHierarchy => {
                 crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
-            }
-            // Each of these reports its own outcome, including the catalog's
-            // refusal text, so the result is never discarded.
-            Self::NextSheet => {
-                let _ = sheet_actions::next_sheet(&mut app.state);
-            }
-            Self::PreviousSheet => {
-                let _ = sheet_actions::previous_sheet(&mut app.state);
-            }
-            Self::NewSheet => {
-                let _ = sheet_actions::new_sheet(&mut app.state);
-            }
-            Self::DeleteSheet => {
-                if let Some(id) = sheet_actions::active_sheet_id(&app.state) {
-                    let _ = sheet_actions::delete_sheet(&mut app.state, id);
-                }
             }
             Self::ConnectivityManager => {
                 crate::workbench::app::open_connectivity_manager(&mut app.state);

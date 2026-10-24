@@ -145,13 +145,13 @@ fn re_activating_the_current_sheet_publishes_nothing() {
 fn page_navigation_wraps_around_both_ends() {
     let (mut state, first, second) = two_sheet_state();
 
-    next_sheet(&mut state).expect("forward");
+    next_sheet(&mut state.model, &mut state.workbench).expect("forward");
     assert_eq!(active_sheet_id(&state), Some(second));
-    next_sheet(&mut state).expect("forward wraps");
+    next_sheet(&mut state.model, &mut state.workbench).expect("forward wraps");
     assert_eq!(active_sheet_id(&state), Some(first));
-    previous_sheet(&mut state).expect("backward wraps");
+    previous_sheet(&mut state.model, &mut state.workbench).expect("backward wraps");
     assert_eq!(active_sheet_id(&state), Some(second));
-    go_to_sheet(&mut state, 0).expect("indexed");
+    go_to_sheet(&mut state.model, &mut state.workbench, 0).expect("indexed");
     assert_eq!(active_sheet_id(&state), Some(first));
 }
 
@@ -173,15 +173,15 @@ fn a_single_sheet_catalog_offers_no_navigation() {
         .expect("first sheet");
 
     assert_eq!(sheet_count(&state), 1);
-    assert!(next_sheet(&mut state).is_err());
-    assert!(previous_sheet(&mut state).is_err());
+    assert!(next_sheet(&mut state.model, &mut state.workbench).is_err());
+    assert!(previous_sheet(&mut state.model, &mut state.workbench).is_err());
 }
 
 #[test]
 fn a_new_sheet_lands_after_the_active_one_and_becomes_current() {
     let (mut state, first, second) = two_sheet_state();
 
-    new_sheet(&mut state).expect("creation publishes");
+    new_sheet(&mut state.model, &mut state.workbench).expect("creation publishes");
 
     let entries = sheet_entries(&state);
     assert_eq!(entries.len(), 3);
@@ -204,7 +204,8 @@ fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
     ];
     assert!(active_sheet_catalog(&state).is_none());
 
-    new_sheet(&mut state).expect("the first new sheet creates the catalog");
+    new_sheet(&mut state.model, &mut state.workbench)
+        .expect("the first new sheet creates the catalog");
 
     let entries = sheet_entries(&state);
     let names = entries
@@ -259,10 +260,16 @@ fn a_blocking_delete_policy_refuses_and_states_what_the_sheet_holds() {
     delete_behavior(&mut state, SheetDeleteBehavior::BlockWhileReferenced);
 
     assert_eq!(
-        plan_delete(&state, second),
+        plan_delete(&state.model, second),
         SheetDeletePlan::Blocked { objects: 1 }
     );
-    let error = delete_sheet(&mut state, second).expect_err("the sheet still owns an object");
+    let error = delete_sheet(
+        &mut state.sheets.delete_sheet,
+        &mut state.model,
+        &mut state.workbench,
+        second,
+    )
+    .expect_err("the sheet still owns an object");
     assert!(error.contains("still owns"), "{error}");
     assert_eq!(sheet_count(&state), 2);
 }
@@ -276,7 +283,7 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
     );
 
     assert_eq!(
-        plan_delete(&state, second),
+        plan_delete(&state.model, second),
         SheetDeletePlan::MovesObjects {
             objects: 1,
             destination: first,
@@ -284,7 +291,13 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
         }
     );
     // The menu's delete moves nothing until the move is confirmed.
-    delete_sheet(&mut state, second).expect("the delete waits for confirmation");
+    delete_sheet(
+        &mut state.sheets.delete_sheet,
+        &mut state.model,
+        &mut state.workbench,
+        second,
+    )
+    .expect("the delete waits for confirmation");
     assert_eq!(
         sheet_count(&state),
         2,
@@ -322,7 +335,13 @@ fn a_confirmed_delete_whose_outcome_changed_deletes_nothing() {
         &mut state,
         SheetDeleteBehavior::MoveReferencesToReviewedReplacement,
     );
-    delete_sheet(&mut state, second).expect("the delete waits for confirmation");
+    delete_sheet(
+        &mut state.sheets.delete_sheet,
+        &mut state.model,
+        &mut state.workbench,
+        second,
+    )
+    .expect("the delete waits for confirmation");
     let mut pending = state.sheets.delete_sheet.clone().expect("pending");
     pending.objects += 1;
 
@@ -348,8 +367,14 @@ fn the_last_sheet_of_a_catalog_is_retained() {
         .bootstrap_for_cell_view(&key, "Sheet 1", [10])
         .expect("first sheet");
 
-    assert_eq!(plan_delete(&state, only), SheetDeletePlan::LastSheet);
-    let error = delete_sheet(&mut state, only).expect_err("the catalog keeps a sheet");
+    assert_eq!(plan_delete(&state.model, only), SheetDeletePlan::LastSheet);
+    let error = delete_sheet(
+        &mut state.sheets.delete_sheet,
+        &mut state.model,
+        &mut state.workbench,
+        only,
+    )
+    .expect_err("the catalog keeps a sheet");
     assert!(error.contains("last sheet"), "{error}");
 }
 

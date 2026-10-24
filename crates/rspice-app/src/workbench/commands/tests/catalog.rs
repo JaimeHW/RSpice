@@ -42,11 +42,15 @@ fn the_registry_catalog_answers_for_every_command_as_the_command_does() {
     use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform};
 
     let catalog = vocabulary::CommandRegistry;
-    assert_eq!(catalog.commands().len(), vocabulary::COMMAND_REGISTRY.len());
-    for (key, command) in catalog
+    let shell_commands = catalog
         .commands()
         .iter()
         .copied()
+        .filter(|key| vocabulary::legacy_command(*key).is_some())
+        .collect::<Vec<CommandKey>>();
+    assert_eq!(shell_commands.len(), vocabulary::COMMAND_REGISTRY.len());
+    for (key, command) in shell_commands
+        .into_iter()
         .zip(vocabulary::COMMAND_REGISTRY.iter().copied())
     {
         assert_eq!(key, command.key());
@@ -162,10 +166,13 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "design-connectivity-tools"
     );
     assert_eq!(Command::SelectionBulkEdit.spec().id, "design-bulk-tools");
-    assert_eq!(Command::NextSheet.spec().id, "next-sheet");
-    assert_eq!(Command::PreviousSheet.spec().id, "previous-sheet");
-    assert_eq!(Command::NewSheet.spec().id, "new-sheet");
-    assert_eq!(Command::DeleteSheet.spec().id, "delete-sheet");
+    assert_eq!(SheetsCommand::NextSheet.key().as_str(), "next-sheet");
+    assert_eq!(
+        SheetsCommand::PreviousSheet.key().as_str(),
+        "previous-sheet"
+    );
+    assert_eq!(SheetsCommand::NewSheet.key().as_str(), "new-sheet");
+    assert_eq!(SheetsCommand::DeleteSheet.key().as_str(), "delete-sheet");
     assert_eq!(Command::ShowInNetlist.spec().id, "show-in-netlist");
     assert_eq!(Command::ModelEditor.spec().id, "model-editor");
     assert_eq!(Command::ImportResultDataset.spec().id, "import-dataset");

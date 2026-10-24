@@ -87,7 +87,8 @@ impl ShortcutCategory {
 mod tests {
     use super::*;
     use crate::state::command_catalog::CommandPlatform;
-    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::framework::command_registry::CommandFlags;
 
     #[test]
     fn command_reference_is_a_lossless_projection_of_discoverable_commands() {
@@ -100,11 +101,12 @@ mod tests {
             }
         }
 
-        for command in COMMAND_REGISTRY {
-            if command.palette_visible() {
+        for spec in command_registry().ordered() {
+            if spec.flags.contains(CommandFlags::PALETTE_VISIBLE) {
                 assert!(
-                    seen.contains(&command.key()),
-                    "discoverable command missing from reference: {command:?}"
+                    seen.contains(&spec.key),
+                    "discoverable command missing from reference: {:?}",
+                    spec.key
                 );
             }
         }

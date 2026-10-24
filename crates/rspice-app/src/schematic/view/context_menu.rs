@@ -8,6 +8,7 @@
 
 use egui::{Context, Response};
 
+use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::vocabulary::Command;
@@ -19,6 +20,7 @@ use crate::workbench::{
         open_new_veriloga_device_form, open_replace_instance_dialog, open_stimulus_definition,
         open_stimulus_link, replace_instance_available,
     },
+    framework::command_registry::ids,
 };
 
 use super::SchematicSymbolContext;
@@ -47,7 +49,8 @@ struct ContextCommand {
     action: ContextAction,
     icon: ContextIcon,
     label: &'static str,
-    shortcut_command: Option<Command>,
+    /// The command whose shortcut the row shows.
+    shortcut_command: Option<CommandKey>,
 }
 
 type ContextEntry = context_surface::ContextEntry<ContextCommand>;
@@ -57,25 +60,25 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Properties,
         icon: ContextIcon::Sliders,
         label: "Object properties…",
-        shortcut_command: Some(Command::ObjectProperties),
+        shortcut_command: Some(Command::ObjectProperties.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Rotate,
         icon: ContextIcon::Rotate,
         label: "Rotate 90°",
-        shortcut_command: Some(Command::RotateSelection),
+        shortcut_command: Some(Command::RotateSelection.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Mirror,
         icon: ContextIcon::Mirror,
         label: "Mirror",
-        shortcut_command: Some(Command::MirrorSelectionHorizontal),
+        shortcut_command: Some(Command::MirrorSelectionHorizontal.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::MirrorVertical,
         icon: ContextIcon::MirrorVertical,
         label: "Mirror vertically",
-        shortcut_command: Some(Command::MirrorSelectionVertical),
+        shortcut_command: Some(Command::MirrorSelectionVertical.key()),
     }),
     // The Design menu's Arrange submenu, as a page of this menu: a phone
     // shows no menu bar, and Align and Distribute have no key.
@@ -118,13 +121,13 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Cut,
         icon: ContextIcon::Copy,
         label: "Cut selection",
-        shortcut_command: Some(Command::Cut),
+        shortcut_command: Some(Command::Cut.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Copy,
         icon: ContextIcon::Copy,
         label: "Copy selection",
-        shortcut_command: Some(Command::Copy),
+        shortcut_command: Some(Command::Copy.key()),
     }),
     // Where the menu was opened, which is the point a reader right-clicks
     // to say "here".
@@ -132,19 +135,19 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Paste,
         icon: ContextIcon::Copy,
         label: "Paste here",
-        shortcut_command: Some(Command::Paste),
+        shortcut_command: Some(Command::Paste.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Duplicate,
         icon: ContextIcon::Copy,
         label: "Duplicate",
-        shortcut_command: Some(Command::Duplicate),
+        shortcut_command: Some(Command::Duplicate.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Delete,
         icon: ContextIcon::Trash,
         label: "Delete",
-        shortcut_command: Some(Command::Delete),
+        shortcut_command: Some(Command::Delete.key()),
     }),
     ContextEntry::Separator,
     // The instance-master slot: what the menu's subject has for a master.
@@ -155,43 +158,43 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::DescendHierarchy,
         icon: ContextIcon::Hierarchy,
         label: "Descend into selected instance",
-        shortcut_command: Some(Command::DescendHierarchyDirect),
+        shortcut_command: Some(Command::DescendHierarchyDirect.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OpenVerilogAView,
         icon: ContextIcon::VerilogA,
         label: "Open Verilog-A view",
-        shortcut_command: Some(Command::DescendHierarchyDirect),
+        shortcut_command: Some(Command::DescendHierarchyDirect.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::EditSymbolInPlace,
         icon: ContextIcon::Hierarchy,
         label: "Edit symbol in place",
-        shortcut_command: Some(Command::EditSymbolInPlace),
+        shortcut_command: Some(Command::EditSymbolInPlace.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::NewVerilogADevice,
         icon: ContextIcon::VerilogA,
         label: "New Verilog-A device…",
-        shortcut_command: Some(Command::NewVerilogADevice),
+        shortcut_command: Some(Command::NewVerilogADevice.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::UpdateInstanceInterface,
         icon: ContextIcon::Hierarchy,
         label: "Update instance interface",
-        shortcut_command: Some(Command::UpdateInstanceInterface),
+        shortcut_command: Some(Command::UpdateInstanceInterface.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::ReplaceInstance,
         icon: ContextIcon::Hierarchy,
         label: "Replace instance…",
-        shortcut_command: Some(Command::ReplaceInstance),
+        shortcut_command: Some(Command::ReplaceInstance.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::CreateHierarchy,
         icon: ContextIcon::Hierarchy,
         label: "Create hierarchy from selection…",
-        shortcut_command: Some(Command::CreateHierarchy),
+        shortcut_command: Some(Command::CreateHierarchy.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::CreateSymbolFromPorts,
@@ -204,7 +207,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::SheetProperties,
         icon: ContextIcon::Sheet,
         label: "Sheet properties",
-        shortcut_command: Some(Command::SheetProperties),
+        shortcut_command: Some(ids::SHEET_PROPERTIES),
     }),
     // Fitting the drawing sheet is not here. `Command::ZoomFit` already has a
     // toolbar button on this canvas, a status-bar route, a mobile canvas
@@ -214,7 +217,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::FitContent,
         icon: ContextIcon::Fit,
         label: "Fit schematic content",
-        shortcut_command: Some(Command::FitSchematicContent),
+        shortcut_command: Some(Command::FitSchematicContent.key()),
     }),
     // Only on the empty canvas's menu: a finger has no Z key, and the next
     // drag after this row frames the view.
@@ -222,26 +225,26 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::ZoomBox,
         icon: ContextIcon::ZoomBox,
         label: "Zoom box",
-        shortcut_command: Some(Command::ZoomBox),
+        shortcut_command: Some(Command::ZoomBox.key()),
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::ShowInNetlist,
         icon: ContextIcon::Code,
         label: "Show in netlist",
-        shortcut_command: Some(Command::ShowInNetlist),
+        shortcut_command: Some(Command::ShowInNetlist.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
         icon: ContextIcon::Probe,
         label: "Add voltage or current probe…",
-        shortcut_command: Some(Command::PlaceProbe),
+        shortcut_command: Some(Command::PlaceProbe.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OperatingPoint,
         icon: ContextIcon::Waveform,
         label: "Open operating point",
-        shortcut_command: Some(Command::ResultViewer(ResultViewer::Op)),
+        shortcut_command: Some(Command::ResultViewer(ResultViewer::Op).key()),
     }),
 ];
 
@@ -319,7 +322,7 @@ const fn arrange(action: ArrangeAction, icon: ContextIcon) -> ContextEntry {
         action: ContextAction::ArrangeCommand(action),
         icon,
         label: command.spec().label,
-        shortcut_command: Some(command),
+        shortcut_command: Some(command.key()),
     })
 }
 
@@ -1659,7 +1662,7 @@ fn resolve_entry(
         .map_or_else(String::new, |product_command| {
             state.model.preferences.shortcuts().resolved_label(
                 &crate::workbench::commands::vocabulary::CommandRegistry,
-                product_command.key(),
+                product_command,
                 crate::workbench::app_state::runtime_command_platform(ctx),
                 ctx.os(),
             )

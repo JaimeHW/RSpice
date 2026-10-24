@@ -1306,7 +1306,6 @@ fn request_editor_cancel(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 
     fn input(width: f32, height: f32) -> egui::RawInput {
         egui::RawInput {
@@ -1409,8 +1408,8 @@ mod tests {
 
     #[test]
     fn typed_context_filters_cover_every_registry_command() {
-        for command in COMMAND_REGISTRY.iter().copied() {
-            assert!(ShortcutEditorContext::ALL.contains(&editor_context(command.key())));
+        for command in command_registry().order().iter().copied() {
+            assert!(ShortcutEditorContext::ALL.contains(&editor_context(command)));
         }
     }
 

@@ -1,0 +1,133 @@
+//! The features the shell registers, and how a command key reaches the
+//! feature that declares it.
+//!
+//! [`features!`] lists every registered feature with the slot of the
+//! application state it owns. Each feature's registry is built once. A call
+//! into one of its commands borrows the feature's slot, the model, the
+//! session and the peers it reads from the application state for that one
+//! call: a context is references only, so building one allocates nothing.
+
+use std::sync::LazyLock;
+
+use crate::state::command_catalog::CommandKey;
+use crate::workbench::app_state::AppState;
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, Peers, Reads, Session};
+use crate::workbench::framework::requests::Outbox;
+use crate::workbench::sheets::SheetsFeature;
+use crate::workbench::state::WorkbenchSession;
+
+impl Session for WorkbenchSession {
+    fn outbox(&mut self) -> &mut Outbox {
+        &mut self.outbox
+    }
+}
+
+/// A feature the shell registers: its registry, and its contexts borrowed
+/// from the application state.
+trait Registered: Feature {
+    /// Everything the feature registered, built on first use.
+    fn registry() -> &'static FeatureRegistry<Self>;
+
+    /// What the feature reads to answer whether a command can run.
+    fn reads(state: &AppState) -> Reads<'_, Self>;
+
+    /// The context the feature's command runs in.
+    fn cx(state: &mut AppState) -> Cx<'_, Self>;
+}
+
+/// Register each `slot: Feature` pair: the feature `Feature`, whose state is
+/// the application state's field `slot`.
+macro_rules! features {
+    ($($slot:ident: $feature:ty),+ $(,)?) => {
+        $(
+            impl Registered for $feature {
+                fn registry() -> &'static FeatureRegistry<Self> {
+                    static REGISTRY: LazyLock<FeatureRegistry<$feature>> =
+                        LazyLock::new(FeatureRegistry::build);
+                    &REGISTRY
+                }
+
+                fn reads(state: &AppState) -> Reads<'_, Self> {
+                    Reads::new(&*state.$slot, &state.model, &*state.workbench)
+                }
+
+                fn cx(state: &mut AppState) -> Cx<'_, Self> {
+                    Cx::new(
+                        &mut *state.$slot,
+                        &mut state.model,
+                        &mut *state.workbench,
+                        Peers::new(&*state.design),
+                    )
+                }
+            }
+        )+
+
+        /// What the feature command `key` names declares; `None` for a key
+        /// no registered feature declares.
+        pub(super) fn spec(key: CommandKey) -> Option<&'static CommandSpec> {
+            $(
+                if let Some(command) = <$feature as Registered>::registry().command(key) {
+                    return Some(&command.spec);
+                }
+            )+
+            None
+        }
+
+        /// Whether the feature command `key` names can run here, as its
+        /// feature answers once the shell's own guards have passed; `None`
+        /// for a key no registered feature declares.
+        pub(super) fn availability(state: &AppState, key: CommandKey) -> Option<CommandAvailability> {
+            $(
+                if let Some(command) = <$feature as Registered>::registry().command(key) {
+                    return Some(command.availability(&<$feature as Registered>::reads(state)));
+                }
+            )+
+            None
+        }
+
+        /// Carry out the feature command `key` names, once the shell's
+        /// prologue has let it through.
+        pub(super) fn execute(state: &mut AppState, key: CommandKey) {
+            $(
+                if let Some(command) = <$feature as Registered>::registry().command(key) {
+                    command.execute(&mut <$feature as Registered>::cx(state));
+                }
+            )else+
+        }
+    };
+}
+
+features! {
+    sheets: SheetsFeature,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench::commands::vocabulary::command_registry;
+
+    /// The registry the shell orders commands by declares each feature
+    /// command exactly as its feature does.
+    #[test]
+    fn every_feature_command_is_ordered_as_its_feature_declares_it() {
+        let registry = command_registry();
+        let declared = <SheetsFeature as Registered>::registry();
+        for key in registry.order() {
+            let Some(spec) = spec(*key) else { continue };
+            assert_eq!(
+                format!("{spec:?}"),
+                format!("{:?}", registry.spec(*key).expect("ordered")),
+            );
+            assert!(declared.command(*key).is_some(), "{key:?}");
+        }
+        assert_eq!(
+            registry
+                .order()
+                .iter()
+                .filter(|key| spec(**key).is_some())
+                .count(),
+            crate::workbench::sheets::commands::SheetsCommand::ALL.len()
+        );
+    }
+}

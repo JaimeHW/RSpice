@@ -253,9 +253,7 @@ pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
     open_symbol_parameter_form_dialog,
 };
-pub(crate) use dialogs::visibility_options::{
-    open_drawing_sheet_layers_dialog, open_schematic_visibility_options,
-};
+pub(crate) use dialogs::visibility_options::open_schematic_visibility_options;
 
 pub(crate) use dialogs::selection::rename::{
     open_selected_object_rename, rename_selection_available,

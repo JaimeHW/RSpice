@@ -53,6 +53,10 @@ pub(crate) enum Drain {
     BeforeToasts,
     /// The last step of a window's chrome.
     AfterChrome,
+    /// Straight after the feature call that raised it returns, wherever in
+    /// the frame that call ran: a command another command raised runs once
+    /// the one that raised it is done.
+    AfterContribution,
 }
 
 /// A value one part of the workbench raises for another to act on once.

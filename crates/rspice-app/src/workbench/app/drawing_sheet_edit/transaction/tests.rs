@@ -81,7 +81,10 @@ fn titled(format: SchematicSheetFormat, title: &str) -> SchematicSheetFormat {
 #[test]
 fn a_sheet_is_edited_only_on_a_writable_schematic() {
     let mut app = RSpiceApp::test_instance();
-    assert!(drawing_sheet_editable(&app.state));
+    assert!(drawing_sheet_editable(
+        &app.state.workbench,
+        &app.state.model
+    ));
 
     app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
@@ -92,9 +95,14 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
     );
 
     assert!(app.state.schematic_edit_read_only());
-    assert!(!drawing_sheet_editable(&app.state));
+    assert!(!drawing_sheet_editable(
+        &app.state.workbench,
+        &app.state.model
+    ));
     assert_eq!(
-        crate::workbench::commands::vocabulary::Command::SheetProperties.availability(&app),
+        app.command_availability(
+            crate::workbench::framework::command_registry::ids::SHEET_PROPERTIES
+        ),
         crate::workbench::framework::command_registry::CommandAvailability::Disabled(
             "the active schematic is read-only"
         )

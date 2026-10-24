@@ -6,8 +6,10 @@
 //! one open, an active source editor takes the editing commands it handles,
 //! a read-only schematic refuses an edit, a pending inspector edit commits
 //! first, and a repeatable command is recorded for Repeat. Only then does the
-//! command's owner carry it out, through the shell's legacy table
-//! [`Command::run_legacy_arm`].
+//! command's owner carry it out: the feature that declares it, in its
+//! context, or for a key no feature declares the shell's legacy table
+//! [`Command::run_legacy_arm`]. A command a feature's command raised runs as
+//! soon as that one returns, behind the same prologue.
 //!
 //! The dispatcher is handed a command value or a key. A key names a command
 //! only when the registry lists it, so a dispatch by key reaches exactly the
@@ -24,28 +26,102 @@ use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{active_schematic_editor, command_edits_schematic};
 use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
+use crate::workbench::features;
+use crate::workbench::framework::command_registry::{
+    CommandAvailability, CommandFlags, CommandSpec,
+};
+use crate::workbench::framework::feature::Execute;
+use crate::workbench::framework::requests;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
-/// The dispatcher by key: where a key becomes the command it names.
+/// The dispatcher by key: where a key becomes the command it names, a
+/// feature's first and the shell's legacy table's otherwise.
 impl RSpiceApp {
     /// Carry out the command `key` names behind the prologue every command
     /// shares. A key no command answers to does nothing.
     pub(crate) fn execute_command_key(&mut self, key: CommandKey) {
-        if let Some(command) = legacy_command(key) {
+        if let Some(spec) = features::spec(key) {
+            self.dispatch_feature_command(spec);
+        } else if let Some(command) = legacy_command(key) {
             command.dispatch(self);
         }
+    }
+
+    /// Whether the command `key` names can run here, and why not: the
+    /// shell's own guards first, then the command's owner. `Hidden` for a key
+    /// no command answers to.
+    pub(crate) fn command_availability(&self, key: CommandKey) -> CommandAvailability {
+        let Some(spec) = features::spec(key) else {
+            return legacy_command(key).map_or(CommandAvailability::Hidden, |command| {
+                command.availability(self)
+            });
+        };
+        if held_by_project_operation(spec.flags, &self.state.platform) {
+            return CommandAvailability::Disabled("project operation is still in progress");
+        }
+        if lacks_open_project(spec.flags, &self.state.platform) {
+            return CommandAvailability::Disabled("no project is open");
+        }
+        features::availability(&self.state, key).unwrap_or(CommandAvailability::Hidden)
     }
 
     /// Whether the command `key` names is available here, as the shortcut
     /// resolver asks it before a chord may fire.
     pub(crate) fn command_key_available(&self, key: CommandKey) -> bool {
-        legacy_command(key).is_some_and(|command| command.availability(self).is_available())
+        self.command_availability(key).is_available()
     }
 
-    /// Whether the command `key` names would run if raised now.
+    /// Whether the command `key` names would run if raised now. A feature's
+    /// command runs exactly when it is available: no source editor takes
+    /// one in its place.
     pub(crate) fn command_key_enabled(&self, key: CommandKey) -> bool {
+        if features::spec(key).is_some() {
+            return self.command_availability(key).is_available();
+        }
         legacy_command(key).is_some_and(|command| command.is_enabled(self))
     }
+
+    /// Carry out the feature command `spec` declares behind the same
+    /// prologue as [`Command::dispatch`], then every command it raised.
+    fn dispatch_feature_command(&mut self, spec: &CommandSpec) {
+        let flags = spec.flags;
+        if held_by_project_operation(flags, &self.state.platform)
+            || lacks_open_project(flags, &self.state.platform)
+        {
+            return;
+        }
+        if flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT)
+            && active_schematic_editor(self)
+            && self.state.schematic_edit_read_only()
+        {
+            self.state.deny_read_only_edit();
+            return;
+        }
+        if flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT)
+            && !self.state.commit_pending_inspector_edit()
+        {
+            return;
+        }
+        features::execute(&mut self.state, spec.key);
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, Execute(key)| app.execute_command_key(key),
+        );
+    }
+}
+
+/// Whether a project operation still in progress holds back a command that
+/// declares `flags`.
+fn held_by_project_operation(flags: CommandFlags, platform: &PlatformState) -> bool {
+    flags.contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
+        && crate::workbench::lifecycle::project_lifecycle::operation_in_progress(platform)
+}
+
+/// Whether a command that declares `flags` needs an open project and none is
+/// open.
+fn lacks_open_project(flags: CommandFlags, platform: &PlatformState) -> bool {
+    flags.contains(CommandFlags::REQUIRES_OPEN_PROJECT) && !platform.project_lifecycle.is_open()
 }
 
 impl Command {

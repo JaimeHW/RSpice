@@ -78,9 +78,13 @@ pub(in crate::workbench) fn confirm_sheet_delete(
     state: &mut AppState,
     pending: &PendingSheetDelete,
 ) {
-    let plan = sheet_actions::plan_delete(state, pending.sheet);
+    let plan = sheet_actions::plan_delete(&state.model, pending.sheet);
     if pending.still_planned(&plan) {
-        let _ = sheet_actions::commit_delete_sheet(state, pending.sheet);
+        let _ = sheet_actions::commit_delete_sheet(
+            &mut state.model,
+            &mut state.workbench,
+            pending.sheet,
+        );
     } else {
         state.prompt(format!(
             "Sheet \u{201c}{}\u{201d} changed while the delete waited for confirmation, so \

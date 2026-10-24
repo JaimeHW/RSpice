@@ -488,14 +488,20 @@ impl Host for RSpiceApp {
         command_registry()
     }
 
+    // A key no legacy command answers to is a feature's, or nobody's: the
+    // dispatcher by key answers both.
     fn availability(&self, key: CommandKey) -> CommandAvailability {
-        command(key).map_or(CommandAvailability::Hidden, |command| {
-            command.availability(self)
-        })
+        command(key).map_or_else(
+            || self.command_availability(key),
+            |command| command.availability(self),
+        )
     }
 
     fn is_enabled(&self, key: CommandKey) -> bool {
-        command(key).is_some_and(|command| command.is_enabled(self))
+        command(key).map_or_else(
+            || self.command_key_enabled(key),
+            |command| command.is_enabled(self),
+        )
     }
 
     fn checked(&self, key: CommandKey) -> Option<bool> {
@@ -503,7 +509,10 @@ impl Host for RSpiceApp {
     }
 
     fn label(&self, key: CommandKey) -> &'static str {
-        command(key).map_or(key.as_str(), |command| command.spec().label)
+        command(key).map_or_else(
+            || command_registry().label(key),
+            |command| command.spec().label,
+        )
     }
 
     fn shortcut_label(
@@ -520,8 +529,9 @@ impl Host for RSpiceApp {
     }
 
     fn execute(&mut self, key: CommandKey) {
-        if let Some(command) = command(key) {
-            command.execute(self);
+        match command(key) {
+            Some(command) => command.execute(self),
+            None => self.execute_command_key(key),
         }
     }
 

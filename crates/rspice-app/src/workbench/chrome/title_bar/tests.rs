@@ -6,8 +6,11 @@
 
 use super::*;
 use crate::state::ModelsPage;
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::{Command, legacy_command};
+use crate::workbench::commands::vocabulary::{Command, command_registry};
+use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -164,12 +167,17 @@ fn draw_menu_entries(ui: &mut Ui, app: &RSpiceApp, entries: &[MenuEntry]) {
 
 /// Every command `entries` list, in order, whatever context their blocks
 /// show in; a submenu's commands follow its row.
-fn listed_commands(entries: &[MenuEntry]) -> Vec<Command> {
+fn listed_commands(entries: &[MenuEntry]) -> Vec<CommandKey> {
     let mut commands = Vec::new();
     for entry in entries {
         match *entry {
-            MenuEntry::Command(item) => commands
-                .push(legacy_command(item.command).expect("a menu names registered commands")),
+            MenuEntry::Command(item) => {
+                assert!(
+                    command_registry().spec(item.command).is_some(),
+                    "a menu names registered commands"
+                );
+                commands.push(item.command);
+            }
             MenuEntry::Submenu { entries, .. } | MenuEntry::Only(_, entries) => {
                 commands.extend(listed_commands(entries));
             }
@@ -179,8 +187,13 @@ fn listed_commands(entries: &[MenuEntry]) -> Vec<Command> {
     commands
 }
 
+/// The keys of `commands`, in order.
+fn keys<const N: usize>(commands: [Command; N]) -> [CommandKey; N] {
+    commands.map(Command::key)
+}
+
 /// `menu` lists `run` as consecutive rows.
-fn assert_menu_lists(menu: ApplicationMenu, run: &[Command]) {
+fn assert_menu_lists(menu: ApplicationMenu, run: &[CommandKey]) {
     let listed = listed_commands(menu.entries());
     assert!(
         listed.windows(run.len()).any(|window| window == run),
@@ -411,9 +424,11 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         Command::ToggleConsole,
         Command::HelpCenter,
     ] {
-        assert!(listed.contains(&command), "no menu lists {command:?}");
+        assert!(listed.contains(&command.key()), "no menu lists {command:?}");
     }
-    assert!(listed_commands(ApplicationMenu::Simulate.entries()).contains(&Command::JobsManager));
+    assert!(
+        listed_commands(ApplicationMenu::Simulate.entries()).contains(&Command::JobsManager.key())
+    );
     assert_eq!(Command::JobsManager.spec().label, "Run history\u{2026}");
 }
 
@@ -553,10 +568,10 @@ fn file_menu_exposes_the_canonical_drawing_sheet_workflows_in_order() {
     assert_menu_lists(
         ApplicationMenu::File,
         &[
-            Command::SheetProperties,
-            Command::SheetFormatManager,
-            Command::CustomSheetSizes,
-            Command::SheetDefaults,
+            SheetsCommand::SheetProperties.key(),
+            SheetsCommand::SheetFormatManager.key(),
+            SheetsCommand::CustomSheetSizes.key(),
+            SheetsCommand::SheetDefaults.key(),
         ],
     );
 }
@@ -632,12 +647,12 @@ fn the_view_menu_lists_each_viewport_row_exactly_once() {
     let listed = listed_commands(ApplicationMenu::View.entries());
     for command in &listed {
         assert!(
-            seen.insert(command.spec().id),
+            seen.insert(command.as_str()),
             "{command:?} appears twice in the View menu"
         );
     }
     assert_eq!(seen.len(), listed.len());
-    assert!(listed.contains(&Command::VisibilityOptions));
+    assert!(listed.contains(&Command::VisibilityOptions.key()));
 }
 
 const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
@@ -668,35 +683,35 @@ const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
     Command::ReviewComments,
     Command::RevisionHistory,
 ];
-const DESIGN_SHEET_COMMANDS: [Command; 4] = [
-    Command::PreviousSheet,
-    Command::NextSheet,
-    Command::NewSheet,
-    Command::DeleteSheet,
+const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
+    SheetsCommand::PreviousSheet,
+    SheetsCommand::NextSheet,
+    SheetsCommand::NewSheet,
+    SheetsCommand::DeleteSheet,
 ];
 
 #[test]
 fn design_placement_menu_matches_the_mockup_order() {
-    assert_menu_lists(ApplicationMenu::Design, &DESIGN_PLACEMENT_COMMANDS);
+    assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_PLACEMENT_COMMANDS));
 }
 
 #[test]
 fn window_layout_menu_places_split_with_results_before_focus_workspace() {
     assert_menu_lists(
         ApplicationMenu::Window,
-        &[
+        &keys([
             Command::ToggleNavigator,
             Command::ToggleInspector,
             Command::ToggleConsole,
             Command::ToggleResultsSplit,
             Command::ToggleFocusMode,
-        ],
+        ]),
     );
 }
 
 #[test]
 fn design_edit_menu_matches_the_upgraded_authoring_group() {
-    assert_menu_lists(ApplicationMenu::Design, &DESIGN_EDIT_COMMANDS);
+    assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_EDIT_COMMANDS));
 }
 
 /// One frame of what `draw` paints, returning the labels of the menu items
@@ -782,7 +797,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         })
         .expect("the Design menu lists Arrange")
         .iter()
-        .map(|command| command.spec().label)
+        .map(|command| command_registry().label(*command))
         .collect();
     assert_eq!(arrange_labels.len(), 13);
     let before = app.state.model.schematic.document().components[1].pos;
@@ -843,12 +858,15 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
 
 #[test]
 fn design_management_menu_matches_the_upgraded_governed_group() {
-    assert_menu_lists(ApplicationMenu::Design, &DESIGN_MANAGEMENT_COMMANDS);
+    assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_MANAGEMENT_COMMANDS));
 }
 
 #[test]
 fn design_sheet_menu_reads_navigation_before_authoring() {
-    assert_menu_lists(ApplicationMenu::Design, &DESIGN_SHEET_COMMANDS);
+    assert_menu_lists(
+        ApplicationMenu::Design,
+        &DESIGN_SHEET_COMMANDS.map(SheetsCommand::key),
+    );
 }
 
 #[test]
@@ -856,10 +874,17 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
     for command in DESIGN_PLACEMENT_COMMANDS
         .into_iter()
         .chain(DESIGN_EDIT_COMMANDS)
-        .chain(DESIGN_SHEET_COMMANDS)
         .chain(DESIGN_MANAGEMENT_COMMANDS)
     {
         assert!(command.palette_visible());
+    }
+    for command in DESIGN_SHEET_COMMANDS {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::PALETTE_VISIBLE)
+        );
     }
     for command in [
         Command::CreateHierarchy,

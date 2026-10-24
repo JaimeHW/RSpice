@@ -9,13 +9,13 @@ use egui::os::OperatingSystem;
 use serde_json::Value;
 
 use crate::state::ComponentType;
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandCatalog, CommandPlatform};
 use crate::state::shortcuts::{
     ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPolicies, ShortcutPreferences,
     ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutProfileLibrary,
     ShortcutProfileLibraryError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::state::Workspace;
 
 fn sequence(key: Key, primary: bool) -> ShortcutSequence {
@@ -205,10 +205,11 @@ fn malformed_keys_are_isolated_and_audited_without_hiding_defaults() {
 #[test]
 fn binding_count_is_expanded_across_supported_platforms() {
     let preferences = ShortcutPreferences::default();
-    let expected: usize = COMMAND_REGISTRY
+    let expected: usize = CommandRegistry
+        .commands()
         .iter()
         .copied()
-        .flat_map(|command| preferences.resolved_bindings(&CommandRegistry, command.key()))
+        .flat_map(|command| preferences.resolved_bindings(&CommandRegistry, command))
         .map(|binding| binding.platforms().len())
         .sum();
     assert_eq!(

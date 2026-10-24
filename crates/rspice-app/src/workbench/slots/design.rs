@@ -3,12 +3,15 @@
 //! schematic and symbol editors' interaction session; the design panel, the
 //! component chooser's filter and the Stimulus Library's reading and drafts.
 
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+
 use crate::state::{GridStyle, SchematicVisibilityPolicy};
 use crate::workbench::app::{
     ConnectivityManagerDialogState, CreateModelBoundSymbolDialogState,
     DesignReviewCommentsDialogState, SelectionBulkEditDialogState, SymbolImportDialogState,
     SymbolParameterFormDialogState,
 };
+use crate::workbench::framework::feature::DesignPort;
 
 /// What the design feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -252,5 +255,11 @@ impl DesignState {
         self.selected_stimulus_definition = None;
         self.stimulus_editor.clear();
         self.stimulus_browser.clear();
+    }
+}
+
+impl DesignPort for DesignState {
+    fn review_markers(&self) -> SchematicReviewMarkerVisibility {
+        self.schematic_visibility.review_markers
     }
 }

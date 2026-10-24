@@ -83,10 +83,6 @@ pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
     open_display_options(state)
 }
 
-pub(crate) fn open_drawing_sheet_layers_dialog(state: &mut AppState) -> bool {
-    open_display_options(state)
-}
-
 impl RSpiceApp {
     pub(in crate::workbench) fn render_schematic_visibility_dialog(&mut self, ctx: &Context) {
         if !self.state.design.schematic_visibility_dialog.open {
@@ -443,7 +439,7 @@ mod tests {
     #[test]
     fn one_display_options_dialog_owns_visibility_and_sheet_layers() {
         let mut app = RSpiceApp::test_instance();
-        assert!(open_drawing_sheet_layers_dialog(&mut app.state));
+        assert!(open_display_options(&mut app.state));
         assert!(
             !open_schematic_visibility_options(&mut app.state),
             "both commands open the same dialog"

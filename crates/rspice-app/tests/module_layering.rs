@@ -613,6 +613,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // frame points that take them. It names nothing of the shell's, so every
     // part can raise or take one.
     "framework",
+    // What the sheets feature's commands declare: keys, labels and bindings,
+    // values the command vocabulary lists in the shell's order.
+    "sheets/commands",
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
     "platform",
@@ -683,6 +686,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // workbench's own types. It hands them the session, so it sits above the
     // session aggregate; every container that takes it sits above it.
     "framework/workbench_host",
+    // A feature, the context its commands run in and the registry they are
+    // listed in. A context holds the model, so it sits above the session
+    // aggregate; every feature sits above it.
+    "framework/feature",
     // The live-session engine the application pumps each frame, and result
     // import. Both take the session aggregate, not the application root.
     "live_session",
@@ -711,13 +718,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/file_actions",
     // Command dispatch.
     "commands",
-    // The one dispatcher every command runs through: its prologue, then the
-    // legacy table the commands module keeps.
-    "dispatch",
     // Following a finding to the object it is about. It reads a route a page
     // recorded and opens its destination, which takes the command vocabulary
-    // and the document engines — so it sits above dispatch and below every
-    // surface that offers one, none of which it references.
+    // and the document engines — so it sits above the commands and below
+    // every surface that offers one, none of which it references.
     "diagnostic_routes",
     // Chrome, docks, surfaces, and the rest of the presentation layer.
     "chrome",
@@ -727,6 +731,16 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // dialog and draft types its feature renders, so it ranks above them;
     // the session aggregate that holds the slots reaches up to it.
     "slots",
+    // The sheets feature: its commands' answers over its own slot, the model
+    // and the session.
+    "sheets",
+    // The shell's list of registered features, which builds each one's
+    // context from the application state.
+    "features",
+    // The one dispatcher every command runs through: its prologue, then the
+    // feature that declares the command or the legacy table the commands
+    // module keeps.
+    "dispatch",
     "surfaces",
     "tools/notification_center",
     "tools/project_launcher",

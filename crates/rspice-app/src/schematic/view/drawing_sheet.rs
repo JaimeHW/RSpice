@@ -3,6 +3,7 @@
 use super::viewport::Viewport;
 use super::{AppState, SchematicSymbolContext, schematic_symbol_context};
 use crate::state::overflow_memo::OverflowKey;
+use crate::workbench::app_state::{Model, model_design_view};
 use egui::{Painter, Rect};
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
 pub(crate) use rspice_schematic_editor::view::drawing_sheet::{
@@ -140,13 +141,15 @@ pub(crate) fn drawing_sheet_overflow_summary(
         .clone()
 }
 
+/// What the open sheet prints, read through the drawing as it shows
+/// `review_markers`.
 pub(crate) fn drawing_sheet_printable_preview(
-    state: &AppState,
+    model: &Model,
+    review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
 ) -> Vec<DrawingSheetPrintablePreview> {
-    let symbol_context = schematic_symbol_context(state);
     sheet_view::drawing_sheet_printable_preview(
-        &super::schematic_design_view(state),
-        &symbol_context,
+        &model_design_view(model, review_markers),
+        &model.schematic_symbol_context(),
     )
 }
 

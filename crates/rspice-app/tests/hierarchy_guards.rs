@@ -668,6 +668,10 @@ const COMMAND_ROUTING_FILE: &str = "workbench/commands/registry.rs";
 /// command it names.
 const COMMAND_IDS_FILE: &str = "workbench/framework/command_registry.rs";
 
+/// Where each registered feature declares its commands. A framework id may
+/// name one of them rather than a `Command` variant.
+const FEATURE_COMMAND_FILES: &[&str] = &["workbench/sheets/commands.rs"];
+
 /// Registered commands with no route, and why.
 ///
 /// An entry is a claim that the product deliberately ships a command nobody
@@ -772,9 +776,14 @@ fn braced_body(code: &str, signature: &str) -> Option<String> {
 ///
 /// Framework code names a command by an id in the `ids!` block, which holds
 /// the command's key; the variant is the one whose `spec` arm declares that
-/// key. An id whose key no arm declares fails here, so a renamed key cannot
-/// silently drop the routes its id carries.
-fn command_ids(ids_production: &str, registry_production: &str) -> BTreeMap<String, String> {
+/// key. An id whose key neither an arm nor a feature's command set declares
+/// fails here, so a renamed key cannot silently drop the routes its id
+/// carries.
+fn command_ids(
+    ids_production: &str,
+    registry_production: &str,
+    feature_productions: &[String],
+) -> BTreeMap<String, String> {
     let specs = braced_body(
         registry_production,
         "pub const fn spec(self) -> CommandSpec {",
@@ -802,7 +811,7 @@ fn command_ids(ids_production: &str, registry_production: &str) -> BTreeMap<Stri
     }
 
     let block = braced_body(ids_production, "ids! {").expect("the framework ids are declared");
-    let mut ids = BTreeMap::new();
+    let mut declared = BTreeMap::new();
     for line in block.lines() {
         let Some((id, key)) = line
             .trim()
@@ -811,17 +820,56 @@ fn command_ids(ids_production: &str, registry_production: &str) -> BTreeMap<Stri
         else {
             continue;
         };
-        let (id, key) = (id.trim(), key.trim().trim_matches('"'));
-        let variant = variant_by_key
-            .get(key)
-            .unwrap_or_else(|| panic!("ids::{id} names `{key}`, which no spec arm declares"));
-        ids.insert(id.to_owned(), variant.clone());
+        declared.insert(
+            id.trim().to_owned(),
+            key.trim().trim_matches('"').to_owned(),
+        );
+    }
+    let feature_keys = feature_command_keys(feature_productions, &declared);
+    let mut ids = BTreeMap::new();
+    for (id, key) in &declared {
+        match variant_by_key.get(key) {
+            Some(variant) => {
+                ids.insert(id.clone(), variant.clone());
+            }
+            // A feature's command routes through its own declaration.
+            None if feature_keys.contains(key) => {}
+            None => panic!("ids::{id} names `{key}`, which no spec arm declares"),
+        }
     }
     assert!(
         !ids.is_empty(),
         "the ids! block parsed as empty — the parse broke, not the block"
     );
     ids
+}
+
+/// The keys the features' command sets declare: each `CommandKey::new`
+/// literal, and the key of each framework id they name.
+fn feature_command_keys(
+    feature_productions: &[String],
+    ids: &BTreeMap<String, String>,
+) -> BTreeSet<String> {
+    let mut keys = BTreeSet::new();
+    for code in feature_productions {
+        let mut rest = code.as_str();
+        while let Some(index) = rest.find("CommandKey::new(\"") {
+            rest = &rest[index + "CommandKey::new(\"".len()..];
+            if let Some((key, _)) = rest.split_once('"') {
+                keys.insert(key.to_owned());
+            }
+        }
+        let mut rest = code.as_str();
+        while let Some(index) = rest.find("ids::") {
+            rest = &rest[index + "ids::".len()..];
+            keys.extend(ids.get(&id_name(rest)).cloned());
+        }
+    }
+    assert!(
+        !keys.is_empty(),
+        "the features' command sets parsed as declaring no keys — the parse broke"
+    );
+    keys
 }
 
 /// The id `ids::NAME` names at the start of `rest`, after its `ids::`.
@@ -910,9 +958,14 @@ fn every_command_has_a_user_route() {
     let mut registry_code = None;
     let mut routing_code = None;
     let mut routes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let features = FEATURE_COMMAND_FILES
+        .iter()
+        .map(|file| Source::read(&root.join(file)).production)
+        .collect::<Vec<_>>();
     let ids = command_ids(
         &Source::read(&root.join(COMMAND_IDS_FILE)).production,
         &Source::read(&root.join(COMMAND_REGISTRY_FILE)).production,
+        &features,
     );
 
     for (path, file) in production_files(&root) {

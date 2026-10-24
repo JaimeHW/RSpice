@@ -6,32 +6,48 @@
 //! bind either key on its own.
 
 use super::*;
-use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::state::command_catalog::{
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
+};
 use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::CommandFlags;
 
-const SHEET_COMMANDS: [Command; 4] = [
-    Command::NextSheet,
-    Command::PreviousSheet,
-    Command::NewSheet,
-    Command::DeleteSheet,
+const SHEET_COMMANDS: [SheetsCommand; 4] = [
+    SheetsCommand::NextSheet,
+    SheetsCommand::PreviousSheet,
+    SheetsCommand::NewSheet,
+    SheetsCommand::DeleteSheet,
 ];
 
+/// The bindings `command` ships with, as the registry declares them.
+fn shortcut_bindings(command: SheetsCommand) -> &'static [ShortcutBinding] {
+    vocabulary::CommandRegistry.default_bindings(command.key())
+}
+
+/// The chord the registry shows for `command` on `platform`.
+fn default_shortcut_label(command: SheetsCommand, platform: CommandPlatform) -> &'static str {
+    shortcut_bindings(command)
+        .iter()
+        .find(|binding| binding.supports(platform))
+        .map_or("", |binding| binding.chord.label)
+}
+
 /// Every registered command that binds any chord `command` binds.
-fn chord_owners(command: Command) -> Vec<Command> {
-    let chords = command
-        .shortcut_bindings()
+fn chord_owners(command: SheetsCommand) -> Vec<CommandKey> {
+    let chords = shortcut_bindings(command)
         .iter()
         .map(|binding| binding.chord)
         .collect::<Vec<_>>();
-    vocabulary::COMMAND_REGISTRY
-        .iter()
-        .copied()
+    command_registry()
+        .ordered()
         .filter(|candidate| {
             candidate
-                .shortcut_bindings()
+                .bindings
                 .iter()
                 .any(|binding| chords.contains(&binding.chord))
         })
+        .map(|candidate| candidate.key)
         .collect()
 }
 
@@ -82,41 +98,52 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
 #[test]
 fn every_sheet_command_is_a_registered_canvas_command() {
     for command in SHEET_COMMANDS {
+        let spec = command_registry().spec(command.key());
         assert!(
-            vocabulary::COMMAND_REGISTRY.contains(&command),
+            command_registry().order().contains(&command.key()),
             "the palette projects the registry, so an unlisted command has no seat"
         );
-        assert!(command.palette_visible(), "{command:?}");
+        let spec = spec.expect("an ordered command is declared");
+        assert!(
+            spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
+            "{command:?}"
+        );
         assert_eq!(
-            command.shortcut_context(),
+            spec.context,
             ShortcutContext::EngineeringCanvas,
             "{command:?}"
         );
-        assert!(command.requires_open_project(), "{command:?}");
+        assert!(
+            spec.flags.contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+            "{command:?}"
+        );
     }
 }
 
 #[test]
 fn paging_chords_have_exactly_one_owner_on_every_platform() {
-    let next = Command::NextSheet.shortcut_bindings();
-    let previous = Command::PreviousSheet.shortcut_bindings();
+    let next = shortcut_bindings(SheetsCommand::NextSheet);
+    let previous = shortcut_bindings(SheetsCommand::PreviousSheet);
     assert_eq!(next.len(), 1);
     assert_eq!(previous.len(), 1);
     assert_eq!(next[0].chord.label, "Page Down");
     assert_eq!(previous[0].chord.label, "Page Up");
 
-    assert_eq!(chord_owners(Command::NextSheet), vec![Command::NextSheet]);
     assert_eq!(
-        chord_owners(Command::PreviousSheet),
-        vec![Command::PreviousSheet]
+        chord_owners(SheetsCommand::NextSheet),
+        vec![SheetsCommand::NextSheet.key()]
+    );
+    assert_eq!(
+        chord_owners(SheetsCommand::PreviousSheet),
+        vec![SheetsCommand::PreviousSheet.key()]
     );
     for platform in CommandPlatform::ALL {
         assert_eq!(
-            Command::NextSheet.default_shortcut_label(platform),
+            default_shortcut_label(SheetsCommand::NextSheet, platform),
             "Page Down"
         );
         assert_eq!(
-            Command::PreviousSheet.default_shortcut_label(platform),
+            default_shortcut_label(SheetsCommand::PreviousSheet, platform),
             "Page Up"
         );
         // The document strip reaches the same keys only with Ctrl+Alt, so a
@@ -131,8 +158,8 @@ fn paging_chords_have_exactly_one_owner_on_every_platform() {
         );
     }
 
-    assert!(Command::NewSheet.shortcut_bindings().is_empty());
-    assert!(Command::DeleteSheet.shortcut_bindings().is_empty());
+    assert!(shortcut_bindings(SheetsCommand::NewSheet).is_empty());
+    assert!(shortcut_bindings(SheetsCommand::DeleteSheet).is_empty());
 }
 
 #[test]
@@ -141,51 +168,51 @@ fn sheet_commands_state_why_they_are_unavailable() {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
     assert_eq!(
-        Command::NextSheet.availability(&app),
+        app.command_availability(SheetsCommand::NextSheet.key()),
         CommandAvailability::Disabled("open a schematic or testbench")
     );
     assert_eq!(
-        Command::NewSheet.availability(&app),
+        app.command_availability(SheetsCommand::NewSheet.key()),
         CommandAvailability::Disabled("open an editable schematic or testbench")
     );
 
     app.state.workbench.activate(Workspace::Design);
     app.state.model.schematic.session.read_only = true;
     assert_eq!(
-        Command::NewSheet.availability(&app),
+        app.command_availability(SheetsCommand::NewSheet.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
     assert_eq!(
-        Command::DeleteSheet.availability(&app),
+        app.command_availability(SheetsCommand::DeleteSheet.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.model.schematic.session.read_only = false;
     for command in [
-        Command::NextSheet,
-        Command::PreviousSheet,
-        Command::DeleteSheet,
+        SheetsCommand::NextSheet,
+        SheetsCommand::PreviousSheet,
+        SheetsCommand::DeleteSheet,
     ] {
         assert_eq!(
-            command.availability(&app),
+            app.command_availability(command.key()),
             CommandAvailability::Disabled("the active cell view has a single sheet"),
             "a drawing with no sheet catalog is one sheet: {command:?}"
         );
     }
     assert_eq!(
-        Command::NewSheet.availability(&app),
+        app.command_availability(SheetsCommand::NewSheet.key()),
         CommandAvailability::Available,
         "a new sheet on a single drawing creates the catalog"
     );
 
     let single = app_with_sheets(1);
     for command in [
-        Command::NextSheet,
-        Command::PreviousSheet,
-        Command::DeleteSheet,
+        SheetsCommand::NextSheet,
+        SheetsCommand::PreviousSheet,
+        SheetsCommand::DeleteSheet,
     ] {
         assert_eq!(
-            command.availability(&single),
+            single.command_availability(command.key()),
             CommandAvailability::Disabled("the active cell view has a single sheet"),
             "{command:?}"
         );
@@ -194,7 +221,7 @@ fn sheet_commands_state_why_they_are_unavailable() {
     app.state.close_project_session();
     for command in SHEET_COMMANDS {
         assert_eq!(
-            command.availability(&app),
+            app.command_availability(command.key()),
             CommandAvailability::Disabled("no project is open"),
             "{command:?}"
         );
@@ -204,15 +231,15 @@ fn sheet_commands_state_why_they_are_unavailable() {
 #[test]
 fn navigation_needs_a_second_sheet_and_authoring_needs_a_catalog() {
     let mut app = app_with_sheets(1);
-    assert!(!Command::NextSheet.is_enabled(&app));
-    assert!(!Command::PreviousSheet.is_enabled(&app));
-    assert!(!Command::DeleteSheet.is_enabled(&app));
-    assert!(Command::NewSheet.is_enabled(&app));
+    assert!(!app.command_key_enabled(SheetsCommand::NextSheet.key()));
+    assert!(!app.command_key_enabled(SheetsCommand::PreviousSheet.key()));
+    assert!(!app.command_key_enabled(SheetsCommand::DeleteSheet.key()));
+    assert!(app.command_key_enabled(SheetsCommand::NewSheet.key()));
 
     app = app_with_sheets(2);
     for command in SHEET_COMMANDS {
         assert_eq!(
-            command.availability(&app),
+            app.command_availability(command.key()),
             CommandAvailability::Available,
             "{command:?}"
         );
@@ -230,10 +257,10 @@ fn paging_commands_move_the_active_sheet_and_wrap() {
         .collect::<Vec<_>>();
     assert_eq!(sheets::active_sheet_id(&app.state), Some(order[0]));
 
-    Command::NextSheet.execute(&mut app);
+    app.execute_command_key(SheetsCommand::NextSheet.key());
     assert_eq!(sheets::active_sheet_id(&app.state), Some(order[1]));
-    Command::PreviousSheet.execute(&mut app);
-    Command::PreviousSheet.execute(&mut app);
+    app.execute_command_key(SheetsCommand::PreviousSheet.key());
+    app.execute_command_key(SheetsCommand::PreviousSheet.key());
     assert_eq!(
         sheets::active_sheet_id(&app.state),
         Some(order[2]),
@@ -246,11 +273,11 @@ fn creating_and_deleting_sheets_run_their_real_transactions() {
     use crate::workbench::app::sheets;
 
     let mut app = app_with_sheets(2);
-    Command::NewSheet.execute(&mut app);
+    app.execute_command_key(SheetsCommand::NewSheet.key());
     assert_eq!(sheets::sheet_count(&app.state), 3);
 
     let created = sheets::active_sheet_id(&app.state).expect("the new sheet is entered");
-    Command::DeleteSheet.execute(&mut app);
+    app.execute_command_key(SheetsCommand::DeleteSheet.key());
     assert_eq!(sheets::sheet_count(&app.state), 2);
     assert_ne!(sheets::active_sheet_id(&app.state), Some(created));
 }
