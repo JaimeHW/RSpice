@@ -88,10 +88,6 @@ tools/rspice-bench/circuits/** text eol=lf
 tools/rspice-bench/external/**/*.cir text eol=lf
 tools/rspice-bench/external/**/*.sh text eol=lf
 
-# The Results catalog is generated from this contract by build.rs. Pin it to LF
-# so every platform's checkout feeds the generator identical bytes.
-crates/rspice-app/contracts/** text eol=lf
-
 # The loader digests a project file's exact bytes, and a frozen migration
 # fixture is include_str!'d into a test binary. CRLF materialization would
 # change both on Windows alone, so the format is pinned to LF everywhere.
