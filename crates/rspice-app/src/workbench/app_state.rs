@@ -951,6 +951,35 @@ impl AppState {
         });
     }
 
+    /// Close a route-owned transient surface without stranding its canonical
+    /// URL. Ordinary opens return to their exact source; a direct deep link
+    /// replaces itself with the currently projected primary workspace.
+    pub(crate) fn close_route_owned_transient(
+        &mut self,
+        surface: crate::workbench::SurfaceId,
+        label: &str,
+    ) {
+        if self.workbench.current_route().surface_id() != surface {
+            return;
+        }
+        if self
+            .workbench
+            .navigate_back(crate::workbench::RouteTransitionSource::User)
+            .is_some()
+        {
+            return;
+        }
+        let fallback = crate::workbench::SurfaceRoute::surface(
+            crate::workbench::SurfaceId::from_workspace(self.workbench.workspace),
+        );
+        if let Err(error) = self
+            .workbench
+            .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
+        {
+            self.prompt(format!("Could not close {label}: {error}"));
+        }
+    }
+
     /// The prompt on the status bar, if one is showing.
     #[cfg(test)]
     pub(crate) fn prompt_text(&self) -> Option<&str> {

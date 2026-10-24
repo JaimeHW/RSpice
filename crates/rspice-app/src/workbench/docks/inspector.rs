@@ -30,8 +30,9 @@ use egui::{ScrollArea, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::framework::host::{Host, Point};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::AppState;
+use crate::workbench::framework::host::Point;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::PANEL_HEADER_H;
 use super::super::state::Workspace;
@@ -165,7 +166,7 @@ pub(crate) fn validate_component_model_catalog_binding(
     Ok(())
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
     let scroll_identity = inspector_scroll_identity(app);
@@ -196,26 +197,26 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 /// The inspected subject's sections, laid out on the panel body.
-fn inspector_body(ui: &mut Ui, app: &mut RSpiceApp) {
-    let scope = app.inspector_scope(app.state.workbench.workspace);
+fn inspector_body(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+    let scope = app.inspector_scope(app.workbench().workspace);
     app.contribute(Point::Inspector(scope), ui);
 }
 
-fn inspector_scroll_identity(app: &RSpiceApp) -> String {
-    let route = app.state.workbench.current_route();
-    if app.state.workbench.workspace != Workspace::Design {
+fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
+    let route = app.workbench().current_route();
+    if app.workbench().workspace != Workspace::Design {
         return route.to_string();
     }
 
     format!(
         "{}|{}|{:?}",
         route,
-        app.state.model.workspace.content.active_display_path(),
-        app.state.model.schematic.session.editor.selection
+        app.model().workspace.content.active_display_path(),
+        app.model().schematic.session.editor.selection
     )
 }
 
-fn header(ui: &mut Ui, app: &mut RSpiceApp) {
+fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
@@ -226,7 +227,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let title = app.inspector_title(app.inspector_scope(app.state.workbench.workspace));
+    let title = app.inspector_title(app.inspector_scope(app.workbench().workspace));
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &title)
     });
@@ -235,7 +236,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(title.as_str());
         node.set_level(2);
     });
-    let size = if app.state.workbench.workspace == Workspace::Design {
+    let size = if app.workbench().workspace == Workspace::Design {
         tokens::FS_2
     } else {
         tokens::FS_0

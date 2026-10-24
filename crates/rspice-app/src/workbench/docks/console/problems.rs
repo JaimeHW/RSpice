@@ -63,6 +63,7 @@ use crate::workbench::app_state::session::shortcuts::{
     report_escape_owner, request_engineering_canvas_focus,
 };
 use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
+use crate::workbench::framework::host::ProblemsHost;
 
 use crate::ui::widgets::{Problem, StatusMark};
 use arrange::{Arrangement, Line};
@@ -403,9 +404,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
         ui.ctx().copy_text(text);
     }
     if let Some(finding) = intent.fix {
-        match crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
-            state, finding,
-        ) {
+        match state.apply_quick_fix(finding) {
             Ok(text) | Err(text) => state.prompt(text),
         }
     }

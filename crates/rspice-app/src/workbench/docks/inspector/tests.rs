@@ -7,6 +7,7 @@
 use super::design::bind_component_model_from_catalog;
 use super::*;
 use crate::state::{Component, ComponentType};
+use crate::workbench::RSpiceApp;
 
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};

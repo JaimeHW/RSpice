@@ -25,7 +25,7 @@ use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec};
 use crate::workbench::framework::host::Host;
 
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 /// Command palette (Ctrl+K) state.
 #[derive(Debug, Clone, Default)]
@@ -489,14 +489,14 @@ impl PaletteEntry {
         }
     }
 
-    fn availability(&self, app: &RSpiceApp) -> CommandAvailability {
+    fn availability(&self, app: &impl WorkbenchHost) -> CommandAvailability {
         match self {
             Self::Command(command) => app.availability(command.key()),
             Self::CellView(_) | Self::Model(_) | Self::Signal(_) => CommandAvailability::Available,
         }
     }
 
-    fn execute(self, app: &mut RSpiceApp) -> Result<(), String> {
+    fn execute(self, app: &mut impl WorkbenchHost) -> Result<(), String> {
         match self {
             Self::Command(command) => {
                 app.execute(command.key());
@@ -504,8 +504,7 @@ impl PaletteEntry {
             }
             Self::CellView(entry) => {
                 let exists = app
-                    .state
-                    .model
+                    .model()
                     .library_manager
                     .get_library(&entry.reference.library)
                     .and_then(|library| library.get_cell(&entry.reference.cell))
@@ -517,16 +516,14 @@ impl PaletteEntry {
                         entry.reference.display_path()
                     ));
                 }
-                app.state.open_workspace_view(entry.reference);
-                app.state
-                    .workbench
+                app.state_mut().open_workspace_view(entry.reference);
+                app.workbench_mut()
                     .activate(crate::workbench::state::Workspace::Design);
                 Ok(())
             }
             Self::Model(entry) => {
                 let exists = app
-                    .state
-                    .model
+                    .model()
                     .model_library_manager
                     .get_library(&entry.library)
                     .is_some_and(|library| library.get_model(&entry.model).is_some());
@@ -536,20 +533,20 @@ impl PaletteEntry {
                         entry.library, entry.model
                     ));
                 }
-                app.state.select_model_library(&entry.library);
-                app.state.model.model_library_manager.filter_text = entry.model.clone();
-                app.state.model.model_library_manager.filter_type = None;
-                app.state.models.selected_model = Some(entry.model);
-                app.state.models.models_page = crate::state::ModelsPage::Models;
-                app.state
+                let state = app.state_mut();
+                state.select_model_library(&entry.library);
+                state.model.model_library_manager.filter_text = entry.model.clone();
+                state.model.model_library_manager.filter_type = None;
+                state.models.selected_model = Some(entry.model);
+                state.models.models_page = crate::state::ModelsPage::Models;
+                state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Models);
                 Ok(())
             }
             Self::Signal(entry) => {
                 let run_index = app
-                    .state
-                    .model
+                    .model()
                     .simulation
                     .retained
                     .runs
@@ -561,14 +558,14 @@ impl PaletteEntry {
                             entry.name
                         )
                     })?;
-                let analysis_index = app.state.model.simulation.retained.runs[run_index]
+                let analysis_index = app.model().simulation.retained.runs[run_index]
                     .analyses
                     .iter()
                     .position(|analysis| analysis.id == entry.analysis_id)
                     .ok_or_else(|| {
                         format!("Analysis for signal '{}' is no longer loaded", entry.name)
                     })?;
-                let waveform_matches = app.state.model.simulation.retained.runs[run_index].analyses
+                let waveform_matches = app.model().simulation.retained.runs[run_index].analyses
                     [analysis_index]
                     .waveforms
                     .get(entry.waveform_index)
@@ -580,13 +577,13 @@ impl PaletteEntry {
                     ));
                 }
 
-                app.state.model.simulation.select_run(run_index);
-                app.state.model.simulation.select_analysis(analysis_index);
-                app.state.model.simulation.retained.runs[run_index].analyses[analysis_index]
+                let state = app.state_mut();
+                state.model.simulation.select_run(run_index);
+                state.model.simulation.select_analysis(analysis_index);
+                state.model.simulation.retained.runs[run_index].analyses[analysis_index]
                     .waveforms[entry.waveform_index]
                     .visible = true;
-                if let Some(waveform) = app
-                    .state
+                if let Some(waveform) = state
                     .model
                     .simulation
                     .view
@@ -595,15 +592,15 @@ impl PaletteEntry {
                 {
                     waveform.visible = true;
                 }
-                app.state.model.simulation.view.data_version =
-                    app.state.model.simulation.view.data_version.wrapping_add(1);
-                app.state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
-                app.state
+                state.model.simulation.view.data_version =
+                    state.model.simulation.view.data_version.wrapping_add(1);
+                state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
+                state
                     .results
                     .results
-                    .restore_analysis_strip(&app.state.model.simulation, analysis_index);
-                app.state.results.results.session.maximized_strip = None;
-                app.state
+                    .restore_analysis_strip(&state.model.simulation, analysis_index);
+                state.results.results.session.maximized_strip = None;
+                state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Results);
                 Ok(())
@@ -739,438 +736,432 @@ fn match_entry(entry: &PaletteEntry, query: &str) -> Option<(u8, Vec<usize>)> {
     Some((rank, marks))
 }
 
-impl RSpiceApp {
-    fn palette_entries(&self) -> Vec<PaletteEntry> {
-        let mut entries = palette_commands(self)
-            .map(PaletteEntry::Command)
-            .collect::<Vec<_>>();
+fn palette_entries(app: &impl WorkbenchHost) -> Vec<PaletteEntry> {
+    let mut entries = palette_commands(app)
+        .map(PaletteEntry::Command)
+        .collect::<Vec<_>>();
 
-        let mut design_libraries = self
-            .state
-            .model
-            .library_manager
-            .libraries_by_key()
-            .map(|(_, library)| library)
-            .collect::<Vec<_>>();
-        design_libraries.sort_by(|left, right| left.name.cmp(&right.name));
-        for library in design_libraries {
-            for cell in library.cells_sorted() {
-                for view in cell.views_sorted() {
-                    entries.push(PaletteEntry::CellView(CellViewEntry {
-                        reference: crate::state::CellViewRef::new(
-                            &library.name,
-                            &cell.name,
-                            &view.name,
-                        ),
-                        view_type: view.view_type,
-                        description: cell.description.clone(),
-                    }));
-                }
-            }
-        }
-
-        for library in self.state.model.model_library_manager.libraries_sorted() {
-            let mut models = library.models.values().collect::<Vec<_>>();
-            models.sort_by(|left, right| left.name.cmp(&right.name));
-            for model in models {
-                entries.push(PaletteEntry::Model(ModelEntry {
-                    library: library.name.clone(),
-                    model: model.name.clone(),
-                    model_type: model.model_type.display_name().to_owned(),
-                    level: model.level.display_name().to_owned(),
-                    description: model.description.clone(),
+    let mut design_libraries = app
+        .model()
+        .library_manager
+        .libraries_by_key()
+        .map(|(_, library)| library)
+        .collect::<Vec<_>>();
+    design_libraries.sort_by(|left, right| left.name.cmp(&right.name));
+    for library in design_libraries {
+        for cell in library.cells_sorted() {
+            for view in cell.views_sorted() {
+                entries.push(PaletteEntry::CellView(CellViewEntry {
+                    reference: crate::state::CellViewRef::new(
+                        &library.name,
+                        &cell.name,
+                        &view.name,
+                    ),
+                    view_type: view.view_type,
+                    description: cell.description.clone(),
                 }));
             }
         }
-
-        if let Some(run) = self.state.model.simulation.active_run() {
-            for analysis in &run.analyses {
-                for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
-                    entries.push(PaletteEntry::Signal(SignalEntry {
-                        dataset_id: run.dataset_id,
-                        analysis_id: analysis.id,
-                        waveform_index,
-                        name: waveform.name.clone(),
-                        run_label: run.label.clone(),
-                        analysis_label: analysis.label.clone(),
-                        visible: waveform.visible,
-                    }));
-                }
-            }
-        }
-
-        entries
     }
 
-    fn palette_rows(
-        &self,
-        query: &str,
-        scope: PaletteScope,
-        platform: CommandPlatform,
-        operating_system: egui::os::OperatingSystem,
-    ) -> Vec<PaletteRow> {
-        let row = |entry: PaletteEntry, marks: Vec<usize>| {
-            let blocked = match entry.availability(self) {
-                CommandAvailability::Available => None,
-                CommandAvailability::Disabled(reason) => Some(reason),
-                // Hidden is a registry instruction, not a disabled state. It
-                // must never leak into search as a visible pseudo-command.
-                CommandAvailability::Hidden => return None,
-            };
-            Some(PaletteRow {
-                shortcut: entry.shortcut_label(self, platform, operating_system),
-                entry,
-                marks,
-                blocked,
-            })
-        };
-        let entries = self.palette_entries();
+    for library in app.model().model_library_manager.libraries_sorted() {
+        let mut models = library.models.values().collect::<Vec<_>>();
+        models.sort_by(|left, right| left.name.cmp(&right.name));
+        for model in models {
+            entries.push(PaletteEntry::Model(ModelEntry {
+                library: library.name.clone(),
+                model: model.name.clone(),
+                model_type: model.model_type.display_name().to_owned(),
+                level: model.level.display_name().to_owned(),
+                description: model.description.clone(),
+            }));
+        }
+    }
 
-        if query.trim().is_empty() {
-            if scope != PaletteScope::All {
-                return entries
-                    .into_iter()
-                    .filter(|entry| entry.scope() == scope)
-                    .filter_map(|entry| row(entry, Vec::new()))
-                    .collect();
+    if let Some(run) = app.model().simulation.active_run() {
+        for analysis in &run.analyses {
+            for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
+                entries.push(PaletteEntry::Signal(SignalEntry {
+                    dataset_id: run.dataset_id,
+                    analysis_id: analysis.id,
+                    waveform_index,
+                    name: waveform.name.clone(),
+                    run_label: run.label.clone(),
+                    analysis_label: analysis.label.clone(),
+                    visible: waveform.visible,
+                }));
             }
+        }
+    }
 
-            let recents = &self.state.workbench.command_palette.recent;
-            let workspace_scope = match self.state.workbench.workspace {
-                crate::workbench::state::Workspace::Project => PaletteScope::Navigate,
-                crate::workbench::state::Workspace::Design => PaletteScope::Design,
-                crate::workbench::state::Workspace::Simulate => PaletteScope::Simulation,
-                // The library has no command group of its own — its verbs
-                // live where the definitions are consumed. A scope row that
-                // filtered to nothing would be a promise with no rows behind
-                // it, so the workspace shares the studio's.
-                crate::workbench::state::Workspace::Stimulus => PaletteScope::Simulation,
-                crate::workbench::state::Workspace::Results => PaletteScope::Results,
-                crate::workbench::state::Workspace::Verify => PaletteScope::Verification,
-                crate::workbench::state::Workspace::Models => PaletteScope::Models,
-                crate::workbench::state::Workspace::Netlist => PaletteScope::Automation,
-            };
-            let mut suggestions = entries
+    entries
+}
+
+fn palette_rows(
+    app: &impl WorkbenchHost,
+    query: &str,
+    scope: PaletteScope,
+    platform: CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
+) -> Vec<PaletteRow> {
+    let row = |entry: PaletteEntry, marks: Vec<usize>| {
+        let blocked = match entry.availability(app) {
+            CommandAvailability::Available => None,
+            CommandAvailability::Disabled(reason) => Some(reason),
+            // Hidden is a registry instruction, not a disabled state. It
+            // must never leak into search as a visible pseudo-command.
+            CommandAvailability::Hidden => return None,
+        };
+        Some(PaletteRow {
+            shortcut: entry.shortcut_label(app, platform, operating_system),
+            entry,
+            marks,
+            blocked,
+        })
+    };
+    let entries = palette_entries(app);
+
+    if query.trim().is_empty() {
+        if scope != PaletteScope::All {
+            return entries
                 .into_iter()
-                .enumerate()
-                .filter_map(|(registry_index, entry)| {
-                    let recent_index = entry.command().and_then(|command| {
-                        recents.iter().position(|candidate| *candidate == command)
-                    });
-                    let entry_scope = entry.scope();
-                    let has_shortcut = !entry
-                        .shortcut_label(self, platform, operating_system)
-                        .is_empty();
-                    (recent_index.is_some()
-                        || entry_scope == workspace_scope
-                        || entry_scope == PaletteScope::Navigate
-                        || has_shortcut)
-                        .then_some((
-                            registry_index,
-                            recent_index,
-                            entry_scope,
-                            has_shortcut,
-                            entry,
-                        ))
-                })
-                .collect::<Vec<_>>();
-            suggestions.sort_by_key(
-                |(registry_index, recent_index, entry_scope, has_shortcut, _)| {
-                    let context_rank = if *entry_scope == workspace_scope {
-                        0
-                    } else if *has_shortcut {
-                        1
-                    } else if *entry_scope == PaletteScope::Navigate {
-                        2
-                    } else {
-                        3
-                    };
-                    (
-                        recent_index.unwrap_or(usize::MAX),
-                        context_rank,
-                        *registry_index,
-                    )
-                },
-            );
-            return suggestions
-                .into_iter()
-                .take(SUGGESTION_LIMIT)
-                .filter_map(|(_, _, _, _, entry)| row(entry, Vec::new()))
+                .filter(|entry| entry.scope() == scope)
+                .filter_map(|entry| row(entry, Vec::new()))
                 .collect();
         }
 
-        let mut ranked = entries
+        let recents = &app.workbench().command_palette.recent;
+        let workspace_scope = match app.workbench().workspace {
+            crate::workbench::state::Workspace::Project => PaletteScope::Navigate,
+            crate::workbench::state::Workspace::Design => PaletteScope::Design,
+            crate::workbench::state::Workspace::Simulate => PaletteScope::Simulation,
+            // The library has no command group of its own — its verbs
+            // live where the definitions are consumed. A scope row that
+            // filtered to nothing would be a promise with no rows behind
+            // it, so the workspace shares the studio's.
+            crate::workbench::state::Workspace::Stimulus => PaletteScope::Simulation,
+            crate::workbench::state::Workspace::Results => PaletteScope::Results,
+            crate::workbench::state::Workspace::Verify => PaletteScope::Verification,
+            crate::workbench::state::Workspace::Models => PaletteScope::Models,
+            crate::workbench::state::Workspace::Netlist => PaletteScope::Automation,
+        };
+        let mut suggestions = entries
             .into_iter()
-            .filter(|entry| scope == PaletteScope::All || entry.scope() == scope)
-            .filter_map(|entry| {
-                let (rank, marks) = match_entry(&entry, query)?;
-                row(entry, marks).map(|row| (rank, row))
+            .enumerate()
+            .filter_map(|(registry_index, entry)| {
+                let recent_index = entry
+                    .command()
+                    .and_then(|command| recents.iter().position(|candidate| *candidate == command));
+                let entry_scope = entry.scope();
+                let has_shortcut = !entry
+                    .shortcut_label(app, platform, operating_system)
+                    .is_empty();
+                (recent_index.is_some()
+                    || entry_scope == workspace_scope
+                    || entry_scope == PaletteScope::Navigate
+                    || has_shortcut)
+                    .then_some((
+                        registry_index,
+                        recent_index,
+                        entry_scope,
+                        has_shortcut,
+                        entry,
+                    ))
             })
             .collect::<Vec<_>>();
-        // Stable rank preserves the command registry and resource catalogs'
-        // deterministic order for equal-quality matches.
-        ranked.sort_by_key(|(rank, _)| *rank);
-        ranked.into_iter().map(|(_, row)| row).collect()
+        suggestions.sort_by_key(
+            |(registry_index, recent_index, entry_scope, has_shortcut, _)| {
+                let context_rank = if *entry_scope == workspace_scope {
+                    0
+                } else if *has_shortcut {
+                    1
+                } else if *entry_scope == PaletteScope::Navigate {
+                    2
+                } else {
+                    3
+                };
+                (
+                    recent_index.unwrap_or(usize::MAX),
+                    context_rank,
+                    *registry_index,
+                )
+            },
+        );
+        return suggestions
+            .into_iter()
+            .take(SUGGESTION_LIMIT)
+            .filter_map(|(_, _, _, _, entry)| row(entry, Vec::new()))
+            .collect();
     }
 
-    pub(in crate::workbench) fn render_command_palette(&mut self, ctx: &Context) {
-        if !self.state.workbench.command_palette.open {
-            crate::ui::input::InputScope::discard(ctx, palette_id());
-            return;
-        }
-        let _opening_input = crate::ui::input::InputScope::enter(ctx, palette_id());
+    let mut ranked = entries
+        .into_iter()
+        .filter(|entry| scope == PaletteScope::All || entry.scope() == scope)
+        .filter_map(|entry| {
+            let (rank, marks) = match_entry(&entry, query)?;
+            row(entry, marks).map(|row| (rank, row))
+        })
+        .collect::<Vec<_>>();
+    // Stable rank preserves the command registry and resource catalogs'
+    // deterministic order for equal-quality matches.
+    ranked.sort_by_key(|(rank, _)| *rank);
+    ranked.into_iter().map(|(_, row)| row).collect()
+}
 
-        let viewport = ctx.content_rect();
-        let t = Tokens::get(ctx);
-        let layout = PaletteLayout::resolve(
+pub(in crate::workbench) fn render_command_palette(app: &mut impl WorkbenchHost, ctx: &Context) {
+    if !app.workbench().command_palette.open {
+        crate::ui::input::InputScope::discard(ctx, palette_id());
+        return;
+    }
+    let _opening_input = crate::ui::input::InputScope::enter(ctx, palette_id());
+
+    let viewport = ctx.content_rect();
+    let t = Tokens::get(ctx);
+    let layout = PaletteLayout::resolve(
+        viewport,
+        ctx.input(|input| input.has_touch_screen()),
+        t.metrics.touch_target(),
+    );
+    let regions = layout.regions();
+    let c = t.color;
+    let area_id = palette_id();
+    let focus_state_id = area_id.with("focus-state");
+    let scope_state_id = area_id.with("scope-state");
+    let opened_this_pass = begin_focus_session(ctx, focus_state_id);
+
+    let mut scope = ctx
+        .data(|data| data.get_temp::<PaletteScope>(scope_state_id))
+        .unwrap_or_default();
+    if opened_this_pass {
+        scope = app
+            .workbench_mut()
+            .command_palette
+            .initial_scope
+            .take()
+            .as_deref()
+            .and_then(PaletteScope::from_label)
+            .unwrap_or(PaletteScope::All);
+    }
+
+    let focused_before = ctx.memory(|memory| memory.focused());
+    let focused_scope = PaletteScope::ALL
+        .iter()
+        .position(|candidate| focused_before == Some(scope_id(*candidate)));
+    let keys = PaletteKeys::take(ctx, focused_scope.is_some());
+    if let Some(index) = focused_scope {
+        let next = if keys.scope_previous {
+            index.checked_sub(1).unwrap_or(PaletteScope::ALL.len() - 1)
+        } else if keys.scope_next {
+            (index + 1) % PaletteScope::ALL.len()
+        } else {
+            index
+        };
+        if next != index {
+            scope = PaletteScope::ALL[next];
+            app.workbench_mut().command_palette.selected = 0;
+            ctx.memory_mut(|memory| memory.request_focus(scope_id(scope)));
+        } else if keys.activate {
+            scope = PaletteScope::ALL[index];
+            app.workbench_mut().command_palette.selected = 0;
+        }
+    }
+
+    let area = egui::Area::new(area_id)
+        .kind(UiKind::Modal)
+        .order(Order::Foreground)
+        .fixed_pos(viewport.min)
+        .sense(Sense::focusable_noninteractive());
+    let modal_layer = area.layer();
+    ctx.memory_mut(|memory| memory.set_modal_layer(modal_layer));
+    if opened_this_pass || !focus_is_within_modal(ctx, modal_layer) {
+        ctx.memory_mut(|memory| {
+            memory.request_focus(search_id());
+            if opened_this_pass {
+                memory.move_focus(FocusDirection::None);
+            }
+        });
+    }
+
+    let mut run = None;
+    let mut activate_handled = focused_scope.is_some() && keys.activate;
+    let mut search_response_id = None;
+    let mut active_result_id = None;
+    let local_index_count = palette_entries(app)
+        .into_iter()
+        .filter(|entry| entry.availability(app) != CommandAvailability::Hidden)
+        .count();
+    let area_response = area.show(ctx, |ui| {
+        // A pointer-only scrim blocks the workbench without polluting the
+        // keyboard or assistive-technology focus order.
+        ui.allocate_rect(
             viewport,
-            ctx.input(|input| input.has_touch_screen()),
-            t.metrics.touch_target(),
+            Sense::click_and_drag().difference(Sense::focusable_noninteractive()),
         );
-        let regions = layout.regions();
-        let c = t.color;
-        let area_id = palette_id();
-        let focus_state_id = area_id.with("focus-state");
-        let scope_state_id = area_id.with("scope-state");
-        let opened_this_pass = begin_focus_session(ctx, focus_state_id);
+        let backdrop = if t.mode == Mode::Dark {
+            egui::Color32::from_rgba_unmultiplied(2, 6, 8, 158)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
+        };
+        ui.painter().rect_filled(viewport, 0.0, backdrop);
+        ui.painter().add(t.shadow().as_shape(layout.surface, 8.0));
+        ui.painter().rect(
+            layout.surface,
+            8.0,
+            c.bg_elevated,
+            Stroke::new(1.0, c.border_strong),
+            egui::StrokeKind::Inside,
+        );
 
-        let mut scope = ctx
-            .data(|data| data.get_temp::<PaletteScope>(scope_state_id))
-            .unwrap_or_default();
-        if opened_this_pass {
-            scope = self
-                .state
-                .workbench
-                .command_palette
-                .initial_scope
-                .take()
-                .as_deref()
-                .and_then(PaletteScope::from_label)
-                .unwrap_or(PaletteScope::All);
+        let mut surface = ui.new_child(
+            UiBuilder::new()
+                .max_rect(layout.surface.shrink(1.0))
+                .layout(egui::Layout::top_down(Align::Min)),
+        );
+        surface.set_clip_rect(layout.surface.shrink(1.0));
+
+        let search_response = render_search_row(
+            &mut surface,
+            regions.search,
+            &mut app.workbench_mut().command_palette.query,
+        );
+        search_response_id = Some(search_response.id);
+        if search_response.changed() {
+            app.workbench_mut().command_palette.selected = 0;
+        }
+        if app.workbench().command_palette.want_focus || opened_this_pass {
+            search_response.request_focus();
+            app.workbench_mut().command_palette.want_focus = false;
         }
 
-        let focused_before = ctx.memory(|memory| memory.focused());
-        let focused_scope = PaletteScope::ALL
+        let scope_changed = render_scope_row(
+            &mut surface,
+            regions.scope,
+            layout.coarse,
+            &mut scope,
+            focused_before,
+            keys.activate,
+        );
+        if scope_changed {
+            app.workbench_mut().command_palette.selected = 0;
+        }
+
+        let rows = palette_rows(
+            app,
+            &app.workbench().command_palette.query,
+            scope,
+            crate::workbench::app_state::runtime_command_platform(ctx),
+            ctx.os(),
+        );
+        let selected = &mut app.workbench_mut().command_palette.selected;
+        if rows.is_empty() {
+            *selected = 0;
+        } else {
+            *selected = (*selected).min(rows.len() - 1);
+            if keys.next {
+                *selected = (*selected + 1) % rows.len();
+            }
+            if keys.previous {
+                *selected = selected.checked_sub(1).unwrap_or(rows.len() - 1);
+            }
+            active_result_id = Some(result_id(*selected));
+        }
+
+        let focused_result = rows
             .iter()
-            .position(|candidate| focused_before == Some(scope_id(*candidate)));
-        let keys = PaletteKeys::take(ctx, focused_scope.is_some());
-        if let Some(index) = focused_scope {
-            let next = if keys.scope_previous {
-                index.checked_sub(1).unwrap_or(PaletteScope::ALL.len() - 1)
-            } else if keys.scope_next {
-                (index + 1) % PaletteScope::ALL.len()
-            } else {
-                index
-            };
-            if next != index {
-                scope = PaletteScope::ALL[next];
-                self.state.workbench.command_palette.selected = 0;
-                ctx.memory_mut(|memory| memory.request_focus(scope_id(scope)));
-            } else if keys.activate {
-                scope = PaletteScope::ALL[index];
-                self.state.workbench.command_palette.selected = 0;
+            .enumerate()
+            .find(|(index, _)| focused_before == Some(result_id(*index)))
+            .map(|(index, row)| (index, row.entry.clone(), row.blocked.is_none()));
+        if keys.activate
+            && focused_scope.is_none()
+            && let Some((index, entry, runnable)) = focused_result
+        {
+            activate_handled = true;
+            *selected = index;
+            if runnable {
+                run = Some(entry);
             }
         }
 
-        let area = egui::Area::new(area_id)
-            .kind(UiKind::Modal)
-            .order(Order::Foreground)
-            .fixed_pos(viewport.min)
-            .sense(Sense::focusable_noninteractive());
-        let modal_layer = area.layer();
-        ctx.memory_mut(|memory| memory.set_modal_layer(modal_layer));
-        if opened_this_pass || !focus_is_within_modal(ctx, modal_layer) {
-            ctx.memory_mut(|memory| {
-                memory.request_focus(search_id());
-                if opened_this_pass {
-                    memory.move_focus(FocusDirection::None);
-                }
-            });
+        let clicked = render_results(
+            &mut surface,
+            regions.results,
+            &rows,
+            *selected,
+            keys.previous || keys.next,
+        );
+        if clicked.is_some() {
+            run = clicked;
         }
 
-        let mut run = None;
-        let mut activate_handled = focused_scope.is_some() && keys.activate;
-        let mut search_response_id = None;
-        let mut active_result_id = None;
-        let local_index_count = self
-            .palette_entries()
-            .into_iter()
-            .filter(|entry| entry.availability(self) != CommandAvailability::Hidden)
-            .count();
-        let area_response = area.show(ctx, |ui| {
-            // A pointer-only scrim blocks the workbench without polluting the
-            // keyboard or assistive-technology focus order.
-            ui.allocate_rect(
-                viewport,
-                Sense::click_and_drag().difference(Sense::focusable_noninteractive()),
-            );
-            let backdrop = if t.mode == Mode::Dark {
-                egui::Color32::from_rgba_unmultiplied(2, 6, 8, 158)
-            } else {
-                egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
-            };
-            ui.painter().rect_filled(viewport, 0.0, backdrop);
-            ui.painter().add(t.shadow().as_shape(layout.surface, 8.0));
-            ui.painter().rect(
-                layout.surface,
-                8.0,
-                c.bg_elevated,
-                Stroke::new(1.0, c.border_strong),
-                egui::StrokeKind::Inside,
-            );
+        if keys.activate && !activate_handled && run.is_none() {
+            run = rows
+                .get(*selected)
+                .filter(|row| row.blocked.is_none())
+                .map(|row| row.entry.clone());
+        }
 
-            let mut surface = ui.new_child(
-                UiBuilder::new()
-                    .max_rect(layout.surface.shrink(1.0))
-                    .layout(egui::Layout::top_down(Align::Min)),
-            );
-            surface.set_clip_rect(layout.surface.shrink(1.0));
+        render_footer(
+            &mut surface,
+            regions.footer,
+            layout.narrow,
+            rows.len(),
+            local_index_count,
+            app.workbench().command_palette.query.trim().is_empty() && scope == PaletteScope::All,
+        );
+    });
 
-            let search_response = render_search_row(
-                &mut surface,
-                regions.search,
-                &mut self.state.workbench.command_palette.query,
-            );
-            search_response_id = Some(search_response.id);
-            if search_response.changed() {
-                self.state.workbench.command_palette.selected = 0;
-            }
-            if self.state.workbench.command_palette.want_focus || opened_this_pass {
-                search_response.request_focus();
-                self.state.workbench.command_palette.want_focus = false;
-            }
+    area_response
+        .response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Window, true, DIALOG_LABEL));
+    ctx.accesskit_node_builder(area_response.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Dialog);
+        node.set_label(DIALOG_LABEL);
+        node.set_description(DIALOG_DESCRIPTION);
+        node.set_modal();
+    });
 
-            let scope_changed = render_scope_row(
-                &mut surface,
-                regions.scope,
-                layout.coarse,
-                &mut scope,
-                focused_before,
-                keys.activate,
-            );
-            if scope_changed {
-                self.state.workbench.command_palette.selected = 0;
-            }
-
-            let rows = self.palette_rows(
-                &self.state.workbench.command_palette.query,
-                scope,
-                crate::workbench::app_state::runtime_command_platform(ctx),
-                ctx.os(),
-            );
-            let selected = &mut self.state.workbench.command_palette.selected;
-            if rows.is_empty() {
-                *selected = 0;
-            } else {
-                *selected = (*selected).min(rows.len() - 1);
-                if keys.next {
-                    *selected = (*selected + 1) % rows.len();
-                }
-                if keys.previous {
-                    *selected = selected.checked_sub(1).unwrap_or(rows.len() - 1);
-                }
-                active_result_id = Some(result_id(*selected));
-            }
-
-            let focused_result = rows
-                .iter()
-                .enumerate()
-                .find(|(index, _)| focused_before == Some(result_id(*index)))
-                .map(|(index, row)| (index, row.entry.clone(), row.blocked.is_none()));
-            if keys.activate
-                && focused_scope.is_none()
-                && let Some((index, entry, runnable)) = focused_result
-            {
-                activate_handled = true;
-                *selected = index;
-                if runnable {
-                    run = Some(entry);
-                }
-            }
-
-            let clicked = render_results(
-                &mut surface,
-                regions.results,
-                &rows,
-                *selected,
-                keys.previous || keys.next,
-            );
-            if clicked.is_some() {
-                run = clicked;
-            }
-
-            if keys.activate && !activate_handled && run.is_none() {
-                run = rows
-                    .get(*selected)
-                    .filter(|row| row.blocked.is_none())
-                    .map(|row| row.entry.clone());
-            }
-
-            render_footer(
-                &mut surface,
-                regions.footer,
-                layout.narrow,
-                rows.len(),
-                local_index_count,
-                self.state.workbench.command_palette.query.trim().is_empty()
-                    && scope == PaletteScope::All,
-            );
-        });
-
-        area_response
-            .response
-            .widget_info(|| WidgetInfo::labeled(WidgetType::Window, true, DIALOG_LABEL));
-        ctx.accesskit_node_builder(area_response.response.id, |node| {
-            node.set_role(egui::accesskit::Role::Dialog);
-            node.set_label(DIALOG_LABEL);
+    if let Some(search_response_id) = search_response_id {
+        ctx.accesskit_node_builder(search_response_id, |node| {
+            node.set_role(egui::accesskit::Role::ComboBox);
+            node.set_label("Command search");
             node.set_description(DIALOG_DESCRIPTION);
-            node.set_modal();
+            node.set_expanded(true);
+            node.set_controls([list_id().accesskit_id()]);
+            if let Some(active_result_id) = active_result_id {
+                node.set_active_descendant(active_result_id.accesskit_id());
+            } else {
+                node.clear_active_descendant();
+            }
         });
+    }
 
-        if let Some(search_response_id) = search_response_id {
-            ctx.accesskit_node_builder(search_response_id, |node| {
-                node.set_role(egui::accesskit::Role::ComboBox);
-                node.set_label("Command search");
-                node.set_description(DIALOG_DESCRIPTION);
-                node.set_expanded(true);
-                node.set_controls([list_id().accesskit_id()]);
-                if let Some(active_result_id) = active_result_id {
-                    node.set_active_descendant(active_result_id.accesskit_id());
-                } else {
-                    node.clear_active_descendant();
-                }
-            });
+    ctx.data_mut(|data| data.insert_temp(scope_state_id, scope));
+
+    let close = keys.close || run.is_some();
+    if close {
+        let route_owned = app.workbench().command_palette.route_owned;
+        app.workbench_mut().command_palette.close();
+        ctx.data_mut(|data| {
+            data.remove_temp::<PaletteScope>(scope_state_id);
+        });
+        restore_focus(ctx, focus_state_id, search_id(), modal_layer);
+        if route_owned {
+            app.state_mut().close_route_owned_transient(
+                crate::workbench::SurfaceId::CommandPalette,
+                "Command Palette",
+            );
         }
+    }
 
-        ctx.data_mut(|data| data.insert_temp(scope_state_id, scope));
-
-        let close = keys.close || run.is_some();
-        if close {
-            let route_owned = self.state.workbench.command_palette.route_owned;
-            self.state.workbench.command_palette.close();
-            ctx.data_mut(|data| {
-                data.remove_temp::<PaletteScope>(scope_state_id);
-            });
-            restore_focus(ctx, focus_state_id, search_id(), modal_layer);
-            if route_owned {
-                crate::workbench::app::close_route_owned_transient(
-                    &mut self.state,
-                    crate::workbench::SurfaceId::CommandPalette,
-                    "Command Palette",
-                );
-            }
+    if let Some(entry) = run {
+        if let Some(command) = entry.command() {
+            let recent = &mut app.workbench_mut().command_palette.recent;
+            recent.retain(|candidate| *candidate != command);
+            recent.insert(0, command);
+            recent.truncate(MAX_RECENT);
         }
-
-        if let Some(entry) = run {
-            if let Some(command) = entry.command() {
-                let recent = &mut self.state.workbench.command_palette.recent;
-                recent.retain(|candidate| *candidate != command);
-                recent.insert(0, command);
-                recent.truncate(MAX_RECENT);
-            }
-            if let Err(error) = entry.execute(self) {
-                self.state.prompt(error);
-            }
+        if let Err(error) = entry.execute(app) {
+            app.state_mut().prompt(error);
         }
     }
 }

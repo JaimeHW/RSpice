@@ -8,6 +8,7 @@
 //! different files.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 use crate::workbench::documents::code_workspace;
 

@@ -23,9 +23,9 @@ use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Stroke, Ui, Vec2}
 use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
-use crate::workbench::framework::host::{Host, Point};
+use crate::workbench::framework::host::Point;
 use crate::workbench::framework::requests::{FocusNavigatorSearch, Outbox, Request};
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, section_header};
 use super::super::state::{VerificationPage, Workspace};
@@ -65,9 +65,9 @@ fn panel_search_field_width(available_width: f32) -> f32 {
     (available_width - PANEL_SEARCH_MARGIN_X * 2.0).max(1.0)
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     ui.spacing_mut().item_spacing.y = 0.0;
-    let workspace = app.state.workbench.workspace;
+    let workspace = app.workbench().workspace;
     let section = app.navigator_section(workspace);
     // Canonical navigator order: header, search, then the workspace's own
     // navigator, which may lead with tabs of its own (the Code workspace's
@@ -96,7 +96,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn header(ui: &mut Ui, app: &mut RSpiceApp) {
+fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
@@ -107,7 +107,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let title = app.navigator_section(app.state.workbench.workspace).title;
+    let title = app.navigator_section(app.workbench().workspace).title;
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -115,7 +115,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(title);
         node.set_level(2);
     });
-    let size = if app.state.workbench.workspace == Workspace::Design {
+    let size = if app.workbench().workspace == Workspace::Design {
         tokens::FS_2
     } else {
         tokens::FS_0
@@ -134,15 +134,15 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn workspace_search(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     workspace: Workspace,
     placeholder: &'static str,
 ) -> bool {
     let mut focus =
-        search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.state.workbench.outbox);
+        search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.workbench_mut().outbox);
     panel_search(
         ui,
-        app.state.workbench.navigator_trees.filter_mut(workspace),
+        app.workbench_mut().navigator_trees.filter_mut(workspace),
         "workbench.navigator.filter",
         placeholder,
         &mut focus,

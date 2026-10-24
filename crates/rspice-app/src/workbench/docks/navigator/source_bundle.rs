@@ -16,6 +16,7 @@
 //! where the cell is placed.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::app_state::AppState;

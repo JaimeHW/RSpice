@@ -31,7 +31,7 @@ use rspice_ui_kit::panels::WorkbenchIcon;
 use super::command_registry::{CommandAvailability, Registry};
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
-use crate::ui::widgets::Problem;
+use crate::ui::widgets::{NotificationAction, Problem};
 
 /// A place in the workbench a container leaves to an owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -310,6 +310,25 @@ pub(crate) trait Host: 'static {
     /// own check, with every key its menus and the framework name a command
     /// by.
     fn validate_commands(&self) -> Result<(), String>;
+
+    /// Carry out what a notification's action asks: open its run in
+    /// Results, or show its line in the console.
+    fn perform_notification_action(&mut self, action: NotificationAction);
+
+    /// Open the log of the run numbered `run_sequence`.
+    fn open_run_log(&mut self, run_sequence: u64);
+
+    /// An edit changed what a run is checked against: drop every run
+    /// prepared or checked before it.
+    fn simulation_input_changed(&mut self);
+}
+
+/// The shell's side of the Problems page, answered over the session the page
+/// is handed.
+pub(crate) trait ProblemsHost {
+    /// Apply the quick fix the page offers for `finding`: the sentence to
+    /// prompt, whether it applied or why it did not.
+    fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String>;
 }
 
 /// The shell's side of the document bar, answered over the session the bar

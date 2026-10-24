@@ -25,41 +25,40 @@ pub(in crate::workbench) use simulate::show_workflow_dialogs as show_simulation_
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;
-use crate::workbench::RSpiceApp;
-use crate::workbench::framework::host::{Host, Point};
+use crate::workbench::framework::host::Point;
 use crate::workbench::framework::requests::Drain;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     // The page that draws a source editor publishes it again below; whatever
     // else is on screen has none for the Edit menu to act on.
-    app.state.workbench.active_source_editor = None;
+    app.workbench_mut().active_source_editor = None;
     if split_results_is_visible(app) {
         show_split_with_results(ui, app);
     } else {
         show_primary(ui, app);
     }
-    if app.state.workbench.outbox.waits_at(Drain::SourceEditor) {
-        if app.state.workbench.active_source_editor.is_some() {
+    if app.workbench().outbox.waits_at(Drain::SourceEditor) {
+        if app.workbench().active_source_editor.is_some() {
             // Asked after the editor was drawn: it takes it next frame.
             ui.ctx().request_repaint();
         } else {
             // No editor is on screen to take it.
-            app.state.workbench.outbox.decline_at(Drain::SourceEditor);
+            app.workbench_mut().outbox.decline_at(Drain::SourceEditor);
         }
     }
 }
 
 /// The stage of the workspace that is showing, drawn by whoever owns it.
-fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
-    let workspace = app.state.workbench.workspace;
+fn show_primary(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+    let workspace = app.workbench().workspace;
     app.contribute(Point::Surface(workspace), ui);
 }
 
-fn split_results_is_visible(app: &RSpiceApp) -> bool {
-    app.state.workbench.results_split_visible(
-        app.state.platform.project_lifecycle.is_open(),
-        app.state
-            .model
+fn split_results_is_visible(app: &impl WorkbenchHost) -> bool {
+    app.workbench().results_split_visible(
+        app.state().platform.project_lifecycle.is_open(),
+        app.model()
             .simulation
             .retained
             .has_retained_result_dataset(),
@@ -86,7 +85,7 @@ fn split_stage_rects(stage: Rect) -> (Rect, Rect, Rect) {
     (primary, divider, secondary)
 }
 
-fn show_split_with_results(ui: &mut Ui, app: &mut RSpiceApp) {
+fn show_split_with_results(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let stage = ui.available_rect_before_wrap();
     let (_, stage_response) = ui.allocate_exact_size(stage.size(), Sense::hover());
     let (primary_rect, divider_rect, results_rect) = split_stage_rects(stage_response.rect);
@@ -133,8 +132,9 @@ fn register_results_split_region(ui: &mut Ui, results_rect: Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::{RSpiceApp, register_results_split_region, split_stage_rects};
+    use super::{register_results_split_region, split_stage_rects};
     use crate::state::ProjectSourceLanguage;
+    use crate::workbench::RSpiceApp;
     use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
     use egui::Context;
 

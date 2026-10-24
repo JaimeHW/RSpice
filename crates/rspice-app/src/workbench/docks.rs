@@ -12,7 +12,7 @@ pub(crate) use navigator::stimulus::browser_state::StimulusBrowserState;
 use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 
 use crate::ui::tokens::Tokens;
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::layout::LayoutSpec;
 
@@ -28,19 +28,23 @@ const CONSOLE_PANEL_ID: &str = "workbench.console";
 /// constructed. A genuinely dragged splitter is copied back to
 /// [`WorkbenchSession`](super::state::WorkbenchSession) after painting and will
 /// match the cache on the next frame.
-pub(super) fn synchronize_panel_memory(ctx: &Context, app: &RSpiceApp, layout: LayoutSpec) {
+pub(super) fn synchronize_panel_memory(
+    ctx: &Context,
+    app: &impl WorkbenchHost,
+    layout: LayoutSpec,
+) {
     synchronize_panel_size(
         ctx,
         NAVIGATOR_PANEL_ID,
         layout.navigator_width,
-        layout.navigator_resizable && app.state.workbench.navigator_width_custom,
+        layout.navigator_resizable && app.workbench().navigator_width_custom,
         PanelDimension::Width,
     );
     synchronize_panel_size(
         ctx,
         INSPECTOR_PANEL_ID,
         layout.inspector_width,
-        layout.inspector_resizable && app.state.workbench.inspector_width_custom,
+        layout.inspector_resizable && app.workbench().inspector_width_custom,
         PanelDimension::Width,
     );
     synchronize_panel_size(
@@ -183,7 +187,7 @@ fn expose_splitter_accessibility(
     });
 }
 
-pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_navigator(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -201,9 +205,9 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     let shown = panel.show(root, |ui| fill_dock(ui, |ui| navigator::show(ui, app)));
     if layout.navigator_resizable && splitter_is_dragged(ctx, NAVIGATOR_PANEL_ID) {
         let actual = shown.response.rect.width();
-        app.state.workbench.navigator_width =
+        app.workbench_mut().navigator_width =
             actual.clamp(layout.navigator_min_width, layout.navigator_max_width);
-        app.state.workbench.navigator_width_custom = true;
+        app.workbench_mut().navigator_width_custom = true;
     }
     if layout.navigator_resizable
         && let Some(response) = splitter_response(ctx, NAVIGATOR_PANEL_ID)
@@ -223,12 +227,12 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
             horizontal_splitter_action(ctx, &response, Key::ArrowRight, Key::ArrowLeft)
         {
             if let Some(width) = apply_splitter_step(layout.navigator_width, action, 12.0) {
-                app.state.workbench.navigator_width =
+                app.workbench_mut().navigator_width =
                     width.clamp(layout.navigator_min_width, layout.navigator_max_width);
-                app.state.workbench.navigator_width_custom = true;
+                app.workbench_mut().navigator_width_custom = true;
             } else {
-                app.state.workbench.navigator_width = layout.navigator_reset_width;
-                app.state.workbench.navigator_width_custom = false;
+                app.workbench_mut().navigator_width = layout.navigator_reset_width;
+                app.workbench_mut().navigator_width_custom = false;
             }
             ctx.request_repaint();
         }
@@ -239,7 +243,7 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     });
 }
 
-pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_inspector(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -260,9 +264,9 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     let shown = panel.show(root, |ui| fill_dock(ui, |ui| inspector::show(ui, app)));
     if layout.inspector_resizable && splitter_is_dragged(ctx, INSPECTOR_PANEL_ID) {
         let actual = shown.response.rect.width();
-        app.state.workbench.inspector_width =
+        app.workbench_mut().inspector_width =
             actual.clamp(layout.inspector_min_width, layout.inspector_max_width);
-        app.state.workbench.inspector_width_custom = true;
+        app.workbench_mut().inspector_width_custom = true;
     }
     if layout.inspector_resizable
         && let Some(response) = splitter_response(ctx, INSPECTOR_PANEL_ID)
@@ -282,12 +286,12 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
             horizontal_splitter_action(ctx, &response, Key::ArrowLeft, Key::ArrowRight)
         {
             if let Some(width) = apply_splitter_step(layout.inspector_width, action, 12.0) {
-                app.state.workbench.inspector_width =
+                app.workbench_mut().inspector_width =
                     width.clamp(layout.inspector_min_width, layout.inspector_max_width);
-                app.state.workbench.inspector_width_custom = true;
+                app.workbench_mut().inspector_width_custom = true;
             } else {
-                app.state.workbench.inspector_width = layout.inspector_reset_width;
-                app.state.workbench.inspector_width_custom = false;
+                app.workbench_mut().inspector_width = layout.inspector_reset_width;
+                app.workbench_mut().inspector_width_custom = false;
             }
             ctx.request_repaint();
         }
@@ -298,7 +302,7 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     });
 }
 
-pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     if !layout.show_console_strip {
@@ -322,7 +326,7 @@ pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         fill_dock(ui, |ui| console::show(ui, app, layout))
     });
     if layout.console_resizable && splitter_is_dragged(ctx, CONSOLE_PANEL_ID) {
-        app.state.workbench.console_height = shown
+        app.workbench_mut().console_height = shown
             .response
             .rect
             .height()
@@ -335,18 +339,18 @@ pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
             ctx,
             &response,
             "Resize console and diagnostics",
-            app.state.workbench.console_height,
+            app.workbench().console_height,
             layout.console_min_height,
             layout.console_max_height,
             16.0,
         );
         if let Some(action) = vertical_splitter_action(ctx, &response) {
-            app.state.workbench.console_height =
-                apply_splitter_step(app.state.workbench.console_height, action, 16.0)
+            app.workbench_mut().console_height =
+                apply_splitter_step(app.workbench().console_height, action, 16.0)
                     .unwrap_or(crate::workbench::state::default_console_height())
                     .clamp(layout.console_min_height, layout.console_max_height);
-            app.state.workbench.console_maximized = false;
-            app.state.workbench.console_visible = true;
+            app.workbench_mut().console_maximized = false;
+            app.workbench_mut().console_visible = true;
             ctx.request_repaint();
         }
     }
@@ -356,7 +360,7 @@ pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
     });
 }
 
-pub fn show_drawers(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_drawers(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     drawers::show(ctx, app, layout);

@@ -20,6 +20,7 @@ use egui::os::OperatingSystem;
 use crate::state::ViewType;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
+use crate::ui::widgets::NotificationAction;
 use crate::workbench::app_state::Model;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
@@ -31,8 +32,8 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::host::{
-    DocumentHost, Host, InspectorScope, NavigatorSection, Point, RailEntry, StatusCell,
-    ToolbarScope, ToolbarSlot,
+    DocumentHost, Host, InspectorScope, NavigatorSection, Point, ProblemsHost, RailEntry,
+    StatusCell, ToolbarScope, ToolbarSlot,
 };
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
@@ -553,6 +554,26 @@ impl Host for RSpiceApp {
         menu_keys(COMPACT_MENU, &mut keys);
         menu_keys(SOURCE_EDITOR_MENU, &mut keys);
         command_registry().validate(ids::named().chain(keys.into_iter().map(|key| ("a menu", key))))
+    }
+
+    fn perform_notification_action(&mut self, action: NotificationAction) {
+        crate::workbench::commands::result_navigation::perform_notification_action(self, action);
+    }
+
+    fn open_run_log(&mut self, run_sequence: u64) {
+        crate::workbench::commands::result_navigation::open_run_log(&mut self.state, run_sequence);
+    }
+
+    fn simulation_input_changed(&mut self) {
+        self.invalidate_simulation_preflight();
+    }
+}
+
+impl ProblemsHost for AppState {
+    fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String> {
+        crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
+            self, finding,
+        )
     }
 }
 

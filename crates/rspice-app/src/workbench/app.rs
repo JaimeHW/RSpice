@@ -966,35 +966,6 @@ impl RSpiceApp {
     }
 }
 
-/// Close a route-owned transient surface without stranding its canonical URL.
-/// Ordinary opens return to their exact source; a direct deep link replaces
-/// itself with the currently projected primary workspace.
-pub(crate) fn close_route_owned_transient(
-    state: &mut AppState,
-    surface: crate::workbench::SurfaceId,
-    label: &str,
-) {
-    if state.workbench.current_route().surface_id() != surface {
-        return;
-    }
-    if state
-        .workbench
-        .navigate_back(crate::workbench::RouteTransitionSource::User)
-        .is_some()
-    {
-        return;
-    }
-    let fallback = crate::workbench::SurfaceRoute::surface(
-        crate::workbench::SurfaceId::from_workspace(state.workbench.workspace),
-    );
-    if let Err(error) = state
-        .workbench
-        .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
-    {
-        state.prompt(format!("Could not close {label}: {error}"));
-    }
-}
-
 /// Close the route-owned Design Management manager without stranding a
 /// `?surface=design-management` URL. Ordinary opens traverse back to their
 /// exact Design source; direct deep links fail safely to the canonical Design
@@ -2076,7 +2047,7 @@ mod tests {
             .workbench
             .navigate(palette, RouteTransitionSource::User)
             .expect("palette route opens");
-        close_route_owned_transient(&mut state, SurfaceId::CommandPalette, "Command Palette");
+        state.close_route_owned_transient(SurfaceId::CommandPalette, "Command Palette");
         assert_eq!(state.workbench.current_route(), source);
 
         let mut direct = AppState::default();
@@ -2087,7 +2058,7 @@ mod tests {
                 RouteTransitionSource::Restore,
             )
             .expect("direct Help route opens");
-        close_route_owned_transient(&mut direct, SurfaceId::HelpCenter, "Help Center");
+        direct.close_route_owned_transient(SurfaceId::HelpCenter, "Help Center");
         assert_eq!(direct.workbench.current_route(), source);
     }
 

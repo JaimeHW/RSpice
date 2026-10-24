@@ -6,7 +6,7 @@
 //! dialog in the same frame. Each step draws what it owns as the shell drew
 //! it before there was a list.
 
-use crate::workbench::app::dialogs;
+use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
 use crate::workbench::{RSpiceApp, SurfaceId};
@@ -92,7 +92,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("framework.command_palette"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.workbench.command_palette.open),
-        render: |app, ctx| app.render_command_palette(ctx),
+        render: |app, ctx| command_palette::render_command_palette(app, ctx),
     },
     DialogSpec {
         key: DialogKey("design.bus_tap"),

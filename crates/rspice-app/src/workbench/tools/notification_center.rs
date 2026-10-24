@@ -28,11 +28,12 @@ use crate::ui::widgets::{
     NotificationAction, NotificationCategory, NotificationRecord, SWITCH_WIDTH, Toasts,
     mark_response_disabled, paint_switch,
 };
+use crate::workbench::AppState;
 use crate::workbench::browser::background_alerts::{self, BackgroundAlerts};
 use crate::workbench::chrome::title_bar;
 use crate::workbench::design_system::{WorkbenchIcon, elide_text};
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::state::NotificationFilter;
-use crate::workbench::{AppState, RSpiceApp};
 
 const PANEL_WIDTH: f32 = 420.0;
 const PANEL_MAX_HEIGHT: f32 = 560.0;
@@ -163,11 +164,15 @@ pub(in crate::workbench) fn showing_here(ctx: &egui::Context, state: &AppState) 
     state.workbench.notification_center_showing() && owner(ctx) == ctx.viewport_id()
 }
 
-pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrome_bottom: f32) {
+pub(in crate::workbench) fn show(
+    ctx: &egui::Context,
+    app: &mut impl WorkbenchHost,
+    chrome_bottom: f32,
+) {
     // Which window drew the panel on the last pass that drew it.
     let drawn_in_id = panel_id().with("drawn-in");
     let enter_id = panel_id().with("enter");
-    if !app.state.workbench.notification_center_showing() {
+    if !app.workbench().notification_center_showing() {
         ctx.data_mut(|data| {
             data.remove::<ViewportId>(drawn_in_id);
             data.remove::<ViewportId>(title_bar::notification_window_id());
@@ -188,14 +193,14 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
 
     let anchor = title_bar::notification_anchor(ctx);
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-        app.state.workbench.close_notification_center();
+        app.workbench_mut().close_notification_center();
         if let Some((_, bell)) = anchor {
             ctx.memory_mut(|memory| memory.request_focus(bell));
         }
         return;
     }
 
-    let large = large_targets(ctx, &app.state);
+    let large = large_targets(ctx, app.state());
     let placement = PanelPlacement::resolve(
         ctx.content_rect(),
         anchor.map(|(rect, _)| rect),
@@ -214,7 +219,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
         // than leaving Tab to walk the whole workbench to reach it.
         let selected = NotificationFilter::ALL
             .iter()
-            .position(|filter| *filter == app.state.workbench.notification_filter)
+            .position(|filter| *filter == app.workbench().notification_filter)
             .unwrap_or(0);
         ctx.memory_mut(|memory| memory.request_focus(segment_id(selected)));
     }
@@ -222,11 +227,11 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
 
     let clock = Clock::read(ctx.input(|input| input.time));
     let mut view = PanelView {
-        filter: app.state.workbench.notification_filter,
-        unread_only: app.state.workbench.notification_unread_only,
+        filter: app.workbench().notification_filter,
+        unread_only: app.workbench().notification_unread_only,
     };
     let mut intents = Vec::new();
-    let records = app.state.workbench.toasts.activity();
+    let records = app.workbench().toasts.activity();
     let alerts = background_alerts::background_alerts();
 
     let area = Area::new(panel_id())
@@ -264,12 +269,12 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
         node.set_label("Notifications");
     });
 
-    app.state.workbench.notification_filter = view.filter;
-    app.state.workbench.notification_unread_only = view.unread_only;
+    app.workbench_mut().notification_filter = view.filter;
+    app.workbench_mut().notification_unread_only = view.unread_only;
 
     let mut followed = None;
     for intent in intents {
-        let toasts = &mut app.state.workbench.toasts;
+        let toasts = &mut app.workbench_mut().toasts;
         match intent {
             Intent::MarkRead(id) => {
                 toasts.mark_read(id);
@@ -290,13 +295,13 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
     if let Some(action) = followed {
         // The offer leaves, so the panel goes with it. Routed after the pass
         // so the hop mutates the session once the records' borrow is over.
-        app.state.workbench.close_notification_center();
-        crate::workbench::commands::result_navigation::perform_notification_action(app, action);
+        app.workbench_mut().close_notification_center();
+        app.perform_notification_action(action);
         return;
     }
     // The press that opened the panel landed on the bell, which is elsewhere.
     if !opening && area.response.clicked_elsewhere() {
-        app.state.workbench.close_notification_center();
+        app.workbench_mut().close_notification_center();
     }
 }
 

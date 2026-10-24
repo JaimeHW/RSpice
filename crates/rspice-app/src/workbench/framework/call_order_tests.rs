@@ -290,7 +290,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_publish_web_dialog", "cloud"),
     ("render_live_session_dialog", "cloud"),
     ("render_unpublish_web_dialog", "cloud"),
-    ("render_command_palette", "framework"),
+    ("command_palette::render_command_palette", "framework"),
     ("render_bus_tap_dialog", "design"),
     ("render_builtin_xspice_placement_dialog", "design"),
     ("render_net_label_dialog", "design"),

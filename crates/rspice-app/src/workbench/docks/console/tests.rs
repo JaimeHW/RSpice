@@ -4,6 +4,7 @@ use super::*;
 use crate::diagnostics::LogSource;
 use crate::state::{AnalysisResult, AnalysisType, Point, SimulationRun};
 use crate::workbench::AppState;
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::commands::vocabulary::Command;

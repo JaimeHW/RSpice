@@ -219,8 +219,7 @@ impl RSpiceApp {
         let route_owned = self.state.shell.help_center.route_owned;
         self.state.shell.help_center.close();
         if route_owned {
-            crate::workbench::app::close_route_owned_transient(
-                &mut self.state,
+            self.state.close_route_owned_transient(
                 crate::workbench::SurfaceId::HelpCenter,
                 "Help Center",
             );

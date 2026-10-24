@@ -9,6 +9,7 @@ use egui::{Rect, pos2, vec2};
 
 use super::*;
 use crate::ui::widgets::{MirroredEntry, ToastKind};
+use crate::workbench::RSpiceApp;
 use crate::workbench::state::ConsolePage;
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 

@@ -1,6 +1,7 @@
 //! The Models workspace's navigator: its pages and the loaded model libraries.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
     // "Model ownership" titled a page index. Nothing under it is about who

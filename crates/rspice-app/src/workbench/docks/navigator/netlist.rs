@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 
 use super::*;
 use crate::state::{OutlineSection, OutlineSectionKind};
+use crate::workbench::RSpiceApp;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageCatalog, MessageId};
 

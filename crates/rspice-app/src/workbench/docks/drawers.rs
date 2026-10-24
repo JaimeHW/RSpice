@@ -6,9 +6,8 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Mode;
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -29,13 +28,13 @@ const MOBILE_NAV_CARD_HEIGHT: f32 = 44.0;
 /// A card's trailing value, in the navigator's row-meta size.
 const MOBILE_NAV_META_SIZE: f32 = 10.0;
 
-pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let Some(drawer) = app.state.workbench.drawer else {
+pub fn show(ctx: &Context, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
+    let Some(drawer) = app.workbench().drawer else {
         clear_side_drawer_focus_session(ctx);
         return;
     };
     if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        app.state.workbench.close_drawer();
+        app.workbench_mut().close_drawer();
         return_drawer_focus(ctx, drawer);
         return;
     }
@@ -77,7 +76,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         })
         .inner;
     if scrim.clicked() {
-        app.state.workbench.close_drawer();
+        app.workbench_mut().close_drawer();
         return_drawer_focus(ctx, drawer);
         return;
     }
@@ -86,8 +85,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         Drawer::Navigator => {
             let opened_this_pass = begin_side_drawer_focus(ctx, Drawer::Navigator);
             if opened_this_pass {
-                app.state
-                    .workbench
+                app.workbench_mut()
                     .outbox
                     .push(crate::workbench::framework::requests::FocusNavigatorSearch);
                 ctx.memory_mut(|memory| memory.move_focus(FocusDirection::None));
@@ -113,12 +111,12 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     close_id = Some(close.id);
                     let _ = take_drawer_focus_pending(ctx, Drawer::Navigator);
                     if close.clicked() {
-                        app.state.workbench.close_drawer();
+                        app.workbench_mut().close_drawer();
                         return_drawer_focus(ctx, Drawer::Navigator);
                     }
                 });
             });
-            if app.state.workbench.drawer == Some(Drawer::Navigator) {
+            if app.workbench().drawer == Some(Drawer::Navigator) {
                 reclaim_side_drawer_focus(ctx, drawer_layer, close_id);
             }
             ctx.accesskit_node_builder(shown.response.id, |node| {
@@ -155,13 +153,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         close.request_focus();
                     }
                     if close.clicked() {
-                        app.state.workbench.close_drawer();
+                        app.workbench_mut().close_drawer();
                         return_drawer_focus(ctx, Drawer::Inspector);
                     }
                 });
                 paint_drawer_inner_edge(ui, framed.response.rect, &t, border);
             });
-            if app.state.workbench.drawer == Some(Drawer::Inspector) {
+            if app.workbench().drawer == Some(Drawer::Inspector) {
                 reclaim_side_drawer_focus(ctx, drawer_layer, close_id);
             }
             ctx.accesskit_node_builder(shown.response.id, |node| {
@@ -354,7 +352,7 @@ fn mobile_navigation_width(screen_width: f32) -> f32 {
 
 fn mobile_navigation_dialog(
     ctx: &Context,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     screen: egui::Rect,
     tokens: &Tokens,
 ) {
@@ -445,10 +443,10 @@ fn mobile_navigation_dialog(
     });
     maintain_mobile_navigation_focus(ctx, &focus_ids, first_card_id);
     if close {
-        app.state.workbench.close_drawer();
+        app.workbench_mut().close_drawer();
         return_drawer_focus(ctx, Drawer::Workspaces);
     } else if let Some(command) = chosen {
-        app.state.workbench.close_drawer();
+        app.workbench_mut().close_drawer();
         release_current_focus(ctx);
         app.execute(command);
     }
@@ -492,7 +490,7 @@ struct MobileNavigationGroupState<'a> {
 
 fn mobile_navigation_group(
     ui: &mut egui::Ui,
-    app: &RSpiceApp,
+    app: &impl WorkbenchHost,
     label: &str,
     actions: &[MobileNavigationAction],
     columns: usize,
@@ -616,10 +614,10 @@ fn release_current_focus(ctx: &Context) {
 
 /// What a card states beside its name, the way a navigator row states its
 /// meta: the bell's unread count, for the shell whose title bar draws no bell.
-fn card_meta(command: CommandKey, app: &RSpiceApp) -> Option<String> {
+fn card_meta(command: CommandKey, app: &impl WorkbenchHost) -> Option<String> {
     match command {
         ids::OPEN_NOTIFICATIONS => {
-            let unread = app.state.workbench.toasts.unread_count();
+            let unread = app.workbench().toasts.unread_count();
             (unread > 0).then(|| format!("{unread} unread"))
         }
         _ => None,
@@ -797,6 +795,7 @@ fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
     use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::state::WorkbenchSession;
 

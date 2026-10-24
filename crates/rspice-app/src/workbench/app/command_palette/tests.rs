@@ -1,6 +1,7 @@
 //! Command palette search, navigation, and input ownership regressions.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 #[test]
 fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
@@ -343,14 +344,14 @@ fn opening_shortcut_and_repeated_letters_in_one_frame_preserve_the_search() {
     }
     let _ = ctx.run_ui(raw_input(events), |ctx| {
         app.handle_shortcuts(ctx);
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert!(app.state.workbench.command_palette.open);
     assert_eq!(app.state.workbench.command_palette.query, query);
 
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
         app.handle_shortcuts(ctx);
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert_eq!(app.state.workbench.command_palette.query, query);
     assert!(!app.state.design.bus_tap.open);
@@ -383,7 +384,7 @@ fn opening_input_keeps_palette_editing_keys() {
         ]),
         |ctx| {
             app.handle_shortcuts(ctx);
-            app.render_command_palette(ctx);
+            render_command_palette(&mut app, ctx);
         },
     );
     assert_eq!(app.state.workbench.command_palette.query, "Review comments");
@@ -440,7 +441,7 @@ fn opening_input_respects_custom_palette_bindings() {
         events.push(egui::Event::Paste("Review comments".to_owned()));
         let _ = ctx.run_ui(raw_input(events), |ctx| {
             app.handle_shortcuts(ctx);
-            app.render_command_palette(ctx);
+            render_command_palette(&mut app, ctx);
         });
         assert_eq!(app.state.workbench.command_palette.query, "Review comments");
     }
@@ -473,7 +474,7 @@ fn opening_input_is_owned_before_background_text_edits() {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
                 });
-                app.render_command_palette(ctx);
+                render_command_palette(&mut app, ctx);
             },
         );
         assert_eq!(underlying, format!("unchanged{before}"));
@@ -487,7 +488,8 @@ fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete()
     let mut app = test_app();
     app.state.workbench.command_palette.recent =
         vec![Command::PlaceProbe.key(), Command::Save.key()];
-    let all = app.palette_rows(
+    let all = palette_rows(
+        &app,
         "",
         PaletteScope::All,
         CommandPlatform::Desktop,
@@ -504,7 +506,8 @@ fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete()
     );
     assert!(all.iter().all(|row| row.section_label() != "Recent"));
 
-    let signals = app.palette_rows(
+    let signals = palette_rows(
+        &app,
         "",
         PaletteScope::Signals,
         CommandPlatform::Desktop,
@@ -530,7 +533,8 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
     library.add_cell(cell);
     app.state.model.library_manager.add_library(library);
 
-    let mut rows = app.palette_rows(
+    let mut rows = palette_rows(
+        &app,
         "precision gain_stage",
         PaletteScope::Design,
         CommandPlatform::Desktop,
@@ -586,7 +590,8 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         ("Verilog-A device", Command::NewVerilogADevice),
         ("New view", Command::NewView),
     ] {
-        let rows = app.palette_rows(
+        let rows = palette_rows(
+            &app,
             query,
             PaletteScope::All,
             CommandPlatform::Desktop,
@@ -641,7 +646,8 @@ fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
 
     let mut app = open_project_app();
     let find = |app: &RSpiceApp| {
-        app.palette_rows(
+        palette_rows(
+            app,
             "Build settings",
             PaletteScope::All,
             CommandPlatform::Desktop,
@@ -677,7 +683,8 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     app.state.model.model_library_manager.filter_type =
         Some(crate::state::model_library::ModelType::Pmos);
 
-    let mut rows = app.palette_rows(
+    let mut rows = palette_rows(
+        &app,
         "qualified foundry_65lp",
         PaletteScope::Models,
         CommandPlatform::Desktop,
@@ -735,9 +742,11 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
     app.state.workbench.command_palette.open();
     app.state.workbench.command_palette.query = "opa189_a".to_owned();
 
-    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+        render_command_palette(&mut app, ctx)
+    });
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
 
     assert!(!app.state.workbench.command_palette.open);
@@ -787,7 +796,8 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     app.state.model.simulation.retained.runs = vec![stale_run, active_run].into();
     assert!(app.state.model.simulation.select_run(1));
     assert!(
-        app.palette_rows(
+        palette_rows(
+            &app,
             "V(stale)",
             PaletteScope::Signals,
             CommandPlatform::Desktop,
@@ -796,7 +806,8 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         .is_empty(),
         "inactive run history must not leak into the active-signal index"
     );
-    let mut rows = app.palette_rows(
+    let mut rows = palette_rows(
+        &app,
         "precision_out tran",
         PaletteScope::Signals,
         CommandPlatform::Desktop,
@@ -870,7 +881,9 @@ fn accesskit_exposes_modal_combobox_scopes_listbox_and_options() {
     ctx.enable_accesskit();
     let mut app = test_app();
     app.state.workbench.command_palette.open();
-    let output = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+    let output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+        render_command_palette(&mut app, ctx)
+    });
     let nodes = output
         .platform_output
         .accesskit_update
@@ -927,41 +940,47 @@ fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
     crate::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     app.state.workbench.command_palette.open();
-    let row_count = app
-        .palette_rows(
-            "",
-            PaletteScope::All,
-            CommandPlatform::Desktop,
-            egui::os::OperatingSystem::Windows,
-        )
-        .len();
-    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+    let row_count = palette_rows(
+        &app,
+        "",
+        PaletteScope::All,
+        CommandPlatform::Desktop,
+        egui::os::OperatingSystem::Windows,
+    )
+    .len();
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+        render_command_palette(&mut app, ctx)
+    });
 
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::ArrowDown)]), |ctx| {
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert_eq!(app.state.workbench.command_palette.selected, 1);
 
     app.state.workbench.command_palette.selected = 0;
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::ArrowUp)]), |ctx| {
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert_eq!(app.state.workbench.command_palette.selected, row_count - 1);
 
     app.state.workbench.command_palette.query = "Stop active run".to_owned();
     app.state.workbench.command_palette.selected = 0;
-    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+        render_command_palette(&mut app, ctx)
+    });
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert!(app.state.workbench.command_palette.open);
     assert!(app.state.workbench.command_palette.recent.is_empty());
 
     app.state.workbench.command_palette.query = "About RSpice".to_owned();
     app.state.workbench.command_palette.selected = 0;
-    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+        render_command_palette(&mut app, ctx)
+    });
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert!(!app.state.workbench.command_palette.open);
     assert!(app.state.shell.about);
@@ -978,11 +997,13 @@ fn tab_moves_to_an_action_without_leaving_the_modal_layer() {
     crate::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     app.state.workbench.command_palette.open();
-    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+        render_command_palette(&mut app, ctx)
+    });
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Tab)]), |ctx| {
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     let focused = ctx.memory(|memory| memory.focused()).expect("modal focus");
     assert_ne!(focused, search_id());
@@ -1014,7 +1035,7 @@ fn modal_claims_and_restores_prior_focus_on_escape() {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
         });
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
@@ -1023,7 +1044,7 @@ fn modal_claims_and_restores_prior_focus_on_escape() {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
         });
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
@@ -1031,7 +1052,7 @@ fn modal_claims_and_restores_prior_focus_on_escape() {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
         });
-        app.render_command_palette(ctx);
+        render_command_palette(&mut app, ctx);
     });
     assert!(!app.state.workbench.command_palette.open);
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id));

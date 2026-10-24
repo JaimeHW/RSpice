@@ -16,13 +16,13 @@ use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::AppState;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{ConsoleChannel, ConsolePage};
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::host::Host;
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
 const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
@@ -55,14 +55,14 @@ use crate::ui::widgets::{
 };
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    transcript::collect_save(ui.ctx(), &mut app.state);
+pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
+    transcript::collect_save(ui.ctx(), app.state_mut());
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app, layout);
     if !layout.show_console_body {
         return;
     }
-    let page = app.state.workbench.console_page;
+    let page = app.workbench().console_page;
     let body_rect = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(body_rect, 0.0, Tokens::get(ui.ctx()).color.bg_inset);
@@ -85,23 +85,23 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             ConsolePage::Console => {
                 // The command decides what Clear may clear and does the
                 // clearing; the toolbar only offers it.
-                let clear = clear_is_offered(layout, app.state.workbench.console_view.channel)
+                let clear = clear_is_offered(layout, app.workbench().console_view.channel)
                     .then(|| console_clear_action(app.is_enabled(ids::CLEAR_CONSOLE)));
-                if toolbar(ui, |ui| console_toolbar(ui, &mut app.state, layout, clear)) {
+                if toolbar(ui, |ui| console_toolbar(ui, app.state_mut(), layout, clear)) {
                     app.execute(ids::CLEAR_CONSOLE);
                 }
                 // The transcript is prose, and keeps the inset on every side.
                 ui.add_space(CONSOLE_BODY_PADDING_TOP);
                 if prose_fits(ui) {
-                    padded(ui, |ui| transcript::console(ui, &mut app.state));
+                    padded(ui, |ui| transcript::console(ui, app.state_mut()));
                 }
             }
             ConsolePage::Problems => {
                 // A waiver changes what refuses a run, as the rule deck does,
                 // so a run prepared or checked before it is not authorized
                 // after it.
-                if problems(ui, &mut app.state) {
-                    app.invalidate_simulation_preflight();
+                if problems(ui, app.state_mut()) {
+                    app.simulation_input_changed();
                 }
             }
             ConsolePage::Measurements => measurements(ui, app),
@@ -114,9 +114,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     });
 }
 
-fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
-    let problems = active_problem_count(&app.state, ui.ctx().cumulative_pass_nr());
+    let problems = active_problem_count(app.state(), ui.ctx().cumulative_pass_nr());
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
     let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
@@ -170,7 +170,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 };
                 if console_action(ui, icon, label, false, control_size).clicked() {
                     if open {
-                        app.state.workbench.console_maximized = false;
+                        app.workbench_mut().console_maximized = false;
                     }
                     app.execute(ids::TOGGLE_CONSOLE);
                 }
@@ -179,12 +179,12 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     if console_action(
                         ui,
                         WorkbenchIcon::Focus,
-                        if app.state.workbench.console_maximized {
+                        if app.workbench().console_maximized {
                             "Restore console"
                         } else {
                             "Maximize console"
                         },
-                        app.state.workbench.console_maximized,
+                        app.workbench().console_maximized,
                         control_size,
                     )
                     .clicked()
@@ -256,7 +256,13 @@ fn console_trailing_actions_width(layout: LayoutSpec, touch_targets: bool) -> f3
 /// The page tabs. `open` says whether the dock shows a page under them: a
 /// collapsed dock marks no tab as the one open, and a press on any tab opens
 /// the dock on that page.
-fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height: f32, open: bool) {
+fn console_tabs(
+    ui: &mut Ui,
+    app: &mut impl WorkbenchHost,
+    problems: ProblemCount,
+    height: f32,
+    open: bool,
+) {
     let mut requested = None;
     let mut expand = false;
     let mut focus = None;
@@ -270,8 +276,8 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
         for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
             let count = match page {
                 ConsolePage::Problems => problems.total(),
-                ConsolePage::Measurements => active_measurement_count(&app.state.model.simulation),
-                ConsolePage::TaskLog => app.state.model.simulation.retained.runs.len(),
+                ConsolePage::Measurements => active_measurement_count(&app.model().simulation),
+                ConsolePage::TaskLog => app.model().simulation.retained.runs.len(),
                 ConsolePage::Console => 0,
             };
             // The badge has room for one number. Which severities that number
@@ -280,7 +286,7 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
             // errors.
             let breakdown =
                 (page == ConsolePage::Problems && count > 0).then(|| problems.announcement());
-            let current = app.state.workbench.console_page == page;
+            let current = app.workbench().console_page == page;
             let response = console_tab(
                 ui,
                 page,
@@ -335,10 +341,10 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
         ui.memory_mut(|memory| memory.request_focus(ids[index]));
     }
     if let Some(page) = requested {
-        app.state.workbench.console_page = page;
+        app.workbench_mut().console_page = page;
     }
     if expand {
-        app.state.workbench.open_console();
+        app.workbench_mut().open_console();
     }
 }
 
@@ -532,12 +538,11 @@ fn paint_row_mark(ui: &Ui, left: f32, top: f32, problem: Option<Problem>) {
     }
 }
 
-fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
+fn measurements(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let specifications = active_specifications(app);
     let rows = active_measurement_rows(app, &specifications);
     let run_label = app
-        .state
-        .model
+        .model()
         .simulation
         .active_run()
         .map(|run| run.label.clone());
@@ -557,7 +562,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
             // where that page's does.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 crate::ui::widgets::Button::new("+ Add measurement…")
-                    .enabled(app.state.model.simulation.active_analysis().is_some())
+                    .enabled(app.model().simulation.active_analysis().is_some())
                     .show(ui)
                     .on_disabled_hover_text(
                         "Select a retained result analysis before creating a measurement",
@@ -572,7 +577,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.add_space(CONSOLE_BODY_PADDING_TOP);
         if prose_fits(ui) {
             padded(ui, |ui| {
-                if app.state.model.simulation.active_run().is_some() {
+                if app.model().simulation.active_run().is_some() {
                     muted(ui, "This dataset has no computed measurements.");
                 } else {
                     muted(
@@ -587,14 +592,13 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     // Add measurement draws over the result viewer, so it opens there.
     if add_measurement {
-        app.state
-            .workbench
+        app.workbench_mut()
             .activate(crate::workbench::state::Workspace::Results);
         app.execute(ids::MEASUREMENT_LIBRARY);
     }
 }
 
-fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
+fn task_log(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let mut open_log = None;
     ScrollArea::vertical()
         .id_salt("workbench.task_log")
@@ -603,7 +607,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
         // the bottom edge of a dock dragged shorter than that.
         .min_scrolled_height(0.0)
         .show(ui, |ui| {
-            if app.state.model.simulation.retained.runs.is_empty() {
+            if app.model().simulation.retained.runs.is_empty() {
                 padded(ui, |ui| {
                     muted(
                         ui,
@@ -617,24 +621,22 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
             // runs listed.
             let columns = TaskColumns {
                 status: widest_status_width(ui),
-                label: app
-                    .state
-                    .model.simulation
+                label: app.model().simulation
                     .retained
                     .runs
                     .iter()
                     .map(|run| task_text_width(ui, &run.label, FontWeight::Medium))
                     .fold(0.0, f32::max),
             };
-            for run in &app.state.model.simulation.retained.runs {
-                let active = app.state.model.simulation.execution.active_execution
+            for run in &app.model().simulation.retained.runs {
+                let active = app.model().simulation.execution.active_execution
                     == run.execution_identity()
                     && !run.lifecycle.is_terminal();
                 let (status, problem) = run_lifecycle_presentation(run.lifecycle);
                 let progress = if active {
                     format!(
                         " · {}%",
-                        simulation_progress_percent(app.state.model.simulation.execution.progress)
+                        simulation_progress_percent(app.model().simulation.execution.progress)
                     )
                 } else {
                     String::new()
@@ -669,7 +671,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         });
     if let Some(run) = open_log {
-        crate::workbench::commands::result_navigation::open_run_log(&mut app.state, run);
+        app.open_run_log(run);
     }
 }
 
@@ -687,10 +689,9 @@ struct MeasurementTableRow {
     failed: bool,
 }
 
-fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
+fn active_specifications(app: &impl WorkbenchHost) -> Vec<crate::state::SpecEntry> {
     if let Some(receipt) = app
-        .state
-        .model
+        .model()
         .simulation
         .active_run()
         .and_then(crate::state::SimulationRun::prepared_receipt)
@@ -702,22 +703,21 @@ fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
             .collect();
     }
     let active = app
-        .state
-        .model
+        .model()
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.model().workspace.content.plan_data(plan.id()))
         .map(|payload| payload.specs.as_slice())
-        .unwrap_or(app.state.model.workspace.content.specs.as_slice());
+        .unwrap_or(app.model().workspace.content.specs.as_slice());
     active.to_vec()
 }
 
 fn active_measurement_rows(
-    app: &RSpiceApp,
+    app: &impl WorkbenchHost,
     specifications: &[crate::state::SpecEntry],
 ) -> Vec<MeasurementTableRow> {
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = app.model().simulation.active_run() else {
         return Vec::new();
     };
     let mut rows: Vec<MeasurementTableRow> = run
@@ -743,7 +743,7 @@ fn active_measurement_rows(
     // the sheet, because a specification binds to these rows.
     if let Some(summary) = crate::state::ac_bode_summary_for_selection(
         run,
-        app.state.model.simulation.view.active_analysis_idx,
+        app.model().simulation.view.active_analysis_idx,
     ) && let Some(analysis) = run.analyses.get(summary.analysis_index)
         && analysis.success
     {

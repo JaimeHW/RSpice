@@ -19,7 +19,8 @@ use crate::ui::{
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize},
 };
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::AppState;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use crate::workbench::{
     RouteTransitionSource, SurfaceExecutionAvailability, SurfaceId, SurfaceRoute,
@@ -61,19 +62,18 @@ enum BrowserAction {
     Open(SurfaceId),
 }
 
-pub(crate) fn open(app: &mut RSpiceApp) {
+pub(crate) fn open(app: &mut impl WorkbenchHost) {
     let route = SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser);
     if let Err(error) = app
-        .state
-        .workbench
+        .workbench_mut()
         .navigate(route, RouteTransitionSource::User)
     {
-        app.state.prompt(error.to_string());
+        app.state_mut().prompt(error.to_string());
     }
 }
 
-pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if app.state.workbench.current_route().surface_id() != SurfaceId::SpecialistToolBrowser {
+pub(crate) fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost) {
+    if app.workbench().current_route().surface_id() != SurfaceId::SpecialistToolBrowser {
         return;
     }
 
@@ -85,7 +85,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         .primary_on_enter(false)
         .initial_focus(DialogInitialFocus::BodyControl)
         .show_with_initial_body_focus(ctx, |ui| {
-            let browser = &mut app.state.workbench.specialist_tool_browser;
+            let browser = &mut app.workbench_mut().specialist_tool_browser;
             purpose_banner(ui);
             let search_id = toolbar(ui, browser);
             filter_bar(ui, browser);
@@ -102,11 +102,11 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         choice,
         DialogChoice::Primary | DialogChoice::Cancelled | DialogChoice::Ghost
     ) {
-        close_to_source(&mut app.state);
+        close_to_source(app.state_mut());
     }
 }
 
-fn execute_action(app: &mut RSpiceApp, action: BrowserAction) {
+fn execute_action(app: &mut impl WorkbenchHost, action: BrowserAction) {
     match action {
         BrowserAction::Unavailable(surface) => {
             let reason = match crate::workbench::surface_availability(surface) {
@@ -115,34 +115,30 @@ fn execute_action(app: &mut RSpiceApp, action: BrowserAction) {
                     "This specialist workspace is not currently available."
                 }
             };
-            app.state.prompt(format!(
+            app.state_mut().prompt(format!(
                 "{} is unavailable: {reason}",
                 surface.metadata().label
             ));
         }
         BrowserAction::ToggleFavorite(surface) => app
-            .state
-            .workbench
+            .workbench_mut()
             .specialist_tool_browser
             .toggle_favorite(surface),
         BrowserAction::TogglePin(surface) => app
-            .state
-            .workbench
+            .workbench_mut()
             .specialist_tool_browser
             .toggle_pin(surface),
         BrowserAction::Open(surface) => {
             let route = SurfaceRoute::surface(surface);
             match app
-                .state
-                .workbench
+                .workbench_mut()
                 .navigate(route, RouteTransitionSource::User)
             {
                 Ok(_) => app
-                    .state
-                    .workbench
+                    .workbench_mut()
                     .specialist_tool_browser
                     .record_recent(surface),
-                Err(error) => app.state.prompt(error.to_string()),
+                Err(error) => app.state_mut().prompt(error.to_string()),
             }
         }
     }
