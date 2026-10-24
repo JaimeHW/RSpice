@@ -9,6 +9,7 @@
 //! before these fields were gathered here.
 
 mod drawing_sheet;
+mod schematic_sync;
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
@@ -78,6 +79,9 @@ pub(crate) struct Model {
     /// Live-session write leases held by other participants, projected by
     /// the live-session engine every frame it is attached.
     pub live_write_locks: crate::state::write_policy::LiveWriteLocks,
+    /// The sheet-membership and generated-symbol failures the drawing sync
+    /// last recorded. Runtime only.
+    pub(crate) recorded_sync_failures: schematic_sync::SyncFailures,
 }
 
 impl Model {

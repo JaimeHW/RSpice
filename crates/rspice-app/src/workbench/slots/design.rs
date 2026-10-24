@@ -180,11 +180,6 @@ pub(crate) struct DesignState {
     pub symbol: crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
 
     pub design_panel: crate::workbench::state::DesignPanel,
-    /// The sheet-membership and generated-symbol failures last recorded.
-    ///
-    /// The drawing is synced every frame, so a failure that stands is
-    /// recorded when it first appears or changes, not sixty times a second.
-    pub recorded_sync_failures: crate::workbench::app::actions::workspace::SyncFailures,
     /// Which stimulus definition the library workspace is reading, by exact
     /// name. Runtime-only: a definition can be renamed or deleted by another
     /// session of the same project, and restoring a name that no longer

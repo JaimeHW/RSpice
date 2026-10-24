@@ -107,7 +107,9 @@ impl RunHost for AppState {
     }
 
     fn sync_active_schematic_to_workspace(&mut self) {
-        AppState::sync_active_schematic_to_workspace(self);
+        if let Some(prompt) = self.model.sync_active_schematic_to_workspace() {
+            self.prompt(prompt);
+        }
     }
 
     fn ensure_design_check(&mut self, subject: CellViewRef) -> Result<(), String> {
