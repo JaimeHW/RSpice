@@ -31,7 +31,7 @@ def measure_tree(files: dict[str, str]):
         return measure(root)
 
 
-PROJECT = "pub fn elide_text() {}\n"
+PROJECT = "pub fn project_title() {}\n"
 
 
 class SliceRuleTests(unittest.TestCase):
@@ -87,8 +87,8 @@ class MeasurementTests(unittest.TestCase):
         values, contributors, _ = measure_tree({
             "workbench/surfaces/project.rs": PROJECT,
             "workbench/surfaces/results.rs": (
-                "use crate::workbench::surfaces::project::elide_text;\n"
-                "pub fn show() { elide_text(); }\n"
+                "use crate::workbench::surfaces::project::project_title;\n"
+                "pub fn show() { project_title(); }\n"
             ),
         })
         # The import and the call each count.
@@ -108,13 +108,13 @@ class MeasurementTests(unittest.TestCase):
                 "pub fn show() {}\n"
                 "#[cfg(test)]\nmod extra;\n"
                 "#[cfg(test)]\nmod tests {\n"
-                "    use crate::workbench::surfaces::project::elide_text;\n"
-                "    #[test]\n    fn elides() { elide_text(); }\n"
+                "    use crate::workbench::surfaces::project::project_title;\n"
+                "    #[test]\n    fn elides() { project_title(); }\n"
                 "}\n"
             ),
             "workbench/surfaces/results/extra.rs": (
-                "use crate::workbench::surfaces::project::elide_text;\n"
-                "pub fn helper() { elide_text(); }\n"
+                "use crate::workbench::surfaces::project::project_title;\n"
+                "pub fn helper() { project_title(); }\n"
             ),
         })
         self.assertEqual(values["feature->feature"], {})
