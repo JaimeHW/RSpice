@@ -11,6 +11,8 @@ members = [
     "crates/rspice-veriloga-models/models/*",
     "crates/rspice-core",
     "crates/rspice-core-base",
+    "crates/rspice-core-netlist",
+    "crates/rspice-core-devices",
     "crates/rspice-output",
     "crates/rspice-design-model",
     "crates/rspice-automation-protocol",
@@ -196,6 +198,8 @@ rspice-veriloga-runtime = { path = "crates/rspice-veriloga-runtime", version = "
 rspice-veriloga-models = { path = "crates/rspice-veriloga-models", version = "0.1.0", default-features = false }
 rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 rspice-core-base = { path = "crates/rspice-core-base", version = "0.1.0", default-features = false }
+rspice-core-netlist = { path = "crates/rspice-core-netlist", version = "0.1.0", default-features = false }
+rspice-core-devices = { path = "crates/rspice-core-devices", version = "0.1.0", default-features = false }
 
 # One lint policy for the whole workspace. Crates opt in with
 # `lints.workspace = true`, so tightening a rule is a single edit here rather

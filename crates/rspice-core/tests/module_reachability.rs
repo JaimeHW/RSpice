@@ -100,16 +100,7 @@ fn declared_submodules(source: &str) -> BTreeSet<String> {
             names.insert(stem.to_owned());
         }
 
-        let rest = if let Some(restricted) = line.strip_prefix("pub(") {
-            // Rust also permits pub(self) and pub(in crate::parent), not
-            // just the two common crate/super spellings.
-            restricted
-                .split_once(')')
-                .map_or(line, |(_, rest)| rest.trim_start())
-        } else {
-            line.strip_prefix("pub ").unwrap_or(line)
-        };
-        let Some(rest) = rest.strip_prefix("mod ") else {
+        let Some(rest) = module_item(line) else {
             continue;
         };
         // `mod foo;` is a file-backed declaration. `mod foo {` is inline and
@@ -123,6 +114,82 @@ fn declared_submodules(source: &str) -> BTreeSet<String> {
         }
     }
     names
+}
+
+/// The text after `mod ` on a trimmed module item line, its visibility
+/// stripped, or `None` when the line declares no module.
+fn module_item(line: &str) -> Option<&str> {
+    let rest = if let Some(restricted) = line.strip_prefix("pub(") {
+        // Rust also permits pub(self) and pub(in crate::parent), not
+        // just the two common crate/super spellings.
+        restricted
+            .split_once(')')
+            .map_or(line, |(_, rest)| rest.trim_start())
+    } else {
+        line.strip_prefix("pub ").unwrap_or(line)
+    };
+    rest.strip_prefix("mod ")
+}
+
+/// Whether a trimmed line opens an inline `mod <name> {` block.
+fn opens_inline_module(line: &str, name: &str) -> bool {
+    module_item(line)
+        .and_then(|rest| rest.strip_prefix(name))
+        .is_some_and(|rest| rest.trim_start().starts_with('{'))
+}
+
+/// File stems the inline `mod <name> { .. }` block of `source` pulls into
+/// the crate: the `mod foo;` declarations directly in its body.
+///
+/// A module whose files moved to another crate of the family but which
+/// keeps one child here is declared inline, around a re-export of the half
+/// that moved and the `mod` of the child it kept; that child's file sits in
+/// the directory named for the module, with no `<name>.rs` beside it.
+fn inline_module_submodules(source: &str, name: &str) -> BTreeSet<String> {
+    let mut body = String::new();
+    let mut depth = 0usize;
+    for line in source.lines() {
+        let code = line.find("//").map_or(line, |index| &line[..index]).trim();
+        let opens = code.matches('{').count();
+        let closes = code.matches('}').count();
+        if depth == 0 {
+            if opens_inline_module(code, name) {
+                depth = opens.saturating_sub(closes);
+                if depth == 0 {
+                    break;
+                }
+            }
+            continue;
+        }
+        if depth == 1 {
+            body.push_str(code);
+            body.push('\n');
+        }
+        depth = (depth + opens).saturating_sub(closes);
+        if depth == 0 {
+            break;
+        }
+    }
+    declared_submodules(&body)
+}
+
+/// Whether the file that would declare `path`'s directory as a module
+/// declares it inline, with `stem` among that body's file-backed children.
+fn declared_by_inline_parent(root: &Path, path: &Path, stem: &str) -> bool {
+    let dir = path.parent().expect("source file has a parent");
+    let Some(module) = dir.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if dir == root {
+        return false;
+    }
+    possible_parents(root, &dir.with_extension("rs"))
+        .into_iter()
+        .any(|holder| {
+            fs::read_to_string(&holder)
+                .map(|source| inline_module_submodules(&source, module).contains(stem))
+                .unwrap_or(false)
+        })
 }
 
 /// The files that could declare `path` as a module: the `mod.rs` beside it, or
@@ -163,7 +230,7 @@ fn every_source_file_is_reachable_from_a_mod_declaration() {
             fs::read_to_string(&parent)
                 .map(|source| declared_submodules(&source).contains(stem))
                 .unwrap_or(false)
-        });
+        }) || declared_by_inline_parent(&root, &path, stem);
 
         if !declared {
             orphans.push(family_relative(&path));
@@ -213,6 +280,27 @@ mod inline_with_brace { }
     assert!(!declared.contains("restricted_inline"));
 }
 
+#[test]
+fn an_inline_module_declares_the_files_its_own_body_names() {
+    let source = "\
+pub mod devices;
+pub mod device {
+    pub use rspice_core_devices::device::*;
+    #[cfg(feature = \"veriloga\")]
+    pub mod veriloga;
+    #[cfg(test)]
+    mod tests {
+        mod nested;
+    }
+}
+mod after;
+";
+    let declared = inline_module_submodules(source, "device");
+    assert_eq!(declared, BTreeSet::from(["veriloga".to_owned()]));
+    assert!(inline_module_submodules(source, "devices").is_empty());
+    assert!(inline_module_submodules(source, "absent").is_empty());
+}
+
 /// A module with submodules is `foo.rs` beside `foo/`, never `foo/mod.rs`.
 ///
 /// Both spellings compile and Rust has no opinion between them. The crate
@@ -260,6 +348,44 @@ fn module_files_use_sibling_style_not_mod_rs() {
         "these modules still use `mod.rs`; rename each to the sibling form:\n{}",
         offenders.join("\n")
     );
+}
+
+/// Whether a glob of `target` re-exports a module of another crate of the
+/// family into the inline module of the same name that `source` declares.
+fn continues_a_moved_module(target: &str, source: &str) -> bool {
+    let Some((krate, module)) = target.split_once("::") else {
+        return false;
+    };
+    krate
+        .strip_prefix("rspice_core_")
+        .is_some_and(|name| !name.is_empty())
+        && !module.is_empty()
+        && !module.contains("::")
+        && source
+            .lines()
+            .any(|line| opens_inline_module(line.trim(), module))
+}
+
+#[test]
+fn a_glob_may_continue_a_moved_module_only_in_its_inline_namesake() {
+    let source = "pub mod device {\n    pub use rspice_core_devices::device::*;\n}\n";
+    assert!(continues_a_moved_module(
+        "rspice_core_devices::device",
+        source
+    ));
+    assert!(!continues_a_moved_module(
+        "rspice_core_devices::netlist",
+        source
+    ));
+    assert!(!continues_a_moved_module(
+        "rspice_core_devices::device::mosfet",
+        source
+    ));
+    assert!(!continues_a_moved_module("rspice_veriloga::device", source));
+    assert!(!continues_a_moved_module(
+        "rspice_core_devices::device",
+        "pub mod device;\n"
+    ));
 }
 
 /// A glob import may only join a module file to its own submodules.
@@ -313,7 +439,16 @@ fn glob_imports_stay_within_their_own_module() {
             // the only way to get `par_iter` into scope, and a module named
             // `prelude` is a published invitation to glob it. The rule is
             // about this crate's own module boundaries.
-            if target == "super" || children.contains(target) || target.ends_with("prelude") {
+            //
+            // So is the last exemption: an inline module that keeps one
+            // child here and globs the rest of itself from the family crate
+            // its other files moved to is one module continued across the
+            // crates, as `super::*` continues one across files.
+            if target == "super"
+                || children.contains(target)
+                || target.ends_with("prelude")
+                || continues_a_moved_module(target, &source)
+            {
                 continue;
             }
             offenders.push(format!("  {display}:{}  {trimmed}", number + 1));

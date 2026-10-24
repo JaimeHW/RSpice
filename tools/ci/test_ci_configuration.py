@@ -482,6 +482,8 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-wasm",
             "rspice-core",
             "rspice-core-base",
+            "rspice-core-netlist",
+            "rspice-core-devices",
             "rspice-publication-contract",
         )
         offenders = []
@@ -552,7 +554,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("ref: ${{ github.sha }}", conformance_job)
         self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', conformance_job)
-        self.assertIn("-p rspice-core -p rspice-core-base --lib --tests", conformance_job)
+        self.assertIn("-p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --lib --tests", conformance_job)
         self.assertIn("-p rspice-engine-adapter", conformance_job)
         for target in (
             "ngspice_oracle_audit",
@@ -640,7 +642,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("CARGO_BUILD_JOBS: \"2\"", workflow)
         # The engine's lane also runs the crates of its family below it.
         for packages, job in (
-            ("-p rspice-core -p rspice-core-base", "test-linux"),
+            ("-p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices", "test-linux"),
             ("-p rspice-app", "test-ui"),
         ):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
@@ -656,6 +658,8 @@ class CiConfigurationTests(unittest.TestCase):
         dedicated = {
             "rspice-core",
             "rspice-core-base",
+            "rspice-core-netlist",
+            "rspice-core-devices",
             "rspice-app",
             "rspice-python",
             "rspice-wasm",
@@ -827,6 +831,8 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-sheet-publisher",
             "rspice-core",
             "rspice-core-base",
+            "rspice-core-netlist",
+            "rspice-core-devices",
             "rspice-app",
         ):
             self.assertIn(package, covered)
@@ -1001,6 +1007,8 @@ class CiConfigurationTests(unittest.TestCase):
         for shard in (
             ("rspice-core", "--no-default-features\n"),
             ("rspice-core-base", "--no-default-features\n"),
+            ("rspice-core-netlist", "--no-default-features\n"),
+            ("rspice-core-devices", "--no-default-features\n"),
             (
                 "rspice-core",
                 "--no-default-features --features wasm,veriloga,veriloga-wasm-jit",
@@ -1027,7 +1035,18 @@ class CiConfigurationTests(unittest.TestCase):
         aliases = tomllib.loads(read_text(".cargo/config.toml"))["alias"]
         self.assertEqual(
             aliases["core-lib-test"],
-            ["test", "-p", "rspice-core", "-p", "rspice-core-base", "--lib"],
+            [
+                "test",
+                "-p",
+                "rspice-core",
+                "-p",
+                "rspice-core-base",
+                "-p",
+                "rspice-core-netlist",
+                "-p",
+                "rspice-core-devices",
+                "--lib",
+            ],
         )
         self.assertIn("run: cargo core-lib-test --locked\n", ci_workflow)
         self.assertIn("Full test suite (release)", nightly_workflow)
@@ -1487,7 +1506,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("RUSTFLAGS: -D warnings", step)
         self.assertIn(
-            "cargo check --locked -p rspice-core -p rspice-core-base"
+            "cargo check --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices"
             " --features veriloga-builtins-base --all-targets",
             step,
         )
@@ -1499,7 +1518,7 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo clippy --locked -p rspice-core -p rspice-core-base"
+            "cargo clippy --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices"
             " --all-targets --all-features -- -D warnings",
             read_text(".github/workflows/python.yml"),
         )
@@ -1789,9 +1808,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo llvm-cov --locked ${{ matrix.packages }}", coverage)
         for group in ("core", "ui", "libraries"):
             self.assertIn(f"group: {group}", coverage)
-        self.assertIn("packages: -p rspice-core -p rspice-core-base\n", coverage)
+        self.assertIn("packages: -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices\n", coverage)
         self.assertIn(
-            "--workspace --exclude rspice-core --exclude rspice-core-base --exclude rspice-app",
+            "--workspace --exclude rspice-core --exclude rspice-core-base\n"
+            "              --exclude rspice-core-netlist --exclude rspice-core-devices --exclude rspice-app",
             coverage,
         )
         self.assertIn("--exclude 'rspice-veriloga-model*'", coverage)
@@ -1879,7 +1899,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("wheel smoke passed", workflow)
         self.assertIn("Python 3.10 abi3 smoke passed", workflow)
         self.assertIn(
-            "cargo clippy --locked -p rspice-core -p rspice-core-base"
+            "cargo clippy --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices"
             " --all-targets --all-features -- -D warnings",
             workflow,
         )
@@ -2089,7 +2109,7 @@ class CiConfigurationTests(unittest.TestCase):
 
     def test_referenced_source_files_are_tracked(self) -> None:
         source_like_paths = [
-            "crates/rspice-core/src/netlist/source_map.rs",
+            "crates/rspice-core-netlist/src/netlist/source_map.rs",
             "crates/rspice-core/tests/common/mod.rs",
             # These moved out of `common/` and `workbench/netlist_document/`
             # during the module reorganization. The paths are updated rather than

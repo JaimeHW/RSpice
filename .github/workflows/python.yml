@@ -132,7 +132,7 @@ jobs:
           python-version: "3.14"
       - name: Run warnings-denied Clippy
         run: |
-          cargo clippy --locked -p rspice-core -p rspice-core-base --all-targets --all-features -- -D warnings
+          cargo clippy --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --all-targets --all-features -- -D warnings
           cargo clippy --locked -p rspice-python --all-targets --all-features -- -D warnings
 
   wheels:

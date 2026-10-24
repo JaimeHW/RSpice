@@ -170,7 +170,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test core units, integration tests, and doctests
-        run: cargo test --locked -p rspice-core -p rspice-core-base --no-fail-fast
+        run: cargo test --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --no-fail-fast
       - name: Conformance suite unit tests
         run: >-
           cargo test --locked -p rspice-conformance --lib
@@ -215,7 +215,7 @@ jobs:
       # shipped application carries the feature.
       - name: Test Verilog-A-gated core suites through the bytecode interpreter
         run: >-
-          cargo test --locked -p rspice-core -p rspice-core-base --features veriloga --no-fail-fast
+          cargo test --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --features veriloga --no-fail-fast
           --lib
           --test analog_event_subscriptions
           --test assertions
@@ -310,8 +310,9 @@ jobs:
       - name: Test remaining workspace crates
         run: >-
           cargo test --locked --workspace --no-fail-fast --features rspice-output/durable-file
-          --exclude rspice-core --exclude rspice-core-base --exclude rspice-app
-          --exclude rspice-conformance --exclude rspice-python --exclude rspice-wasm
+          --exclude rspice-core --exclude rspice-core-base --exclude rspice-core-netlist
+          --exclude rspice-core-devices --exclude rspice-app --exclude rspice-conformance
+          --exclude rspice-python --exclude rspice-wasm
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
 
   test-ui:
@@ -349,7 +350,7 @@ jobs:
           RUSTFLAGS: -D warnings
         run: |
           cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
-          cargo check --locked -p rspice-core -p rspice-core-base --features veriloga-builtins-base --all-targets
+          cargo check --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --features veriloga-builtins-base --all-targets
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards --test transient_noise_veriloga
           cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
@@ -414,7 +415,7 @@ jobs:
       # process -- and it applies to every target in this invocation.
       - name: Test Verilog-A-gated core suites through the native JIT (Linux x64)
         run: >-
-          cargo test --locked -p rspice-core -p rspice-core-base --features veriloga-native --no-fail-fast
+          cargo test --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --features veriloga-native --no-fail-fast
           --lib
           --test analog_event_subscriptions
           --test assertions
@@ -978,6 +979,16 @@ jobs:
             targets: --all-targets
           - label: core base, no default features
             package: rspice-core-base
+            features: --no-default-features
+            target: ""
+            targets: --all-targets
+          - label: core netlist, no default features
+            package: rspice-core-netlist
+            features: --no-default-features
+            target: ""
+            targets: --all-targets
+          - label: core devices, no default features
+            package: rspice-core-devices
             features: --no-default-features
             target: ""
             targets: --all-targets

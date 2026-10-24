@@ -14,21 +14,42 @@ rust-version.workspace = true
 # and the default test configuration all exercise the fast paths;
 # rspice-wasm opts out via default-features = false.
 default = ["faer-parallel", "parallel", "simd"]
-wasm = ["wasm-bindgen", "rspice-core-base/wasm"]
-parallel = ["rayon", "portable-atomic", "rspice-core-base/parallel"]
+wasm = [
+    "wasm-bindgen",
+    "rspice-core-base/wasm",
+    "rspice-core-netlist/wasm",
+    "rspice-core-devices/wasm",
+]
+parallel = [
+    "rayon",
+    "portable-atomic",
+    "rspice-core-base/parallel",
+    "rspice-core-netlist/parallel",
+    "rspice-core-devices/parallel",
+]
 faer-parallel = [
     "faer/rayon",
     "rspice-matrix/faer-parallel",
     "rspice-veriloga-runtime/faer-parallel",
     "rspice-core-base/faer-parallel",
+    "rspice-core-netlist/faer-parallel",
+    "rspice-core-devices/faer-parallel",
 ]
 veriloga = [
     "dep:rspice-veriloga",
     "dep:dirs",
     "rspice-core-base/veriloga",
+    "rspice-core-netlist/veriloga",
+    "rspice-core-devices/veriloga",
 ]
 # Native JIT for Verilog-A devices (native targets only). Native mode is full JIT or error.
-veriloga-native = ["veriloga", "rspice-veriloga/native", "rspice-core-base/veriloga-native"]
+veriloga-native = [
+    "veriloga",
+    "rspice-veriloga/native",
+    "rspice-core-base/veriloga-native",
+    "rspice-core-netlist/veriloga-native",
+    "rspice-core-devices/veriloga-native",
+]
 # Browser JIT compiler. Runtime module compilation/instantiation is performed
 # by the owning Web Worker; the core retains the authenticated artifacts and
 # synchronous solver integration.
@@ -36,12 +57,16 @@ veriloga-wasm-jit = [
     "veriloga",
     "rspice-veriloga/wasm-jit",
     "rspice-core-base/veriloga-wasm-jit",
+    "rspice-core-netlist/veriloga-wasm-jit",
+    "rspice-core-devices/veriloga-wasm-jit",
 ]
 # Runtime integration shared by every build-time generated Verilog-A model.
 # Prefer a `veriloga-model-*` feature for small production binaries and fast builds.
 veriloga-builtins-base = [
     "dep:rspice-veriloga-models",
     "rspice-core-base/veriloga-builtins-base",
+    "rspice-core-netlist/veriloga-builtins-base",
+    "rspice-core-devices/veriloga-builtins-base",
 ]
 # Noise analysis is independently selectable because its generated schedules are
 # more than half of the checked-in Rust source. The compatibility umbrella below
@@ -50,221 +75,309 @@ veriloga-builtins-noise = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-builtins-noise",
     "rspice-core-base/veriloga-builtins-noise",
+    "rspice-core-netlist/veriloga-builtins-noise",
+    "rspice-core-devices/veriloga-builtins-noise",
 ]
 veriloga-model-diode-cmc = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-diode-cmc",
     "rspice-core-base/veriloga-model-diode-cmc",
+    "rspice-core-netlist/veriloga-model-diode-cmc",
+    "rspice-core-devices/veriloga-model-diode-cmc",
 ]
 veriloga-model-epfl-hemt-10a = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-epfl-hemt-10a",
     "rspice-core-base/veriloga-model-epfl-hemt-10a",
+    "rspice-core-netlist/veriloga-model-epfl-hemt-10a",
+    "rspice-core-devices/veriloga-model-epfl-hemt-10a",
 ]
 veriloga-model-juncap200 = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-juncap200",
     "rspice-core-base/veriloga-model-juncap200",
+    "rspice-core-netlist/veriloga-model-juncap200",
+    "rspice-core-devices/veriloga-model-juncap200",
 ]
 veriloga-model-psp104tva = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-psp104tva",
     "rspice-core-base/veriloga-model-psp104tva",
+    "rspice-core-netlist/veriloga-model-psp104tva",
+    "rspice-core-devices/veriloga-model-psp104tva",
 ]
 veriloga-model-psp104va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-psp104va",
     "rspice-core-base/veriloga-model-psp104va",
+    "rspice-core-netlist/veriloga-model-psp104va",
+    "rspice-core-devices/veriloga-model-psp104va",
 ]
 veriloga-model-pspnqs104va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-pspnqs104va",
     "rspice-core-base/veriloga-model-pspnqs104va",
+    "rspice-core-netlist/veriloga-model-pspnqs104va",
+    "rspice-core-devices/veriloga-model-pspnqs104va",
 ]
 veriloga-model-angelov = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-angelov",
     "rspice-core-base/veriloga-model-angelov",
+    "rspice-core-netlist/veriloga-model-angelov",
+    "rspice-core-devices/veriloga-model-angelov",
 ]
 veriloga-model-angelov-gan = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-angelov-gan",
     "rspice-core-base/veriloga-model-angelov-gan",
+    "rspice-core-netlist/veriloga-model-angelov-gan",
+    "rspice-core-devices/veriloga-model-angelov-gan",
 ]
 veriloga-model-asmesd = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-asmesd",
     "rspice-core-base/veriloga-model-asmesd",
+    "rspice-core-netlist/veriloga-model-asmesd",
+    "rspice-core-devices/veriloga-model-asmesd",
 ]
 veriloga-model-asmesd-dio = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-asmesd-dio",
     "rspice-core-base/veriloga-model-asmesd-dio",
+    "rspice-core-netlist/veriloga-model-asmesd-dio",
+    "rspice-core-devices/veriloga-model-asmesd-dio",
 ]
 veriloga-model-asmhemt = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-asmhemt",
     "rspice-core-base/veriloga-model-asmhemt",
+    "rspice-core-netlist/veriloga-model-asmhemt",
+    "rspice-core-devices/veriloga-model-asmhemt",
 ]
 veriloga-model-bjt505-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bjt505-va",
     "rspice-core-base/veriloga-model-bjt505-va",
+    "rspice-core-netlist/veriloga-model-bjt505-va",
+    "rspice-core-devices/veriloga-model-bjt505-va",
 ]
 veriloga-model-bjt505t-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bjt505t-va",
     "rspice-core-base/veriloga-model-bjt505t-va",
+    "rspice-core-netlist/veriloga-model-bjt505t-va",
+    "rspice-core-devices/veriloga-model-bjt505t-va",
 ]
 veriloga-model-bjtd505-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bjtd505-va",
     "rspice-core-base/veriloga-model-bjtd505-va",
+    "rspice-core-netlist/veriloga-model-bjtd505-va",
+    "rspice-core-devices/veriloga-model-bjtd505-va",
 ]
 veriloga-model-bjtd505t-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bjtd505t-va",
     "rspice-core-base/veriloga-model-bjtd505t-va",
+    "rspice-core-netlist/veriloga-model-bjtd505t-va",
+    "rspice-core-devices/veriloga-model-bjtd505t-va",
 ]
 veriloga-model-bsimbulk = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimbulk",
     "rspice-core-base/veriloga-model-bsimbulk",
+    "rspice-core-netlist/veriloga-model-bsimbulk",
+    "rspice-core-devices/veriloga-model-bsimbulk",
 ]
 veriloga-model-bsimcmg-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimcmg-va",
     "rspice-core-base/veriloga-model-bsimcmg-va",
+    "rspice-core-netlist/veriloga-model-bsimcmg-va",
+    "rspice-core-devices/veriloga-model-bsimcmg-va",
 ]
 veriloga-model-bsimimg = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimimg",
     "rspice-core-base/veriloga-model-bsimimg",
+    "rspice-core-netlist/veriloga-model-bsimimg",
+    "rspice-core-devices/veriloga-model-bsimimg",
 ]
 veriloga-model-bsimsoi-18c250bc = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimsoi-18c250bc",
     "rspice-core-base/veriloga-model-bsimsoi-18c250bc",
+    "rspice-core-netlist/veriloga-model-bsimsoi-18c250bc",
+    "rspice-core-devices/veriloga-model-bsimsoi-18c250bc",
 ]
 veriloga-model-bsimsoi-e2aff994 = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimsoi-e2aff994",
     "rspice-core-base/veriloga-model-bsimsoi-e2aff994",
+    "rspice-core-netlist/veriloga-model-bsimsoi-e2aff994",
+    "rspice-core-devices/veriloga-model-bsimsoi-e2aff994",
 ]
 veriloga-model-bsimsoi-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimsoi-va",
     "rspice-core-base/veriloga-model-bsimsoi-va",
+    "rspice-core-netlist/veriloga-model-bsimsoi-va",
+    "rspice-core-devices/veriloga-model-bsimsoi-va",
 ]
 veriloga-model-ekv3-rf = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-ekv3-rf",
     "rspice-core-base/veriloga-model-ekv3-rf",
+    "rspice-core-netlist/veriloga-model-ekv3-rf",
+    "rspice-core-devices/veriloga-model-ekv3-rf",
 ]
 veriloga-model-ekv-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-ekv-va",
     "rspice-core-base/veriloga-model-ekv-va",
+    "rspice-core-netlist/veriloga-model-ekv-va",
+    "rspice-core-devices/veriloga-model-ekv-va",
 ]
 veriloga-model-hicuml0va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hicuml0va",
     "rspice-core-base/veriloga-model-hicuml0va",
+    "rspice-core-netlist/veriloga-model-hicuml0va",
+    "rspice-core-devices/veriloga-model-hicuml0va",
 ]
 veriloga-model-hicuml2va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hicuml2va",
     "rspice-core-base/veriloga-model-hicuml2va",
+    "rspice-core-netlist/veriloga-model-hicuml2va",
+    "rspice-core-devices/veriloga-model-hicuml2va",
 ]
 veriloga-model-hisimhv-n4-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimhv-n4-va",
     "rspice-core-base/veriloga-model-hisimhv-n4-va",
+    "rspice-core-netlist/veriloga-model-hisimhv-n4-va",
+    "rspice-core-devices/veriloga-model-hisimhv-n4-va",
 ]
 veriloga-model-hisimhv-n5-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimhv-n5-va",
     "rspice-core-base/veriloga-model-hisimhv-n5-va",
+    "rspice-core-netlist/veriloga-model-hisimhv-n5-va",
+    "rspice-core-devices/veriloga-model-hisimhv-n5-va",
 ]
 veriloga-model-hisimhv-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimhv-va",
     "rspice-core-base/veriloga-model-hisimhv-va",
+    "rspice-core-netlist/veriloga-model-hisimhv-va",
+    "rspice-core-devices/veriloga-model-hisimhv-va",
 ]
 veriloga-model-hisimsoi-va-5be18005 = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimsoi-va-5be18005",
     "rspice-core-base/veriloga-model-hisimsoi-va-5be18005",
+    "rspice-core-netlist/veriloga-model-hisimsoi-va-5be18005",
+    "rspice-core-devices/veriloga-model-hisimsoi-va-5be18005",
 ]
 veriloga-model-hisimsoi-va-242bc21d = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimsoi-va-242bc21d",
     "rspice-core-base/veriloga-model-hisimsoi-va-242bc21d",
+    "rspice-core-netlist/veriloga-model-hisimsoi-va-242bc21d",
+    "rspice-core-devices/veriloga-model-hisimsoi-va-242bc21d",
 ]
 veriloga-model-hisimsoi-va-38074d06 = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimsoi-va-38074d06",
     "rspice-core-base/veriloga-model-hisimsoi-va-38074d06",
+    "rspice-core-netlist/veriloga-model-hisimsoi-va-38074d06",
+    "rspice-core-devices/veriloga-model-hisimsoi-va-38074d06",
 ]
 veriloga-model-hisimsotb-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-hisimsotb-va",
     "rspice-core-base/veriloga-model-hisimsotb-va",
+    "rspice-core-netlist/veriloga-model-hisimsotb-va",
+    "rspice-core-devices/veriloga-model-hisimsotb-va",
 ]
 veriloga-model-l-utsoi-832ce87d = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-l-utsoi-832ce87d",
     "rspice-core-base/veriloga-model-l-utsoi-832ce87d",
+    "rspice-core-netlist/veriloga-model-l-utsoi-832ce87d",
+    "rspice-core-devices/veriloga-model-l-utsoi-832ce87d",
 ]
 veriloga-model-l-utsoi-485e0ac9 = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-l-utsoi-485e0ac9",
     "rspice-core-base/veriloga-model-l-utsoi-485e0ac9",
+    "rspice-core-netlist/veriloga-model-l-utsoi-485e0ac9",
+    "rspice-core-devices/veriloga-model-l-utsoi-485e0ac9",
 ]
 veriloga-model-mosvar = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-mosvar",
     "rspice-core-base/veriloga-model-mosvar",
+    "rspice-core-netlist/veriloga-model-mosvar",
+    "rspice-core-devices/veriloga-model-mosvar",
 ]
 veriloga-model-mvsg-cmc = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-mvsg-cmc",
     "rspice-core-base/veriloga-model-mvsg-cmc",
+    "rspice-core-netlist/veriloga-model-mvsg-cmc",
+    "rspice-core-devices/veriloga-model-mvsg-cmc",
 ]
 veriloga-model-r2-cmc = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-r2-cmc",
     "rspice-core-base/veriloga-model-r2-cmc",
+    "rspice-core-netlist/veriloga-model-r2-cmc",
+    "rspice-core-devices/veriloga-model-r2-cmc",
 ]
 veriloga-model-r2-et-cmc = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-r2-et-cmc",
     "rspice-core-base/veriloga-model-r2-et-cmc",
+    "rspice-core-netlist/veriloga-model-r2-et-cmc",
+    "rspice-core-devices/veriloga-model-r2-et-cmc",
 ]
 veriloga-model-r3-cmc = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-r3-cmc",
     "rspice-core-base/veriloga-model-r3-cmc",
+    "rspice-core-netlist/veriloga-model-r3-cmc",
+    "rspice-core-devices/veriloga-model-r3-cmc",
 ]
 veriloga-model-vbic13 = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-vbic13",
     "rspice-core-base/veriloga-model-vbic13",
+    "rspice-core-netlist/veriloga-model-vbic13",
+    "rspice-core-devices/veriloga-model-vbic13",
 ]
 veriloga-model-vbic13-3t-et = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-vbic13-3t-et",
     "rspice-core-base/veriloga-model-vbic13-3t-et",
+    "rspice-core-netlist/veriloga-model-vbic13-3t-et",
+    "rspice-core-devices/veriloga-model-vbic13-3t-et",
 ]
 veriloga-model-vbic13-4t = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-vbic13-4t",
     "rspice-core-base/veriloga-model-vbic13-4t",
+    "rspice-core-netlist/veriloga-model-vbic13-4t",
+    "rspice-core-devices/veriloga-model-vbic13-4t",
 ]
 veriloga-model-vbic-4t-et-cf = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-vbic-4t-et-cf",
     "rspice-core-base/veriloga-model-vbic-4t-et-cf",
+    "rspice-core-netlist/veriloga-model-vbic-4t-et-cf",
+    "rspice-core-devices/veriloga-model-vbic-4t-et-cf",
 ]
 # Complete generated model catalog without the optional noise schedules.
 veriloga-builtins-models = [
@@ -312,17 +425,25 @@ veriloga-builtins-models = [
     "veriloga-model-vbic13-4t",
     "veriloga-model-vbic-4t-et-cf",
     "rspice-core-base/veriloga-builtins-models",
+    "rspice-core-netlist/veriloga-builtins-models",
+    "rspice-core-devices/veriloga-builtins-models",
 ]
 # Backwards-compatible complete generated catalog, including noise.
 veriloga-builtins = [
     "veriloga-builtins-models",
     "veriloga-builtins-noise",
     "rspice-core-base/veriloga-builtins",
+    "rspice-core-netlist/veriloga-builtins",
+    "rspice-core-devices/veriloga-builtins",
 ]
-simd = ["wide", "rspice-core-base/simd"]
+simd = ["wide", "rspice-core-base/simd", "rspice-core-netlist/simd", "rspice-core-devices/simd"]
 # Test helpers a crate built on this one compiles into its own unit tests.
 # Additive only: it adds hidden items and changes no behaviour.
-test-support = ["rspice-core-base/test-support"]
+test-support = [
+    "rspice-core-base/test-support",
+    "rspice-core-netlist/test-support",
+    "rspice-core-devices/test-support",
+]
 
 [lib]
 test = false
@@ -346,6 +467,8 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 # so nothing on the wasm path reaches for a file or a mapping.
 rustyhdf5 = { version = "1.93", default-features = false }
 rspice-core-base = { workspace = true, default-features = false }
+rspice-core-netlist = { workspace = true, default-features = false }
+rspice-core-devices = { workspace = true, default-features = false }
 rspice-matrix.workspace = true
 rspice-output.workspace = true
 rspice-units.workspace = true
@@ -385,6 +508,8 @@ proptest.workspace = true
 rayon.workspace = true
 # The engine's unit tests build with the hidden helpers of the crates below.
 rspice-core-base = { workspace = true, default-features = false, features = ["test-support"] }
+rspice-core-netlist = { workspace = true, default-features = false, features = ["test-support"] }
+rspice-core-devices = { workspace = true, default-features = false, features = ["test-support"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 # Register the same public-core regressions with the workspace's WASM runner.

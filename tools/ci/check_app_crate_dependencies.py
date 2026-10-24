@@ -60,7 +60,8 @@ HEADLESS = set(ALLOWED) - {
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {
-    "rspice-core", "rspice-core-base", "rspice-matrix", "rspice-veriloga",
+    "rspice-core", "rspice-core-base", "rspice-core-netlist", "rspice-core-devices",
+    "rspice-matrix", "rspice-veriloga",
     "rspice-veriloga-runtime", "rspice-veriloga-models",
 }
 INCLUDE_DEV = {"rspice-worker", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui"}

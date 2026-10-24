@@ -89,8 +89,14 @@ pub(crate) use rspice_core_base::codemodels;
 pub use rspice_core_base::config;
 pub use rspice_core_base::constants;
 /// Shared vocabulary between the control-session machine and its engine host.
-mod control_protocol;
-pub mod device;
+use rspice_core_netlist::control_protocol;
+/// Device models. They compile in the family's devices crate; the compiled
+/// Verilog-A device needs the compiler, so it is this crate's.
+pub mod device {
+    pub use rspice_core_devices::device::*;
+    #[cfg(feature = "veriloga")]
+    pub mod veriloga;
+}
 pub use rspice_core_base::diagnostics;
 pub mod engine;
 /// The names an event-only net is refused and published under.
@@ -104,14 +110,12 @@ pub use rspice_core_base::family_features;
 /// the other to say which analysis or sweep point a value belongs to.
 pub use rspice_core_base::identity;
 pub use rspice_core_base::io;
-pub mod library;
 /// Which run a log record belongs to, carried onto the engine's worker threads.
 /// A leaf: the analyses that hand work to another thread read down into it.
 pub use rspice_core_base::log_scope;
 /// SPICE naming rules: what a name means in a deck, independent of dialect.
 /// A leaf — everything else depends on it, so it depends on nothing.
 pub(crate) use rspice_core_base::naming;
-pub mod netlist;
 /// What a run raised and went on to complete with, in a shape a reader can
 /// act on: the advisories the log states as prose.
 pub use rspice_core_base::notice;
@@ -127,12 +131,11 @@ use rspice_core_base::result_scalar;
 /// Physical units carried by result schemas and control-expression vectors.
 use rspice_core_base::signal_unit;
 pub use rspice_core_base::solver;
-/// Where a line of deck text was written. A leaf, so a refusal raised below
-/// the parser can cite one; published through `netlist`.
-use rspice_core_base::source_location;
 use rspice_core_base::spice_number;
 pub use rspice_core_base::time_compat;
 use rspice_core_base::transient_observation;
+pub use rspice_core_netlist::library;
+pub use rspice_core_netlist::netlist;
 pub mod xspice;
 
 /// Abort signal for cancelling long-running simulations
@@ -178,7 +181,7 @@ pub use transient_observation::{
 };
 pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
 
-family_features!(rspice_core_base);
+family_features!(rspice_core_base, rspice_core_netlist, rspice_core_devices);
 
 /// Error types for the simulation engine
 pub mod error {

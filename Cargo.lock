@@ -5518,6 +5518,8 @@ dependencies = [
  "proptest",
  "rayon",
  "rspice-core-base",
+ "rspice-core-devices",
+ "rspice-core-netlist",
  "rspice-matrix",
  "rspice-output",
  "rspice-units",
@@ -5551,6 +5553,37 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wide",
+]
+
+[[package]]
+name = "rspice-core-devices"
+version = "0.1.0"
+dependencies = [
+ "faer",
+ "libm",
+ "log",
+ "num-bigint 0.4.8",
+ "num-complex",
+ "rspice-core-base",
+ "rspice-core-netlist",
+ "rspice-veriloga-models",
+ "rspice-veriloga-runtime",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rspice-core-netlist"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "libm",
+ "log",
+ "num-complex",
+ "rspice-core-base",
+ "rspice-veriloga-models",
+ "rspice-veriloga-runtime",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5695,8 +5728,8 @@ dependencies = [
  "base64 0.23.1",
  "csv",
  "ed25519-dalek",
- "rspice-core",
  "rspice-core-base",
+ "rspice-core-netlist",
  "rspice-design-model",
  "rspice-vocabulary",
  "semver",

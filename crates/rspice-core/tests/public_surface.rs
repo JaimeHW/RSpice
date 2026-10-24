@@ -491,7 +491,10 @@ fn is_public_item(line: &str) -> bool {
 
 /// The crate directory and module a `pub use rspice_core_<name>::<module>;`
 /// line names: a module of the family re-exported whole at the path it had
-/// before it moved into another crate of the family.
+/// before it moved into another crate of the family. A module that keeps a
+/// child of its own in this crate is declared inline instead, and its
+/// `pub use rspice_core_<name>::<module>::*;` re-exports the moved module
+/// whole in the same way.
 ///
 /// That statement is the module's declaration, as the `pub mod` it replaced
 /// was, and counts as `pub mod` does: not at all. The module's items are
@@ -503,6 +506,7 @@ fn family_module_reexport(line: &str) -> Option<(String, &str)> {
     let path = line
         .strip_prefix("pub use rspice_core_")?
         .strip_suffix(';')?;
+    let path = path.strip_suffix("::*").unwrap_or(path);
     let (name, module) = path.split_once("::")?;
     let snake = |word: &str| {
         !word.is_empty()
@@ -674,9 +678,13 @@ fn a_moved_module_reexported_whole_counts_as_its_declaration_did() {
     assert!(!is_public_item(
         "pub use rspice_core_base::family_features;"
     ));
+    assert!(!is_public_item("pub use rspice_core_devices::device::*;"));
     // Anything narrower or wider than one whole module still counts.
     assert!(is_public_item(
         "pub use rspice_core_base::config::SpiceDialect;"
+    ));
+    assert!(is_public_item(
+        "pub use rspice_core_devices::device::mosfet::*;"
     ));
     assert!(is_public_item(
         "pub use rspice_core_base::{config, solver};"

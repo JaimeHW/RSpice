@@ -1,0 +1,9 @@
+# The panic-convenience denials below are aimed at production paths: a
+# `.expect` in an execution planner is a crash an authored netlist can reach,
+# while the same call in a test is how the test states its precondition.
+# Clippy's own in-test allowances draw that line, so the modules that carry
+# `#![deny(clippy::expect_used, ...)]` can carry it over their tests too.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

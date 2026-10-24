@@ -25,10 +25,6 @@ pub mod thermal;
 mod traits;
 mod transmission_line;
 
-// Verilog-A support (feature-gated)
-#[cfg(feature = "veriloga")]
-pub mod veriloga;
-
 // Generated Verilog-A runtime ABI; the built-in registry remains feature-gated inside the module.
 pub mod veriloga_builtins;
 

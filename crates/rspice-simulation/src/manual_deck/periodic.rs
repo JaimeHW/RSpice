@@ -1525,7 +1525,7 @@ endmodule
         let engine_source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("this crate sits in the workspace's crates/ directory")
-            .join("rspice-core/src/netlist/parser/periodic_cards.rs");
+            .join("rspice-core-netlist/src/netlist/parser/periodic_cards.rs");
         let source = std::fs::read_to_string(&engine_source)
             .unwrap_or_else(|error| panic!("read {}: {error}", engine_source.display()));
         let start = source
