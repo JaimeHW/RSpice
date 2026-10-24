@@ -281,7 +281,10 @@ const SHOW: &[Step] = &[
 const DIALOG_STEPS: &[(&str, &str)] = &[
     ("synchronize_route_owned_dialogs", "shell"),
     ("synchronize_design_management_route", "shell"),
-    ("render_confirmation_dialog", "framework"),
+    (
+        "dialogs::confirmation::render_confirmation_dialog",
+        "framework",
+    ),
     ("dialogs::property_dialog::render_property_dialog", "design"),
     ("process_pdk_settings_dialog", "models"),
     ("render_preferences_dialog", "settings"),
@@ -335,7 +338,10 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_rename_selection_dialog", "design"),
     ("render_find_replace_dialog", "design"),
     ("render_shared_properties_dialog", "design"),
-    ("render_window_session_dialog", "framework"),
+    (
+        "dialogs::window_session::render_window_session_dialog",
+        "framework",
+    ),
     ("render_help_center_dialog", "shell"),
     ("render_about_dialog", "shell"),
     (

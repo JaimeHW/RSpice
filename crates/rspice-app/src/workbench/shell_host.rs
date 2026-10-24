@@ -21,6 +21,8 @@ use crate::state::ViewType;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
+use crate::workbench::app::ConfirmationResponse;
+use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
 use crate::workbench::app_state::Model;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
@@ -37,6 +39,7 @@ use crate::workbench::framework::host::{
 };
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
 use crate::workbench::state::{
     ProjectPage, VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId,
 };
@@ -596,6 +599,42 @@ impl WorkbenchHost for RSpiceApp {
 
     fn state_mut(&mut self) -> &mut AppState {
         &mut self.state
+    }
+}
+
+impl ConfirmationHost for RSpiceApp {
+    fn answer_confirmation(&mut self, response: ConfirmationResponse) {
+        self.handle_confirmation_response(response);
+    }
+
+    fn revert_active_document(&mut self, token: &RevertReviewToken) {
+        crate::workbench::workflows::project_workflow::confirm_revert_active_document(
+            &mut self.state,
+            token,
+        );
+    }
+
+    fn close_project_after_save(&mut self, destination: ProjectCloseDestination) {
+        self.begin_close_project_after_save(destination);
+    }
+
+    fn close_project_discarding(&mut self, destination: ProjectCloseDestination) {
+        crate::workbench::workflows::project_workflow::close_project_discard(
+            &mut self.state,
+            destination,
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn pending_browser_file_operation(&self) -> Option<String> {
+        crate::workbench::workflows::project_workflow::browser_file_operation_label(&self.state)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn cancel_browser_file_operation(&mut self) {
+        crate::workbench::workflows::project_workflow::cancel_pending_browser_file_operation(
+            &mut self.state,
+        );
     }
 }
 

@@ -31,7 +31,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
             state.workbench.confirmation_dialog.visible
                 || state.workbench.project_review_dialog.request.is_some()
         }),
-        render: |app, ctx| app.render_confirmation_dialog(ctx),
+        render: |app, ctx| dialogs::confirmation::render_confirmation_dialog(app, ctx),
     },
     DialogSpec {
         key: DialogKey("design.property"),
@@ -331,7 +331,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("framework.window_session"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.workbench.window_session_dialog.open),
-        render: |app, ctx| app.render_window_session_dialog(ctx),
+        render: |app, ctx| dialogs::window_session::render_window_session_dialog(app, ctx),
     },
     DialogSpec {
         key: DialogKey("shell.help_center"),

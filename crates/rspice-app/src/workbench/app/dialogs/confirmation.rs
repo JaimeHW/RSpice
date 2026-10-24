@@ -9,282 +9,306 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
-use crate::workbench::app::{ConfirmationResponse, ProjectReviewRequest, RSpiceApp};
+use crate::workbench::app::{ConfirmationResponse, ProjectReviewRequest};
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, ProjectDocumentId};
+use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::lifecycle::project_lifecycle::{
+    ProjectCloseDestination, ProjectDocumentId, RevertReviewToken,
+};
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_confirmation_dialog(&mut self, ctx: &Context) {
-        if self.state.workbench.confirmation_dialog.visible {
-            self.render_save_confirmation_dialog(ctx);
-        }
-        #[cfg(target_arch = "wasm32")]
-        self.render_pending_browser_file_operation(ctx);
-        self.render_project_review_dialog(ctx);
-    }
+/// The project's side of the confirmations: what the host does once a
+/// question is answered.
+pub(in crate::workbench) trait ConfirmationHost: WorkbenchHost {
+    /// Carry out the pending action as the save-changes question was
+    /// answered: save first, go ahead without saving, or stay.
+    fn answer_confirmation(&mut self, response: ConfirmationResponse);
 
+    /// Discard the active document's working changes, as the revert review
+    /// `token` was issued for.
+    fn revert_active_document(&mut self, token: &RevertReviewToken);
+
+    /// Save the project, then close it to `destination`.
+    fn close_project_after_save(&mut self, destination: ProjectCloseDestination);
+
+    /// Close the project to `destination` without saving it.
+    fn close_project_discarding(&mut self, destination: ProjectCloseDestination);
+
+    /// What the browser file operation still waiting to finish is doing, if
+    /// one is.
     #[cfg(target_arch = "wasm32")]
-    fn render_pending_browser_file_operation(&mut self, ctx: &Context) {
-        if self.state.workbench.confirmation_dialog.visible {
-            return;
-        }
-        let Some(message) =
-            crate::workbench::workflows::project_workflow::browser_file_operation_label(
-                &self.state,
-            )
-        else {
-            return;
-        };
+    fn pending_browser_file_operation(&self) -> Option<String>;
 
-        let choice = Dialog::new(
-            "Browser file operation",
-            "Cancel operation",
-        )
-        .description(
-            "Review or cancel the pending browser file operation while protecting newer work from a late response.",
-        )
-        .size(DialogSize::Transaction)
-        .show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new(message)
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Canceling releases RSpice immediately. A late browser response cannot replace or save over newer work.",
-                )
+    /// Release the browser file operation still waiting to finish, so a late
+    /// response can no longer change the session.
+    #[cfg(target_arch = "wasm32")]
+    fn cancel_browser_file_operation(&mut self);
+}
+
+pub(in crate::workbench) fn render_confirmation_dialog(
+    app: &mut impl ConfirmationHost,
+    ctx: &Context,
+) {
+    if app.workbench().confirmation_dialog.visible {
+        render_save_confirmation_dialog(app, ctx);
+    }
+    #[cfg(target_arch = "wasm32")]
+    render_pending_browser_file_operation(app, ctx);
+    render_project_review_dialog(app, ctx);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_pending_browser_file_operation(app: &mut impl ConfirmationHost, ctx: &Context) {
+    if app.workbench().confirmation_dialog.visible {
+        return;
+    }
+    let Some(message) = app.pending_browser_file_operation() else {
+        return;
+    };
+
+    let choice = Dialog::new(
+        "Browser file operation",
+        "Cancel operation",
+    )
+    .description(
+        "Review or cancel the pending browser file operation while protecting newer work from a late response.",
+    )
+    .size(DialogSize::Transaction)
+    .show(ctx, |ui| {
+        let t = Tokens::get(ui.ctx());
+        ui.label(
+            egui::RichText::new(message)
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                 .color(t.color.text_dim),
-            );
-        });
-        if matches!(
-            choice,
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
-        ) {
-            crate::workbench::workflows::project_workflow::cancel_pending_browser_file_operation(
-                &mut self.state,
-            );
-        }
-    }
-
-    fn render_save_confirmation_dialog(&mut self, ctx: &Context) {
-        let (title, consequence) = match self.state.workbench.confirmation_dialog.pending_action {
-            Some(action) => (
-                action.prompt_title(self.state.model.workspace.content.project.name().trim()),
-                action.prompt_consequence(),
-            ),
-            None => (
-                "Save changes?".to_owned(),
-                "Your changes will be lost if you don't save them.",
-            ),
-        };
-        let choice = Dialog::new(&title, "Save")
-            .description(consequence)
-            .size(DialogSize::Confirmation)
-            .secondary("Don't save")
-            .secondary_leading()
-            .ghost("Cancel")
-            .show(ctx, |ui| prompt_sentence(ui, None, consequence));
-
-        let response = match choice {
-            DialogChoice::Primary => Some(ConfirmationResponse::Yes),
-            DialogChoice::Secondary => Some(ConfirmationResponse::No),
-            DialogChoice::Ghost | DialogChoice::Cancelled => Some(ConfirmationResponse::Cancel),
-            DialogChoice::None => None,
-        };
-        if let Some(r) = response {
-            self.handle_confirmation_response(r);
-        }
-    }
-
-    fn render_project_review_dialog(&mut self, ctx: &Context) {
-        let Some(request) = self.state.workbench.project_review_dialog.request.clone() else {
-            return;
-        };
-        match request {
-            ProjectReviewRequest::RevertActive(token) => {
-                let document = token.document_label();
-                let choice = Dialog::new(
-                    "Revert active document",
-                    "Revert document",
-                )
-                .description(
-                    "Discard explicit working changes in the active document while leaving other documents unchanged.",
-                )
-                .size(DialogSize::Transaction)
-                .ghost("Cancel")
-                .show(ctx, |ui| {
-                    let t = Tokens::get(ui.ctx());
-                    ui.label(
-                        egui::RichText::new(format!("Document: {document}"))
-                            .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                            .color(t.color.text),
-                    );
-                    ui.label(
-                        egui::RichText::new(
-                            "Restore only this document's accepted engineering content. Other documents and their working changes remain untouched.",
-                        )
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    );
-                });
-                match choice {
-                    DialogChoice::Primary => {
-                        self.state.workbench.project_review_dialog.close();
-                        crate::workbench::workflows::project_workflow::confirm_revert_active_document(
-                            &mut self.state,
-                            &token,
-                        );
-                    }
-                    DialogChoice::Ghost | DialogChoice::Cancelled => {
-                        self.state.workbench.project_review_dialog.close();
-                    }
-                    DialogChoice::Secondary | DialogChoice::None => {}
-                }
-            }
-            ProjectReviewRequest::CloseProject(destination) => {
-                self.render_close_project_review(ctx, destination);
-            }
-        }
-    }
-
-    /// The close-project prompt. While a local run owns the project it asks
-    /// for the run to stop; otherwise it is the standard save-changes
-    /// question. A clean, idle project never opens it, and one that turns
-    /// clean and idle while it is open, because its run ended with nothing
-    /// unsaved, closes without asking again.
-    fn render_close_project_review(&mut self, ctx: &Context, destination: ProjectCloseDestination) {
-        let documents =
-            crate::workbench::lifecycle::project_lifecycle::dirty_documents(&self.state);
-        // A never-saved project has no baseline to compare against, so all of
-        // it is unsaved: the summary says that once, rather than listing the
-        // configuration record that stands in for the whole project.
-        let never_saved = self.state.platform.project_lifecycle.accepted().is_none();
-        let mut unsaved: Vec<(WorkbenchIcon, String)> = if never_saved {
-            Vec::new()
-        } else {
-            documents
-                .iter()
-                .map(|document| (document_icon(document), document.label()))
-                .collect()
-        };
-        if self.state.models.model_editor_has_unsaved_changes() {
-            unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
-        }
-        // A stimulus draft is runtime-only, so it is not an unsaved document
-        // and saving the project would not publish it. Naming it is the only
-        // honest thing to do: closing discards it, and nothing offered here
-        // can apply a draft the audit strip may be refusing.
-        for definition in self.state.design.stimulus_editor.dirty_definitions() {
-            unsaved.push((
-                WorkbenchIcon::Source,
-                format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
-            ));
-        }
-        if self.state.model.simulation.execution.has_active_execution() {
-            self.render_close_blocked_by_run(ctx, &unsaved);
-        } else if documents.is_empty() && unsaved.is_empty() {
-            self.state.workbench.project_review_dialog.close();
-            crate::workbench::workflows::project_workflow::close_project_discard(
-                &mut self.state,
-                destination,
-            );
-        } else {
-            self.render_close_save_prompt(ctx, never_saved, &unsaved, destination);
-        }
-    }
-
-    fn render_close_save_prompt(
-        &mut self,
-        ctx: &Context,
-        never_saved: bool,
-        unsaved: &[(WorkbenchIcon, String)],
-        destination: ProjectCloseDestination,
+        );
+        ui.label(
+            egui::RichText::new(
+                "Canceling releases RSpice immediately. A late browser response cannot replace or save over newer work.",
+            )
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .color(t.color.text_dim),
+        );
+    });
+    if matches!(
+        choice,
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
     ) {
-        let project = self.state.model.workspace.content.project.name().trim();
-        let title = if project.is_empty() {
-            "Save changes before closing?".to_owned()
-        } else {
-            format!("Save changes to \u{201c}{project}\u{201d}?")
-        };
-        let summary = match (never_saved, unsaved.len()) {
-            (true, _) => "This project has never been saved.".to_owned(),
-            (false, 1) => "1 document has unsaved changes.".to_owned(),
-            (false, count) => format!("{count} documents have unsaved changes."),
-        };
-        let choice = Dialog::new(
-            &title,
-            if unsaved.len() > 1 {
-                "Save all"
-            } else {
-                "Save"
-            },
-        )
-        .description(format!("{summary} Save them or close without saving."))
+        app.cancel_browser_file_operation();
+    }
+}
+
+fn render_save_confirmation_dialog(app: &mut impl ConfirmationHost, ctx: &Context) {
+    let (title, consequence) = match app.workbench().confirmation_dialog.pending_action {
+        Some(action) => (
+            action.prompt_title(app.model().workspace.content.project.name().trim()),
+            action.prompt_consequence(),
+        ),
+        None => (
+            "Save changes?".to_owned(),
+            "Your changes will be lost if you don't save them.",
+        ),
+    };
+    let choice = Dialog::new(&title, "Save")
+        .description(consequence)
         .size(DialogSize::Confirmation)
         .secondary("Don't save")
         .secondary_leading()
         .ghost("Cancel")
-        .show(ctx, |ui| {
-            prompt_sentence(ui, None, &summary);
-            unsaved_list(ui, unsaved);
-        });
-        match choice {
-            DialogChoice::Primary => self.begin_close_project_after_save(destination),
-            DialogChoice::Secondary => {
-                self.state.workbench.project_review_dialog.close();
-                crate::workbench::workflows::project_workflow::close_project_discard(
-                    &mut self.state,
-                    destination,
+        .show(ctx, |ui| prompt_sentence(ui, None, consequence));
+
+    let response = match choice {
+        DialogChoice::Primary => Some(ConfirmationResponse::Yes),
+        DialogChoice::Secondary => Some(ConfirmationResponse::No),
+        DialogChoice::Ghost | DialogChoice::Cancelled => Some(ConfirmationResponse::Cancel),
+        DialogChoice::None => None,
+    };
+    if let Some(r) = response {
+        app.answer_confirmation(r);
+    }
+}
+
+fn render_project_review_dialog(app: &mut impl ConfirmationHost, ctx: &Context) {
+    let Some(request) = app.workbench().project_review_dialog.request.clone() else {
+        return;
+    };
+    match request {
+        ProjectReviewRequest::RevertActive(token) => {
+            let document = token.document_label();
+            let choice = Dialog::new(
+                "Revert active document",
+                "Revert document",
+            )
+            .description(
+                "Discard explicit working changes in the active document while leaving other documents unchanged.",
+            )
+            .size(DialogSize::Transaction)
+            .ghost("Cancel")
+            .show(ctx, |ui| {
+                let t = Tokens::get(ui.ctx());
+                ui.label(
+                    egui::RichText::new(format!("Document: {document}"))
+                        .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                        .color(t.color.text),
                 );
+                ui.label(
+                    egui::RichText::new(
+                        "Restore only this document's accepted engineering content. Other documents and their working changes remain untouched.",
+                    )
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                );
+            });
+            match choice {
+                DialogChoice::Primary => {
+                    app.workbench_mut().project_review_dialog.close();
+                    app.revert_active_document(&token);
+                }
+                DialogChoice::Ghost | DialogChoice::Cancelled => {
+                    app.workbench_mut().project_review_dialog.close();
+                }
+                DialogChoice::Secondary | DialogChoice::None => {}
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.workbench.project_review_dialog.close();
-            }
-            DialogChoice::None => {}
+        }
+        ProjectReviewRequest::CloseProject(destination) => {
+            render_close_project_review(app, ctx, destination);
         }
     }
+}
 
-    fn render_close_blocked_by_run(&mut self, ctx: &Context, unsaved: &[(WorkbenchIcon, String)]) {
-        let stopping = self.state.model.simulation.cancellation_is_pending();
-        let can_stop = self.state.model.simulation.can_request_abort_active_run();
-        // With no stop to request, Cancel is the only verb, so it is the primary.
-        let primary = if stopping {
-            "Stopping\u{2026}"
-        } else if can_stop {
-            "Stop simulation"
+/// The close-project prompt. While a local run owns the project it asks
+/// for the run to stop; otherwise it is the standard save-changes
+/// question. A clean, idle project never opens it, and one that turns
+/// clean and idle while it is open, because its run ended with nothing
+/// unsaved, closes without asking again.
+fn render_close_project_review(
+    app: &mut impl ConfirmationHost,
+    ctx: &Context,
+    destination: ProjectCloseDestination,
+) {
+    let documents = crate::workbench::lifecycle::project_lifecycle::dirty_documents(app.state());
+    // A never-saved project has no baseline to compare against, so all of
+    // it is unsaved: the summary says that once, rather than listing the
+    // configuration record that stands in for the whole project.
+    let never_saved = app.state().platform.project_lifecycle.accepted().is_none();
+    let mut unsaved: Vec<(WorkbenchIcon, String)> = if never_saved {
+        Vec::new()
+    } else {
+        documents
+            .iter()
+            .map(|document| (document_icon(document), document.label()))
+            .collect()
+    };
+    if app.state().models.model_editor_has_unsaved_changes() {
+        unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
+    }
+    // A stimulus draft is runtime-only, so it is not an unsaved document
+    // and saving the project would not publish it. Naming it is the only
+    // honest thing to do: closing discards it, and nothing offered here
+    // can apply a draft the audit strip may be refusing.
+    for definition in app.state().design.stimulus_editor.dirty_definitions() {
+        unsaved.push((
+            WorkbenchIcon::Source,
+            format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
+        ));
+    }
+    if app.model().simulation.execution.has_active_execution() {
+        render_close_blocked_by_run(app, ctx, &unsaved);
+    } else if documents.is_empty() && unsaved.is_empty() {
+        app.workbench_mut().project_review_dialog.close();
+        app.close_project_discarding(destination);
+    } else {
+        render_close_save_prompt(app, ctx, never_saved, &unsaved, destination);
+    }
+}
+
+fn render_close_save_prompt(
+    app: &mut impl ConfirmationHost,
+    ctx: &Context,
+    never_saved: bool,
+    unsaved: &[(WorkbenchIcon, String)],
+    destination: ProjectCloseDestination,
+) {
+    let project = app.model().workspace.content.project.name().trim();
+    let title = if project.is_empty() {
+        "Save changes before closing?".to_owned()
+    } else {
+        format!("Save changes to \u{201c}{project}\u{201d}?")
+    };
+    let summary = match (never_saved, unsaved.len()) {
+        (true, _) => "This project has never been saved.".to_owned(),
+        (false, 1) => "1 document has unsaved changes.".to_owned(),
+        (false, count) => format!("{count} documents have unsaved changes."),
+    };
+    let choice = Dialog::new(
+        &title,
+        if unsaved.len() > 1 {
+            "Save all"
         } else {
-            "Cancel"
-        };
-        let mut dialog = Dialog::new("Stop the simulation to close this project", primary)
-            .description("A local simulation has to stop before the project can close.")
-            .size(DialogSize::Confirmation)
-            .primary_enabled(!stopping);
-        if stopping || can_stop {
-            dialog = dialog.ghost("Cancel");
+            "Save"
+        },
+    )
+    .description(format!("{summary} Save them or close without saving."))
+    .size(DialogSize::Confirmation)
+    .secondary("Don't save")
+    .secondary_leading()
+    .ghost("Cancel")
+    .show(ctx, |ui| {
+        prompt_sentence(ui, None, &summary);
+        unsaved_list(ui, unsaved);
+    });
+    match choice {
+        DialogChoice::Primary => app.close_project_after_save(destination),
+        DialogChoice::Secondary => {
+            app.workbench_mut().project_review_dialog.close();
+            app.close_project_discarding(destination);
         }
-        let choice = dialog.show(ctx, |ui| {
-            prompt_sentence(
-                ui,
-                Some(WorkbenchIcon::Warning),
-                "A local simulation is running. Stop it and wait for it to finish before closing.",
-            );
-            unsaved_list(ui, unsaved);
-        });
-        match choice {
-            DialogChoice::Primary if can_stop => {
-                if let Err(error) = self.state.model.simulation.request_abort_active_run() {
-                    self.state
-                        .prompt(format!("The run was not stopped: {error}."));
-                }
-            }
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.workbench.project_review_dialog.close();
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.workbench_mut().project_review_dialog.close();
         }
+        DialogChoice::None => {}
+    }
+}
+
+fn render_close_blocked_by_run(
+    app: &mut impl WorkbenchHost,
+    ctx: &Context,
+    unsaved: &[(WorkbenchIcon, String)],
+) {
+    let stopping = app.model().simulation.cancellation_is_pending();
+    let can_stop = app.model().simulation.can_request_abort_active_run();
+    // With no stop to request, Cancel is the only verb, so it is the primary.
+    let primary = if stopping {
+        "Stopping\u{2026}"
+    } else if can_stop {
+        "Stop simulation"
+    } else {
+        "Cancel"
+    };
+    let mut dialog = Dialog::new("Stop the simulation to close this project", primary)
+        .description("A local simulation has to stop before the project can close.")
+        .size(DialogSize::Confirmation)
+        .primary_enabled(!stopping);
+    if stopping || can_stop {
+        dialog = dialog.ghost("Cancel");
+    }
+    let choice = dialog.show(ctx, |ui| {
+        prompt_sentence(
+            ui,
+            Some(WorkbenchIcon::Warning),
+            "A local simulation is running. Stop it and wait for it to finish before closing.",
+        );
+        unsaved_list(ui, unsaved);
+    });
+    match choice {
+        DialogChoice::Primary if can_stop => {
+            let state = app.state_mut();
+            if let Err(error) = state.model.simulation.request_abort_active_run() {
+                state.prompt(format!("The run was not stopped: {error}."));
+            }
+        }
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.workbench_mut().project_review_dialog.close();
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 
@@ -386,6 +410,7 @@ fn unsaved_list(ui: &mut Ui, unsaved: &[(WorkbenchIcon, String)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     fn render_close_review(app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
         let ctx = Context::default();
@@ -397,7 +422,7 @@ mod tests {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                     ..Default::default()
                 },
-                |ui| app.render_confirmation_dialog(ui.ctx()),
+                |ui| render_confirmation_dialog(app, ui.ctx()),
             ));
         }
         output.expect("three passes ran")
