@@ -290,7 +290,8 @@ fn excluded_flag(args: &[String]) -> Option<&str> {
         "m",
         "S",
         "g2",
-        "g1995",
+        // `-g1995` and `-g1`, Icarus's older spelling of it.
+        "g1",
         "gstrict",
         "gno-io-range-error",
         "grelative-include",
@@ -1202,6 +1203,9 @@ mod tests {
     fn flags_outside_the_selection_are_named_and_mapped_flags_stay_in() {
         let args = |list: &[&str]| list.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
         assert_eq!(excluded_flag(&args(&["-g2009"])), Some("-g2009"));
+        // IEEE 1364-1995, in both of Icarus's spellings.
+        assert_eq!(excluded_flag(&args(&["-g1995"])), Some("-g1995"));
+        assert_eq!(excluded_flag(&args(&["-g1"])), Some("-g1"));
         assert_eq!(excluded_flag(&args(&["-Wall"])), Some("-Wall"));
         assert_eq!(excluded_flag(&args(&["-Iivltests"])), Some("-Iivltests"));
         assert_eq!(excluded_flag(&args(&["-gspecify", "-Tmax", "+plus"])), None);
