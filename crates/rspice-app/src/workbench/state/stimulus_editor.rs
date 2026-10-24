@@ -541,4 +541,15 @@ mod tests {
         editor.realization(&edited, PreviewSpan::Transient, timing);
         assert_eq!(editor.evaluations(), after_first + 2, "the record changed");
     }
+
+    /// The button that asks for one period says so, and asks the engine bridge
+    /// for the period span.
+    #[test]
+    fn the_period_button_names_the_period_span() {
+        assert_eq!(PreviewSpan::Period.label(), "Period");
+        assert!(matches!(
+            span_seconds(PreviewSpan::Period),
+            crate::simulation::stimulus_realize::SpanChoice::Period
+        ));
+    }
 }

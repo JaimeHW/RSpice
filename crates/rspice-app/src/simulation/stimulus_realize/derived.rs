@@ -1134,7 +1134,6 @@ fn seconds_free(value: f64, unit: &str) -> String {
 mod tests {
     use super::*;
     use crate::state::ComponentType;
-    use crate::workbench::state::PreviewSpan;
 
     fn definition(kind: ComponentType, value: &str, params: &str) -> StimulusDefinition {
         let mut definition =
@@ -1385,6 +1384,5 @@ mod tests {
         let period = StimulusRealization::of(&record, SpanChoice::Period, timing(1e-3));
 
         assert_eq!(fit.span, period.span);
-        assert_eq!(PreviewSpan::Period.label(), "Period");
     }
 }
