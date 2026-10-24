@@ -9,13 +9,13 @@
 
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, AnalysisResultDocumentBuilder,
-    DeckPlan, RunCoordinate, SignalUnit, topology_fingerprint_with_abort,
+    DeckPlan, RunCoordinate, topology_fingerprint_with_abort,
 };
 use rspice_core::{AbortSignal, Engine, NoAbort, ResourceKind, ResourceLimits, Value};
 
 use crate::DetailedWasmResult;
 use crate::abort::ensure_not_aborted;
-use crate::dto::{NetlistSummary, WasmHealthReport};
+use crate::dto::NetlistSummary;
 use crate::errors::{
     WasmError, diagnostic_summary, resource_limit_error, startup_diagnostic_summary,
 };
@@ -182,80 +182,6 @@ pub fn run_operating_point_document_detailed(source: &str) -> DetailedWasmResult
     )
 }
 
-/// Run one linear source sweep into the shared result document.
-#[allow(clippy::too_many_arguments)]
-pub fn run_dc_sweep_document_with_options_and_abort_detailed(
-    source: &str,
-    source_name: &str,
-    start: f64,
-    stop: f64,
-    step: f64,
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<DeckExecution> {
-    ensure_not_aborted(external_abort)?;
-    if source_name.trim().is_empty() {
-        return Err(Box::new(WasmError::invalid_argument(
-            "DC sweep source name must not be empty".to_owned(),
-        )));
-    }
-    if !start.is_finite() || !stop.is_finite() || !step.is_finite() || step == 0.0 {
-        return Err(Box::new(WasmError::invalid_argument(
-            "DC sweep start/stop must be finite and step must be finite and nonzero".to_owned(),
-        )));
-    }
-    let resource_limits = options.resource_limits.to_core();
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let engine = engine_with_resource_limits(resource_limits)?;
-    direct_execution(
-        AnalysisKind::Dc,
-        &engine,
-        &netlist,
-        resource_limits,
-        external_abort,
-        |id| {
-            let points = engine
-                .run_dc_sweep_with_report_and_abort(
-                    &netlist,
-                    source_name,
-                    start,
-                    stop,
-                    step,
-                    external_abort,
-                )
-                .map_err(simulation_error)?;
-            ensure_not_aborted(external_abort)?;
-            Ok(vec![
-                AnalysisResultDocument::from_dc_sweep(
-                    id,
-                    source_name,
-                    sweep_source_unit(source_name),
-                    &points,
-                )
-                .map_err(document_projection_error)?,
-            ])
-        },
-    )
-}
-
-pub fn run_dc_sweep_document_detailed(
-    source: &str,
-    source_name: &str,
-    start: f64,
-    stop: f64,
-    step: f64,
-) -> DetailedWasmResult<DeckExecution> {
-    run_dc_sweep_document_with_options_and_abort_detailed(
-        source,
-        source_name,
-        start,
-        stop,
-        step,
-        &WasmExecutionOptions::default(),
-        &NoAbort,
-    )
-}
-
 /// Run one AC sweep over an explicit frequency grid.
 pub fn run_ac_document_with_options_and_abort_detailed(
     source: &str,
@@ -265,7 +191,7 @@ pub fn run_ac_document_with_options_and_abort_detailed(
 ) -> DetailedWasmResult<DeckExecution> {
     ensure_not_aborted(external_abort)?;
     let resource_limits = options.resource_limits.to_core();
-    validate_frequency_grid("AC", frequencies, false, resource_limits)?;
+    validate_frequency_grid(frequencies, resource_limits)?;
     let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
     let engine = engine_with_resource_limits(resource_limits)?;
     direct_execution(
@@ -377,109 +303,14 @@ pub fn run_transient_document_detailed(
     )
 }
 
-/// Run one input-referred noise sweep over an explicit frequency grid.
-#[allow(clippy::too_many_arguments)]
-pub fn run_noise_document_with_options_and_abort_detailed(
-    source: &str,
-    output_node: &str,
-    reference_node: Option<&str>,
-    input_source: &str,
-    frequencies: &[f64],
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<DeckExecution> {
-    ensure_not_aborted(external_abort)?;
-    if output_node.trim().is_empty() || input_source.trim().is_empty() {
-        return Err(Box::new(WasmError::invalid_argument(
-            "noise output node and input source must not be empty".to_owned(),
-        )));
-    }
-    let resource_limits = options.resource_limits.to_core();
-    validate_frequency_grid("noise", frequencies, true, resource_limits)?;
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let engine = engine_with_resource_limits(resource_limits)?;
-    direct_execution(
-        AnalysisKind::Noise,
-        &engine,
-        &netlist,
-        resource_limits,
-        external_abort,
-        |id| {
-            let points = engine
-                .run_noise_named_with_input_source_and_abort(
-                    &netlist,
-                    output_node,
-                    reference_node,
-                    input_source,
-                    frequencies,
-                    engine.config().temperature,
-                    external_abort,
-                )
-                .map_err(simulation_error)?;
-            ensure_not_aborted(external_abort)?;
-            Ok(vec![
-                AnalysisResultDocument::from_noise(id, &points)
-                    .map_err(document_projection_error)?,
-            ])
-        },
-    )
-}
-
-pub fn run_noise_document_detailed(
-    source: &str,
-    output_node: &str,
-    reference_node: Option<&str>,
-    input_source: &str,
-    frequencies: &[f64],
-) -> DetailedWasmResult<DeckExecution> {
-    run_noise_document_with_options_and_abort_detailed(
-        source,
-        output_node,
-        reference_node,
-        input_source,
-        frequencies,
-        &WasmExecutionOptions::default(),
-        &NoAbort,
-    )
-}
-
-/// Exercise the configured browser parser-to-solver path without I/O.
-pub fn health_check_with_options_detailed(
-    options: &WasmExecutionOptions,
-) -> DetailedWasmResult<WasmHealthReport> {
-    health_check_with_options_and_abort_detailed(options, &NoAbort)
-}
-
-/// Execute the readiness probe with the same deadline and cancellation
-/// contract as analysis calls.
-pub fn health_check_with_options_and_abort_detailed(
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<WasmHealthReport> {
-    let report = engine_with_resource_limits(options.resource_limits.to_core())?
-        .health_check_with_abort(external_abort)
-        .map_err(simulation_error)?;
-    Ok(WasmHealthReport {
-        status: "ready".to_string(),
-        ready: true,
-        duration_seconds: report.elapsed.as_secs_f64(),
-        element_count: report.element_count,
-        node_count: report.node_count,
-        branch_count: report.branch_count,
-        output_voltage: report.output_voltage,
-    })
-}
-
 fn validate_frequency_grid(
-    analysis: &str,
     frequencies: &[Value],
-    strictly_positive: bool,
     resource_limits: ResourceLimits,
 ) -> DetailedWasmResult<()> {
     if frequencies.is_empty() {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "{analysis} analysis requires at least one frequency"
-        ))));
+        return Err(Box::new(WasmError::invalid_argument(
+            "AC analysis requires at least one frequency".to_owned(),
+        )));
     }
     if frequencies.len() > resource_limits.max_analysis_points {
         return Err(resource_limit_error(
@@ -488,38 +319,17 @@ fn validate_frequency_grid(
             resource_limits.max_analysis_points,
         ));
     }
-    let rejected = frequencies.iter().copied().enumerate().find(|(_, value)| {
-        !value.is_finite() || *value < 0.0 || (strictly_positive && *value <= 0.0)
-    });
+    let rejected = frequencies
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite() || *value < 0.0);
     if let Some((index, frequency)) = rejected {
-        let bound = if strictly_positive {
-            "positive"
-        } else {
-            "non-negative"
-        };
         return Err(Box::new(WasmError::invalid_argument(format!(
-            "{analysis} frequency at index {index} must be finite and {bound}, got {frequency}"
+            "AC frequency at index {index} must be finite and non-negative, got {frequency}"
         ))));
     }
     Ok(())
-}
-
-/// Unit of a directly requested sweep source.
-///
-/// This mirrors the first-letter element contract the parser itself uses:
-/// `V`-prefixed instances are voltage sources and `I`-prefixed are current
-/// sources. Anything else is a swept parameter with no intrinsic unit.
-fn sweep_source_unit(source_name: &str) -> SignalUnit {
-    match source_name
-        .trim()
-        .chars()
-        .next()
-        .map(|first| first.to_ascii_uppercase())
-    {
-        Some('V') => SignalUnit::Volt,
-        Some('I') => SignalUnit::Ampere,
-        _ => SignalUnit::Dimensionless,
-    }
 }
 
 fn allocation_error(object: &'static str) -> Box<WasmError> {
@@ -554,11 +364,6 @@ C1 out 0 1p\n\
                 run_operating_point_document_detailed(DECK).expect("OP runs"),
             ),
             (
-                AnalysisResultKind::DcSweep,
-                "dc-001",
-                run_dc_sweep_document_detailed(DECK, "V1", 0.0, 1.0, 0.5).expect("DC runs"),
-            ),
-            (
                 AnalysisResultKind::Ac,
                 "ac-001",
                 run_ac_document_detailed(DECK, &[1.0e3, 1.0e4]).expect("AC runs"),
@@ -567,12 +372,6 @@ C1 out 0 1p\n\
                 AnalysisResultKind::Transient,
                 "tran-001",
                 run_transient_document_detailed(DECK, 1.0e-8, 1.0e-9).expect("TRAN runs"),
-            ),
-            (
-                AnalysisResultKind::Noise,
-                "noise-001",
-                run_noise_document_detailed(DECK, "out", None, "V1", &[1.0e3, 1.0e4])
-                    .expect("noise runs"),
             ),
         ];
 
@@ -608,12 +407,6 @@ C1 out 0 1p\n\
         for error in [
             *run_ac_document_detailed(DECK, &[]).expect_err("an empty AC grid is invalid"),
             *run_ac_document_detailed(DECK, &[-1.0]).expect_err("a negative frequency is invalid"),
-            *run_noise_document_detailed(DECK, "out", None, "V1", &[0.0])
-                .expect_err("a zero noise frequency is invalid"),
-            *run_noise_document_detailed(DECK, "", None, "V1", &[1.0e3])
-                .expect_err("an empty noise output is invalid"),
-            *run_dc_sweep_document_detailed(DECK, "V1", 0.0, 1.0, 0.0)
-                .expect_err("a zero DC step is invalid"),
             *run_transient_document_detailed(DECK, -1.0, 1.0e-9)
                 .expect_err("a negative stop time is invalid"),
         ] {
@@ -635,16 +428,6 @@ C1 out 0 1p\n\
                 &ImmediateAbort,
             )
             .expect_err("OP observes cancellation"),
-            *run_dc_sweep_document_with_options_and_abort_detailed(
-                DECK,
-                "V1",
-                0.0,
-                1.0,
-                0.5,
-                &options,
-                &ImmediateAbort,
-            )
-            .expect_err("DC observes cancellation"),
             *run_ac_document_with_options_and_abort_detailed(
                 DECK,
                 &[1.0e3],
@@ -660,18 +443,6 @@ C1 out 0 1p\n\
                 &ImmediateAbort,
             )
             .expect_err("TRAN observes cancellation"),
-            *run_noise_document_with_options_and_abort_detailed(
-                DECK,
-                "out",
-                None,
-                "V1",
-                &[1.0e3],
-                &options,
-                &ImmediateAbort,
-            )
-            .expect_err("noise observes cancellation"),
-            *health_check_with_options_and_abort_detailed(&options, &ImmediateAbort)
-                .expect_err("the readiness probe observes cancellation"),
         ];
         for error in failures {
             assert_eq!(error.code, "aborted");

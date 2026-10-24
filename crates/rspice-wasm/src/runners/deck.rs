@@ -1719,12 +1719,11 @@ R2 out 0 {r2v}\n";
             assert_eq!(window, reference, "{kind:?} window");
         }
 
-        let json = handle
-            .result_json_snapshot(index, &NoAbort)
-            .expect("the lossless export encodes");
-        let decoded = AnalysisResultDocument::from_json(&json)
-            .expect("the lossless export decodes as the same core document");
-        assert_eq!(decoded, expected, "{kind:?} lossless round trip");
+        assert_eq!(
+            handle.documents()[index],
+            expected,
+            "{kind:?} retained unchanged"
+        );
     }
 
     /// The browser runs the same mismatch study the command line and the
@@ -1950,8 +1949,7 @@ R2 out 0 1k\n\
         assert_eq!(metadata.planned_analyses[1].id, "ac-001");
         assert_eq!(metadata.coordinates.len(), 3);
         assert_eq!(metadata.results.len(), 6);
-        assert_eq!(metadata.result_count, handle.result_count());
-        assert_eq!(handle.coordinate_count(), 3);
+        assert_eq!(metadata.result_count, handle.documents().len());
     }
 
     /// Textual `.ALTER` is refused by the core materializer, and the browser

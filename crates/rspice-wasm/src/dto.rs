@@ -1,4 +1,4 @@
-//! Serializable summaries of parser diagnostics and the readiness probe.
+//! Serializable summaries of parser diagnostics.
 //!
 //! Analysis results are deliberately not here. There is one result document
 //! in this crate and it is `rspice_core::execution::AnalysisResultDocument`,
@@ -50,15 +50,4 @@ pub struct WasmStartupDiagnostic {
     pub origins: Vec<WasmSourceLocation>,
     pub scopes: Vec<WasmStartupDirectiveScope>,
     pub canonical_nodes: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WasmHealthReport {
-    pub status: String,
-    pub ready: bool,
-    pub duration_seconds: f64,
-    pub element_count: usize,
-    pub node_count: usize,
-    pub branch_count: usize,
-    pub output_voltage: f64,
 }

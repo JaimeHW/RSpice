@@ -20,7 +20,7 @@ JavaScript reads bounded, typed windows of them; all numerical work happens in
 | `options` | The browser resource policy, execution options and compression policy |
 | `abort` | Deadlines, the shared-memory cancellation word and the composed abort source |
 | `errors` | `WasmError` and its JavaScript projection |
-| `dto` | Netlist summaries, parser diagnostics and the readiness report |
+| `dto` | Netlist summaries and parser diagnostics |
 | `hb_config` | The authored `.HB` tone list, resolved through the core constructors |
 | `js_interop`, `support` | JavaScript value decoding, typed-array publication and shared helpers |
 
@@ -40,22 +40,16 @@ Every analysis export returns a `WasmResultHandle`, and every failure throws an
 | :--- | :--- |
 | `runAuthoredDeckDocument(source[, options])` | A complete deck, over its `.DATA`, `.STEP` and `.TEMP` coordinates |
 | `runOperatingPointDocument(source[, options])` | One operating point |
-| `runDcSweepDocument(source, sourceName, start, stop, step[, options])` | One linear single-source DC sweep |
 | `runAcAnalysisDocument(source, frequencies[, options])` | AC over an explicit frequency grid |
 | `runTransientAnalysisDocument(source, tstop, maxStep[, options])` | One transient |
-| `runNoiseAnalysisDocument(source, outputNode, referenceNode, inputSource, frequencies[, options])` | Noise over an explicit positive frequency grid |
 | `summarizeNetlist(source[, options])` | Counts and diagnostics of a parsed deck, without simulating |
-| `healthCheck([options])` | A parser-to-solver readiness probe |
-| `defaultResourceLimits()` | The browser resource policy, in camelCase |
 
-The handle reports `resultCount()`, `coordinateCount()`, the executed plan
-(`metadata()`) and each result's identity and descriptors
-(`resultMetadata(i)`), and transfers data only through bounded calls:
-`readWindow(i, start, count)` for result samples, `controlWindow(…)` for
-control-script plot and print traces, `resultJson(i)` for the complete document,
-`digitalNodes`, `digitalEvents`, `digitalBuses` and `busEvents` for event
-histories, and `toVcd(i)` for the Value Change Dump `rspice run -f vcd`
-publishes for the same run.
+The handle reports the executed plan (`metadata()`) and each result's identity
+and descriptors (`resultMetadata(i)`), and transfers data only through bounded
+calls: `readWindow(i, start, count)` for result samples, `digitalNodes`,
+`digitalEvents`, `digitalBuses` and `busEvents` for event histories, and
+`toVcd(i)` for the Value Change Dump `rspice run -f vcd` publishes for the same
+run.
 
 The same operations are plain Rust functions too, since the crate builds as
 both `cdylib` and `rlib`: `run_*_document_detailed` and
@@ -70,7 +64,7 @@ Documents are `rspice-analysis-result` version 20, defined and validated by
 encoding, missingness rules and payloads, and this crate does not restate them.
 A direct call is planned as a one-analysis deck, so its result carries the same
 canonical identity and run coordinate an authored deck would give it. The
-handle's `metadata()` is the `rspice-browser-result` schema, version 3.
+handle's `metadata()` is the `rspice-browser-result` schema, version 4.
 
 - `readWindow` returns axis and sample columns as `Float64Array` and a
   `Uint8Array` `validity` mask per signal. A zero validity entry marks an
@@ -79,8 +73,7 @@ handle's `metadata()` is the `rspice-browser-result` schema, version 3.
   reduced by `maxResultValues`, counting one validity byte per signal per point.
   An empty, out-of-range or over-budget window fails with
   `code: "invalid_result_window"`, and an unknown result with
-  `"invalid_result_index"`. `resultJson` has its own byte budget and fails
-  rather than truncating.
+  `"invalid_result_index"`.
 - Event calls fail with `"unsupported_result_family"`, `"unknown_event_node"`,
   `"unknown_event_bus"` or `"no_event_history"`. Event rows carry the `0..=12`
   XSPICE event code, so the drive strength the VCD drops survives here.
@@ -109,7 +102,7 @@ result family, and the test suite takes that registry as its input.
 A deck's `.control` script runs through the shared core control host, with the
 same commands the CLI accepts. Each completed analysis keeps its own document
 and identity; `metadata()` lists the script's `controlDatasets` (`ac1`, …) and
-`controlPresentations`, whose trace data `controlWindow` transfers. A script
+the descriptors of its plot and print `controlPresentations`. A script
 combined with run axes, `.FOUR` or `.FFT`, `.OPTIONS RESTART` or compression is
 refused.
 
@@ -137,7 +130,7 @@ const handle = runAcAnalysisDocument(source, frequencies, options);
 
 Unknown option and resource fields are rejected, so a misspelled control cannot
 fall back to a looser policy, and omitted resource fields take the browser
-defaults `defaultResourceLimits()` returns: among them 8 MiB netlists, 2,000
+defaults: among them 8 MiB netlists, 2,000
 matrix unknowns, 200,000 analysis points, 2,000,000 retained values, 64 MiB of
 shared cache and one worker, because the browser build is single-threaded.
 `transientCompression` is a transfer policy, not a deck semantic: the solver
@@ -180,8 +173,8 @@ The control word belongs to the caller: `0` continues and any nonzero value
 cancels. Clear it before each call and do not share one word between
 concurrent calls. In a browser, `SharedArrayBuffer` needs cross-origin-isolated
 deployment headers. Cancellation is cooperative: the core polls at bounded
-parser chunks and numerical checkpoints, and document encoding and the JSON
-export poll too, so the latency is one uncancellable kernel. A cancelled call
+parser chunks and numerical checkpoints, and document encoding polls too, so
+the latency is one uncancellable kernel. A cancelled call
 never returns a result; it throws with `code: "aborted"`,
 `category: "cancellation"` and `retryable: true`. A DOM `AbortSignal` cannot
 interrupt a synchronous WebAssembly call on its own event loop; without

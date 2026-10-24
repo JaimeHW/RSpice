@@ -11,7 +11,7 @@
 //! - [`abort`]: deadlines, the shared-memory cancellation control, and the
 //!   composed abort source every runner polls
 //! - [`errors`]: the structured [`WasmError`] and its JavaScript projection
-//! - [`dto`]: parser-diagnostic and readiness summaries
+//! - [`dto`]: netlist and parser-diagnostic summaries
 //! - [`document`]: the descriptor-only projection of one core result document
 //! - [`events`]: the typed digital event rows and the Value Change Dump
 //! - [`handles`]: the retained handle that publishes bounded typed-array windows
@@ -55,7 +55,7 @@ pub use document::{
     SignalOwnerView, SignalShapeView, SignalUnitView, SignalValueTypeView,
 };
 pub use dto::{
-    NetlistSummary, WasmDiagnostic, WasmHealthReport, WasmSourceLocation, WasmStartupDiagnostic,
+    NetlistSummary, WasmDiagnostic, WasmSourceLocation, WasmStartupDiagnostic,
     WasmStartupDirectiveScope,
 };
 pub use errors::{WasmError, WasmUnresolvedOutputSymbol};
@@ -71,10 +71,7 @@ pub use runners::deck::{
     run_authored_deck_document_with_options_and_abort_detailed,
 };
 pub use runners::direct::{
-    health_check_with_options_and_abort_detailed, health_check_with_options_detailed,
     run_ac_document_detailed, run_ac_document_with_options_and_abort_detailed,
-    run_dc_sweep_document_detailed, run_dc_sweep_document_with_options_and_abort_detailed,
-    run_noise_document_detailed, run_noise_document_with_options_and_abort_detailed,
     run_operating_point_document_detailed,
     run_operating_point_document_with_options_and_abort_detailed, run_transient_document_detailed,
     run_transient_document_with_options_and_abort_detailed, summarize_netlist,

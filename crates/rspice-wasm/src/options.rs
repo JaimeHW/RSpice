@@ -13,8 +13,6 @@ use crate::errors::WasmError;
 pub(crate) const MEBIBYTE: usize = 1024 * 1024;
 pub(crate) const MAX_TIMEOUT_MILLISECONDS: u32 = 86_400_000;
 pub(crate) const DEFAULT_MAX_TRANSFER_VALUES: usize = 262_144;
-/// Largest lossless JSON export one retained result may produce.
-pub(crate) const DEFAULT_MAX_RESULT_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn browser_resource_limits() -> ResourceLimits {
     let mut limits = ResourceLimits::default();

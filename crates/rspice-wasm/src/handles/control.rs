@@ -2,9 +2,7 @@
 
 use super::*;
 use crate::document::SignalUnitView;
-use rspice_core::engine::{
-    ControlPresentation, ControlPresentationKind, ControlTrace, ControlVector,
-};
+use rspice_core::engine::{ControlPresentation, ControlPresentationKind, ControlVector};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,91 +200,6 @@ impl WasmResultHandle {
             })
             .collect()
     }
-
-    fn control_trace(
-        &self,
-        presentation: usize,
-        trace: usize,
-    ) -> DetailedWasmResult<&ControlTrace> {
-        let traces = self
-            .control_presentations
-            .get(presentation)
-            .and_then(|presentation| match &presentation.kind {
-                ControlPresentationKind::Plot { traces, .. }
-                | ControlPresentationKind::Print(traces) => Some(traces),
-                ControlPresentationKind::UnitsChanged { .. } => None,
-            });
-        traces.and_then(|traces| traces.get(trace)).ok_or_else(|| {
-            window_error(format!(
-                "no control trace {trace} in presentation {presentation}"
-            ))
-        })
-    }
-
-    /// Four finite columns: x real/imaginary, then y real/imaginary.
-    fn control_window(
-        &self,
-        presentation: usize,
-        trace: usize,
-        start: usize,
-        count: usize,
-    ) -> DetailedWasmResult<[Vec<f64>; 4]> {
-        if count == 0 || count.saturating_mul(4) > self.maximum_window_values {
-            return Err(window_error(
-                "control window exceeds the numeric transfer budget or is empty".into(),
-            ));
-        }
-        let trace = self.control_trace(presentation, trace)?;
-        let end = start
-            .checked_add(count)
-            .ok_or_else(|| window_error("control window index overflow".into()))?;
-        let x = trace
-            .x
-            .samples
-            .get(start..end)
-            .ok_or_else(|| window_error("control x window is out of range".into()))?;
-        let y = trace
-            .y
-            .samples
-            .get(start..end)
-            .ok_or_else(|| window_error("control y window is out of range".into()))?;
-        Ok([
-            x.iter().map(|value| value.re).collect(),
-            x.iter().map(|value| value.im).collect(),
-            y.iter().map(|value| value.re).collect(),
-            y.iter().map(|value| value.im).collect(),
-        ])
-    }
-}
-
-#[wasm_bindgen]
-impl WasmResultHandle {
-    /// Resolve one plot/print trace window without copying its entire dataset.
-    /// Returns {xReal, xImaginary, yReal, yImaginary}, each a Float64Array.
-    #[wasm_bindgen(js_name = controlWindow)]
-    pub fn control_window_js(
-        &self,
-        presentation_index: usize,
-        trace_index: usize,
-        start: usize,
-        count: usize,
-    ) -> Result<JsValue, JsValue> {
-        let columns = self
-            .control_window(presentation_index, trace_index, start, count)
-            .map_err(|error| wasm_error_to_js(*error))?;
-        let output = js_sys::Object::new();
-        for (name, values) in ["xReal", "xImaginary", "yReal", "yImaginary"]
-            .into_iter()
-            .zip(columns)
-        {
-            js_sys::Reflect::set(
-                &output,
-                &JsValue::from_str(name),
-                &js_sys::Float64Array::from(values.as_slice()),
-            )?;
-        }
-        Ok(output.into())
-    }
 }
 
 #[cfg(test)]
@@ -297,6 +210,7 @@ mod tests {
         WasmExecutionOptions, run_authored_deck_document_detailed,
         run_authored_deck_document_with_options_and_abort_detailed,
     };
+    use rspice_core::engine::ControlTrace;
 
     fn retain(execution: crate::DeckExecution) -> WasmResultHandle {
         WasmResultHandle::new(
@@ -310,9 +224,23 @@ mod tests {
         .unwrap()
     }
 
+    fn control_trace(
+        handle: &WasmResultHandle,
+        presentation: usize,
+        trace: usize,
+    ) -> &ControlTrace {
+        match &handle.control_presentations[presentation].kind {
+            ControlPresentationKind::Plot { traces, .. }
+            | ControlPresentationKind::Print(traces) => &traces[trace],
+            ControlPresentationKind::UnitsChanged { .. } => {
+                panic!("presentation {presentation} carries no trace")
+            }
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn transfer_function_handle_preserves_scalar_determinations_and_finite_windows() {
+    fn transfer_function_handle_preserves_scalar_determinations_and_finite_traces() {
         let execution = run_authored_deck_document_detailed("Open transfer\nV1 in 0 1\nR1 out 0 1k\n.control\ntf I(V1) V1\nprint transfer_function input_impedance transfer_gain output_impedance\n.endc\n.end\n").unwrap();
         let handle = retain(execution);
         let metadata = handle.metadata_snapshot().unwrap();
@@ -330,11 +258,15 @@ mod tests {
             "positive_infinity"
         );
         for trace in 0..2 {
-            let window = handle.control_window(0, trace, 0, 1).unwrap();
-            assert!(window.iter().flatten().all(|sample| sample.is_finite()));
-            assert_eq!(window[2], [0.0]);
+            let trace = control_trace(&handle, 0, trace);
+            assert!(
+                trace.x.samples[..1]
+                    .iter()
+                    .chain(&trace.y.samples[..1])
+                    .all(|sample| sample.re.is_finite() && sample.im.is_finite())
+            );
+            assert_eq!(trace.y.samples[0].re, 0.0);
         }
-        assert!(handle.control_window(0, 2, 0, 1).is_err());
         let mut options = WasmExecutionOptions::default();
         options.resource_limits.max_result_values = 32;
         let source = "Open transfer\nV1 in 0 1\nR1 out 0 1k\n.control\ntf I(V1) V1\nrepeat 40\nprint input_impedance\nend\n.endc\n.end\n";
@@ -348,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn control_documents_preserve_order_complex_windows_and_transfer_bounds() {
+    fn control_documents_preserve_order_and_complex_traces() {
         let source = "ordered browser script\nV1 a 0 1 ac 1\nR1 a out 1k\nC1 out 0 1u\n.control\nforeach bias 1 2\nalter v1 $bias\nop\nprint v(out)\nend\nac lin 3 100 300\nplot v(out)\n.endc\n.end\n";
         let handle = retain(run_authored_deck_document_detailed(source).unwrap());
         let metadata = handle.metadata_snapshot().unwrap();
@@ -364,8 +296,8 @@ mod tests {
         assert_eq!(metadata.planned_analyses.len(), 3);
         assert_eq!(metadata.control_presentations.len(), 3);
         for (index, bias) in [1.0, 2.0].into_iter().enumerate() {
-            let window = handle.control_window(index, 0, 0, 1).unwrap();
-            assert!((window[2][0] - bias).abs() < 1e-8);
+            let trace = control_trace(&handle, index, 0);
+            assert!((trace.y.samples[0].re - bias).abs() < 1e-8);
             assert_eq!(
                 metadata.control_presentations[index].traces[0]
                     .y
@@ -373,21 +305,14 @@ mod tests {
                 index
             );
         }
-        let window = handle.control_window(2, 0, 0, 2).unwrap();
-        assert_eq!(window[0], [100.0, 200.0]);
-        for (index, frequency) in window[0].iter().enumerate() {
+        let trace = control_trace(&handle, 2, 0);
+        let frequencies: Vec<f64> = trace.x.samples[..2].iter().map(|x| x.re).collect();
+        assert_eq!(frequencies, [100.0, 200.0]);
+        for (frequency, response) in frequencies.iter().zip(&trace.y.samples) {
             let omega_rc = std::f64::consts::TAU * frequency * 1e-3;
-            assert!((window[2][index] - 1.0 / (1.0 + omega_rc * omega_rc)).abs() < 1e-8);
-            assert!((window[3][index] + omega_rc / (1.0 + omega_rc * omega_rc)).abs() < 1e-8);
+            assert!((response.re - 1.0 / (1.0 + omega_rc * omega_rc)).abs() < 1e-8);
+            assert!((response.im + omega_rc / (1.0 + omega_rc * omega_rc)).abs() < 1e-8);
         }
-        assert!(handle.control_window(2, 0, 0, 0).is_err());
-        assert!(handle.control_window(2, 0, 2, 2).is_err());
-        assert!(handle.control_window(3, 0, 0, 1).is_err());
-        assert!(
-            handle
-                .control_window(2, 0, 0, handle.maximum_window_values / 4 + 1)
-                .is_err()
-        );
         let serialized = serde_json::to_string(&metadata).unwrap();
         assert!(!serialized.contains("samples"));
     }
@@ -413,7 +338,7 @@ mod tests {
             assert_eq!(descriptor.y.current_sources[0].result_index, index);
             assert_eq!(descriptor.y.unit, SignalUnitView::Ampere);
             assert_eq!(descriptor.x.point_count, result.point_count());
-            let trace = handle.control_trace(4, trace_index).unwrap();
+            let trace = control_trace(&handle, 4, trace_index);
             let window = result.window(0, result.point_count()).unwrap();
             let rspice_core::execution::result_document::AxisValues::Real { values: times } =
                 &window.axes[0].values

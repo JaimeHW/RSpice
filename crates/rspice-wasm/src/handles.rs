@@ -7,22 +7,21 @@
 //! boundary as typed arrays. No export copies a whole result into ordinary
 //! JavaScript arrays.
 
+use rspice_core::ResourceLimits;
 use rspice_core::execution::result_document::ResultCoordinate;
 use rspice_core::execution::{
-    AnalysisResultDocument, AxisKind, DeckPlan, ResultDocumentError, RunAxis, RunAxisValue,
-    RunCoordinate, StepAxisTarget,
+    AnalysisResultDocument, AxisKind, DeckPlan, RunAxis, RunAxisValue, RunCoordinate,
+    StepAxisTarget,
 };
-use rspice_core::{AbortSignal, ResourceKind, ResourceLimits};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::DetailedWasmResult;
-use crate::abort::aborted_error;
 use crate::document::{AnalysisIdentity, ResultMetadata, result_metadata, window_transfer_values};
 use crate::errors::{WasmError, wasm_error_to_js};
 use crate::events::{BusEventRow, DigitalBusDescriptor, DigitalEventRow, DigitalNodeDescriptor};
 use crate::js_interop::{serialize_result_window_to_js, serialize_to_js};
-use crate::options::{DEFAULT_MAX_RESULT_JSON_BYTES, DEFAULT_MAX_TRANSFER_VALUES};
+use crate::options::DEFAULT_MAX_TRANSFER_VALUES;
 
 mod control;
 pub use control::{
@@ -34,7 +33,7 @@ pub use control::{
 /// carries keep the core document's schema and version.
 pub const BROWSER_RESULT_SCHEMA: &str = "rspice-browser-result";
 /// Version of the handle metadata envelope.
-pub const BROWSER_RESULT_VERSION: u32 = 3;
+pub const BROWSER_RESULT_VERSION: u32 = 4;
 
 /// One planned run axis, without its values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -97,7 +96,6 @@ pub struct HandleMetadata<'a> {
     pub results: Vec<ResultSummary>,
     pub result_count: usize,
     pub maximum_window_values: usize,
-    pub maximum_result_json_bytes: f64,
     /// Named control datasets map to `results` by index; empty for direct calls.
     pub control_datasets: &'a [String],
     pub control_presentations: Vec<ControlPresentationDescriptor<'a>>,
@@ -112,7 +110,6 @@ pub struct WasmResultHandle {
     coordinates: Vec<ResultCoordinate>,
     results: Vec<AnalysisResultDocument>,
     maximum_window_values: usize,
-    maximum_result_json_bytes: u64,
     control_datasets: Vec<String>,
     control_presentations: Vec<rspice_core::engine::ControlPresentation>,
 }
@@ -156,7 +153,6 @@ impl WasmResultHandle {
             results,
             maximum_window_values: DEFAULT_MAX_TRANSFER_VALUES
                 .min(resource_limits.max_result_values),
-            maximum_result_json_bytes: DEFAULT_MAX_RESULT_JSON_BYTES,
             control_datasets: Vec::new(),
             control_presentations: Vec::new(),
         })
@@ -223,9 +219,6 @@ impl WasmResultHandle {
             results,
             result_count: self.results.len(),
             maximum_window_values: self.maximum_window_values,
-            #[allow(clippy::cast_precision_loss)]
-            // JavaScript numbers are f64; the byte ceiling is far below 2^53.
-            maximum_result_json_bytes: self.maximum_result_json_bytes as f64,
             control_datasets: &self.control_datasets,
             control_presentations: self.control_metadata()?,
         })
@@ -296,52 +289,10 @@ impl WasmResultHandle {
     pub(crate) fn vcd_snapshot(&self, index: usize) -> DetailedWasmResult<String> {
         crate::events::vcd_text(self.document(index)?)
     }
-
-    pub(crate) fn result_json_snapshot(
-        &self,
-        index: usize,
-        abort: &dyn AbortSignal,
-    ) -> DetailedWasmResult<String> {
-        let document = self.document(index)?;
-        document
-            .to_json_with_abort(abort, self.maximum_result_json_bytes)
-            .map_err(|error| match error {
-                ResultDocumentError::Aborted => aborted_error(),
-                ResultDocumentError::ArtifactTooLarge { limit_bytes } => Box::new(
-                    WasmError::resource_limit(
-                        format!(
-                            "result {index} does not fit in the {limit_bytes}-byte browser export budget"
-                        ),
-                        rspice_core::ResourceLimitError {
-                            resource: ResourceKind::ResultValues,
-                            requested: document.total_value_count(),
-                            limit: self.maximum_window_values,
-                        },
-                    ),
-                ),
-                other => Box::new(WasmError::new(
-                    other.to_string(),
-                    "invalid_result_document",
-                    "result_validation",
-                )),
-            })
-    }
 }
 
 #[wasm_bindgen]
 impl WasmResultHandle {
-    /// Number of retained results.
-    #[wasm_bindgen(js_name = resultCount)]
-    pub fn result_count(&self) -> usize {
-        self.results.len()
-    }
-
-    /// Number of canonical run coordinates the plan produced.
-    #[wasm_bindgen(js_name = coordinateCount)]
-    pub fn coordinate_count(&self) -> usize {
-        self.coordinates.len()
-    }
-
     /// The plan, the coordinates, and a compact summary of every result.
     #[wasm_bindgen(js_name = metadata)]
     pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
@@ -469,16 +420,6 @@ impl WasmResultHandle {
         self.vcd_snapshot(result_index)
             .map_err(|error| wasm_error_to_js(*error))
     }
-
-    /// The complete core result document for one result, as JSON.
-    ///
-    /// This is the lossless export path: it is bounded by an explicit byte
-    /// budget and fails closed rather than truncating.
-    #[wasm_bindgen(js_name = resultJson)]
-    pub fn result_json_js(&self, result_index: usize) -> Result<String, JsValue> {
-        self.result_json_snapshot(result_index, &rspice_core::NoAbort)
-            .map_err(|error| wasm_error_to_js(*error))
-    }
 }
 
 fn run_axis_descriptor(axis: &RunAxis) -> DetailedWasmResult<RunAxisDescriptor> {
@@ -555,7 +496,6 @@ fn allocation_error(object: &'static str) -> Box<WasmError> {
 
 #[cfg(test)]
 mod tests {
-    use rspice_core::NoAbort;
     use rspice_core::execution::result_document::SeriesWindowValues;
 
     use super::*;
@@ -634,7 +574,7 @@ C1 out 0 1p\n\
             assert_eq!(error.category, "result_transfer");
         }
         let error = *handle
-            .window_snapshot(handle.result_count(), 0, 1)
+            .window_snapshot(handle.documents().len(), 0, 1)
             .expect_err("an unknown result index must fail closed");
         assert_eq!(error.code, "invalid_result_index");
     }
@@ -660,17 +600,6 @@ C1 out 0 1p\n\
             "the failure quotes the effective ceiling: {}",
             error.message
         );
-    }
-
-    /// The lossless JSON export is the core document, unchanged.
-    #[test]
-    fn the_json_export_round_trips_the_core_document() {
-        let handle = handle(TRANSIENT, crate::options::browser_resource_limits());
-        let json = handle
-            .result_json_snapshot(0, &NoAbort)
-            .expect("the lossless export encodes");
-        let decoded = AnalysisResultDocument::from_json(&json).expect("the export decodes");
-        assert_eq!(&decoded, &handle.documents()[0]);
     }
 
     /// A transient that captures event nodes answers the typed accessors, and
@@ -716,7 +645,7 @@ rout out 0 1k
         assert!(dump.contains("$scope module events $end"), "{dump}");
 
         let error = *handle
-            .digital_nodes_snapshot(handle.result_count())
+            .digital_nodes_snapshot(handle.documents().len())
             .expect_err("an unknown result index must fail closed");
         assert_eq!(error.code, "invalid_result_index");
     }
@@ -748,17 +677,5 @@ rin in 0 1k
             "{}",
             error.message
         );
-    }
-
-    /// Projection is cancellable: a pre-set abort stops the export instead of
-    /// returning a truncated string.
-    #[test]
-    fn a_pre_set_abort_cancels_the_json_export() {
-        let handle = handle(TRANSIENT, crate::options::browser_resource_limits());
-        let error = *handle
-            .result_json_snapshot(0, &rspice_core::abort_signal::ImmediateAbort)
-            .expect_err("a cancelled export must not return a document");
-        assert_eq!(error.code, "aborted");
-        assert_eq!(error.category, "cancellation");
     }
 }

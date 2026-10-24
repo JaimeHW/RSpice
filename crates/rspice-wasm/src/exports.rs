@@ -16,14 +16,11 @@ use crate::abort::ExecutionScope;
 use crate::errors::wasm_error_to_js;
 use crate::handles::WasmResultHandle;
 use crate::js_interop::serialize_to_js;
-use crate::options::WasmResourceLimits;
 use crate::runners::deck::{
     DeckExecution, run_authored_deck_document_with_options_and_abort_detailed,
 };
 use crate::runners::direct::{
-    health_check_with_options_and_abort_detailed, run_ac_document_with_options_and_abort_detailed,
-    run_dc_sweep_document_with_options_and_abort_detailed,
-    run_noise_document_with_options_and_abort_detailed,
+    run_ac_document_with_options_and_abort_detailed,
     run_operating_point_document_with_options_and_abort_detailed,
     run_transient_document_with_options_and_abort_detailed,
     summarize_netlist_with_options_and_abort_detailed,
@@ -50,21 +47,6 @@ fn retain(scope: &ExecutionScope, execution: DeckExecution) -> Result<WasmResult
     thrown(handle.with_control(execution.control_datasets, execution.control_presentations))
 }
 
-#[wasm_bindgen(js_name = defaultResourceLimits)]
-pub fn default_resource_limits_js() -> Result<JsValue, JsValue> {
-    serialize_to_js(&WasmResourceLimits::default())
-}
-
-#[wasm_bindgen(js_name = healthCheck)]
-pub fn health_check_js(options: JsValue) -> Result<JsValue, JsValue> {
-    let scope = scope(options)?;
-    let report = thrown(health_check_with_options_and_abort_detailed(
-        scope.options(),
-        &scope.abort(),
-    ))?;
-    serialize_to_js(&report)
-}
-
 #[wasm_bindgen(js_name = summarizeNetlist)]
 pub fn summarize_netlist_js(source: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let scope = scope(options)?;
@@ -89,28 +71,6 @@ pub fn run_operating_point_document_js(
             &scope.abort(),
         ),
     )?;
-    retain(&scope, execution)
-}
-
-#[wasm_bindgen(js_name = runDcSweepDocument)]
-pub fn run_dc_sweep_document_js(
-    source: &str,
-    source_name: &str,
-    start: f64,
-    stop: f64,
-    step: f64,
-    options: JsValue,
-) -> Result<WasmResultHandle, JsValue> {
-    let scope = scope(options)?;
-    let execution = thrown(run_dc_sweep_document_with_options_and_abort_detailed(
-        source,
-        source_name,
-        start,
-        stop,
-        step,
-        scope.options(),
-        &scope.abort(),
-    ))?;
     retain(&scope, execution)
 }
 
@@ -142,28 +102,6 @@ pub fn run_transient_document_js(
         source,
         tstop,
         max_step,
-        scope.options(),
-        &scope.abort(),
-    ))?;
-    retain(&scope, execution)
-}
-
-#[wasm_bindgen(js_name = runNoiseAnalysisDocument)]
-pub fn run_noise_document_js(
-    source: &str,
-    output_node: &str,
-    reference_node: Option<String>,
-    input_source: &str,
-    frequencies: Vec<f64>,
-    options: JsValue,
-) -> Result<WasmResultHandle, JsValue> {
-    let scope = scope(options)?;
-    let execution = thrown(run_noise_document_with_options_and_abort_detailed(
-        source,
-        output_node,
-        reference_node.as_deref(),
-        input_source,
-        &frequencies,
         scope.options(),
         &scope.abort(),
     ))?;
@@ -4223,7 +4161,7 @@ C1 out 0 1p\n\
     fn a_clear_control_word_runs_to_completion() {
         let handle = run_authored_deck_document_js(DECK, shared_cancellation_options(false))
             .expect("a clear control word must not cancel the run");
-        assert!(handle.result_count() > 0);
+        assert!(!handle.documents().is_empty());
     }
 
     /// Cancellation controls this build cannot honour are rejected before any
