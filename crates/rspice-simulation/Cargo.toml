@@ -14,7 +14,10 @@ workspace = true
 [features]
 default = []
 pdk-test-fixtures = ["dep:ed25519-dalek", "dep:wat"]
-generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog"]
+generated-veriloga-catalog = [
+    "rspice-design/generated-veriloga-catalog",
+    "rspice-core/veriloga-builtins",
+]
 wasm-jit = ["rspice-veriloga/wasm-jit"]
 browser-worker = ["wasm-jit", "rspice-core/veriloga-wasm-jit"]
 

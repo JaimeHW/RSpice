@@ -4,7 +4,7 @@
 //! a frozen identity/signature so a generator or source update cannot silently
 //! reinterpret old terminals or parameters.
 
-use rspice_core::device::veriloga_builtins::{
+use rspice_core_devices::device::veriloga_builtins::{
     GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GeneratedVerilogACompatibilityCatalogEntry,
     GeneratedVerilogAModelDescriptor, GeneratedVerilogATerminalDirection,
     generated_veriloga_model_descriptor, generated_veriloga_model_descriptors,
@@ -468,9 +468,9 @@ fn hash_generated_veriloga_interface(
     for parameter in descriptor.parameters {
         hash_text(hasher, parameter.name);
         hasher.update([match parameter.scope {
-            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Model => 0,
-            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Instance => 1,
-            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Dual => 2,
+            rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAParameterScope::Model => 0,
+            rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAParameterScope::Instance => 1,
+            rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAParameterScope::Dual => 2,
         }]);
         hasher.update([u8::from(parameter.is_integer)]);
         hash_optional_number(hasher, parameter.default);
@@ -520,7 +520,7 @@ fn hash_optional_number(hasher: &mut Sha256, value: Option<f64>) {
 
 fn hash_optional_bound(
     hasher: &mut Sha256,
-    bound: Option<rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterBound>,
+    bound: Option<rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAParameterBound>,
 ) {
     match bound {
         Some(bound) => {
@@ -543,7 +543,7 @@ const fn terminal_direction(direction: GeneratedVerilogATerminalDirection) -> Po
 #[cfg(test)]
 mod descriptor_v2_tests {
     use super::*;
-    use rspice_core::device::veriloga_builtins::GeneratedVerilogATerminalDescriptor;
+    use rspice_core_devices::device::veriloga_builtins::GeneratedVerilogATerminalDescriptor;
 
     #[test]
     fn descriptor_signature_covers_terminal_current_and_state_identity() {
@@ -567,7 +567,7 @@ mod descriptor_v2_tests {
             source_identity: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             checkpoint_identity: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             accepted_state_shape_identity:
-                rspice_core::device::veriloga_builtins::GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([0x5a; 32]),
+                rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([0x5a; 32]),
             terminals: &TERMINALS_A,
             parameters: &[],
             total_node_count: 2,
@@ -575,7 +575,7 @@ mod descriptor_v2_tests {
             internal_state_nodes: &[],
             branch_count: 0,
             stamp_pattern:
-                rspice_core::device::veriloga_builtins::GeneratedVerilogAStampPattern::EMPTY,
+                rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAStampPattern::EMPTY,
         };
         const CHANGED: GeneratedVerilogAModelDescriptor = GeneratedVerilogAModelDescriptor {
             terminals: &TERMINALS_B,
@@ -609,7 +609,7 @@ mod descriptor_v2_tests {
 #[cfg(all(test, feature = "generated-veriloga-catalog"))]
 mod tests {
     use super::*;
-    use rspice_core::device::veriloga_builtins::{
+    use rspice_core_devices::device::veriloga_builtins::{
         GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
     };
 

@@ -184,11 +184,11 @@ pub fn valid_parameter_name(name: &str) -> bool {
     }
     // Keep the common CDF names allocation-free; extended names follow the
     // engine's identifier grammar, rather than a narrower UI-only alphabet.
-    rspice_core::netlist::lexer::tokenize(name).is_ok_and(|tokens| {
+    rspice_core_netlist::netlist::lexer::tokenize(name).is_ok_and(|tokens| {
         tokens.len() == 2
             && matches!(
                 tokens[0].kind,
-                rspice_core::netlist::lexer::TokenKind::Ident(_)
+                rspice_core_netlist::netlist::lexer::TokenKind::Ident(_)
             )
     })
 }

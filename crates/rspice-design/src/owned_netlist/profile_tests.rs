@@ -1,6 +1,7 @@
 //! Profile admission and adaptation must describe the source the parser executes.
 
 use super::NetlistExecutionProfile;
+use rspice_core_netlist::netlist::Netlist;
 
 #[test]
 fn profile_validation_checks_deferred_file_waveforms_before_admission() {
@@ -13,7 +14,7 @@ fn profile_validation_checks_deferred_file_waveforms_before_admission() {
             "deck\n.probe V(out)\n.subckt source out params: level=1\nV1 out 0 {waveform}\n.ends\nX1 out source level=2\nR1 out 0 1k\n.op\n.end\n"
         );
         let adapted = profile.adapt_source(&source).unwrap();
-        let parsed = rspice_core::Netlist::parse(&adapted).unwrap();
+        let parsed = Netlist::parse(&adapted).unwrap();
         let result = profile.validate_parsed_netlist(&parsed);
         if file_backed {
             let error = result.expect_err("resolved file inputs cannot be admitted");
@@ -34,7 +35,7 @@ fn inline_pwl_sources_may_use_file_as_a_node_or_parameter_name() {
         let adapted = profile
             .adapt_source(source)
             .expect("inline samples do not name a dependency");
-        let parsed = rspice_core::Netlist::parse(&adapted).unwrap();
+        let parsed = Netlist::parse(&adapted).unwrap();
         profile.validate_parsed_netlist(&parsed).unwrap();
     }
 }
@@ -58,7 +59,7 @@ fn export_headers_and_quoted_semicolons_survive_adaptation() {
             );
             let adapted = profile.adapt_source(&source).unwrap();
             profile.validate_executable_source(&adapted).unwrap();
-            let parsed = rspice_core::Netlist::parse(&adapted).unwrap();
+            let parsed = Netlist::parse(&adapted).unwrap();
             assert_eq!(parsed.elements.len(), 2);
             if title_header {
                 assert_eq!(parsed.title, header);
@@ -83,7 +84,7 @@ fn pwl_mentions_in_titles_and_comments_do_not_create_external_dependencies() {
     let adapted = profile.adapt_source(file_source).unwrap();
     assert!(
         profile
-            .validate_parsed_netlist(&rspice_core::Netlist::parse(&adapted).unwrap())
+            .validate_parsed_netlist(&Netlist::parse(&adapted).unwrap())
             .is_err()
     );
 }
@@ -126,7 +127,7 @@ fn profile_validation_preserves_end_titles_and_commented_markers() {
             profile
                 .validate_executable_source(&adapted)
                 .expect("adapter output satisfies its profile");
-            let parsed = rspice_core::Netlist::parse(&adapted).expect("adapted deck parses");
+            let parsed = Netlist::parse(&adapted).expect("adapted deck parses");
             assert_eq!(parsed.title, title, "{profile:?}: {adapted}");
             assert_eq!(parsed.elements.len(), 2, "{adapted}");
             assert_eq!(parsed.analyses.len(), 1, "{adapted}");
@@ -177,8 +178,7 @@ fn command_like_titles_do_not_restrict_profile_admission() {
         let adapted = profile
             .adapt_source(&source)
             .expect("the first physical record is a title");
-        let parsed =
-            rspice_core::Netlist::parse(&adapted).expect("title was not rewritten as a command");
+        let parsed = Netlist::parse(&adapted).expect("title was not rewritten as a command");
         assert_eq!(parsed.title, title, "{profile:?}: {adapted}");
         assert_eq!(parsed.analyses.len(), 1);
     }
@@ -194,7 +194,7 @@ fn ngspice_declarative_controls_accept_semicolon_comments_without_executing_them
     profile
         .validate_executable_source(&adapted)
         .expect("adapted control source is admissible");
-    let parsed = rspice_core::Netlist::parse(&adapted).expect("the declarative script parses");
+    let parsed = Netlist::parse(&adapted).expect("the declarative script parses");
     assert_eq!(parsed.analyses.len(), 1);
     assert_eq!(adapted.lines().count(), source.lines().count());
     assert!(

@@ -1,10 +1,8 @@
 //! Versioned import compatibility and the source adapters it qualifies.
 
 use super::NetlistSourceDialect;
-use rspice_core::{
-    config::ExpressionDialect,
-    netlist::{is_spice_end_card, strip_spice_inline_comment},
-};
+use rspice_core_base::config::{ExpressionDialect, SpiceDialect};
+use rspice_core_netlist::netlist::{Netlist, is_spice_end_card, strip_spice_inline_comment};
 use serde::{Deserialize, Serialize};
 
 /// Versioned, persisted netlist-semantics contract.
@@ -52,20 +50,18 @@ impl NetlistExecutionProfile {
         }
     }
 
-    pub const fn spice_dialect(self) -> rspice_core::SpiceDialect {
+    pub const fn spice_dialect(self) -> SpiceDialect {
         match self {
-            Self::RSpiceCanonicalV1 => rspice_core::SpiceDialect::BestAvailable,
-            Self::Spice3NgspiceV1 | Self::Spice3NgspiceV2 => rspice_core::SpiceDialect::Ngspice,
-            Self::HspiceDeclarativeV1 => rspice_core::SpiceDialect::BestAvailable,
-            Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2 => {
-                rspice_core::SpiceDialect::BestAvailable
-            }
-            Self::SpectreSpiceV1 => rspice_core::SpiceDialect::BestAvailable,
-            Self::AdsSpiceExportV1 => rspice_core::SpiceDialect::BestAvailable,
+            Self::RSpiceCanonicalV1 => SpiceDialect::BestAvailable,
+            Self::Spice3NgspiceV1 | Self::Spice3NgspiceV2 => SpiceDialect::Ngspice,
+            Self::HspiceDeclarativeV1 => SpiceDialect::BestAvailable,
+            Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2 => SpiceDialect::BestAvailable,
+            Self::SpectreSpiceV1 => SpiceDialect::BestAvailable,
+            Self::AdsSpiceExportV1 => SpiceDialect::BestAvailable,
         }
     }
 
-    pub const fn expression_dialect(self) -> rspice_core::config::ExpressionDialect {
+    pub const fn expression_dialect(self) -> ExpressionDialect {
         match self {
             Self::RSpiceCanonicalV1
             | Self::Spice3NgspiceV1
@@ -74,7 +70,7 @@ impl NetlistExecutionProfile {
             | Self::PspiceDeclarativeV1
             | Self::PspiceDeclarativeV2
             | Self::SpectreSpiceV1
-            | Self::AdsSpiceExportV1 => rspice_core::config::ExpressionDialect::Ngspice,
+            | Self::AdsSpiceExportV1 => ExpressionDialect::Ngspice,
         }
     }
 
@@ -156,7 +152,7 @@ impl NetlistExecutionProfile {
     /// expansion. Text-only profile checks cannot see a `PWL FILE` card inside
     /// an included deck, so import review must apply this second boundary to
     /// the resolved AST before calling the source executable.
-    pub fn validate_parsed_netlist(self, netlist: &rspice_core::Netlist) -> Result<(), String> {
+    pub fn validate_parsed_netlist(self, netlist: &Netlist) -> Result<(), String> {
         if matches!(self, Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2)
             && let Some((element, path)) = parsed_file_backed_pwl(netlist)?
         {
@@ -500,15 +496,13 @@ fn is_pspice_v2_extended_source_line(line: &str) -> bool {
         || compact.contains("value_scale_factor=")
 }
 
-fn parsed_file_backed_pwl(
-    netlist: &rspice_core::Netlist,
-) -> Result<Option<(String, String)>, String> {
+fn parsed_file_backed_pwl(netlist: &Netlist) -> Result<Option<(String, String)>, String> {
     fn elements(
-        elements: &[rspice_core::netlist::Element],
+        elements: &[rspice_core_netlist::netlist::Element],
     ) -> Result<Option<(String, String)>, String> {
         for element in elements {
             if let Some(path) =
-                rspice_core::netlist::independent_source_file_dependency(&element.kind)
+                rspice_core_netlist::netlist::independent_source_file_dependency(&element.kind)
                     .map_err(|error| error.to_string())?
             {
                 return Ok(Some((element.name.clone(), path.into_owned())));
@@ -517,7 +511,7 @@ fn parsed_file_backed_pwl(
         Ok(None)
     }
     fn subcircuits(
-        definitions: &[rspice_core::netlist::SubcircuitDef],
+        definitions: &[rspice_core_netlist::netlist::SubcircuitDef],
     ) -> Result<Option<(String, String)>, String> {
         for definition in definitions {
             if let Some(dependency) = elements(&definition.elements)? {

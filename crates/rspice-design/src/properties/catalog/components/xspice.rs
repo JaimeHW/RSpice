@@ -13,7 +13,7 @@ use crate::schematic::device_descriptor::DeviceImplementation;
 /// the bottom of this file is the guard.
 impl PropertyCatalog {
     pub(in super::super) fn register_xspice_components(&mut self) {
-        let models = rspice_core::xspice::CodeModelRegistry::with_builtins();
+        let models = rspice_core_xspice::xspice::CodeModelRegistry::with_builtins();
         for kind in ComponentType::ALL {
             let DeviceImplementation::Xspice { model_type } = kind.descriptor().implementation
             else {
@@ -28,7 +28,7 @@ impl PropertyCatalog {
     }
 }
 
-fn code_model_sheet(parameters: &[rspice_core::xspice::ParamSpec]) -> PropertySheet {
+fn code_model_sheet(parameters: &[rspice_core_xspice::xspice::ParamSpec]) -> PropertySheet {
     let mut sheet = PropertySheet::new();
     sheet.add(
         PropertyDefinition::new("name")
@@ -51,10 +51,10 @@ fn code_model_sheet(parameters: &[rspice_core::xspice::ParamSpec]) -> PropertySh
 /// carry a human label, a unit, or a grouping, and several of its descriptions
 /// are empty. Those four things are supplied here and nowhere else.
 fn code_model_property(
-    parameter: &rspice_core::xspice::ParamSpec,
+    parameter: &rspice_core_xspice::xspice::ParamSpec,
     order: i32,
 ) -> PropertyDefinition {
-    use rspice_core::xspice::ParamType;
+    use rspice_core_xspice::xspice::ParamType;
 
     let name = parameter.name.as_str();
     let (label, fallback_description) = code_model_label(name);
@@ -118,8 +118,11 @@ struct CodeModelFacet {
 /// Group and unit for a parameter, keyed off the naming convention the XSPICE
 /// catalog follows throughout: `*_delay` and `t_*` are times, `*_load` are
 /// capacitive loads, and the rest shape the transfer behavior.
-fn code_model_facet(name: &str, param_type: rspice_core::xspice::ParamType) -> CodeModelFacet {
-    use rspice_core::xspice::ParamType;
+fn code_model_facet(
+    name: &str,
+    param_type: rspice_core_xspice::xspice::ParamType,
+) -> CodeModelFacet {
+    use rspice_core_xspice::xspice::ParamType;
 
     // `inertial_delay` is a mode flag that happens to end in `_delay`, so the
     // type has to decide before the name does.
@@ -295,7 +298,7 @@ mod tests {
     #[test]
     fn every_code_model_parameter_is_reachable_from_its_property_sheet() {
         let registry = PropertyCatalog::new();
-        let models = rspice_core::xspice::CodeModelRegistry::with_builtins();
+        let models = rspice_core_xspice::xspice::CodeModelRegistry::with_builtins();
         let mut unreachable = Vec::new();
 
         for kind in ComponentType::ALL {

@@ -77,15 +77,15 @@ pub fn parse_expression_source(
         .and_then(|inner| inner.strip_suffix('}'))
         .unwrap_or(trimmed)
         .trim();
-    let parsed = rspice_core::netlist::expr::parse_expression(expression)
+    let parsed = rspice_core_netlist::netlist::expr::parse_expression(expression)
         .map_err(|error| format!("{} expression: {error}", def.display_name))?;
 
     // Successful evaluation with an empty parameter context proves this is a
     // constant, not a symbolic parameter expression. It must therefore obey
     // the same explicit-unit policy as any other literal quantity.
-    match rspice_core::netlist::expr::evaluate(
+    match rspice_core_netlist::netlist::expr::evaluate(
         &parsed,
-        &rspice_core::netlist::expr::ParamContext::new(),
+        &rspice_core_netlist::netlist::expr::ParamContext::new(),
     ) {
         Ok(constant) => {
             if property_quantity_kind(def) == QuantityInputKind::EngineeringScalar {
@@ -98,7 +98,7 @@ pub fn parse_expression_source(
             }
             return Err(quantity_error.to_string());
         }
-        Err(rspice_core::netlist::expr::ExprError::UndefinedParam(_)) => {}
+        Err(rspice_core_netlist::netlist::expr::ExprError::UndefinedParam(_)) => {}
         Err(error) => return Err(format!("{} expression: {error}", def.display_name)),
     }
 
@@ -164,7 +164,7 @@ mod tests {
     /// a spelling, but never read one as another value.
     #[test]
     fn typed_fields_read_every_prefix_and_unit_the_way_the_engine_does() {
-        use rspice_core::netlist::lexer::spice_suffix_scale;
+        use rspice_core_netlist::netlist::lexer::spice_suffix_scale;
         use rspice_vocabulary::quantity::EngineeringSuffixPolicy;
 
         let locale = UiNumberLocale::default();

@@ -546,7 +546,7 @@ pub use crate::parameters::normalize_params;
 /// will parse the card.
 #[must_use]
 pub fn is_spice_identifier(name: &str) -> bool {
-    use rspice_core::netlist::lexer::TokenKind;
+    use rspice_core_netlist::netlist::lexer::TokenKind;
 
     let name = name.trim();
     if name.is_empty()
@@ -557,7 +557,7 @@ pub fn is_spice_identifier(name: &str) -> bool {
     {
         return false;
     }
-    let Ok(tokens) = rspice_core::netlist::lexer::tokenize(name) else {
+    let Ok(tokens) = rspice_core_netlist::netlist::lexer::tokenize(name) else {
         return false;
     };
     tokens.len() == 2 && matches!(tokens[0].kind, TokenKind::Ident(_))

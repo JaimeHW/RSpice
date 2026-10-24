@@ -52,7 +52,7 @@ pub fn display_bit_name(deck_name: &str, notation: BusNotation) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use rspice_core::netlist::{ElementKind, Netlist, SaveSignal, XspicePort};
+    use rspice_core_netlist::netlist::{ElementKind, Netlist, SaveSignal, XspicePort};
 
     use super::*;
     use rspice_design_model::bus::BusDeclaration;

@@ -907,7 +907,7 @@ fn deck_cards(component: &Component, cards: Vec<WrittenCard>) -> Option<Vec<Writ
     }
     cards
         .iter()
-        .all(|card| rspice_core::netlist::lexer::is_xyce_device_name(&card.name))
+        .all(|card| rspice_core_netlist::netlist::lexer::is_xyce_device_name(&card.name))
         .then_some(cards)
 }
 
