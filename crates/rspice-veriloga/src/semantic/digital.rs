@@ -1803,8 +1803,8 @@ impl SemanticAnalyzer {
     }
 
     /// The module's timing checks (IEEE 1364-2005 section 15), each event's
-    /// terminal a discrete signal of the module, its notifier a `reg`
-    /// (section 15.5), and each delayed signal a net as wide as the signal
+    /// terminal a discrete signal of the module, its notifier a variable
+    /// (A.7.5.2), and each delayed signal a net as wide as the signal
     /// it copies (section 15.8).
     fn analyze_timing_checks(
         &mut self,
@@ -1855,8 +1855,9 @@ impl SemanticAnalyzer {
             {
                 problems.push((
                     format!(
-                        "`{name}` notifier `{}` is not a `reg` of module `{}`; IEEE 1364-2005 \
-                         section 15.5 toggles a reg",
+                        "`{name}` notifier `{}` is not a variable of module `{}`; IEEE \
+                         1364-2005 A.7.5.2 makes a notifier a variable (`notifier ::= \
+                         variable_identifier`), which section 15.5 toggles",
                         notifier.name, module.name
                     ),
                     notifier.span,

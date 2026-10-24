@@ -298,7 +298,17 @@ fn prepare_boundaries(
                 &child_path,
                 &port.name,
             )?;
-            if port.direction == PortDirection::Input
+            // A port coerced to inout (IEEE 1364-2005 section 12.3.8) that
+            // is connected to no net has nothing outside to drive, so it
+            // takes its connection as the input it was declared.
+            let names_nets = matches!(
+                actual,
+                Expression::Identifier(_)
+                    | Expression::ArrayAccess(_)
+                    | Expression::ArrayLiteral(_)
+                    | Expression::Digital(crate::ast::DigitalExpr::PartSelect(_))
+            );
+            if (port.direction == PortDirection::Input || (port.coerced_from_input && !names_nets))
                 && lower.net_kind.is_some()
                 && !scope.contains_physical(actual)
                 && let Some(declared) = child

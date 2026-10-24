@@ -2629,18 +2629,29 @@ fn a_coerced_input_port_drives_its_connection_in_the_parent() {
          \x20   gate g1(z, x);\n     assign x = 1'b1;\n\
          endmodule\n"
     );
-    let plan = plan(&source, "top");
-    let x = plan
+    let linked = plan(&source, "top");
+    let x = linked
         .signals
         .iter()
         .find(|signal| signal.name == "x")
         .expect("the parent's net");
     assert!(
-        plan.signals.iter().all(|signal| signal.name != "g1.a"),
+        linked.signals.iter().all(|signal| signal.name != "g1.a"),
         "the coerced port collapsed onto `x`"
     );
     // `assign a = y;` inside the instance and `assign x = 1'b1;` beside it.
-    assert_eq!(plan.drivers_of(x.id).count(), 2);
+    assert_eq!(linked.drivers_of(x.id).count(), 2);
+
+    // Connected to a constant, the port has nothing outside to drive and
+    // takes the constant as the input it was declared.
+    let source = format!(
+        "{DRIVEN_INPUT}\n\
+         module top(z);\n\
+         \x20   output z;\n     wire z;\n\
+         \x20   gate g1(z, 1'b0);\n\
+         endmodule\n"
+    );
+    plan(&source, "top");
 }
 
 const BOUNDARY_CHILDREN: &str = "module dig(q);\n\
@@ -4932,7 +4943,10 @@ fn timing_check_operands_follow_section_15() {
             "$setuphold(posedge c, a, 1, 1, , , w);",
             "condition signal `w` is no discrete signal",
         ),
-        ("$setup(a, posedge c, 1, a);", "notifier `a` is not a `reg`"),
+        (
+            "$setup(a, posedge c, 1, a);",
+            "notifier `a` is not a variable of module `m`; IEEE 1364-2005 A.7.5.2",
+        ),
     ] {
         let error = analyze_error(&module(items));
         assert!(error.contains(expected), "{items}: {error}");
