@@ -104,7 +104,7 @@ impl ProjectSnapshot {
         }
     }
     #[cfg(test)]
-    pub(crate) fn schematic_editor(&self, key: &str) -> Option<SchematicEditorRef<'_>> {
+    pub fn schematic_editor(&self, key: &str) -> Option<SchematicEditorRef<'_>> {
         self.workspace_session
             .schematic_editor(&self.file.workspace, key)
     }
