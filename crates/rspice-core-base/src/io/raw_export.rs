@@ -261,14 +261,6 @@ impl RawVariable {
         }
     }
 
-    /// Create a frequency variable
-    pub fn frequency() -> Self {
-        Self {
-            name: "frequency".to_string(),
-            var_type: VariableType::Frequency,
-        }
-    }
-
     /// Create a voltage variable
     pub fn voltage(node: &str) -> Self {
         Self {
@@ -367,14 +359,6 @@ impl RawExporter {
         self.variables.push(RawVariable::current(element));
     }
 
-    /// Add a data point (all values for one time/frequency point)
-    /// First value should be time/frequency, rest are signal values
-    pub fn add_point(&mut self, values: Vec<Value>) {
-        if values.len() == self.variables.len() {
-            self.data.push(values);
-        }
-    }
-
     /// Add data from transient result
     pub fn add_transient_data(
         &mut self,
@@ -390,16 +374,6 @@ impl RawExporter {
             self.data.push(point);
         }
         Ok(())
-    }
-
-    /// Number of data points
-    pub fn num_points(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Number of variables
-    pub fn num_variables(&self) -> usize {
-        self.variables.len()
     }
 
     /// Write to any writer
@@ -614,24 +588,6 @@ fn chrono_date() -> String {
 // Convenience functions for engine integration
 //=============================================================================
 
-/// Write transient results to any writer.
-pub fn write_transient<W: Write + ?Sized>(
-    writer: &mut W,
-    times: &[Value],
-    node_names: &[String],
-    waveforms: &[Vec<Value>],
-    format: RawFormat,
-) -> io::Result<()> {
-    let mut exporter = RawExporter::new_transient("Transient Analysis");
-
-    for name in node_names {
-        exporter.add_voltage(name);
-    }
-
-    exporter.add_transient_data(times, waveforms)?;
-    exporter.write(writer, format)
-}
-
 /// Append event timelines to an open rawfile, one plot per node.
 ///
 /// The writer is called after an analysis plot's data block and leaves that
@@ -714,48 +670,6 @@ fn checked_event_node_name(name: &str) -> io::Result<()> {
         )));
     }
     Ok(())
-}
-
-/// Write DC sweep results to any writer.
-pub fn write_dc_sweep<W: Write + ?Sized>(
-    writer: &mut W,
-    sweep_values: &[Value],
-    sweep_name: &str,
-    node_names: &[String],
-    results: &[Vec<Value>],
-    format: RawFormat,
-) -> io::Result<()> {
-    let mut exporter = RawExporter {
-        title: "DC Sweep".to_string(),
-        plot_name: "DC transfer characteristic".to_string(),
-        variables: vec![RawVariable {
-            name: sweep_name.to_string(),
-            var_type: VariableType::Voltage,
-        }],
-        data: Vec::new(),
-        metadata: None,
-    };
-
-    for name in node_names {
-        exporter.add_voltage(name);
-    }
-
-    validate_series_lengths(
-        "sweep",
-        sweep_values.len(),
-        &exporter.variables[1..],
-        results,
-    )?;
-
-    for (i, &sweep_val) in sweep_values.iter().enumerate() {
-        let mut point = vec![sweep_val];
-        for result in results {
-            point.push(result[i]);
-        }
-        exporter.data.push(point);
-    }
-
-    exporter.write(writer, format)
 }
 
 //=============================================================================
@@ -976,44 +890,5 @@ mod export_tests {
         assert_eq!(parsed.waveforms[0].y, [0.0, 1.0]);
         assert_eq!(parsed.waveforms[1].y, [0.0, 1.0]);
         assert_eq!(parsed.waveforms[2].y, [-0.0, 1.0]);
-    }
-
-    #[test]
-    fn transient_export_rejects_waveform_length_mismatch() {
-        let mut out = Vec::new();
-        let err = write_transient(
-            &mut out,
-            &[0.0, 1.0, 2.0],
-            &["out".to_string()],
-            &[vec![0.0, 1.0]],
-            RawFormat::Ascii,
-        )
-        .expect_err("truncated transient waveform must not be zero-padded");
-
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(
-            err.to_string().contains("V(out)"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn dc_sweep_export_rejects_result_length_mismatch() {
-        let mut out = Vec::new();
-        let err = write_dc_sweep(
-            &mut out,
-            &[0.0, 1.0, 2.0],
-            "vin",
-            &["out".to_string()],
-            &[vec![0.0, 1.0]],
-            RawFormat::Ascii,
-        )
-        .expect_err("truncated DC sweep result must not be zero-padded");
-
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(
-            err.to_string().contains("V(out)"),
-            "unexpected error: {err}"
-        );
     }
 }
