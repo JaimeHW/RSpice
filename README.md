@@ -146,7 +146,7 @@ back to a generic two-terminal element or drops unsupported parameters.
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled multi-conductor (CPL) |
 | Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL-from-file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
-| Mixed-signal | Verilog-AMS digital and real-number (`wreal`) modules with automatic connect-module insertion; XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
+| Mixed-signal | Verilog-AMS digital and real-number (`wreal`) modules and SystemVerilog real nettypes, with automatic connect-module insertion; XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
 | Verilog-A | Generated compact models and externally compiled modules; see [below](#generated-verilog-a-devices) |
 
 Unlisted `M` levels fail closed rather than falling through to the simplified
@@ -368,7 +368,11 @@ The discrete half is the IEEE 1364-2005 digital subset: four-state (`0 1 x z`)
 logic, gate primitives, blocking and non-blocking assignment, vectors, module
 hierarchy, and clause 13 library maps and configurations, driven by an event
 wheel alongside the analog solve. Real-number modeling has `wreal` nets and the
-four resolved forms. Mixed-discipline boundaries at deck nodes follow LRM 2.4
+four resolved forms. SystemVerilog sources (IEEE 1800-2017: `.sv` and `.svh`
+files, or text inside `` `begin_keywords "1800-2017" ``) add packages, `import`
+and real nettypes (`nettype real`), whose nets take one driver each; a
+resolution function or an `interconnect` net is refused by name.
+Mixed-discipline boundaries at deck nodes follow LRM 2.4
 clause 7 (discipline resolution, `connect_mode` auto-insertion, `resolveto`
 with `exclude`, and `merged`/`split` segmentation), with the detail resolution
 mode of Annex F.2.2 refused by name rather than approximated. A boundary
