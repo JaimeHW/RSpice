@@ -30,7 +30,7 @@ browser-qualification = []
 
 [dependencies]
 # RSpice core simulation engine lives in the target sections below: native
-# builds keep the default fast paths (parallel + simd), wasm opts out.
+# builds keep the default fast paths (parallel), wasm opts out.
 rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
 
 # Design-management state authority and the signed drawing-sheet package
@@ -178,7 +178,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rspice-pack = { workspace = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
-# Default features keep the desktop solver's parallel/SIMD paths. The native
+# Default features keep the desktop solver's parallel paths. The native
 # Verilog-A JIT is selected on each qualified desktop architecture.
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
 
@@ -222,7 +222,7 @@ wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
 # zeroization without carrying that table in either browser image.
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 
-# No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen. The
+# No rayon on wasm; the "wasm" feature wires up wasm-bindgen. The
 # interactive image retains portable Verilog-A artifacts and validation, while
 # secondary-module emission and verification are owned exclusively by the
 # `rspice-worker` package. Keeping that ownership explicit prevents the

@@ -10,10 +10,10 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-# parallel + simd ship in the default set so the CLI, Python bindings,
+# parallel ships in the default set so the CLI, Python bindings,
 # and the default test configuration all exercise the fast paths;
 # rspice-wasm opts out via default-features = false.
-default = ["faer-parallel", "parallel", "simd"]
+default = ["faer-parallel", "parallel"]
 wasm = [
     "wasm-bindgen",
     "rspice-core-base/wasm",
@@ -436,7 +436,6 @@ veriloga-builtins = [
     "rspice-core-netlist/veriloga-builtins",
     "rspice-core-devices/veriloga-builtins",
 ]
-simd = ["rspice-core-base/simd", "rspice-core-netlist/simd", "rspice-core-devices/simd"]
 # Test helpers a crate built on this one compiles into its own unit tests.
 # Additive only: it adds hidden items and changes no behaviour.
 test-support = [

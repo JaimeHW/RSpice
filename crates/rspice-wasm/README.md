@@ -193,8 +193,8 @@ diagnostic errors keep their unresolved output symbols.
 ## Feature flags
 
 The crate declares none. It depends on `rspice-core` with
-`default-features = false`, which drops the `parallel`, `faer-parallel` and
-`simd` backends this target cannot use, and with the `wasm` feature, which
+`default-features = false`, which drops the `parallel` and `faer-parallel`
+backends this target cannot use, and with the `wasm` feature, which
 wires up `wasm-bindgen`. The build is single-threaded and enables no Verilog-A
 backend.
 

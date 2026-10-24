@@ -65,8 +65,8 @@ editor with completion and a parameter tuner).
   diagnostics records, property values and quantity policy) belong to
   `rspice-vocabulary`; this crate re-exports the ones its callers use.
 - Qualified desktop architectures take `rspice-core` with its default parallel
-  and SIMD solver paths plus the native Verilog-A JIT; every other target takes
-  the portable Verilog-A, and `wasm32` drops rayon and SIMD as well.
+  solver paths plus the native Verilog-A JIT; every other target takes the
+  portable Verilog-A, and `wasm32` drops rayon as well.
 
 ## Entry points
 

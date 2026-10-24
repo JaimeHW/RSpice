@@ -57,7 +57,7 @@
 //!
 //! ## Feature flags
 //!
-//! `parallel`, `simd`, and `faer-parallel` are on by default. `wasm` and the
+//! `parallel` and `faer-parallel` are on by default. `wasm` and the
 //! Verilog-A features are opt-in: `veriloga`, `veriloga-native`,
 //! `veriloga-wasm-jit`, and the generated built-ins (`veriloga-builtins-base`,
 //! one `veriloga-model-*` flag per model, `veriloga-builtins-noise`, and the
@@ -251,7 +251,6 @@ mod family_features_tests {
         let stated = crate::FAMILY_FEATURES;
         assert_eq!(stated, rspice_core_base::FAMILY_FEATURES);
         assert_eq!(stated.parallel, cfg!(feature = "parallel"));
-        assert_eq!(stated.simd, cfg!(feature = "simd"));
         assert_eq!(stated.veriloga, cfg!(feature = "veriloga"));
         assert_eq!(stated.veriloga_native, cfg!(feature = "veriloga-native"));
         assert_eq!(

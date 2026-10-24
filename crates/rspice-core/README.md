@@ -53,7 +53,6 @@ netlist text
 | `config`, `resource` | `SimulationConfig`, `ConvergenceConfig` and their selectors; `ResourceLimits` and the limit errors that govern untrusted and batch workloads |
 | `diagnostics`, `identity`, `op_label` | Structured warnings and convergence-quality metrics; stable analysis-instance and run-coordinate identities; the closed vocabulary of operating-point report labels |
 | `abort_signal`, `constants`, `time_compat` | Cooperative cancellation (`AbortSignal`, `AtomicAbort`, `NoAbort`); physical and simulation constants; a wall-clock shim that is a no-op on `wasm32` |
-| `simd` | `wide`-based vector, reduction and integration kernels (with the `simd` feature) |
 
 ## Device routing
 
@@ -218,9 +217,8 @@ shooting `.PSS` and takes none.
 | Flag | Effect |
 | :--- | :--- |
 | `parallel` | On by default. Rayon and `portable-atomic` for the parallel paths in `engine/`, `circuit/` and `device/` |
-| `simd` | On by default. `wide`: the `simd` module's kernels and a vectorized Newton update test |
 | `faer-parallel` | On by default. faer's Rayon-parallel factorization, forwarded to `rspice-matrix` and `rspice-veriloga-runtime` |
-| `wasm` | Adds `wasm-bindgen`. The browser builds enable it with `default-features = false`, which also drops Rayon and `wide` |
+| `wasm` | Adds `wasm-bindgen`. The browser builds enable it with `default-features = false`, which also drops Rayon |
 | `veriloga` | Runtime Verilog-AMS devices through `rspice-veriloga`'s bytecode interpreter: a deck's `.va`, `.veriloga`, `.vams`, `.hdl` or `.verilog` source compiles at elaboration. Native targets cache compiled models on disk under the platform cache directory, or `RSPICE_VERILOGA_CACHE_DIR` |
 | `veriloga-native` | Implies `veriloga`. RSpice's native JIT: a requested native device is fully JIT-compiled or refused with a typed construction error, never run on bytecode |
 | `veriloga-wasm-jit` | Implies `veriloga`. Browser JIT: the owning Web Worker compiles and instantiates the module, while this crate keeps the authenticated artifacts and the synchronous solver integration |

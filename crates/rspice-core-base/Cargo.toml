@@ -13,7 +13,7 @@ rust-version.workspace = true
 # can assert at compile time that the two agree; rspice-core forwards every
 # one of them here. A feature this crate does not read is an empty list.
 [features]
-default = ["faer-parallel", "parallel", "simd"]
+default = ["faer-parallel", "parallel"]
 wasm = []
 parallel = []
 faer-parallel = [
@@ -70,7 +70,6 @@ veriloga-model-vbic13-4t = []
 veriloga-model-vbic-4t-et-cf = []
 veriloga-builtins-models = []
 veriloga-builtins = []
-simd = ["dep:wide"]
 # Test helpers a crate built on this one compiles into its own unit tests.
 # Additive only: it adds hidden items and changes no behaviour.
 test-support = []
@@ -96,9 +95,6 @@ rspice-matrix.workspace = true
 rspice-veriloga-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-
-# SIMD acceleration (optional)
-wide = { version = "1.5", optional = true }
 
 [lints]
 workspace = true

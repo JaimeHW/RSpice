@@ -992,7 +992,7 @@ class CiConfigurationTests(unittest.TestCase):
         cannot be `--all-features`: `rspice-core/wasm` plus `veriloga-wasm-jit`
         describes a browser build and `veriloga-native` a host JIT, and no
         shipped binary enables both. Unification also forces `parallel`,
-        `simd`, `faer-parallel` and `veriloga` on for the whole workspace, so
+        `faer-parallel` and `veriloga` on for the whole workspace, so
         the `cfg(not(...))` arm of each is code no lane compiles.
 
         The matrix is the written-down answer to that, one row per

@@ -73,7 +73,6 @@ pub struct FamilyFeatures {
     pub veriloga_model_vbic_4t_et_cf: bool,
     pub veriloga_builtins_models: bool,
     pub veriloga_builtins: bool,
-    pub simd: bool,
 }
 
 /// States the calling crate's features at its root and fails the build when
@@ -159,7 +158,6 @@ macro_rules! family_features {
             veriloga_model_vbic_4t_et_cf "veriloga-model-vbic-4t-et-cf"
             veriloga_builtins_models "veriloga-builtins-models"
             veriloga_builtins "veriloga-builtins"
-            simd "simd"
         });
     };
 }
@@ -233,7 +231,6 @@ mod tests {
         assert_eq!(stated.wasm, cfg!(feature = "wasm"));
         assert_eq!(stated.parallel, cfg!(feature = "parallel"));
         assert_eq!(stated.faer_parallel, cfg!(feature = "faer-parallel"));
-        assert_eq!(stated.simd, cfg!(feature = "simd"));
         assert_eq!(stated.veriloga, cfg!(feature = "veriloga"));
         assert_eq!(stated.veriloga_native, cfg!(feature = "veriloga-native"));
         assert_eq!(
@@ -260,7 +257,7 @@ mod tests {
             stated.veriloga_builtins,
             cfg!(feature = "veriloga-builtins")
         );
-        // A default build has `parallel`, `faer-parallel` and `simd` and nothing
+        // A default build has `parallel` and `faer-parallel` and nothing
         // else, so no other flag, a model's included, may read true.
         if cfg!(all(
             feature = "default",
@@ -270,7 +267,7 @@ mod tests {
         )) {
             assert_eq!(
                 format!("{stated:?}").matches(": true").count(),
-                3,
+                2,
                 "{stated:?}"
             );
         }
