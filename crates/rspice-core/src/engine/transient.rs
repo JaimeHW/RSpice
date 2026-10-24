@@ -215,15 +215,7 @@ fn accepted_veriloga_event_time(
     // the run was snapped onto the corner past the timer instead.
     let analog_event = circuit
         .veriloga_transient_event_time(accepted_time)
-        .map_err(SimulationError::Circuit)?
-        .map(|event| {
-            next_breakpoint
-                .filter(|breakpoint| {
-                    crate::numerics::integration::coincides_before(event, *breakpoint, hard_min_dt)
-                })
-                .unwrap_or(event)
-        });
-    let mut target = analog_event;
+        .map_err(SimulationError::Circuit)?;
     // The two discrete lanes have the same exact landing contract as an analog
     // device's event target, and the fold above cannot see either: a shared
     // code model's events and a mixed module's digital queue belong to the
@@ -243,13 +235,47 @@ fn accepted_veriloga_event_time(
     // reachability filter and the coupling test now live: see
     // `circuit::ActivationLanes::landing`.
     let lanes = crate::circuit::ActivationLanes::landing(accepted_time, hard_min_dt);
-    if let Some(activation) = circuit.next_activation(lanes)? {
-        let event = activation.seconds();
-        target = Some(target.map_or(event, |target| target.min(event)));
-    }
-    let Some(target) = target else {
+    let activation = circuit
+        .next_activation(lanes)?
+        .map(crate::circuit::Activation::seconds);
+    let Some(earliest) = analog_event
+        .into_iter()
+        .chain(activation)
+        .reduce(Value::min)
+    else {
         return Ok((None, false));
     };
+    // One instant, one landing. The analog event, the discrete activation and
+    // the next breakpoint are folded by the rule the physical clocks are
+    // ([`latest_coincident_instant`]): starting from the earliest, the landing
+    // is carried onto every later one less than one floor after it, and the
+    // step lands on the latest of the run. A coupled code-model event keyed on
+    // a tick image a few ulps before a PULSE corner is the corner's instant;
+    // landed on the image, the corner was left a sliver behind it, and landed
+    // on the corner, an HDL wake read off it was a tick late. Either way one
+    // instant took two accepted points, and the later one re-evaluated what
+    // the first had caused.
+    //
+    // The other order — a breakpoint less than one floor *before* a discrete
+    // activation — cannot be folded here, because the landing is never moved
+    // before an event. The step cut at that breakpoint is carried on to the
+    // activation instead, where the breakpoint is solved with it (see the
+    // step's `breakpoint_before_activation`). An analog event keeps the one
+    // direction it always had, so a run without discrete lanes lands where it
+    // did.
+    let members = [analog_event, activation, next_breakpoint];
+    let target = latest_coincident_instant(
+        earliest,
+        hard_min_dt,
+        |_| false,
+        |after| {
+            Ok(members
+                .into_iter()
+                .flatten()
+                .filter(|member| *member > after)
+                .reduce(Value::min))
+        },
+    )?;
     Ok((
         Some(landed_veriloga_event_time(
             floor_grid,
@@ -258,8 +284,38 @@ fn accepted_veriloga_event_time(
             hard_min_dt,
             stop_time,
         )?),
-        analog_event == Some(target),
+        analog_event.is_some_and(|event| event <= target),
     ))
+}
+
+/// The latest of a run of instants each less than one floor after the one
+/// before it, starting from `earliest`.
+///
+/// Such a run has no analog instant between its members — the solver cannot
+/// take an interval shorter than its floor — so it is one instant computed
+/// several ways ([`crate::numerics::integration::coincides_before`]), and the
+/// landing that serves all of them is the latest: at or after every one, which
+/// is all any of them is owed. `next_after` yields the earliest candidate
+/// strictly after its argument; `stays` ends the run at a member that may not
+/// be carried past.
+fn latest_coincident_instant(
+    earliest: Value,
+    hard_min_dt: Value,
+    mut stays: impl FnMut(Value) -> bool,
+    mut next_after: impl FnMut(Value) -> Result<Option<Value>, SimulationError>,
+) -> Result<Value, SimulationError> {
+    let mut landing = earliest;
+    while !stays(landing) {
+        match next_after(landing)? {
+            Some(next)
+                if crate::numerics::integration::coincides_before(landing, next, hard_min_dt) =>
+            {
+                landing = next;
+            }
+            _ => break,
+        }
+    }
+    Ok(landing)
 }
 
 /// One run of consecutive landings on the solver's floor.
@@ -297,7 +353,9 @@ struct FloorLandingGrid {
 /// # Contract
 ///
 /// The event's own scheduler owns its exact time and its ordering; the analog
-/// solver owes it only a timepoint at or after that instant. An event whose
+/// solver owes it only a timepoint at or after that instant, where instants
+/// less than one floor apart are one instant and the timepoint is the latest of
+/// them ([`latest_coincident_instant`]). An event whose
 /// interval from the accepted time is shorter than the solver's hard minimum
 /// step — a `` `timescale 1ps/1fs `` clock, a sub-picosecond `#delay` chained
 /// onto an A/D crossing, an activation inside the breakpoint tolerance of one
@@ -509,21 +567,17 @@ fn physical_event_landing(
     stop_time: Value,
     mut next_after: impl FnMut(Value) -> Result<Option<Value>, SimulationError>,
 ) -> Result<Value, SimulationError> {
-    let mut landing = earliest;
-    while phase_arrival != Some(landing) {
-        let next = next_after(landing)?
-            .into_iter()
-            .chain(phase_arrival.filter(|arrival| *arrival > landing))
-            .reduce(Value::min);
-        match next {
-            Some(next)
-                if crate::numerics::integration::coincides_before(landing, next, hard_min_dt) =>
-            {
-                landing = next;
-            }
-            _ => break,
-        }
-    }
+    let landing = latest_coincident_instant(
+        earliest,
+        hard_min_dt,
+        |landing| phase_arrival == Some(landing),
+        |after| {
+            Ok(next_after(after)?
+                .into_iter()
+                .chain(phase_arrival.filter(|arrival| *arrival > after))
+                .reduce(Value::min))
+        },
+    )?;
     if phase_arrival == Some(landing) {
         return Ok(landing);
     }
@@ -7893,11 +7947,35 @@ impl Engine {
                     && target - t <= timestep.dt()
                     && breakpoints.next_after(t).is_none_or(|next| target < next)
             };
+            // A breakpoint less than one floor before a discrete activation is
+            // the activation's instant computed another way: a PULSE corner a
+            // few ulps short of the tick image a coupled code-model event is
+            // keyed on. `accepted_veriloga_event_time` lands such a run on its
+            // latest member, so a step cut at the breakpoint is carried on to
+            // the activation and the breakpoint is solved there with it.
+            // Stopping on the breakpoint left the activation a sliver no step
+            // could cross, landed one floor late. An analog model's event keeps
+            // the landing it always had.
+            let breakpoint_before_activation = |target: Value| {
+                locked_grid.is_none()
+                    && !pending_analog_model_event
+                    && pending_veriloga_event_time == Some(target)
+                    && breakpoints.next_after(t).is_some_and(|breakpoint| {
+                        breakpoint - t <= dt
+                            && crate::numerics::integration::coincides_before(
+                                breakpoint,
+                                target,
+                                timestep.hard_min_dt(),
+                            )
+                    })
+            };
             let mut exact_device_event_time = None;
             if let Some(target) = pending_exact_event_time
                 && target > t
                 && target <= tstop
-                && (target - t <= dt || device_event_within_proposal(target))
+                && (target - t <= dt
+                    || device_event_within_proposal(target)
+                    || breakpoint_before_activation(target))
             {
                 dt = target - t;
                 exact_device_event_time = Some(target);
@@ -8010,12 +8088,19 @@ impl Engine {
                 }
             }
             if locked_grid.is_none() && (model_min_dt > 0.0 || phase_arrival.is_some()) {
-                let target = breakpoints
-                    .next_after(t)
-                    .into_iter()
-                    .chain(pending_exact_event_time)
-                    .filter(|target| *target > t)
-                    .fold(tstop, Value::min);
+                // A step already landing on an event is fitted to it. Only a
+                // step carried past a breakpoint onto the activation it
+                // coincides with (`breakpoint_before_activation`) has a
+                // breakpoint before its event, and fitted to that breakpoint
+                // it stopped there, a floor short of the activation again.
+                let target = exact_device_event_time.unwrap_or_else(|| {
+                    breakpoints
+                        .next_after(t)
+                        .into_iter()
+                        .chain(pending_exact_event_time)
+                        .filter(|target| *target > t)
+                        .fold(tstop, Value::min)
+                });
                 let candidate_maximum = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
