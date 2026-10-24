@@ -8,7 +8,7 @@ mod tests;
 
 impl Model {
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn retain_annotation_history_after_save_descriptor(
+    pub fn retain_annotation_history_after_save_descriptor(
         &mut self,
         published: &crate::state::ProjectDescriptor,
     ) {
@@ -72,7 +72,7 @@ impl Model {
         }
     }
 
-    pub(crate) fn prepare_design_management_schematic_transaction(
+    pub fn prepare_design_management_schematic_transaction(
         &self,
         candidate: &DesignManagementCatalog,
     ) -> Result<SchematicReferenceTransaction, String> {
@@ -135,7 +135,7 @@ impl Model {
         self.prepare_schematic_reference_transaction(before, after)
     }
 
-    pub(crate) fn apply_design_management_schematic_transaction(
+    pub fn apply_design_management_schematic_transaction(
         &mut self,
         transaction: &SchematicReferenceTransaction,
     ) {

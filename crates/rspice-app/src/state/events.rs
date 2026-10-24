@@ -14,7 +14,7 @@ use super::{ActiveViewer, SpecializedViewerCacheProvenance};
 
 /// One thing the run tier reports to the viewers that show its results.
 #[derive(Debug)]
-pub(crate) enum RunEvent {
+pub enum RunEvent {
     /// A transient result replaced the one the FFT and eye viewers were
     /// derived from, or left them nothing to derive from.
     TransientResultReplaced,
@@ -65,6 +65,6 @@ pub(crate) enum RunEvent {
 
 /// Where the run tier reports. The implementor applies each event before
 /// returning.
-pub(crate) trait RunEventSink {
+pub trait RunEventSink {
     fn apply_run_event(&mut self, event: RunEvent);
 }

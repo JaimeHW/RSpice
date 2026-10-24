@@ -2,10 +2,10 @@
 
 use super::*;
 
-pub(crate) struct SchematicReferenceTransaction {
-    pub(crate) before: BTreeMap<String, SchematicState>,
-    pub(crate) after: BTreeMap<String, SchematicState>,
-    pub(crate) references: ReferenceChanges,
+pub struct SchematicReferenceTransaction {
+    pub before: BTreeMap<String, SchematicState>,
+    pub after: BTreeMap<String, SchematicState>,
+    pub references: ReferenceChanges,
     pub(crate) prepared_references: PreparedReferences,
 }
 

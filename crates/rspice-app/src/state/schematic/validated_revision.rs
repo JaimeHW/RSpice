@@ -60,13 +60,13 @@ impl SchematicState {
 }
 
 impl super::SchematicEditorRef<'_> {
-    pub(crate) fn copy_without_validated_revisions(&self) -> SchematicState {
+    pub fn copy_without_validated_revisions(&self) -> SchematicState {
         self.with_design(self.design.copy_without_validated_revisions())
     }
 }
 
 impl SchematicState {
-    pub(crate) fn record_validated_save_revision(
+    pub fn record_validated_save_revision(
         &mut self,
         request: ValidatedRevisionRequest,
         original_journal: ValidatedRevisionJournal,
@@ -96,7 +96,7 @@ impl SchematicState {
         }
     }
 
-    pub(crate) fn rollback_validated_save_journal(
+    pub fn rollback_validated_save_journal(
         &mut self,
         original_journal: &ValidatedRevisionJournal,
         expected_journal: &ValidatedRevisionJournal,

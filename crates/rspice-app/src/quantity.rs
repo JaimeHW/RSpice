@@ -4,12 +4,12 @@
 //! authored-deck parsing, and result-import units stay with their consumers.
 
 mod locale;
-pub(crate) use rspice_simulation_contract::spice_value;
+pub use rspice_simulation_contract::spice_value;
 
 pub use locale::platform_number_locale;
 #[cfg(test)]
 pub use rspice_vocabulary::quantity::AngleDisplay;
-pub(crate) use rspice_vocabulary::quantity::engineering;
+pub use rspice_vocabulary::quantity::engineering;
 pub use rspice_vocabulary::quantity::{
     EngineeringPrecision, LayoutDatabaseUnit, QuantityInputKind, QuantityPresentationPolicy,
     UiNumberLocale, UnitsPreferences, format_elapsed, format_engineering_value,
@@ -19,7 +19,7 @@ pub use rspice_vocabulary::quantity::{
 /// A temperature stated in degrees Celsius, as a number in the unit
 /// Temperature display chose: whole values stay whole, at most two decimals,
 /// and a negative value takes a true minus sign.
-pub(crate) fn temperature_number(celsius: f64, policy: QuantityPresentationPolicy) -> String {
+pub fn temperature_number(celsius: f64, policy: QuantityPresentationPolicy) -> String {
     let (scale, offset, _) = policy.celsius_display_transform();
     let text = format!("{:.2}", celsius * scale + offset);
     let text = text.trim_end_matches('0').trim_end_matches('.');
@@ -31,15 +31,12 @@ pub(crate) fn temperature_number(celsius: f64, policy: QuantityPresentationPolic
 }
 
 /// A Celsius temperature with its display unit: `27 °C`, `300.15 K`.
-pub(crate) fn temperature_label(celsius: f64, policy: QuantityPresentationPolicy) -> String {
+pub fn temperature_label(celsius: f64, policy: QuantityPresentationPolicy) -> String {
     temperature_list_label(&[celsius], policy)
 }
 
 /// Celsius temperatures as one list in the display unit: `−40, 27, 125 °C`.
-pub(crate) fn temperature_list_label(
-    celsius: &[f64],
-    policy: QuantityPresentationPolicy,
-) -> String {
+pub fn temperature_list_label(celsius: &[f64], policy: QuantityPresentationPolicy) -> String {
     let numbers = celsius
         .iter()
         .map(|value| temperature_number(*value, policy))

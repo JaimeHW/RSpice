@@ -21,9 +21,9 @@ const MAX_PERSONAL_PRESETS: usize = crate::state::MAX_DRAWING_SHEET_PROJECT_PRES
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(default, deny_unknown_fields)]
-pub(crate) struct DrawingSheetPersonalPreferences {
-    pub(crate) default_format: SchematicSheetFormat,
-    pub(crate) presets: Vec<DrawingSheetPreset>,
+pub struct DrawingSheetPersonalPreferences {
+    pub default_format: SchematicSheetFormat,
+    pub presets: Vec<DrawingSheetPreset>,
 }
 
 #[derive(Deserialize)]
@@ -125,7 +125,7 @@ impl DrawingSheetPersonalPreferences {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.default_format.inheritance != DrawingSheetInheritance::UserDefault {
             return Err(
                 "The personal drawing-sheet default must retain personal-default ownership."
@@ -186,7 +186,7 @@ impl DrawingSheetPersonalPreferences {
         Ok(())
     }
 
-    pub(crate) fn find_preset(&self, id: &str) -> Option<&DrawingSheetPreset> {
+    pub fn find_preset(&self, id: &str) -> Option<&DrawingSheetPreset> {
         self.presets
             .iter()
             .find(|preset| preset.id.eq_ignore_ascii_case(id))
@@ -197,7 +197,7 @@ impl UserPreferences {
     /// Typed personal sheet preferences. An incompatible future payload stays
     /// retained in the preference map while this build resolves safe defaults.
     #[must_use]
-    pub(crate) fn drawing_sheet_personal_preferences(&self) -> DrawingSheetPersonalPreferences {
+    pub fn drawing_sheet_personal_preferences(&self) -> DrawingSheetPersonalPreferences {
         self.unknown_domains
             .get(STORAGE_KEY)
             .cloned()
@@ -207,7 +207,7 @@ impl UserPreferences {
     }
 
     /// Atomically replace the personal drawing-sheet preference domain.
-    pub(crate) fn set_drawing_sheet_personal_preferences(
+    pub fn set_drawing_sheet_personal_preferences(
         &mut self,
         mut settings: DrawingSheetPersonalPreferences,
     ) -> Result<(), String> {

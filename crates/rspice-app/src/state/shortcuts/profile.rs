@@ -619,10 +619,7 @@ fn shared_platform(
         .find(|platform| left.supports(*platform) && right.supports(*platform))
 }
 
-pub(crate) const fn shortcut_contexts_overlap(
-    left: ShortcutContext,
-    right: ShortcutContext,
-) -> bool {
+pub const fn shortcut_contexts_overlap(left: ShortcutContext, right: ShortcutContext) -> bool {
     context_workspace_mask(left) & context_workspace_mask(right) != 0
         && context_view_mask(left) & context_view_mask(right) != 0
 }

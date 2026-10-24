@@ -27,7 +27,7 @@ pub struct DiagnosticFix {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Diagnostic {
     #[serde(flatten)]
-    pub(crate) canonical: rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata,
+    pub canonical: rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata,
     pub severity: DiagnosticSeverity,
     /// Physical source that owns this diagnostic. `None` identifies the
     /// in-memory editor buffer. Included-source diagnostics retain their path
@@ -120,7 +120,7 @@ impl Diagnostic {
         self
     }
 
-    pub(crate) fn bind_validation(&mut self, revision: u64, validation_id: &str) {
+    pub fn bind_validation(&mut self, revision: u64, validation_id: &str) {
         self.canonical.revision = revision;
         self.canonical.validation_id = validation_id.into();
         self.refresh_canonical_location();
@@ -130,7 +130,7 @@ impl Diagnostic {
         self.canonical.is_current()
     }
 
-    pub(crate) fn refresh_canonical_location(&mut self) {
+    pub fn refresh_canonical_location(&mut self) {
         let document_id = self.source_path.as_deref().map_or_else(
             || "netlist-editor".to_owned(),
             |path| path.to_string_lossy().into_owned(),

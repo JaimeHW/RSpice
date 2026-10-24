@@ -40,7 +40,7 @@ pub struct SimSetupEditorSession {
 /// Workbench setup: portable simulation state plus transient editor state.
 #[derive(Debug, Clone, Default)]
 pub struct SimSetupState {
-    pub(crate) setup: rspice_simulation_contract::setup_state::SimulationSetup,
+    pub setup: rspice_simulation_contract::setup_state::SimulationSetup,
     pub session: SimSetupEditorSession,
 }
 
@@ -102,7 +102,7 @@ impl SimSetupState {
 
     /// The solver options of the user's default preset, which every new plan
     /// starts from unless it copies another plan's.
-    pub(crate) fn preferred_solver_options(
+    pub fn preferred_solver_options(
         preferences: &crate::workbench::preferences::UserPreferences,
     ) -> rspice_simulation_contract::options::SimulationOptions {
         use rspice_simulation_contract::options::SimulationOptions;
@@ -117,7 +117,7 @@ impl SimSetupState {
     }
 
     /// Rebuild portable setup state and the current editor session after load.
-    pub(crate) fn prepare_after_restore(&mut self) {
+    pub fn prepare_after_restore(&mut self) {
         self.setup.prepare_after_restore();
         self.session.options_draft =
             crate::simulation::plan::OptionsDialogState::from_options(&self.options);

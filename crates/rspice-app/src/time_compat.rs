@@ -11,7 +11,7 @@ pub use web_time::Instant;
 
 /// Read wall time without trapping or accepting an invalid browser timestamp.
 /// Evidence producers can propagate the failure instead of fabricating a date.
-pub(crate) fn checked_unix_epoch() -> Result<std::time::Duration, &'static str> {
+pub fn checked_unix_epoch() -> Result<std::time::Duration, &'static str> {
     #[cfg(test)]
     if let Some(epoch) = tests::TEST_EPOCH.with(std::cell::Cell::get) {
         return epoch;
@@ -47,7 +47,7 @@ pub(crate) fn checked_unix_epoch() -> Result<std::time::Duration, &'static str> 
 /// there is no timestamp at all is the caller's question, not this one's: a
 /// recovery list says `an earlier session`, an evidence row says
 /// `time unavailable`, and a navigator row says nothing.
-pub(crate) fn relative_age(elapsed: std::time::Duration) -> String {
+pub fn relative_age(elapsed: std::time::Duration) -> String {
     match elapsed.as_secs() {
         0..=59 => "just now".to_owned(),
         seconds @ 60..=3_599 => format!("{} min ago", seconds / 60),
@@ -59,7 +59,7 @@ pub(crate) fn relative_age(elapsed: std::time::Duration) -> String {
 
 /// A nonzero millisecond timestamp for durable evidence. Zero is reserved for
 /// unknown historical time; a failed clock must not create a new dated record.
-pub(crate) fn checked_unix_time_ms() -> Result<u64, &'static str> {
+pub fn checked_unix_time_ms() -> Result<u64, &'static str> {
     let milliseconds = checked_unix_epoch()?.as_millis();
     let milliseconds = u64::try_from(milliseconds)
         .map_err(|_| "system clock timestamp exceeds the supported range")?;
@@ -71,7 +71,7 @@ pub(crate) fn checked_unix_time_ms() -> Result<u64, &'static str> {
 }
 
 /// Wall time for callers whose existing contract uses the epoch on failure.
-pub(crate) fn unix_epoch() -> std::time::Duration {
+pub fn unix_epoch() -> std::time::Duration {
     checked_unix_epoch().unwrap_or_default()
 }
 
@@ -87,7 +87,7 @@ pub(crate) fn unix_epoch() -> std::time::Duration {
 /// Zero is the reserved "unknown historical time" of
 /// [`checked_unix_time_ms`], and a timestamp the calendar cannot place is the
 /// same absence, so both say so rather than printing 1970.
-pub(crate) fn utc_stamp(unix_ms: u64) -> String {
+pub fn utc_stamp(unix_ms: u64) -> String {
     const UNKNOWN: &str = "at an unknown time";
     if unix_ms == 0 {
         return UNKNOWN.to_owned();
@@ -113,7 +113,7 @@ pub(crate) fn utc_stamp(unix_ms: u64) -> String {
 /// For what the reader saw happen in this session and wants to place against
 /// the clock on the wall: a log line, a run's start. `None` for a timestamp the
 /// calendar cannot place.
-pub(crate) fn local_date_time(unix_ms: u64) -> Option<time::OffsetDateTime> {
+pub fn local_date_time(unix_ms: u64) -> Option<time::OffsetDateTime> {
     let utc =
         time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_ms) * 1_000_000).ok()?;
     let offset = time::UtcOffset::from_whole_seconds(local_offset_seconds(utc.unix_timestamp()))

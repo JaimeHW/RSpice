@@ -11,7 +11,7 @@ mod profile;
 mod types;
 
 pub use library::{ShortcutProfileLibrary, ShortcutProfileLibraryError};
-pub(crate) use profile::shortcut_contexts_overlap;
+pub use profile::shortcut_contexts_overlap;
 pub use profile::{
     ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
     ShortcutProfileIssueSeverity, shortcut_context_precedence_rank,

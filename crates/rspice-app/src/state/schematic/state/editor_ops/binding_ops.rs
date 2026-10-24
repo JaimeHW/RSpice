@@ -3,20 +3,15 @@
 use crate::state::{LibraryCellInstance, SchematicState};
 
 impl SchematicState {
-    pub(crate) fn rename_library_bindings(&mut self, library: &str, new_name: &str) -> usize {
+    pub fn rename_library_bindings(&mut self, library: &str, new_name: &str) -> usize {
         self.design.rename_library_bindings(library, new_name)
     }
 
-    pub(crate) fn rename_cell_bindings(
-        &mut self,
-        library: &str,
-        cell: &str,
-        new_name: &str,
-    ) -> usize {
+    pub fn rename_cell_bindings(&mut self, library: &str, cell: &str, new_name: &str) -> usize {
         self.design.rename_cell_bindings(library, cell, new_name)
     }
 
-    pub(crate) fn rename_view_bindings(
+    pub fn rename_view_bindings(
         &mut self,
         library: &str,
         cell: &str,
@@ -37,12 +32,7 @@ impl SchematicState {
 }
 
 impl SchematicState {
-    pub(crate) fn remove_master_placements(
-        &mut self,
-        library: &str,
-        cell: &str,
-        view: Option<&str>,
-    ) {
+    pub fn remove_master_placements(&mut self, library: &str, cell: &str, view: Option<&str>) {
         let repaired = self.design.remove_master_placements(library, cell, view);
         self.remove_stale_runtime_references(&repaired);
         self.session.is_dirty = true;

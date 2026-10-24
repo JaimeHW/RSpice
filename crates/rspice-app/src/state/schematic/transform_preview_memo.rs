@@ -20,17 +20,17 @@ use rspice_schematic_editor::view::preview::TransformCandidateDiff;
 /// the sheet whose objects it may reach. Shared by every memo that holds
 /// something derived from the open drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DrawingInputs {
-    pub(crate) topology_version: u64,
-    pub(crate) content_version: u64,
-    pub(crate) symbol_revision: u64,
-    pub(crate) active_sheet: Option<SheetId>,
-    pub(crate) sheet_catalog_revision: Option<u64>,
+pub struct DrawingInputs {
+    pub topology_version: u64,
+    pub content_version: u64,
+    pub symbol_revision: u64,
+    pub active_sheet: Option<SheetId>,
+    pub sheet_catalog_revision: Option<u64>,
 }
 
 /// Everything one transform preview was computed from.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum TransformPreviewKey {
+pub enum TransformPreviewKey {
     Move {
         delta: Point,
         mode: MoveSelectionMode,
@@ -48,7 +48,7 @@ pub(crate) enum TransformPreviewKey {
 
 /// What the preview found: the changes to paint, `None` when the transform
 /// would change nothing, or why it is refused.
-pub(crate) type TransformPreviewOutcome = Result<Option<Arc<TransformCandidateDiff>>, String>;
+pub type TransformPreviewOutcome = Result<Option<Arc<TransformCandidateDiff>>, String>;
 
 #[derive(Clone, Default)]
 pub struct TransformPreviewMemo {
@@ -66,14 +66,14 @@ impl std::fmt::Debug for TransformPreviewMemo {
 
 impl TransformPreviewMemo {
     /// The outcome computed from exactly `key`, if it is held.
-    pub(crate) fn current(&self, key: &TransformPreviewKey) -> Option<TransformPreviewOutcome> {
+    pub fn current(&self, key: &TransformPreviewKey) -> Option<TransformPreviewOutcome> {
         self.entry
             .as_ref()
             .filter(|(held, _)| held == key)
             .map(|(_, outcome)| outcome.clone())
     }
 
-    pub(crate) fn store(&mut self, key: TransformPreviewKey, outcome: TransformPreviewOutcome) {
+    pub fn store(&mut self, key: TransformPreviewKey, outcome: TransformPreviewOutcome) {
         self.entry = Some((key, outcome));
     }
 }

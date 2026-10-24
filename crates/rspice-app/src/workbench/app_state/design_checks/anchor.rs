@@ -15,7 +15,7 @@ use crate::workbench::app_state::model::Model;
 
 /// The drawing in front of the reader, from the model and the review markers
 /// it shows.
-pub(crate) fn model_design_view(
+pub fn model_design_view(
     model: &Model,
     review_markers: SchematicReviewMarkerVisibility,
 ) -> DesignView<'_> {
@@ -36,7 +36,7 @@ pub(crate) fn model_design_view(
 ///
 /// The drawing in front of the reader is asked through its live editor, and
 /// any other cell view through the working copy the workspace holds for it.
-pub(crate) fn model_location_anchor(
+pub fn model_location_anchor(
     model: &Model,
     review_markers: SchematicReviewMarkerVisibility,
     cell_view: &CellViewRef,

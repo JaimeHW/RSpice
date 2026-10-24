@@ -27,15 +27,15 @@ use crate::workbench::app_state::model::{Model, SlotFacts};
 
 /// What the list is assembled from: the model, the source editors'
 /// findings, and the facts of the features' state the digests read.
-pub(in crate::workbench) struct ListingInputs<'a> {
-    pub(in crate::workbench) model: &'a Model,
-    pub(in crate::workbench) sources: SourceCollections<'a>,
-    pub(in crate::workbench) facts: SlotFacts,
+pub struct ListingInputs<'a> {
+    pub model: &'a Model,
+    pub sources: SourceCollections<'a>,
+    pub facts: SlotFacts,
 }
 
 /// A holder of everything the list is assembled from: the application state,
 /// so a reader holding it asks for the list with it.
-pub(in crate::workbench) trait ListingSource {
+pub trait ListingSource {
     fn listing_inputs(&self) -> ListingInputs<'_>;
 }
 
@@ -46,7 +46,7 @@ pub(in crate::workbench) trait ListingSource {
 /// drawing had moved under it, or whether the checks had failed to run at
 /// all. Each is a different thing to do next, so each says which.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum RowStanding {
+pub enum RowStanding {
     Current,
     /// The inputs this finding was derived from have moved. The words say
     /// which, in the terms the producer measured them in, as one full clause
@@ -63,69 +63,66 @@ impl RowStanding {
 }
 
 /// One row, assembled when it is drawn.
-pub(in crate::workbench) struct DiagnosticRow<'a> {
+pub struct DiagnosticRow<'a> {
     /// The canonical identity its producer minted for it: what a selection,
     /// a quick fix and the canvas tour all name it by.
-    pub(in crate::workbench) id: uuid::Uuid,
+    pub id: uuid::Uuid,
     /// The rule this finding is an instance of, which is how a reader names
     /// it when they go looking for why it fired.
-    pub(in crate::workbench) code: &'a str,
+    pub code: &'a str,
     /// Who reported it, by the producer identity the record carries. Stated
     /// in full: a truncated identity is one a reader cannot check.
-    pub(in crate::workbench) producer: &'a str,
-    pub(in crate::workbench) level: DiagnosticLevel,
+    pub producer: &'a str,
+    pub level: DiagnosticLevel,
     /// Whether this finding describes the design as it stands, and what moved
     /// where it does not.
-    pub(in crate::workbench) standing: RowStanding,
+    pub standing: RowStanding,
     /// What the finding is about: the object a rule named, or the document a
     /// parser or compiler was reading.
-    pub(in crate::workbench) subject: String,
+    pub subject: String,
     /// Where that thing is — the cell view it is drawn in, or the position in
     /// the document the producer was reading. Empty where a finding is about
     /// the project rather than about a place in it.
-    pub(in crate::workbench) location: String,
-    pub(in crate::workbench) message: &'a str,
+    pub location: String,
+    pub message: &'a str,
     /// What else the reader needs, for the row's hover.
-    pub(in crate::workbench) details: &'a str,
+    pub details: &'a str,
     /// What the rule requires, in its own words. Empty where the producer has
     /// no rule prose to state.
-    pub(in crate::workbench) rule: &'a str,
+    pub rule: &'a str,
     /// The other places this finding names.
-    pub(in crate::workbench) related: &'a [DiagnosticRelatedLocation],
+    pub related: &'a [DiagnosticRelatedLocation],
     /// The other drawn objects this finding involves. Each one's route is
     /// offered only through [`Self::place_route`], which withholds it from a
     /// finding that is not current, as [`Self::route`] is withheld.
-    pub(in crate::workbench) related_places: &'a [super::RelatedPlace],
+    pub related_places: &'a [super::RelatedPlace],
     /// The line of a run's log that states this finding, where one does.
-    pub(in crate::workbench) log_place: Option<super::RunLogPlace>,
+    pub log_place: Option<super::RunLogPlace>,
     /// The edits the producer offered, where it offered any.
-    pub(in crate::workbench) quick_fixes: &'a [CanonicalQuickFix],
+    pub quick_fixes: &'a [CanonicalQuickFix],
     /// The waiver that covers it, with the scope and justification the rule
     /// deck recorded. A waived finding is still listed; it just stops
     /// counting against the design.
-    pub(in crate::workbench) suppression: Option<&'a DiagnosticSuppression>,
+    pub suppression: Option<&'a DiagnosticSuppression>,
     /// Where it is repaired, when it names somewhere.
-    pub(in crate::workbench) route: Option<DiagnosticRoute>,
+    pub route: Option<DiagnosticRoute>,
     /// What the reader may do about its waiver, where anything.
-    pub(in crate::workbench) waiver_action: Option<&'a super::super::waivers::WaiverAction>,
+    pub waiver_action: Option<&'a super::super::waivers::WaiverAction>,
 }
 
 impl DiagnosticRow<'_> {
-    pub(in crate::workbench) const fn current(&self) -> bool {
+    pub const fn current(&self) -> bool {
         self.standing.is_current()
     }
 
-    pub(in crate::workbench) const fn waived(&self) -> bool {
+    pub const fn waived(&self) -> bool {
         self.suppression.is_some()
     }
 
     /// Where following one of its related places goes, where anywhere. A
     /// place read off a stale finding may name an object the drawing has
     /// since lost, so it is stated and not offered.
-    pub(in crate::workbench) fn place_route(
-        &self,
-        place: &super::RelatedPlace,
-    ) -> Option<DiagnosticRoute> {
+    pub fn place_route(&self, place: &super::RelatedPlace) -> Option<DiagnosticRoute> {
         self.current().then(|| place.route.clone()).flatten()
     }
 }
@@ -138,13 +135,13 @@ impl DiagnosticRow<'_> {
 /// matching the subject means spelling it — so that, and only that, builds
 /// rows.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::workbench) struct RowFacet<'a> {
-    pub(in crate::workbench) id: uuid::Uuid,
-    pub(in crate::workbench) code: &'a str,
-    pub(in crate::workbench) producer: &'a str,
-    pub(in crate::workbench) level: DiagnosticLevel,
-    pub(in crate::workbench) current: bool,
-    pub(in crate::workbench) waived: bool,
+pub struct RowFacet<'a> {
+    pub id: uuid::Uuid,
+    pub code: &'a str,
+    pub producer: &'a str,
+    pub level: DiagnosticLevel,
+    pub current: bool,
+    pub waived: bool,
 }
 
 /// Why the list has nothing in it, which is never one answer.
@@ -152,7 +149,7 @@ pub(in crate::workbench) struct RowFacet<'a> {
 /// "Nothing is wrong" and "nobody has looked" are different claims, and a
 /// tool that prints the first when it means the second is lying.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum EmptyReason {
+pub enum EmptyReason {
     /// No project is open, so there is no design to have conditions about.
     NoProject,
     /// Nothing has produced evidence for this design yet.
@@ -270,18 +267,18 @@ fn netlist_standing(
 /// finding counts as an error or an advisory unless a waiver covers it, and
 /// a finding that is not current counts as what it is instead.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(in crate::workbench) struct DiagnosticCounts {
-    pub(in crate::workbench) errors: usize,
-    pub(in crate::workbench) advisories: usize,
+pub struct DiagnosticCounts {
+    pub errors: usize,
+    pub advisories: usize,
     /// The advisories that are warnings, rather than notes or hints.
-    pub(in crate::workbench) warnings: usize,
+    pub warnings: usize,
     /// Findings about a design that has since been edited. Counted on their
     /// own: a stale finding is neither an error nor an advisory about the
     /// design in front of the reader.
-    pub(in crate::workbench) stale: usize,
+    pub stale: usize,
     /// Findings whose inputs cannot be read at all, so whether they still
     /// stand cannot be said. Not stale: nothing is known to have moved.
-    pub(in crate::workbench) unavailable: usize,
+    pub unavailable: usize,
 }
 
 impl DiagnosticCounts {
@@ -323,20 +320,20 @@ impl Tally {
     }
 }
 
-pub(in crate::workbench) struct DiagnosticListing<'a> {
+pub struct DiagnosticListing<'a> {
     segments: Vec<Segment<'a>>,
     counts: DiagnosticCounts,
     empty_reason: EmptyReason,
 }
 
 impl<'a> DiagnosticListing<'a> {
-    pub(in crate::workbench) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.segments.iter().map(Segment::len).sum()
     }
 
     /// How many rows the store's own batches hold. They come first, so every
     /// index from here on is an editor's finding, read in place.
-    pub(in crate::workbench) fn stored_len(&self) -> usize {
+    pub fn stored_len(&self) -> usize {
         self.segments
             .iter()
             .filter(|segment| matches!(segment, Segment::Stored { .. }))
@@ -349,7 +346,7 @@ impl<'a> DiagnosticListing<'a> {
     /// whether it stands current. Two listings with equal stamps list the same
     /// stored rows the same way — a batch republished unchanged included —
     /// which is what lets a reader skip walking them.
-    pub(in crate::workbench) fn stored_stamp(&self) -> Vec<(u64, bool)> {
+    pub fn stored_stamp(&self) -> Vec<(u64, bool)> {
         self.segments
             .iter()
             .filter_map(|segment| match segment {
@@ -361,19 +358,19 @@ impl<'a> DiagnosticListing<'a> {
             .collect()
     }
 
-    pub(in crate::workbench) const fn counts(&self) -> DiagnosticCounts {
+    pub const fn counts(&self) -> DiagnosticCounts {
         self.counts
     }
 
     /// Why there is nothing to list. Meaningful only when [`Self::len`] is
     /// zero; a non-empty list reports [`EmptyReason::NoFindings`].
-    pub(in crate::workbench) const fn empty_reason(&self) -> &EmptyReason {
+    pub const fn empty_reason(&self) -> &EmptyReason {
         &self.empty_reason
     }
 
     /// The reason a producer cannot be evaluated, where one said so, for a
     /// list that still has other rows to show.
-    pub(in crate::workbench) fn unavailable(&self) -> Option<&str> {
+    pub fn unavailable(&self) -> Option<&str> {
         self.segments.iter().find_map(|segment| match segment {
             Segment::Stored {
                 standing: BatchStanding::Unavailable(reason),
@@ -384,17 +381,17 @@ impl<'a> DiagnosticListing<'a> {
     }
 
     /// Whether anything in the list is about a design that has since changed.
-    pub(in crate::workbench) const fn has_stale(&self) -> bool {
+    pub const fn has_stale(&self) -> bool {
         self.counts.stale > 0
     }
 
-    pub(in crate::workbench) fn row(&self, index: usize) -> Option<DiagnosticRow<'a>> {
+    pub fn row(&self, index: usize) -> Option<DiagnosticRow<'a>> {
         let (segment, index) = self.locate(index)?;
         segment_row(segment, index)
     }
 
     /// What a row is, without spelling it out. See [`RowFacet`].
-    pub(in crate::workbench) fn facet(&self, index: usize) -> Option<RowFacet<'a>> {
+    pub fn facet(&self, index: usize) -> Option<RowFacet<'a>> {
         let (segment, index) = self.locate(index)?;
         segment_facet(segment, index)
     }
@@ -670,10 +667,7 @@ fn listing_of(inputs: ListingInputs<'_>) -> DiagnosticListing<'_> {
 /// what it buys. Across passes each batch's digest is reused from the
 /// store's [digest memo](super::digest_memo) while the stamps and revisions
 /// it read stand, so a pass in which nothing was edited digests nothing.
-pub(in crate::workbench) fn listing_in_pass(
-    source: &impl ListingSource,
-    pass: u64,
-) -> DiagnosticListing<'_> {
+pub fn listing_in_pass(source: &impl ListingSource, pass: u64) -> DiagnosticListing<'_> {
     let inputs = source.listing_inputs();
     let model = inputs.model;
     if !model.project_open.is_open() {

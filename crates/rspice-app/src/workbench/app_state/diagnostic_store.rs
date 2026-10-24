@@ -39,7 +39,7 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::PreflightRemediation;
 use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
 
-pub(in crate::workbench) use current::SourceCollections;
+pub use current::SourceCollections;
 
 use super::design_checks;
 use super::model::{Model, SlotFacts};
@@ -54,7 +54,7 @@ const DIAGNOSTIC_INPUT_DIGEST_DOMAIN: &[u8] = b"rspice-diagnostic-inputs/v1\0";
 /// `Error` means a specific thing is wrong with it. Both are errors when the
 /// counts are added up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(in crate::workbench) enum DiagnosticLevel {
+pub enum DiagnosticLevel {
     Hint,
     Info,
     Warning,
@@ -65,7 +65,7 @@ pub(in crate::workbench) enum DiagnosticLevel {
 impl DiagnosticLevel {
     /// Every rung, worst first — the order a reader scans a severity filter
     /// in, and the order a worst-first tour visits findings in.
-    pub(in crate::workbench) const ALL: [Self; 5] = [
+    pub const ALL: [Self; 5] = [
         Self::Critical,
         Self::Error,
         Self::Warning,
@@ -77,7 +77,7 @@ impl DiagnosticLevel {
     ///
     /// One mapping, because anything that keeps a count or a flag per severity
     /// indexes by it, and two copies of the order would be two orders.
-    pub(in crate::workbench) const fn rung(self) -> usize {
+    pub const fn rung(self) -> usize {
         match self {
             Self::Critical => 0,
             Self::Error => 1,
@@ -87,7 +87,7 @@ impl DiagnosticLevel {
         }
     }
 
-    pub(in crate::workbench) const fn display_name(self) -> &'static str {
+    pub const fn display_name(self) -> &'static str {
         match self {
             Self::Hint => "Hint",
             Self::Info => "Info",
@@ -99,7 +99,7 @@ impl DiagnosticLevel {
 
     /// Whether this rung stops the design working, which is what separates an
     /// error from an advisory in every count the product states.
-    pub(in crate::workbench) const fn is_error(self) -> bool {
+    pub const fn is_error(self) -> bool {
         matches!(self, Self::Error | Self::Critical)
     }
 }
@@ -140,14 +140,14 @@ impl From<rspice_design::drc::DrcSeverity> for DiagnosticLevel {
 /// the cell view is where that object is. Spelling them together was what made
 /// every row of one view repeat its path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) struct DiagnosticSubject {
+pub struct DiagnosticSubject {
     pub(in crate::workbench) project: ProjectId,
     pub(in crate::workbench) cell_view: Option<CellViewRef>,
     pub(in crate::workbench) object: String,
 }
 
 impl DiagnosticSubject {
-    pub(in crate::workbench) fn new(project: ProjectId, object: impl Into<String>) -> Self {
+    pub fn new(project: ProjectId, object: impl Into<String>) -> Self {
         Self {
             project,
             cell_view: None,
@@ -155,7 +155,7 @@ impl DiagnosticSubject {
         }
     }
 
-    pub(in crate::workbench) fn in_cell_view(mut self, cell_view: CellViewRef) -> Self {
+    pub fn in_cell_view(mut self, cell_view: CellViewRef) -> Self {
         self.cell_view = Some(cell_view);
         self
     }
@@ -169,7 +169,7 @@ impl DiagnosticSubject {
 /// happened to be open. A finding with no route is still a finding: the page
 /// renders it inert rather than offering a jump it cannot honour.
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::workbench) enum DiagnosticRoute {
+pub enum DiagnosticRoute {
     /// A place in the drawing, or the objects a failed run named.
     Anchor(LogAnchor),
     /// A record the netlist editor owns, opened by its canonical identity.
@@ -205,7 +205,7 @@ pub(in crate::workbench) enum DiagnosticRoute {
 /// revision, the message — was re-minted by every re-check, and fixing one
 /// finding handed its identity to the next finding of the same rule.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(in crate::workbench) struct FindingKey {
+pub struct FindingKey {
     pub(in crate::workbench) producer: Arc<str>,
     pub(in crate::workbench) code: Arc<str>,
     pub(in crate::workbench) document: Arc<str>,
@@ -213,7 +213,7 @@ pub(in crate::workbench) struct FindingKey {
 }
 
 impl FindingKey {
-    pub(in crate::workbench) fn new(
+    pub fn new(
         producer: impl Into<Arc<str>>,
         code: impl Into<Arc<str>>,
         document: impl Into<Arc<str>>,
@@ -237,7 +237,7 @@ impl FindingKey {
 /// counts only findings whose keys are identical, in the order they were
 /// reported: it separates two findings about one object, and nothing else
 /// about the pass can move an identity.
-pub(in crate::workbench) fn mint_canonical(
+pub fn mint_canonical(
     keys: &[FindingKey],
     revision: u64,
     validation_id: &str,
@@ -263,15 +263,15 @@ pub(in crate::workbench) fn mint_canonical(
 
 /// One condition, in the shape every consumer reads it in.
 #[derive(Debug, Clone)]
-pub(in crate::workbench) struct DiagnosticRecord {
-    pub(in crate::workbench) canonical: CanonicalDiagnosticMetadata,
+pub struct DiagnosticRecord {
+    pub canonical: CanonicalDiagnosticMetadata,
     /// What the finding is about, as its identity was minted from it. A
     /// republication that re-mints the current finding under a new
     /// occurrence finds it again by this.
     pub(in crate::workbench) key: FindingKey,
-    pub(in crate::workbench) level: DiagnosticLevel,
+    pub level: DiagnosticLevel,
     pub(in crate::workbench) subject: DiagnosticSubject,
-    pub(in crate::workbench) message: String,
+    pub message: String,
     /// What else the reader needs, shown on hover. Empty when the message is
     /// the whole finding.
     pub(in crate::workbench) details: String,
@@ -284,7 +284,7 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// surface that offers to explain a finding must offer nothing where this
     /// is empty rather than restate the message under a different heading.
     pub(in crate::workbench) rule: String,
-    pub(in crate::workbench) route: Option<DiagnosticRoute>,
+    pub route: Option<DiagnosticRoute>,
     /// What the reader may do about this finding's waiver: waive it, remove
     /// the waiver covering it, or — `None` — nothing, because it is not a
     /// design-rule finding or its rule may not be waived.
@@ -315,7 +315,7 @@ pub(in crate::workbench) struct DiagnosticRecord {
 /// what the run said, so an edit to the design moves nothing in it, and the
 /// line stays where it is for as long as the run is held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workbench) struct RunLogPlace {
+pub struct RunLogPlace {
     pub(in crate::workbench) run_sequence: u64,
     /// Its position in the run's log, from zero, which is how the Console
     /// addresses a run's lines.
@@ -324,7 +324,7 @@ pub(in crate::workbench) struct RunLogPlace {
 
 impl RunLogPlace {
     /// `Run 3 log · line 14`, counted from one as a reader counts.
-    pub(in crate::workbench) fn label(self) -> String {
+    pub fn label(self) -> String {
         format!(
             "Run {} log \u{00b7} line {}",
             self.run_sequence,
@@ -332,7 +332,7 @@ impl RunLogPlace {
         )
     }
 
-    pub(in crate::workbench) const fn route(self) -> DiagnosticRoute {
+    pub const fn route(self) -> DiagnosticRoute {
         DiagnosticRoute::RunLogLine {
             run_sequence: self.run_sequence,
             line: self.line,
@@ -346,10 +346,10 @@ impl RunLogPlace {
 /// What it is to the finding is presentation, like the message: neither the
 /// record's identity nor a waiver of it is keyed by these.
 #[derive(Debug, Clone)]
-pub(in crate::workbench) struct RelatedPlace {
+pub struct RelatedPlace {
     /// What the object is called and what it is to the finding, as the
     /// reader is told it: `V1 · source in the loop`.
-    pub(in crate::workbench) label: String,
+    pub label: String,
     /// The cellview the object is drawn in, which for a finding stated inside
     /// an instance is that instance's master, not the checked subject.
     pub(in crate::workbench) cell_view: CellViewRef,
@@ -361,7 +361,7 @@ pub(in crate::workbench) struct RelatedPlace {
 }
 
 impl DiagnosticRecord {
-    pub(in crate::workbench) fn new(
+    pub fn new(
         canonical: CanonicalDiagnosticMetadata,
         level: DiagnosticLevel,
         subject: DiagnosticSubject,
@@ -408,32 +408,29 @@ impl DiagnosticRecord {
         self
     }
 
-    pub(in crate::workbench) fn with_waiver_action(
-        mut self,
-        action: Option<super::waivers::WaiverAction>,
-    ) -> Self {
+    pub fn with_waiver_action(mut self, action: Option<super::waivers::WaiverAction>) -> Self {
         self.waiver_action = action;
         self
     }
 
     /// State the key the record's identity was minted from.
-    pub(in crate::workbench) fn keyed(mut self, key: FindingKey) -> Self {
+    pub fn keyed(mut self, key: FindingKey) -> Self {
         self.key = key;
         self
     }
 
-    pub(in crate::workbench) fn with_details(mut self, details: impl Into<String>) -> Self {
+    pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = details.into();
         self
     }
 
     /// State the rule this finding is an instance of, in the rule's own words.
-    pub(in crate::workbench) fn with_rule(mut self, rule: impl Into<String>) -> Self {
+    pub fn with_rule(mut self, rule: impl Into<String>) -> Self {
         self.rule = rule.into();
         self
     }
 
-    pub(in crate::workbench) fn with_route(mut self, route: Option<DiagnosticRoute>) -> Self {
+    pub fn with_route(mut self, route: Option<DiagnosticRoute>) -> Self {
         self.route = route;
         self
     }
@@ -544,7 +541,7 @@ const _: () = {
 /// means adding the inputs it reads, and the compiler then insists the digest
 /// is defined for them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum DiagnosticInputs {
+pub enum DiagnosticInputs {
     /// Everything one cell view's checks read, exactly as the check receipt
     /// digests it.
     DesignCheck { subject: CellViewRef },
@@ -754,10 +751,7 @@ impl Model {
     /// Decided against the live inputs instead, a finding about an edited
     /// design would read as current. The report is counted as retained, as
     /// it will be when they are published.
-    pub(in crate::workbench) fn dispatch_inputs_at_press(
-        &self,
-        facts: SlotFacts,
-    ) -> Result<ContentDigest, String> {
+    pub fn dispatch_inputs_at_press(&self, facts: SlotFacts) -> Result<ContentDigest, String> {
         dispatch_digest(&DigestScope::new(self, facts), true)
     }
 }
@@ -847,10 +841,10 @@ pub(super) fn digest_of(material: &impl serde::Serialize) -> Result<ContentDiges
 /// Everything one producer published in one pass, with the digest that decides
 /// whether it still describes the design in front of the reader.
 #[derive(Debug, Clone)]
-pub(in crate::workbench) struct DiagnosticBatch {
+pub struct DiagnosticBatch {
     pub(in crate::workbench) inputs: DiagnosticInputs,
     input_digest: ContentDigest,
-    pub(in crate::workbench) records: Vec<DiagnosticRecord>,
+    pub records: Vec<DiagnosticRecord>,
     /// What the records say about themselves, folded once when the batch is
     /// published: see [`fingerprint`].
     fingerprint: u64,
@@ -900,7 +894,7 @@ impl BatchStanding {
 /// design, and evidence that outlives the session that produced it is a claim
 /// nobody checked.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DiagnosticStore {
+pub struct DiagnosticStore {
     batches: BTreeMap<String, DiagnosticBatch>,
     /// Which batch owns each record, keyed by canonical `diagnostic_id`.
     ///
@@ -1029,15 +1023,12 @@ impl DiagnosticStore {
     }
 
     /// The batch published for `inputs`, found the way the store files it.
-    pub(in crate::workbench) fn batch(
-        &self,
-        inputs: &DiagnosticInputs,
-    ) -> Option<&DiagnosticBatch> {
+    pub fn batch(&self, inputs: &DiagnosticInputs) -> Option<&DiagnosticBatch> {
         self.batches.get(&inputs.key())
     }
 
     /// Moves on every publication and withdrawal.
-    pub(in crate::workbench) const fn generation(&self) -> u64 {
+    pub const fn generation(&self) -> u64 {
         self.generation
     }
 
@@ -1105,11 +1096,11 @@ impl DiagnosticStore {
             .collect()
     }
 
-    pub(in crate::workbench) fn request_route(&mut self, route: DiagnosticRoute) {
+    pub fn request_route(&mut self, route: DiagnosticRoute) {
         self.pending_route = Some(route);
     }
 
-    pub(in crate::workbench) fn take_pending_route(&mut self) -> Option<DiagnosticRoute> {
+    pub fn take_pending_route(&mut self) -> Option<DiagnosticRoute> {
         self.pending_route.take()
     }
 
@@ -1118,7 +1109,7 @@ impl DiagnosticStore {
     /// Reachable from the whole crate because the canvas is: the finding tour
     /// lives with the drawing it moves, outside the shell, and the point of
     /// one selection is that both ends of it can read it.
-    pub(crate) const fn current_finding(&self) -> Option<uuid::Uuid> {
+    pub const fn current_finding(&self) -> Option<uuid::Uuid> {
         self.current
     }
 
@@ -1130,7 +1121,7 @@ impl DiagnosticStore {
     /// any check made here. What makes a selection meaningful is that
     /// something resolves it, which every reader of it does by looking the
     /// identity up in the list it is drawing.
-    pub(crate) fn set_current_finding(&mut self, finding: Option<uuid::Uuid>) {
+    pub fn set_current_finding(&mut self, finding: Option<uuid::Uuid>) {
         if finding == self.current {
             return;
         }
@@ -1221,7 +1212,7 @@ impl DiagnosticStore {
         }
     }
 
-    pub(in crate::workbench) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.batches.clear();
         self.owners.clear();
         self.pending_route = None;
@@ -1341,7 +1332,7 @@ impl Model {
     /// The digest is taken here, from the live state, which is what makes the
     /// currency rule one rule: a producer cannot publish evidence and declare
     /// it current against inputs it never read.
-    pub(in crate::workbench) fn publish_diagnostics(
+    pub fn publish_diagnostics(
         &mut self,
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
@@ -1367,7 +1358,7 @@ impl Model {
 
     /// Withdraw a batch, for a producer whose evidence no longer exists at
     /// all — a closed project, a retired run, a cell view that was deleted.
-    pub(in crate::workbench) fn withdraw_diagnostics(&mut self, inputs: &DiagnosticInputs) {
+    pub fn withdraw_diagnostics(&mut self, inputs: &DiagnosticInputs) {
         self.diagnostics.remove(inputs);
     }
 
@@ -1387,7 +1378,7 @@ impl Model {
     /// dispatched one after another, but each measures its own configuration,
     /// and a campaign's outcome is all of them — the members that were
     /// refused before they became runs included.
-    pub(crate) fn supersede_run_diagnostics(&mut self, dispatched: u64) {
+    pub fn supersede_run_diagnostics(&mut self, dispatched: u64) {
         let campaign = self.run_campaign(dispatched);
         self.supersede_run_outcomes(Some(dispatched), campaign);
     }
@@ -1439,7 +1430,7 @@ impl Model {
     /// boundary as well as wherever the shell itself retires a run. A refused
     /// campaign member never had a run to retire; it stands until a later
     /// measurement supersedes it.
-    pub(crate) fn withdraw_retired_run_diagnostics(&mut self) {
+    pub fn withdraw_retired_run_diagnostics(&mut self) {
         let retired: Vec<DiagnosticInputs> = self
             .diagnostics
             .batches()

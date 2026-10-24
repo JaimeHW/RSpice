@@ -265,13 +265,13 @@ impl SimulationState {
 
     /// Allocate a run for external evidence; the importer seals its provenance
     /// and payload before publishing it. Exhaustion does not mutate history.
-    pub(crate) fn start_imported_run(&mut self) -> Result<&mut SimulationRun, String> {
+    pub fn start_imported_run(&mut self) -> Result<&mut SimulationRun, String> {
         self.start_run_with_receipt(None)
     }
 
     /// Start a run already sealed by the exact consumed prepared snapshot.
     /// Sequence exhaustion leaves history, selection, and retention unchanged.
-    pub(crate) fn start_prepared_run(
+    pub fn start_prepared_run(
         &mut self,
         receipt: PreparedRunReceipt,
     ) -> Result<&mut SimulationRun, String> {
@@ -660,11 +660,7 @@ impl SimulationState {
         self.prune_yield_evidence_provenance();
     }
 
-    pub(crate) fn prune_plan_runs(
-        &mut self,
-        plan_id: crate::product::SimulationPlanId,
-        limit: usize,
-    ) {
+    pub fn prune_plan_runs(&mut self, plan_id: crate::product::SimulationPlanId, limit: usize) {
         let selected_run_id = self.active_run().map(|run| run.run_id);
         self.retained
             .runs

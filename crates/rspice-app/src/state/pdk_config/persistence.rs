@@ -12,7 +12,7 @@ use sha2::{Digest as _, Sha256};
 #[cfg(target_arch = "wasm32")]
 mod browser;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::{start_browser_pdk_config_load, start_browser_pdk_config_save};
+pub use browser::{start_browser_pdk_config_load, start_browser_pdk_config_save};
 
 #[cfg(any(test, target_arch = "wasm32"))]
 const BROWSER_PDK_SCHEMA_VERSION: u32 = 1;
@@ -60,16 +60,16 @@ struct BrowserPdkHead {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BrowserPdkConfigReceipt {
+pub struct BrowserPdkConfigReceipt {
     head_key: String,
     generation: u64,
     head_digest: ContentDigest,
-    pub(crate) storage_status: BrowserPdkStorageStatus,
+    pub storage_status: BrowserPdkStorageStatus,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum BrowserPdkStorageDurability {
+pub enum BrowserPdkStorageDurability {
     Persistent,
     BestEffort,
     #[default]
@@ -78,25 +78,25 @@ pub(crate) enum BrowserPdkStorageDurability {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct BrowserPdkStorageStatus {
-    pub(crate) durability: BrowserPdkStorageDurability,
+pub struct BrowserPdkStorageStatus {
+    pub durability: BrowserPdkStorageDurability,
     pub(crate) usage_bytes: Option<u64>,
     pub(crate) quota_bytes: Option<u64>,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
 impl BrowserPdkStorageStatus {
-    pub(crate) fn available_bytes(self) -> Option<u64> {
+    pub fn available_bytes(self) -> Option<u64> {
         Some(self.quota_bytes?.saturating_sub(self.usage_bytes?))
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserPdkConfigRestore {
-    pub(crate) config: PdkConfig,
-    pub(crate) receipt: Option<BrowserPdkConfigReceipt>,
-    pub(crate) migrated_legacy_record: bool,
-    pub(crate) storage_status: BrowserPdkStorageStatus,
+pub struct BrowserPdkConfigRestore {
+    pub config: PdkConfig,
+    pub receipt: Option<BrowserPdkConfigReceipt>,
+    pub migrated_legacy_record: bool,
+    pub storage_status: BrowserPdkStorageStatus,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]

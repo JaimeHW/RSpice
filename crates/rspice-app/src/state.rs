@@ -15,17 +15,17 @@ mod model_bound_symbol;
 pub(crate) mod model_hub;
 pub(crate) mod model_library;
 mod netlist_artifacts;
-pub(crate) use rspice_design::netlist_document;
+pub use rspice_design::netlist_document;
 pub(crate) mod netlist_diagnostics;
 pub(crate) mod notices;
-pub(crate) use rspice_design::parameters as params_string;
+pub use rspice_design::parameters as params_string;
 pub(crate) mod pdk_config;
 use rspice_design::physical_layout;
 mod preflight_report;
 mod project_open;
 pub(crate) use rspice_design::project_sources;
-pub(crate) use rspice_design::properties as property_types;
-pub(crate) use rspice_results::result_presentation;
+pub use rspice_design::properties as property_types;
+pub use rspice_results::result_presentation;
 mod schematic;
 pub(crate) mod shortcuts;
 mod simulation;
@@ -63,7 +63,7 @@ pub use engineering_table::{
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy,
     SavedEngineeringTableView, SortDirection,
 };
-pub(crate) use events::{RunEvent, RunEventSink};
+pub use events::{RunEvent, RunEventSink};
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
     View, ViewType, library_cell_placement_candidates,
@@ -80,7 +80,8 @@ pub use model_bound_symbol::{
     load_model_bound_symbol, materialize_symbol_document, prepare_symbol_construction,
 };
 pub use model_library::ModelLibraryManager;
-pub(crate) use netlist_artifacts::{NetlistArtifacts, NetlistValidationReceipt};
+pub(crate) use netlist_artifacts::NetlistArtifacts;
+pub use netlist_artifacts::NetlistValidationReceipt;
 #[cfg(test)]
 pub use netlist_document::DocumentOwnership;
 pub use netlist_document::{
@@ -91,7 +92,7 @@ pub use netlist_document::{
     OutlineSectionKind, SourceLocator, ValidationDiagnostic, content_digest,
     find_all_in_source_bounded, replace_source_ranges,
 };
-pub(crate) use netlist_document::{
+pub use netlist_document::{
     card_tokens, find_all_in_source_range_bounded_filter, parse_include_directives,
     same_include_graph,
 };
@@ -106,7 +107,8 @@ pub use preflight_report::{
     DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
     PreflightReport, PreparedPreflightContract,
 };
-pub(crate) use project_open::ProjectOpenFact;
+pub use project_open::ProjectOpenFact;
+pub(crate) use project_sources::CanonicalCellViewOwnerKey;
 #[cfg(not(target_arch = "wasm32"))]
 pub use project_sources::MAX_PROJECT_SOURCE_DEPENDENCIES;
 #[cfg(not(target_arch = "wasm32"))]
@@ -122,9 +124,8 @@ pub use project_sources::{
     ProjectSourceQualificationTarget, ProjectSourceRegistry, ProjectSourceRole,
     ProjectSourceRoleBinding,
 };
-pub(crate) use project_sources::{
-    CanonicalCellViewOwnerKey, canonical_cell_view_owner_key, project_source_path_key,
-    project_source_paths_equal,
+pub use project_sources::{
+    canonical_cell_view_owner_key, project_source_path_key, project_source_paths_equal,
 };
 pub use property_types::{
     ContractStrength, DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
@@ -146,7 +147,7 @@ pub(crate) use schematic::policy_labels;
 pub(crate) use schematic::symbol_context_cache;
 pub(crate) use schematic::transform_preview_memo;
 pub use schematic::*;
-pub(crate) use simulation::CampaignMemberRefusal;
+pub use simulation::CampaignMemberRefusal;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
 #[cfg(test)]
@@ -162,7 +163,7 @@ pub use simulation::DcSweepFamily;
 // spell it out on a Floquet row, where it was the engine's own bookkeeping.
 #[cfg(test)]
 pub use simulation::FloquetSpectrumEvidence;
-pub(crate) use simulation::RunHistoryRevision;
+pub use simulation::RunHistoryRevision;
 #[cfg(test)]
 pub use simulation::SensitivityBasisEvidence;
 #[cfg(test)]
@@ -234,10 +235,8 @@ pub use symbol::{
 #[cfg(test)]
 pub use symbol_resolver::ResolvedCellSymbol;
 pub use symbol_resolver::SymbolResolver;
-pub(crate) use viewer_cache::{
-    SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
-};
-pub(crate) use workspace::PreparedProjectLibraryMutation;
+pub use viewer_cache::{SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance};
+pub use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,
     DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableQuantity,

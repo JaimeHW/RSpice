@@ -28,7 +28,7 @@ use crate::state::stimulus_library::definition::RetainedPwlFile;
 use rspice_simulation::netlist_gen::{NetlistSourceHost, TableRoute};
 
 /// Application file operations shared by generation and stimulus previews.
-pub(crate) struct SourceFiles;
+pub struct SourceFiles;
 
 impl NetlistSourceHost for SourceFiles {
     fn route_retaining(
@@ -52,7 +52,7 @@ impl NetlistSourceHost for SourceFiles {
 
 /// What a reader has to find a table with.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TableSources<'a> {
+pub struct TableSources<'a> {
     /// The folder project-relative references resolve against, once the
     /// project has one.
     pub data_root: Option<&'a Path>,
@@ -141,7 +141,7 @@ pub(crate) fn route_retaining(
 ///
 /// A digest this process has already written or verified is not checked again:
 /// previews ask every frame.
-pub(crate) fn materialized(table: &RetainedPwlFile) -> Result<PathBuf, String> {
+pub fn materialized(table: &RetainedPwlFile) -> Result<PathBuf, String> {
     let path = cache_directory()
         .join(short_digest(&table.digest))
         .join(file_name(&table.file_name));
@@ -187,7 +187,7 @@ pub(crate) fn named_file_matches(named: &str, table: &RetainedPwlFile) -> Option
 /// preview asking every frame reads the file once and an edited file is read
 /// again.
 #[must_use]
-pub(crate) fn engine_refusal(path: &str) -> Option<String> {
+pub fn engine_refusal(path: &str) -> Option<String> {
     /// More files than this at once is not a working set; start over.
     const REMEMBERED: usize = 64;
     static CHECKED: OnceLock<Mutex<HashMap<TableStamp, Option<String>>>> = OnceLock::new();

@@ -13,16 +13,13 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 /// retained run-local analysis ID; paired with the immutable dataset ID this
 /// is still an exact identity and never aliases another dataset's result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SpecializedViewerCacheProvenance {
-    pub(crate) dataset_id: DatasetId,
-    pub(crate) analysis_identity: SpecializedViewerAnalysisIdentity,
+pub struct SpecializedViewerCacheProvenance {
+    pub dataset_id: DatasetId,
+    pub analysis_identity: SpecializedViewerAnalysisIdentity,
 }
 
 impl SpecializedViewerCacheProvenance {
-    pub(crate) fn for_analysis(
-        dataset_id: DatasetId,
-        analysis: &crate::state::AnalysisResult,
-    ) -> Self {
+    pub fn for_analysis(dataset_id: DatasetId, analysis: &crate::state::AnalysisResult) -> Self {
         let analysis_identity = analysis.provenance().map_or(
             SpecializedViewerAnalysisIdentity::LegacyResultId(analysis.id),
             |provenance| {
@@ -35,7 +32,7 @@ impl SpecializedViewerCacheProvenance {
         }
     }
 
-    pub(crate) const fn for_prepared_analysis(
+    pub const fn for_prepared_analysis(
         dataset_id: DatasetId,
         source_instance_id: AnalysisInstanceId,
     ) -> Self {
@@ -47,7 +44,7 @@ impl SpecializedViewerCacheProvenance {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SpecializedViewerAnalysisIdentity {
+pub enum SpecializedViewerAnalysisIdentity {
     Prepared(AnalysisInstanceId),
     LegacyResultId(u64),
 }

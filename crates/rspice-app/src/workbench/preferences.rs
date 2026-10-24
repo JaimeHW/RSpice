@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::quantity::{QuantityPresentationPolicy, UnitsPreferences};
 
 mod drawing_sheet;
-pub(crate) use drawing_sheet::DrawingSheetPersonalPreferences;
+pub use drawing_sheet::DrawingSheetPersonalPreferences;
 
 #[cfg(test)]
 use crate::state::shortcuts::ShortcutProfileLibraryError;
@@ -1081,7 +1081,7 @@ impl UserPreferences {
         catalog.save(table)
     }
 
-    pub(crate) fn replace_personal_print_mapping_presets(
+    pub fn replace_personal_print_mapping_presets(
         &mut self,
         catalog: PrintMappingPresetCatalog,
     ) -> Result<(), PrintMappingPersistenceError> {
@@ -1378,7 +1378,7 @@ impl UserPreferences {
         }
     }
 
-    pub(crate) fn normalize(&mut self) {
+    pub fn normalize(&mut self) {
         self.migrate_legacy_workspace_storage();
         self.migrate_legacy_units_storage();
         self.migrate_legacy_results_storage();
@@ -1609,7 +1609,7 @@ impl UserPreferences {
     /// and is retained on the wire rather than overwritten, exactly as the
     /// other typed domains here behave.
     #[must_use]
-    pub(crate) fn component_shelf(&self) -> ComponentShelfPreferences {
+    pub fn component_shelf(&self) -> ComponentShelfPreferences {
         self.unknown_domains
             .get(COMPONENT_SHELF_STORAGE_KEY)
             .cloned()
@@ -1623,7 +1623,7 @@ impl UserPreferences {
     /// who pins and then unpins back to the shipped state leaves no residue —
     /// and, because the default is `pinned: None`, gets the shipped pin set
     /// back. An explicitly emptied set is not the default and is kept.
-    pub(crate) fn set_component_shelf(&mut self, shelf: ComponentShelfPreferences) {
+    pub fn set_component_shelf(&mut self, shelf: ComponentShelfPreferences) {
         if shelf == ComponentShelfPreferences::default() {
             self.unknown_domains.remove(COMPONENT_SHELF_STORAGE_KEY);
             return;
@@ -1643,7 +1643,7 @@ const COMPONENT_SHELF_STORAGE_KEY: &str = "component-shelf";
 
 /// The dialects an imported deck can be read as, in stored-index order: each
 /// one RSpice can execute. "Unknown" is a detection outcome, not a choice.
-pub(crate) const IMPORTABLE_NETLIST_DIALECTS: [crate::state::NetlistSourceDialect; 6] = [
+pub const IMPORTABLE_NETLIST_DIALECTS: [crate::state::NetlistSourceDialect; 6] = [
     crate::state::NetlistSourceDialect::RSpice,
     crate::state::NetlistSourceDialect::Spice3Ngspice,
     crate::state::NetlistSourceDialect::Hspice,
@@ -1661,13 +1661,13 @@ pub(crate) const IMPORTABLE_NETLIST_DIALECTS: [crate::state::NetlistSourceDialec
 /// its part being detached and reattached.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub(crate) struct ComponentShelfPreferences {
+pub struct ComponentShelfPreferences {
     /// `None` until the reader pins or unpins something: a fresh profile takes
     /// the shelf's shipped default set, and one emptied on purpose stays
     /// empty rather than reverting to it.
-    pub(crate) pinned: Option<Vec<String>>,
+    pub pinned: Option<Vec<String>>,
     /// Placement history, most recent first.
-    pub(crate) recent: Vec<String>,
+    pub recent: Vec<String>,
 }
 
 const UNIT_CHOICE_KEYS: [ChoicePreference; 9] = [

@@ -29,7 +29,7 @@ impl Drop for BrowserDatabase {
     }
 }
 
-pub(crate) fn start_browser_pdk_config_load(
+pub fn start_browser_pdk_config_load(
     path: PathBuf,
     complete: impl FnOnce(Result<BrowserPdkConfigRestore, ConfigError>) + 'static,
 ) {
@@ -38,7 +38,7 @@ pub(crate) fn start_browser_pdk_config_load(
     });
 }
 
-pub(crate) fn start_browser_pdk_config_save(
+pub fn start_browser_pdk_config_save(
     path: PathBuf,
     expected: Option<BrowserPdkConfigReceipt>,
     config: PdkConfig,

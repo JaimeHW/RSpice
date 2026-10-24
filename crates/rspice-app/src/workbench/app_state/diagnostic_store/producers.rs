@@ -50,7 +50,7 @@ impl Model {
     /// event in the session and the Console is the session's log. This is the
     /// other statement: the design does not simulate, which is a condition,
     /// and it stands until the inputs it was measured against move.
-    pub(crate) fn publish_run_failure(
+    pub fn publish_run_failure(
         &mut self,
         analysis: &str,
         message: &str,
@@ -134,7 +134,7 @@ impl Model {
     /// supersedes what earlier runs and campaigns reported before it is
     /// filed: a re-run whose member is refused again replaces the last
     /// refusal rather than colliding with its identity.
-    pub(crate) fn publish_campaign_member_refusal(
+    pub fn publish_campaign_member_refusal(
         &mut self,
         campaign: crate::product::SimulationCampaignId,
         member_index: u32,
@@ -192,7 +192,7 @@ impl Model {
     /// dispatched read as current against an edit made after it. Nothing is
     /// published: a run that fails nothing has nothing to list, and an empty
     /// batch would tell the page that checks had run.
-    pub(crate) fn open_run_outcome(&mut self, run_sequence: u64, facts: SlotFacts) {
+    pub fn open_run_outcome(&mut self, run_sequence: u64, facts: SlotFacts) {
         match (DiagnosticInputs::Run { run_sequence }).digest(&super::DigestScope::new(self, facts))
         {
             Ok(digest) => {
@@ -213,11 +213,7 @@ impl Model {
     /// from one report, so both expire together when the design, the plan or
     /// the bindings move — which is exactly what the report's own currency
     /// rule already said and what no surface but the report could state.
-    pub(in crate::workbench) fn publish_dispatch_diagnostics(
-        &mut self,
-        report: &PreflightReport,
-        facts: SlotFacts,
-    ) {
+    pub fn publish_dispatch_diagnostics(&mut self, report: &PreflightReport, facts: SlotFacts) {
         let records = self.dispatch_records(report);
         self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records, facts);
     }
@@ -225,7 +221,7 @@ impl Model {
     /// The same records, decided against the dispatch inputs as they stood
     /// when the pass that found them began (`Self::dispatch_inputs_at_press`),
     /// so an edit made while the engine built the decks leaves them stale.
-    pub(in crate::workbench) fn publish_dispatch_diagnostics_against(
+    pub fn publish_dispatch_diagnostics_against(
         &mut self,
         report: &PreflightReport,
         inputs_at_press: crate::product::ContentDigest,

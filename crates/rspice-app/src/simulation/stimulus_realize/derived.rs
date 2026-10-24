@@ -45,7 +45,7 @@ const PREVIEW_SAMPLES: usize = 480;
 
 /// Which span the surface is looking through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SpanChoice {
+pub enum SpanChoice {
     /// The natural span of this shape.
     Fit,
     /// One fundamental period, where the family has one; the fit span
@@ -57,7 +57,7 @@ pub(crate) enum SpanChoice {
 
 /// One labelled breakpoint the surface draws a rule at.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Guide {
+pub struct Guide {
     /// Where it lands, in seconds from the start of the window.
     pub time: f64,
     /// What the card calls it.
@@ -66,7 +66,7 @@ pub(crate) struct Guide {
 
 /// One authored PWL point, as the plot marks it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PwlMarker {
+pub struct PwlMarker {
     /// Source time, including the card's TD.
     pub time: f64,
     /// Level at that time.
@@ -81,7 +81,7 @@ pub(crate) struct PwlMarker {
 /// realization whose guides came from one reading of the card and whose curve
 /// came from another is the disagreement this whole module exists to close.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct StimulusRealization {
+pub struct StimulusRealization {
     /// The window's length in seconds.
     pub span: f64,
     /// The fundamental period, where this family has one.
@@ -323,7 +323,7 @@ fn fundamental_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
 /// window, so the picture in the list is the picture the row opens.
 ///
 /// The refusals are the instrument's too, carried through unrewritten.
-pub(crate) fn shape_trace(
+pub fn shape_trace(
     component: &Component,
     samples: usize,
     timing: PreviewTiming,
@@ -366,7 +366,7 @@ pub(crate) fn design_variable(value: &str) -> Option<String> {
 /// Read off the authored text, because that is all there is at this boundary:
 /// the parser refuses a braced field against an empty scope without saying
 /// that a brace was why.
-pub(crate) fn names_design_variable(record: &StimulusDefinition) -> bool {
+pub fn names_design_variable(record: &StimulusDefinition) -> bool {
     record.value.contains('{') || record.params.contains('{')
 }
 

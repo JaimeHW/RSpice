@@ -15,9 +15,9 @@ use super::transform_preview_memo::DrawingInputs;
 /// Everything the advisories are found from: the drawing, its symbols and
 /// active sheet, and the sheet's geometry.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OverflowKey {
-    pub(crate) drawing: DrawingInputs,
-    pub(crate) geometry: DrawingSheetGeometry,
+pub struct OverflowKey {
+    pub drawing: DrawingInputs,
+    pub geometry: DrawingSheetGeometry,
 }
 
 #[derive(Clone, Default)]
@@ -42,14 +42,14 @@ impl std::fmt::Debug for OverflowSummaryMemo {
 
 impl OverflowSummaryMemo {
     /// The advisories found from exactly `key`, if they are held.
-    pub(crate) fn current(&self, key: &OverflowKey) -> Option<Arc<DrawingSheetOverflowSummary>> {
+    pub fn current(&self, key: &OverflowKey) -> Option<Arc<DrawingSheetOverflowSummary>> {
         self.entry
             .as_ref()
             .filter(|(held, _)| held == key)
             .map(|(_, summary)| Arc::clone(summary))
     }
 
-    pub(crate) fn store(&mut self, key: OverflowKey, summary: Arc<DrawingSheetOverflowSummary>) {
+    pub fn store(&mut self, key: OverflowKey, summary: Arc<DrawingSheetOverflowSummary>) {
         self.entry = Some((key, summary));
     }
 }

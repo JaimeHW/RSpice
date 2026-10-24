@@ -28,8 +28,8 @@ mod instance_removal;
 mod reference_preparation;
 mod veriloga_build;
 
-pub(crate) use hierarchy_extraction::validate_hierarchy_target_unreferenced;
-pub(crate) use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
+pub use hierarchy_extraction::validate_hierarchy_target_unreferenced;
+pub use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,7 +53,7 @@ use crate::workbench::app_state::model::Model;
 const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectDesignHistory {
+pub struct ProjectDesignHistory {
     undo: Vec<ProjectDesignRecord>,
     redo: Vec<ProjectDesignRecord>,
     /// Where the newest transaction committed here sits in the global order.
@@ -205,10 +205,10 @@ struct ModelResolutionRecordsRecord {
 /// definition. Create Symbol uses this for its generated simulation fixture;
 /// import and parameter-form edits pass `None`.
 #[derive(Debug, Clone)]
-pub(crate) struct SymbolDefinitionFixtureDelta {
-    pub(crate) reference: CellViewRef,
-    pub(crate) before: Option<SchematicState>,
-    pub(crate) after: Option<SchematicState>,
+pub struct SymbolDefinitionFixtureDelta {
+    pub reference: CellViewRef,
+    pub before: Option<SchematicState>,
+    pub after: Option<SchematicState>,
 }
 
 pub(crate) struct SymbolDefinitionHistoryEntry {
@@ -343,7 +343,7 @@ pub(crate) fn publish_model_definition_candidate(
 /// project transaction. Unlike a model-definition edit, the affected library
 /// may be externally sourced; its authenticated retained bytes and authority
 /// still participate in undo conflict checks and execution invalidation.
-pub(crate) fn publish_model_library_candidate(
+pub fn publish_model_library_candidate(
     state: &mut Model,
     mut candidate: ModelLibraryManager,
     library_name: &str,
@@ -410,7 +410,7 @@ pub(crate) fn publish_model_library_candidate(
 
 /// Publish one validated multi-library replacement as a single project
 /// revision and one guarded global Undo step.
-pub(crate) fn publish_model_library_set_candidate(
+pub fn publish_model_library_set_candidate(
     state: &mut Model,
     mut candidate: ModelLibraryManager,
     description: impl Into<String>,
@@ -455,7 +455,7 @@ pub(crate) fn publish_model_library_set_candidate(
 /// Publish source-qualified contested-definition decisions as one guarded
 /// project transaction. The loaded libraries must remain byte-for-byte the
 /// same; only the durable provider ledger may change.
-pub(crate) fn publish_model_resolution_candidate(
+pub fn publish_model_resolution_candidate(
     state: &mut Model,
     mut candidate: ModelLibraryManager,
     description: impl Into<String>,
@@ -507,7 +507,7 @@ pub(crate) fn publish_model_resolution_candidate(
 /// all format, symbol, pin, form and netlist validation on `candidate` first;
 /// this boundary owns authority/read-only checks and the monotonic project
 /// revision.
-pub(crate) fn publish_symbol_definition_candidate(
+pub fn publish_symbol_definition_candidate(
     state: &mut Model,
     candidate: LibraryManager,
     library_name: &str,
@@ -524,7 +524,7 @@ pub(crate) fn publish_symbol_definition_candidate(
     )
 }
 
-pub(crate) fn publish_symbol_definition_candidate_with_fixture(
+pub fn publish_symbol_definition_candidate_with_fixture(
     state: &mut Model,
     candidate: LibraryManager,
     library_name: &str,
@@ -619,31 +619,31 @@ pub(crate) fn publish_symbol_definition_candidate_with_fixture(
     Ok(committed_revision)
 }
 
-pub(crate) struct DesignManagementHistoryEntry {
-    pub(crate) description: String,
-    pub(crate) owner: CellViewRef,
-    pub(crate) before: DesignManagementCatalog,
-    pub(crate) after: DesignManagementCatalog,
-    pub(crate) before_schematics: BTreeMap<String, SchematicState>,
-    pub(crate) after_schematics: BTreeMap<String, SchematicState>,
-    pub(crate) references: ReferenceChanges,
-    pub(crate) committed_revision: ObjectRevision,
+pub struct DesignManagementHistoryEntry {
+    pub description: String,
+    pub owner: CellViewRef,
+    pub before: DesignManagementCatalog,
+    pub after: DesignManagementCatalog,
+    pub before_schematics: BTreeMap<String, SchematicState>,
+    pub after_schematics: BTreeMap<String, SchematicState>,
+    pub references: ReferenceChanges,
+    pub committed_revision: ObjectRevision,
 }
 
-pub(crate) struct HierarchyExtractionHistoryEntry {
-    pub(crate) parent_ref: CellViewRef,
-    pub(crate) target_schematic_ref: CellViewRef,
-    pub(crate) target_open_ref: CellViewRef,
-    pub(crate) before_parent: SchematicState,
-    pub(crate) after_parent: SchematicState,
-    pub(crate) child: SchematicState,
-    pub(crate) target_cell: Cell,
-    pub(crate) open_views_before: Vec<OpenCellView>,
-    pub(crate) hierarchy_stack_before: Vec<CellViewRef>,
-    pub(crate) hierarchy_instances_before: Vec<String>,
-    pub(crate) open_views_after: Vec<OpenCellView>,
-    pub(crate) hierarchy_stack_after: Vec<CellViewRef>,
-    pub(crate) hierarchy_instances_after: Vec<String>,
+pub struct HierarchyExtractionHistoryEntry {
+    pub parent_ref: CellViewRef,
+    pub target_schematic_ref: CellViewRef,
+    pub target_open_ref: CellViewRef,
+    pub before_parent: SchematicState,
+    pub after_parent: SchematicState,
+    pub child: SchematicState,
+    pub target_cell: Cell,
+    pub open_views_before: Vec<OpenCellView>,
+    pub hierarchy_stack_before: Vec<CellViewRef>,
+    pub hierarchy_instances_before: Vec<String>,
+    pub open_views_after: Vec<OpenCellView>,
+    pub hierarchy_stack_after: Vec<CellViewRef>,
+    pub hierarchy_instances_after: Vec<String>,
 }
 
 impl Model {
@@ -658,7 +658,7 @@ impl Model {
         publish_model_definition_candidate(self, candidate, commit, description)
     }
 
-    pub(crate) fn clear_project_design_history(&mut self) {
+    pub fn clear_project_design_history(&mut self) {
         self.project_design_history = ProjectDesignHistory::default();
     }
 
@@ -677,7 +677,7 @@ impl Model {
         self.project_design_history.redo.clear();
     }
 
-    pub(crate) fn record_hierarchy_extraction(&mut self, entry: HierarchyExtractionHistoryEntry) {
+    pub fn record_hierarchy_extraction(&mut self, entry: HierarchyExtractionHistoryEntry) {
         // Extraction is the one transaction that moves objects out of one
         // document and into another, so the parent's sheet membership is
         // recorded: undoing it has to put those objects back where they were
@@ -712,10 +712,7 @@ impl Model {
         );
     }
 
-    pub(crate) fn record_design_management_transaction(
-        &mut self,
-        entry: DesignManagementHistoryEntry,
-    ) {
+    pub fn record_design_management_transaction(&mut self, entry: DesignManagementHistoryEntry) {
         if entry.before == entry.after {
             return;
         }
@@ -769,7 +766,7 @@ impl Model {
     /// may leave the steps before it unable to undo. Each still has to find
     /// the catalog it restores, membership included, and the drawings it
     /// names exactly as it left them.
-    pub(crate) fn carry_project_history_over_sheet_membership(
+    pub fn carry_project_history_over_sheet_membership(
         &mut self,
         previous: ObjectRevision,
         published: ObjectRevision,
@@ -846,7 +843,7 @@ impl Model {
         );
     }
 
-    pub(crate) fn can_undo_project_design(&self) -> bool {
+    pub fn can_undo_project_design(&self) -> bool {
         self.project_design_history
             .undo
             .last()
@@ -856,7 +853,7 @@ impl Model {
             })
     }
 
-    pub(crate) fn can_redo_project_design(&self) -> bool {
+    pub fn can_redo_project_design(&self) -> bool {
         !self.project_redo_is_replaced()
             && self
                 .project_design_history
@@ -870,7 +867,7 @@ impl Model {
 
     /// Whether the active schematic has a step to redo that no newer step
     /// replaced.
-    pub(crate) fn can_redo_active_schematic(&self) -> bool {
+    pub fn can_redo_active_schematic(&self) -> bool {
         self.schematic.can_redo() && !self.schematic_redo_is_replaced()
     }
 
@@ -881,7 +878,7 @@ impl Model {
     /// has been done since it was undone. Each history drops its own redo
     /// steps when it commits; a step committed in the other one replaces
     /// them as well, or Redo would replay an undone step over the newer edit.
-    pub(crate) fn retire_replaced_redo_steps(&mut self) {
+    pub fn retire_replaced_redo_steps(&mut self) {
         if self.project_redo_is_replaced() {
             self.project_design_history.redo.clear();
         }
@@ -910,7 +907,7 @@ impl Model {
 
     /// Where the next project undo step sits in the global order, for
     /// arbitration against the active document's own history.
-    pub(crate) fn project_undo_sequence(&self) -> Option<UndoSequence> {
+    pub fn project_undo_sequence(&self) -> Option<UndoSequence> {
         self.project_design_history
             .undo
             .last()
@@ -918,7 +915,7 @@ impl Model {
     }
 
     /// Where the next project redo step sits in the global order.
-    pub(crate) fn project_redo_sequence(&self) -> Option<UndoSequence> {
+    pub fn project_redo_sequence(&self) -> Option<UndoSequence> {
         self.project_design_history
             .redo
             .last()
@@ -927,9 +924,7 @@ impl Model {
 
     /// The first part of an undo: whether the step on top of the undo stack
     /// can be taken, and what taking it needs. Nothing changes here.
-    pub(in crate::workbench) fn stage_project_undo(
-        &self,
-    ) -> Result<Option<StagedProjectStep>, String> {
+    pub fn stage_project_undo(&self) -> Result<Option<StagedProjectStep>, String> {
         let Some(record) = self.project_design_history.undo.last() else {
             return Ok(None);
         };
@@ -949,9 +944,7 @@ impl Model {
     }
 
     /// The first part of a redo, as [`Self::stage_project_undo`] states it.
-    pub(in crate::workbench) fn stage_project_redo(
-        &self,
-    ) -> Result<Option<StagedProjectStep>, String> {
+    pub fn stage_project_redo(&self) -> Result<Option<StagedProjectStep>, String> {
         let Some(record) = self.project_design_history.redo.last() else {
             return Ok(None);
         };
@@ -975,7 +968,7 @@ impl Model {
     /// `selected_model` is the model the reader has selected. What applying
     /// the record leaves for the application is added to `effects` as the
     /// record reaches it, so it stands even where the record then fails.
-    pub(in crate::workbench) fn apply_project_step(
+    pub fn apply_project_step(
         &mut self,
         staged: StagedProjectStep,
         selected_model: Option<&str>,
@@ -1013,10 +1006,7 @@ impl Model {
     /// it asked: an undone step's documents go back on their recorded sheets,
     /// the placements the catalog left stranded are repaired, and the record
     /// moves to the other stack. Returns the step's description.
-    pub(in crate::workbench) fn finish_project_step(
-        &mut self,
-        applied: AppliedProjectStep,
-    ) -> Result<String, String> {
+    pub fn finish_project_step(&mut self, applied: AppliedProjectStep) -> Result<String, String> {
         let AppliedProjectStep {
             forward,
             mut record,
@@ -1122,10 +1112,7 @@ impl Model {
     ///
     /// Returns whether the document was brought to the front: the editor then
     /// takes up its new active drawing, and the console says so.
-    pub(in crate::workbench) fn activate_history_document(
-        &mut self,
-        reference: &CellViewRef,
-    ) -> bool {
+    pub fn activate_history_document(&mut self, reference: &CellViewRef) -> bool {
         if self.workspace.content.active_view == *reference {
             return false;
         }
@@ -1171,7 +1158,7 @@ impl Model {
 
 /// A history step that can be taken, staged before the document it restores
 /// is brought to the front.
-pub(crate) struct StagedProjectStep {
+pub struct StagedProjectStep {
     forward: bool,
     prepared: Option<PreparedReferenceMutation>,
     destination: Option<CellViewRef>,
@@ -1179,13 +1166,13 @@ pub(crate) struct StagedProjectStep {
 
 impl StagedProjectStep {
     /// The document the step restores, where that is not the active one.
-    pub(crate) fn destination(&self) -> Option<&CellViewRef> {
+    pub fn destination(&self) -> Option<&CellViewRef> {
         self.destination.as_ref()
     }
 }
 
 /// A history step whose record has been applied, still to be finished.
-pub(crate) struct AppliedProjectStep {
+pub struct AppliedProjectStep {
     forward: bool,
     record: ProjectDesignRecord,
     cells_before: BTreeSet<(String, String)>,
@@ -1194,14 +1181,14 @@ pub(crate) struct AppliedProjectStep {
 /// What applying a history step leaves for the application, set as the step
 /// reaches each. A step is one record, and no record sets more than one.
 #[derive(Debug, Default)]
-pub(crate) struct HistoryEffects {
+pub struct HistoryEffects {
     /// The selected model left the selected model library.
-    pub(crate) clear_selected_model: bool,
+    pub clear_selected_model: bool,
     /// A Verilog-A source was restored, so what it compiled to is void.
-    pub(crate) void_veriloga_evidence: bool,
+    pub void_veriloga_evidence: bool,
     /// The step restored the active document: the editor reloads it from
     /// the workspace.
-    pub(crate) restore_active_schematic: bool,
+    pub restore_active_schematic: bool,
 }
 
 impl ProjectDesignRecord {

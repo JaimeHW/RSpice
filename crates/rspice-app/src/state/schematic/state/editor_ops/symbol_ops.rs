@@ -5,7 +5,7 @@ use rspice_design::symbol::edit::SymbolInstanceWiring;
 use std::collections::{BTreeMap, HashMap};
 
 impl SchematicState {
-    pub(crate) fn apply_symbol_instance_wiring(
+    pub fn apply_symbol_instance_wiring(
         &mut self,
         wiring: &SymbolInstanceWiring,
         pin_remaps: &HashMap<String, (Point, Point)>,
@@ -17,7 +17,7 @@ impl SchematicState {
         changed
     }
 
-    pub(crate) fn rename_instance_terminals(
+    pub fn rename_instance_terminals(
         &mut self,
         reference: &CellViewRef,
         renames: &BTreeMap<String, String>,

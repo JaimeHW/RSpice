@@ -4,7 +4,7 @@ use crate::product::{SavedOutputId, SimulationPlanId};
 use crate::state::{Point, SchematicState};
 
 impl SchematicState {
-    pub(crate) fn bind_probe_saved_output(
+    pub fn bind_probe_saved_output(
         &mut self,
         existing_id: u64,
         binding: Option<(SimulationPlanId, SavedOutputId)>,
@@ -18,7 +18,7 @@ impl SchematicState {
         }
     }
 
-    pub(crate) fn place_schematic_probe(
+    pub fn place_schematic_probe(
         &mut self,
         position: Point,
         label: Option<String>,
@@ -43,7 +43,7 @@ impl SchematicState {
         }
     }
 
-    pub(crate) fn edit_probe_intent(
+    pub fn edit_probe_intent(
         &mut self,
         id: u64,
         enabled: bool,

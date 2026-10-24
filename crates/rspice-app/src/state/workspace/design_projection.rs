@@ -43,7 +43,7 @@ impl ProjectWorkspace {
         )
     }
 
-    pub(crate) fn design_projection_key(
+    pub fn design_projection_key(
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,

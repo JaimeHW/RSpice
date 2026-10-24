@@ -44,7 +44,7 @@ impl AsMut<RetainedRun<AnalysisResult>> for SimulationRun {
 }
 
 impl SimulationRun {
-    pub(crate) fn from_restored(data: RetainedRun<AnalysisResult>) -> Self {
+    pub fn from_restored(data: RetainedRun<AnalysisResult>) -> Self {
         Self {
             data,
             elapsed_started_at: None,
@@ -76,10 +76,7 @@ impl SimulationRun {
     }
 
     /// Seal retained judgments and duration before releasing the live clock.
-    pub(crate) fn finish_lifecycle(
-        &mut self,
-        terminal: SimulationRunLifecycle,
-    ) -> Result<(), String> {
+    pub fn finish_lifecycle(&mut self, terminal: SimulationRunLifecycle) -> Result<(), String> {
         let was_terminal = self.lifecycle.is_terminal();
         let started = self.elapsed_started_at;
         let id = self.id;
@@ -94,7 +91,7 @@ impl SimulationRun {
         Ok(())
     }
 
-    pub(crate) fn restore_lifecycle(
+    pub fn restore_lifecycle(
         &mut self,
         lifecycle: SimulationRunLifecycle,
         elapsed: f64,
@@ -117,10 +114,7 @@ impl SimulationRun {
     /// Publish or refresh the single provisional result for an in-flight
     /// prepared task. This does not change run success: the task has not
     /// reached a terminal outcome yet.
-    pub(crate) fn upsert_live_analysis(
-        &mut self,
-        mut analysis: AnalysisResult,
-    ) -> Result<(), String> {
+    pub fn upsert_live_analysis(&mut self, mut analysis: AnalysisResult) -> Result<(), String> {
         if !analysis.is_live_partial() {
             return Err("only a live partial analysis can use provisional retention".to_owned());
         }
@@ -156,7 +150,7 @@ impl SimulationRun {
 
     /// Replace the provisional prefix for this exact task, or append the
     /// terminal result when no live presentation was published.
-    pub(crate) fn replace_live_or_add_analysis(&mut self, mut analysis: AnalysisResult) {
+    pub fn replace_live_or_add_analysis(&mut self, mut analysis: AnalysisResult) {
         let matching_live = analysis.provenance().and_then(|provenance| {
             let instance = provenance.source_instance_id();
             self.analyses.iter().position(|existing| {

@@ -3,14 +3,14 @@
 use super::*;
 
 impl ProjectWorkspace {
-    pub(crate) fn restore_pending_annotation(
+    pub fn restore_pending_annotation(
         &mut self,
         libraries: &LibraryManager,
     ) -> Result<usize, String> {
         self.session
             .restore_pending_annotation(&mut self.content, libraries)
     }
-    pub(crate) fn annotation_restoration_error(&self) -> Option<&str> {
+    pub fn annotation_restoration_error(&self) -> Option<&str> {
         self.session.annotation_restoration_error()
     }
 }

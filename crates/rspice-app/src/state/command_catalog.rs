@@ -79,7 +79,7 @@ impl CommandPlatform {
         }
     }
 
-    pub(crate) const fn has_browser_reserved_primary(self) -> bool {
+    pub const fn has_browser_reserved_primary(self) -> bool {
         matches!(self, Self::Browser)
     }
 }

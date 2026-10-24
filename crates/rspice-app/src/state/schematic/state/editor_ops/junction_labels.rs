@@ -45,7 +45,7 @@ impl SchematicState {
         self.session.is_dirty = true;
         id
     }
-    pub(crate) fn add_net_label_with_kind(
+    pub fn add_net_label_with_kind(
         &mut self,
         pos: Point,
         name: String,

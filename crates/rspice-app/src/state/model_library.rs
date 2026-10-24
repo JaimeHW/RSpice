@@ -13,9 +13,9 @@ mod compatibility;
 mod manager;
 mod source_label;
 
-pub(crate) use compatibility::{
-    models_have_compatible_device_family, placement_component_for_model,
-    validate_component_model_compatibility,
+pub(crate) use compatibility::placement_component_for_model;
+pub use compatibility::{
+    models_have_compatible_device_family, validate_component_model_compatibility,
 };
 pub use rspice_model_library::ProjectModelDefinition;
 pub use rspice_model_library::RetainedClosure;
@@ -28,7 +28,7 @@ pub use rspice_model_library::correlation::{
     CorrelationReleaseRole, CorrelationReviewDecision, CorrelationSimulationProvenance,
     CorrelationSuite, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
 };
-pub(crate) use rspice_model_library::device_class::{SUBCIRCUIT_CLASS, card_device};
+pub use rspice_model_library::device_class::{SUBCIRCUIT_CLASS, card_device};
 pub use rspice_model_library::{
     CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
 };
@@ -40,15 +40,15 @@ pub use rspice_model_library::{
     TemperatureLawRepresentation,
 };
 // Metadata fixtures used by application integration tests.
-pub(crate) use manager::model_library_source_digest;
+pub use manager::model_library_source_digest;
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
-pub(crate) use rspice_model_library::first_unreachable_source;
+pub use rspice_model_library::first_unreachable_source;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rspice_model_library::is_foreign_platform_absolute_path;
+pub use rspice_model_library::is_foreign_platform_absolute_path;
 #[cfg(test)]
 pub(crate) use rspice_model_library::is_portable_absolute_path;
 pub use rspice_model_library::qualification::{
@@ -68,7 +68,7 @@ pub use rspice_model_library::qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
-pub(crate) use rspice_model_library::{BinFamily, BindableModel, model_bin_family};
+pub use rspice_model_library::{BinFamily, BindableModel, model_bin_family};
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{
     ModelConsumerScope, ModelResolutionRecord, ModelValidationFinding,

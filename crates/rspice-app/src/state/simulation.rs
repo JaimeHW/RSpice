@@ -143,7 +143,7 @@ pub use rspice_results::waveform::SharedWaveformValues;
 pub use rspice_vocabulary::hierarchy_path::OccurrenceProbeSpelling;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
-pub(crate) use rspice_results::run_history::RunHistoryRevision;
+pub use rspice_results::run_history::RunHistoryRevision;
 pub use rspice_results::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 pub use rspice_simulation::execution::SimulationRunIntent;
 pub use state_model::{
@@ -154,7 +154,7 @@ pub use state_model::{
 /// Why a campaign member never became a run: what the run controller reports
 /// when it files the member's refusal with the diagnostic store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CampaignMemberRefusal {
+pub enum CampaignMemberRefusal {
     /// Its frozen snapshot could not be authorized for dispatch.
     Authorization,
     /// It could not be started: its place in the campaign could not be

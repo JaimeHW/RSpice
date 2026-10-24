@@ -1,15 +1,15 @@
 //! Editor selection after a validated design-owned bulk edit.
 use crate::state::SchematicState;
-pub(crate) use rspice_design::schematic::owned::bulk_edit::{
+pub use rspice_design::schematic::owned::bulk_edit::{
     SelectionBulkProperty, SelectionBulkUnsetBehavior, mutate_component, parameter_key_from_filter,
     validate_bulk_value,
 };
 use std::collections::BTreeSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SelectionBulkReceipt {
-    pub(crate) changed: usize,
+pub struct SelectionBulkReceipt {
+    pub changed: usize,
 }
-pub(crate) fn apply_bulk_edit(
+pub fn apply_bulk_edit(
     schematic: &mut SchematicState,
     target_ids: &BTreeSet<u64>,
     property: SelectionBulkProperty,
@@ -43,7 +43,7 @@ pub(crate) fn apply_bulk_edit(
 
 /// Replace each expected instance by its edited candidate as one undo step.
 /// Returns how many instances changed.
-pub(crate) fn replace_components(
+pub fn replace_components(
     schematic: &mut SchematicState,
     edits: Vec<(crate::state::Component, crate::state::Component)>,
     description: &str,

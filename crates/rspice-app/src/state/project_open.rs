@@ -13,7 +13,7 @@
 /// lifecycle calls it from one function, in the same call that opens, resets
 /// or closes the project, and a source guard refuses any other caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ProjectOpenFact {
+pub struct ProjectOpenFact {
     open: bool,
 }
 
@@ -27,13 +27,13 @@ impl Default for ProjectOpenFact {
 
 impl ProjectOpenFact {
     /// Whether a project is open.
-    pub(crate) const fn is_open(self) -> bool {
+    pub const fn is_open(self) -> bool {
         self.open
     }
 
     /// Record the project lifecycle's answer. Only the lifecycle's one
     /// publishing function calls this; nothing else writes the fact.
-    pub(crate) fn set_from_lifecycle(&mut self, open: bool) {
+    pub fn set_from_lifecycle(&mut self, open: bool) {
         self.open = open;
     }
 }

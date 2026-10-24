@@ -100,7 +100,7 @@ pub use generated_veriloga_catalog::{
     generated_veriloga_devices, generated_veriloga_library_binding,
     validate_generated_veriloga_binding,
 };
-pub(crate) use hierarchy::SheetMoveConnectivityPlan;
+pub use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{
     HierarchyExtractionPlan, HierarchyExtractionTerminal, HierarchyNetConnectivity,
     hierarchy_terminal_direction, hierarchy_terminal_discipline,
@@ -114,7 +114,7 @@ pub use placement_authority::PlacementAuthority;
 pub use port::{PendingPortPlacement, PortDirectionType, PortSignalType};
 pub use port::{PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSpec};
 pub use probe::SchematicProbe;
-pub(crate) use replacement::parse_replacement_parameters_strict;
+pub use replacement::parse_replacement_parameters_strict;
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementError, SchematicReplacementParameter,
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,

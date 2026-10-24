@@ -67,7 +67,7 @@ impl ModelDeviceFamily {
 }
 
 /// Reject a structurally invalid primitive binding before schematic mutation.
-pub(crate) fn validate_component_model_compatibility(
+pub fn validate_component_model_compatibility(
     component: ComponentType,
     model: &DeviceModel,
 ) -> Result<(), String> {
@@ -109,7 +109,7 @@ pub(crate) fn placement_component_for_model(model: &DeviceModel) -> Option<Compo
 }
 
 /// A model-bound library cell may move only within the same structural family.
-pub(crate) fn models_have_compatible_device_family(
+pub fn models_have_compatible_device_family(
     current: &DeviceModel,
     candidate: &DeviceModel,
 ) -> bool {

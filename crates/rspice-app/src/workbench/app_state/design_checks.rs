@@ -27,7 +27,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 mod anchor;
 mod live;
-pub(crate) use anchor::{model_design_view, model_location_anchor};
+pub use anchor::{model_design_view, model_location_anchor};
 pub(in crate::workbench) use live::live_check_digest;
 
 /// Producer identity every schematic and electrical rule finding carries.
@@ -36,11 +36,11 @@ const DESIGN_RULE_PRODUCER: &str = "rspice.design.rules";
 const DESIGN_CHECK_DIGEST_DOMAIN: &[u8] = b"rspice-interactive-design-check/v1\0";
 
 #[derive(Debug, Clone)]
-pub(crate) struct CellViewCheckReceipt {
+pub struct CellViewCheckReceipt {
     pub(crate) project_id: ProjectId,
     pub(crate) subject: CellViewRef,
     pub(crate) input_digest: ContentDigest,
-    pub(crate) result: DrcResult,
+    pub result: DrcResult,
     /// How much of the design the check stated.
     pub(crate) scope: CheckScope,
     /// Where it stands in the order the checks were published in, which is
@@ -52,7 +52,7 @@ pub(crate) struct CellViewCheckReceipt {
 /// How much of the design one check states, which is what it takes over from
 /// the checks published before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CheckScope {
+pub enum CheckScope {
     /// The subject's own findings: Check Cellview, and Check and Save.
     Cellview,
     /// The subject and every cellview its walk reaches.
@@ -176,7 +176,7 @@ impl RuleCoverage {
 }
 
 #[derive(Debug)]
-pub(crate) enum DesignCheckStatus<'a> {
+pub enum DesignCheckStatus<'a> {
     NotRun,
     Current(&'a CellViewCheckReceipt),
     Stale(&'a CellViewCheckReceipt),
@@ -187,14 +187,14 @@ pub(crate) enum DesignCheckStatus<'a> {
 }
 
 impl DesignCheckStatus<'_> {
-    pub(crate) fn current_receipt(&self) -> Option<&CellViewCheckReceipt> {
+    pub fn current_receipt(&self) -> Option<&CellViewCheckReceipt> {
         match self {
             Self::Current(receipt) => Some(receipt),
             Self::NotRun | Self::Stale(_) | Self::Unavailable { .. } => None,
         }
     }
 
-    pub(crate) fn last_receipt(&self) -> Option<&CellViewCheckReceipt> {
+    pub fn last_receipt(&self) -> Option<&CellViewCheckReceipt> {
         match self {
             Self::Current(receipt) | Self::Stale(receipt) => Some(receipt),
             Self::Unavailable { last, .. } => *last,
@@ -204,7 +204,7 @@ impl DesignCheckStatus<'_> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DesignCheckRuntime {
+pub struct DesignCheckRuntime {
     receipts: BTreeMap<CanonicalCellViewOwnerKey, CellViewCheckReceipt>,
     /// The live checks' passes, by the cellview each was of.
     live: BTreeMap<CanonicalCellViewOwnerKey, CellViewCheckReceipt>,
@@ -253,7 +253,7 @@ impl Model {
     /// Record how a finished design check came out: Warning when it found
     /// errors, Info when it is clean. Every check the reader can run, by hand
     /// or on save, states its outcome by this one rule.
-    pub(crate) fn record_check_outcome(&mut self, result: &DrcResult, line: String) {
+    pub fn record_check_outcome(&mut self, result: &DrcResult, line: String) {
         use crate::diagnostics::{LogSeverity, LogSource};
 
         let severity = if result.passed() {
@@ -266,7 +266,7 @@ impl Model {
 
     /// The findings of the check of `subject` that reached as far as
     /// `scope`, while they still describe the design.
-    pub(in crate::workbench) fn current_design_check(
+    pub fn current_design_check(
         &self,
         subject: &CellViewRef,
         scope: CheckScope,
@@ -285,7 +285,7 @@ impl Model {
     ///
     /// The model's part of a check: the drawing's annotation is brought into
     /// the workspace first, by the editor, where restoring it failed.
-    pub(in crate::workbench) fn run_design_check(
+    pub fn run_design_check(
         &mut self,
         subject: CellViewRef,
         scope: CheckScope,
@@ -330,7 +330,7 @@ impl Model {
         Ok(result)
     }
 
-    pub(crate) fn publish_active_design_check_result(
+    pub fn publish_active_design_check_result(
         &mut self,
         result: DrcResult,
         facts: SlotFacts,
@@ -353,7 +353,7 @@ impl Model {
     /// configured simulation root — the profile the Check command uses for
     /// that cell view, so a pass run by either is the same evidence, and the
     /// one the run gate judges the root under.
-    pub(crate) fn configured_root_design_check_config(&self) -> DrcConfig {
+    pub fn configured_root_design_check_config(&self) -> DrcConfig {
         self.design_check_config(&self.workspace.content.simulation_root_reference())
     }
 
@@ -461,7 +461,7 @@ impl Model {
     /// What the findings the canvas marks are called, in the order the
     /// canvas holds them. They may be two passes' findings composed, so they
     /// are named from that set rather than from either pass's receipt.
-    pub(crate) fn canvas_finding_identities(&self) -> Vec<uuid::Uuid> {
+    pub fn canvas_finding_identities(&self) -> Vec<uuid::Uuid> {
         let Some(result) = &self.design_checks.drc_results else {
             return Vec::new();
         };
@@ -476,7 +476,7 @@ impl Model {
     /// frame costs that finding's objects and no walk over the others. A
     /// finding whose batch no longer describes the design marks nothing, as
     /// its row offers no jump.
-    pub(crate) fn current_finding_related_marks(
+    pub fn current_finding_related_marks(
         &self,
         cell_view: &CellViewRef,
         facts: SlotFacts,
@@ -510,10 +510,7 @@ impl Model {
 
     /// The worst rule finding published for `subject`, first among equals in
     /// the order the checks reported them — where a worst-first tour starts.
-    pub(in crate::workbench) fn worst_design_rule_finding(
-        &self,
-        subject: &CellViewRef,
-    ) -> Option<uuid::Uuid> {
+    pub fn worst_design_rule_finding(&self, subject: &CellViewRef) -> Option<uuid::Uuid> {
         let published = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
         };
@@ -531,7 +528,7 @@ impl Model {
             .map(|record| record.canonical.diagnostic_id)
     }
 
-    pub(crate) fn design_check_status(
+    pub fn design_check_status(
         &self,
         subject: &CellViewRef,
         facts: SlotFacts,
@@ -558,7 +555,7 @@ impl Model {
         }
     }
 
-    pub(crate) fn active_design_check_status(&self, facts: SlotFacts) -> DesignCheckStatus<'_> {
+    pub fn active_design_check_status(&self, facts: SlotFacts) -> DesignCheckStatus<'_> {
         if !matches!(
             self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -570,14 +567,11 @@ impl Model {
 
     /// Where Check Design's evidence about the configured design stands: the
     /// receipt is filed under the simulation root it walked from.
-    pub(crate) fn simulation_root_design_check_status(
-        &self,
-        facts: SlotFacts,
-    ) -> DesignCheckStatus<'_> {
+    pub fn simulation_root_design_check_status(&self, facts: SlotFacts) -> DesignCheckStatus<'_> {
         self.design_check_status(&self.workspace.content.simulation_root_reference(), facts)
     }
 
-    pub(crate) fn clear_active_design_check(&mut self, facts: SlotFacts) {
+    pub fn clear_active_design_check(&mut self, facts: SlotFacts) {
         if !matches!(
             self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -613,7 +607,7 @@ impl Model {
     /// so the pass keeps its digest and stays current. A stale pass is left
     /// as it is: re-stating it would publish findings about a design that has
     /// moved under the digest of the one in front of the reader.
-    pub(in crate::workbench) fn restate_design_checks(&mut self, facts: SlotFacts) {
+    pub fn restate_design_checks(&mut self, facts: SlotFacts) {
         // In the order they were published, so each still takes over from the
         // checks before it what it took over then.
         let mut subjects = self
@@ -653,7 +647,7 @@ impl Model {
         }
     }
 
-    pub(crate) fn clear_all_design_checks(&mut self) {
+    pub fn clear_all_design_checks(&mut self) {
         let published: Vec<DiagnosticInputs> =
             self.design_checks
                 .receipts
@@ -676,7 +670,7 @@ impl Model {
     /// Keep the legacy interactive DRC projection scoped to the exact active
     /// schematic. Remaining canvas/status consumers can therefore never show
     /// a different cell/view's findings while they are migrated to receipts.
-    pub(crate) fn refresh_active_design_check_projection(&mut self, facts: SlotFacts) {
+    pub fn refresh_active_design_check_projection(&mut self, facts: SlotFacts) {
         if !matches!(
             self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -992,7 +986,7 @@ fn reached_cellviews(model: &Model, subject: &CellViewRef) -> Result<Vec<CellVie
 
 /// A stable key of the object a rule finding is located at: the design
 /// crate's, which a waiver is keyed by too.
-pub(in crate::workbench) use rspice_design::drc::location_key;
+pub use rspice_design::drc::location_key;
 
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
     canonical_cell_view_owner_key(&subject.library, &subject.cell, &subject.view)
@@ -1015,7 +1009,7 @@ impl Model {
     /// may instantiate, so a waived error is waived for the run gate as it is
     /// on the page, and asks for a ground where the subject is a design of
     /// its own.
-    pub(crate) fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
+    pub fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
         DrcConfig {
             check_missing_ground: asks_for_ground(self, subject),
             severity_overrides: self.workspace.content.design_rules.severity_overrides(),

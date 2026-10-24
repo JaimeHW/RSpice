@@ -61,7 +61,7 @@ impl super::WorkspaceSession {
     }
 }
 
-pub(crate) struct WorkspaceSourceFiles;
+pub struct WorkspaceSourceFiles;
 
 impl HierarchySourceFiles for WorkspaceSourceFiles {
     fn source_paths_match(&self, left: &Path, right: &Path) -> bool {

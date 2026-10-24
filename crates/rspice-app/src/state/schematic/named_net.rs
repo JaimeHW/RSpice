@@ -1,10 +1,10 @@
 //! Editor permission checks around design-owned named-net authority.
 use crate::state::SchematicState;
 use rspice_design::schematic::owned::named_net;
-pub(crate) use rspice_design::schematic::owned::named_net::{
+pub use rspice_design::schematic::owned::named_net::{
     NamedNetTarget, NetMembership, net_name_eq, port_terminal,
 };
-pub(crate) fn validate_named_net_rename(
+pub fn validate_named_net_rename(
     schematic: &SchematicState,
     target: &NamedNetTarget,
     candidate: &str,
@@ -14,7 +14,7 @@ pub(crate) fn validate_named_net_rename(
     }
     named_net::validate_named_net_rename(schematic.document(), target, candidate)
 }
-pub(crate) fn apply_named_net_rename(
+pub fn apply_named_net_rename(
     schematic: &mut SchematicState,
     target: NamedNetTarget,
     candidate: String,

@@ -19,7 +19,7 @@ impl Model {
     /// belongs here rather than only in the schematic gate because every
     /// document class — symbol, layout, hierarchy reference, review comment —
     /// writes into the same project that safe mode opened read-only.
-    pub(crate) fn active_view_read_only(&self) -> bool {
+    pub fn active_view_read_only(&self) -> bool {
         self.safe_mode.project_read_only()
             || self.workspace.content.active_read_only_reference()
             || self
@@ -32,7 +32,7 @@ impl Model {
     ///
     /// Safe mode can be activated after a tool or dialog was armed, so callers
     /// must not rely only on the persisted schematic flag captured earlier.
-    pub(crate) fn schematic_edit_read_only(&self) -> bool {
+    pub fn schematic_edit_read_only(&self) -> bool {
         self.schematic.session.read_only || self.active_view_read_only()
     }
 }
@@ -41,17 +41,17 @@ impl Model {
 /// validated against again before it commits. Every entry point takes the
 /// session that holds the model as `impl AsRef<Model>`.
 #[derive(Debug, Clone)]
-pub(crate) struct SchematicEditAuthority {
-    pub(crate) source: EditorRequestSource,
-    pub(crate) view_path: String,
-    pub(crate) grid_size: i32,
-    pub(crate) document_policy: SchematicDocumentPolicy,
-    pub(crate) snapshot: SchematicSnapshot,
-    pub(crate) selection: Selection,
+pub struct SchematicEditAuthority {
+    pub source: EditorRequestSource,
+    pub view_path: String,
+    pub grid_size: i32,
+    pub document_policy: SchematicDocumentPolicy,
+    pub snapshot: SchematicSnapshot,
+    pub selection: Selection,
 }
 
 impl SchematicEditAuthority {
-    pub(crate) fn capture(state: &impl AsRef<Model>) -> Self {
+    pub fn capture(state: &impl AsRef<Model>) -> Self {
         let model = state.as_ref();
         Self {
             source: schematic_editor_request_source(state),
@@ -64,7 +64,7 @@ impl SchematicEditAuthority {
     }
 
     /// Geometry and scope are shared; each workflow validates the library masters it uses.
-    pub(crate) fn matches_source(&self, current: &EditorRequestSource) -> bool {
+    pub fn matches_source(&self, current: &EditorRequestSource) -> bool {
         self.source.project == current.project
             && self.source.document == current.document
             && self.source.occurrence == current.occurrence
@@ -75,7 +75,7 @@ impl SchematicEditAuthority {
             && self.source.sheet == current.sheet
     }
 
-    pub(crate) fn validate(&self, state: &impl AsRef<Model>, command: &str) -> Result<(), String> {
+    pub fn validate(&self, state: &impl AsRef<Model>, command: &str) -> Result<(), String> {
         let model = state.as_ref();
         if model.schematic_edit_read_only() {
             return Err("The active schematic is read-only.".to_owned());
@@ -88,7 +88,7 @@ impl SchematicEditAuthority {
     /// Selection is deliberately available in read-only cell views, but it
     /// must still be bound to the exact document, hierarchy owner, geometry,
     /// and prior selection reviewed by the user.
-    pub(crate) fn validate_presentation(
+    pub fn validate_presentation(
         &self,
         state: &impl AsRef<Model>,
         command: &str,
@@ -127,7 +127,7 @@ impl SchematicEditAuthority {
 }
 
 /// Source identity shared by editor requests and retained edit workflows.
-pub(crate) fn schematic_editor_request_source(state: &impl AsRef<Model>) -> EditorRequestSource {
+pub fn schematic_editor_request_source(state: &impl AsRef<Model>) -> EditorRequestSource {
     let model = state.as_ref();
     let document = model.workspace.content.active_schematic_reference();
     let document_key = document.key();
@@ -151,6 +151,6 @@ pub(crate) fn schematic_editor_request_source(state: &impl AsRef<Model>) -> Edit
 }
 
 /// [`Model::symbol_context_revision`] for any holder of the model.
-pub(crate) fn symbol_context_revision(state: &impl AsRef<Model>) -> u64 {
+pub fn symbol_context_revision(state: &impl AsRef<Model>) -> u64 {
     state.as_ref().symbol_context_revision()
 }

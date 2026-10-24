@@ -4,23 +4,20 @@ use super::ProjectWorkspace;
 use crate::state::schematic::{SchematicEditorMut, SchematicEditorRef, SchematicState};
 
 impl ProjectWorkspace {
-    pub(crate) fn schematic_editor(&self, key: &str) -> Option<SchematicEditorRef<'_>> {
+    pub fn schematic_editor(&self, key: &str) -> Option<SchematicEditorRef<'_>> {
         self.session.schematic_editor(&self.content, key)
     }
-    pub(crate) fn clone_schematic_editor(&self, key: &str) -> Option<SchematicState> {
+    pub fn clone_schematic_editor(&self, key: &str) -> Option<SchematicState> {
         self.session.clone_schematic_editor(&self.content, key)
     }
-    pub(crate) fn schematic_editor_mut(&mut self, key: &str) -> Option<SchematicEditorMut<'_>> {
+    pub fn schematic_editor_mut(&mut self, key: &str) -> Option<SchematicEditorMut<'_>> {
         self.session.schematic_editor_mut(&mut self.content, key)
     }
-    pub(crate) fn for_each_schematic_editor_mut(
-        &mut self,
-        edit: impl FnMut(&str, &mut SchematicState),
-    ) {
+    pub fn for_each_schematic_editor_mut(&mut self, edit: impl FnMut(&str, &mut SchematicState)) {
         self.session
             .for_each_schematic_editor_mut(&mut self.content, edit)
     }
-    pub(crate) fn insert_schematic_editor(
+    pub fn insert_schematic_editor(
         &mut self,
         key: String,
         editor: SchematicState,
@@ -28,7 +25,7 @@ impl ProjectWorkspace {
         self.session
             .insert_schematic_editor(&mut self.content, key, editor)
     }
-    pub(crate) fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
+    pub fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
         self.session.remove_schematic_editor(&mut self.content, key)
     }
 }
@@ -48,7 +45,7 @@ impl super::WorkspaceSession {
             })
     }
 
-    pub(crate) fn clone_schematic_editor(
+    pub fn clone_schematic_editor(
         &self,
         content: &rspice_project::ProjectWorkspace,
         key: &str,

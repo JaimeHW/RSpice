@@ -47,14 +47,14 @@ impl SchematicState {
 
     /// Copy the baseline an operation beginning now would capture, before
     /// it is known that one will: see [`Self::begin_prepared_operation`].
-    pub(crate) fn prepare_operation(&self) -> PreparedBaseline {
+    pub fn prepare_operation(&self) -> PreparedBaseline {
         self.design.prepare_operation()
     }
 
     /// [`Self::begin_operation`], with the baseline [`Self::prepare_operation`]
     /// copied earlier. The copy stands in for a fresh capture only while the
     /// document is unchanged since; otherwise the document is captured now.
-    pub(crate) fn begin_prepared_operation(
+    pub fn begin_prepared_operation(
         &mut self,
         prepared: Option<PreparedBaseline>,
         description: impl Into<String>,
@@ -242,7 +242,7 @@ impl SchematicState {
         self.design.pending_operation_id().is_some()
     }
 
-    pub(crate) fn pending_operation_id(&self) -> Option<u64> {
+    pub fn pending_operation_id(&self) -> Option<u64> {
         self.design.pending_operation_id()
     }
 

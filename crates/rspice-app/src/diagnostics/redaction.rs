@@ -10,7 +10,7 @@ const MAX_MESSAGE_BYTES: usize = 2_048;
 
 /// `message` as it may be shared: `home` replaced by `<HOME>`, and the text
 /// cut at [`MAX_MESSAGE_BYTES`] on a character boundary.
-pub(crate) fn redact_log_message(message: &str, home: Option<&str>) -> String {
+pub fn redact_log_message(message: &str, home: Option<&str>) -> String {
     let mut redacted = home.filter(|home| !home.is_empty()).map_or_else(
         || message.to_owned(),
         |home| message.replace(home, "<HOME>"),
@@ -27,7 +27,7 @@ pub(crate) fn redact_log_message(message: &str, home: Option<&str>) -> String {
 }
 
 /// The reader's home directory, as the text [`redact_log_message`] replaces.
-pub(crate) fn home_directory() -> Option<String> {
+pub fn home_directory() -> Option<String> {
     dirs::home_dir().map(|path| path.display().to_string())
 }
 

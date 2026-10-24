@@ -19,7 +19,7 @@ impl SchematicState {
 
     /// Current allocator cursor used to key immutable transaction previews.
     /// Reading it never consumes an identity.
-    pub(crate) const fn identity_cursor(&self) -> u64 {
+    pub const fn identity_cursor(&self) -> u64 {
         self.design.identity_cursor()
     }
 

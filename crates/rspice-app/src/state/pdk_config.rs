@@ -11,18 +11,18 @@ mod technology_diff;
 #[cfg(test)]
 mod technology_draft_tests;
 
-pub(crate) use discovery::discover_model_files;
+pub use discovery::discover_model_files;
 #[cfg(test)]
 pub(crate) use discovery::discovered_file;
 pub use errors::ConfigError;
-pub(crate) use paths::expand_path;
+pub use paths::expand_path;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use persistence::default_config_path;
+pub use persistence::default_config_path;
 #[cfg(all(not(test), not(target_arch = "wasm32")))]
-pub(crate) use persistence::load;
-pub(crate) use persistence::save;
+pub use persistence::load;
+pub use persistence::save;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use persistence::{
+pub use persistence::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
 };

@@ -15,34 +15,34 @@ use crate::product::ContentDigest;
 /// contract used by execution. The receipt is invalid as soon as the visible
 /// content digest changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NetlistValidationReceipt {
-    pub(crate) visible_content_digest: ContentDigest,
-    pub(crate) executable_source_digest: ContentDigest,
-    pub(crate) prepared_snapshot_digest: ContentDigest,
-    pub(crate) project_revision: u64,
-    pub(crate) task_count: usize,
-    pub(crate) advisory_count: usize,
+pub struct NetlistValidationReceipt {
+    pub visible_content_digest: ContentDigest,
+    pub executable_source_digest: ContentDigest,
+    pub prepared_snapshot_digest: ContentDigest,
+    pub project_revision: u64,
+    pub task_count: usize,
+    pub advisory_count: usize,
 }
 
 /// The generated deck, the generation inputs it is bound to, and the latest
 /// validation of the visible source.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NetlistArtifacts {
+pub struct NetlistArtifacts {
     /// Canonical immutable document, including generated provenance,
     /// dependency identities, source map, outline, and validation state.
-    pub(crate) generated_document: Option<crate::state::NetlistDocument>,
+    pub generated_document: Option<crate::state::NetlistDocument>,
     /// Runtime-generated primary artifact retained independently from any
     /// project-owned source document.
-    pub(crate) generated_source: String,
+    pub generated_source: String,
     /// Exact project-input digest used to produce the retained generated
     /// artifact. `None` means the current bytes have no generated authority.
-    pub(crate) generated_input_digest: Option<ContentDigest>,
+    pub generated_input_digest: Option<ContentDigest>,
     /// Input digest observed this frame. A mismatch with
     /// `generated_input_digest` makes the retained artifact stale and blocks
     /// execution until generation succeeds.
-    pub(crate) current_generation_input_digest: Option<ContentDigest>,
+    pub current_generation_input_digest: Option<ContentDigest>,
     /// Diagnostic from the latest failed generation attempt.
-    pub(crate) generation_error: Option<String>,
+    pub generation_error: Option<String>,
     /// Receipt for the latest exact visible source validation.
-    pub(crate) validation: Option<NetlistValidationReceipt>,
+    pub validation: Option<NetlistValidationReceipt>,
 }

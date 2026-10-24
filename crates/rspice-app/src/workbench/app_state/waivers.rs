@@ -33,9 +33,9 @@ const WAIVER_PRODUCER: &str = "rspice.design.waivers";
 
 /// Where the waiver of one finding is stored, and what it names there.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) struct WaiverTarget {
+pub struct WaiverTarget {
     /// The cellview whose document stores the waiver.
-    pub(in crate::workbench) cell_view: CellViewRef,
+    pub cell_view: CellViewRef,
     /// The code of the rule the finding is an instance of.
     pub(in crate::workbench) rule: Arc<str>,
     /// The object inside that cellview the finding is located at.
@@ -44,7 +44,7 @@ pub(in crate::workbench) struct WaiverTarget {
 
 /// What the page may do about a finding's waiver.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum WaiverAction {
+pub enum WaiverAction {
     /// The finding is not waived and its rule may be: record one.
     Waive(WaiverTarget),
     /// A waiver covers the finding: remove it, so the finding counts again.
@@ -57,7 +57,7 @@ pub(in crate::workbench) enum WaiverAction {
 
 impl WaiverAction {
     /// Where the waiver this acts on is stored, and what it names there.
-    pub(in crate::workbench) const fn target(&self) -> &WaiverTarget {
+    pub const fn target(&self) -> &WaiverTarget {
         match self {
             Self::Waive(target) | Self::Remove(target) | Self::Delete(target) => target,
         }
@@ -92,7 +92,7 @@ impl WaiverTarget {
 /// What the page may do about the waiver of a finding of `subject`'s check:
 /// remove the waiver covering it, waive it, or nothing, for a rule that may
 /// not be waived.
-pub(in crate::workbench) fn finding_waiver_action(
+pub fn finding_waiver_action(
     subject: &CellViewRef,
     violation: &DrcViolation,
 ) -> Option<WaiverAction> {
@@ -109,7 +109,7 @@ pub(in crate::workbench) fn finding_waiver_action(
 }
 
 /// The waiver covering a finding, as the record states it.
-pub(in crate::workbench) fn suppression_of(waiver: &DrcWaiver) -> DiagnosticSuppression {
+pub fn suppression_of(waiver: &DrcWaiver) -> DiagnosticSuppression {
     DiagnosticSuppression {
         rule: waiver.rule.clone(),
         reason: waiver.reason.clone(),
@@ -149,7 +149,7 @@ fn cell_view_of_key(key: &str) -> Option<CellViewRef> {
 /// None of them is silently kept or silently deleted. Each says what it is
 /// and offers to remove the waiver, except a list this build cannot read,
 /// which it keeps as it is.
-pub(in crate::workbench) fn stored_waiver_records(
+pub fn stored_waiver_records(
     model: &Model,
     subject: &CellViewRef,
     stored: &DrcWaivers,
@@ -344,7 +344,7 @@ impl Model {
     /// and the symbol's in front of the reader. Taken before an undo or redo
     /// and compared after it, it says whether the step recorded or took
     /// away a waiver.
-    pub(in crate::workbench) fn stored_waivers(&self) -> StoredWaivers {
+    pub fn stored_waivers(&self) -> StoredWaivers {
         StoredWaivers {
             schematics: self
                 .schematic_documents()
@@ -367,10 +367,7 @@ impl Model {
     /// stores it, so that document has to be one the workbench edits: the
     /// view in front of the reader, or a schematic the project holds open. A
     /// library the project borrows read-only is never edited from here.
-    pub(in crate::workbench) fn waiver_edit_refusal(
-        &self,
-        cell_view: &CellViewRef,
-    ) -> Option<String> {
+    pub fn waiver_edit_refusal(&self, cell_view: &CellViewRef) -> Option<String> {
         if self.safe_mode.project_read_only() {
             return Some("The project is read-only".to_owned());
         }
@@ -409,7 +406,7 @@ impl Model {
     /// The symbol in front of the reader stores its waivers through its
     /// editor, so for it the edit is handed back, unapplied, for the editor
     /// to make.
-    pub(in crate::workbench) fn edit_held_waivers(
+    pub fn edit_held_waivers(
         &mut self,
         cell_view: &CellViewRef,
         edit: StoredWaiverEdit,
@@ -454,33 +451,33 @@ impl Model {
 /// The waivers the documents open for editing store, as
 /// [`Model::stored_waivers`] takes them.
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::workbench) struct StoredWaivers {
+pub struct StoredWaivers {
     schematics: Vec<(String, DrcWaivers)>,
     symbol: Option<DrcWaivers>,
 }
 
 impl StoredWaivers {
     /// Whether the symbol's waivers differ from what they were in `before`.
-    pub(in crate::workbench) fn symbol_changed_since(&self, before: &Self) -> bool {
+    pub fn symbol_changed_since(&self, before: &Self) -> bool {
         self.symbol != before.symbol
     }
 
     /// Whether any schematic's waivers differ from what they were in
     /// `before`.
-    pub(in crate::workbench) fn schematics_changed_since(&self, before: &Self) -> bool {
+    pub fn schematics_changed_since(&self, before: &Self) -> bool {
         self.schematics != before.schematics
     }
 }
 
 /// One change to the waivers a document stores.
-pub(in crate::workbench) enum StoredWaiverEdit {
+pub enum StoredWaiverEdit {
     Waive(DrcWaiver),
     Remove { rule: String, object: String },
 }
 
 impl StoredWaiverEdit {
     /// Waive the finding at `target` for `reason`, stamped now.
-    pub(in crate::workbench) fn waive(target: &WaiverTarget, reason: &str) -> Result<Self, String> {
+    pub fn waive(target: &WaiverTarget, reason: &str) -> Result<Self, String> {
         let waived_at_ms = crate::time_compat::checked_unix_time_ms()
             .map_err(|error| format!("The waiver was not recorded: {error}."))?;
         Ok(Self::Waive(DrcWaiver {
@@ -493,14 +490,14 @@ impl StoredWaiverEdit {
     }
 
     /// Remove the waiver stored at `target`.
-    pub(in crate::workbench) fn remove(target: &WaiverTarget) -> Self {
+    pub fn remove(target: &WaiverTarget) -> Self {
         Self::Remove {
             rule: target.rule.to_string(),
             object: target.object.clone(),
         }
     }
 
-    pub(in crate::workbench) fn apply(self, waivers: &mut DrcWaivers) -> Result<(), String> {
+    pub fn apply(self, waivers: &mut DrcWaivers) -> Result<(), String> {
         match self {
             Self::Waive(waiver) => waivers.waive(waiver).map_err(|refusal| refusal.to_string()),
             Self::Remove { rule, object } => waivers

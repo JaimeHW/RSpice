@@ -15,7 +15,7 @@ use crate::state::{
 
 impl Model {
     /// Everything the symbol pin checks read for one symbol view.
-    pub(in crate::workbench) fn symbol_pin_check_inputs(
+    pub fn symbol_pin_check_inputs(
         &self,
         reference: &CellViewRef,
     ) -> Result<SymbolPinCheckInputs, String> {
@@ -32,7 +32,7 @@ impl Model {
     }
 
     /// The interface contract one cell's symbol is checked against.
-    pub(crate) fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
+    pub fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
         if self.workspace.content.active_view == schematic_ref {
             return self.schematic.document().interface_ports();
@@ -67,15 +67,12 @@ impl Model {
             .unwrap_or_default()
     }
 
-    pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
+    pub fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
         self.load_symbol_document(&self.workspace.content.active_view)
     }
 
     /// One cell's symbol artwork, as published in the library.
-    pub(crate) fn load_symbol_document(
-        &self,
-        reference: &CellViewRef,
-    ) -> Result<SymbolDocument, String> {
+    pub fn load_symbol_document(&self, reference: &CellViewRef) -> Result<SymbolDocument, String> {
         let Some(view) = self
             .library_manager
             .get_library(&reference.library)
@@ -120,7 +117,7 @@ impl Model {
 
     /// One cell's symbol authoring metadata, which is where its published
     /// revision is recorded.
-    pub(crate) fn load_symbol_editor_metadata(
+    pub fn load_symbol_editor_metadata(
         &self,
         reference: &CellViewRef,
         document: &SymbolDocument,
@@ -144,8 +141,8 @@ impl Model {
 /// same drawing under a new one is a new contract, and a finding measured
 /// against the old one no longer describes it.
 #[derive(Debug, Clone, serde::Serialize)]
-pub(in crate::workbench) struct SymbolPinCheckInputs {
+pub struct SymbolPinCheckInputs {
     pub(in crate::workbench) revision: u64,
-    pub(in crate::workbench) document: SymbolDocument,
-    pub(in crate::workbench) ports: Vec<PortSpec>,
+    pub document: SymbolDocument,
+    pub ports: Vec<PortSpec>,
 }

@@ -35,17 +35,14 @@ use rspice_simulation::netlist_gen::TableRoute;
 ///
 /// A preview cares about the waveform, not the topology, so the nets are named
 /// rather than resolved. They appear in the card text and nowhere else.
-pub(crate) const DETACHED_NETS: [&str; 2] = ["p", "n"];
+pub const DETACHED_NETS: [&str; 2] = ["p", "n"];
 
 /// The card this placed source emits, between these two nets.
 ///
 /// The generator writes it, so this is the same text the deck carries for the
 /// same instance — minus only the companion elements a source's parasitics add
 /// beside it, which are separate devices.
-pub(crate) fn source_card_text(
-    component: &Component,
-    nets: [&str; 2],
-) -> Result<String, Vec<String>> {
+pub fn source_card_text(component: &Component, nets: [&str; 2]) -> Result<String, Vec<String>> {
     rspice_simulation::netlist_gen::independent_source_card(
         component,
         nets,
@@ -61,7 +58,7 @@ pub(crate) fn source_card_text(
 /// The generator writes it, through the instance the definition would be
 /// adopted onto, so a library's realization line and a placed adopter's
 /// deck line cannot spell the same definition differently.
-pub(crate) fn definition_card_text(
+pub fn definition_card_text(
     definition: &StimulusDefinition,
     nets: [&str; 2],
 ) -> Result<String, Vec<String>> {
@@ -75,7 +72,7 @@ pub(crate) fn definition_card_text(
 /// realization line states the card a deck would carry and that card names
 /// the file, not a cache path.
 #[must_use]
-pub(crate) fn definition_preview_component(definition: &StimulusDefinition) -> Component {
+pub fn definition_preview_component(definition: &StimulusDefinition) -> Component {
     let component = definition.transient_component();
     let Some(stored) = data_file_reference(&component) else {
         return component;
@@ -85,7 +82,7 @@ pub(crate) fn definition_preview_component(definition: &StimulusDefinition) -> C
 }
 
 /// The data file a file-backed source's card names, as stored.
-pub(crate) fn data_file_reference(component: &Component) -> Option<String> {
+pub fn data_file_reference(component: &Component) -> Option<String> {
     if !component.kind.is_pwl_file_source() {
         return None;
     }
@@ -123,7 +120,7 @@ fn reading_table(component: &Component, route: &TableRoute) -> Option<Component>
 /// directory for the parser — and a preview refused a table the run would
 /// have read.
 #[must_use]
-pub(crate) fn reading_reachable_table<'c>(
+pub fn reading_reachable_table<'c>(
     component: &'c Component,
     sources: TableSources<'_>,
 ) -> std::borrow::Cow<'c, Component> {
@@ -147,7 +144,7 @@ pub(crate) fn reading_reachable_table<'c>(
 /// design variable does not resolve and is reported here rather than silently
 /// taking some other scope's value — resolving design variables is the
 /// netlister's business, at the point where a deck knows its own `.param`s.
-pub(crate) fn source_spec(component: &Component) -> Result<SourceSpec, String> {
+pub fn source_spec(component: &Component) -> Result<SourceSpec, String> {
     let card = source_card_text(component, DETACHED_NETS).map_err(|errors| errors.join("; "))?;
     let specification = specification_of(&card).ok_or_else(|| {
         format!(
@@ -173,7 +170,7 @@ fn specification_of(card: &str) -> Option<&str> {
 
 /// Where a preview looks, and how finely.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PreviewWindow {
+pub struct PreviewWindow {
     /// First sample time, in seconds.
     pub start: f64,
     /// Last sample time, in seconds.
@@ -197,7 +194,7 @@ pub(crate) struct PreviewWindow {
 /// default transient instead and says so, which is what a run would use if the
 /// user added one without changing a field.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PreviewTiming {
+pub struct PreviewTiming {
     /// TSTEP, in seconds.
     pub tstep: f64,
     /// TSTOP, in seconds.
@@ -283,7 +280,7 @@ fn evaluate_at(spec: &SourceSpec, time: f64, timing: PreviewTiming) -> f64 {
 /// the card: an axis label that disagreed with the line above it would be the
 /// same defect in miniature.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct WaveformReadouts {
+pub struct WaveformReadouts {
     /// Lowest sampled value.
     pub minimum: f64,
     /// Highest sampled value.
@@ -354,7 +351,7 @@ impl WaveformReadouts {
 ///   as TRNOISE (`core:engine/transient/noise.rs` `replace_transient_random`),
 ///   and its sample count is a function of the transient's stop time, so the
 ///   flat line the spec does return is the offset rather than the draw.
-pub(crate) fn preview_defect(spec: &SourceSpec) -> Option<String> {
+pub fn preview_defect(spec: &SourceSpec) -> Option<String> {
     match transient_part(spec) {
         SourceSpec::PwlFile { path, .. } if !std::path::Path::new(path).is_file() => Some(format!(
             "This preview needs the data file '{path}', which is not readable here."
@@ -399,17 +396,16 @@ fn transient_part(spec: &SourceSpec) -> &SourceSpec {
 /// a behavioural source's expression and a controlled source's gain are not
 /// `SourceSpec`s and the engine does not read them through this parser.
 #[must_use]
-pub(crate) fn is_independent_source(kind: ComponentType) -> bool {
+pub fn is_independent_source(kind: ComponentType) -> bool {
     crate::state::stimulus_library::definition::StimulusFamily::of(kind).is_some()
 }
 
 mod derived;
 mod trace;
 
-pub(crate) use derived::{
-    Guide, SpanChoice, StimulusRealization, design_variable, names_design_variable, shape_trace,
-};
-pub(crate) use trace::{EnvelopeColumn, TraceReading, WaveformTrace, sample_trace};
+pub(crate) use derived::design_variable;
+pub use derived::{Guide, SpanChoice, StimulusRealization, names_design_variable, shape_trace};
+pub use trace::{EnvelopeColumn, TraceReading, WaveformTrace, sample_trace};
 
 #[cfg(test)]
 mod tests;

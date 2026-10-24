@@ -58,24 +58,20 @@ impl SchematicState {
 }
 
 /// A definition-realized candidate; callers may preview it or consume it once.
-pub(crate) struct PreparedStimulusAdoption {
+pub struct PreparedStimulusAdoption {
     candidate: Component,
 }
 
 impl PreparedStimulusAdoption {
-    pub(crate) fn component(&self) -> &Component {
+    pub fn component(&self) -> &Component {
         &self.candidate
     }
 
-    pub(crate) fn into_component(self) -> Component {
+    pub fn into_component(self) -> Component {
         self.candidate
     }
 
-    pub(crate) fn replace_family(
-        self,
-        schematic: &mut SchematicState,
-        description: String,
-    ) -> bool {
+    pub fn replace_family(self, schematic: &mut SchematicState, description: String) -> bool {
         if schematic.session.read_only {
             return false;
         }
@@ -88,7 +84,7 @@ impl PreparedStimulusAdoption {
 }
 
 impl SchematicState {
-    pub(crate) fn prepare_stimulus_adoption(
+    pub fn prepare_stimulus_adoption(
         component: &Component,
         definition: &StimulusDefinition,
     ) -> Option<PreparedStimulusAdoption> {

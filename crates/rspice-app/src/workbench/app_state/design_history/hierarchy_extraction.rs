@@ -10,7 +10,7 @@ use super::*;
 /// Creating a previously absent master can silently resolve an authored
 /// dangling instance in any open schematic. That is outside the extraction
 /// transaction, so fail before publishing the new cell.
-pub(crate) fn validate_hierarchy_target_unreferenced(
+pub fn validate_hierarchy_target_unreferenced(
     state: &Model,
     target: &CellViewRef,
 ) -> Result<(), String> {

@@ -31,7 +31,7 @@ pub(super) struct PreparedComponentRename {
 }
 
 impl Model {
-    pub(crate) fn rename_component_transaction(
+    pub fn rename_component_transaction(
         &mut self,
         expected: &Component,
         name: String,
@@ -43,7 +43,7 @@ impl Model {
 
     /// Commit a complete property candidate, carrying any renamed references
     /// in the same history entry. Value-only edits keep document-local history.
-    pub(crate) fn edit_component_transaction(
+    pub fn edit_component_transaction(
         &mut self,
         expected: &Component,
         candidate: Component,
@@ -90,7 +90,7 @@ impl Model {
     /// step. Instance renames among them go through the rename a manual
     /// Rename makes: the other instances, probes, saved outputs and
     /// configurations that name the instance follow it, in the same step.
-    pub(crate) fn replace_text_carrying_references(
+    pub fn replace_text_carrying_references(
         &mut self,
         document: &CellViewRef,
         matches: &[rspice_design::schematic::find_replace::FindMatch],

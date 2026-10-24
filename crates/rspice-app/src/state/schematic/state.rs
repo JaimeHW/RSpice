@@ -71,17 +71,17 @@ pub struct SchematicState {
 
 /// Borrow a stored design with the session belonging to the same document.
 #[derive(Clone, Copy)]
-pub(crate) struct SchematicEditorRef<'a> {
-    pub(crate) design: &'a rspice_design::schematic::owned::Schematic,
+pub struct SchematicEditorRef<'a> {
+    pub design: &'a rspice_design::schematic::owned::Schematic,
     pub(crate) session: Option<&'a SchematicSession>,
 }
 
 impl<'a> SchematicEditorRef<'a> {
-    pub(crate) fn document(&self) -> &'a SchematicDocument {
+    pub fn document(&self) -> &'a SchematicDocument {
         self.design.document()
     }
 
-    pub(crate) fn clone_editor(&self) -> SchematicState {
+    pub fn clone_editor(&self) -> SchematicState {
         self.with_design(self.design.clone())
     }
 
@@ -109,8 +109,8 @@ impl AsRef<SchematicDocument> for SchematicEditorRef<'_> {
 
 /// Exclusive editor access to a stored design and its per-document session.
 /// Both values return to their borrowed slots when editing ends, including unwind.
-pub(crate) struct SchematicEditorMut<'a> {
-    pub(crate) editor: SchematicState,
+pub struct SchematicEditorMut<'a> {
+    pub editor: SchematicState,
     design: &'a mut rspice_design::schematic::owned::Schematic,
     session: &'a mut SchematicSession,
 }
@@ -123,7 +123,7 @@ impl Drop for SchematicEditorMut<'_> {
 }
 
 impl SchematicState {
-    pub(crate) fn editor_ref(&self) -> SchematicEditorRef<'_> {
+    pub fn editor_ref(&self) -> SchematicEditorRef<'_> {
         SchematicEditorRef {
             design: &self.design,
             session: Some(&self.session),
@@ -184,18 +184,18 @@ pub struct SchematicSession {
     // fixtures move by value under a 40 KiB stack budget.
     /// The canvas's resolved symbols, kept while what they resolve from
     /// stands still.
-    pub(crate) symbol_context: Box<super::symbol_context_cache::SymbolContextCache>,
+    pub symbol_context: Box<super::symbol_context_cache::SymbolContextCache>,
 
     /// The canvas's operating-point voltage badges, kept while what they are
     /// read from stands still.
-    pub(crate) operating_point_badges: Box<super::operating_point_memo::OperatingPointMemo>,
+    pub operating_point_badges: Box<super::operating_point_memo::OperatingPointMemo>,
 
     /// The armed Move or Stretch preview, kept while its inputs stand still.
-    pub(crate) transform_preview: Box<super::transform_preview_memo::TransformPreviewMemo>,
+    pub transform_preview: Box<super::transform_preview_memo::TransformPreviewMemo>,
 
     /// The sheet's overflow advisories, kept while the drawing and the sheet
     /// stand still.
-    pub(crate) overflow_summary: Box<super::overflow_memo::OverflowSummaryMemo>,
+    pub overflow_summary: Box<super::overflow_memo::OverflowSummaryMemo>,
 }
 
 impl Default for SchematicState {
@@ -206,11 +206,11 @@ impl Default for SchematicState {
 
 impl SchematicState {
     /// Read-only access to persisted schematic content.
-    pub(crate) fn document(&self) -> &SchematicDocument {
+    pub fn document(&self) -> &SchematicDocument {
         self.design.document()
     }
 
-    pub(crate) fn document_and_editor(&mut self) -> (&SchematicDocument, &mut EditorSession) {
+    pub fn document_and_editor(&mut self) -> (&SchematicDocument, &mut EditorSession) {
         (self.design.document(), &mut self.session.editor)
     }
 
@@ -223,7 +223,7 @@ impl SchematicState {
 
     /// Create fresh editor state around an owned document. Saved-file loading
     /// retains its separate legacy runtime defaults in Deserialize.
-    pub(crate) fn from_document(document: SchematicDocument) -> Self {
+    pub fn from_document(document: SchematicDocument) -> Self {
         let mut session = SchematicSession::default();
         session.editor.snap_engine.grid_size = document.grid_size;
         Self {
@@ -256,7 +256,7 @@ impl SchematicState {
     ///
     /// Call this after restoring history or installing session-owned snap
     /// target preferences into a newly activated document.
-    pub(crate) fn reconcile_grid_pitch_runtime(&mut self) {
+    pub fn reconcile_grid_pitch_runtime(&mut self) {
         let grid_size = self.design.reconcile_grid_pitch();
         self.session.editor.snap_engine.grid_size = grid_size;
     }
@@ -269,18 +269,18 @@ impl SchematicState {
     pub(crate) fn clear_schematic_redo(&mut self) {
         self.design.clear_redo();
     }
-    pub(crate) fn set_live_sheet_assignments(
+    pub fn set_live_sheet_assignments(
         &mut self,
         assignments: std::collections::BTreeMap<u64, crate::state::SheetId>,
     ) {
         self.design.set_live_sheet_assignments(assignments);
     }
-    pub(crate) fn take_restored_sheet_assignments(
+    pub fn take_restored_sheet_assignments(
         &mut self,
     ) -> std::collections::BTreeMap<u64, crate::state::SheetId> {
         self.design.take_restored_sheet_assignments()
     }
-    pub(crate) fn set_pending_was_dirty(&mut self, was_dirty: bool) {
+    pub fn set_pending_was_dirty(&mut self, was_dirty: bool) {
         if let Some(cancel) = &mut self.session.operation_cancel
             && Some(cancel.operation_id()) == self.design.pending_operation_id()
         {

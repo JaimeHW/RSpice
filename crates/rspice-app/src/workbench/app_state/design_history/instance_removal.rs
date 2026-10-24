@@ -28,7 +28,7 @@ impl Model {
     /// drawings it reached. Each document is named so undo puts its objects
     /// back on the sheets they were drawn on, and the reader is returned to
     /// the drawing they were editing when they answered.
-    pub(crate) fn record_instance_removal_transaction(
+    pub fn record_instance_removal_transaction(
         &mut self,
         description: impl Into<String>,
         documents: Vec<(CellViewRef, SchematicState, SchematicState)>,

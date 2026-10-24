@@ -25,30 +25,30 @@ use crate::workbench::app_state::model::Model;
 ///
 /// Taken from the code feature's state by whoever holds it, since the model
 /// does not reach up into a feature for them.
-pub(in crate::workbench) struct SourceCollections<'a> {
+pub struct SourceCollections<'a> {
     /// The netlist editor's findings.
-    pub(in crate::workbench) netlist: &'a Arc<NetlistDiagnosticCollection>,
+    pub netlist: &'a Arc<NetlistDiagnosticCollection>,
     /// The netlist buffer's revision, which moves on every edit.
-    pub(in crate::workbench) netlist_revision: u64,
+    pub netlist_revision: u64,
     /// The buffer revision the netlist editor last validated, if it did.
-    pub(in crate::workbench) netlist_validated: Option<u64>,
+    pub netlist_validated: Option<u64>,
     /// The diagnostics of the last Verilog-A compile that produced a
     /// receipt.
-    pub(in crate::workbench) veriloga: Option<&'a Arc<CodeDiagnosticCollection>>,
+    pub veriloga: Option<&'a Arc<CodeDiagnosticCollection>>,
     /// The token that compile was authorized under, where there is one.
-    pub(in crate::workbench) veriloga_token: Option<VerilogASourceOperationToken>,
+    pub veriloga_token: Option<VerilogASourceOperationToken>,
     /// The diagnostics of the last Verilog-A compile that failed before it
     /// could produce a receipt.
-    pub(in crate::workbench) veriloga_failure: &'a Arc<CodeDiagnosticCollection>,
+    pub veriloga_failure: &'a Arc<CodeDiagnosticCollection>,
     /// The token that failed compile was authorized under.
-    pub(in crate::workbench) veriloga_failure_token: Option<&'a VerilogASourceOperationToken>,
+    pub veriloga_failure_token: Option<&'a VerilogASourceOperationToken>,
     /// The Automation validation's diagnostics.
-    pub(in crate::workbench) automation: &'a Arc<CodeDiagnosticCollection>,
+    pub automation: &'a Arc<CodeDiagnosticCollection>,
     /// Whether an Automation validation is on record as having run.
-    pub(in crate::workbench) automation_validated: bool,
+    pub automation_validated: bool,
     /// The project and source revision the Automation diagnostics were
     /// produced under: the receipt's token, or the diagnostics' own.
-    pub(in crate::workbench) automation_token: Option<(ProjectId, u64)>,
+    pub automation_token: Option<(ProjectId, u64)>,
 }
 
 /// One source editor's collection of findings.
@@ -196,10 +196,7 @@ impl Model {
     /// one lookup; once it does not, the source collections are searched for
     /// it, then for the finding about the same thing, and a search that finds
     /// neither is not repeated until a collection changes.
-    pub(in crate::workbench) fn reconcile_current_finding(
-        &mut self,
-        sources: &SourceCollections<'_>,
-    ) {
+    pub fn reconcile_current_finding(&mut self, sources: &SourceCollections<'_>) {
         let Some(current) = self.diagnostics.current else {
             return;
         };

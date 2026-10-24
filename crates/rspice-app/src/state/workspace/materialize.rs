@@ -1,9 +1,9 @@
 //! Host source checks for project hierarchy materialization.
 
-pub(crate) use super::hierarchy_resolver::metadata_value;
+pub use super::hierarchy_resolver::metadata_value;
 use super::*;
 
-pub(crate) fn project_veriloga_binding_for_view(
+pub fn project_veriloga_binding_for_view(
     workspace: &ProjectWorkspace,
     libraries: &LibraryManager,
     reference: &CellViewRef,

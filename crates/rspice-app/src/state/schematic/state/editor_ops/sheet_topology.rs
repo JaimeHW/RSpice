@@ -19,7 +19,7 @@ pub struct ActiveSheetTopology(());
 impl SchematicState {
     /// Run `operation` with the conductors `hidden` names taken out of the
     /// document, then put them back exactly where they were.
-    pub(crate) fn with_active_wire_topology<R>(
+    pub fn with_active_wire_topology<R>(
         &mut self,
         hidden: impl Fn(u64) -> bool,
         operation: impl FnOnce(&mut SchematicState, &ActiveSheetTopology) -> R,

@@ -53,7 +53,7 @@ impl SchematicState {
     /// over in the same deterministic way as Copy. `on_sheet` names the objects
     /// on the sheet being copied from; another sheet's wires and junctions at
     /// the same coordinates are left behind.
-    pub(crate) fn capture_complete_selection_resolved(
+    pub fn capture_complete_selection_resolved(
         &self,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         on_sheet: &dyn Fn(u64) -> bool,

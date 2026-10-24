@@ -13,25 +13,25 @@
 /// How a notice reads: a failure, or something that completed, but not the way
 /// the reader asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NoticeKind {
+pub enum NoticeKind {
     Error,
     Warning,
 }
 
 /// One notice, and the Console line that keeps it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Notice {
-    pub(crate) kind: NoticeKind,
-    pub(crate) title: String,
-    pub(crate) detail: String,
+pub struct Notice {
+    pub kind: NoticeKind,
+    pub title: String,
+    pub detail: String,
     /// The Console line written for this notice. The toast offers to show it,
     /// so the mirrored copy of that line is the same notice, not another.
-    pub(crate) log_id: u64,
+    pub log_id: u64,
 }
 
 /// Notices raised and not yet shown, oldest first.
 #[derive(Debug, Default)]
-pub(crate) struct NoticeQueue {
+pub struct NoticeQueue {
     pending: Vec<Notice>,
 }
 
@@ -48,17 +48,17 @@ impl NoticeQueue {
         self.pending.push(notice);
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
     /// Every pending notice, oldest first, leaving the queue empty.
-    pub(crate) fn take(&mut self) -> Vec<Notice> {
+    pub fn take(&mut self) -> Vec<Notice> {
         std::mem::take(&mut self.pending)
     }
 
     /// Put `earlier`, raised before anything queued here, ahead of it.
-    pub(crate) fn prepend(&mut self, mut earlier: NoticeQueue) {
+    pub fn prepend(&mut self, mut earlier: NoticeQueue) {
         earlier.pending.append(&mut self.pending);
         self.pending = earlier.pending;
     }

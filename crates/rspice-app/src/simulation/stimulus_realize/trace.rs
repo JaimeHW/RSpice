@@ -76,7 +76,7 @@ const COLUMN_SWEEP: usize = 24;
 /// One column of an envelope: what the waveform covers over the time the column
 /// spans.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct EnvelopeColumn {
+pub struct EnvelopeColumn {
     /// The column's own time, at its centre, which is where it is drawn.
     pub time: f64,
     /// The lowest value the waveform takes over the column.
@@ -87,7 +87,7 @@ pub(crate) struct EnvelopeColumn {
 
 /// What a preview has to draw.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum WaveformTrace {
+pub enum WaveformTrace {
     /// One value per time, in increasing time order: the engine's samples on
     /// the uniform grid with every breakpoint in the window merged in.
     Curve(Vec<(f64, f64)>),
@@ -105,7 +105,7 @@ pub(crate) enum WaveformTrace {
 
 /// What a trace reads at one time, which is what a hover readout states.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TraceReading {
+pub enum TraceReading {
     /// A value the engine produced at a time it produced it at.
     Sample {
         /// When.
@@ -202,7 +202,7 @@ impl WaveformTrace {
 /// what decides the mode: a window holding more cycles than a quarter of that,
 /// or more breakpoints than a polyline can merge, is measured rather than
 /// sampled.
-pub(crate) fn sample_trace(
+pub fn sample_trace(
     spec: &SourceSpec,
     window: PreviewWindow,
     timing: PreviewTiming,

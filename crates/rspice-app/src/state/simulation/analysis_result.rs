@@ -67,7 +67,7 @@ impl AnalysisResult {
     /// points. It is deliberately unsuccessful until the engine returns its
     /// terminal result, which keeps measurement, export, and qualification
     /// paths from mistaking an in-flight prefix for complete evidence.
-    pub(crate) fn live_transient_partial(
+    pub fn live_transient_partial(
         id: u64,
         analysis_type: AnalysisType,
         label: impl Into<String>,
@@ -75,7 +75,7 @@ impl AnalysisResult {
         Self::failed(id, analysis_type, label, LIVE_TRANSIENT_PARTIAL_MESSAGE)
     }
 
-    pub(crate) fn live_monte_carlo_partial(
+    pub fn live_monte_carlo_partial(
         label: impl Into<String>,
         checkpoint: MonteCarloCheckpointEvidence,
     ) -> Self {

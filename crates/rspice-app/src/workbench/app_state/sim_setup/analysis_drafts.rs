@@ -12,7 +12,7 @@ use super::SimSetupState;
 impl SimSetupState {
     /// Validate one raw instance draft with the same parser used by the
     /// existing controller, without mutating the authoritative plan.
-    pub(crate) fn analysis_draft_validation_error(&self, draft: &AnalysisDraft) -> Option<String> {
+    pub fn analysis_draft_validation_error(&self, draft: &AnalysisDraft) -> Option<String> {
         if let Some(error) = draft.manifest_configuration_error() {
             return Some(error);
         }
@@ -26,7 +26,7 @@ impl SimSetupState {
     }
 
     /// Render the existing concise summary from one exact instance draft.
-    pub(crate) fn analysis_draft_summary(&self, draft: &AnalysisDraft) -> String {
+    pub fn analysis_draft_summary(&self, draft: &AnalysisDraft) -> String {
         if let Some(summary) = draft.manifest_summary() {
             return summary;
         }

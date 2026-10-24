@@ -38,26 +38,19 @@ impl std::fmt::Debug for OperatingPointMemo {
 
 impl OperatingPointMemo {
     /// The badges read from inputs with this fingerprint, if they are held.
-    pub(crate) fn current(
-        &self,
-        fingerprint: u64,
-    ) -> Option<Arc<Vec<OperatingPointCanvasAnnotation>>> {
+    pub fn current(&self, fingerprint: u64) -> Option<Arc<Vec<OperatingPointCanvasAnnotation>>> {
         self.entry
             .as_ref()
             .filter(|(held, _)| *held == fingerprint)
             .map(|(_, badges)| Arc::clone(badges))
     }
 
-    pub(crate) fn store(
-        &mut self,
-        fingerprint: u64,
-        badges: Arc<Vec<OperatingPointCanvasAnnotation>>,
-    ) {
+    pub fn store(&mut self, fingerprint: u64, badges: Arc<Vec<OperatingPointCanvasAnnotation>>) {
         self.entry = Some((fingerprint, badges));
     }
 
     /// Where the canvas holds the badges' last layout.
-    pub(crate) const fn layout(&self) -> &BadgeLayoutMemo {
+    pub const fn layout(&self) -> &BadgeLayoutMemo {
         &self.layout
     }
 }

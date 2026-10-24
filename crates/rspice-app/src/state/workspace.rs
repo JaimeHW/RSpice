@@ -8,17 +8,17 @@ mod capture_group;
 mod design_intent;
 mod design_projection;
 mod hierarchy;
-pub(crate) use hierarchy::WorkspaceSourceFiles;
+pub use hierarchy::WorkspaceSourceFiles;
 use rspice_design::hierarchy as hierarchy_resolver;
 mod materialize;
 mod open_documents;
 mod reference_preparation;
 mod schematic_buffers;
 mod veriloga_cells;
-pub(crate) use veriloga_cells::{
+pub(crate) use veriloga_cells::retire_code_workspace_veriloga;
+pub use veriloga_cells::{
     DeclaredModule, VERILOGA_VIEW, declared_cell_interface, place_veriloga_view,
-    retire_code_workspace_veriloga, survey_veriloga_bundle, survey_veriloga_file,
-    veriloga_cell_for_module, veriloga_view,
+    survey_veriloga_bundle, survey_veriloga_file, veriloga_cell_for_module, veriloga_view,
 };
 
 // The two functions are renamed on export: bare `normalize` and
@@ -45,7 +45,7 @@ pub use rspice_project::*;
 // the one binding lookup two workbench surfaces reach by path and the metadata lookup the
 // Models & PDKs symbol-contract table reads a declared family with.
 use materialize::*;
-pub(crate) use materialize::{metadata_value, project_veriloga_binding_for_view};
+pub use materialize::{metadata_value, project_veriloga_binding_for_view};
 
 #[cfg(test)]
 pub use rspice_simulation_contract::saved_output::SavedOutputDisplayIntent;
@@ -112,15 +112,15 @@ pub use super::project_sources::{ProjectSourceLanguage, ProjectSourceRegistry};
 #[derive(Debug, Clone)]
 pub struct ProjectWorkspace {
     pub content: rspice_project::ProjectWorkspace,
-    pub(crate) session: WorkspaceSession,
+    pub session: WorkspaceSession,
 }
 
 /// Runtime workspace state retained by application snapshots and editor sessions.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WorkspaceSession {
+pub struct WorkspaceSession {
     annotation_restoration_error: Option<String>,
-    pub(crate) schematic_sessions: HashMap<String, crate::state::schematic::SchematicSession>,
-    pub(crate) symbol_sessions:
+    pub schematic_sessions: HashMap<String, crate::state::schematic::SchematicSession>,
+    pub symbol_sessions:
         HashMap<String, rspice_schematic_editor::symbol_editor::session::SymbolEditorSession>,
     design_projection_cache: rspice_design::projection::DesignProjectionCache,
 }
@@ -156,7 +156,7 @@ impl Default for ProjectWorkspace {
 }
 
 impl ProjectWorkspace {
-    pub(crate) fn from_parts(
+    pub fn from_parts(
         content: rspice_project::ProjectWorkspace,
         session: WorkspaceSession,
     ) -> Self {
@@ -174,7 +174,7 @@ impl ProjectWorkspace {
     /// of the reader is the active cell view's bundle, and there is none while
     /// the active view is not a Verilog-A view. Automation is the project's
     /// code-workspace bundle.
-    pub(crate) fn active_source_owner(
+    pub fn active_source_owner(
         &self,
         language: ProjectSourceLanguage,
     ) -> Option<crate::state::ProjectSourceOwner> {
@@ -192,7 +192,7 @@ impl ProjectWorkspace {
 
     /// The bundle [`Self::active_source_owner`] names, when the project holds
     /// one.
-    pub(crate) fn active_source_bundle(
+    pub fn active_source_bundle(
         &self,
         language: ProjectSourceLanguage,
     ) -> Option<&crate::state::ProjectSourceBundle> {

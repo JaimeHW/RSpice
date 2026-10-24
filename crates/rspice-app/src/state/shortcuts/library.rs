@@ -389,7 +389,7 @@ impl ShortcutProfileLibrary {
 
     /// Restore predecessor content as a new revision. The caller owns CAS
     /// verification; this operation deliberately never copies old revision.
-    pub(crate) fn replace_content_from(
+    pub fn replace_content_from(
         &mut self,
         predecessor: &Self,
     ) -> Result<(), ShortcutProfileLibraryError> {

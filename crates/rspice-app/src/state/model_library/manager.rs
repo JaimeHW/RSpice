@@ -10,8 +10,9 @@ mod project_models;
 mod sealing;
 mod source_bundle;
 
+pub(crate) use rspice_model_library::ModelDefinitionProvider;
+pub use rspice_model_library::model_library_source_digest;
 use rspice_model_library::source_paths::portable_path_key;
-pub(crate) use rspice_model_library::{ModelDefinitionProvider, model_library_source_digest};
 pub use rspice_simulation::model_sources::SealedModelExecutionSources;
 
 use serde::{Deserialize, Serialize};
@@ -136,7 +137,7 @@ impl ModelLibraryManager {
         self.validation_receipt = None;
     }
 
-    pub(crate) fn restore_model_validation_receipt(
+    pub fn restore_model_validation_receipt(
         &mut self,
         receipt: Option<ModelValidationReceipt>,
     ) -> Result<(), String> {
@@ -147,7 +148,7 @@ impl ModelLibraryManager {
         Ok(())
     }
 
-    pub(crate) fn issue_model_validation_receipt(
+    pub fn issue_model_validation_receipt(
         &mut self,
         project_revision: ObjectRevision,
         plan_digest: ContentDigest,
@@ -175,7 +176,7 @@ impl ModelLibraryManager {
         Ok(receipt)
     }
 
-    pub(crate) fn validate_model_validation_receipt(
+    pub fn validate_model_validation_receipt(
         &self,
         project_revision: ObjectRevision,
         plan_digest: ContentDigest,
@@ -239,7 +240,7 @@ impl ModelLibraryManager {
         self.resolution_records.record(scope, definition)
     }
 
-    pub(crate) fn restore_model_resolution_records(
+    pub fn restore_model_resolution_records(
         &mut self,
         records: Vec<ModelResolutionRecord>,
     ) -> Result<(), String> {
@@ -247,11 +248,11 @@ impl ModelLibraryManager {
     }
 
     #[must_use]
-    pub(crate) fn owned_model_resolution_records(&self) -> Vec<ModelResolutionRecord> {
+    pub fn owned_model_resolution_records(&self) -> Vec<ModelResolutionRecord> {
         self.resolution_records.owned_records()
     }
 
-    pub(crate) fn definition_providers(
+    pub fn definition_providers(
         &self,
         scope: ModelConsumerScope,
         definition: &str,
@@ -265,7 +266,7 @@ impl ModelLibraryManager {
     /// metadata is not an independent namespace selector. Every UI surface must
     /// consult this method so Properties, catalog binding, and the sealed run
     /// plan agree with the same project-global provider decision.
-    pub(crate) fn effective_definition_provider(
+    pub fn effective_definition_provider(
         &self,
         scope: ModelConsumerScope,
         definition: &str,
@@ -369,11 +370,11 @@ impl ModelLibraryManager {
             .and_then(|name| self.catalog.get_library(name))
     }
 
-    pub(crate) fn catalog(&self) -> &rspice_model_library::ModelCatalog {
+    pub fn catalog(&self) -> &rspice_model_library::ModelCatalog {
         &self.catalog
     }
 
-    pub(crate) fn resolution_records(&self) -> &ModelResolutionRecords {
+    pub fn resolution_records(&self) -> &ModelResolutionRecords {
         &self.resolution_records
     }
 

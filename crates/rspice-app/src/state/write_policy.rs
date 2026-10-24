@@ -52,18 +52,18 @@ pub struct LocalSafeModeState {
 }
 
 impl LocalSafeModeState {
-    pub(crate) fn activate(&mut self, options: LocalSafeModeOptions, session: String) {
+    pub fn activate(&mut self, options: LocalSafeModeOptions, session: String) {
         self.active = true;
         self.draft = options;
         self.applied = options;
         self.preserved_session = Some(session);
     }
 
-    pub(crate) fn preserved_session(&self) -> Option<&str> {
+    pub fn preserved_session(&self) -> Option<&str> {
         self.preserved_session.as_deref()
     }
 
-    pub(crate) const fn project_read_only(&self) -> bool {
+    pub const fn project_read_only(&self) -> bool {
         self.active && self.applied.open_project_read_only
     }
 }

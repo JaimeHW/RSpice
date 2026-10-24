@@ -19,7 +19,7 @@ use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 /// content too, so a binding changed without a topology bump still resolves
 /// afresh.
 #[derive(Clone, PartialEq)]
-pub(crate) struct SymbolContextInputs {
+pub struct SymbolContextInputs {
     revision: u64,
     topology_version: u64,
     pending: Option<LibraryCellInstance>,
@@ -38,7 +38,7 @@ fn instance_bindings(
 }
 
 impl SymbolContextInputs {
-    pub(crate) fn capture(
+    pub fn capture(
         revision: u64,
         topology_version: u64,
         pending: Option<&LibraryCellInstance>,
@@ -91,7 +91,7 @@ impl std::fmt::Debug for SymbolContextCache {
 
 impl SymbolContextCache {
     /// The cached context, if it was resolved from exactly these inputs.
-    pub(crate) fn current(
+    pub fn current(
         &self,
         revision: u64,
         topology_version: u64,
@@ -104,11 +104,7 @@ impl SymbolContextCache {
             .map(|(_, context)| Arc::clone(context))
     }
 
-    pub(crate) fn store(
-        &mut self,
-        inputs: SymbolContextInputs,
-        context: Arc<SchematicSymbolContext>,
-    ) {
+    pub fn store(&mut self, inputs: SymbolContextInputs, context: Arc<SchematicSymbolContext>) {
         self.entry = Some((inputs, context));
     }
 }

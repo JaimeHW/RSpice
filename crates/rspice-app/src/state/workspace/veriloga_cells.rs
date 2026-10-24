@@ -17,7 +17,7 @@ use crate::state::{
 };
 
 /// The view every module is placed under.
-pub(crate) const VERILOGA_VIEW: &str = "veriloga";
+pub const VERILOGA_VIEW: &str = "veriloga";
 
 /// The root file of the demonstration module every new project used to be
 /// created with. A project whose project-wide bundle still holds exactly this
@@ -27,27 +27,27 @@ const RETIRED_DEMO_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_br
 
 /// One module a source declares, with its ports in declaration order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DeclaredModule {
-    pub(crate) name: String,
+pub struct DeclaredModule {
+    pub name: String,
     pub(crate) ports: Vec<String>,
 }
 
 /// What a Verilog-A source declares: its top modules, the ones no other
 /// module in the same source instantiates, first-in-the-root-file first.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ModuleSurvey {
-    pub(crate) tops: Vec<DeclaredModule>,
+pub struct ModuleSurvey {
+    pub tops: Vec<DeclaredModule>,
 }
 
 /// Read the modules `bundle` declares.
-pub(crate) fn survey_veriloga_bundle(bundle: &ProjectSourceBundle) -> Result<ModuleSurvey, String> {
+pub fn survey_veriloga_bundle(bundle: &ProjectSourceBundle) -> Result<ModuleSurvey, String> {
     survey_veriloga_sources(bundle.root().logical_path(), &|path| {
         bundle.file_content(path)
     })
 }
 
 /// Read the modules one file declares, as the root of a bundle of its own.
-pub(crate) fn survey_veriloga_file(path: &str, contents: &str) -> Result<ModuleSurvey, String> {
+pub fn survey_veriloga_file(path: &str, contents: &str) -> Result<ModuleSurvey, String> {
     survey_veriloga_sources(path, &|candidate| (candidate == path).then_some(contents))
 }
 
@@ -211,7 +211,7 @@ fn is_retired_demo(bundle: &ProjectSourceBundle) -> bool {
 /// Names are compared by the canonical cell-view identity New Cell and the
 /// source registry use, so a module never lands in a cell that differs from
 /// one already there only by Unicode case or composition.
-pub(crate) fn veriloga_cell_for_module(
+pub fn veriloga_cell_for_module(
     libraries: &LibraryManager,
     interface_of: &dyn Fn(&Cell, &CellViewRef) -> Vec<String>,
     library: &str,
@@ -280,7 +280,7 @@ fn cell_name_for_module(module: &str) -> String {
 
 /// The interface a cell already declares: its schematic's ports when one of
 /// its schematic views has a buffer here, else its symbol's pins.
-pub(crate) fn declared_cell_interface(
+pub fn declared_cell_interface(
     schematic_ports: &dyn Fn(&CellViewRef) -> Option<Vec<String>>,
     cell: &Cell,
     library: &str,
@@ -310,7 +310,7 @@ pub(crate) fn declared_cell_interface(
 
 /// The `veriloga` view stating `module` and its ports, the way New View
 /// writes them. A module the source could not be read for states neither.
-pub(crate) fn veriloga_view(module: Option<&DeclaredModule>) -> Result<View, String> {
+pub fn veriloga_view(module: Option<&DeclaredModule>) -> Result<View, String> {
     let mut view = View::new(VERILOGA_VIEW, ViewType::VerilogA);
     if let Some(module) = module {
         view.metadata
@@ -325,7 +325,7 @@ pub(crate) fn veriloga_view(module: Option<&DeclaredModule>) -> Result<View, Str
 
 /// Put `view` at `reference`: in a new cell, or beside the views of the cell
 /// that already holds that name. The library is created if it is missing.
-pub(crate) fn place_veriloga_view(
+pub fn place_veriloga_view(
     libraries: &mut LibraryManager,
     reference: &CellViewRef,
     view: View,

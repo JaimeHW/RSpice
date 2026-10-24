@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
     pub file: ProjectFile,
-    pub(crate) workspace_session: WorkspaceSession,
+    pub workspace_session: WorkspaceSession,
 }
 
 impl Serialize for ProjectSnapshot {
@@ -74,7 +74,7 @@ impl ProjectSnapshot {
         self.file = self.file.with_result_presentation(presentation);
         self
     }
-    pub(crate) fn from_decoded(decoded: rspice_project::DecodedProject) -> Self {
+    pub fn from_decoded(decoded: rspice_project::DecodedProject) -> Self {
         let mut workspace_session = WorkspaceSession::default();
         for key in decoded.restored_schematic_documents {
             workspace_session
@@ -106,7 +106,7 @@ impl ProjectSnapshot {
         self.workspace_session
             .schematic_editor(&self.file.workspace, key)
     }
-    pub(crate) fn clone_schematic_editor(&self, key: &str) -> Option<SchematicState> {
+    pub fn clone_schematic_editor(&self, key: &str) -> Option<SchematicState> {
         self.workspace_session
             .clone_schematic_editor(&self.file.workspace, key)
     }
@@ -129,7 +129,7 @@ impl ProjectSnapshot {
         self.workspace_session
             .remove_schematic_editor(&mut self.file.workspace, key)
     }
-    pub(crate) fn ensure_library_model(&mut self) {
+    pub fn ensure_library_model(&mut self) {
         self.workspace_session
             .ensure_library_model(&mut self.file.workspace, &mut self.file.libraries)
     }
@@ -141,9 +141,9 @@ impl ProjectSnapshot {
 }
 
 /// Captured editor state follows the project owner's choice of design content.
-pub(crate) struct SnapshotSessionCapture<'a> {
-    pub(crate) workspace: WorkspaceSession,
-    pub(crate) active: &'a super::schematic::SchematicSession,
+pub struct SnapshotSessionCapture<'a> {
+    pub workspace: WorkspaceSession,
+    pub active: &'a super::schematic::SchematicSession,
 }
 
 impl rspice_project::SnapshotSessions for SnapshotSessionCapture<'_> {

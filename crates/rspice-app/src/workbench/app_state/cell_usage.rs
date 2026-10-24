@@ -13,13 +13,13 @@ use crate::workbench::app_state::model::Model;
 
 /// One placed instance of a library cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CellInstanceUse {
+pub struct CellInstanceUse {
     /// The schematic the instance is placed in.
-    pub(crate) schematic: CellViewRef,
+    pub schematic: CellViewRef,
     /// The instance's name in that schematic, `I3`.
-    pub(crate) instance: String,
+    pub instance: String,
     /// The instance's component identity in that schematic.
-    pub(crate) component_id: u64,
+    pub component_id: u64,
 }
 
 impl Model {
@@ -29,7 +29,7 @@ impl Model {
     /// With `view` it counts only instances bound to that view. Without one it
     /// counts every view of the cell: an instance placed from a cell's symbol
     /// is still an instance of the cell its Verilog-A view describes.
-    pub(crate) fn cell_instances(
+    pub fn cell_instances(
         &self,
         library: &str,
         cell: &str,
@@ -82,7 +82,7 @@ impl Model {
 
     /// Take a removed cell out of every workspace collection that names it,
     /// and say what that left undecided.
-    pub(in crate::workbench) fn drop_workspace_references_to_cell(
+    pub fn drop_workspace_references_to_cell(
         &mut self,
         library: &str,
         cell: &str,
@@ -138,10 +138,10 @@ impl Model {
 /// What taking one cell out of the workspace left undecided: the focus, the
 /// project root, and the occurrence trail all name cell views, and any of the
 /// three can have named the cell that just went.
-pub(in crate::workbench) struct CellRemovalScope {
-    pub(in crate::workbench) active_removed: bool,
-    pub(in crate::workbench) project_root_removed: bool,
-    pub(in crate::workbench) hierarchy_pruned: bool,
+pub struct CellRemovalScope {
+    pub active_removed: bool,
+    pub project_root_removed: bool,
+    pub hierarchy_pruned: bool,
 }
 
 fn collect(

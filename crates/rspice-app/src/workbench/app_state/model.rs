@@ -23,54 +23,54 @@ use super::sim_setup::SimSetupState;
 
 /// The project model every feature reads.
 #[derive(Clone)]
-pub(crate) struct Model {
+pub struct Model {
     /// Circuit schematic state (components, wires, topology)
-    pub(crate) schematic: SchematicState,
+    pub schematic: SchematicState,
     /// Simulation results and waveforms
-    pub(crate) simulation: SimulationState,
+    pub simulation: SimulationState,
     /// Monotonic token that invalidates in-flight controller work whenever an
     /// unrelated design document replaces the active project/schematic.
-    pub(crate) design_execution_epoch: u64,
+    pub design_execution_epoch: u64,
     /// Monotonic identity for the active schematic buffer. Unlike the
     /// execution epoch, this advances on ordinary cell/view navigation so an
     /// A→B→A round trip cannot revive a stale editor transaction.
-    pub(crate) active_schematic_epoch: u64,
+    pub active_schematic_epoch: u64,
     /// Runtime-only cross-document design transactions. Schematic-local undo
     /// cannot own operations that also create cells, views, or buffers.
-    pub(crate) project_design_history: ProjectDesignHistory,
+    pub project_design_history: ProjectDesignHistory,
     /// Per-cell-view interactive check receipts, bound to exact live inputs.
-    pub(crate) design_checks: DesignCheckRuntime,
+    pub design_checks: DesignCheckRuntime,
     /// The conditions that stand against the design, from every producer, in
     /// the one shape the Problems page, the tab badge and the status bar read.
-    pub(crate) diagnostics: DiagnosticStore,
+    pub diagnostics: DiagnosticStore,
     /// Typed analysis configuration behind the Simulate view.
-    pub(crate) sim_setup: SimSetupState,
+    pub sim_setup: SimSetupState,
     /// Structured log history buffer (ring-buffer, filterable).
-    pub(crate) log_buffer: crate::diagnostics::LogBuffer,
+    pub log_buffer: crate::diagnostics::LogBuffer,
     /// Failures and warnings reported and not yet toasted. Each one's line is
     /// already in [`Self::log_buffer`]; the shell raises the toasts. Runtime
     /// only: never persisted, and a clone starts empty.
-    pub(crate) notices: NoticeQueue,
+    pub notices: NoticeQueue,
     /// The generated deck and its validation evidence. Runtime only. Boxed,
     /// as it was inside the UI session state, so a moved state stays the same
     /// size.
-    pub(crate) netlist_artifacts: Box<crate::state::NetlistArtifacts>,
+    pub netlist_artifacts: Box<crate::state::NetlistArtifacts>,
     /// Library/Cell/View manager for design hierarchy
-    pub(crate) library_manager: crate::state::LibraryManager,
+    pub library_manager: crate::state::LibraryManager,
     /// Runtime collaboration-lock authority for governed project library
     /// mutations. Local projects remain explicitly unmanaged; connected
     /// sessions install revision-bound authoritative snapshots.
-    pub(crate) library_edit_locks: crate::state::ProjectLibraryLockAuthority,
+    pub library_edit_locks: crate::state::ProjectLibraryLockAuthority,
     /// Project/workspace model for active design context and open LCV views.
-    pub(crate) workspace: crate::state::ProjectWorkspace,
+    pub workspace: crate::state::ProjectWorkspace,
     /// Whether a project is open, as model code reads it. Only the lifecycle
     /// writes it, in the call that opens or closes the project.
-    pub(crate) project_open: crate::state::ProjectOpenFact,
+    pub project_open: crate::state::ProjectOpenFact,
     /// PDK model paths plus signed technology packages, trust roots, exact
     /// active binding, and administrative receipts.
-    pub(crate) pdk_config: crate::state::pdk_config::PdkConfig,
+    pub pdk_config: crate::state::pdk_config::PdkConfig,
     /// Model library manager (PDK models, device libraries)
-    pub(crate) model_library_manager: crate::state::model_library::ModelLibraryManager,
+    pub model_library_manager: crate::state::model_library::ModelLibraryManager,
     /// Canonical user/device preference overrides not already owned by the
     /// theme or autosave runtime. Boxed, as they were inside the UI session
     /// state, so a moved state stays the same size.
@@ -112,7 +112,7 @@ impl Model {
 
     /// What the project's technology contract is resolved against: the
     /// project, its plan, both execution catalogs and the layouts.
-    pub(crate) fn technology_inputs(
+    pub fn technology_inputs(
         &self,
     ) -> rspice_simulation::project_technology::ProjectTechnologyInputs<'_> {
         rspice_simulation::project_technology::ProjectTechnologyInputs {
@@ -127,7 +127,7 @@ impl Model {
 
     /// The chain the project's `.include` and `.lib` files resolve through:
     /// its own search paths, then the library folders set in Preferences.
-    pub(crate) fn include_search_chain(
+    pub fn include_search_chain(
         &self,
     ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
         rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
@@ -137,7 +137,7 @@ impl Model {
     }
 
     /// Exact immutable result currently selected in the Results workspace.
-    pub(crate) fn active_specialized_viewer_cache_provenance(
+    pub fn active_specialized_viewer_cache_provenance(
         &self,
     ) -> Option<crate::state::SpecializedViewerCacheProvenance> {
         let run = self.simulation.active_run()?;
@@ -146,20 +146,20 @@ impl Model {
     }
 
     /// The folders searched for includes after every project's own paths.
-    pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
+    pub fn library_folders(&self) -> &[std::path::PathBuf] {
         self.preferences
             .folders(crate::workbench::preferences::FolderListPreference::LibraryFolders)
     }
 
     /// Report a failure of something the user asked for, as
     /// [`AppState::report_failure`](super::AppState::report_failure) states it.
-    pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+    pub fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
         self.report(NoticeKind::Error, title.into(), detail.into());
     }
 
     /// Report something that completed, but not the way the user asked, as
     /// [`AppState::report_warning`](super::AppState::report_warning) states it.
-    pub(crate) fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+    pub fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
         self.report(NoticeKind::Warning, title.into(), detail.into());
     }
 
@@ -190,12 +190,12 @@ impl Model {
 /// the operation, read when the operation starts, which is when the model
 /// read them before.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SlotFacts {
+pub struct SlotFacts {
     /// Whether the run gate's report is retained: the dispatch findings are
     /// about that report, and read stale once it is dropped.
-    pub(crate) preflight_report_retained: bool,
+    pub preflight_report_retained: bool,
     /// Which review markers the drawing shows, part of the view a finding's
     /// place is read through.
-    pub(crate) review_markers:
+    pub review_markers:
         rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
 }

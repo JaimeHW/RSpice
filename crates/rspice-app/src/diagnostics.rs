@@ -11,4 +11,4 @@ mod log;
 mod redaction;
 
 pub use log::{LogAnchor, LogBuffer, LogEntry, LogSeverity, LogSource};
-pub(crate) use redaction::{home_directory, redact_log_message};
+pub use redaction::{home_directory, redact_log_message};

@@ -8,7 +8,7 @@ use crate::state::{
 impl SchematicState {
     /// Make the changes a find and replace listed, as one undo step.
     /// Returns how many texts changed, or why none could.
-    pub(crate) fn replace_text(
+    pub fn replace_text(
         &mut self,
         matches: &[rspice_design::schematic::find_replace::FindMatch],
     ) -> Result<usize, String> {
@@ -20,7 +20,7 @@ impl SchematicState {
         Ok(edit.value)
     }
 
-    pub(crate) fn edit_net_label_properties(
+    pub fn edit_net_label_properties(
         &mut self,
         expected: NetLabel,
         name: String,
@@ -41,7 +41,7 @@ impl SchematicState {
         Ok(committed)
     }
 
-    pub(crate) fn edit_design_note_properties(
+    pub fn edit_design_note_properties(
         &mut self,
         expected: DesignNote,
         kind: DesignNoteKind,
@@ -63,7 +63,7 @@ impl SchematicState {
         Ok(committed)
     }
 
-    pub(crate) fn edit_documentation_shape_properties(
+    pub fn edit_documentation_shape_properties(
         &mut self,
         expected: DocumentationShape,
         geometry: DocumentationShapeGeometry,
@@ -83,11 +83,7 @@ impl SchematicState {
         Ok(committed)
     }
 
-    pub(crate) fn rename_net_label(
-        &mut self,
-        expected: NetLabel,
-        name: String,
-    ) -> Result<bool, String> {
+    pub fn rename_net_label(&mut self, expected: NetLabel, name: String) -> Result<bool, String> {
         let read_only = self.session.read_only;
         let Some(change) = self.design.prepare_net_label_rename(expected, name)? else {
             return Ok(false);
@@ -100,7 +96,7 @@ impl SchematicState {
         Ok(committed)
     }
 
-    pub(crate) fn change_grid_pitch(&mut self, pitch: SchematicGridPitch) -> bool {
+    pub fn change_grid_pitch(&mut self, pitch: SchematicGridPitch) -> bool {
         if self.session.read_only {
             return false;
         }
@@ -109,7 +105,7 @@ impl SchematicState {
         committed
     }
 
-    pub(crate) fn change_net_naming(&mut self, policy: NetNamingPolicy) -> bool {
+    pub fn change_net_naming(&mut self, policy: NetNamingPolicy) -> bool {
         if self.session.read_only {
             return false;
         }
@@ -120,7 +116,7 @@ impl SchematicState {
 }
 
 impl SchematicState {
-    pub(crate) fn bind_component_value(
+    pub fn bind_component_value(
         &mut self,
         component_id: u64,
         binding_expression: String,

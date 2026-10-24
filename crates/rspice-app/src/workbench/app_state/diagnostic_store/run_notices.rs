@@ -213,7 +213,7 @@ impl Model {
     /// tolerance; `failed_measurements` its `.MEASURE` results, of which only
     /// those that produced no value are kept. A measurement's failure is
     /// stated in no line of the log.
-    pub(crate) fn publish_run_notices(
+    pub fn publish_run_notices(
         &mut self,
         analysis: &str,
         notices: Vec<(RecordedNotice, Option<usize>)>,

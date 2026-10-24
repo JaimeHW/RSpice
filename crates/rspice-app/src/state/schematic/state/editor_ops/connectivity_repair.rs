@@ -3,7 +3,7 @@
 use crate::state::SchematicState;
 
 impl SchematicState {
-    pub(crate) fn repair_candidate_net_labels(
+    pub fn repair_candidate_net_labels(
         &mut self,
         canonical: &str,
         labels: &[(u64, String)],

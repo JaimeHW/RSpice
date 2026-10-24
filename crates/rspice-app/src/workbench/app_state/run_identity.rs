@@ -27,7 +27,7 @@ use crate::workbench::app_state::model::Model;
 impl Model {
     /// Plan identity and revision of the active analysis plan, if one is
     /// configured. `None` means there is nothing to expire against.
-    pub(crate) fn active_plan_revision(
+    pub fn active_plan_revision(
         &self,
     ) -> Option<(
         crate::product::SimulationPlanId,
@@ -41,7 +41,7 @@ impl Model {
 
     /// Stable identity and revision of the configured execution root, with the
     /// per-reference topology versions of everything it instantiates.
-    pub(crate) fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
+    pub fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
         let root = self.workspace.content.simulation_root_reference();
         let closure = self.configured_closure(|_, topology_version| topology_version);
         let root_key = root.key();

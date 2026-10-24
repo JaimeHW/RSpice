@@ -124,7 +124,7 @@ impl AnalysisDependencyRepairContext {
     /// mode refuses a tone list, so neither an empty selection nor a full one
     /// could pass. What the engine actually does with those sources is stated
     /// on the form rather than refused here.
-    pub(crate) fn validate_pss_sources(&self, draft: &PssDialogState) -> Result<(), String> {
+    pub fn validate_pss_sources(&self, draft: &PssDialogState) -> Result<(), String> {
         let config = draft
             .to_config()
             .map_err(|detail| format!("PSS configuration is invalid: {detail}"))?;

@@ -20,22 +20,22 @@ use crate::state::ProjectSourceId;
 const MODULE_KEY: &str = "veriloga.module";
 
 /// What one save of Build settings changed, handed over by the save.
-pub(crate) struct VerilogABuildSettingsHistoryEntry {
-    pub(crate) bundle: ProjectSourceId,
+pub struct VerilogABuildSettingsHistoryEntry {
+    pub bundle: ProjectSourceId,
     /// The bundle's revision before the save and after it; equal when the
     /// profile already read as the form saved it.
-    pub(crate) before_revision: ObjectRevision,
-    pub(crate) after_revision: ObjectRevision,
+    pub before_revision: ObjectRevision,
+    pub after_revision: ObjectRevision,
     /// The view the save bound to another module, when it did.
-    pub(crate) binding: Option<VerilogAModuleBinding>,
+    pub binding: Option<VerilogAModuleBinding>,
 }
 
 /// A view's `veriloga.module` on each side of a save.
 #[derive(Debug, Clone)]
-pub(crate) struct VerilogAModuleBinding {
-    pub(crate) view: CellViewRef,
-    pub(crate) before: Option<String>,
-    pub(crate) after: String,
+pub struct VerilogAModuleBinding {
+    pub view: CellViewRef,
+    pub before: Option<String>,
+    pub after: String,
 }
 
 #[derive(Debug, Clone)]
@@ -66,10 +66,7 @@ struct ProfileStep {
 impl Model {
     /// Record one save of Build settings as one undo step. A save that
     /// changed nothing records nothing.
-    pub(crate) fn record_veriloga_build_settings(
-        &mut self,
-        entry: VerilogABuildSettingsHistoryEntry,
-    ) {
+    pub fn record_veriloga_build_settings(&mut self, entry: VerilogABuildSettingsHistoryEntry) {
         let profile = (entry.before_revision != entry.after_revision).then_some(ProfileStep {
             bundle: entry.bundle,
             before: entry.before_revision,

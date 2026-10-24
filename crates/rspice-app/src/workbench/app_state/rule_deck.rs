@@ -25,7 +25,7 @@ impl Model {
     /// Publish what the stored deck could not apply, replacing what was
     /// published for it before. Asked when a project is opened and whenever
     /// the deck is edited.
-    pub(crate) fn publish_rule_deck_issues(&mut self, facts: SlotFacts) {
+    pub fn publish_rule_deck_issues(&mut self, facts: SlotFacts) {
         let records = rule_deck_records(self);
         // One record per kept code and at most one for the whole deck, so the
         // batch never mints one identity twice; the digest is over the deck

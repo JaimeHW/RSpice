@@ -23,7 +23,7 @@ use rspice_vocabulary::run_log::{RunLog, RunLogLine};
 /// (its ordinal, its position), so a notice that names the line by its
 /// ordinal can be followed to it. A line the log withheld or left out is not
 /// there.
-pub(crate) fn publish(
+pub fn publish(
     lines: Vec<EngineLogLine>,
     log: &mut RunLog,
     unix_ms: u64,
@@ -130,7 +130,7 @@ impl log::Log for StudioLogger {
 /// A logger installs once per process. A second call leaves the first in place
 /// rather than failing a launch over it.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_studio_logger(inner: env_logger::Logger) {
+pub fn install_studio_logger(inner: env_logger::Logger) {
     let logger = StudioLogger::new(inner);
     let stderr_level = logger.stderr_level();
     if log::set_boxed_logger(Box::new(logger)).is_ok() {

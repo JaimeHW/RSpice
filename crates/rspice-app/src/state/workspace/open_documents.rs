@@ -16,7 +16,7 @@ impl ProjectWorkspace {
     /// Resolve the exact root schematic while projecting the live editor only
     /// when it is the selected root. A different open tab can never silently
     /// replace the configuration's simulation source.
-    pub(crate) fn simulation_root_schematic<'a>(
+    pub fn simulation_root_schematic<'a>(
         &'a self,
         active_reference: &CellViewRef,
         active_schematic: &'a SchematicState,
@@ -198,11 +198,11 @@ impl ProjectWorkspace {
         }
     }
 
-    pub(crate) fn active_schematic(&self) -> Option<SchematicEditorRef<'_>> {
+    pub fn active_schematic(&self) -> Option<SchematicEditorRef<'_>> {
         self.schematic_editor(&self.content.active_key())
     }
 
-    pub(crate) fn active_context_schematic(&self) -> Option<SchematicEditorRef<'_>> {
+    pub fn active_context_schematic(&self) -> Option<SchematicEditorRef<'_>> {
         let reference = self.content.active_schematic_reference();
         self.schematic_editor(&reference.key())
     }

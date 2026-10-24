@@ -184,7 +184,7 @@ impl ShortcutSequence {
         }
     }
 
-    pub(crate) fn is_prefix_of(&self, other: &Self) -> bool {
+    pub fn is_prefix_of(&self, other: &Self) -> bool {
         self.0.len() < other.0.len() && other.0.starts_with(&self.0)
     }
 }
@@ -417,11 +417,11 @@ impl ResolvedShortcutBinding {
         self.sequence.display_label()
     }
 
-    pub(crate) fn supports(&self, platform: CommandPlatform) -> bool {
+    pub fn supports(&self, platform: CommandPlatform) -> bool {
         self.platforms.contains(&platform)
     }
 
-    pub(crate) fn with_sequence(mut self, sequence: ShortcutSequence) -> Self {
+    pub fn with_sequence(mut self, sequence: ShortcutSequence) -> Self {
         self.sequence = sequence;
         self
     }

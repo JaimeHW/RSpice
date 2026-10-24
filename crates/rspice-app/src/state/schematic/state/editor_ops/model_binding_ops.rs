@@ -4,7 +4,7 @@ use crate::state::SchematicState;
 use std::path::PathBuf;
 
 impl SchematicState {
-    pub(crate) fn select_instance_model(
+    pub fn select_instance_model(
         &mut self,
         component_id: u64,
         candidate_name: String,
@@ -19,7 +19,7 @@ impl SchematicState {
         changed
     }
 
-    pub(crate) fn select_instance_model_section(
+    pub fn select_instance_model_section(
         &mut self,
         component_id: u64,
         selected: Option<String>,

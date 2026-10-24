@@ -134,7 +134,7 @@ pub struct SimulationViewState {
 impl SimulationState {
     /// Canonical devices with retained SOA warning/violation evidence in the
     /// active run. This is the sole authority for OP `Violations only`.
-    pub(crate) fn active_soa_violation_context(
+    pub fn active_soa_violation_context(
         &self,
         project_revision: crate::product::ObjectRevision,
     ) -> Option<(crate::product::ContentDigest, Vec<String>)> {
@@ -267,7 +267,7 @@ impl RetainedSimulationState {
             .max(1)
     }
 
-    pub(crate) fn has_retained_op_state(
+    pub fn has_retained_op_state(
         &self,
         project_revision: crate::product::ObjectRevision,
         allow_changed_revision: bool,

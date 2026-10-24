@@ -47,11 +47,7 @@ impl Model {
     /// [`SETTLE`], and while it waits this says how long until it should be
     /// asked again. Opening a cellview is not an edit and checks nothing.
     /// Leaving one with an edit still settling checks it on the way out.
-    pub(in crate::workbench) fn refresh_live_checks(
-        &mut self,
-        now: Instant,
-        facts: SlotFacts,
-    ) -> Option<Duration> {
+    pub fn refresh_live_checks(&mut self, now: Instant, facts: SlotFacts) -> Option<Duration> {
         if !self
             .preferences
             .toggle(TogglePreference::IncrementalConnectivityChecks)

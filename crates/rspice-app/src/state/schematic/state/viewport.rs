@@ -31,7 +31,7 @@ impl SchematicState {
 
     /// The lowest zoom this canvas offers for the sheet `paper` frames: 25 %,
     /// or the zoom that fits the whole sheet when that is lower.
-    pub(crate) fn zoom_floor_for_sheet(
+    pub fn zoom_floor_for_sheet(
         paper: (f64, f64, f64, f64),
         viewport_width: f64,
         viewport_height: f64,
@@ -44,7 +44,7 @@ impl SchematicState {
     /// Carry out a zoom a command left for the canvas, now that the canvas
     /// rectangle is known. A step or a set zoom pivots on the middle of the
     /// canvas; a frame fits its rectangle with `screen_inset` to spare.
-    pub(crate) fn apply_zoom_request(
+    pub fn apply_zoom_request(
         &mut self,
         request: ZoomRequest,
         viewport_width: f64,
@@ -73,7 +73,7 @@ impl SchematicState {
         }
     }
 
-    pub(crate) fn zoom_to_fit_bounds(
+    pub fn zoom_to_fit_bounds(
         &mut self,
         bounds: Option<(i32, i32, i32, i32)>,
         viewport_width: f64,
@@ -148,7 +148,7 @@ impl SchematicState {
     /// integral schematic units (for example, US Letter is 215.9 mm wide).
     /// Keeping this path in `f64` avoids coercing those edges while preserving
     /// the editor's shared zoom range, whose floor is `min_zoom`.
-    pub(crate) fn zoom_to_fit_world_rect(
+    pub fn zoom_to_fit_world_rect(
         &mut self,
         bounds: (f64, f64, f64, f64),
         viewport_width: f64,

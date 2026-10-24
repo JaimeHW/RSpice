@@ -30,7 +30,7 @@ impl ModelLibraryManager {
     /// repaints may ask for it; see
     /// [`Self::design_inspection_catalog_key`] for the answer that can be
     /// asked per frame.
-    pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
+    pub fn execution_catalog_digest(&self) -> ContentDigest {
         self.catalog
             .execution_catalog_digest(&self.resolution_records)
     }
@@ -87,7 +87,7 @@ impl ModelLibraryManager {
     /// qualification, correlation, provenance, and presentation field a library
     /// owns. Their absence is the point — expanding a library row in the
     /// browser used to expire the exact model-bin inspection.
-    pub(crate) fn design_inspection_catalog_key(&self) -> u64 {
+    pub fn design_inspection_catalog_key(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         "rspice.model-inspection-catalog/v1".hash(&mut hasher);
         // A `BTreeMap`, so its iteration order is the content's own.
