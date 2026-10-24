@@ -23,9 +23,8 @@ use crate::quantity::QuantityInputKind;
 use crate::simulation::dialog::HbDialogState;
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, action_line, choice_row, engineering_input_row,
-    hinted_input_row, hinted_switch_row, input_row, input_row_enabled, quantity_input_row,
-    sub_header, switch_row,
+    QuantityPresentationPolicy, UiNumberLocale, action_line, choice_row, hinted_input_row,
+    hinted_switch_row, input_row, input_row_enabled, quantity_input_row, sub_header, switch_row,
 };
 
 /// The order and wording of the harmonic-balance form's own fields.
@@ -91,8 +90,8 @@ pub(super) fn fields(
         &mut setup.max_mixing_order,
         "products up to this order",
     );
-    engineering_input_row(ui, HB_FIELD_LABELS[8], &mut setup.reltol);
-    engineering_input_row(ui, HB_FIELD_LABELS[9], &mut setup.abstol);
+    input_row(ui, HB_FIELD_LABELS[8], &mut setup.reltol);
+    input_row(ui, HB_FIELD_LABELS[9], &mut setup.abstol);
     // The same quantity and the same domain the PSS form states beside its own
     // `Damping`, so it is stated the same way. `HbConfig::with_damping` bounds
     // the factor to `[0.1, 1]` and the floor to the interval below it, and a

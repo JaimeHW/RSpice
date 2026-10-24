@@ -15,7 +15,8 @@ use krilla::text::{Font, TextDirection};
 use krilla::{Document, SerializeSettings};
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow, ShortcutReferenceStatus};
+use super::markdown::status_label;
+use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow};
 use super::schema::ShortcutArtifactScope;
 use super::{hex_digest, sha256};
 use crate::state::command_catalog::CommandPlatform;
@@ -764,14 +765,6 @@ const fn scope_label(scope: ShortcutArtifactScope) -> &'static str {
         ShortcutArtifactScope::UserOverrides => "User overrides and platform exceptions",
         ShortcutArtifactScope::CompleteResolved => "Complete resolved shortcut map",
         ShortcutArtifactScope::CurrentWorkspace => "Current workspace context",
-    }
-}
-
-const fn status_label(status: ShortcutReferenceStatus) -> &'static str {
-    match status {
-        ShortcutReferenceStatus::Default => "Default",
-        ShortcutReferenceStatus::UserOverride => "User override",
-        ShortcutReferenceStatus::Unbound => "Unbound",
     }
 }
 

@@ -5,7 +5,7 @@ use egui::Ui;
 
 use crate::simulation::dialog::PstbDialogState;
 
-use super::{engineering_input_row, input_row, stb_probe, switch_row};
+use super::{input_row, stb_probe, switch_row};
 
 /// Render the periodic loop-stability fields.
 pub(super) fn fields(ui: &mut Ui, setup: &mut PstbDialogState, placed_loop_probes: &[String]) {
@@ -21,7 +21,7 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut PstbDialogState, placed_loop_probe
     );
     input_row(ui, "Harmonics", &mut setup.max_harmonics);
     input_row(ui, "Multipliers", &mut setup.num_multipliers);
-    engineering_input_row(ui, "Unstable above", &mut setup.stability_threshold);
-    engineering_input_row(ui, "Eigen tol", &mut setup.eigenvalue_tolerance);
+    input_row(ui, "Unstable above", &mut setup.stability_threshold);
+    input_row(ui, "Eigen tol", &mut setup.eigenvalue_tolerance);
     switch_row(ui, "Detect subharmonics", &mut setup.detect_subharmonics);
 }

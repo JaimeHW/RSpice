@@ -57,7 +57,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // a table that says so by being empty is indistinguishable from the plan
     // whose author has written no requirement yet — which is the one thing an
     // acceptance page must never leave ambiguous.
-    let payload = match plan_payload(app) {
+    let payload = match super::page_outputs::plan_payload(app) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);
@@ -112,27 +112,6 @@ fn role_label(role: SpecificationRole) -> &'static str {
         SpecificationRole::Review => "review",
         SpecificationRole::Informational => "informational",
     }
-}
-
-/// The limits this page judges against, or why there are none to judge with.
-///
-/// A `Result` rather than a defaulted payload. Both failures — a plan that has
-/// not been migrated to stable analysis-instance identity, and a resolvable
-/// plan the workspace holds no payload record for — used to fall back to
-/// `SimulationPlanPayload::default()`, which paints exactly what a plan holding
-/// no requirement paints: "No specifications · nothing judges this plan's
-/// results". That row is a true statement about an authored plan and a false
-/// one here, because a broken plan's results are not unjudged, they are
-/// unknown.
-fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
-    app.state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)
-        .cloned()
-        .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
 }
 
 /// The process corners the current run set actually reaches.

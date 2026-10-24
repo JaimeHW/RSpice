@@ -426,7 +426,7 @@ fn device_columns(
         .map(|(_, name, unit)| (name, unit))
         .collect()
 }
-fn op_column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
+pub(crate) fn op_column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
     egui::Rect::from_min_size(
         egui::pos2(row.left() + offset, row.top()),
         egui::vec2(width, row.height()),

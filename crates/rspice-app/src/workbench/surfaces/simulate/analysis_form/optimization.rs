@@ -16,8 +16,8 @@ use egui::Ui;
 use crate::simulation::dialog::OptimizationDialogState;
 
 use super::{
-    choice_row, clear_pending_cell, engineering_input_row, engineering_input_row_enabled,
-    field_note, hinted_input_row, input_row, input_row_enabled, sub_header,
+    choice_row, clear_pending_cell, field_note, hinted_input_row, input_row, input_row_enabled,
+    sub_header,
 };
 
 /// Render the optimization fields.
@@ -104,19 +104,19 @@ pub(super) fn fields(
     input_row(ui, "Tolerance", &mut setup.cost_tolerance);
 
     sub_header(ui, "Step sizes");
-    engineering_input_row_enabled(
+    input_row_enabled(
         ui,
         "Gradient probe",
         &mut setup.fd_step,
         setup.algorithm == 0,
     );
-    engineering_input_row_enabled(
+    input_row_enabled(
         ui,
         "Gradient stop",
         &mut setup.var_tolerance,
         setup.algorithm == 0,
     );
-    engineering_input_row(ui, "First step", &mut setup.initial_step);
+    input_row(ui, "First step", &mut setup.initial_step);
     hinted_input_row(
         ui,
         "Smallest step",
@@ -125,13 +125,13 @@ pub(super) fn fields(
     );
     clear_pending_cell(ui);
     sub_header(ui, "Annealing");
-    engineering_input_row_enabled(
+    input_row_enabled(
         ui,
         "Initial temperature",
         &mut setup.sa_initial_temp,
         setup.algorithm == 2,
     );
-    engineering_input_row_enabled(
+    input_row_enabled(
         ui,
         "Cooling factor",
         &mut setup.sa_cooling_rate,
@@ -160,8 +160,8 @@ fn weighted_objectives(ui: &mut Ui, setup: &mut OptimizationDialogState) {
             super::hinted_input_row(ui, "Unit", &mut term.unit, "blank: native; e.g. mV, ns, mW");
             choice_row(ui, "Goal", &["min", "max", "target"], &mut term.goal);
             input_row_enabled(ui, "Target", &mut term.target, term.goal == 2);
-            engineering_input_row(ui, "Scale", &mut term.scale);
-            engineering_input_row(ui, "Weight", &mut term.weight);
+            input_row(ui, "Scale", &mut term.scale);
+            input_row(ui, "Weight", &mut term.weight);
             if super::action_line(ui, "Remove objective") {
                 remove = Some(index);
             }

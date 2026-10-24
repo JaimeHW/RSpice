@@ -32,9 +32,9 @@ use crate::quantity::QuantityInputKind;
 use crate::simulation::dialog::{IntegrationMethod, PssDialogState};
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, choice_row, enabled_choice_row,
-    engineering_input_row, hinted_input_row, hinted_input_row_enabled, hinted_switch_row,
-    input_row, input_row_enabled, named_periodic_source_row, quantity_input_row,
+    QuantityPresentationPolicy, UiNumberLocale, choice_row, enabled_choice_row, hinted_input_row,
+    hinted_input_row_enabled, hinted_switch_row, input_row, input_row_enabled,
+    named_periodic_source_row, quantity_input_row,
 };
 
 pub(super) const PSS_FIELD_LABELS: [&str; 15] = [
@@ -110,7 +110,7 @@ pub(super) fn fields(
         "Initial integration points per period; the solver refines this grid for accuracy. \
          Output schedules sample the solved orbit, with linear interpolation between solver points.",
     );
-    engineering_input_row(ui, PSS_FIELD_LABELS[5], &mut setup.tolerance);
+    input_row(ui, PSS_FIELD_LABELS[5], &mut setup.tolerance);
     enabled_choice_row(ui, PSS_FIELD_LABELS[6], &mut setup.osc_mode);
     // The oscillator field is a stable member of the grid. Toggling autonomous
     // mode changes enablement, not the position of every field that follows it.
@@ -126,8 +126,7 @@ pub(super) fn fields(
     .on_hover_text(STABILIZATION_TIME_HINT);
     input_row(ui, PSS_FIELD_LABELS[10], &mut setup.max_iterations)
         .on_hover_text(MAX_ITERATIONS_HINT);
-    engineering_input_row(ui, PSS_FIELD_LABELS[11], &mut setup.abstol)
-        .on_hover_text(ABSOLUTE_TOLERANCE_HINT);
+    input_row(ui, PSS_FIELD_LABELS[11], &mut setup.abstol).on_hover_text(ABSOLUTE_TOLERANCE_HINT);
     hinted_input_row(ui, PSS_FIELD_LABELS[12], &mut setup.damping, "0.1 to 1")
         .on_hover_text(DAMPING_HINT);
     // Autonomous only, and still a stable member of the grid: the period is a

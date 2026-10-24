@@ -17,6 +17,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::AppState;
+use crate::workbench::chrome::status_bar::run::simulation_progress_percent;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;
@@ -1466,10 +1467,6 @@ fn row_with_sense(
     );
     theme::paint_focus_ring(ui, &response, rect);
     response
-}
-
-fn simulation_progress_percent(progress: f64) -> u8 {
-    (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
 /// Run `add` in the page's text column: the page less `CONSOLE_BODY_PADDING_X`

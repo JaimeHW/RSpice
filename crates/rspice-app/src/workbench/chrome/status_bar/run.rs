@@ -3,7 +3,7 @@
 
 use crate::simulation::status::EngineAvailability;
 
-pub(super) fn simulation_progress_percent(progress: f64) -> u8 {
+pub(in crate::workbench) fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 

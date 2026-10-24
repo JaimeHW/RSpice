@@ -31,6 +31,7 @@ use super::sheet_visibility::{
 use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
+use rspice_schematic_editor::view::scene::normalized_probe_expression;
 #[cfg(test)]
 use rspice_schematic_editor::view::selection_drag::{
     select_drag_can_start, select_drag_is_authorized,
@@ -1042,16 +1043,8 @@ fn toggle_materialized_waveform(state: &mut AppState, probe_name: &str) -> Optio
         })
 }
 
-fn raw_output_expression_key(expression: &str) -> String {
-    expression
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
 fn is_ground_voltage_expression(expression: &str) -> bool {
-    raw_output_expression_key(expression) == "v(0)"
+    normalized_probe_expression(expression) == "v(0)"
 }
 
 fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String {
@@ -1085,7 +1078,8 @@ fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
                 .iter()
                 .position(|candidate| std::ptr::eq(candidate, analysis))?;
             let waveform_index = analysis.waveforms.iter().position(|waveform| {
-                raw_output_expression_key(&waveform.name) == raw_output_expression_key(probe_name)
+                normalized_probe_expression(&waveform.name)
+                    == normalized_probe_expression(probe_name)
                     || waveform.name.eq_ignore_ascii_case(probe_name)
             })?;
             rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
@@ -1114,7 +1108,7 @@ fn ensure_plan_probe_output(
     let plan_id = setup.stable_analysis_plan()?.id();
     let plan_name = setup.active_plan_name().to_string();
     let expression = spelling.engine().trim();
-    let expression_key = raw_output_expression_key(expression);
+    let expression_key = normalized_probe_expression(expression);
     if state
         .model
         .workspace
@@ -1123,7 +1117,7 @@ fn ensure_plan_probe_output(
         .and_then(|payload| {
             payload.saved_outputs.iter().find_map(|output| {
                 (output.kind == SavedOutputKind::RawVoltageOrCurrent
-                    && raw_output_expression_key(&output.source_expression) == expression_key)
+                    && normalized_probe_expression(&output.source_expression) == expression_key)
                     .then_some(output.id)
             })
         })
@@ -1452,7 +1446,7 @@ fn current_probe_output_binding(
     crate::product::SavedOutputId,
 )> {
     let plan_id = state.model.sim_setup.stable_analysis_plan().ok()?.id();
-    let expression_key = raw_output_expression_key(expression);
+    let expression_key = normalized_probe_expression(expression);
     let output_id = state
         .model
         .workspace
@@ -1462,7 +1456,7 @@ fn current_probe_output_binding(
         .iter()
         .find_map(|output| {
             (output.kind == SavedOutputKind::RawVoltageOrCurrent
-                && raw_output_expression_key(&output.source_expression) == expression_key)
+                && normalized_probe_expression(&output.source_expression) == expression_key)
                 .then_some(output.id)
         })?;
     Some((plan_id, output_id))
@@ -1487,7 +1481,9 @@ fn retain_probe_flag(
     let label = spelling.map(|spelling| spelling.display().trim().to_owned());
     let validation_reference = label.as_deref().unwrap_or("P1");
     SchematicProbe::new(1, position, validation_reference, source_expression.clone())?;
-    let source_key = source_expression.as_deref().map(raw_output_expression_key);
+    let source_key = source_expression
+        .as_deref()
+        .map(normalized_probe_expression);
     if let Some(existing_id) = state
         .model
         .schematic
@@ -1499,7 +1495,7 @@ fn retain_probe_flag(
                 && probe
                     .source_expression
                     .as_deref()
-                    .map(raw_output_expression_key)
+                    .map(normalized_probe_expression)
                     == source_key)
                 .then_some(probe.id)
         })

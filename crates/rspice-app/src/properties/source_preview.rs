@@ -26,6 +26,7 @@ use crate::state::stimulus_library::definition::{StimulusDefinition, StimulusFam
 use crate::ui::plot::si_tick_label;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use rspice_ui_kit::panels::measured_text_width;
 
 /// How many points a preview asks the engine for.
 ///
@@ -271,7 +272,7 @@ pub(crate) fn paint_instrument(ui: &mut Ui, instrument: &Instrument<'_>) {
     let gutter = plans
         .iter()
         .flat_map(|plan| plan.labels.iter().flatten())
-        .map(|label| measured(ui, label, font.clone()))
+        .map(|label| measured_text_width(ui, label, font.clone()))
         .fold(0.0_f32, f32::max)
         + GUTTER_GAP;
 
@@ -566,16 +567,6 @@ fn paint_time_axis(ui: &Ui, frame: Rect, stop: f64) {
             t.color.text_faint,
         );
     }
-}
-
-/// How wide one run lays out.
-fn measured(ui: &mut Ui, text: &str, font: egui::FontId) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
-            .size()
-            .x
-    })
 }
 
 /// The two levels a curve runs between, for a row that has no room for a plot

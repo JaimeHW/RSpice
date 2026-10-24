@@ -19,6 +19,7 @@ use super::*;
 use crate::workbench::RSpiceApp;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
+use crate::workbench::app::dialogs::source_document::leaf_name;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::design_system::{Problem, elide_text, paint_problem_mark};
@@ -246,15 +247,6 @@ fn bundle_rows(state: &AppState, language: ProjectSourceLanguage) -> Vec<BundleR
         role,
     })
     .collect()
-}
-
-fn leaf_name(logical_path: &str) -> String {
-    logical_path
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-        .unwrap_or(logical_path)
-        .to_owned()
 }
 
 /// What the bundle records this file as, when that is something other than

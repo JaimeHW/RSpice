@@ -1740,6 +1740,16 @@ pub fn card_well(ui: &mut Ui, card: Result<&str, &str>, trailing_inset: f32) -> 
 /// paints them.
 pub const CARD_WELL_HEIGHT: f32 = 18.0;
 
+/// How wide `text` lays out on one line in `font`, for placing what follows it.
+pub fn measured_text_width(ui: &mut Ui, text: &str, font: egui::FontId) -> f32 {
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+            .size()
+            .x
+    })
+}
+
 pub fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
     if max_width <= 0.0 {
         return String::new();
@@ -1771,6 +1781,18 @@ pub fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> S
         }
     }
     format!("{}{}", graphemes[..low].concat(), ellipsis)
+}
+
+/// Shorten `text` to at most `max` characters, the last of them a typographic
+/// ellipsis: for a label budgeted in characters rather than in points, which
+/// [`elide_text`] fits.
+pub fn elide_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 /// Shorten a path from the middle: its root stays, and as many of its

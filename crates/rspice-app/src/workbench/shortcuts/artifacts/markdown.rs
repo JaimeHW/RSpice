@@ -128,7 +128,7 @@ const fn scope_label(scope: ShortcutArtifactScope) -> &'static str {
     }
 }
 
-const fn status_label(status: ShortcutReferenceStatus) -> &'static str {
+pub(super) const fn status_label(status: ShortcutReferenceStatus) -> &'static str {
     match status {
         ShortcutReferenceStatus::Default => "Default",
         ShortcutReferenceStatus::UserOverride => "User override",

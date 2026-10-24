@@ -832,13 +832,6 @@ fn measurement_badge_counts_only_the_active_immutable_dataset() {
     assert_eq!(active_measurement_count(&simulation), 0);
 }
 
-#[test]
-fn fractional_engine_progress_is_rendered_as_a_percentage() {
-    assert_eq!(simulation_progress_percent(0.0), 0);
-    assert_eq!(simulation_progress_percent(0.375), 38);
-    assert_eq!(simulation_progress_percent(1.0), 100);
-}
-
 /// The task log's status column is as wide as its widest status, measured in
 /// its own font. A 58 px constant clipped "INTERRUPTED".
 #[test]

@@ -23,8 +23,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, IconButton, Problem, paint_problem_mark,
-    problem_line, select,
+    Button, Dialog, DialogChoice, DialogSize, IconButton, Problem, focus_is_within_modal,
+    paint_problem_mark, problem_line, select,
 };
 use crate::workbench::RSpiceApp;
 
@@ -449,7 +449,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     if let Some(close_control_id) = close_control_id
         && !confirmation_open
-        && (opened_this_pass || !focus_is_within_launcher(ctx, modal_layer))
+        && (opened_this_pass || !focus_is_within_modal(ctx, modal_layer))
     {
         let target = if app.state.project.project_launcher_page == ProjectLauncherPage::Projects {
             project_search_id()
@@ -1829,17 +1829,6 @@ fn begin_launcher_focus(ctx: &Context, state_id: Id) -> bool {
         data.insert_temp(state_id, state);
         !continuing
     })
-}
-
-fn focus_is_within_launcher(ctx: &Context, modal_layer: egui::LayerId) -> bool {
-    let Some(focused) = ctx.memory(|memory| memory.focused()) else {
-        return false;
-    };
-    let Some(response) = ctx.read_response(focused) else {
-        return false;
-    };
-    response.layer_id == modal_layer
-        || ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id))
 }
 
 fn restore_launcher_focus(

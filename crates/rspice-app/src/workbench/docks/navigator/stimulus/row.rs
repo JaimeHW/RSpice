@@ -13,6 +13,7 @@ use crate::properties::source_preview;
 use crate::state::stimulus_library::definition::StimulusFamily;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::design_system::measured_text_width;
 
 /// A family heading, and one definition under it.
 ///
@@ -165,7 +166,7 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
     let text_right = rect.right() - RIGHT_INSET - if row.dirty { DOT_TRACK } else { 0.0 };
     let name_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let name_elided =
-        measured(ui, &row.name, name_font.clone()) > (text_right - text_left).max(0.0);
+        measured_text_width(ui, &row.name, name_font.clone()) > (text_right - text_left).max(0.0);
     painted_run(
         ui,
         Rect::from_min_max(
@@ -292,14 +293,4 @@ fn painted_run(
         galley,
         color,
     );
-}
-
-/// How wide one run lays out, for placing what follows it.
-fn measured(ui: &mut Ui, text: &str, font: egui::FontId) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
-            .size()
-            .x
-    })
 }

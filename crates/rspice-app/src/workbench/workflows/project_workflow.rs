@@ -17,6 +17,7 @@ use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::lifecycle::project_lifecycle::{
     PersistenceBinding, ProjectLifecycleError, SaveScope,
 };
+use crate::workbench::workflows::file_workflow::file_name_string;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
 
@@ -285,12 +286,6 @@ pub(crate) fn save_project_to_path(state: &mut AppState, path: &Path) -> bool {
         DestinationAuthority::UserSelected,
     )
     .is_ok()
-}
-
-fn file_name_string(path: &Path) -> Option<String> {
-    path.file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .filter(|name| !name.trim().is_empty())
 }
 
 fn project_save_dialog_default_name(state: &AppState) -> String {

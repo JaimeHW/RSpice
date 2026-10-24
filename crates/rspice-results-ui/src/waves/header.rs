@@ -34,15 +34,7 @@ pub struct PaneHeader {
     pub cursor_a: Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
 }
 
-/// Shorten a label to `max` characters with a typographic ellipsis.
-pub fn elide(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
-    }
-    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
+pub use rspice_ui_kit::panels::elide_chars as elide;
 
 fn trace_belongs_to_pane(
     model: &StripModel,

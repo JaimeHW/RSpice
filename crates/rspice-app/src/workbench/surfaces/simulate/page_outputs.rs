@@ -71,17 +71,18 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-/// The outputs this page lists, or why there is no list to draw.
+/// The plan payload the Outputs, Save and Specifications pages read, or why
+/// there is none.
 ///
 /// A `Result` rather than a defaulted payload. Both failures — a plan that has
 /// not been migrated to stable analysis-instance identity, and a resolvable
 /// plan the workspace holds no payload record for — used to fall back to
 /// `SimulationPlanPayload::default()`, which paints exactly what a plan whose
 /// author has saved nothing paints. The two states have opposite fixes: one is
-/// "author an output", the other is "this plan is broken", and a registry that
-/// spells them the same way tells the reader a run would capture nothing when
-/// in truth nothing here is known about the run at all.
-fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
+/// "author an output", the other is "this plan is broken", and a page that
+/// spells them the same way states a fact about a plan when in truth nothing
+/// here is known about it at all.
+pub(super) fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
     let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
     app.state
         .model

@@ -848,7 +848,7 @@ fn find_resolved_symbol<'a>(
         .map(|entry| &entry.symbol)
 }
 
-fn escape_xml(text: &str) -> String {
+pub(crate) fn escape_xml(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

@@ -432,7 +432,7 @@ fn candidate_matches_best(
         })
 }
 
-fn table_header(ui: &mut Ui, text: &str) {
+pub(crate) fn table_header(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
         RichText::new(text)
@@ -441,7 +441,7 @@ fn table_header(ui: &mut Ui, text: &str) {
     );
 }
 
-fn mono(ui: &mut Ui, text: &str) {
+pub(crate) fn mono(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular)));
 }
 

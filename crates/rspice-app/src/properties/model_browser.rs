@@ -35,9 +35,11 @@ use crate::state::model_library::{
     BinFamily, BindableModel, DeviceModel, ModelConsumerScope, ModelLevel, ModelLibrary,
     ModelLibraryManager, ModelType, validate_component_model_compatibility,
 };
+use crate::ui::input::focus_filter_on_typing;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
+use rspice_ui_kit::panels::measured_text_width;
 
 // =============================================================================
 // State
@@ -1167,22 +1169,6 @@ fn stepped(groups: &[Group<'_>], pick: Option<&ModelKey>, step: i32) -> Option<M
     Some(reachable[index].key())
 }
 
-/// Send a keystroke to the filter wherever the reader's focus happens to be.
-///
-/// Typing into a list means one thing: narrow it. The character is not lost,
-/// because focus is granted before the field is added on this same frame.
-fn focus_filter_on_typing(ui: &Ui, filter_id: egui::Id) {
-    let typed = ui.input(|input| {
-        input
-            .events
-            .iter()
-            .any(|event| matches!(event, egui::Event::Text(_)))
-    });
-    if typed && !ui.memory(|memory| memory.has_focus(filter_id)) {
-        ui.memory_mut(|memory| memory.request_focus(filter_id));
-    }
-}
-
 /// One library's quiet label, with how many of its models are listed.
 fn group_label(ui: &mut Ui, library: &str, count: usize) {
     let t = Tokens::get(ui.ctx());
@@ -1199,7 +1185,7 @@ fn group_label(ui: &mut Ui, library: &str, count: usize) {
     );
     let count = count.to_string();
     let mono = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let count_width = measured_width(ui, &count, mono.clone());
+    let count_width = measured_text_width(ui, &count, mono.clone());
     run(ui, baseline, true, &count, mono, t.color.text_faint);
     run(
         ui,
@@ -1269,7 +1255,7 @@ fn model_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui::Response {
     let mut text_right = rect.right() - 10.0;
     if let Some(tag) = tag {
         let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-        let width = measured_width(ui, tag, font.clone()) + 12.0;
+        let width = measured_text_width(ui, tag, font.clone()) + 12.0;
         let pill = Rect::from_min_size(
             egui::pos2(text_right - width, rect.center().y - 8.0),
             vec2(width, 16.0),
@@ -1333,7 +1319,7 @@ fn fitted_meta(ui: &mut Ui, parts: &[String], width: f32, font: egui::FontId) ->
     let mut kept = parts.len();
     while kept > 1 {
         let line = parts[..kept].join(" \u{00b7} ");
-        if measured_width(ui, &line, font.clone()) <= width {
+        if measured_text_width(ui, &line, font.clone()) <= width {
             return line;
         }
         kept -= 1;
@@ -1493,7 +1479,7 @@ fn bin_columns(ui: &mut Ui, family: &BinFamily<'_>) -> [f32; 3] {
             window_label(bin.w_min, bin.w_max),
         ];
         for (width, text) in widths.iter_mut().zip(texts) {
-            *width = width.max(measured_width(ui, &text, mono.clone()));
+            *width = width.max(measured_text_width(ui, &text, mono.clone()));
         }
     }
     widths
@@ -1782,7 +1768,7 @@ fn fact_column(ui: &mut Ui) -> f32 {
     let font = theme::sans(tokens::FS_0, FontWeight::Regular);
     FACT_LABELS
         .iter()
-        .map(|label| measured_width(ui, label, font.clone()))
+        .map(|label| measured_text_width(ui, label, font.clone()))
         .fold(0.0, f32::max)
         + FACT_LABEL_GAP
 }
@@ -1873,7 +1859,7 @@ fn parameter_grid(ui: &mut Ui, parameters: &[Parameter]) {
             let left = row.left() + column as f32 * (cell + PARAMETER_GUTTER);
             let cell_rect =
                 Rect::from_min_size(egui::pos2(left, row.top()), vec2(cell, PARAMETER_PITCH));
-            let name_width = measured_width(ui, &parameter.name, mono.clone()).min(cell * 0.6);
+            let name_width = measured_text_width(ui, &parameter.name, mono.clone()).min(cell * 0.6);
             run(
                 ui,
                 Rect::from_min_size(cell_rect.min, vec2(name_width, PARAMETER_PITCH)),
@@ -1918,16 +1904,6 @@ fn note(ui: &mut Ui, text: &str) {
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
-}
-
-/// How wide one run lays out, for placing what follows it.
-fn measured_width(ui: &mut Ui, text: &str, font: egui::FontId) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
-            .size()
-            .x
-    })
 }
 
 /// One run of text, vertically centred in `rect` and elided into its width.

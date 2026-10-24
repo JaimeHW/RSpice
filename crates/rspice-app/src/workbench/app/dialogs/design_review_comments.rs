@@ -13,7 +13,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
-use crate::workbench::design_system::section_header;
+use crate::workbench::design_system::{elide_chars, section_header};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
@@ -720,7 +720,7 @@ fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Re
     ui.painter().text(
         title_rect.left_top(),
         egui::Align2::LEFT_TOP,
-        ellipsize(&note.text, 46),
+        elide_chars(&note.text, 46),
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
@@ -739,7 +739,7 @@ fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Re
         t.color.text_dim,
     );
     // Every column is painted, so the announced label is assembled here.
-    let row_label = format!("{author}: {}", ellipsize(&note.text, 46));
+    let row_label = format!("{author}: {}", elide_chars(&note.text, 46));
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -1025,18 +1025,6 @@ fn format_anchor(point: Point) -> String {
 
 fn short_identity(identity: &str) -> &str {
     identity.get(..7).unwrap_or(identity)
-}
-
-fn ellipsize(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_owned();
-    }
-    let mut result = value
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    result.push('\u{2026}');
-    result
 }
 
 fn relative_time(timestamp_ms: u64) -> String {

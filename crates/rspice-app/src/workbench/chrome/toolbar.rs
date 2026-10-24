@@ -206,7 +206,7 @@ fn toolbar_horizontal_padding(viewport_width: f32) -> f32 {
     }
 }
 
-fn drawer_owner(drawer: Drawer) -> &'static str {
+pub(in crate::workbench) fn drawer_owner(drawer: Drawer) -> &'static str {
     match drawer {
         Drawer::Navigator => "navigator",
         Drawer::Inspector => "inspector",

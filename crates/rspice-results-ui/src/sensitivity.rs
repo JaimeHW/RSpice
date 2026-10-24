@@ -1,6 +1,7 @@
 //! Retained single-point sensitivity charts and exact readouts.
 
 use crate::{
+    op_inspector::op_column_rect as column_rect,
     presentation::{panel_note, well_hint},
     strip::StripHeader,
     virtual_rows::RowOffsets,
@@ -154,13 +155,6 @@ fn chart_value(value: SensitivityValue<f64>) -> String {
     } else {
         format!("{value:+.6e}")
     }
-}
-
-fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
-    egui::Rect::from_min_size(
-        egui::pos2(row.left() + offset, row.top()),
-        egui::vec2(width, row.height()),
-    )
 }
 
 fn paint_cell(

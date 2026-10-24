@@ -20,7 +20,9 @@ use egui::{
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, IconButton, SWITCH_WIDTH, paint_switch, select};
+use crate::ui::widgets::{
+    Button, IconButton, SWITCH_WIDTH, focus_is_within_modal, paint_switch, select,
+};
 
 const DESKTOP_WIDTH: f32 = 1000.0;
 const DESKTOP_HEIGHT: f32 = 680.0;
@@ -596,17 +598,6 @@ fn begin_focus_session(ctx: &Context, state_id: Id) -> bool {
         data.insert_temp(state_id, state);
         !continuing
     })
-}
-
-fn focus_is_within_modal(ctx: &Context, modal_layer: egui::LayerId) -> bool {
-    let Some(focused) = ctx.memory(|memory| memory.focused()) else {
-        return false;
-    };
-    let Some(response) = ctx.read_response(focused) else {
-        return false;
-    };
-    response.layer_id == modal_layer
-        || ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id))
 }
 
 fn restore_focus(ctx: &Context, state_id: Id, close_control_id: Id, modal_layer: egui::LayerId) {

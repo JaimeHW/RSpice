@@ -46,7 +46,7 @@ pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords};
 pub use dialog::{
     Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse, DialogSize,
-    DialogTransactionTone,
+    DialogTransactionTone, focus_is_within_modal,
 };
 pub use docbar::docbar_at_height;
 pub use form::name_control;

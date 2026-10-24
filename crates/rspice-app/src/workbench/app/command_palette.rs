@@ -21,6 +21,7 @@ use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
+use crate::ui::widgets::focus_is_within_modal;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec};
 use crate::workbench::framework::host::Host;
@@ -1793,17 +1794,6 @@ fn begin_focus_session(ctx: &Context, state_id: Id) -> bool {
         data.insert_temp(state_id, state);
         !continuing
     })
-}
-
-fn focus_is_within_modal(ctx: &Context, modal_layer: egui::LayerId) -> bool {
-    let Some(focused) = ctx.memory(|memory| memory.focused()) else {
-        return false;
-    };
-    let Some(response) = ctx.read_response(focused) else {
-        return false;
-    };
-    response.layer_id == modal_layer
-        || ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id))
 }
 
 fn restore_focus(ctx: &Context, state_id: Id, search: Id, modal_layer: egui::LayerId) {

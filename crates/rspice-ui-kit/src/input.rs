@@ -100,6 +100,22 @@ impl InputTransition {
     }
 }
 
+/// Send a keystroke to the filter wherever the reader's focus happens to be.
+///
+/// Typing into a list means one thing: narrow it. Call it before the filter
+/// field is added: focus granted earlier in the same frame keeps the character.
+pub fn focus_filter_on_typing(ui: &egui::Ui, filter_id: Id) {
+    let typed = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Text(_)))
+    });
+    if typed && !ui.memory(|memory| memory.has_focus(filter_id)) {
+        ui.memory_mut(|memory| memory.request_focus(filter_id));
+    }
+}
+
 /// Give a surface the input that follows the command opening it, when the
 /// caller already holds those events instead of splitting them out of the
 /// current batch. The surface collects them with [`InputScope::enter`].

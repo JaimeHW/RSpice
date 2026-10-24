@@ -34,7 +34,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // states a save policy, a group ledger and a forecast for a plan it could
     // not resolve — numbers that read as "this run keeps nothing" rather than
     // "there is no run to price".
-    let payload = match plan_payload(app) {
+    let payload = match super::page_outputs::plan_payload(app) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);
@@ -219,28 +219,6 @@ impl ExecutedDeckStorage {
     const fn total(&self) -> u64 {
         self.listed.saturating_add(self.summarized)
     }
-}
-
-/// The outputs and groups this page prices, or why there is nothing to price.
-///
-/// A `Result` rather than a defaulted payload. Both failures — a plan that has
-/// not been migrated to stable analysis-instance identity, and a resolvable
-/// plan the workspace holds no payload record for — used to fall back to
-/// `SimulationPlanPayload::default()`. Every number on this page is a fold over
-/// that payload, so the fallback did not produce an error, it produced a
-/// forecast: a zero-byte ledger, an empty group table and a streaming policy,
-/// all stated with the same confidence as a real plan's. `retention_contract`
-/// already refused to do that for its own half of the page; this is the same
-/// refusal, taken before the controller is asked to price anything.
-fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
-    app.state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)
-        .cloned()
-        .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
 }
 
 /// What the page says instead of a save policy when the plan will not resolve.

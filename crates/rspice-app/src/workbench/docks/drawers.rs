@@ -6,6 +6,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Mode;
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::chrome::toolbar::drawer_owner;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
@@ -573,14 +574,6 @@ fn maintain_mobile_navigation_focus(ctx: &Context, focus_ids: &[Id], first_card_
     };
     if let Some(target) = target {
         ctx.memory_mut(|memory| memory.request_focus(target));
-    }
-}
-
-fn drawer_owner(drawer: Drawer) -> &'static str {
-    match drawer {
-        Drawer::Navigator => "navigator",
-        Drawer::Inspector => "inspector",
-        Drawer::Workspaces => "workspaces",
     }
 }
 

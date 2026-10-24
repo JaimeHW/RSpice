@@ -14,7 +14,7 @@ use std::fmt::Write;
 use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
 use super::lod;
-use crate::export::SvgExportConfig;
+use crate::export::{SvgExportConfig, escape_xml};
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
     schematic::{
@@ -864,13 +864,6 @@ fn cardinal_bounds(center: Point, radius: i32) -> [Point; 4] {
         Point::new(center.x, center.y - radius),
         Point::new(center.x, center.y + radius),
     ]
-}
-
-fn escape_xml(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 #[cfg(test)]

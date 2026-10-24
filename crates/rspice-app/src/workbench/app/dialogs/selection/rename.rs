@@ -15,6 +15,7 @@ use egui::{Context, Id};
 use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+use rspice_schematic_editor::object_properties::clause;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -369,14 +370,6 @@ fn count(value: usize, one: &str, many: &str) -> Option<String> {
         0 => None,
         1 => Some(format!("1 {one}")),
         value => Some(format!("{value} {many}")),
-    }
-}
-
-fn clause(left: Option<String>, right: Option<String>) -> Option<String> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(format!("{left} and {right}")),
-        (Some(only), None) | (None, Some(only)) => Some(only),
-        (None, None) => None,
     }
 }
 

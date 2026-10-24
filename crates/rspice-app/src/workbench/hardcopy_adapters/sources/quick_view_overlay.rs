@@ -4,7 +4,6 @@ use super::*;
 use crate::workbench::documents::result_document::{AnalysisPresentationKey, MarkerKind};
 use crate::workbench::preferences::CursorInterpolation;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
-use rspice_results_ui::session::MarkerView;
 
 pub(super) fn capture_quick_view_overlays(
     state: &AppState,
@@ -47,7 +46,7 @@ fn capture_quick_view_overlay(
         .session
         .strip_markers(analysis_key)
         .map(|marker| RetainedQuickMarker {
-            label: marker_tag(marker),
+            label: rspice_results_ui::waves::dock::marker_label(marker),
             kind: marker.kind(),
             x: marker.x(),
             trace_name: (marker.kind() != MarkerKind::Spec).then(|| marker.trace_name().to_owned()),
@@ -73,17 +72,4 @@ fn capture_quick_view_overlay(
         crate::workbench::documents::result_document::captured_viewport(state, analysis_key)
             .map(|(x, y)| RetainedQuickViewport { x, y }),
     )
-}
-
-/// The tag text the sheet draws: the display id, plus the note when the
-/// reader wrote one. Mirrors `waves::readout::marker_label`, which is
-/// `pub(super)` to `result_document` and cannot be called from here.
-fn marker_tag(marker: MarkerView<'_>) -> String {
-    let id = marker.display_id();
-    let note = marker.note().trim();
-    if note.is_empty() {
-        id
-    } else {
-        format!("{id} · {note}")
-    }
 }

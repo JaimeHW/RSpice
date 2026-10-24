@@ -304,7 +304,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
     digest.to_string().chars().take(12).collect()
 }
 
-fn leaf_name(logical_path: &str) -> String {
+pub(in crate::workbench) fn leaf_name(logical_path: &str) -> String {
     logical_path
         .rsplit('/')
         .next()

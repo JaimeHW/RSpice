@@ -20,6 +20,7 @@ use crate::simulation::stimulus_realize::{self, WaveformTrace};
 use crate::state::Component;
 use crate::state::stimulus_library::definition::{StimulusDefinition, StimulusFamily};
 use crate::state::stimulus_library::provenance::AdoptionFit;
+use crate::ui::input::focus_filter_on_typing;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
@@ -476,23 +477,6 @@ pub(super) fn stepped(groups: &[AdoptGroup<'_>], pick: Option<&str>, step: i32) 
         None => first,
     };
     Some(next.to_owned())
-}
-
-/// Send a keystroke to the filter wherever the reader's focus happens to be.
-///
-/// The list is the surface people arrive at, and typing into it means one
-/// thing: narrow it. The character is not lost, because focus is granted before
-/// the field is added on this same frame.
-fn focus_filter_on_typing(ui: &Ui, filter_id: egui::Id) {
-    let typed = ui.input(|input| {
-        input
-            .events
-            .iter()
-            .any(|event| matches!(event, egui::Event::Text(_)))
-    });
-    if typed && !ui.memory(|memory| memory.has_focus(filter_id)) {
-        ui.memory_mut(|memory| memory.request_focus(filter_id));
-    }
 }
 
 /// One group's quiet label.

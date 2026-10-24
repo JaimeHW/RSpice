@@ -237,7 +237,8 @@ fn rename_scope(
     }
 }
 
-fn clause(left: Option<String>, right: Option<String>) -> Option<String> {
+/// Two optional phrases joined by "and", or whichever one there is.
+pub fn clause(left: Option<String>, right: Option<String>) -> Option<String> {
     match (left, right) {
         (Some(left), Some(right)) => Some(format!("{left} and {right}")),
         (Some(only), None) | (None, Some(only)) => Some(only),

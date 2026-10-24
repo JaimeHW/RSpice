@@ -6,6 +6,7 @@ use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{SheetCatalog, SheetId};
+use rspice_ui_kit::panels::elide_chars;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::active_palette;
 
@@ -297,12 +298,12 @@ fn draw_hover_card(painter: &Painter, viewport: &Viewport, marker: Pos2, violati
         severity_color(violation.severity, &palette),
     );
     let message_galley = painter.layout_no_wrap(
-        truncate(&violation.message, 78),
+        elide_chars(&violation.message, 78),
         theme::sans(11.0, FontWeight::Regular),
         palette.text,
     );
     let fix_galley = painter.layout_no_wrap(
-        truncate(&fix, 78),
+        elide_chars(&fix, 78),
         theme::sans(11.0, FontWeight::Regular),
         palette.text_faint,
     );
@@ -345,16 +346,6 @@ fn draw_hover_card(painter: &Painter, viewport: &Viewport, marker: Pos2, violati
         painter.galley(pos2(origin.x + pad_x, y), galley, palette.text);
         y += galley_height + line_gap;
     }
-}
-
-/// Hard-truncate long strings for the single-line card rows.
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
-    }
-    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]

@@ -288,7 +288,7 @@ fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool
 /// A well whose hint slot states a rule rather than the notation.
 ///
 /// Most numeric fields have nothing to say in that slot but which notation
-/// they take, and [`engineering_input_row`] says exactly that. A few have a
+/// they take, and [`input_row`] says exactly that. A few have a
 /// rule the label cannot carry and the value alone does not imply — a window
 /// that overrides the count above it, a factor with a closed range, a control
 /// only one mode reads — and for those the rule is worth more in the slot than
@@ -323,34 +323,6 @@ fn hinted_input_row_enabled(
     })
 }
 
-fn engineering_input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
-    if !uses_two_column_fields(ui) {
-        return inspector_input_row(ui, label, value);
-    }
-    field_cell(ui, label, None, |ui| {
-        mono_input(ui, label, value, ui.available_width())
-    })
-}
-
-fn engineering_input_row_enabled(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut String,
-    enabled: bool,
-) -> Response {
-    if !uses_two_column_fields(ui) {
-        return ui
-            .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
-            .inner;
-    }
-    field_cell(ui, label, None, |ui| {
-        ui.add_enabled_ui(enabled, |ui| {
-            mono_input(ui, label, value, ui.available_width())
-        })
-        .inner
-    })
-}
-
 fn quantity_input_row(
     ui: &mut Ui,
     label: &str,
@@ -359,7 +331,7 @@ fn quantity_input_row(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) -> Response {
-    let response = engineering_input_row(ui, label, value);
+    let response = input_row(ui, label, value);
     normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
     response
 }
@@ -450,7 +422,7 @@ fn quantity_input_row_enabled(
     locale: UiNumberLocale,
     enabled: bool,
 ) -> Response {
-    let response = engineering_input_row_enabled(ui, label, value, enabled);
+    let response = input_row_enabled(ui, label, value, enabled);
     if enabled {
         normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
     }

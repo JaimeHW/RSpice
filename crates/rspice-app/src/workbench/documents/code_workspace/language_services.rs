@@ -1208,7 +1208,7 @@ fn normalize_source_whitespace(source: &str, protected_lines: &BTreeSet<usize>) 
     (output, removed)
 }
 
-fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<Item = (&str, &str)> {
+pub(super) fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<Item = (&str, &str)> {
     std::iter::once((bundle.root().logical_path(), bundle.root().content())).chain(
         bundle
             .files()
@@ -1547,7 +1547,7 @@ fn char_to_byte(source: &str, char_index: usize) -> usize {
         .map_or(source.len(), |(byte, _)| byte)
 }
 
-fn source_line_preview(source: &str, one_based_line: usize) -> String {
+pub(super) fn source_line_preview(source: &str, one_based_line: usize) -> String {
     source
         .lines()
         .nth(one_based_line.saturating_sub(1))

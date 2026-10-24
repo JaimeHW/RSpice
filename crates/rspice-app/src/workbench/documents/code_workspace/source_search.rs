@@ -16,6 +16,7 @@ use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::accessibility::counted;
 use crate::workbench::RSpiceApp;
 
+use super::language_services::{bundle_documents, source_line_preview};
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
 
 pub(crate) fn source_search_query_id() -> egui::Id {
@@ -436,15 +437,6 @@ fn current_bundle<'a>(
     Ok(bundle)
 }
 
-fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<Item = (&str, &str)> {
-    std::iter::once((bundle.root().logical_path(), bundle.root().content())).chain(
-        bundle
-            .files()
-            .iter()
-            .map(|file| (file.logical_path(), file.content())),
-    )
-}
-
 #[derive(Debug, Clone, Copy)]
 struct SearchDocument<'a> {
     logical_path: &'a str,
@@ -791,17 +783,6 @@ fn search_options(search: &CodeSourceSearchState) -> FindOptions {
         whole_word: search.whole_symbol,
         regular_expression: search.regular_expression,
     }
-}
-
-fn source_line_preview(source: &str, one_based_line: usize) -> String {
-    source
-        .lines()
-        .nth(one_based_line.saturating_sub(1))
-        .unwrap_or_default()
-        .trim()
-        .chars()
-        .take(240)
-        .collect()
 }
 
 #[cfg(test)]

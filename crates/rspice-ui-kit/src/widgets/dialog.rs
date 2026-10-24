@@ -2103,7 +2103,9 @@ fn focused_control_owns_enter(ctx: &Context, dialog_focus_id: Id) -> bool {
         .is_some_and(|response| response.sense.senses_click() && !response.sense.senses_drag())
 }
 
-fn focus_is_within_modal(ctx: &Context, dialog_layer: egui::LayerId) -> bool {
+/// Whether keyboard focus sits on the modal's own layer or on a layer above
+/// it (a popup the modal opened), so a modal that lost focus can take it back.
+pub fn focus_is_within_modal(ctx: &Context, dialog_layer: egui::LayerId) -> bool {
     let Some(focused) = ctx.memory(|memory| memory.focused()) else {
         return false;
     };

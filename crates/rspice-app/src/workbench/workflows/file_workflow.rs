@@ -405,7 +405,7 @@ pub(crate) fn open_schematic_from_dialog_with_io(
     }
 }
 
-fn file_name_string(path: &Path) -> Option<String> {
+pub(in crate::workbench) fn file_name_string(path: &Path) -> Option<String> {
     path.file_name()
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.trim().is_empty())

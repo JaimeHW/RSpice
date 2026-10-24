@@ -1,6 +1,7 @@
 //! Retained SOA rule projections, table, inspector and stress-history presentation.
 
 use crate::{
+    optimization::{mono, table_header},
     presentation::{PlotView, panel_note, stat_table, well_hint},
     strip::StripHeader,
 };
@@ -17,8 +18,7 @@ use rspice_results::{
 use rspice_ui_kit::{
     panels::section_header,
     plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_readout},
-    theme::{self, FontWeight},
-    tokens::{self, Tokens},
+    tokens::Tokens,
 };
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 const ROW_HEIGHT: f32 = 29.0;
@@ -1160,19 +1160,6 @@ fn verdict_color(
         SoaRuleVerdictEvidence::Warning => palette.warn,
         SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => palette.err,
     }
-}
-
-fn table_header(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(text)
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-}
-
-fn mono(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular)));
 }
 
 fn exact_quantity(ui: &mut Ui, value: f64, unit: &str) {
