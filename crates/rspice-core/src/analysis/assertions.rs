@@ -38,8 +38,8 @@ use crate::abort_signal::AbortSignal;
 use crate::circuit::DeviceOpReport;
 use crate::netlist::expr::{BinOpKind, Expr, UnaryOpKind};
 use crate::netlist::{
-    AssertAnalysis, AssertCheck, AssertLevel, AssertStatement, AssertTarget, Element, ElementKind,
-    Flattener, Netlist, NetlistSourceLocation, ParamContext, canonical_symbol,
+    AssertAnalysis, AssertCheck, AssertLevel, AssertSample, AssertStatement, AssertTarget, Element,
+    ElementKind, Flattener, Netlist, NetlistSourceLocation, ParamContext, canonical_symbol,
 };
 use crate::solver::SimulationResult;
 
@@ -91,7 +91,7 @@ pub fn evaluate_tran_assertions(
     abort: &dyn AbortSignal,
 ) -> Result<Vec<AssertionReport>, SimulationError> {
     let statements = applicable(netlist, AssertAnalysis::Tran);
-    if statements.is_empty() {
+    if statements.is_empty() && netlist.vector_files.is_empty() {
         return Ok(Vec::new());
     }
     let signals = retained_transient_signal_map(result);
@@ -110,7 +110,66 @@ pub fn evaluate_tran_assertions(
         }
         evaluate_statement(netlist, statement, &source, &mut reports);
     }
+    // A `.VEC` file's expected outputs, read from the file the build drove
+    // the inputs from.
+    let limit = crate::resource::ResourceLimits::default().max_external_data_bytes;
+    for reference in &netlist.vector_files {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        match load_vector_file(reference, &netlist.params, limit) {
+            Ok(file) => {
+                for statement in file.output_checks(reference) {
+                    evaluate_statement(netlist, &statement, &source, &mut reports);
+                }
+            }
+            Err(error) => reports.push(AssertionReport {
+                name: reference.report_name(),
+                analysis: AssertAnalysis::Tran,
+                target: reference.path.clone(),
+                instance: None,
+                level: reference.level,
+                message: None,
+                origin: reference.origin.clone(),
+                violations: Vec::new(),
+                unknown_stretches: 0,
+                error: Some(error),
+            }),
+        }
+    }
     Ok(reports)
+}
+
+/// Read and parse the vector file a `.VEC` card names, refusing what RSpice
+/// does not realize. The file comes from the data files a prepared run
+/// registered under the card's spelling, or from disk; an error names the
+/// file and the line.
+pub(crate) fn load_vector_file(
+    reference: &crate::netlist::VectorFileReference,
+    params: &ParamContext,
+    limit: usize,
+) -> Result<crate::netlist::hspice_vec::VectorFile, String> {
+    let text = crate::xspice::read_data_file_to_string_limited(&reference.path, limit).map_err(
+        |error| {
+            format!(
+                "{}: the vector file '{}' cannot be read: {error}",
+                reference.origin, reference.path
+            )
+        },
+    )?;
+    crate::netlist::hspice_vec::parse(&text, &|name| params.get(name))
+        .and_then(|file| file.check_realizable().map(|()| file))
+        .map_err(|error| {
+            let location = if error.line == 0 {
+                reference.path.clone()
+            } else {
+                format!("{}:{}", reference.path, error.line)
+            };
+            format!(
+                "{location}: {} (vector file of the .VEC card at {})",
+                error.message, reference.origin
+            )
+        })
 }
 
 /// Evaluate every assertion that applies to an operating point. `devices` is
@@ -233,6 +292,7 @@ fn needs(statement: &AssertStatement) -> Needs {
             }
         }
         AssertCheck::Device { .. } => needs.devices = true,
+        AssertCheck::Sampled { .. } => {}
     }
     needs
 }
@@ -723,6 +783,7 @@ fn blank_report(
         AssertCheck::Device { parameter, .. } => {
             format!("@{}[{parameter}]", instance.as_deref().unwrap_or("*"))
         }
+        AssertCheck::Sampled { node, .. } => format!("V({node})"),
     };
     AssertionReport {
         name: statement.name.clone(),
@@ -798,6 +859,112 @@ fn evaluate_statement(
                 reports.push(run(statement, source, Some(instance), compiled));
             }
         }
+        AssertCheck::Sampled {
+            node,
+            column,
+            samples,
+        } => sampled(statement, source, node, *column, samples, reports),
+    }
+}
+
+/// A vector file's expected outputs on one bit. Each sample is read off the
+/// accepted trajectory at its instant, on the line between the accepted
+/// points around it, and each mismatch is a report of its own, located at
+/// the row that states the expectation. A bit with no mismatch has one
+/// report with no violation. A sample outside the run's time span is not
+/// checked.
+fn sampled(
+    statement: &AssertStatement,
+    source: &Source<'_>,
+    node: &str,
+    column: usize,
+    samples: &[AssertSample],
+    reports: &mut Vec<AssertionReport>,
+) {
+    let analysis = source.analysis;
+    if analysis != AssertAnalysis::Tran {
+        reports.push(failed(
+            statement,
+            analysis,
+            None,
+            "a sampled check reads a transient".into(),
+        ));
+        return;
+    }
+    let signal = format!("V({node})");
+    let Some(values) = source.lookup(&signal) else {
+        reports.push(failed(
+            statement,
+            analysis,
+            None,
+            missing_signal(source, &signal),
+        ));
+        return;
+    };
+    let time = source.axis;
+    let (Some(&first), Some(&stop)) = (time.first(), time.last()) else {
+        reports.push(failed(
+            statement,
+            analysis,
+            None,
+            "the transient accepted no time point".into(),
+        ));
+        return;
+    };
+    if values.len() != time.len() {
+        reports.push(failed(
+            statement,
+            analysis,
+            None,
+            format!(
+                "{signal} holds {} samples on a time axis of {}",
+                values.len(),
+                time.len()
+            ),
+        ));
+        return;
+    }
+    let mut mismatches = 0usize;
+    for sample in samples {
+        let at = sample.time;
+        if !(at >= first && at <= stop) {
+            continue;
+        }
+        let row = time.partition_point(|t| *t <= at) - 1;
+        let value = if time[row] == at || row + 1 == time.len() {
+            values[row]
+        } else {
+            let (t0, t1) = (time[row], time[row + 1]);
+            values[row] + (values[row + 1] - values[row]) * ((at - t0) / (t1 - t0))
+        };
+        let holds = if sample.high {
+            value >= sample.threshold
+        } else {
+            value <= sample.threshold
+        };
+        if holds {
+            continue;
+        }
+        mismatches += 1;
+        let mut report = blank_report(statement, analysis, None);
+        report.origin = sample.origin.clone();
+        report.message = Some(format!(
+            "{}: column {column} expects {} on {node}: {signal} {} {} V",
+            sample.origin,
+            u8::from(sample.high),
+            if sample.high { ">=" } else { "<=" },
+            sample.threshold
+        ));
+        report.violations.push(AssertViolation {
+            start: Some(at),
+            end: Some(at),
+            extreme: Some(value),
+            at: Some(at),
+        });
+        reports.push(report);
+    }
+    if mismatches == 0 {
+        reports.push(blank_report(statement, analysis, None));
     }
 }
 

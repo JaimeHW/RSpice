@@ -13,7 +13,7 @@ use crate::Value;
 use crate::netlist::lexer::TokenKind;
 use crate::netlist::{
     AssertAnalysis, AssertCheck, AssertLevel, AssertStatement, AssertTarget, NetlistSourceLocation,
-    ParamContext, ParseError,
+    ParamContext, ParseError, VectorFileReference,
 };
 
 use super::super::stream::TokenStream;
@@ -282,33 +282,7 @@ pub(in crate::netlist::parser) fn parse_assert_command(
                 bind(&mut keywords.duration, value, line, "DURATION")?;
             }
             "LEVEL" => {
-                let word = word_value(stream, line, "LEVEL")?;
-                let level = match word.to_ascii_uppercase().as_str() {
-                    "NOTICE" => AssertLevel::Notice,
-                    "WARNING" => AssertLevel::Warning,
-                    "ERROR" => AssertLevel::Error,
-                    "FATAL" => {
-                        return Err(ParseError::UnsupportedCapability {
-                            origin: origin.clone(),
-                            capability: "netlist.assert.level_fatal",
-                            detail: format!(
-                                ".ASSERT {name}: LEVEL=FATAL would stop the run at the \
-                                 violation, but an assertion is evaluated after the run; use \
-                                 LEVEL=ERROR, which fails the run's verdict and keeps its \
-                                 results"
-                            ),
-                        });
-                    }
-                    _ => {
-                        return Err(syntax(
-                            line,
-                            format!(
-                                ".ASSERT {name}: LEVEL={word} is not a level; use NOTICE, \
-                                 WARNING or ERROR"
-                            ),
-                        ));
-                    }
-                };
+                let level = level_value(stream, line, &format!(".ASSERT {name}"), origin)?;
                 bind(&mut keywords.level, level, line, "LEVEL")?;
             }
             "MESSAGE" => {
@@ -346,6 +320,89 @@ pub(in crate::netlist::parser) fn parse_assert_command(
         }
     }
     finish(name, keywords, line, origin)
+}
+
+/// `LEVEL=NOTICE|WARNING|ERROR`; `FATAL` is refused in its own sentence.
+fn level_value(
+    stream: &mut TokenStream,
+    line: usize,
+    card: &str,
+    origin: &NetlistSourceLocation,
+) -> Result<AssertLevel, ParseError> {
+    let word = word_value(stream, line, "LEVEL")?;
+    match word.to_ascii_uppercase().as_str() {
+        "NOTICE" => Ok(AssertLevel::Notice),
+        "WARNING" => Ok(AssertLevel::Warning),
+        "ERROR" => Ok(AssertLevel::Error),
+        "FATAL" => Err(ParseError::UnsupportedCapability {
+            origin: origin.clone(),
+            capability: "netlist.assert.level_fatal",
+            detail: format!(
+                "{card}: LEVEL=FATAL would stop the run at the violation, but an assertion is \
+                 evaluated after the run; use LEVEL=ERROR, which fails the run's verdict and \
+                 keeps its results"
+            ),
+        }),
+        _ => Err(syntax(
+            line,
+            format!("{card}: LEVEL={word} is not a level; use NOTICE, WARNING or ERROR"),
+        )),
+    }
+}
+
+/// `.VEC '<file>' [LEVEL=NOTICE|WARNING|ERROR]`: HSPICE's digital vector
+/// file card. HSPICE's card takes the file alone; `LEVEL=` is RSpice's, the
+/// level the file's output mismatches are reported at, ERROR by default.
+pub(in crate::netlist::parser) fn parse_vec_command(
+    stream: &mut TokenStream,
+    line: usize,
+    origin: &NetlistSourceLocation,
+) -> Result<VectorFileReference, ParseError> {
+    skip_commas(stream);
+    if at_card_end(stream) || at_keyword(stream) {
+        return Err(syntax(line, ".VEC requires the vector file's name"));
+    }
+    let path = match super::super::command_parsers::quoted_path_lexeme(stream) {
+        Some(path) => path,
+        None => word_value(stream, line, "file")
+            .map_err(|_| syntax(line, ".VEC requires the vector file's name"))?,
+    };
+    if path.trim().is_empty() {
+        return Err(syntax(line, ".VEC requires the vector file's name"));
+    }
+    let mut level = None;
+    loop {
+        skip_commas(stream);
+        if at_card_end(stream) {
+            break;
+        }
+        match take_keyword(stream).as_deref() {
+            Some("LEVEL") => {
+                let value = level_value(stream, line, &format!(".VEC '{path}'"), origin)?;
+                bind(&mut level, value, line, "LEVEL")?;
+            }
+            Some(other) => {
+                return Err(syntax(
+                    line,
+                    format!(".VEC '{path}': {other}= is not a .VEC parameter (LEVEL)"),
+                ));
+            }
+            None => {
+                return Err(syntax(
+                    line,
+                    format!(
+                        ".VEC '{path}': expected LEVEL=value after the file, found '{}'",
+                        stream.peek().lexeme
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(VectorFileReference {
+        path,
+        level: level.unwrap_or(AssertLevel::Error),
+        origin: origin.clone(),
+    })
 }
 
 fn finish(
@@ -640,6 +697,47 @@ mod tests {
              X1 n cell\nV1 n 0 1\n.op\n.end\n",
         )
         .expect_err("a subcircuit body holds no assertion")
+        .to_string();
+        assert!(
+            error.contains("cannot be written inside a .SUBCKT"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_vec_card_names_its_file_and_reports_at_error_unless_it_says_otherwise() {
+        // HSPICE Reference Manual, .VEC: `.VEC 'digital_vector_file'`.
+        let netlist = parse(".vec 'digstim.vec'");
+        let [reference] = netlist.vector_files.as_slice() else {
+            panic!("{:?}", netlist.vector_files)
+        };
+        assert_eq!(reference.path, "digstim.vec");
+        assert_eq!(reference.level, AssertLevel::Error);
+        assert_eq!(reference.origin.line, 5);
+        let netlist = parse(".VEC \"../net/c04.vec\" LEVEL=warning");
+        assert_eq!(netlist.vector_files[0].path, "../net/c04.vec");
+        assert_eq!(netlist.vector_files[0].level, AssertLevel::Warning);
+        let netlist = parse(".vec stim/plain.vec");
+        assert_eq!(netlist.vector_files[0].path, "stim/plain.vec");
+        for (card, needle) in [
+            (".VEC", "requires the vector file's name"),
+            (".VEC 'a.vec' LEVEL=loud", "is not a level"),
+            (".VEC 'a.vec' MODE=1", "MODE= is not a .VEC parameter"),
+            (".VEC 'a.vec' LEVEL=error LEVEL=notice", "more than once"),
+        ] {
+            let error = refusal(card).to_string();
+            assert!(error.contains(needle), "{card}: {error}");
+        }
+        let ParseError::UnsupportedCapability { capability, .. } =
+            refusal(".VEC 'a.vec' LEVEL=FATAL")
+        else {
+            panic!("LEVEL=FATAL must be a capability refusal");
+        };
+        assert_eq!(capability, "netlist.assert.level_fatal");
+        let error = Netlist::parse(
+            "vec\n.subckt cell a\nR1 a 0 1k\n.vec 'a.vec'\n.ends\nX1 n cell\n.op\n.end\n",
+        )
+        .expect_err("a subcircuit body applies no vector file")
         .to_string();
         assert!(
             error.contains("cannot be written inside a .SUBCKT"),

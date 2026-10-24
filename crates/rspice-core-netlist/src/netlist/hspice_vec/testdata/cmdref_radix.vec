@@ -1,0 +1,9 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", RADIX, "Examples": two 1-bit
+; signals, a 4-bit signal, one each 1-, 2-, 3- and 4-bit signals, and eight
+; 1-bit signals.
+; start of Vector Pattern Definition section
+RADIX 1 1 4 1234 1111 1111
+VNAME A B C[[3:0]] I9 I[[8:7]] I[[6:4]] I[[3:0]] O7 O6 O5 O4
++ O3 O2 O1 O0
+IO I I I IIII OOOO OOOO

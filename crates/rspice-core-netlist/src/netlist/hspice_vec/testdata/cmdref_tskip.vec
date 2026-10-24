@@ -1,0 +1,9 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", TSKIP, "Examples": the absolute
+; times 11.0, 20.0 and 33.0 are ignored and the rows follow PERIOD.
+radix 1111 1111
+period 10
+tskip
+11.0 1000 1000
+20.0 1100 1100
+33.0 1010 1001

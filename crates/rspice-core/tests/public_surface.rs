@@ -356,7 +356,13 @@ use rspice_core::analysis::harmonic_balance::{
 // `RawPlotLayout` and `write_raw_exponent`, through which the CLI table
 // export and the Python binding write their real and complex plots. The
 // census is 5,460, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5460;
+// The HSPICE `.VEC` card adds three: `netlist::VectorFileReference` (its
+// struct and its re-export), the card that `Netlist::vector_files` lists and
+// the builder and the assertion evaluator read the file through, and
+// `netlist::AssertSample`, one instant of the sampled check
+// (`AssertCheck::Sampled`) a vector file's expected output becomes. The
+// census is 5,463, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5463;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
@@ -439,8 +445,16 @@ const MAX_PUBLIC_ITEMS: usize = 5460;
 // `BreakpointManager::merge_tolerance` add two: the transient engine tells
 // every code model the window it counts as the current instant, which the
 // breakpoint schedule's merge tolerance and the solver floor set, and both
-// live in the base crate below it. The census is 1,317, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1317;
+// live in the base crate below it. The census was 1,317, with no slack.
+// The HSPICE `.VEC` reader adds seven: it sits with the parser, below the
+// engine, and the circuit build and the assertion evaluator read a card's
+// vector file through `hspice_vec::parse` and the `VectorFile` it returns,
+// refuse what RSpice does not realize through `VectorFile::check_realizable`,
+// drive the inputs through `VectorFile::input_sources`, check the outputs
+// through `VectorFile::output_checks`, report under
+// `VectorFileReference::report_name`, and name the line a refusal comes from
+// through `VectorFileError`. The census is 1,324, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1324;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

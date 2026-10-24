@@ -1099,6 +1099,11 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
             None,
         );
     }
+    // A `.VEC` file's inputs drive the trajectory: a resume against an edited
+    // file is a different run. Its path is already the one the build reads.
+    for reference in &netlist.vector_files {
+        hash_dependency(hasher, &reference.path, None, true, None);
+    }
 }
 
 /// One device's initial-condition projection: the flattened instance name,

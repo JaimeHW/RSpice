@@ -114,6 +114,7 @@ pub(super) struct ParseState {
     pub(super) spef_includes: Vec<String>,
     pub(super) measurements: Vec<MeasureStatement>,
     pub(super) assertions: Vec<crate::netlist::AssertStatement>,
+    pub(super) vector_files: Vec<crate::netlist::VectorFileReference>,
     pub(super) saves: SaveSet,
     pub(super) output_requests: Vec<OutputRequest>,
     pub(super) options: super::SimulationOptions,
@@ -181,6 +182,7 @@ impl ParseState {
             spef_includes: Vec::new(),
             measurements: Vec::new(),
             assertions: Vec::new(),
+            vector_files: Vec::new(),
             saves: SaveSet::default(),
             output_requests: Vec::new(),
             options: super::SimulationOptions::default(),
@@ -254,6 +256,7 @@ impl ParseState {
             global_nodes: self.global_nodes,
             measurements: self.measurements,
             assertions: self.assertions,
+            vector_files: self.vector_files,
             saves: self.saves,
             output_requests: self.output_requests,
             options,
@@ -394,6 +397,9 @@ pub(super) struct ParseLineContext<'a> {
     /// The deck's `.ASSERT` cards; `None` inside a subcircuit body, where
     /// the card is refused.
     pub(super) assertions: Option<&'a mut Vec<crate::netlist::AssertStatement>>,
+    /// The deck's `.VEC` cards; `None` inside a subcircuit body, where the
+    /// card is refused.
+    pub(super) vector_files: Option<&'a mut Vec<crate::netlist::VectorFileReference>>,
     pub(super) saves: &'a mut SaveSet,
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
@@ -435,6 +441,7 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) measurements: &'a mut Vec<MeasureStatement>,
     pub(super) assertions: Option<&'a mut Vec<crate::netlist::AssertStatement>>,
+    pub(super) vector_files: Option<&'a mut Vec<crate::netlist::VectorFileReference>>,
     pub(super) saves: &'a mut SaveSet,
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,

@@ -1,0 +1,14 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", TDELAY, IDELAY and ODELAY,
+; "Examples" (the same example under all three). The manual states: no TUNIT,
+; so ns; all signals 1.0 ns; V2 and VX -1.2; V4, V5[0:1] and V6[0:2] 1.5;
+; V7[0:3] input 2.0 and output 3.0.
+RADIX 1 1 4 1234 11111111
+IO i i o iiib iiiiiiii
+VNAME V1 V2 VX[[3:0]] V4 V5[[1:0]] V6[[0:2]] V7[[0:3]]
++ V8 V9 V10 V11 V12 V13 V14 V15
+TDELAY 1.0
+TDELAY -1.2 0 1 F 0000 00000000
+TDELAY 1.5 0 0 0 1370 00000000
+IDELAY 2.0 0 0 0 000F 00000000
+ODELAY 3.0 0 0 0 000F 00000000

@@ -436,3 +436,127 @@ endconnectrules\n";
         assert!((e1 - (41.0e-9 - crossing)).abs() <= 1e-15, "{e1:e}");
     }
 }
+
+/// HSPICE `.VEC` vector files: inputs drive ideal piecewise-linear sources,
+/// expected outputs are sampled checks in the assertion report. The files are
+/// registered as data files, as a prepared run registers what it sealed, under
+/// paths no other test uses.
+mod vector_files {
+    use super::*;
+    use rspice_core::netlist::AssertLevel;
+
+    fn register(path: &str, contents: &str) {
+        rspice_core::xspice::register_data_file(path, contents)
+            .unwrap_or_else(|error| panic!("register {path}: {error}"));
+    }
+
+    fn build_error(deck: &str) -> String {
+        let netlist = parse(deck);
+        match Engine::new(SimulationConfig::default()).run_tran(&netlist, 20e-9, 1e-9) {
+            Ok(_) => panic!("the build refuses the vector file:\n{deck}"),
+            Err(error) => error.to_string(),
+        }
+    }
+
+    /// VIH 1.8 V, VIL 0, TRISE 1 ns, a 0 -> 1 row at 10 ns into 1 MΩ: the
+    /// source ramps from 10 ns to 11 ns, so V(a) crosses 0.9 V at 10.5 ns,
+    /// read off the accepted points around it.
+    #[test]
+    fn an_input_ramps_through_half_its_swing_half_a_rise_time_after_its_row() {
+        register(
+            "assertions-vec/drive.vec",
+            "radix 1\nvname a\nio i\ntunit ns\nvih 1.8\nvil 0\ntrise 1\n0 0\n10 1\n",
+        );
+        let netlist = parse(
+            "* vec drive\nr1 a 0 1meg\n.vec 'assertions-vec/drive.vec'\n.tran 0.1n 20n\n.end\n",
+        );
+        let result = run(&netlist);
+        let v = result
+            .try_voltage_waveform_named("a")
+            .expect("V(a) is recorded");
+        let row = v
+            .iter()
+            .position(|value| *value >= 0.9)
+            .expect("V(a) reaches 0.9 V");
+        let (t0, t1) = (result.time[row - 1], result.time[row]);
+        let (v0, v1) = (v[row - 1], v[row]);
+        let crossing = t0 + (0.9 - v0) * (t1 - t0) / (v1 - v0);
+        // The accepted points lie on the source's line, so the crossing is
+        // exact to the rounding of the interpolation: a few ulp.
+        let ulp = f64::EPSILON * 10.5e-9;
+        assert!(
+            (crossing - 10.5e-9).abs() <= 8.0 * ulp,
+            "V(a) crosses 0.9 V at {crossing:e}, between {t0:e} and {t1:e}"
+        );
+        assert_eq!(v[0], 0.0);
+        assert_eq!(*v.last().unwrap(), 1.8);
+        // An input file has no output column, so nothing is reported.
+        let reports = evaluate_tran_assertions(&netlist, &result, &NoAbort).unwrap();
+        assert!(reports.is_empty(), "{reports:?}");
+    }
+
+    #[test]
+    fn the_card_sets_the_level_and_an_unreadable_file_is_reported() {
+        register(
+            "assertions-vec/level.vec",
+            "radix 1\nio o\nvname a\nvoh 1\nvol 0.5\n0 1\n",
+        );
+        let netlist = parse(
+            "* vec level\nva a 0 0\n.vec 'assertions-vec/level.vec' LEVEL=warning\n\
+             .tran 1n 10n\n.end\n",
+        );
+        let reports = tran_reports(&netlist);
+        let [report] = reports.as_slice() else {
+            panic!("{reports:?}")
+        };
+        assert_eq!(report.level, AssertLevel::Warning);
+        assert_eq!(report.violations.len(), 1, "V(a) = 0 is not >= VOH");
+        let error = build_error(
+            "* vec missing\nr1 a 0 1k\n.vec 'assertions-vec/no-such-file.vec'\n.tran 1n 10n\n.end\n",
+        );
+        assert!(
+            error.contains("the vector file 'assertions-vec/no-such-file.vec' cannot be read"),
+            "{error}"
+        );
+    }
+
+    /// Each refusal names the file and line, as the build reports it.
+    #[test]
+    fn a_vector_file_is_refused_naming_its_file_and_line() {
+        for (name, text, needle) in [
+            (
+                "bidirectional",
+                "radix 1 4\nio i b\nvname en x[3:0]\nenable en 0 F\n0 0 0\n",
+                "bidirectional.vec:2: column 2 (x3) is bidirectional (IO b)",
+            ),
+            (
+                "input-z",
+                "radix 1 1\nio i o\nvname a b\n0 0 0\n10 Z 1\n",
+                "input-z.vec:5: input a (column 1) is Z",
+            ),
+            (
+                "keyword",
+                "radix 1\nvname a\nhlz 1\n0 0\n",
+                "keyword.vec:3: hlz is not a vector file keyword",
+            ),
+            (
+                "digit",
+                "radix 2\nvname a[1:0]\n0 4\n",
+                "digit.vec:3: '4' in column 1 is not a digit of its 2-bit",
+            ),
+            (
+                "columns",
+                "radix 1 1\nvname a b\n0 0 0\n10 1\n",
+                "columns.vec:4: the row gives 1 value(s), but RADIX declares 2",
+            ),
+        ] {
+            let path = format!("assertions-vec/{name}.vec");
+            register(&path, text);
+            let error = build_error(&format!(
+                "* vec {name}\nr1 a 0 1k\nr2 b 0 1k\n.vec '{path}'\n.tran 1n 10n\n.end\n"
+            ));
+            assert!(error.contains(needle), "{name}: {error}");
+            assert!(error.contains("the .VEC card at line 4"), "{name}: {error}");
+        }
+    }
+}

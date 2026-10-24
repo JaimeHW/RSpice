@@ -44,6 +44,7 @@ pub(super) fn parse_command(
         global_nodes,
         measurements,
         assertions,
+        vector_files,
         saves,
         output_requests,
         startup_directives,
@@ -303,6 +304,18 @@ pub(super) fn parse_command(
                 .into());
             }
             assertions.push(statement);
+        }
+        ".VEC" => {
+            let Some(vector_files) = vector_files else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".VEC applies a digital vector file to the deck; it cannot be \
+                              written inside a .SUBCKT body"
+                        .to_string(),
+                }
+                .into());
+            };
+            vector_files.push(assertion::parse_vec_command(stream, line_num, origin)?);
         }
         ".SAVE" | ".PROBE" => {
             let directive = if cmd == ".SAVE" {

@@ -1,0 +1,8 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", PERIOD, "Examples": the rows are
+; at 0 ns, 10 ns and 20 ns.
+radix 1111 1111
+period 10
+1000 1000
+1100 1100
+1010 1001

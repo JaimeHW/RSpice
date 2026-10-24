@@ -1,0 +1,12 @@
+; Source: HSPICE User Guide: Basic Simulation and Analysis, H-2013.03,
+; chapter 10, "Defining Tabular Data", "Periodic Tabular Data": PERIOD sets
+; 10 ns between successive rows, which omit their times.
+RADIX 1111 1111
+VNAME A B C D E F G H
+IO IIII IIII
+TUNIT ns
+PERIOD 10
+; start of vector data section
+1000 1000
+1100 1100
+1010 1001

@@ -15,7 +15,9 @@ use crate::config::ExpressionDialect;
 
 mod add_resistors;
 mod assertion;
-pub use assertion::{AssertAnalysis, AssertCheck, AssertLevel, AssertStatement, AssertTarget};
+pub use assertion::{
+    AssertAnalysis, AssertCheck, AssertLevel, AssertSample, AssertStatement, AssertTarget,
+};
 mod ast;
 mod control_source;
 pub use control_source::ControlScriptSource;
@@ -23,6 +25,9 @@ mod data_table;
 pub mod expr;
 mod flattener;
 pub mod hierarchy_path;
+#[doc(hidden)]
+pub mod hspice_vec;
+pub use hspice_vec::VectorFileReference;
 pub mod include;
 mod initcond;
 pub mod lexer;
@@ -1114,6 +1119,11 @@ pub struct Netlist {
     /// published result after an analysis and are not part of a checkpoint's
     /// identity.
     pub assertions: Vec<AssertStatement>,
+    /// `.VEC` cards in deck order: HSPICE digital vector files, whose inputs
+    /// the circuit build drives and whose expected outputs the `.ASSERT`
+    /// report checks after a transient. The file is read when the circuit is
+    /// built, so a prepared run reads the bytes it sealed.
+    pub vector_files: Vec<VectorFileReference>,
     /// Output selection from .SAVE/.PROBE/.PRINT/.PLOT commands
     pub saves: SaveSet,
     /// Typed source/provenance sidecar for every output-producing directive.
@@ -2008,6 +2018,7 @@ impl Netlist {
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
+        netlist.normalize_vector_file_paths(file_path);
         netlist.resolve_veriloga_source_paths_with_abort(&include_processor, file_path, abort)?;
         if !allow_filesystem_spef && !netlist.spef_includes.is_empty() {
             return Err(ParseError::Syntax {
@@ -3115,6 +3126,20 @@ impl Netlist {
         ensure_parse_not_aborted(abort)
     }
 
+    /// A `.VEC` file named relative to a path-backed deck is read from the
+    /// deck's directory, as a code model's data file is.
+    fn normalize_vector_file_paths(&mut self, file_path: &std::path::Path) {
+        let Some(base_dir) = file_path.parent() else {
+            return;
+        };
+        for reference in &mut self.vector_files {
+            let candidate = Path::new(&reference.path);
+            if !candidate.is_absolute() {
+                reference.path = base_dir.join(candidate).to_string_lossy().into_owned();
+            }
+        }
+    }
+
     /// Check if a node is global
     pub fn is_global(&self, node: &str) -> bool {
         self.global_nodes.contains(&node.to_uppercase())
@@ -3827,6 +3852,7 @@ impl Default for Netlist {
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
             assertions: Vec::new(),
+            vector_files: Vec::new(),
             saves: SaveSet::default(),
             output_requests: Vec::new(),
             options: SimulationOptions::default(),

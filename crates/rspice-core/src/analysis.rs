@@ -24,6 +24,7 @@
 // deciding which of the two to open was guesswork.
 pub mod ac;
 mod assertions;
+pub(crate) use assertions::load_vector_file;
 pub mod dc;
 pub mod dcmatch;
 pub mod distortion;

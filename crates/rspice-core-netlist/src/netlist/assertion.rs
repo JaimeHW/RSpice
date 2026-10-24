@@ -14,6 +14,9 @@
 //!            [MESSAGE='<text>'] [ANALYSES=op,dc,tran] [XZ=FAIL|IGNORE]
 //! ```
 //!
+//! A `.VEC` vector file's expected outputs lower onto the same statement as
+//! sampled checks ([`AssertCheck::Sampled`]).
+//!
 //! These types are deck syntax, not results: the evaluator in
 //! `analysis::assertions` reads them after an analysis completes. An
 //! assertion observes the published result and never changes it, so it is
@@ -43,6 +46,28 @@ pub enum AssertCheck {
         min: Option<Value>,
         max: Option<Value>,
     },
+    /// A node's voltage checked at given instants: an expected output of an
+    /// HSPICE vector file (`.VEC`). Each sample is a check of its own, written
+    /// on its own row of the file, so a mismatch is reported at that row.
+    Sampled {
+        /// The node, as the vector file names the output bit.
+        node: String,
+        /// The bit's one-based column (vector) in the file.
+        column: usize,
+        samples: Vec<AssertSample>,
+    },
+}
+
+/// One instant of a [`AssertCheck::Sampled`] check.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssertSample {
+    /// When the voltage is read: the row's time plus the bit's output delay.
+    pub time: Value,
+    /// An expected `1` (V >= `threshold`, VOH) or `0` (V <= `threshold`, VOL).
+    pub high: bool,
+    pub threshold: Value,
+    /// The row that states the expectation.
+    pub origin: NetlistSourceLocation,
 }
 
 /// The devices a device-form assertion checks.

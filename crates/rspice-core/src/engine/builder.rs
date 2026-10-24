@@ -59,6 +59,7 @@ mod behavioral;
 mod boundary_supply;
 mod builtin_models;
 mod transmission_lines;
+mod vector_inputs;
 mod xspice_ports;
 use behavioral::*;
 use builtin_models::*;
@@ -6032,6 +6033,17 @@ impl Engine {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
+        // A `.VEC` file's inputs are sources of the deck from here on.
+        let vector_inputs;
+        let netlist = if netlist.vector_files.is_empty() {
+            netlist
+        } else {
+            vector_inputs = vector_inputs::with_vector_inputs(
+                netlist,
+                self.config.resource_limits.max_external_data_bytes,
+            )?;
+            &vector_inputs
+        };
         // The deck as given, which a design's SPICE leaves are added to and
         // whose own cells the HDL compiler is offered.
         #[cfg(feature = "veriloga")]

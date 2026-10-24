@@ -39,10 +39,11 @@ impl Engine {
         Ok(paths.into_iter().collect())
     }
 
-    /// Every XSPICE code-model parameter of the flattened deck that names a
-    /// data file, in hierarchy order, with the path exactly as the model asks
-    /// the data-file loader for it: a host that seals the file registers its
-    /// bytes under that path.
+    /// Every `.VEC` card's vector file, then every XSPICE code-model
+    /// parameter of the flattened deck that names a data file, in hierarchy
+    /// order, with the path exactly as the build asks the data-file loader
+    /// for it: a host that seals the file registers its bytes under that
+    /// path.
     ///
     /// The same resolution as [`Self::data_file_candidates_with_abort`]:
     /// nothing is read, no model is initialized, and the caller's statistical
@@ -66,6 +67,17 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
         check_build_abort(abort)?;
+        // A `.VEC` card's vector file is read as the card names it, when the
+        // circuit is built.
+        let mut files: Vec<CodeModelDataFile> = netlist
+            .vector_files
+            .iter()
+            .map(|reference| CodeModelDataFile {
+                instance: format!(".VEC at {}", reference.origin),
+                parameter: "file",
+                path: reference.path.clone(),
+            })
+            .collect();
 
         // Avoid hierarchy work for decks with no data-consuming element kinds.
         let other_kinds = other_inputs.is_some();
@@ -88,7 +100,7 @@ impl Engine {
                 break;
             }
             let Some(definition) = definitions.pop() else {
-                return Ok(Vec::new());
+                return Ok(files);
             };
             elements = &definition.elements;
             definitions.extend(&definition.nested_subcircuits);
@@ -108,7 +120,6 @@ impl Engine {
         .map_err(|error| map_build_parse_error("data-file dependency discovery", error))?;
         isolated.models.extend(flattened.scoped_models);
         let registry = OnceLock::new();
-        let mut files = Vec::new();
         for element in flattened.elements {
             check_build_abort(abort)?;
             if let Some(paths) = other_inputs.as_deref_mut() {

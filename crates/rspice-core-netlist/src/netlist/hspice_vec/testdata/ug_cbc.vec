@@ -1,0 +1,10 @@
+; Source: HSPICE User Guide: Basic Simulation and Analysis, H-2013.03,
+; chapter 10, "Using the Context-Based Control Option (CBC)": B is a
+; bidirectional vector whose direction its values switch.
+RADIX 1 1 1
+IO I O B
+VNAME A Z B
+OPTION CBC
+10.0 0 X L
+20.0 1 1 H
+30.0 1 0 Z

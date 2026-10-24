@@ -1,0 +1,12 @@
+; Source: HSPICE User Guide: Basic Simulation and Analysis, H-2013.03,
+; chapter 10, "Defining Tabular Data", "Expected Output": at 11 the first and
+; fourth outputs are expected high and the others low; at 20 the first two
+; high; at 30 only the first; at 35 the first two are "don't care" and the
+; last two low. The RADIX line is added to declare the four vectors.
+RADIX 1111
+IO OOOO
+; start of tabular section data
+11.0 1001
+20.0 1100
+30.0 1000
+35.0 xx00

@@ -1635,6 +1635,7 @@ impl TransientCapturePlan {
         let retain_all = netlist.saves.keeps_everything()
             || !netlist.measurements.is_empty()
             || !netlist.assertions.is_empty()
+            || !netlist.vector_files.is_empty()
             || netlist.options.output_snapshots.unwrap_or(false);
         // P()/W() are terminal quantities, not merely branch-current aliases:
         // evaluating them after integration needs both terminal voltage
@@ -4003,6 +4004,7 @@ impl Engine {
                     expression: text, ..
                 }
                 | crate::netlist::AssertCheck::Condition { condition: text } => text.contains('@'),
+                crate::netlist::AssertCheck::Sampled { .. } => false,
             })
             || netlist.output_requests.iter().any(|request| {
                 request.dependencies.iter().any(|dependency| {

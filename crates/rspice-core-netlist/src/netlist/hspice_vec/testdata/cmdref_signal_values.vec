@@ -1,0 +1,41 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", the "Examples" of TRISE, TFALL,
+; VIH, VIL, VOH, VOL, VTH, OUT or OUTZ, and TRIZ, in that order. Their masks
+; describe fifteen vectors, three 1-bit, then one each of 1, 2, 3 and 4 bits,
+; then eight 1-bit; the RADIX and VNAME lines are added to declare them.
+RADIX 1 1 1 1234 11111111
+VNAME V1 V2 V3 V4 V5[[1:0]] V6[[2:0]] V7[[3:0]] V8 V9 V10 V11 V12 V13 V14 V15
+; TRISE: 0.3 for all; 0.5 for vectors 2 to 7; 0.8 for vectors 8 to 11
+TRISE 0.3
+TRISE 0.5 0 1 1 137F 00000000
+TRISE 0.8 0 0 0 0000 11110000
+; TFALL: 0.5 for all; 0.3 for vectors 2 to 7; 0.9 for vectors 8 to 11
+TFALL 0.5
+TFALL 0.3 0 1 1 137F 00000000
+TFALL 0.9 0 0 0 0000 11110000
+; VIH: 5 V for all; 3.5 V for the last eight
+VIH 5.0
+VIH 3.5 0 0 0 0000 11111111
+; VIL: 0 V for all; 0.5 V for the last eight
+VIL 0.0
+VIL 0.5 0 0 0 0000 11111111
+; VOH: 4.5 V for the first seven; 3.5 V for the last eight
+VOH 4.75
+VOH 4.5 1 1 1 137F 00000000
+VOH 3.5 0 0 0 0000 11111111
+; VOL: 0.5 V for the first three; 0.2 V for vectors 4 to 7; 0 V for the rest
+VOL 0.0
+VOL 0.2 0 0 0 137F 00000000
+VOL 0.5 1 1 1 0000 00000000
+; VTH: 2.5 V for the first seven; 1.75 V for the last eight
+VTH 1.75
+VTH 2.5 1 1 1 137F 00000000
+VTH 1.75 0 0 0 0000 11111111
+; OUT/OUTZ: 15.1 ohm for all; 150 ohm for vectors 1 to 3; 50.5 ohm for 4 to 7
+OUT 15.1
+OUT 150 1 1 1 0000 00000000
+OUTZ 50.5 0 0 0 137F 00000000
+; TRIZ: 15.1 Mohm for all; 150 Mohm for vectors 1 to 3; 50.5 Mohm for 4 to 7
+TRIZ 15.1Meg
+TRIZ 150Meg 1 1 1 0000 00000000
+TRIZ 50.5Meg 0 0 0 137F 00000000

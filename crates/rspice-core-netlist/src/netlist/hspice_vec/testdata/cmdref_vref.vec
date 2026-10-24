@@ -1,0 +1,9 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", VREF, "Examples": v1 to v7 are
+; realized against node 0 and v8, v9 and v10 against vss. The RADIX line is
+; added to declare the vectors VNAME names.
+RADIX 1111 234 111
+VNAME v1 v2 v3 v4 v5[[1:0]] v6[[2:0]] v7[[0:3]] v8 v9 v10
+VREF 0
+VREF 0 111 137F 000
+VREF vss 0 0 0 0000 111

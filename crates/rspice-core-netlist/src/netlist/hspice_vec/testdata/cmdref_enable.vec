@@ -1,0 +1,8 @@
+; Source: HSPICE Reference Manual: Commands and Control Options, D-2010.12,
+; chapter 4 "Digital Vector File Commands", ENABLE, "Examples": x becomes
+; an output when a is 1, and y when a is 0.
+radix 144
+io ibb
+vname a x[[3:0]] y[[3:0]]
+enable a 0 F 0
+enable ~a 0 0 F
