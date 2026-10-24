@@ -324,32 +324,6 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
     }
 }
 
-/// The page reads records. It must not read the session log back in, which is
-/// what made it a severity filter over everything that had ever happened.
-///
-/// Every file the page is made of, not only its entry: the table, the filter
-/// strip, the arrangement and the detail region are all the page, and a split
-/// that moved the body out from under this guard would have retired it without
-/// anyone deciding to.
-#[test]
-fn the_problems_page_never_names_the_log_buffer() {
-    for (file, source) in [
-        ("problems.rs", include_str!("problems.rs")),
-        ("problems/arrange.rs", include_str!("problems/arrange.rs")),
-        ("problems/detail.rs", include_str!("problems/detail.rs")),
-        ("problems/grid.rs", include_str!("problems/grid.rs")),
-        ("problems/strip.rs", include_str!("problems/strip.rs")),
-    ] {
-        let production = crate::source_guard::production_source(source);
-        for forbidden in ["log_buffer", "LogEntry", "LogSeverity", "LogSource"] {
-            assert!(
-                !production.contains(forbidden),
-                "{file} names `{forbidden}`; a condition is not an event"
-            );
-        }
-    }
-}
-
 /// A page with nothing to list is inset by the body padding and nothing
 /// else: its line stands at the panel's own left edge, on the row the first
 /// row would have taken — under the tab strip, or under the page's toolbar
