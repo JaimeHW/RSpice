@@ -11,14 +11,13 @@ token run `RTH0 94 = .006` to the intended `RTH0 = .006`, matching the sibling
 BSIM3SOI model cards. The recorded ngspice-46 `.out` references remain
 unchanged.
 
-How RSpice runs it: tools/rspice-conformance/tests/ngspice_regression.rs drives
-the decks suite by suite (test_ngspice_<suite>_suite). Per-deck validation
+How RSpice runs it: tools/rspice-conformance/tests/ngspice_regression.rs runs
+every suite in one test (test_full_ngspice_suite_summary). Per-deck validation
 contracts live in validation-manifest.tsv (smoke, scripted_control,
 expected_unsupported, expected_unsupported_without_veriloga_builtins,
 expected_unsolvable, reference_unsolvable, locked_grid, measures); measure
-gates are declared in <deck>.gates.tsv sidecars next to their decks. The
-full run gates nightly CI against the conformance watermark
-(.github/workflows/nightly.yml).
+gates are declared in <deck>.gates.tsv sidecars next to their decks. Nightly
+CI (.github/workflows/nightly.yml) fails if any deck fails or is skipped.
 
 Upstream runner/build files that RSpice does not execute - `bin/`,
 `Makefile.am`, CMC `qaSpec`/`parameters`/`reference` harness trees, and

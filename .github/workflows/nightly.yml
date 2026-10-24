@@ -1,5 +1,5 @@
 # Nightly depth: the full release-mode test suite, the ngspice conformance
-# run gated at its recorded watermark (the pass-rate log is the artifact),
+# run, which fails on any failing deck (the pass-rate log is the artifact),
 # and a release build of the shipped binaries on Windows to catch
 # LTO/release-only breakage.
 name: Nightly

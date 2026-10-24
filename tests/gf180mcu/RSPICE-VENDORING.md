@@ -153,7 +153,7 @@ metal/poly overlap capacitance). The reason a foundry card needs it is the
 
 Two reference behaviours are reproduced deliberately rather than corrected,
 both documented at their implementation sites in
-`crates/rspice-core/src/device/semiconductor/diode.rs`:
+`crates/rspice-core-devices/src/device/semiconductor/diode.rs`:
 
 - `BV=0` means *breakdown matched to a negative voltage*, not *no breakdown*.
   `nwp_3p3` relies on it — 5.65 A at −12.13 V against 81 µA with BV omitted.

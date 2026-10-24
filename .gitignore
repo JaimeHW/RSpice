@@ -24,9 +24,6 @@ dist/
 # Separately versioned local prototypes
 /mockups/
 
-# Tauri
-src-tauri/target/
-
 # OS
 .DS_Store
 Thumbs.db

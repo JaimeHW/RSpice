@@ -406,9 +406,9 @@ runs against the trimmed `tests/xyce/` runtime corpus, discovers every retained
 instead of omitting the deck.
 
 Every executed analysis must be backed by a validation oracle, so no deck passes
-silently. Nightly release runs gate on the recorded failure watermark in
-[.github/workflows/nightly.yml](.github/workflows/nightly.yml), which is zero:
-any failing deck fails the run.
+silently. The nightly release run in
+[.github/workflows/nightly.yml](.github/workflows/nightly.yml) fails if any
+ngspice deck fails or is skipped.
 
 ```bash
 cargo test --release -p rspice-core                                   # unit + integration

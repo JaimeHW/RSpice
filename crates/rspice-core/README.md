@@ -109,10 +109,10 @@ are refused by every periodic analysis.
 ### Periodic analysis cards
 
 `.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.PSTB` and `.ENVELOPE` are validated whole
-at parse time (`netlist/parser/periodic_cards.rs`). Keywords are
-case-insensitive and bind once, cards continue across `+` lines, and a field
-another simulator accepts that RSpice cannot honour is refused with a
-source-located error rather than parsed and dropped.
+at parse time (`netlist/parser/periodic_cards.rs` in `rspice-core-netlist`).
+Keywords are case-insensitive and bind once, cards continue across `+` lines,
+and a field another simulator accepts that RSpice cannot honour is refused
+with a source-located error rather than parsed and dropped.
 
 ```text
 .PSS <gfreq> <tstab> <oscnode> <psspoints> <harms> <sciter> [KEY=VALUE ...]
