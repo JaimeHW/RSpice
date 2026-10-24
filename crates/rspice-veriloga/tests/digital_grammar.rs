@@ -4601,6 +4601,48 @@ fn ports_and_names_are_declared_as_ieee_1364_declares_them() {
     }
 }
 
+/// IEEE 1364-2005 section 5.1.14 allows no unsized constant number in a
+/// concatenation, and section 5.1.1 no real operand; a replication's count is
+/// no operand, and a sized number or an untyped parameter is one.
+#[test]
+fn a_concatenation_takes_sized_operands_that_are_not_real() {
+    for (source, expected) in [
+        (
+            "module m; parameter p = 1; initial $display(\"%d\", {p, 2}); endmodule",
+            "the unsized constant `2`",
+        ),
+        (
+            "module m; reg [7:0] r; initial r = {4{'b1}}; endmodule",
+            "the unsized constant `'b1`",
+        ),
+        (
+            "module m; real x; reg [7:0] r; initial begin x = 1.0; r = {x, 1'b0}; end endmodule",
+            "the real value `x`",
+        ),
+        (
+            "module m; parameter real a = 1.0; parameter real b = {a, 2.0}; endmodule",
+            "the real value",
+        ),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect_err("the operand must be rejected")
+            .to_string();
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+    for source in [
+        "module m; parameter p = 1; reg [40:0] r; initial r = {p, 4'd2, {2{1'b1}}}; endmodule",
+        "module m; reg [7:0] r; initial r = {8{1'b1}}; endmodule",
+        "module m; parameter [7:0] p = {4'h1, 4'h2}; reg [7:0] r; initial r = p; endmodule",
+    ] {
+        if let Err(error) =
+            VerilogACompiler::new(CompilerOptions::default()).compile_canonical_ir(source)
+        {
+            panic!("{source}: {error}");
+        }
+    }
+}
+
 /// IEEE 1364-2005 section 5.2.1: `+:` and `-:` are one token each, select at
 /// a run-time base with a positive constant width, of a vector or of one
 /// array element after all its coordinates, and a continuous target's base is

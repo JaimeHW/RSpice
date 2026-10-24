@@ -910,7 +910,7 @@ fn a_conditional_sizes_its_arms_and_not_its_condition() {
 /// The floor is thirty-two, and the context takes over above it. Neither half
 /// alone is the rule: freezing at thirty-two loses the second, and taking the
 /// context unconditionally loses the first — and with it the width of every
-/// concatenation holding an unsized literal.
+/// self-determined unsized literal.
 #[test]
 fn an_unsized_literal_is_thirty_two_bits_or_the_context() {
     let wide = only_process(
@@ -926,10 +926,11 @@ fn an_unsized_literal_is_thirty_two_bits_or_the_context() {
         "a forty-bit context makes the literal forty bits"
     );
 
+    // A shift count is self-determined (section 5.4.1, table 5-22); a
+    // concatenation operand is too, but section 5.1.14 allows no unsized one.
     let inside = only_process(
-        "    reg [3:0] a;\n\
-         \x20   reg [35:0] p;\n\
-         \x20   initial p = {a, 1};",
+        "    reg [39:0] q, p;\n\
+         \x20   initial p = q << 1;",
     );
     assert_eq!(
         widths_where(&inside, |kind| matches!(
@@ -937,7 +938,7 @@ fn an_unsized_literal_is_thirty_two_bits_or_the_context() {
             CfgValueKind::FourStateConstant(_)
         )),
         vec![Some(32)],
-        "a concatenation operand is self-determined, so the floor applies"
+        "a shift count is self-determined, so the floor applies"
     );
 
     // A *sized* literal is not an unsized one and never grows: section 3.5.1

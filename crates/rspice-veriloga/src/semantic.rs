@@ -391,6 +391,7 @@ mod array_coordinates;
 mod bounded_loop;
 mod builtin_limiters;
 use builtin_limiters::{BUILTIN_LIMITER_NAMES, BuiltinLimiter};
+mod concatenation_operands;
 mod constant_dependencies;
 mod declaration_rules;
 pub(crate) mod defparam;
@@ -1639,6 +1640,7 @@ impl SemanticAnalyzer {
             &all_indices,
             &param_names,
         );
+        self.check_parameter_concatenations(&ordered);
         if self.errors.len() > errors_before {
             return Err(self.errors.remove(errors_before).into());
         }

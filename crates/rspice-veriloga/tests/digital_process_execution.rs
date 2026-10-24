@@ -1392,31 +1392,22 @@ fn an_unsized_literal_takes_a_context_wider_than_thirty_two_bits() {
     );
 }
 
-/// The floor is still thirty-two: a concatenation's operands are
-/// self-determined, so the same literal inside one is exactly thirty-two bits
-/// wide however wide the target is.
-///
-/// Together with the test above this pins both halves of section 5.4.1's
-/// unsized-literal rule — the 32-bit minimum, and the context taking over
-/// above it — and neither reading satisfies both.
+/// A concatenation's operands are self-determined, and its width is theirs,
+/// so section 5.1.14 allows no unsized literal among them: `{a, 1}` has no
+/// width to run with, and is refused at the literal.
 #[test]
-fn an_unsized_literal_in_a_concatenation_is_exactly_thirty_two_bits() {
-    let mut harness = Harness::new(
-        "    reg [3:0] a;\n\
-     \x20   reg [35:0] product;\n\
-     \x20   initial product = {a, 1};",
-    );
-    harness.set("a", "1010");
-
-    expect_finished(harness.run());
-    let mut expected = String::from("1010");
-    expected.push_str(&"0".repeat(31));
-    expected.push('1');
-    assert_eq!(expected.len(), 36);
-    assert_eq!(
-        harness.get("product"),
-        expected,
-        "`a` sits above a 32-bit one"
+fn an_unsized_literal_in_a_concatenation_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    reg [3:0] a;\n\
+         \x20   reg [35:0] product;\n\
+         \x20   initial product = {a, 1};",
+        ))
+        .expect_err("an unsized concatenation operand must be refused")
+        .to_string();
+    assert!(
+        error.contains("the unsized constant `1`") && error.contains("section 5.1.14"),
+        "{error}"
     );
 }
 

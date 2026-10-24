@@ -2085,14 +2085,21 @@ endmodule
         enable_ams: true,
         ..Default::default()
     });
-    for (declarations, assignment, reason) in [
-        ("real a[0:1],b[0:2];", "a=b;", "equal extents"),
-        ("real a[0:1][0:1],b[0:3];", "a=b;", "equal extents"),
-        ("real a[0:1]; integer b[0:1];", "a=b;", "equivalent"),
-        ("real a[0:1];", "a='{1.0};", "requires 2 elements"),
-        ("real a[0:1];", "a={1.0,2.0};", "assignment pattern"),
+    // The reasons of the analog and the discrete domain. A discrete process
+    // refuses the real operands of a concatenation first (IEEE 1364-2005
+    // section 5.1.1).
+    for (declarations, assignment, reasons) in [
+        ("real a[0:1],b[0:2];", "a=b;", ["equal extents"; 2]),
+        ("real a[0:1][0:1],b[0:3];", "a=b;", ["equal extents"; 2]),
+        ("real a[0:1]; integer b[0:1];", "a=b;", ["equivalent"; 2]),
+        ("real a[0:1];", "a='{1.0};", ["requires 2 elements"; 2]),
+        (
+            "real a[0:1];",
+            "a={1.0,2.0};",
+            ["assignment pattern", "section 5.1.1"],
+        ),
     ] {
-        for domain in ["analog", "initial"] {
+        for (domain, reason) in ["analog", "initial"].into_iter().zip(reasons) {
             let text =
                 format!("module invalid; {declarations} {domain} begin {assignment} end endmodule");
             let error = compiler

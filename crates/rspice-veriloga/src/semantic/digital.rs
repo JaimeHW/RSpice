@@ -3510,6 +3510,11 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::ArrayLiteral(literal) => {
+                self.check_concatenation_operands(literal, &|name| {
+                    index
+                        .get(name)
+                        .is_some_and(|position| signals[*position].class.is_real())
+                });
                 for element in &literal.elements {
                     match element {
                         ArrayLiteralElement::Value(value) => {
