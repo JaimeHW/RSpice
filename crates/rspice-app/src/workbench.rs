@@ -64,7 +64,6 @@ pub(crate) mod routing;
 pub(crate) mod sheets;
 mod shell_host;
 pub(crate) mod shortcuts;
-pub(crate) mod simulation_analysis_tabs;
 pub(crate) mod slots;
 pub(crate) mod state;
 mod surfaces;

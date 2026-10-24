@@ -751,7 +751,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "preflight",
     "cross_probe",
     "account_organization",
-    "simulation_analysis_tabs",
     "browser/navigation",
     "browser/download",
     "browser/accessibility",
@@ -878,7 +877,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("state", "routing/availability", 4),
     ("state", "lifecycle/window_session", 2),
     ("state", "preferences", 1),
-    ("state", "simulation_analysis_tabs", 1),
     // The framework dialogs the workbench holds: the window-session manager,
     // the command palette, the confirmation and project-review dialogs, and
     // pointer interaction. Their types still live with the application root
@@ -1468,7 +1466,10 @@ fn source_files_have_no_byte_order_mark() {
 ///
 /// 16 -> 13: the shortcut import's rollback path is deleted, and with it the
 /// three `allow(dead_code)` that kept an unreachable undo compiling.
-const MAX_LINT_SUPPRESSIONS: usize = 13;
+///
+/// 13 -> 12: `workbench::simulation_analysis_tabs` and its blanket allow are
+/// deleted. Saved indices decode through `AnalysisKind::legacy_index`.
+const MAX_LINT_SUPPRESSIONS: usize = 12;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

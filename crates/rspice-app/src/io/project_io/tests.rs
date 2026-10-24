@@ -498,15 +498,17 @@ fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts
 
 fn project_with_execution_context() -> ProjectSnapshot {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
-    use crate::workbench::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
+    let ac = AnalysisKind::Ac.legacy_index();
+    let noise = AnalysisKind::Noise.legacy_index();
+    let transient = AnalysisKind::Transient.legacy_index();
 
     let mut design_libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut design_libraries);
 
     let mut setup = crate::workbench::app_state::SimSetupState::new();
-    setup.enabled.extend([TAB_AC, TAB_NOISE]);
-    setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
-    setup.listed.extend([TAB_AC, TAB_NOISE]);
+    setup.enabled.extend([ac, noise]);
+    setup.analysis_order = vec![noise, transient, ac];
+    setup.listed.extend([ac, noise]);
     setup
         .set_reference_pvt(crate::product::ProcessCorner::FF, -40.0)
         .expect("fixture PVT is valid");

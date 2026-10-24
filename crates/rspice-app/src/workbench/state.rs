@@ -907,7 +907,7 @@ pub(crate) const fn default_console_height() -> f32 {
 }
 
 pub(in crate::workbench) const fn default_analysis_index() -> usize {
-    crate::workbench::simulation_analysis_tabs::TAB_TRANSIENT
+    rspice_simulation_contract::analysis_kind::AnalysisKind::Transient.legacy_index()
 }
 
 impl Default for WorkbenchSession {
