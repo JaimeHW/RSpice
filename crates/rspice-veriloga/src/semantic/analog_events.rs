@@ -896,7 +896,11 @@ impl AssignmentEvents {
             return None;
         }
         if let Some((counter, index)) = self.array_targets.get(name) {
-            Some(increment_at(counter, Some(integer(*index, span)), span))
+            Some(increment_at(
+                counter,
+                Some(super::exact_integer_expression(*index, span)),
+                span,
+            ))
         } else {
             self.counters
                 .get(name)
@@ -1004,13 +1008,6 @@ fn increment_at(name: &str, index: Option<Expression>, span: Span) -> AnalogStat
             })),
             span,
         }),
-    })
-}
-fn integer(value: i64, span: Span) -> Expression {
-    Expression::Number(NumberLit {
-        value: value as f64,
-        raw: value.to_string().into(),
-        span,
     })
 }
 fn number(value: i32, span: Span) -> Expression {

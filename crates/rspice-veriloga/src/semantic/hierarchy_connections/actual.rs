@@ -1,8 +1,7 @@
 //! Identify a concrete discrete lane without confusing array axes with bits.
+use super::super::exact_integer_expression as literal;
 use super::*;
-use crate::ast::{
-    ArrayAccessExpr, ArraySelectExpr, DigitalExpr, NumberLit, PackedSelect, PartSelectExpr,
-};
+use crate::ast::{ArrayAccessExpr, ArraySelectExpr, DigitalExpr, PackedSelect, PartSelectExpr};
 use crate::numeric_literal::NumericLiteralValue;
 
 fn index(
@@ -21,14 +20,6 @@ fn index(
             value.span(),
         )),
     }
-}
-
-fn literal(value: i64, span: Span) -> Expression {
-    Expression::Number(NumberLit {
-        value: value as f64,
-        raw: value.to_string().into(),
-        span,
-    })
 }
 
 pub(super) fn endpoint(
