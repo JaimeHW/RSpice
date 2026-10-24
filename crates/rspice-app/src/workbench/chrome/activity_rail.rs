@@ -9,7 +9,6 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::framework::host::Host;
 
-use super::super::commands::vocabulary::Command;
 use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};
 use super::super::state::Workspace;
 
@@ -75,15 +74,14 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
                 let active = app.state.workbench.workspace == workspace;
                 let entry = app.rail_entry(workspace);
                 let new_result_count = entry.badge.map_or(0, |badge| badge(app, active));
-                let command = Command::OpenWorkspace(workspace);
-                let shortcut = app.state.model.preferences.shortcuts().resolved_label(
-                    &crate::workbench::commands::vocabulary::CommandRegistry,
-                    command.key(),
+                let command = app.open_workspace(workspace);
+                let shortcut = app.shortcut_label(
+                    command,
                     crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                     ui.ctx().os(),
                 );
                 let response = ui
-                    .add_enabled_ui(command.is_enabled(app), |ui| {
+                    .add_enabled_ui(app.is_enabled(command), |ui| {
                         activity_button(ui, workspace, active, new_result_count, &shortcut)
                     })
                     .inner;
@@ -91,7 +89,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
                     if let Some(on_visible) = entry.on_visible {
                         on_visible(app);
                     }
-                    command.execute(app);
+                    app.execute(command);
                     ui.ctx().request_repaint();
                 }
             }

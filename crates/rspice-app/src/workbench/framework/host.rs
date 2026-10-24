@@ -16,11 +16,21 @@
 //!
 //! A point is keyed by the host's own types, which this module does not name:
 //! it names nothing of the workbench it frames.
+//!
+//! A container that offers commands — a menu, the palette, a toolbar button,
+//! a navigation sheet — holds each by its key and asks the host what the
+//! command is called, whether it can run, and to run it. The menus it draws
+//! are the host's tables, handed over the same way.
 
 use std::borrow::Cow;
 
 use egui::Ui;
+use egui::os::OperatingSystem;
+use rspice_ui_kit::panels::WorkbenchIcon;
 
+use super::command_registry::Registry;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
+use crate::ui::icons::Icon;
 use crate::ui::widgets::Problem;
 
 /// A place in the workbench a container leaves to an owner.
@@ -198,6 +208,12 @@ pub(crate) trait Host: 'static {
     type Layout;
     /// What the status cells read in common on a frame.
     type StatusFrame: 'static;
+    /// Whether a command can run here, and why not.
+    type Availability: Copy;
+    /// A menu the title bar offers by name.
+    type Menu: Copy;
+    /// One entry of a menu, as the host writes its menus down.
+    type MenuEntry: 'static;
 
     /// Draw, in `ui`, what the owner of `point` contributes there.
     fn contribute(
@@ -234,6 +250,60 @@ pub(crate) trait Host: 'static {
 
     /// Every status cell, in the order each zone's places are offered.
     fn status_cells(&self) -> &'static [StatusCell<Self>];
+
+    /// Every command the host registers, in the order it lists them.
+    fn command_registry(&self) -> &'static Registry;
+
+    /// Whether the command `key` names can run here, and why not.
+    fn availability(&self, key: CommandKey) -> Self::Availability;
+
+    /// Whether the command `key` names would run if raised now.
+    fn is_enabled(&self, key: CommandKey) -> bool;
+
+    /// Whether the state the command `key` names switches is on; `None` for
+    /// a command that switches none.
+    fn checked(&self, key: CommandKey) -> Option<bool>;
+
+    /// What the command `key` names is called.
+    fn label(&self, key: CommandKey) -> &'static str;
+
+    /// The keys the reader's profile binds the command `key` names to on
+    /// `platform`, written as `os` writes them; empty for none.
+    fn shortcut_label(
+        &self,
+        key: CommandKey,
+        platform: CommandPlatform,
+        os: OperatingSystem,
+    ) -> String;
+
+    /// Carry out the command `key` names, behind the prologue every command
+    /// goes through. A key no command answers to does nothing.
+    fn execute(&mut self, key: CommandKey);
+
+    /// The icon a menu row of the command `key` names wears: the one its
+    /// toolbar button wears, for a command that has a button.
+    fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon>;
+
+    /// The glyph the palette gives the command `key` names, where it has
+    /// one of its own rather than its scope's.
+    fn palette_icon(&self, key: CommandKey) -> Option<Icon>;
+
+    /// The command that opens `workspace`.
+    fn open_workspace(&self, workspace: Self::WorkspaceKey) -> CommandKey;
+
+    /// What the application menu `menu` holds.
+    fn menu_entries(&self, menu: Self::Menu) -> &'static [Self::MenuEntry];
+
+    /// What the compact layout's one Menu button holds.
+    fn compact_menu(&self) -> &'static [Self::MenuEntry];
+
+    /// What the source editor's right-click menu holds.
+    fn source_editor_menu(&self) -> &'static [Self::MenuEntry];
+
+    /// Whether the commands the host offers hold together: the registry's
+    /// own check, with every key its menus and the framework name a command
+    /// by.
+    fn validate_commands(&self) -> Result<(), String>;
 }
 
 /// The shell's side of the document bar, answered over the session the bar

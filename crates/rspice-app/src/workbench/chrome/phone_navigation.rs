@@ -6,8 +6,8 @@ use egui::{Align2, Frame, Panel, Ui, Vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::host::Host;
 
-use super::super::commands::vocabulary::Command;
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
@@ -75,9 +75,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             && app.state.results.results_seen_version
                                 != app.state.model.simulation.view.data_version,
                     );
-                    let command = Command::OpenWorkspace(workspace);
+                    let command = app.open_workspace(workspace);
                     let response = ui
-                        .add_enabled_ui(command.is_enabled(app), |ui| {
+                        .add_enabled_ui(app.is_enabled(command), |ui| {
                             nav_item(
                                 ui,
                                 workspace_icon(workspace),
@@ -94,7 +94,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             app.state.results.results_seen_version =
                                 app.state.model.simulation.view.data_version;
                         }
-                        command.execute(app);
+                        app.execute(command);
                     }
                 }
                 if layout.workspaces_uses_drawer {

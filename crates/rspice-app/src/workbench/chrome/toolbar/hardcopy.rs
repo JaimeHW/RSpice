@@ -15,7 +15,7 @@ pub(in crate::workbench) fn report_authoring_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::SaveReportDocument,
+        Command::SaveReportDocument.key(),
         WorkbenchIcon::Save,
         "Save report document",
         layout,
@@ -23,7 +23,7 @@ pub(in crate::workbench) fn report_authoring_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::AddReportPage,
+        Command::AddReportPage.key(),
         WorkbenchIcon::Add,
         "Add report page",
         layout,
@@ -31,7 +31,7 @@ pub(in crate::workbench) fn report_authoring_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ReportPageProperties,
+        Command::ReportPageProperties.key(),
         WorkbenchIcon::Sliders,
         "Page properties",
         layout,

@@ -3,11 +3,22 @@
 //! is written the same way.
 
 use super::*;
+use crate::workbench::commands::vocabulary::Command;
 use menu_entries::MenuEntry::Separator;
-use menu_entries::{MenuContext, MenuEntry, MenuRow, command, command_as, palette_scope};
+use menu_entries::{MenuContext, MenuEntry, MenuRow, palette_scope};
+
+/// The command's row under the vocabulary's label.
+const fn command(command: Command) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The command's row under a label of the menu's own.
+const fn command_as(command: Command, label: &'static str) -> MenuEntry {
+    MenuEntry::command_as(command.key(), label)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum ApplicationMenu {
+pub(crate) enum ApplicationMenu {
     File,
     Edit,
     View,
@@ -38,7 +49,7 @@ impl ApplicationMenu {
         }
     }
 
-    pub(super) const fn entries(self) -> &'static [MenuEntry] {
+    pub(in crate::workbench) const fn entries(self) -> &'static [MenuEntry] {
         match self {
             Self::File => FILE_MENU,
             Self::Edit => EDIT_MENU,
@@ -55,7 +66,7 @@ impl ApplicationMenu {
     }
 }
 
-pub(super) const ALL_MENUS: [ApplicationMenu; 11] = [
+pub(in crate::workbench) const ALL_MENUS: [ApplicationMenu; 11] = [
     ApplicationMenu::File,
     ApplicationMenu::Edit,
     ApplicationMenu::View,
@@ -371,9 +382,6 @@ const WINDOW_MENU: &[MenuEntry] = &[
     command(Command::WorkspaceLayouts),
     command(Command::WindowManager),
     command(Command::ResetLayout),
-    Separator,
-    command(Command::PreviousWorkspace),
-    command(Command::NextWorkspace),
 ];
 
 const HELP_MENU: &[MenuEntry] = &[
@@ -390,7 +398,7 @@ const HELP_MENU: &[MenuEntry] = &[
 
 /// What the compact layout's Menu button holds: every application menu,
 /// in the bar's order, as a submenu.
-pub(super) const COMPACT_MENU: &[MenuEntry] = &[
+pub(in crate::workbench) const COMPACT_MENU: &[MenuEntry] = &[
     compact_submenu(ApplicationMenu::File),
     compact_submenu(ApplicationMenu::Edit),
     compact_submenu(ApplicationMenu::View),
@@ -415,7 +423,7 @@ const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
 /// where the document's language service can answer it, then the
 /// clipboard, then the line edits. Mutating rows are greyed on a read-only
 /// source.
-const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
+pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[
@@ -451,7 +459,7 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
 /// (`chrome/toolbar.rs`), for a command that has a button. A command with
 /// no button shows none, so an icon in a menu always marks the toolbar's
 /// twin. The column stays for the rows that carry a check mark.
-pub(super) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
+pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
         Command::SelectTool => WorkbenchIcon::Select,
         Command::PlaceInstance => WorkbenchIcon::Instance,
@@ -524,7 +532,7 @@ pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app:
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
     let popup_id = Popup::default_response_id(response);
     let shown = Popup::context_menu(response).show(|ui| {
-        let rows = menu_rows(SOURCE_EDITOR_MENU, app, ui.ctx());
+        let rows = menu_rows(app.source_editor_menu(), app, ui.ctx());
         configure_menu_popup(ui, large_targets, &rows);
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
@@ -542,21 +550,14 @@ pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app:
 }
 
 pub(super) fn shortcut_for_occurrence(
-    shortcuts: &crate::state::shortcuts::ShortcutPreferences,
+    host: &impl Host,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
-    command: Command,
+    command: crate::state::command_catalog::CommandKey,
     shortcut_override: Option<&str>,
 ) -> String {
     shortcut_override.map_or_else(
-        || {
-            shortcuts.resolved_label(
-                &crate::workbench::commands::vocabulary::CommandRegistry,
-                command.key(),
-                platform,
-                operating_system,
-            )
-        },
+        || host.shortcut_label(command, platform, operating_system),
         str::to_owned,
     )
 }

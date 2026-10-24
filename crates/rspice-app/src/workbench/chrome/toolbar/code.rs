@@ -28,7 +28,7 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::CompileVerilogA,
+        Command::CompileVerilogA.key(),
         WorkbenchIcon::Run,
         "Compile Verilog-A module",
         layout,
@@ -37,7 +37,7 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::VerilogABuildSettings,
+        Command::VerilogABuildSettings.key(),
         WorkbenchIcon::Sliders,
         layout,
     );
@@ -46,21 +46,21 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::FindCodeDocument,
+        Command::FindCodeDocument.key(),
         WorkbenchIcon::Search,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::SourceLanguageTools,
+        Command::SourceLanguageTools.key(),
         WorkbenchIcon::Target,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ManageSourceDocument,
+        Command::ManageSourceDocument.key(),
         WorkbenchIcon::Folder,
         layout,
     );
@@ -178,7 +178,7 @@ pub(in crate::workbench) fn netlist_tools(
             toolbar_text_command(
                 ui,
                 app,
-                Command::AutomationConsole,
+                Command::AutomationConsole.key(),
                 WorkbenchIcon::Terminal,
                 "Automation console",
                 layout,
@@ -186,7 +186,13 @@ pub(in crate::workbench) fn netlist_tools(
             source_page_tools(ui, app, layout);
         }
     }
-    toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::RunSimulation.key(),
+        WorkbenchIcon::Run,
+        layout,
+    );
 }
 
 /// The Automation page's source tools: navigate the index, manage the
@@ -196,21 +202,21 @@ fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec)
     toolbar_icon_command(
         ui,
         app,
-        Command::SourceLanguageTools,
+        Command::SourceLanguageTools.key(),
         WorkbenchIcon::Target,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ManageSourceDocument,
+        Command::ManageSourceDocument.key(),
         WorkbenchIcon::Folder,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::FindCodeDocument,
+        Command::FindCodeDocument.key(),
         WorkbenchIcon::Search,
         layout,
     );
@@ -225,7 +231,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         toolbar_text_command(
             ui,
             app,
-            Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+            Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
             WorkbenchIcon::Export,
             "Export generated deck",
             layout,
@@ -233,7 +239,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         toolbar_text_command(
             ui,
             app,
-            Command::ValidateCodeDocument,
+            Command::ValidateCodeDocument.key(),
             WorkbenchIcon::Check,
             "Validate generated netlist",
             layout,
@@ -242,7 +248,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         toolbar_text_command(
             ui,
             app,
-            Command::CompareGeneratedRevisions,
+            Command::CompareGeneratedRevisions.key(),
             WorkbenchIcon::Compare,
             "Compare generated revisions",
             layout,
@@ -252,7 +258,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
     toolbar_text_command(
         ui,
         app,
-        Command::Save,
+        Command::Save.key(),
         WorkbenchIcon::Save,
         "Save deck",
         layout,
@@ -260,7 +266,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
     toolbar_text_command(
         ui,
         app,
-        Command::ValidateCodeDocument,
+        Command::ValidateCodeDocument.key(),
         WorkbenchIcon::Check,
         "Validate source",
         layout,
@@ -269,7 +275,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
     toolbar_text_command(
         ui,
         app,
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+        Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
         WorkbenchIcon::Export,
         "Export deck copy",
         layout,

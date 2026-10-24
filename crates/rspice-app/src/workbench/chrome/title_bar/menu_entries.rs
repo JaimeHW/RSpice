@@ -10,11 +10,12 @@ use egui::containers::menu::{MenuState, SubMenu};
 use egui::os::OperatingSystem;
 
 use super::*;
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
+use crate::workbench::framework::command_registry::ids;
 
 /// One entry of a menu, as the menu is written down.
 #[derive(Clone, Copy)]
-pub(super) enum MenuEntry {
+pub(crate) enum MenuEntry {
     /// A command's row.
     Command(MenuCommand),
     /// A row that opens a menu of its own entries beside it.
@@ -31,8 +32,8 @@ pub(super) enum MenuEntry {
 /// A command's row as written down: which command, under what label, with
 /// which key.
 #[derive(Clone, Copy)]
-pub(super) struct MenuCommand {
-    pub(super) command: Command,
+pub(crate) struct MenuCommand {
+    pub(super) command: CommandKey,
     label: MenuLabel,
     /// `None` shows the command's own key; `Some(key)` shows `key`.
     shortcut: Option<&'static str>,
@@ -50,7 +51,7 @@ enum MenuLabel {
 
 /// Where a block of entries is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MenuContext {
+pub(crate) enum MenuContext {
     /// A source editor is the document on screen.
     SourceEditor,
     /// A source editor whose language service answers go to definition,
@@ -75,34 +76,53 @@ impl MenuContext {
     }
 }
 
-/// The command's row under the vocabulary's label.
-pub(super) const fn command(command: Command) -> MenuEntry {
-    MenuEntry::Command(MenuCommand {
-        command,
-        label: MenuLabel::Command,
-        shortcut: None,
-        palette_scope: None,
-    })
-}
+impl MenuEntry {
+    /// The row of the command `key` names, under the vocabulary's label.
+    pub(in crate::workbench) const fn command(key: CommandKey) -> Self {
+        Self::Command(MenuCommand {
+            command: key,
+            label: MenuLabel::Command,
+            shortcut: None,
+            palette_scope: None,
+        })
+    }
 
-/// The command's row under a label of the menu's own.
-pub(super) const fn command_as(command: Command, label: &'static str) -> MenuEntry {
-    MenuEntry::Command(MenuCommand {
-        command,
-        label: MenuLabel::Fixed(label),
-        shortcut: None,
-        palette_scope: None,
-    })
+    /// The row of the command `key` names, under a label of the menu's own.
+    pub(in crate::workbench) const fn command_as(key: CommandKey, label: &'static str) -> Self {
+        Self::Command(MenuCommand {
+            command: key,
+            label: MenuLabel::Fixed(label),
+            shortcut: None,
+            palette_scope: None,
+        })
+    }
 }
 
 /// A row that opens the command palette narrowed to `scope`.
-pub(super) const fn palette_scope(label: &'static str, scope: &'static str) -> MenuEntry {
+pub(in crate::workbench) const fn palette_scope(
+    label: &'static str,
+    scope: &'static str,
+) -> MenuEntry {
     MenuEntry::Command(MenuCommand {
-        command: Command::CommandPalette,
+        command: ids::COMMAND_PALETTE,
         label: MenuLabel::Fixed(label),
         shortcut: Some("Ctrl+K"),
         palette_scope: Some(scope),
     })
+}
+
+/// Every key `entries` hold, in order and whatever context their blocks show
+/// in, added to `keys`.
+pub(in crate::workbench) fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<CommandKey>) {
+    for entry in entries {
+        match *entry {
+            MenuEntry::Command(item) => keys.push(item.command),
+            MenuEntry::Submenu { entries, .. } | MenuEntry::Only(_, entries) => {
+                menu_keys(entries, keys);
+            }
+            MenuEntry::Separator => {}
+        }
+    }
 }
 
 /// A menu row as it reads for the application's state right now.
@@ -118,7 +138,7 @@ pub(super) enum MenuRow {
 
 #[derive(Debug, Clone)]
 pub(super) struct CommandRow {
-    pub(super) command: Command,
+    pub(super) command: CommandKey,
     pub(super) label: &'static str,
     /// The key painted at the row's right edge, empty for none.
     pub(super) shortcut: String,
@@ -126,6 +146,8 @@ pub(super) struct CommandRow {
     /// Whether the state the command switches is on, for a command that
     /// switches one: the row shows a check mark while it is.
     pub(super) checked: Option<bool>,
+    /// The icon the row wears where it shows no check mark.
+    icon: Option<WorkbenchIcon>,
     palette_scope: Option<&'static str>,
 }
 
@@ -164,18 +186,13 @@ fn push_menu_rows(
             MenuEntry::Command(item) => rows.push(MenuRow::Command(CommandRow {
                 command: item.command,
                 label: match item.label {
-                    MenuLabel::Command => item.command.spec().label,
+                    MenuLabel::Command => app.label(item.command),
                     MenuLabel::Fixed(label) => label,
                 },
-                shortcut: shortcut_for_occurrence(
-                    app.state.model.preferences.shortcuts(),
-                    platform,
-                    os,
-                    item.command,
-                    item.shortcut,
-                ),
-                availability: item.command.availability(app),
-                checked: item.command.checked(app),
+                shortcut: shortcut_for_occurrence(app, platform, os, item.command, item.shortcut),
+                availability: app.availability(item.command),
+                checked: app.checked(item.command),
+                icon: app.command_icon(item.command),
                 palette_scope: item.palette_scope,
             })),
             MenuEntry::Submenu { label, entries } => rows.push(MenuRow::Submenu {
@@ -195,7 +212,7 @@ fn push_menu_rows(
 /// The row a reader chose from a menu, carried out once the menu is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct MenuChoice {
-    command: Command,
+    command: CommandKey,
     palette_scope: Option<&'static str>,
 }
 
@@ -204,7 +221,7 @@ impl MenuChoice {
         if let Some(scope) = self.palette_scope {
             app.state.workbench.command_palette.open_in_scope(scope);
         } else {
-            self.command.execute(app);
+            app.execute(self.command);
         }
     }
 }
@@ -328,7 +345,7 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         highlighted,
         enabled,
         row.checked.map_or_else(
-            || command_icon(row.command).map_or(MenuRowLead::Blank, MenuRowLead::Icon),
+            || row.icon.map_or(MenuRowLead::Blank, MenuRowLead::Icon),
             MenuRowLead::Check,
         ),
         label,

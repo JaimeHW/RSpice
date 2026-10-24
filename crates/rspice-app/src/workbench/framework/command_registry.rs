@@ -145,9 +145,14 @@ impl Registry {
 
     /// Whether the registry holds together: every key is declared by exactly
     /// one owner, the order lists each declared key once and nothing else,
-    /// and every alias names a declared key without being one. The error
-    /// lists every problem, one per line.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    /// every alias names a declared key without being one, and every key in
+    /// `named` names a declared command. `named` pairs each key a menu or
+    /// framework code names a command by with what names it. The error lists
+    /// every problem, one per line.
+    pub(crate) fn validate(
+        &self,
+        named: impl IntoIterator<Item = (&'static str, CommandKey)>,
+    ) -> Result<(), String> {
         let mut problems = Vec::new();
         let mut owners: HashMap<&'static str, CommandOwner> = HashMap::new();
         for spec in &self.specs {
@@ -190,11 +195,68 @@ impl Registry {
                 ));
             }
         }
+        for (namer, key) in named {
+            if !owners.contains_key(key.as_str()) {
+                problems.push(format!(
+                    "{namer} names `{}`, which no owner declares",
+                    key.as_str()
+                ));
+            }
+        }
         if problems.is_empty() {
             Ok(())
         } else {
             Err(problems.join("\n"))
         }
+    }
+}
+
+/// The commands framework code raises or asks about by name rather than
+/// reading them from a table an owner hands it. Each is the key of a
+/// registered command, which the registry's check asserts.
+pub(crate) mod ids {
+    use crate::state::command_catalog::CommandKey;
+
+    macro_rules! ids {
+        ($($name:ident = $id:literal;)*) => {
+            $(pub(crate) const $name: CommandKey = CommandKey::new($id);)*
+
+            /// Every key above.
+            const ALL: &[CommandKey] = &[$($name),*];
+        };
+    }
+
+    /// Every key above, as [`super::Registry::validate`] is handed the keys
+    /// something names.
+    pub(crate) fn named() -> impl Iterator<Item = (&'static str, CommandKey)> {
+        ALL.iter().map(|&key| ("framework code", key))
+    }
+
+    ids! {
+        ACCOUNT_ORGANIZATION = "account-organization";
+        CLEAR_CONSOLE = "console-clear";
+        COMMAND_PALETTE = "command-palette";
+        DESIGN_WORKSPACE = "design";
+        MEASUREMENT_LIBRARY = "measurement-library";
+        MODELS_WORKSPACE = "models";
+        NETLIST_WORKSPACE = "netlist";
+        OPEN_CONSOLE = "open-console";
+        OPEN_NOTIFICATIONS = "open-notifications";
+        PREFERENCES = "preferences";
+        PROJECT_LAUNCHER = "project-launcher";
+        PROJECT_RECOVERY = "project-recovery";
+        PROJECT_WORKSPACE = "project";
+        RESET_LAYOUT = "reset-workspace-layout";
+        RESULTS_WORKSPACE = "results";
+        SAVE = "save-project";
+        SIMULATE_WORKSPACE = "simulate";
+        SPECIALIST_TOOL_BROWSER = "specialist-tool-browser";
+        STIMULUS_WORKSPACE = "stimulus";
+        TOGGLE_CONSOLE = "console";
+        TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
+        TOGGLE_FOCUS_MODE = "toggle-focus-mode";
+        VERIFY_WORKSPACE = "verify";
+        WORKSPACE_LAYOUTS = "workspace-layouts";
     }
 }
 
@@ -218,7 +280,7 @@ mod tests {
 
     fn problems(registry: &Registry) -> Vec<String> {
         registry
-            .validate()
+            .validate([])
             .err()
             .map(|problems| problems.lines().map(str::to_owned).collect())
             .unwrap_or_default()
@@ -236,7 +298,7 @@ mod tests {
             ],
             &ALIASES,
         );
-        assert_eq!(registry.validate(), Ok(()));
+        assert_eq!(registry.validate([]), Ok(()));
         assert_eq!(registry.order(), ORDER);
         assert_eq!(registry.resolve("open"), Some(CommandKey::new("open")));
         assert_eq!(registry.resolve("save-file"), Some(CommandKey::new("save")));
@@ -321,5 +383,21 @@ mod tests {
         );
         // An alias is answered before the key it shadows.
         assert_eq!(registry.resolve("open"), Some(CommandKey::new("save")));
+    }
+
+    #[test]
+    fn a_key_a_menu_or_the_framework_names_must_be_declared() {
+        static ORDER: [CommandKey; 1] = [CommandKey::new("open")];
+        let registry = Registry::new(&ORDER, vec![spec("open", CommandOwner::Project)], &[]);
+        assert_eq!(
+            registry.validate([
+                ("the File menu", CommandKey::new("open")),
+                ("the File menu", CommandKey::new("close")),
+                ("framework code", CommandKey::new("retired")),
+            ]),
+            Err("the File menu names `close`, which no owner declares\n\
+                 framework code names `retired`, which no owner declares"
+                .to_owned())
+        );
     }
 }

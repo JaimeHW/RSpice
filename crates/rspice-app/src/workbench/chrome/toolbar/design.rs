@@ -138,67 +138,79 @@ pub(in crate::workbench) fn design_tools(
         }
         let selected =
             design_toolbar_command_selected(app.state.model.schematic.session.editor.tool, command);
-        toolbar_icon_command_selected_as(ui, app, command, icon, selected, label, layout);
+        toolbar_icon_command_selected_as(ui, app, command.key(), icon, selected, label, layout);
     }
     context_separator(ui, layout);
     toolbar_icon_command(
         ui,
         app,
-        Command::RotateSelection,
+        Command::RotateSelection.key(),
         WorkbenchIcon::Rotate,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::MirrorSelectionHorizontal,
+        Command::MirrorSelectionHorizontal.key(),
         WorkbenchIcon::Mirror,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::MirrorSelectionVertical,
+        Command::MirrorSelectionVertical.key(),
         WorkbenchIcon::MirrorVertical,
         layout,
     );
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::Duplicate,
+        Command::Duplicate.key(),
         WorkbenchIcon::Copy,
         false,
         "Duplicate",
         layout,
     );
-    toolbar_icon_command(ui, app, Command::Delete, WorkbenchIcon::Trash, layout);
+    toolbar_icon_command(ui, app, Command::Delete.key(), WorkbenchIcon::Trash, layout);
     context_separator(ui, layout);
-    toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
-    toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
+    toolbar_icon_command(ui, app, Command::Undo.key(), WorkbenchIcon::Undo, layout);
+    toolbar_icon_command(ui, app, Command::Redo.key(), WorkbenchIcon::Redo, layout);
     context_separator(ui, layout);
     toolbar_icon_command(
         ui,
         app,
-        Command::DescendHierarchyDirect,
+        Command::DescendHierarchyDirect.key(),
         WorkbenchIcon::Layers,
         layout,
     );
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::AscendHierarchy,
+        Command::AscendHierarchy.key(),
         WorkbenchIcon::ArrowUp,
         false,
         "Ascend to parent sheet · double-click the sheet background also ascends",
         layout,
     );
     context_separator(ui, layout);
-    toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
-    toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ZoomOut.key(),
+        WorkbenchIcon::ZoomOut,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ZoomIn.key(),
+        WorkbenchIcon::ZoomIn,
+        layout,
+    );
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::ZoomFit,
+        Command::ZoomFit.key(),
         WorkbenchIcon::ZoomFit,
         false,
         "Fit drawing sheet",
@@ -208,7 +220,7 @@ pub(in crate::workbench) fn design_tools(
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::VisibilityOptions,
+        Command::VisibilityOptions.key(),
         WorkbenchIcon::Visibility,
         false,
         "Display options",
@@ -217,7 +229,7 @@ pub(in crate::workbench) fn design_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::CheckCellview,
+        Command::CheckCellview.key(),
         WorkbenchIcon::Check,
         "Check cellview",
         layout,
@@ -225,7 +237,7 @@ pub(in crate::workbench) fn design_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::CheckDesign,
+        Command::CheckDesign.key(),
         WorkbenchIcon::Check,
         "Check design",
         layout,
@@ -259,7 +271,7 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
             selected: grid_visible,
             label: Some("Cycle grid display"),
         };
-        let tool = overflow::OverflowTool::command(Command::CycleGrid, presentation);
+        let tool = overflow::OverflowTool::command(app, Command::CycleGrid.key(), presentation);
         overflow::set_aside(ui, tool);
         return;
     }
@@ -297,20 +309,20 @@ pub(in crate::workbench) fn symbol_tools(
 ) {
     let active = app.state.design.symbol.editor.tool;
     for (command, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
-        toolbar_icon_command_selected(ui, app, command, icon, active == tool, layout);
+        toolbar_icon_command_selected(ui, app, command.key(), icon, active == tool, layout);
     }
     context_separator(ui, layout);
     toolbar_icon_command(
         ui,
         app,
-        Command::SymbolRotatePin,
+        Command::SymbolRotatePin.key(),
         WorkbenchIcon::Rotate,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::SymbolMirrorPin,
+        Command::SymbolMirrorPin.key(),
         WorkbenchIcon::Mirror,
         layout,
     );
@@ -320,17 +332,35 @@ pub(in crate::workbench) fn symbol_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::SymbolUpdatePinsFromContract,
+        Command::SymbolUpdatePinsFromContract.key(),
         WorkbenchIcon::Pin,
         layout,
     );
     context_separator(ui, layout);
-    toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
-    toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
+    toolbar_icon_command(ui, app, Command::Undo.key(), WorkbenchIcon::Undo, layout);
+    toolbar_icon_command(ui, app, Command::Redo.key(), WorkbenchIcon::Redo, layout);
     context_separator(ui, layout);
-    toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
-    toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
-    toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ZoomOut.key(),
+        WorkbenchIcon::ZoomOut,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ZoomIn.key(),
+        WorkbenchIcon::ZoomIn,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ZoomFit.key(),
+        WorkbenchIcon::ZoomFit,
+        layout,
+    );
     symbol_toggle(
         ui,
         &mut app.state.design.symbol.editor.show_grid,
@@ -357,14 +387,21 @@ pub(in crate::workbench) fn symbol_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::SymbolSave,
+        Command::SymbolSave.key(),
         WorkbenchIcon::Save,
         "Save symbol",
         layout,
     );
     if app.state.symbol_in_place().is_some() {
         let (icon, label) = (WorkbenchIcon::ArrowUp, "Return to parent");
-        toolbar_text_command(ui, app, Command::ExitSymbolInPlace, icon, label, layout);
+        toolbar_text_command(
+            ui,
+            app,
+            Command::ExitSymbolInPlace.key(),
+            icon,
+            label,
+            layout,
+        );
     }
 }
 
@@ -419,9 +456,9 @@ pub(in crate::workbench) fn stimulus_tools(
             context_separator(ui, layout);
         }
         if let Some(label) = label {
-            toolbar_text_command(ui, app, command, icon, label, layout);
+            toolbar_text_command(ui, app, command.key(), icon, label, layout);
         } else {
-            toolbar_icon_command(ui, app, command, icon, layout);
+            toolbar_icon_command(ui, app, command.key(), icon, layout);
         }
     }
 }

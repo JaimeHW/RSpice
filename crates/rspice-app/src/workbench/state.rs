@@ -1304,19 +1304,6 @@ impl WorkbenchSession {
         self.navigation.reset_history();
     }
 
-    pub fn cycle_workspace(&mut self, backwards: bool) {
-        let current = Workspace::ALL
-            .iter()
-            .position(|workspace| *workspace == self.workspace)
-            .unwrap_or(0);
-        let next = if backwards {
-            (current + Workspace::ALL.len() - 1) % Workspace::ALL.len()
-        } else {
-            (current + 1) % Workspace::ALL.len()
-        };
-        self.activate(Workspace::ALL[next]);
-    }
-
     /// Apply a reviewed workspace preset immediately and retain that exact
     /// composition for the active workspace.
     pub fn apply_workspace_preset(&mut self, preset: WorkspacePreset) {

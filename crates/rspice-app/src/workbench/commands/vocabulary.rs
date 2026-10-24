@@ -115,8 +115,6 @@ pub enum Command {
     CloseAllDocuments,
     WorkspaceLayouts,
     WindowManager,
-    PreviousWorkspace,
-    NextWorkspace,
     SelectTool,
     PlaceInstance,
     PlaceWire,
@@ -539,8 +537,6 @@ impl Command {
                 "Windows, documents and session\u{2026}",
                 "Window",
             ),
-            Self::PreviousWorkspace => spec("previous-workspace", "Previous workspace", "Window"),
-            Self::NextWorkspace => spec("next-workspace", "Next workspace", "Window"),
             Self::SelectTool => spec("select-tool", "Select tool", "Design"),
             Self::PlaceInstance => spec("place-instance", "Place instance…", "Design"),
             Self::PlaceWire => spec("place-wire", "Draw wire", "Design"),
@@ -1493,7 +1489,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .collect(),
             LEGACY_ALIASES,
         );
-        debug_assert_eq!(registry.validate(), Ok(()));
+        debug_assert_eq!(registry.validate(command_registry::ids::named()), Ok(()));
         registry
     });
     &REGISTRY
@@ -1555,8 +1551,10 @@ impl CommandCatalog for CommandRegistry {
     }
 }
 
-/// Searchable projection of the command registry. The command palette itself
-/// and context-only cancellation are intentionally not self-referential rows.
+/// Searchable projection of the command registry, as values: the commands
+/// the palette lists. The command palette itself and context-only
+/// cancellation are intentionally not self-referential rows.
+#[cfg(test)]
 pub fn command_catalog() -> impl Iterator<Item = Command> {
     let registry = command_registry();
     registry

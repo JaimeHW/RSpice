@@ -24,7 +24,7 @@ pub(in crate::workbench) fn results_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::ToggleLinkedCursors,
+        Command::ToggleLinkedCursors.key(),
         WorkbenchIcon::Target,
         layout,
     );
@@ -33,7 +33,7 @@ pub(in crate::workbench) fn results_tools(
         toolbar_icon_command(
             ui,
             app,
-            Command::WaveformCalculator,
+            Command::WaveformCalculator.key(),
             WorkbenchIcon::Sliders,
             layout,
         );
@@ -42,25 +42,31 @@ pub(in crate::workbench) fn results_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::CompareResultDatasets,
+        Command::CompareResultDatasets.key(),
         WorkbenchIcon::Compare,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ImportResultDataset,
+        Command::ImportResultDataset.key(),
         WorkbenchIcon::Folder,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ExportWaveformsCsv,
+        Command::ExportWaveformsCsv.key(),
         WorkbenchIcon::Export,
         layout,
     );
-    toolbar_icon_command(ui, app, Command::PrintHardcopy, WorkbenchIcon::File, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::PrintHardcopy.key(),
+        WorkbenchIcon::File,
+        layout,
+    );
 }
 
 fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) -> bool {

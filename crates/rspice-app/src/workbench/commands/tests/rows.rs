@@ -23,7 +23,7 @@ use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
 use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandRegistry, command_registry};
-use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::framework::command_registry::{CommandFlags, ids};
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
@@ -370,7 +370,7 @@ fn registry_rows_equal_legacy_rows() {
 
 #[test]
 fn the_command_registry_validates() {
-    assert_eq!(command_registry().validate(), Ok(()));
+    assert_eq!(command_registry().validate(ids::named()), Ok(()));
 }
 
 /// A retired id is answered with the key of the command it names now, and

@@ -592,6 +592,14 @@ impl RSpiceApp {
         self.state.drain_notices(ctx);
         self.state.reconcile_schematic_drag(ctx, false);
         let initializing_frame = self.first_frame;
+        if initializing_frame {
+            // The shell's menus name their commands by key; the registry
+            // answers every one before the first menu is drawn.
+            debug_assert_eq!(
+                crate::workbench::framework::host::Host::validate_commands(self),
+                Ok(())
+            );
+        }
         let desired_zoom = self.state.model.preferences.interface_scale();
         if (ctx.zoom_factor() - desired_zoom).abs() > f32::EPSILON {
             ctx.set_zoom_factor(desired_zoom);

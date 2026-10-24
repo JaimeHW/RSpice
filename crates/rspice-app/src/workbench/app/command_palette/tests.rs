@@ -18,7 +18,31 @@ fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
     );
     assert_eq!(PaletteScope::from_label("unknown"), None);
 }
-use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+use crate::workbench::commands::vocabulary::{
+    COMMAND_REGISTRY, Command, command_registry, legacy_command,
+};
+
+/// What the registry declares about `command`.
+fn spec(command: Command) -> &'static CommandSpec {
+    command_registry()
+        .spec(command.key())
+        .expect("the registry declares the command")
+}
+
+/// The commands the palette lists, as values, in its order.
+fn palette_commands_listed() -> Vec<Command> {
+    palette_commands(&RSpiceApp::test_instance())
+        .filter_map(|command| legacy_command(command.key()))
+        .collect()
+}
+
+/// `command`'s entry as the palette lists it.
+fn palette_entry(command: Command) -> PaletteEntry {
+    palette_commands(&RSpiceApp::test_instance())
+        .find(|listed| listed.key() == command.key())
+        .map(PaletteEntry::Command)
+        .expect("the palette lists the command")
+}
 
 #[test]
 fn desktop_and_phone_layouts_match_the_mockup_contract() {
@@ -66,7 +90,7 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
 
 #[test]
 fn palette_is_a_typed_registry_projection() {
-    let commands = palette_commands().collect::<Vec<_>>();
+    let commands = palette_commands_listed();
     assert!(!commands.contains(&Command::CommandPalette));
     assert!(!commands.contains(&Command::Cancel));
     assert!(commands.contains(&Command::OpenProject));
@@ -81,12 +105,12 @@ fn palette_is_a_typed_registry_projection() {
 
 #[test]
 fn registered_command_projection_is_total_without_signal_substitutes() {
-    let commands = palette_commands().collect::<Vec<_>>();
+    let commands = palette_commands_listed();
     assert!(
         commands
             .iter()
             .copied()
-            .all(|command| { PaletteScope::for_command(command) != PaletteScope::All })
+            .all(|command| { PaletteScope::for_command(spec(command)) != PaletteScope::All })
     );
     let assigned = PaletteScope::ALL
         .into_iter()
@@ -95,7 +119,7 @@ fn registered_command_projection_is_total_without_signal_substitutes() {
             commands
                 .iter()
                 .copied()
-                .filter(|command| scope.contains(*command))
+                .filter(|command| scope.contains(spec(*command)))
                 .count()
         })
         .sum::<usize>();
@@ -104,16 +128,40 @@ fn registered_command_projection_is_total_without_signal_substitutes() {
         commands
             .iter()
             .copied()
-            .all(|command| PaletteScope::for_command(command) != PaletteScope::Signals),
+            .all(|command| PaletteScope::for_command(spec(command)) != PaletteScope::Signals),
         "signal rows must represent real result waveforms, not generic commands"
     );
 }
 
+/// Opening a workspace or a project page is navigating. The palette files a
+/// command by its group alone, so each of these must carry a group the
+/// Navigate scope takes.
+#[test]
+fn opening_a_workspace_or_a_project_page_is_navigating() {
+    let (mut workspaces, mut pages) = (0, 0);
+    for &command in COMMAND_REGISTRY {
+        match command {
+            Command::OpenWorkspace(_) => workspaces += 1,
+            Command::ProjectPage(_) => pages += 1,
+            _ => continue,
+        }
+        assert_eq!(
+            PaletteScope::for_command(spec(command)),
+            PaletteScope::Navigate,
+            "{command:?} is filed under {}",
+            spec(command).group
+        );
+    }
+    assert_eq!(workspaces, crate::workbench::state::Workspace::ALL.len());
+    assert!(pages > 0, "the registry lists the project pages");
+}
+
 #[test]
 fn command_scopes_and_metadata_search_only_return_registered_commands() {
-    let design = palette_commands()
-        .filter(|command| PaletteScope::Design.contains(*command))
-        .filter(|command| match_entry(&PaletteEntry::Command(*command), "wire").is_some())
+    let design = palette_commands_listed()
+        .into_iter()
+        .filter(|command| PaletteScope::Design.contains(spec(*command)))
+        .filter(|command| match_entry(&palette_entry(*command), "wire").is_some())
         .collect::<Vec<_>>();
     assert_eq!(
         design,
@@ -121,28 +169,29 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
     );
 
     assert_eq!(
-        PaletteScope::for_command(Command::PlaceProbe),
+        PaletteScope::for_command(spec(Command::PlaceProbe)),
         PaletteScope::Design
     );
     assert_eq!(
-        PaletteScope::for_command(Command::PlaceBus),
+        PaletteScope::for_command(spec(Command::PlaceBus)),
         PaletteScope::Design
     );
     assert_eq!(
-        PaletteScope::for_command(Command::PlaceBusTap),
+        PaletteScope::for_command(spec(Command::PlaceBusTap)),
         PaletteScope::Design
     );
     assert_eq!(
-        PaletteScope::for_command(Command::PlaceJunction),
+        PaletteScope::for_command(spec(Command::PlaceJunction)),
         PaletteScope::Design
     );
     assert_eq!(
-        PaletteScope::for_command(Command::ExportWaveformsCsv),
+        PaletteScope::for_command(spec(Command::ExportWaveformsCsv)),
         PaletteScope::Results
     );
 
-    let help = palette_commands()
-        .filter(|command| PaletteScope::Help.contains(*command))
+    let help = palette_commands_listed()
+        .into_iter()
+        .filter(|command| PaletteScope::Help.contains(spec(*command)))
         .collect::<Vec<_>>();
     assert!(help.contains(&Command::KeyboardShortcuts));
     assert!(help.contains(&Command::About));
@@ -150,20 +199,14 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
 
 #[test]
 fn bus_commands_use_the_mockup_palette_glyphs() {
-    assert_eq!(
-        row_icon(&PaletteEntry::Command(Command::PlaceBus)),
-        Icon::Bus
-    );
-    assert_eq!(
-        row_icon(&PaletteEntry::Command(Command::PlaceBusTap)),
-        Icon::Bus
-    );
+    assert_eq!(row_icon(&palette_entry(Command::PlaceBus)), Icon::Bus);
+    assert_eq!(row_icon(&palette_entry(Command::PlaceBusTap)), Icon::Bus);
 }
 
 #[test]
 fn stretch_selection_uses_the_exact_pointer_glyph() {
     assert_eq!(
-        row_icon(&PaletteEntry::Command(Command::StretchSelection)),
+        row_icon(&palette_entry(Command::StretchSelection)),
         Icon::Select
     );
 }
@@ -171,7 +214,7 @@ fn stretch_selection_uses_the_exact_pointer_glyph() {
 #[test]
 fn create_array_uses_the_exact_grid_glyph() {
     assert_eq!(
-        row_icon(&PaletteEntry::Command(Command::ArraySelection)),
+        row_icon(&palette_entry(Command::ArraySelection)),
         Icon::Grid
     );
 }
@@ -179,7 +222,7 @@ fn create_array_uses_the_exact_grid_glyph() {
 #[test]
 fn replace_instance_uses_the_exact_refresh_glyph() {
     assert_eq!(
-        row_icon(&PaletteEntry::Command(Command::ReplaceInstance)),
+        row_icon(&palette_entry(Command::ReplaceInstance)),
         Icon::Refresh
     );
 }
@@ -190,7 +233,7 @@ fn fuzzy_matching_marks_display_characters_and_searches_registry_metadata() {
         match_spans("Open generated netlist", "ogn"),
         Some((4, vec![0, 5, 7]))
     );
-    let command = PaletteEntry::Command(Command::GenerateNetlist);
+    let command = palette_entry(Command::GenerateNetlist);
     let (_, marks) = match_entry(&command, "generated netlist").expect("label terms match");
     assert!(!marks.is_empty());
     assert!(match_entry(&command, "simulate").is_some());
@@ -200,10 +243,10 @@ fn fuzzy_matching_marks_display_characters_and_searches_registry_metadata() {
 
 #[test]
 fn palette_names_are_canonical_labels_without_ellipsis() {
-    assert_eq!(command_name(Command::OpenProject), "Open project");
-    assert_eq!(command_name(Command::SaveAll), "Save all");
+    assert_eq!(command_name(spec(Command::OpenProject)), "Open project");
+    assert_eq!(command_name(spec(Command::SaveAll)), "Save all");
     assert_eq!(
-        command_name(Command::GenerateNetlist),
+        command_name(spec(Command::GenerateNetlist)),
         "Open generated netlist"
     );
 }
@@ -442,19 +485,20 @@ fn opening_input_is_owned_before_background_text_edits() {
 #[test]
 fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete() {
     let mut app = test_app();
-    app.state.workbench.command_palette.recent = vec![Command::PlaceProbe, Command::Save];
+    app.state.workbench.command_palette.recent =
+        vec![Command::PlaceProbe.key(), Command::Save.key()];
     let all = app.palette_rows(
         "",
         PaletteScope::All,
         CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
-    assert_eq!(all[0].entry.command(), Some(Command::PlaceProbe));
-    assert_eq!(all[1].entry.command(), Some(Command::Save));
+    assert_eq!(all[0].entry.command(), Some(Command::PlaceProbe.key()));
+    assert_eq!(all[1].entry.command(), Some(Command::Save.key()));
     assert_eq!(all.len(), SUGGESTION_LIMIT);
     assert_eq!(
         all.iter()
-            .filter(|row| row.entry.command() == Some(Command::Save))
+            .filter(|row| row.entry.command() == Some(Command::Save.key()))
             .count(),
         1
     );
@@ -550,7 +594,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         );
         let row = rows
             .into_iter()
-            .find(|row| row.entry.command() == Some(command))
+            .find(|row| row.entry.command() == Some(command.key()))
             .unwrap_or_else(|| panic!("{query:?} finds {command:?}"));
         assert!(row.blocked.is_none(), "{command:?}: {:?}", row.blocked);
         row.entry.execute(&mut app).expect("the command runs");
@@ -604,7 +648,7 @@ fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
             egui::os::OperatingSystem::Windows,
         )
         .into_iter()
-        .find(|row| row.entry.command() == Some(Command::VerilogABuildSettings))
+        .find(|row| row.entry.command() == Some(Command::VerilogABuildSettings.key()))
     };
     assert!(
         find(&app).is_none_or(|row| row.blocked.is_some()),
@@ -923,7 +967,7 @@ fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
     assert!(app.state.shell.about);
     assert_eq!(
         app.state.workbench.command_palette.recent.first(),
-        Some(&Command::About)
+        Some(&Command::About.key())
     );
 }
 

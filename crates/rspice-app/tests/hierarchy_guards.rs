@@ -640,6 +640,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
 /// by definition, so counting it would make this guard pass unconditionally.
 const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
     ("workbench/chrome/title_bar.rs", "menu"),
+    ("workbench/chrome/title_bar/menus.rs", "menu"),
     ("workbench/menu_bar.rs", "menu"),
     ("workbench/menu_bar/", "menu"),
     ("workbench/chrome/toolbar.rs", "toolbar"),
@@ -662,6 +663,10 @@ const COMMAND_REGISTRY_FILE: &str = "workbench/commands/vocabulary.rs";
 
 /// Where the palette exclusions and the shortcut table are declared.
 const COMMAND_ROUTING_FILE: &str = "workbench/commands/registry.rs";
+
+/// Where framework code's command ids are declared, each the key of the
+/// command it names.
+const COMMAND_IDS_FILE: &str = "workbench/framework/command_registry.rs";
 
 /// Registered commands with no route, and why.
 ///
@@ -763,7 +768,71 @@ fn braced_body(code: &str, signature: &str) -> Option<String> {
     None
 }
 
-/// Variants a route file offers the user, by variant name.
+/// The `Command` variant each framework id names, by id.
+///
+/// Framework code names a command by an id in the `ids!` block, which holds
+/// the command's key; the variant is the one whose `spec` arm declares that
+/// key. An id whose key no arm declares fails here, so a renamed key cannot
+/// silently drop the routes its id carries.
+fn command_ids(ids_production: &str, registry_production: &str) -> BTreeMap<String, String> {
+    let specs = braced_body(
+        registry_production,
+        "pub const fn spec(self) -> CommandSpec {",
+    )
+    .expect("Command::spec is declared in vocabulary.rs");
+    let mut variant_by_key = BTreeMap::new();
+    let mut rest = specs.as_str();
+    while let Some(index) = rest.find("Self::") {
+        rest = &rest[index + "Self::".len()..];
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        let arm = skip_payload(&rest[name.len()..]).trim_start();
+        let Some(arm) = arm.strip_prefix("=>").map(str::trim_start) else {
+            continue;
+        };
+        let arm = arm.strip_prefix('{').unwrap_or(arm).trim_start();
+        let Some(arm) = arm.strip_prefix("spec(").map(str::trim_start) else {
+            continue;
+        };
+        if let Some((key, _)) = arm.strip_prefix('"').and_then(|arm| arm.split_once('"')) {
+            variant_by_key.insert(key.to_owned(), name);
+        }
+    }
+
+    let block = braced_body(ids_production, "ids! {").expect("the framework ids are declared");
+    let mut ids = BTreeMap::new();
+    for line in block.lines() {
+        let Some((id, key)) = line
+            .trim()
+            .strip_suffix(';')
+            .and_then(|line| line.split_once('='))
+        else {
+            continue;
+        };
+        let (id, key) = (id.trim(), key.trim().trim_matches('"'));
+        let variant = variant_by_key
+            .get(key)
+            .unwrap_or_else(|| panic!("ids::{id} names `{key}`, which no spec arm declares"));
+        ids.insert(id.to_owned(), variant.clone());
+    }
+    assert!(
+        !ids.is_empty(),
+        "the ids! block parsed as empty — the parse broke, not the block"
+    );
+    ids
+}
+
+/// The id `ids::NAME` names at the start of `rest`, after its `ids::`.
+fn id_name(rest: &str) -> String {
+    rest.chars()
+        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+        .collect()
+}
+
+/// Variants a route file offers the user, by variant name, whether it names
+/// the command by its variant or by a framework id.
 ///
 /// Two occurrences are not routes and are excluded:
 ///
@@ -772,7 +841,7 @@ fn braced_body(code: &str, signature: &str) -> Option<String> {
 ///   reported `ClearConsole` as routed by the trash-icon table.
 /// - A name inside a comment or a string literal, which the classification
 ///   pass has already blanked.
-fn routed_variants(code: &str) -> BTreeSet<String> {
+fn routed_variants(code: &str, ids: &BTreeMap<String, String>) -> BTreeSet<String> {
     let mut routed = BTreeSet::new();
     let mut rest = code;
     while let Some(index) = rest.find("Command::") {
@@ -787,6 +856,14 @@ fn routed_variants(code: &str) -> BTreeSet<String> {
         if is_route_occurrence(&rest[name.len()..]) {
             routed.insert(name);
         }
+    }
+    let mut rest = code;
+    while let Some(index) = rest.find("ids::") {
+        let qualified = !rest[..index].ends_with(|c: char| c.is_alphanumeric() || c == '_');
+        rest = &rest[index + "ids::".len()..];
+        let id = id_name(rest);
+        let route = qualified && is_route_occurrence(&rest[id.len()..]);
+        routed.extend(ids.get(&id).filter(|_| route).cloned());
     }
     routed
 }
@@ -833,6 +910,10 @@ fn every_command_has_a_user_route() {
     let mut registry_code = None;
     let mut routing_code = None;
     let mut routes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let ids = command_ids(
+        &Source::read(&root.join(COMMAND_IDS_FILE)).production,
+        &Source::read(&root.join(COMMAND_REGISTRY_FILE)).production,
+    );
 
     for (path, file) in production_files(&root) {
         let code = Source::read(&file).code;
@@ -846,7 +927,7 @@ fn every_command_has_a_user_route() {
             .iter()
             .find(|(route, _)| path == *route || path.starts_with(*route))
         {
-            for variant in routed_variants(&code) {
+            for variant in routed_variants(&code, &ids) {
                 routes
                     .entry(variant)
                     .or_default()
@@ -867,6 +948,18 @@ fn every_command_has_a_user_route() {
                 if !name.is_empty() && rest[name.len()..].starts_with(".execute(") {
                     routes
                         .entry(name)
+                        .or_default()
+                        .insert("in-place control".to_owned());
+                }
+            }
+            // The same control in the framework asks the host to run the
+            // command an id names.
+            let mut rest = code.as_str();
+            while let Some(index) = rest.find(".execute(ids::") {
+                rest = &rest[index + ".execute(ids::".len()..];
+                if let Some(variant) = ids.get(&id_name(rest)) {
+                    routes
+                        .entry(variant.clone())
                         .or_default()
                         .insert("in-place control".to_owned());
                 }

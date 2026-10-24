@@ -584,8 +584,6 @@ impl Command {
             self,
             Self::CommandPalette
                 | Self::Cancel
-                | Self::PreviousWorkspace
-                | Self::NextWorkspace
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
                 | Self::SaveReportDocument
@@ -920,9 +918,6 @@ impl Command {
     }
 
     pub fn availability(self, app: &RSpiceApp) -> CommandAvailability {
-        if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
-            return CommandAvailability::Hidden;
-        }
         // A build with no cloud endpoints can never host a session or
         // publish, whatever the reader does, so it offers neither rather than
         // showing two rows that are grey for good.

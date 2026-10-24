@@ -21,7 +21,8 @@ use crate::workbench::{AppState, RSpiceApp};
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{ConsoleChannel, ConsolePage};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::host::Host;
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
 const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
@@ -85,9 +86,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 // The command decides what Clear may clear and does the
                 // clearing; the toolbar only offers it.
                 let clear = clear_is_offered(layout, app.state.workbench.console_view.channel)
-                    .then(|| console_clear_action(Command::ClearConsole.is_enabled(app)));
+                    .then(|| console_clear_action(app.is_enabled(ids::CLEAR_CONSOLE)));
                 if toolbar(ui, |ui| console_toolbar(ui, &mut app.state, layout, clear)) {
-                    Command::ClearConsole.execute(app);
+                    app.execute(ids::CLEAR_CONSOLE);
                 }
                 // The transcript is prose, and keeps the inset on every side.
                 ui.add_space(CONSOLE_BODY_PADDING_TOP);
@@ -171,7 +172,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     if open {
                         app.state.workbench.console_maximized = false;
                     }
-                    Command::ToggleConsole.execute(app);
+                    app.execute(ids::TOGGLE_CONSOLE);
                 }
                 if !layout.compact_shell && !touch_targets {
                     ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
@@ -188,7 +189,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     )
                     .clicked()
                     {
-                        Command::ToggleConsoleMaximized.execute(app);
+                        app.execute(ids::TOGGLE_CONSOLE_MAXIMIZED);
                     }
                 }
             });
@@ -589,7 +590,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Results);
-        Command::MeasurementLibrary.execute(app);
+        app.execute(ids::MEASUREMENT_LIBRARY);
     }
 }
 

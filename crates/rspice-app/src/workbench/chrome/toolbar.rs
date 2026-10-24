@@ -13,16 +13,17 @@ pub(in crate::workbench) mod simulate;
 
 use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 
+use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::host::{Host, Point, ToolbarScope, ToolbarSlot};
 
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
 use run_config_chip::RUN_CONFIG_CHIP_MAX_WIDTH;
 
@@ -155,9 +156,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// it remains reachable even when a dense engineering toolbar overflows.
 fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state);
-    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
-        &CommandRegistry,
-        Command::Save.key(),
+    let shortcut = app.shortcut_label(
+        ids::SAVE,
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
@@ -171,7 +171,7 @@ fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
     } else {
         format!("Save ({shortcut}) \u{00b7} {state_label}")
     };
-    let availability = Command::Save.availability(app);
+    let availability = app.availability(ids::SAVE);
     let enabled = availability == CommandAvailability::Available;
     let response = ui
         .add_enabled_ui(enabled, |ui| {
@@ -194,7 +194,7 @@ fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
         });
     }
     if response.clicked() {
-        Command::Save.execute(app);
+        app.execute(ids::SAVE);
     }
     context_separator(ui, layout);
 }
@@ -365,7 +365,7 @@ fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::ToggleFocusMode,
+        ids::TOGGLE_FOCUS_MODE,
         WorkbenchIcon::Focus,
         app.state.workbench.focus_mode,
         if app.state.workbench.focus_mode {
@@ -382,7 +382,7 @@ fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
 fn toolbar_icon_command(
     ui: &mut egui::Ui,
     app: &mut RSpiceApp,
-    command: Command,
+    command: CommandKey,
     icon: WorkbenchIcon,
     layout: LayoutSpec,
 ) {
@@ -392,7 +392,7 @@ fn toolbar_icon_command(
 fn toolbar_icon_command_selected(
     ui: &mut egui::Ui,
     app: &mut RSpiceApp,
-    command: Command,
+    command: CommandKey,
     icon: WorkbenchIcon,
     selected: bool,
     layout: LayoutSpec,
@@ -413,7 +413,7 @@ fn toolbar_icon_command_selected(
 fn toolbar_icon_command_selected_as(
     ui: &mut egui::Ui,
     app: &mut RSpiceApp,
-    command: Command,
+    command: CommandKey,
     icon: WorkbenchIcon,
     selected: bool,
     label: &'static str,
@@ -438,7 +438,7 @@ fn toolbar_icon_command_selected_as(
 fn toolbar_text_command(
     ui: &mut egui::Ui,
     app: &mut RSpiceApp,
-    command: Command,
+    command: CommandKey,
     icon: WorkbenchIcon,
     label: &'static str,
     layout: LayoutSpec,
@@ -468,33 +468,34 @@ enum ToolbarCommandPresentation {
 fn toolbar_command(
     ui: &mut egui::Ui,
     app: &mut RSpiceApp,
-    command: Command,
+    command: CommandKey,
     layout: LayoutSpec,
     presentation: ToolbarCommandPresentation,
 ) {
     let has_slot = take_projected_tool_slot(ui, layout);
-    let availability = command.availability(app);
+    let availability = app.availability(command);
     if availability == CommandAvailability::Hidden {
         return;
     }
     if !has_slot {
-        overflow::set_aside(ui, overflow::OverflowTool::command(command, presentation));
+        overflow::set_aside(
+            ui,
+            overflow::OverflowTool::command(app, command, presentation),
+        );
         return;
     }
-    let spec = command.spec();
     let (icon, base_label, show_label, selected) = match presentation {
         ToolbarCommandPresentation::Icon {
             icon,
             selected,
             label,
-        } => (icon, label.unwrap_or(spec.label), false, selected),
+        } => (icon, label.unwrap_or(app.label(command)), false, selected),
         ToolbarCommandPresentation::Text { icon, label } => {
             (icon, label, layout.toolbar_labels, false)
         }
     };
-    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
-        &CommandRegistry,
-        command.key(),
+    let shortcut = app.shortcut_label(
+        command,
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
@@ -530,7 +531,7 @@ fn toolbar_command(
         });
     }
     if response.clicked() {
-        command.execute(app);
+        app.execute(command);
     }
 }
 

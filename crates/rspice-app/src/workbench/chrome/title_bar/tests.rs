@@ -5,6 +5,7 @@
 //! capability the workbench does not have.
 
 use super::*;
+use crate::workbench::commands::vocabulary::{Command, legacy_command};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn title_test_app() -> RSpiceApp {
@@ -164,7 +165,8 @@ fn listed_commands(entries: &[MenuEntry]) -> Vec<Command> {
     let mut commands = Vec::new();
     for entry in entries {
         match *entry {
-            MenuEntry::Command(item) => commands.push(item.command),
+            MenuEntry::Command(item) => commands
+                .push(legacy_command(item.command).expect("a menu names registered commands")),
             MenuEntry::Submenu { entries, .. } | MenuEntry::Only(_, entries) => {
                 commands.extend(listed_commands(entries));
             }
@@ -502,23 +504,23 @@ fn f10_then_enter_opens_the_focused_application_menu() {
 
 #[test]
 fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
-    let shortcuts = crate::state::shortcuts::ShortcutPreferences::default();
+    let app = RSpiceApp::test_instance();
     assert_eq!(
         shortcut_for_occurrence(
-            &shortcuts,
+            &app,
             crate::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
-            Command::KeyboardShortcuts,
+            Command::KeyboardShortcuts.key(),
             Some("")
         ),
         ""
     );
     assert_eq!(
         shortcut_for_occurrence(
-            &shortcuts,
+            &app,
             crate::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
-            Command::KeyboardShortcuts,
+            Command::KeyboardShortcuts.key(),
             Some("Ctrl+Alt+R")
         ),
         "Ctrl+Alt+R"
@@ -566,7 +568,7 @@ fn application_menu_height_is_viewport_bounded() {
 #[test]
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
     let platform = crate::state::command_catalog::CommandPlatform::Desktop;
-    let shortcuts = crate::state::shortcuts::ShortcutPreferences::default();
+    let app = RSpiceApp::test_instance();
     for command in [
         Command::OpenProject,
         Command::Save,
@@ -577,10 +579,10 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
     ] {
         assert_eq!(
             shortcut_for_occurrence(
-                &shortcuts,
+                &app,
                 platform,
                 egui::os::OperatingSystem::Windows,
-                command,
+                command.key(),
                 None
             ),
             command.default_shortcut_label(platform)
@@ -588,10 +590,10 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
     }
     assert_eq!(
         shortcut_for_occurrence(
-            &shortcuts,
+            &app,
             platform,
             egui::os::OperatingSystem::Windows,
-            Command::KeyboardShortcuts,
+            Command::KeyboardShortcuts.key(),
             None
         ),
         ""
@@ -968,6 +970,7 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
 /// folder for Close project) that matched nothing on screen.
 #[test]
 fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
+    let app = RSpiceApp::test_instance();
     for (command, icon) in [
         (Command::PlaceInstance, WorkbenchIcon::Instance),
         (Command::PlaceJunction, WorkbenchIcon::Junction),
@@ -985,7 +988,12 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::ModelCompareRelease, WorkbenchIcon::Compare),
         (Command::PrintHardcopy, WorkbenchIcon::File),
     ] {
-        assert_eq!(command_icon(command), Some(icon), "{}", command.spec().id);
+        assert_eq!(
+            app.command_icon(command.key()),
+            Some(icon),
+            "{}",
+            command.spec().id
+        );
     }
     for command in [
         Command::LegalPrivacy,
@@ -999,7 +1007,12 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::DesignSpecialistWorkspaces,
         Command::KeyboardShortcuts,
     ] {
-        assert_eq!(command_icon(command), None, "{}", command.spec().id);
+        assert_eq!(
+            app.command_icon(command.key()),
+            None,
+            "{}",
+            command.spec().id
+        );
     }
 }
 
@@ -1031,7 +1044,7 @@ fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
             format!(
                 "{} | {} | {} | {state}{mark}",
                 row.label,
-                row.command.stable_id(),
+                row.command.as_str(),
                 row.shortcut
             )
         }
@@ -1089,7 +1102,7 @@ fn every_menu_shows_exactly_its_pinned_rows() {
     }
     check(
         "Compact Menu button",
-        menu_pin(COMPACT_MENU, &title_test_app()),
+        menu_pin(title_test_app().compact_menu(), &title_test_app()),
         &PINNED_COMPACT_MENU,
     );
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
@@ -2098,9 +2111,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Workspace layouts… | workspace-layouts |  | on",
             "Windows, documents and session… | window-manager |  | on",
             "Reset workspace layout… | reset-workspace-layout |  | on",
-            "---",
-            "Previous workspace | previous-workspace |  | hidden",
-            "Next workspace | next-workspace |  | hidden",
         ],
     ),
     (

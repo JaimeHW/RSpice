@@ -2,12 +2,14 @@
 
 use egui::{Area, Context, FocusDirection, Frame, Id, Order, Sense, UiKind, Vec2};
 
+use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Mode;
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::host::Host;
 
-use super::super::commands::vocabulary::Command;
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
@@ -239,7 +241,7 @@ fn focus_is_within_drawer(ctx: &Context, drawer_layer: egui::LayerId) -> bool {
 
 #[derive(Clone, Copy)]
 struct MobileNavigationAction {
-    command: Command,
+    command: CommandKey,
     icon: WorkbenchIcon,
     label: &'static str,
 }
@@ -248,42 +250,42 @@ struct MobileNavigationAction {
 /// sheet used to coin a second name for four of the eight.
 const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Project),
+        command: ids::PROJECT_WORKSPACE,
         icon: WorkbenchIcon::Project,
         label: Workspace::Project.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Design),
+        command: ids::DESIGN_WORKSPACE,
         icon: WorkbenchIcon::Design,
         label: Workspace::Design.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Simulate),
+        command: ids::SIMULATE_WORKSPACE,
         icon: WorkbenchIcon::Simulate,
         label: Workspace::Simulate.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Stimulus),
+        command: ids::STIMULUS_WORKSPACE,
         icon: WorkbenchIcon::Source,
         label: Workspace::Stimulus.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Results),
+        command: ids::RESULTS_WORKSPACE,
         icon: WorkbenchIcon::Results,
         label: Workspace::Results.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Verify),
+        command: ids::VERIFY_WORKSPACE,
         icon: WorkbenchIcon::Verify,
         label: Workspace::Verify.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Models),
+        command: ids::MODELS_WORKSPACE,
         icon: WorkbenchIcon::Models,
         label: Workspace::Models.label(),
     },
     MobileNavigationAction {
-        command: Command::OpenWorkspace(Workspace::Netlist),
+        command: ids::NETLIST_WORKSPACE,
         icon: WorkbenchIcon::Netlist,
         label: Workspace::Netlist.label(),
     },
@@ -298,32 +300,32 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
 /// the unread count from nowhere.
 const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
     MobileNavigationAction {
-        command: Command::SpecialistToolBrowser,
+        command: ids::SPECIALIST_TOOL_BROWSER,
         icon: WorkbenchIcon::More,
         label: "Specialist tool browser",
     },
     MobileNavigationAction {
-        command: Command::OpenConsole,
+        command: ids::OPEN_CONSOLE,
         icon: WorkbenchIcon::Console,
         label: "Console",
     },
     MobileNavigationAction {
-        command: Command::OpenNotifications,
+        command: ids::OPEN_NOTIFICATIONS,
         icon: WorkbenchIcon::Bell,
         label: "Notifications",
     },
     MobileNavigationAction {
-        command: Command::ProjectLauncher,
+        command: ids::PROJECT_LAUNCHER,
         icon: WorkbenchIcon::Project,
         label: "Project launcher",
     },
     MobileNavigationAction {
-        command: Command::Preferences,
+        command: ids::PREFERENCES,
         icon: WorkbenchIcon::Settings,
         label: "Preferences",
     },
     MobileNavigationAction {
-        command: Command::AccountOrganization,
+        command: ids::ACCOUNT_ORGANIZATION,
         icon: WorkbenchIcon::Verify,
         label: "Organization & licensing",
     },
@@ -448,7 +450,7 @@ fn mobile_navigation_dialog(
     } else if let Some(command) = chosen {
         app.state.workbench.close_drawer();
         release_current_focus(ctx);
-        command.execute(app);
+        app.execute(command);
     }
 }
 
@@ -483,7 +485,7 @@ fn mobile_navigation_close(ui: &mut egui::Ui, header: egui::Rect) -> egui::Respo
 }
 
 struct MobileNavigationGroupState<'a> {
-    chosen: &'a mut Option<Command>,
+    chosen: &'a mut Option<CommandKey>,
     focus_ids: &'a mut Vec<Id>,
     first_card_id: &'a mut Option<Id>,
 }
@@ -523,7 +525,7 @@ fn mobile_navigation_group(
             let card_width = (available - MOBILE_NAV_GRID_GAP * (columns.saturating_sub(1) as f32))
                 / columns as f32;
             for action in row {
-                let enabled = action.command.is_enabled(app);
+                let enabled = app.is_enabled(action.command);
                 let meta = card_meta(action.command, app);
                 let response = ui
                     .add_enabled_ui(enabled, |ui| {
@@ -614,9 +616,9 @@ fn release_current_focus(ctx: &Context) {
 
 /// What a card states beside its name, the way a navigator row states its
 /// meta: the bell's unread count, for the shell whose title bar draws no bell.
-fn card_meta(command: Command, app: &RSpiceApp) -> Option<String> {
+fn card_meta(command: CommandKey, app: &RSpiceApp) -> Option<String> {
     match command {
-        Command::OpenNotifications => {
+        ids::OPEN_NOTIFICATIONS => {
             let unread = app.state.workbench.toasts.unread_count();
             (unread > 0).then(|| format!("{unread} unread"))
         }
@@ -795,6 +797,7 @@ fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::state::WorkbenchSession;
 
     #[derive(Clone, Copy)]
@@ -907,7 +910,7 @@ mod tests {
         for workspace in Workspace::ALL {
             assert!(
                 WORKSPACE_ACTIONS.iter().any(|action| {
-                    action.command == Command::OpenWorkspace(workspace)
+                    action.command == Command::OpenWorkspace(workspace).key()
                         && action.label == workspace.label()
                 }),
                 "{workspace:?} is offered under the name the shell gives it"
@@ -925,7 +928,7 @@ mod tests {
             .iter()
             .find(|action| action.label == "Organization & licensing")
             .expect("the account entry");
-        assert_eq!(action.command, Command::AccountOrganization);
+        assert_eq!(action.command, Command::AccountOrganization.key());
     }
 
     /// A phone's title bar draws no bell, so the sheet carries it: the panel
@@ -934,24 +937,24 @@ mod tests {
     fn the_phone_sheet_reaches_notifications_and_counts_what_is_unread() {
         let action = TOOL_ACTIONS
             .iter()
-            .find(|action| action.command == Command::OpenNotifications)
+            .find(|action| action.command == Command::OpenNotifications.key())
             .expect("the sheet offers the notification panel");
         assert_eq!(action.label, "Notifications");
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         assert_eq!(
-            card_meta(Command::OpenNotifications, &app),
+            card_meta(Command::OpenNotifications.key(), &app),
             None,
             "nothing unread says nothing"
         );
         app.state.workbench.toasts.info(&ctx, "Recovery copy saved");
         app.state.workbench.toasts.info(&ctx, "Library reloaded");
         assert_eq!(
-            card_meta(Command::OpenNotifications, &app).as_deref(),
+            card_meta(Command::OpenNotifications.key(), &app).as_deref(),
             Some("2 unread")
         );
-        assert_eq!(card_meta(Command::OpenConsole, &app), None);
+        assert_eq!(card_meta(Command::OpenConsole.key(), &app), None);
     }
 
     #[test]

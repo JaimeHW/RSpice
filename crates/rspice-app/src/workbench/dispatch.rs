@@ -121,8 +121,6 @@ mod tests {
     /// The commands the registry leaves out. No key names one, so a menu, a
     /// shortcut profile or Repeat never reaches it.
     const UNREGISTERED: &[Command] = &[
-        Command::PreviousWorkspace,
-        Command::NextWorkspace,
         Command::SaveReportDocument,
         Command::AddReportPage,
         Command::ReportPageProperties,

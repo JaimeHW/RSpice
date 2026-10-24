@@ -11,6 +11,7 @@ use crate::state::{
     PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
     Tool,
 };
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::WorkbenchSession;
 
 fn digest(byte: u8) -> ContentDigest {

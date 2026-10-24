@@ -428,10 +428,6 @@ fn only_exactly_implemented_reset_actions_are_discoverable() {
     assert!(searchable.contains(&Command::ResetActiveView));
     assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ResetLayout));
     assert!(searchable.contains(&Command::ResetLayout));
-    for command in [Command::PreviousWorkspace, Command::NextWorkspace] {
-        assert!(!vocabulary::COMMAND_REGISTRY.contains(&command));
-        assert!(!searchable.contains(&command));
-    }
 }
 
 #[test]

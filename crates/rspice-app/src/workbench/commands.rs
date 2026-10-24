@@ -460,8 +460,6 @@ impl Command {
                     | Self::OpenWorkspace(_)
                     | Self::ProjectLauncher
                     | Self::RecentProjects
-                    | Self::PreviousWorkspace
-                    | Self::NextWorkspace
                     | Self::PreviousDocument
                     | Self::NextDocument
                     | Self::CloseOtherDocuments
@@ -493,8 +491,6 @@ impl Command {
             Self::OpenWorkspace(_)
             | Self::Exit
             | Self::RepeatLastCommand
-            | Self::PreviousWorkspace
-            | Self::NextWorkspace
             | Self::KeyboardShortcuts
             | Self::HelpCenter
             | Self::ReleaseNotes
@@ -1186,8 +1182,6 @@ impl Command {
                 .workbench
                 .window_session_dialog
                 .open(crate::workbench::app::WindowSessionPage::Windows),
-            Self::PreviousWorkspace => app.state.workbench.cycle_workspace(true),
-            Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
             Self::SelectTool => {
                 if active_symbol_editor(app) {
                     app.activate_symbol_tool(crate::workbench::SymbolTool::Select);

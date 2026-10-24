@@ -50,7 +50,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelSaveRevision,
+        Command::ModelSaveRevision.key(),
         WorkbenchIcon::Save,
         "Save model revision",
         layout,
@@ -58,7 +58,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelValidate,
+        Command::ModelValidate.key(),
         WorkbenchIcon::Check,
         "Validate model",
         layout,
@@ -66,7 +66,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelRunQualificationTests,
+        Command::ModelRunQualificationTests.key(),
         WorkbenchIcon::Run,
         "Run qualification tests",
         layout,
@@ -74,7 +74,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelCompareRelease,
+        Command::ModelCompareRelease.key(),
         WorkbenchIcon::Compare,
         "Compare with release",
         layout,
@@ -91,9 +91,9 @@ pub(in crate::workbench) fn models_tools(
             context_separator(ui, layout);
         }
         if let Some(label) = label {
-            toolbar_text_command(ui, app, command, icon, label, layout);
+            toolbar_text_command(ui, app, command.key(), icon, label, layout);
         } else {
-            toolbar_icon_command(ui, app, command, icon, layout);
+            toolbar_icon_command(ui, app, command.key(), icon, layout);
         }
     }
 }

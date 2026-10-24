@@ -14,14 +14,15 @@ use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{VerificationPage, WorkbenchSession, Workspace};
 use crate::state::ModelsPage;
-use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::framework::command_registry::ids;
 
 pub(in crate::workbench) mod code;
 pub(in crate::workbench) mod design;
 mod keyboard;
-mod menu_entries;
+pub(in crate::workbench) mod menu_entries;
 mod menu_row;
-mod menus;
+pub(in crate::workbench) mod menus;
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
     claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
@@ -33,8 +34,8 @@ use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};
 use menus::menu_popup_height_for_viewport;
 pub(in crate::workbench) use menus::source_editor_context_menu;
 use menus::{
-    ALL_MENUS, ApplicationMenu, COMPACT_MENU, command_icon, configure_menu_popup,
-    file_menu_shows_exit, menu_popup_max_height, shortcut_for_occurrence,
+    ALL_MENUS, ApplicationMenu, configure_menu_popup, file_menu_shows_exit, menu_popup_max_height,
+    shortcut_for_occurrence,
 };
 
 /// The narrowest a menu popup is; it widens to fit its longest row up to
@@ -114,7 +115,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     ui.add_space(if viewport_width <= 820.0 { 5.0 } else { 7.0 });
                     if viewport_width > 560.0 {
                         if account_action(ui, account_initials.as_deref(), large_targets) {
-                            Command::AccountOrganization.execute(app);
+                            app.execute(ids::ACCOUNT_ORGANIZATION);
                         }
                         if notification_action(
                             ui,
@@ -130,11 +131,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             "Open preferences",
                             large_targets,
                         ) {
-                            Command::Preferences.execute(app);
+                            app.execute(ids::PREFERENCES);
                         }
                     }
                     if search_button(ui, app, viewport_width, large_targets) {
-                        Command::CommandPalette.execute(app);
+                        app.execute(ids::COMMAND_PALETTE);
                     }
                     for action in super::presence::session_presence_cluster(ui, app, large_targets)
                     {
@@ -265,7 +266,7 @@ fn brand(
         );
     }
     if response.clicked() {
-        Command::OpenWorkspace(Workspace::Project).execute(app);
+        app.execute(ids::PROJECT_WORKSPACE);
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
     response.on_hover_text("RSpice project overview");
@@ -368,6 +369,7 @@ fn top_menu(
     title_bar_height: f32,
 ) -> MenuTriggerResponse {
     let width = menu_trigger_width(ui, menu.label());
+    let entries = app.menu_entries(menu);
     menu_trigger(
         ui,
         app,
@@ -377,7 +379,7 @@ fn top_menu(
             height: title_bar_height,
             large_targets,
         },
-        menu.entries(),
+        entries,
     )
 }
 
@@ -389,6 +391,7 @@ fn compact_menu_button(
     title_bar_height: f32,
 ) -> MenuTriggerResponse {
     let width = menu_trigger_width(ui, COMPACT_MENU_LABEL).max(MENU_TOUCH_ROW_HEIGHT);
+    let entries = app.compact_menu();
     menu_trigger(
         ui,
         app,
@@ -398,7 +401,7 @@ fn compact_menu_button(
             height: title_bar_height,
             large_targets: true,
         },
-        COMPACT_MENU,
+        entries,
     )
 }
 
@@ -724,9 +727,8 @@ fn ellipsize(value: &str, maximum_characters: usize) -> String {
 
 fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target: bool) -> bool {
     let t = Tokens::get(ui.ctx());
-    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
-        &crate::workbench::commands::vocabulary::CommandRegistry,
-        Command::CommandPalette.key(),
+    let shortcut = app.shortcut_label(
+        ids::COMMAND_PALETTE,
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );

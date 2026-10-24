@@ -6,13 +6,30 @@
 //! they test, the first arm that matches winning, so an arm listed earlier
 //! takes a point from one listed later. The owner draws in the `Ui` the
 //! container handed over.
+//!
+//! The containers hold the commands they offer by key. Here, and only here,
+//! a key becomes the command it names, which then answers as it always has.
 
+mod palette_icons;
 mod status_order;
 
 use egui::Ui;
+use egui::os::OperatingSystem;
 
 use crate::state::ViewType;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
+use crate::ui::icons::Icon;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
+use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
+use crate::workbench::chrome::title_bar::menus::{
+    self, ApplicationMenu, COMPACT_MENU, SOURCE_EDITOR_MENU,
+};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::{
+    Command, CommandRegistry, command_registry, legacy_command,
+};
+use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::host::{
     DocumentHost, Host, InspectorScope, NavigatorSection, Point, RailEntry, StatusCell,
     ToolbarScope, ToolbarSlot,
@@ -29,11 +46,29 @@ pub(crate) enum SurfaceOwner {
     ModelEditor,
 }
 
+/// The commands the registry leaves out that a container still holds by key:
+/// the report route's own toolbar actions. No menu, shortcut profile or
+/// Repeat reaches them.
+const UNLISTED: [Command; 3] = [
+    Command::SaveReportDocument,
+    Command::AddReportPage,
+    Command::ReportPageProperties,
+];
+
+/// The command a container's `key` names: a registered one, found by key, or
+/// one of the few the registry leaves out.
+fn command(key: CommandKey) -> Option<Command> {
+    legacy_command(key).or_else(|| UNLISTED.into_iter().find(|command| command.key() == key))
+}
+
 impl Host for RSpiceApp {
     type WorkspaceKey = Workspace;
     type SurfaceKey = SurfaceOwner;
     type Layout = LayoutSpec;
     type StatusFrame = status_order::StatusReadings;
+    type Availability = CommandAvailability;
+    type Menu = ApplicationMenu;
+    type MenuEntry = MenuEntry;
 
     fn contribute(&mut self, point: Point<Workspace, SurfaceOwner, LayoutSpec>, ui: &mut Ui) {
         let app = self;
@@ -411,6 +446,81 @@ impl Host for RSpiceApp {
     fn status_cells(&self) -> &'static [StatusCell<RSpiceApp>] {
         status_order::STATUS_ORDER
     }
+
+    fn command_registry(&self) -> &'static Registry {
+        command_registry()
+    }
+
+    fn availability(&self, key: CommandKey) -> CommandAvailability {
+        command(key).map_or(CommandAvailability::Hidden, |command| {
+            command.availability(self)
+        })
+    }
+
+    fn is_enabled(&self, key: CommandKey) -> bool {
+        command(key).is_some_and(|command| command.is_enabled(self))
+    }
+
+    fn checked(&self, key: CommandKey) -> Option<bool> {
+        command(key).and_then(|command| command.checked(self))
+    }
+
+    fn label(&self, key: CommandKey) -> &'static str {
+        command(key).map_or(key.as_str(), |command| command.spec().label)
+    }
+
+    fn shortcut_label(
+        &self,
+        key: CommandKey,
+        platform: CommandPlatform,
+        os: OperatingSystem,
+    ) -> String {
+        self.state
+            .model
+            .preferences
+            .shortcuts()
+            .resolved_label(&CommandRegistry, key, platform, os)
+    }
+
+    fn execute(&mut self, key: CommandKey) {
+        if let Some(command) = command(key) {
+            command.execute(self);
+        }
+    }
+
+    fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon> {
+        command(key).and_then(menus::command_icon)
+    }
+
+    fn palette_icon(&self, key: CommandKey) -> Option<Icon> {
+        command(key).and_then(palette_icons::palette_icon)
+    }
+
+    fn open_workspace(&self, workspace: Workspace) -> CommandKey {
+        Command::OpenWorkspace(workspace).key()
+    }
+
+    fn menu_entries(&self, menu: ApplicationMenu) -> &'static [MenuEntry] {
+        menu.entries()
+    }
+
+    fn compact_menu(&self) -> &'static [MenuEntry] {
+        COMPACT_MENU
+    }
+
+    fn source_editor_menu(&self) -> &'static [MenuEntry] {
+        SOURCE_EDITOR_MENU
+    }
+
+    fn validate_commands(&self) -> Result<(), String> {
+        let mut keys = Vec::new();
+        for menu in menus::ALL_MENUS {
+            menu_keys(menu.entries(), &mut keys);
+        }
+        menu_keys(COMPACT_MENU, &mut keys);
+        menu_keys(SOURCE_EDITOR_MENU, &mut keys);
+        command_registry().validate(ids::named().chain(keys.into_iter().map(|key| ("a menu", key))))
+    }
 }
 
 impl DocumentHost for AppState {
@@ -530,4 +640,99 @@ fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
             .results
             .valid_selected_trace(&app.state.model.simulation)
             .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_registry_answers_every_key_the_menus_and_the_framework_name() {
+        assert_eq!(RSpiceApp::test_instance().validate_commands(), Ok(()));
+    }
+
+    /// Each key framework code names by an id is the key of the command the
+    /// id is named for.
+    #[test]
+    fn each_framework_id_names_its_command() {
+        for (id, command) in [
+            (ids::ACCOUNT_ORGANIZATION, Command::AccountOrganization),
+            (ids::CLEAR_CONSOLE, Command::ClearConsole),
+            (ids::COMMAND_PALETTE, Command::CommandPalette),
+            (
+                ids::DESIGN_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Design),
+            ),
+            (ids::MEASUREMENT_LIBRARY, Command::MeasurementLibrary),
+            (
+                ids::MODELS_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Models),
+            ),
+            (
+                ids::NETLIST_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Netlist),
+            ),
+            (ids::OPEN_CONSOLE, Command::OpenConsole),
+            (ids::OPEN_NOTIFICATIONS, Command::OpenNotifications),
+            (ids::PREFERENCES, Command::Preferences),
+            (ids::PROJECT_LAUNCHER, Command::ProjectLauncher),
+            (
+                ids::PROJECT_RECOVERY,
+                Command::ProjectPage(ProjectPage::Recovery),
+            ),
+            (
+                ids::PROJECT_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Project),
+            ),
+            (ids::RESET_LAYOUT, Command::ResetLayout),
+            (
+                ids::RESULTS_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Results),
+            ),
+            (ids::SAVE, Command::Save),
+            (
+                ids::SIMULATE_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Simulate),
+            ),
+            (ids::SPECIALIST_TOOL_BROWSER, Command::SpecialistToolBrowser),
+            (
+                ids::STIMULUS_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Stimulus),
+            ),
+            (ids::TOGGLE_CONSOLE, Command::ToggleConsole),
+            (
+                ids::TOGGLE_CONSOLE_MAXIMIZED,
+                Command::ToggleConsoleMaximized,
+            ),
+            (ids::TOGGLE_FOCUS_MODE, Command::ToggleFocusMode),
+            (
+                ids::VERIFY_WORKSPACE,
+                Command::OpenWorkspace(Workspace::Verify),
+            ),
+            (ids::WORKSPACE_LAYOUTS, Command::WorkspaceLayouts),
+        ] {
+            assert_eq!(id, command.key(), "{command:?}");
+            assert_eq!(legacy_command(id), Some(command), "{command:?}");
+        }
+    }
+
+    /// The commands the registry leaves out answer by key exactly as they
+    /// answer by value, and nothing else answers to their keys.
+    #[test]
+    fn a_left_out_command_answers_by_key() {
+        let app = RSpiceApp::test_instance();
+        for left_out in UNLISTED {
+            assert_eq!(legacy_command(left_out.key()), None, "{left_out:?}");
+            assert_eq!(command(left_out.key()), Some(left_out));
+            assert_eq!(
+                app.availability(left_out.key()),
+                left_out.availability(&app)
+            );
+            assert_eq!(app.label(left_out.key()), left_out.spec().label);
+        }
+        assert_eq!(
+            app.availability(CommandKey::new("no-such-command")),
+            CommandAvailability::Hidden
+        );
+    }
 }

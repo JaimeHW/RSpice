@@ -10,13 +10,14 @@
 use egui::{Popup, Rect, Sense, Vec2};
 
 use super::ToolbarCommandPresentation;
+use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button};
+use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
 
 /// A tool the row had no slot for this frame.
@@ -31,20 +32,24 @@ pub(super) struct OverflowTool {
 #[derive(Clone, Copy)]
 pub(super) enum OverflowAction {
     /// A command, with the way the row draws it.
-    Command(Command, ToolbarCommandPresentation),
+    Command(CommandKey, ToolbarCommandPresentation),
     /// A toolbar action that is not a command, such as opening the
     /// generated deck. Always available.
     Run(fn(&mut AppState)),
 }
 
 impl OverflowTool {
-    pub(super) fn command(command: Command, presentation: ToolbarCommandPresentation) -> Self {
+    pub(super) fn command(
+        host: &impl Host,
+        command: CommandKey,
+        presentation: ToolbarCommandPresentation,
+    ) -> Self {
         let (icon, label, selected) = match presentation {
             ToolbarCommandPresentation::Icon {
                 icon,
                 selected,
                 label,
-            } => (icon, label.unwrap_or(command.spec().label), selected),
+            } => (icon, label.unwrap_or(host.label(command)), selected),
             ToolbarCommandPresentation::Text { icon, label } => (icon, label, false),
         };
         Self {
@@ -57,7 +62,7 @@ impl OverflowTool {
 
     fn availability(&self, app: &RSpiceApp) -> CommandAvailability {
         match self.action {
-            OverflowAction::Command(command, _) => command.availability(app),
+            OverflowAction::Command(command, _) => app.availability(command),
             OverflowAction::Run(_) => CommandAvailability::Available,
         }
     }
@@ -120,7 +125,7 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
             if tool_row(ui, app, tool, row_height) {
                 match tool.action {
                     OverflowAction::Command(command, _) => {
-                        command.execute(app);
+                        app.execute(command);
                     }
                     OverflowAction::Run(run) => run(&mut app.state),
                 }

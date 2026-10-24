@@ -6,6 +6,7 @@ use crate::state::{AnalysisResult, AnalysisType, Point, SimulationRun};
 use crate::workbench::AppState;
 use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::WorkbenchSession;
 use rspice_design::drc::DrcResult;
 

@@ -17,12 +17,13 @@ use egui::{
     UiBuilder, UiKind, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
 use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::{Command, command_catalog};
+use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec};
+use crate::workbench::framework::host::Host;
 
 use crate::workbench::app::RSpiceApp;
 
@@ -42,7 +43,7 @@ pub struct CommandPaletteState {
     pub(crate) initial_scope: Option<String>,
     /// Commands run from the palette, newest first — leads the empty-query
     /// list under a RECENT header. Survives close/reopen, capped at five.
-    pub(crate) recent: Vec<crate::workbench::commands::vocabulary::Command>,
+    pub(crate) recent: Vec<CommandKey>,
     /// Whether the palette owns the canonical `?surface=command-palette`
     /// route. Contextual test and embedded hosts may still render the palette
     /// without changing application navigation.
@@ -238,11 +239,10 @@ impl PaletteScope {
             .find(|scope| scope.label().eq_ignore_ascii_case(label))
     }
 
-    fn for_command(command: Command) -> Self {
-        if matches!(command, Command::OpenWorkspace(_) | Command::ProjectPage(_)) {
-            return Self::Navigate;
-        }
-        match command.spec().group {
+    /// The scope of the command `spec` declares, by its group. Opening a
+    /// workspace or a project page is navigating, as their groups say.
+    fn for_command(spec: &CommandSpec) -> Self {
+        match spec.group {
             "Navigate" | "Project" => Self::Navigate,
             "Design" => Self::Design,
             "Simulate" => Self::Simulation,
@@ -258,8 +258,8 @@ impl PaletteScope {
     }
 
     #[cfg(test)]
-    fn contains(self, command: Command) -> bool {
-        self == Self::All || Self::for_command(command) == self
+    fn contains(self, spec: &CommandSpec) -> bool {
+        self == Self::All || Self::for_command(spec) == self
     }
 
     fn detail(self, registry_group: &'static str) -> &'static str {
@@ -345,13 +345,36 @@ struct SignalEntry {
     visible: bool,
 }
 
+/// A registered command as the palette lists it: what the registry declares
+/// about it, and the glyph its row wears.
+#[derive(Debug, Clone, Copy)]
+struct PaletteCommand {
+    spec: &'static CommandSpec,
+    /// The glyph the shell gives the command, where it has one of its own
+    /// rather than its scope's.
+    icon: Option<Icon>,
+}
+
+impl PaletteCommand {
+    const fn key(self) -> CommandKey {
+        self.spec.key
+    }
+}
+
+/// One command is one key: the registry declares each key once.
+impl PartialEq for PaletteCommand {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
 /// A palette target always retains the typed identity needed to resolve and
 /// execute the production object represented by its row. Resource entries are
 /// deliberately view-only for recency; only registry commands have a stable
 /// command-history identity.
 #[derive(Debug, Clone, PartialEq)]
 enum PaletteEntry {
-    Command(Command),
+    Command(PaletteCommand),
     CellView(CellViewEntry),
     Model(ModelEntry),
     Signal(SignalEntry),
@@ -360,7 +383,7 @@ enum PaletteEntry {
 impl PaletteEntry {
     fn scope(&self) -> PaletteScope {
         match self {
-            Self::Command(command) => PaletteScope::for_command(*command),
+            Self::Command(command) => PaletteScope::for_command(command.spec),
             Self::CellView(_) => PaletteScope::Design,
             Self::Model(_) => PaletteScope::Models,
             Self::Signal(_) => PaletteScope::Signals,
@@ -369,7 +392,7 @@ impl PaletteEntry {
 
     fn name(&self) -> Cow<'_, str> {
         match self {
-            Self::Command(command) => Cow::Borrowed(command_name(*command)),
+            Self::Command(command) => Cow::Borrowed(command_name(command.spec)),
             Self::CellView(entry) => Cow::Owned(format!(
                 "Open {} / {}",
                 entry.reference.cell, entry.reference.view
@@ -381,8 +404,8 @@ impl PaletteEntry {
 
     fn detail(&self) -> String {
         match self {
-            Self::Command(command) => PaletteScope::for_command(*command)
-                .detail(command.spec().group)
+            Self::Command(command) => PaletteScope::for_command(command.spec)
+                .detail(command.spec.group)
                 .to_owned(),
             Self::CellView(entry) => {
                 let path = entry.reference.display_path();
@@ -413,11 +436,11 @@ impl PaletteEntry {
     fn search_metadata(&self) -> String {
         match self {
             Self::Command(command) => {
-                let scope = PaletteScope::for_command(*command);
-                let spec = command.spec();
+                let spec = command.spec;
+                let scope = PaletteScope::for_command(spec);
                 format!(
                     "{} {} {} {}",
-                    spec.id,
+                    spec.key.as_str(),
                     spec.group,
                     scope.label(),
                     scope.detail(spec.group)
@@ -447,31 +470,28 @@ impl PaletteEntry {
 
     fn shortcut_label(
         &self,
-        shortcuts: &crate::state::shortcuts::ShortcutPreferences,
+        host: &impl Host,
         platform: CommandPlatform,
         operating_system: egui::os::OperatingSystem,
     ) -> String {
         match self {
-            Self::Command(command) => shortcuts.resolved_label(
-                &crate::workbench::commands::vocabulary::CommandRegistry,
-                command.key(),
-                platform,
-                operating_system,
-            ),
+            Self::Command(command) => {
+                host.shortcut_label(command.key(), platform, operating_system)
+            }
             Self::CellView(_) | Self::Model(_) | Self::Signal(_) => String::new(),
         }
     }
 
-    fn command(&self) -> Option<Command> {
+    fn command(&self) -> Option<CommandKey> {
         match self {
-            Self::Command(command) => Some(*command),
+            Self::Command(command) => Some(command.key()),
             Self::CellView(_) | Self::Model(_) | Self::Signal(_) => None,
         }
     }
 
     fn availability(&self, app: &RSpiceApp) -> CommandAvailability {
         match self {
-            Self::Command(command) => command.availability(app),
+            Self::Command(command) => app.availability(command.key()),
             Self::CellView(_) | Self::Model(_) | Self::Signal(_) => CommandAvailability::Available,
         }
     }
@@ -479,7 +499,7 @@ impl PaletteEntry {
     fn execute(self, app: &mut RSpiceApp) -> Result<(), String> {
         match self {
             Self::Command(command) => {
-                command.execute(app);
+                app.execute(command.key());
                 Ok(())
             }
             Self::CellView(entry) => {
@@ -636,14 +656,21 @@ fn result_id(index: usize) -> Id {
     palette_id().with(("result", index))
 }
 
-/// Everything searchable is a real registry entry. The registry already
-/// excludes the palette itself, context-only Cancel, and private shell verbs.
-fn palette_commands() -> impl Iterator<Item = Command> {
-    command_catalog()
+/// Everything searchable is a real registry entry, in registry order. The
+/// registry already excludes the palette itself, context-only Cancel, and
+/// private shell verbs.
+fn palette_commands(host: &impl Host) -> impl Iterator<Item = PaletteCommand> + '_ {
+    host.command_registry()
+        .ordered()
+        .filter(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
+        .map(|spec| PaletteCommand {
+            spec,
+            icon: host.palette_icon(spec.key),
+        })
 }
 
-fn command_name(command: Command) -> &'static str {
-    command.spec().label.trim_end_matches('…')
+fn command_name(spec: &CommandSpec) -> &'static str {
+    spec.label.trim_end_matches('…')
 }
 
 /// How well text matches the query (lower sorts first), with matching display
@@ -714,7 +741,7 @@ fn match_entry(entry: &PaletteEntry, query: &str) -> Option<(u8, Vec<usize>)> {
 
 impl RSpiceApp {
     fn palette_entries(&self) -> Vec<PaletteEntry> {
-        let mut entries = palette_commands()
+        let mut entries = palette_commands(self)
             .map(PaletteEntry::Command)
             .collect::<Vec<_>>();
 
@@ -791,11 +818,7 @@ impl RSpiceApp {
                 CommandAvailability::Hidden => return None,
             };
             Some(PaletteRow {
-                shortcut: entry.shortcut_label(
-                    self.state.model.preferences.shortcuts(),
-                    platform,
-                    operating_system,
-                ),
+                shortcut: entry.shortcut_label(self, platform, operating_system),
                 entry,
                 marks,
                 blocked,
@@ -836,11 +859,7 @@ impl RSpiceApp {
                     });
                     let entry_scope = entry.scope();
                     let has_shortcut = !entry
-                        .shortcut_label(
-                            self.state.model.preferences.shortcuts(),
-                            platform,
-                            operating_system,
-                        )
+                        .shortcut_label(self, platform, operating_system)
                         .is_empty();
                     (recent_index.is_some()
                         || entry_scope == workspace_scope
@@ -1619,44 +1638,9 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
             PaletteEntry::Command(_) => unreachable!("command handled above"),
         };
     };
-    match command {
-        Command::PlaceWire | Command::JoinCollinearWires => Icon::Wire,
-        Command::PlaceBus => Icon::Bus,
-        Command::PlaceBusTap => Icon::Bus,
-        Command::PlaceJunction => Icon::Grid,
-        Command::PlaceLabel => Icon::NetLabel,
-        Command::PlaceProbe => Icon::Probe,
-        Command::PlacePin => Icon::Pin,
-        Command::PlaceText => Icon::NetLabel,
-        Command::PlaceShape => Icon::Grid,
-        Command::MoveSelection | Command::StretchSelection => Icon::Select,
-        Command::ArraySelection => Icon::Grid,
-        Command::ReplaceInstance => Icon::Refresh,
-        Command::CreateHierarchy => Icon::Folder,
-        Command::ConnectivityManager => Icon::Bus,
-        Command::ConfigurationSets => Icon::Grid,
-        Command::RuleSetup => Icon::Check,
-        Command::RunSimulation => Icon::Run,
-        Command::StopSimulation => Icon::Stop,
-        Command::CheckCellview
-        | Command::CheckDesign
-        | Command::CheckAndSave
-        | Command::PreflightChecks => Icon::Check,
-        Command::OpenProject
-        | Command::ProjectLauncher
-        | Command::RecentProjects
-        | Command::OpenDocument
-        | Command::ModelBrowser => Icon::Folder,
-        Command::NewProject
-        | Command::Save
-        | Command::SaveAs
-        | Command::SaveAll
-        | Command::ImportNetlist
-        | Command::ImportVerilogA
-        | Command::ExportSchematicSvg
-        | Command::ExportWaveformsCsv
-        | Command::ExportNetlist(_) => Icon::File,
-        _ => match PaletteScope::for_command(*command) {
+    command
+        .icon
+        .unwrap_or_else(|| match PaletteScope::for_command(command.spec) {
             PaletteScope::Navigate => Icon::Folder,
             PaletteScope::Design => Icon::Schematic,
             PaletteScope::Simulation => Icon::Simulate,
@@ -1666,8 +1650,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
             PaletteScope::Signals => Icon::Probe,
             PaletteScope::Help => Icon::Brand,
             PaletteScope::All | PaletteScope::Commands | PaletteScope::Automation => Icon::File,
-        },
-    }
+        })
 }
 
 fn render_footer(

@@ -10,8 +10,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{ProjectPage, Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
+use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::host::Host;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
 use crate::workbench::{ApplicationWindowId, WorkspacePreset};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -255,12 +256,12 @@ impl RSpiceApp {
             }
             WindowSessionAction::WorkspaceLayouts => {
                 self.state.workbench.window_session_dialog.close();
-                Command::WorkspaceLayouts.execute(self);
+                self.execute(ids::WORKSPACE_LAYOUTS);
             }
-            WindowSessionAction::ResetLayout => Command::ResetLayout.execute(self),
+            WindowSessionAction::ResetLayout => self.execute(ids::RESET_LAYOUT),
             WindowSessionAction::OpenRecovery => {
                 self.state.workbench.window_session_dialog.close();
-                Command::ProjectPage(ProjectPage::Recovery).execute(self);
+                self.execute(ids::PROJECT_RECOVERY);
             }
             WindowSessionAction::OpenWorkflow(workflow) => open_window_workflow(self, workflow),
             WindowSessionAction::Focus(window) => {

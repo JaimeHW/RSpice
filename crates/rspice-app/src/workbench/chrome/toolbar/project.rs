@@ -16,7 +16,7 @@ pub(in crate::workbench) fn no_project_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ProjectLauncher,
+        Command::ProjectLauncher.key(),
         WorkbenchIcon::Folder,
         "Open project launcher",
         layout,
@@ -24,7 +24,7 @@ pub(in crate::workbench) fn no_project_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::NewProject,
+        Command::NewProject.key(),
         WorkbenchIcon::Add,
         "New project",
         layout,
@@ -39,7 +39,7 @@ pub(in crate::workbench) fn project_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::NewCell,
+        Command::NewCell.key(),
         WorkbenchIcon::Add,
         "New cell",
         layout,

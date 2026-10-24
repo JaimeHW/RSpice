@@ -26,7 +26,7 @@ pub(in crate::workbench) fn simulation_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::SimulationOptions,
+        Command::SimulationOptions.key(),
         WorkbenchIcon::Sliders,
         layout,
     );
@@ -34,7 +34,7 @@ pub(in crate::workbench) fn simulation_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::PreflightChecks,
+        Command::PreflightChecks.key(),
         WorkbenchIcon::Check,
         "Run preflight",
         layout,
@@ -49,7 +49,7 @@ pub(in crate::workbench) fn verification_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::EditSpecifications,
+        Command::EditSpecifications.key(),
         WorkbenchIcon::Target,
         layout,
     );
