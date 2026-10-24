@@ -28,6 +28,7 @@ use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
 use crate::state::ModelsPage;
 use crate::state::Wire;
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage};
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {

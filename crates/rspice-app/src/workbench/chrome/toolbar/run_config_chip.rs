@@ -13,9 +13,9 @@ use egui::Vec2;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::framework::command_registry::CommandAvailability;
 
 /// Widest the plan chip may grow before its copy is clipped.
 ///

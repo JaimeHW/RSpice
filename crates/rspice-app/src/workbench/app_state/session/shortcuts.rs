@@ -8,9 +8,9 @@
 
 use egui::{InputState, Key, Modifiers};
 
-use crate::state::command_catalog::{CommandKey, CommandPlatform};
+use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform};
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
+use crate::workbench::framework::command_registry::Registry;
 
 mod canvas_focus;
 mod category;
@@ -31,9 +31,13 @@ pub(crate) use resolver::ShortcutResolverState;
 
 /// Accessibility projection of the same effective bindings consumed by the
 /// runtime resolver. Empty/unsupported bindings are omitted rather than
-/// announcing a key that cannot execute on the current host.
+/// announcing a key that cannot execute on the current host. `catalog` and
+/// `registry` are the shell's: the commands the profile binds, and what each
+/// is called.
 pub(crate) fn accessibility_shortcut_summary(
     shortcuts: &ShortcutPreferences,
+    catalog: &impl CommandCatalog,
+    registry: &Registry,
     platform: CommandPlatform,
     operating_system: egui::os::OperatingSystem,
     commands: &[CommandKey],
@@ -41,15 +45,12 @@ pub(crate) fn accessibility_shortcut_summary(
     let entries = commands
         .iter()
         .filter_map(|command| {
-            let labels =
-                shortcuts.resolved_labels(&CommandRegistry, *command, platform, operating_system);
+            let labels = shortcuts.resolved_labels(catalog, *command, platform, operating_system);
             (!labels.is_empty()).then(|| {
                 format!(
                     "{}: {}",
                     labels.join(" or "),
-                    command_registry()
-                        .label(*command)
-                        .trim_end_matches('\u{2026}')
+                    registry.label(*command).trim_end_matches('\u{2026}')
                 )
             })
         })
@@ -65,7 +66,7 @@ pub(crate) fn accessibility_shortcut_summary(
 mod accessibility_tests {
     use super::*;
     use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
 
     #[test]
     fn accessibility_projection_uses_effective_custom_profile_and_host() {
@@ -87,6 +88,8 @@ mod accessibility_tests {
 
         let summary = accessibility_shortcut_summary(
             &shortcuts,
+            &CommandRegistry,
+            command_registry(),
             CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
             &[Command::SymbolCircleTool.key()],

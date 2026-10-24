@@ -37,14 +37,14 @@ use crate::workbench::RSpiceApp;
 use super::super::design_system::{self, WorkbenchIcon};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::{
-    CommandAvailability, ModelEditorWorkflow, active_model_editor_workflow,
-    close_model_editor_workflow, prepare_model_editor_workflow, request_model_editor_workflow,
-    set_model_editor_workflow_error,
+    ModelEditorWorkflow, active_model_editor_workflow, close_model_editor_workflow,
+    prepare_model_editor_workflow, request_model_editor_workflow, set_model_editor_workflow_error,
 };
 use crate::workbench::documents::model_editor::{
     ModelComparisonDisposition, ModelEditorSection, ModelParameterKind,
     QualificationAuthoringAnalysis, QualificationAuthoringProbe, QualificationAuthoringSample,
 };
+use crate::workbench::framework::command_registry::CommandAvailability;
 
 /// The candidate band: one line, the open candidate's name and whatever is
 /// wrong with it. It was 82 px when it also carried a monogram, a kicker, a

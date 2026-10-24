@@ -95,7 +95,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
     assert!(!drawing_sheet_editable(&app.state));
     assert_eq!(
         crate::workbench::commands::vocabulary::Command::SheetProperties.availability(&app),
-        crate::workbench::commands::CommandAvailability::Disabled(
+        crate::workbench::framework::command_registry::CommandAvailability::Disabled(
             "the active schematic is read-only"
         )
     );

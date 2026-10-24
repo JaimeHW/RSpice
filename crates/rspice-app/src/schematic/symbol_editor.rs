@@ -27,9 +27,11 @@ fn symbol_canvas_accessibility_label(
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
     let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
         state.model.preferences.shortcuts(),
+        &CommandRegistry,
+        command_registry(),
         platform,
         operating_system,
         &[

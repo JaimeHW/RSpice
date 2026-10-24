@@ -12,7 +12,6 @@ use crate::state::shortcuts::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutPreferences, SingleKeyCanvasPolicy,
     shortcut_context_precedence_rank,
 };
-use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::state::Workspace;
 
 use super::ShortcutInputSnapshot;
@@ -63,11 +62,13 @@ impl ShortcutResolverState {
 
     /// Resolve before touching egui's input queue. `is_available` is evaluated
     /// before precedence so a disabled higher-tier command cannot steal a
-    /// chord from an executable lower-tier command.
+    /// chord from an executable lower-tier command. `catalog` is the shell's
+    /// list of commands the profile binds.
     pub(crate) fn resolve(
         &mut self,
         snapshot: &ShortcutInputSnapshot,
         profile: &ShortcutPreferences,
+        catalog: &impl CommandCatalog,
         platform: CommandPlatform,
         environment: ShortcutEnvironment,
         injected_now: Duration,
@@ -87,7 +88,7 @@ impl ShortcutResolverState {
         // mixing default bindings with untrusted custom policies would produce
         // a third, never-authored runtime profile.
         let (timeout_policy, precedence, single_key_policy) =
-            if profile.is_effective_profile_valid(&CommandRegistry) {
+            if profile.is_effective_profile_valid(catalog) {
                 (
                     profile.policies().chord_timeout(),
                     profile.policies().context_precedence(),
@@ -105,6 +106,7 @@ impl ShortcutResolverState {
             let pending_analysis = analyze_prefix(
                 &self.pending,
                 profile,
+                catalog,
                 platform,
                 environment,
                 snapshot.has_non_canvas_focus(),
@@ -170,6 +172,7 @@ impl ShortcutResolverState {
                 let analysis = analyze_prefix(
                     &prefix,
                     profile,
+                    catalog,
                     platform,
                     environment,
                     snapshot.has_non_canvas_focus(),
@@ -201,6 +204,7 @@ impl ShortcutResolverState {
             let previous = analyze_prefix(
                 &self.pending,
                 profile,
+                catalog,
                 platform,
                 environment,
                 snapshot.has_non_canvas_focus(),
@@ -213,6 +217,7 @@ impl ShortcutResolverState {
             let analysis = analyze_prefix(
                 &extended,
                 profile,
+                catalog,
                 platform,
                 environment,
                 snapshot.has_non_canvas_focus(),
@@ -242,6 +247,7 @@ impl ShortcutResolverState {
                 let fresh = analyze_prefix(
                     &[press],
                     profile,
+                    catalog,
                     platform,
                     environment,
                     snapshot.has_non_canvas_focus(),
@@ -359,6 +365,7 @@ impl PrefixAnalysis {
 fn analyze_prefix(
     prefix: &[ShortcutKeyPress],
     profile: &ShortcutPreferences,
+    catalog: &impl CommandCatalog,
     platform: CommandPlatform,
     environment: ShortcutEnvironment,
     non_canvas_focus: bool,
@@ -367,8 +374,8 @@ fn analyze_prefix(
     is_available: &mut impl FnMut(CommandKey) -> bool,
 ) -> PrefixAnalysis {
     let mut analysis = PrefixAnalysis::default();
-    for (registry_index, command) in CommandRegistry.commands().iter().copied().enumerate() {
-        let Some(context) = CommandRegistry.context(command) else {
+    for (registry_index, command) in catalog.commands().iter().copied().enumerate() {
+        let Some(context) = catalog.context(command) else {
             continue;
         };
         if !context_is_active(context, environment)
@@ -378,7 +385,7 @@ fn analyze_prefix(
             continue;
         }
         for (binding_index, binding) in profile
-            .effective_bindings(&CommandRegistry, command)
+            .effective_bindings(catalog, command)
             .into_iter()
             .enumerate()
         {
@@ -520,7 +527,7 @@ mod tests {
 
     use super::*;
     use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
     fn primary() -> Modifiers {
         Modifiers {
@@ -617,6 +624,7 @@ mod tests {
         let first = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -633,6 +641,7 @@ mod tests {
                 false,
             ),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(100),
@@ -644,6 +653,7 @@ mod tests {
         let deferred = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(101),
@@ -672,6 +682,7 @@ mod tests {
         let first = state.resolve(
             &snapshot(&[event(Key::Q, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_secs(5),
@@ -681,6 +692,7 @@ mod tests {
         let not_rewound = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_secs(1),
@@ -690,6 +702,7 @@ mod tests {
         let expired = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(6_500),
@@ -721,6 +734,7 @@ mod tests {
         state.resolve(
             &snapshot(&[event(Key::Q, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -729,6 +743,7 @@ mod tests {
         let waiting = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_secs(60),
@@ -739,6 +754,7 @@ mod tests {
         let mismatch = state.resolve(
             &snapshot(&[event(Key::S, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_secs(61),
@@ -750,6 +766,7 @@ mod tests {
         let deferred = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_secs(62),
@@ -775,6 +792,7 @@ mod tests {
                 .resolve(
                     &ignored_events,
                     &ShortcutPreferences::default(),
+                    &CommandRegistry,
                     CommandPlatform::Browser,
                     design(false),
                     Duration::ZERO,
@@ -793,6 +811,7 @@ mod tests {
         let browser = state.resolve(
             &snapshot(&[event(Key::F12, Modifiers::NONE, false)], false),
             &desktop_only,
+            &CommandRegistry,
             CommandPlatform::Browser,
             design(false),
             Duration::from_millis(1),
@@ -803,6 +822,7 @@ mod tests {
         let desktop = state.resolve(
             &snapshot(&[event(Key::F12, Modifiers::NONE, false)], false),
             &desktop_only,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(2),
@@ -831,6 +851,7 @@ mod tests {
         let resolved = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::ZERO,
@@ -852,6 +873,7 @@ mod tests {
         let resolved = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -888,6 +910,7 @@ mod tests {
         let fallback = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -897,6 +920,7 @@ mod tests {
         let rejected_override = state.resolve(
             &snapshot(&[event(Key::F12, Modifiers::NONE, false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(1),
@@ -906,6 +930,7 @@ mod tests {
         let rejected_policy = state.resolve(
             &snapshot(&[event(Key::W, Modifiers::NONE, false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::from_millis(2),
@@ -921,6 +946,7 @@ mod tests {
         let unfocused = state.resolve(
             &snapshot(&[event(Key::W, Modifiers::NONE, false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -930,6 +956,7 @@ mod tests {
         let focused = state.resolve(
             &snapshot(&[event(Key::W, Modifiers::NONE, false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::from_millis(1),
@@ -940,6 +967,7 @@ mod tests {
         let model_symbol = state.resolve(
             &snapshot(&[event(Key::L, Modifiers::NONE, false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             models_symbol(true),
             Duration::from_millis(2),
@@ -965,6 +993,7 @@ mod tests {
             let resolved = state.resolve(
                 &snapshot(&[event(key, Modifiers::NONE, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 models_symbol(true),
                 Duration::from_millis(time),
@@ -976,6 +1005,7 @@ mod tests {
         let unbound_select = state.resolve(
             &snapshot(&[event(Key::S, Modifiers::NONE, false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             models_symbol(true),
             Duration::from_millis(6),
@@ -997,6 +1027,7 @@ mod tests {
             ShortcutResolverState::default().resolve(
                 &snapshot(&[event(Key::S, Modifiers::NONE, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 environment,
                 Duration::ZERO,
@@ -1023,6 +1054,7 @@ mod tests {
             ShortcutResolverState::default().resolve(
                 &snapshot(&[event(key, modifiers, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 environment,
                 Duration::ZERO,
@@ -1056,6 +1088,7 @@ mod tests {
             ShortcutResolverState::default().resolve(
                 &snapshot(&[event(Key::T, modifiers, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 environment,
                 Duration::ZERO,
@@ -1091,6 +1124,7 @@ mod tests {
         let result = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             results(),
             Duration::ZERO,
@@ -1139,6 +1173,7 @@ mod tests {
             let resolution = state.resolve(
                 &snapshot(&[event(stroke.key(), modifiers, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 results(),
                 Duration::ZERO,
@@ -1177,6 +1212,7 @@ mod tests {
             let resolution = state.resolve(
                 &snapshot(&[event(stroke.key(), modifiers, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 results(),
                 Duration::ZERO,
@@ -1212,6 +1248,7 @@ mod tests {
         state.resolve(
             &snapshot(&[event(Key::Q, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -1222,6 +1259,7 @@ mod tests {
                 .resolve(
                     &ShortcutInputSnapshot::empty_for_test(false),
                     &profile,
+                    &CommandRegistry,
                     CommandPlatform::Desktop,
                     design(false),
                     Duration::from_millis(2_999),
@@ -1235,6 +1273,7 @@ mod tests {
                 .resolve(
                     &ShortcutInputSnapshot::empty_for_test(false),
                     &profile,
+                    &CommandRegistry,
                     CommandPlatform::Desktop,
                     design(false),
                     Duration::from_secs(3),
@@ -1268,6 +1307,7 @@ mod tests {
         let resolution = state.resolve(
             &snapshot(&events, false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -1287,6 +1327,7 @@ mod tests {
         let plain = state.resolve(
             &snapshot(&[event(Key::W, Modifiers::NONE, false)], false),
             &require_alt,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::ZERO,
@@ -1306,6 +1347,7 @@ mod tests {
                 false,
             ),
             &require_alt,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(1),
@@ -1330,6 +1372,7 @@ mod tests {
                 false,
             ),
             &disabled,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::from_millis(2),
@@ -1355,6 +1398,7 @@ mod tests {
         let chrome = state.resolve(
             &snapshot(&[event(Key::Q, primary(), false)], false),
             &chrome_first,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::ZERO,
@@ -1369,6 +1413,7 @@ mod tests {
         let editor = state.resolve(
             &snapshot(&[event(Key::Q, primary(), false)], false),
             &editor_first,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::from_millis(1),
@@ -1384,6 +1429,7 @@ mod tests {
         let editor = state.resolve(
             &snapshot(&[event(Key::W, Modifiers::NONE, false)], true),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::ZERO,
@@ -1393,6 +1439,7 @@ mod tests {
         let global = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], true),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(false),
             Duration::from_millis(1),
@@ -1412,6 +1459,7 @@ mod tests {
             let resolved = state.resolve(
                 &snapshot(&[event(key, Modifiers::NONE, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 environment,
                 Duration::from_millis(time),
@@ -1446,6 +1494,7 @@ mod tests {
             let resolved = state.resolve(
                 &snapshot(&[event(key, modifiers, false)], false),
                 &profile,
+                &CommandRegistry,
                 CommandPlatform::Desktop,
                 environment,
                 Duration::from_millis(time),
@@ -1468,6 +1517,7 @@ mod tests {
         let in_editor = state.resolve(
             &snapshot(&[event(Key::D, primary(), false)], true),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             focused_source_editor(),
             Duration::ZERO,
@@ -1477,6 +1527,7 @@ mod tests {
         let on_canvas = state.resolve(
             &snapshot(&[event(Key::D, primary(), false)], false),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             design(true),
             Duration::from_millis(1),
@@ -1486,6 +1537,7 @@ mod tests {
         let unfocused = state.resolve(
             &snapshot(&[event(Key::Slash, primary(), false)], true),
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             ShortcutEnvironment {
                 source_editor_focus: false,

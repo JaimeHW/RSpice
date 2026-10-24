@@ -23,11 +23,11 @@ use crate::ui::icons::Icon;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
-use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::host::{
     DocumentHost, Host, InspectorScope, NavigatorSection, Point, RailEntry, StatusCell,
@@ -66,7 +66,6 @@ impl Host for RSpiceApp {
     type SurfaceKey = SurfaceOwner;
     type Layout = LayoutSpec;
     type StatusFrame = status_order::StatusReadings;
-    type Availability = CommandAvailability;
     type Menu = ApplicationMenu;
     type MenuEntry = MenuEntry;
 

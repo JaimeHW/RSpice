@@ -23,7 +23,7 @@ use crate::workbench::framework::host::{Host, Point, ToolbarScope, ToolbarSlot};
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
-use crate::workbench::commands::CommandAvailability;
+use crate::workbench::framework::command_registry::CommandAvailability;
 
 use run_config_chip::RUN_CONFIG_CHIP_MAX_WIDTH;
 

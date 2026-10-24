@@ -12,20 +12,8 @@ use crate::state::command_catalog::{
     CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::state::Workspace;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandAvailability {
-    Available,
-    Disabled(&'static str),
-    Hidden,
-}
-
-impl CommandAvailability {
-    pub const fn is_available(self) -> bool {
-        matches!(self, Self::Available)
-    }
-}
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];

@@ -329,7 +329,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     ] {
         assert_eq!(
             command.availability(&app),
-            crate::workbench::commands::CommandAvailability::Hidden,
+            crate::workbench::framework::command_registry::CommandAvailability::Hidden,
             "{command:?} off a source page"
         );
     }

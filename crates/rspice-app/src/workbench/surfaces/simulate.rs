@@ -1199,9 +1199,11 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let split_availability = Command::ToggleResultsSplit.availability(app);
     let split_enabled = split_availability.is_available();
     let split_reason = match split_availability {
-        crate::workbench::commands::CommandAvailability::Disabled(reason) => Some(reason),
-        crate::workbench::commands::CommandAvailability::Available
-        | crate::workbench::commands::CommandAvailability::Hidden => None,
+        crate::workbench::framework::command_registry::CommandAvailability::Disabled(reason) => {
+            Some(reason)
+        }
+        crate::workbench::framework::command_registry::CommandAvailability::Available
+        | crate::workbench::framework::command_registry::CommandAvailability::Hidden => None,
     };
     let split_label = if app.state.workbench.split_with_results {
         "Unsplit results"

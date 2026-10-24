@@ -22,7 +22,7 @@ pub(in crate::workbench) mod workspace;
 
 use egui::{Context, Popup};
 
-use crate::workbench::commands::vocabulary::Command as ShortcutCommand;
+use crate::workbench::commands::vocabulary::{Command as ShortcutCommand, CommandRegistry};
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -80,6 +80,7 @@ impl RSpiceApp {
         let resolution = resolver.resolve(
             &snapshot,
             &profile,
+            &CommandRegistry,
             platform,
             environment,
             injected_now,
@@ -829,6 +830,7 @@ mod shortcut_ownership_tests {
         let resolution = resolver.resolve(
             &snapshot,
             &profile,
+            &CommandRegistry,
             CommandPlatform::Desktop,
             environment,
             std::time::Duration::from_millis(1),

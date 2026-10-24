@@ -21,7 +21,7 @@ use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
-use crate::workbench::commands::CommandAvailability;
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec};
 use crate::workbench::framework::host::Host;
 

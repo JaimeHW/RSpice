@@ -15,8 +15,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::CommandAvailability;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button};
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
 

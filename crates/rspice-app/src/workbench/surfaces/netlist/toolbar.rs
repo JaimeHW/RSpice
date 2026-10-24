@@ -904,8 +904,8 @@ fn run_control(
     app: &RSpiceApp,
     messages: crate::workbench::MessageCatalog,
 ) -> Option<NetlistToolbarAction> {
-    use crate::workbench::commands::CommandAvailability;
     use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::framework::command_registry::CommandAvailability;
 
     let (execution_active, label) = run_control_label(app, messages);
     let (command, action) = if execution_active {

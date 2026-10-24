@@ -49,8 +49,9 @@ use crate::workbench::app::{
 };
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
-use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::model_editor::{self, ModelEditorSection};
+use crate::workbench::framework::command_registry::CommandAvailability;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     manager::show(ui, app);

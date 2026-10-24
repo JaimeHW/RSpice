@@ -1259,6 +1259,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
                 .resolve(
                     &snapshot,
                     &profile,
+                    &crate::workbench::commands::vocabulary::CommandRegistry,
                     runtime_command_platform(&ctx),
                     ShortcutEnvironment {
                         workspace: crate::workbench::state::Workspace::Design,

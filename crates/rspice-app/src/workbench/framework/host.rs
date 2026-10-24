@@ -28,7 +28,7 @@ use egui::Ui;
 use egui::os::OperatingSystem;
 use rspice_ui_kit::panels::WorkbenchIcon;
 
-use super::command_registry::Registry;
+use super::command_registry::{CommandAvailability, Registry};
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Problem;
@@ -208,8 +208,6 @@ pub(crate) trait Host: 'static {
     type Layout;
     /// What the status cells read in common on a frame.
     type StatusFrame: 'static;
-    /// Whether a command can run here, and why not.
-    type Availability: Copy;
     /// A menu the title bar offers by name.
     type Menu: Copy;
     /// One entry of a menu, as the host writes its menus down.
@@ -255,7 +253,7 @@ pub(crate) trait Host: 'static {
     fn command_registry(&self) -> &'static Registry;
 
     /// Whether the command `key` names can run here, and why not.
-    fn availability(&self, key: CommandKey) -> Self::Availability;
+    fn availability(&self, key: CommandKey) -> CommandAvailability;
 
     /// Whether the command `key` names would run if raised now.
     fn is_enabled(&self, key: CommandKey) -> bool;

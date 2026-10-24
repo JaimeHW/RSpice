@@ -486,6 +486,7 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
                             false,
                         ),
                         &profile,
+                        &CommandRegistry,
                         CommandPlatform::Desktop,
                         environment,
                         Duration::ZERO,

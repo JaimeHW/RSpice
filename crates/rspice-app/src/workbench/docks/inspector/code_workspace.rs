@@ -137,7 +137,9 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let tuning = crate::workbench::commands::vocabulary::Command::VerificationPage(
         crate::workbench::state::VerificationPage::Tuning,
     );
-    if let crate::workbench::commands::CommandAvailability::Available = tuning.availability(app) {
+    if let crate::workbench::framework::command_registry::CommandAvailability::Available =
+        tuning.availability(app)
+    {
         section_header(
             ui,
             &messages.text(crate::workbench::MessageId::NetlistParameterExploration),

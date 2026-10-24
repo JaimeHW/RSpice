@@ -7,9 +7,9 @@ use egui::{Align, Layout, Vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 

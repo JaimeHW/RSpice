@@ -34,6 +34,21 @@ pub(crate) enum CommandOwner {
     Settings,
 }
 
+/// Whether a command can run here: available, offered but refused for the
+/// reason given, or not offered at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandAvailability {
+    Available,
+    Disabled(&'static str),
+    Hidden,
+}
+
+impl CommandAvailability {
+    pub const fn is_available(self) -> bool {
+        matches!(self, Self::Available)
+    }
+}
+
 /// The yes-or-no facts a command declares about itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CommandFlags(u8);

@@ -13,7 +13,7 @@ use crate::workbench::framework::host::Host;
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::WorkbenchSession;
-use crate::workbench::commands::CommandAvailability;
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::ids;
 
 pub(in crate::workbench) mod application_menus;

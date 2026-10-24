@@ -28,7 +28,6 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
-use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
     Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row_captioned,
@@ -36,6 +35,7 @@ use crate::workbench::design_system::{
     property_row_input_captioned, property_row_input_with_hint,
     schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
 };
+use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::state::{InlineEditField, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
