@@ -373,7 +373,7 @@ impl AppState {
                     && self.results.analysis.eye_diagram_state.trace_count() > 0
                 {
                     ViewerCapability::available("Active analysis eye traces loaded")
-                } else if self.model.active_analysis_supports_eye_diagram() {
+                } else if active_analysis_supports_eye_diagram(&self.model) {
                     ViewerCapability::available(
                         "Can derive eye data from active transient waveforms",
                     )
@@ -424,7 +424,7 @@ impl AppState {
                         .is_some_and(|data| !data.is_empty());
                 if self.specialized_viewer_cache_matches_active(viewer) && has_spectrum {
                     ViewerCapability::available("Active analysis FFT spectrum data loaded")
-                } else if self.model.active_analysis_supports_fft() {
+                } else if active_analysis_supports_fft(&self.model) {
                     ViewerCapability::available("Can derive FFT from active transient waveforms")
                 } else {
                     ViewerCapability::unavailable("Requires sampled time-domain data for FFT")
@@ -463,44 +463,30 @@ impl AppState {
     }
 }
 
-impl Model {
-    /// Exact immutable result currently selected in the Results workspace.
-    pub(crate) fn active_specialized_viewer_cache_provenance(
-        &self,
-    ) -> Option<SpecializedViewerCacheProvenance> {
-        let run = self.simulation.active_run()?;
-        let analysis = self.simulation.active_analysis()?;
-        Some(SpecializedViewerCacheProvenance::for_analysis(
-            run.dataset_id,
-            analysis,
-        ))
-    }
+fn active_analysis_supports_eye_diagram(model: &Model) -> bool {
+    active_time_domain_waveform_len(model)
+        .map(|len| len >= 8)
+        .unwrap_or(false)
+}
 
-    fn active_analysis_supports_eye_diagram(&self) -> bool {
-        self.active_time_domain_waveform_len()
-            .map(|len| len >= 8)
-            .unwrap_or(false)
-    }
+fn active_analysis_supports_fft(model: &Model) -> bool {
+    active_time_domain_waveform_len(model)
+        .map(|len| len >= rspice_results_ui::fft::MIN_FFT_SAMPLES)
+        .unwrap_or(false)
+}
 
-    fn active_analysis_supports_fft(&self) -> bool {
-        self.active_time_domain_waveform_len()
-            .map(|len| len >= rspice_results_ui::fft::MIN_FFT_SAMPLES)
-            .unwrap_or(false)
-    }
+fn active_time_domain_waveform_len(model: &Model) -> Option<usize> {
+    let analysis = model.simulation.active_analysis()?;
+    crate::simulation::SimulationController::analysis_supports_transient_derivation(
+        analysis.analysis_type,
+    )
+    .then_some(())?;
 
-    fn active_time_domain_waveform_len(&self) -> Option<usize> {
-        let analysis = self.simulation.active_analysis()?;
-        crate::simulation::SimulationController::analysis_supports_transient_derivation(
-            analysis.analysis_type,
-        )
-        .then_some(())?;
-
-        analysis
-            .waveforms
-            .iter()
-            .map(|wf| wf.x.len().min(wf.y.len()))
-            .max()
-    }
+    analysis
+        .waveforms
+        .iter()
+        .map(|wf| wf.x.len().min(wf.y.len()))
+        .max()
 }
 
 /// The timebase map's key for one result.

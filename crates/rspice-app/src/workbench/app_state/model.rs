@@ -128,6 +128,15 @@ impl Model {
         )
     }
 
+    /// Exact immutable result currently selected in the Results workspace.
+    pub(crate) fn active_specialized_viewer_cache_provenance(
+        &self,
+    ) -> Option<crate::state::SpecializedViewerCacheProvenance> {
+        let run = self.simulation.active_run()?;
+        let analysis = self.simulation.active_analysis()?;
+        Some(crate::state::SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis))
+    }
+
     /// The folders searched for includes after every project's own paths.
     pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
         self.preferences
