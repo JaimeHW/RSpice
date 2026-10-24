@@ -99,9 +99,9 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
                 let ports = ports.unwrap_or_default();
                 return Some(ResolvedCellSymbol::from_authored_document(document, &ports));
             }
-            AuthoredDocument::Invalid(message) => {
+            AuthoredDocument::Invalid => {
                 let ports = ports.unwrap_or_default();
-                return Some(ResolvedCellSymbol::from_invalid_metadata(&ports, message));
+                return Some(ResolvedCellSymbol::from_invalid_metadata(&ports));
             }
             AuthoredDocument::Missing => {}
         }
@@ -195,7 +195,7 @@ enum PortPreference {
 enum AuthoredDocument {
     Missing,
     Loaded(SymbolDocument),
-    Invalid(String),
+    Invalid,
 }
 
 fn authored_document(view: Option<&View>) -> AuthoredDocument {
@@ -207,7 +207,7 @@ fn authored_document(view: Option<&View>) -> AuthoredDocument {
     }
     match SymbolDocument::load_from_view(view) {
         Ok(document) => AuthoredDocument::Loaded(document),
-        Err(message) => AuthoredDocument::Invalid(message),
+        Err(_) => AuthoredDocument::Invalid,
     }
 }
 

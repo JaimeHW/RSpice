@@ -1360,10 +1360,7 @@ impl RequestedModeOutcome {
     }
 }
 
-pub(super) fn run_requested_mode(
-    ctx: &RunContext<'_>,
-    _config: &Config,
-) -> Result<RequestedModeOutcome, CliError> {
+pub(super) fn run_requested_mode(ctx: &RunContext<'_>) -> Result<RequestedModeOutcome, CliError> {
     if let Some(num_runs) = ctx.args.monte_carlo {
         let spread = ctx.args.mc_spread.unwrap_or(0.01);
         if !spread.is_finite() || spread < 0.0 {

@@ -1608,7 +1608,6 @@ fn sheet_order_changes_presentation_without_changing_stable_identity() {
             revision,
             vec![bias, afe],
             ReorderPageNumbering::RetainExplicitPageNumbers,
-            ReorderCrossReferences::UpdateDisplayOnlyStableIdsRetained,
         )
         .unwrap();
 
@@ -1626,7 +1625,6 @@ fn sheet_order_changes_presentation_without_changing_stable_identity() {
             revision,
             vec![afe, bias],
             ReorderPageNumbering::RetainExplicitPageNumbers,
-            ReorderCrossReferences::UpdateDisplayOnlyStableIdsRetained,
         ),
         Err(DesignManagementError::RevisionConflict { .. })
     ));

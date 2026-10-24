@@ -777,7 +777,6 @@ impl SymbolImportReport {
                 && validate_netlist(
                     &definition.netlist,
                     &definition.source,
-                    &definition.pins,
                     &definition.parameter_form,
                 )
                 .is_ok(),

@@ -208,7 +208,7 @@ impl ResolvedCellSymbol {
         }
     }
 
-    pub fn from_invalid_metadata(ports: &[PortSpec], _message: String) -> Self {
+    pub fn from_invalid_metadata(ports: &[PortSpec]) -> Self {
         let mut resolved = Self::from_generated(ports);
         resolved.issues.push(ResolvedSymbolIssue {
             kind: ResolvedSymbolIssueKind::InvalidMetadata,

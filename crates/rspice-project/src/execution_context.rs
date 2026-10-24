@@ -969,7 +969,7 @@ fn authenticated_subcircuit_projection(
                 .join("; ")
         ));
     }
-    parsed_subcircuit_projection(library, &parsed, root)
+    parsed_subcircuit_projection(&parsed, root)
 }
 
 fn migrate_authenticated_model_sections(library: &mut ProjectModelLibrary) -> Result<(), String> {
@@ -1215,7 +1215,6 @@ pub fn persisted_active_model_section_names(
 }
 
 fn parsed_subcircuit_projection(
-    _library: &ProjectModelLibrary,
     parsed: &rspice_core::library::LibParseResult,
     root: &std::path::Path,
 ) -> Result<HashMap<String, ModelSubcircuitInterface>, String> {
@@ -1738,7 +1737,7 @@ fn validate_authenticated_source_projection(
         ));
     }
 
-    let parsed_subcircuits = parsed_subcircuit_projection(library, &parsed, root)
+    let parsed_subcircuits = parsed_subcircuit_projection(&parsed, root)
         .map_err(|error| format!("{context}.subcircuits cannot be projected: {error}"))?;
     if library.subcircuits != parsed_subcircuits {
         return Err(format!(

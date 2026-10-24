@@ -314,7 +314,6 @@ fn moving_one_sheet_commits_the_same_transaction_as_the_equivalent_reorder() {
             revision,
             vec![last, top, middle],
             ReorderPageNumbering::UpdatePrintPageNumbers,
-            ReorderCrossReferences::UpdateDisplayOnlyStableIdsRetained,
         )
         .unwrap();
     assert_eq!(moved_revision, reordered_revision);

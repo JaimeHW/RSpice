@@ -152,12 +152,7 @@ impl ModelBoundSymbolDefinition {
         self.parameter_form.validate()?;
 
         validate_source(&self.source, &self.pins)?;
-        validate_netlist(
-            &self.netlist,
-            &self.source,
-            &self.pins,
-            &self.parameter_form,
-        )?;
+        validate_netlist(&self.netlist, &self.source, &self.parameter_form)?;
         if !self.generated_views.symbol
             && !self.generated_views.parameter_form
             && !self.generated_views.simulation_test_fixture

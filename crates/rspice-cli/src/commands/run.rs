@@ -809,7 +809,7 @@ fn run_concrete_deck(
     let start_time = Instant::now();
     let mut simulation_error: Option<String> = None;
     let mut simulation_error_details: Option<crate::cli::ErrorDetails> = None;
-    let requested_mode = match run_requested_mode(&ctx, config) {
+    let requested_mode = match run_requested_mode(&ctx) {
         Ok(outcome) => outcome.ran(),
         Err(error) => {
             if is_run_setup_or_output_error(&error) {

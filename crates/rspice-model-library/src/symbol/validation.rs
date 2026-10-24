@@ -239,7 +239,6 @@ fn compare_source_ports(
 pub(super) fn validate_netlist(
     netlist: &SymbolNetlistBinding,
     source: &SymbolSourceContract,
-    pins: &[SymbolPinDefinition],
     form: &SymbolParameterForm,
 ) -> Result<(), SymbolDefinitionError> {
     if source.is_explicitly_unbound_for_review() {
@@ -259,13 +258,12 @@ pub(super) fn validate_netlist(
             "model source and executable netlist model must match exactly".to_owned(),
         ));
     }
-    validate_executable_template(netlist, pins, form)?;
+    validate_executable_template(netlist, form)?;
     Ok(())
 }
 
 pub(super) fn validate_executable_template(
     netlist: &SymbolNetlistBinding,
-    _pins: &[SymbolPinDefinition],
     form: &SymbolParameterForm,
 ) -> Result<(), SymbolDefinitionError> {
     if netlist.device_prefix.trim().is_empty()

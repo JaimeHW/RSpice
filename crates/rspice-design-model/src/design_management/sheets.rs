@@ -53,13 +53,6 @@ pub enum ReorderPageNumbering {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ReorderCrossReferences {
-    #[default]
-    UpdateDisplayOnlyStableIdsRetained,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum CrossSheetPortDirection {
     Input,
     Output,
@@ -1059,7 +1052,6 @@ impl SheetCatalog {
         expected_catalog_revision: u64,
         ordered_ids: Vec<SheetId>,
         page_numbering: ReorderPageNumbering,
-        _cross_references: ReorderCrossReferences,
     ) -> Result<u64, DesignManagementError> {
         self.validate()?;
         require_revision(
@@ -1141,12 +1133,7 @@ impl SheetCatalog {
         let mut ordered_ids = self.sheets.iter().map(|sheet| sheet.id).collect::<Vec<_>>();
         let moved = ordered_ids.remove(from_index);
         ordered_ids.insert(to_index, moved);
-        self.reorder(
-            expected_catalog_revision,
-            ordered_ids,
-            page_numbering,
-            ReorderCrossReferences::UpdateDisplayOnlyStableIdsRetained,
-        )
+        self.reorder(expected_catalog_revision, ordered_ids, page_numbering)
     }
 
     pub fn assign_objects(
