@@ -32,6 +32,13 @@ impl Model {
             .sheet_catalog(&self.workspace.content.active_schematic_reference().key())
     }
 
+    /// The open cell view's sheet catalog while it has more than one sheet.
+    /// One sheet is the drawing itself, so there is no sheet to tell apart.
+    pub(crate) fn multi_sheet_catalog(&self) -> Option<&SheetCatalog> {
+        self.active_sheet_catalog()
+            .filter(|catalog| catalog.sheets().len() > 1)
+    }
+
     /// The sheet the open cell view's catalog has active.
     pub(crate) fn active_sheet_id(&self) -> Option<SheetId> {
         self.active_sheet_catalog()

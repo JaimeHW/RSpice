@@ -58,19 +58,7 @@ pub(crate) fn object_is_in_scope(state: &AppState, scope: SheetScope, object_id:
 /// when it answers `None`, so none of them can offer a control with one
 /// position or a page number with one page.
 pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    state
-        .model
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&key)
-        .filter(|catalog| catalog.sheets().len() > 1)
+    state.model.multi_sheet_catalog()
 }
 
 /// The active cell view's sheet catalog, however many sheets it holds.

@@ -230,7 +230,7 @@ fn selection_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusTe
 /// The page a multi-sheet drawing is open at reads beside where the cursor
 /// is, because both answer where the reader is rather than what is selected.
 fn page_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    let (text, detail) = sheet_position_summary(&app.state)?;
+    let (text, detail) = sheet_position_summary(&app.state.model)?;
     Some(StatusText {
         text: Cow::Owned(text),
         mark: StatusMark::None,

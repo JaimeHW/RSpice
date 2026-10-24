@@ -1086,7 +1086,7 @@ mod tests {
             .design_management
             .bootstrap_for_cell_view(&key, "Input stage", [10])
             .expect("the fixture cell view takes a sheet catalog");
-        assert_eq!(sheet_position_summary(&app.state), None);
+        assert_eq!(sheet_position_summary(&app.state.model), None);
 
         let catalog = app
             .state
@@ -1114,14 +1114,14 @@ mod tests {
             .expect("the first sheet is active");
         let second = catalog.sheets()[1].id();
         assert_eq!(
-            sheet_position_summary(&app.state).map(|(segment, _)| segment),
+            sheet_position_summary(&app.state.model).map(|(segment, _)| segment),
             Some("p1/4".to_owned())
         );
 
         crate::workbench::app::sheets::activate_sheet(&mut app.state, second)
             .expect("the second sheet activates");
         assert_eq!(
-            sheet_position_summary(&app.state),
+            sheet_position_summary(&app.state.model),
             Some((
                 "p2/4".to_owned(),
                 "Sheet 2 of 4 \u{00b7} Output stage".to_owned()
