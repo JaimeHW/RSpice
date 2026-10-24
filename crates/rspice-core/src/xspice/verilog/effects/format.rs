@@ -123,7 +123,7 @@ struct Spec {
     width: Option<usize>,
     precision: Option<usize>,
     alternate: bool,
-    /// Written in upper case: `%E`, `%F` and `%G` print as C's do.
+    /// Written in upper case: `%E` and `%G` print as C's do.
     upper: bool,
 }
 
@@ -279,20 +279,20 @@ fn packed_string(text: &str) -> FourStateValue {
     value
 }
 
-/// `%s` text of a string's characters, most significant first. Section
-/// 17.1.1.7 makes each 8 bits one character and never prints leading zeros: a
-/// NUL has no character, so it keeps its column as a space, and the minimum
-/// width (`%0s`) drops the leading ones.
-fn string_text(characters: impl Iterator<Item = char>, minimum: bool) -> String {
-    let mut text = String::new();
-    for character in characters {
-        if character != '\0' {
-            text.push(character);
-        } else if !(minimum && text.is_empty()) {
-            text.push(' ');
-        }
-    }
-    text
+/// `%s` of a string's characters, most significant first, printed into the
+/// field: section 17.1.1.7 makes each 8 bits one character and never prints
+/// leading zeros, so leading NULs are the field's padding, which `%0s` drops
+/// and `%-s` moves to the right; a NUL after the first character has no
+/// character either and keeps its column as a space. The natural width is one
+/// column per character.
+fn pad_string(out: &mut String, characters: impl Iterator<Item = char>, spec: &Spec) {
+    let characters: Vec<char> = characters.collect();
+    let text: String = characters
+        .iter()
+        .skip_while(|character| **character == '\0')
+        .map(|character| if *character == '\0' { ' ' } else { *character })
+        .collect();
+    pad(out, &text, spec, characters.len());
 }
 
 /// An integral value's conversion to a real, with its `x` and `z` bits read
@@ -345,8 +345,7 @@ fn render(
             if spec.conversion == 's' {
                 // A literal printed as text keeps every character, and its
                 // NULs print as a value's NUL bytes do.
-                let text = string_text(text.chars(), spec.width == Some(0));
-                pad(out, &text, spec, 0);
+                pad_string(out, text.chars(), spec);
                 return;
             }
             let value = DigitalScalar::FourState(packed_string(text));
@@ -386,9 +385,10 @@ fn render_value(
                 Some(real) => format_real(real, spec),
                 None => "x".to_string(),
             };
-            if spec.upper {
-                // C's upper-case forms, which section 17.1.1.2 names:
-                // `1.5E+00`, `INF`, `NAN`.
+            if spec.upper && spec.conversion != 'f' {
+                // C's upper-case `%E` and `%G`, which section 17.1.1.2
+                // names: `1.5E+00`. `%F` is `%f`, as Icarus Verilog prints
+                // it; C89 has no `%F`.
                 text.make_ascii_uppercase();
             }
             pad(out, &text, spec, 0);
@@ -589,8 +589,7 @@ fn render_bits(spec: &Spec, bits: &FourStateValue, signed: bool, out: &mut Strin
                 });
                 char::from(value)
             });
-            let text = string_text(characters, spec.width == Some(0));
-            pad(out, &text, spec, 0);
+            pad_string(out, characters, spec);
         }
         'u' | 'z' => {
             // Raw words, least significant first, each in little-endian byte
@@ -990,9 +989,10 @@ mod tests {
     }
 
     /// IEEE 1364-2005 section 17.1.1.7: `%s` prints each 8 bits as one
-    /// character and never prints leading zeros. A NUL byte, leading or not,
-    /// keeps its column as a space, the minimum width drops the leading ones,
-    /// and a string literal prints as the value it is (section 3.6).
+    /// character and never prints leading zeros. Leading NULs are the
+    /// field's padding, which the minimum width drops and left justification
+    /// moves right; a later NUL keeps its column as a space; and a string
+    /// literal prints as the value it is (section 3.6).
     #[test]
     fn a_nul_byte_keeps_its_column_in_a_string() {
         let packed = unsigned(32, 0x0061_0062);
@@ -1004,7 +1004,7 @@ mod tests {
                 Value(&packed, false),
                 Value(&packed, false)
             ]),
-            "[ a b][a b][   a b][ a b  ]"
+            "[ a b][a b][   a b][a b   ]"
         );
         assert_eq!(
             run(&[Literal("[%s][%0s]"), Literal("\0a\0b"), Literal("\0a\0b")]),
@@ -1022,7 +1022,7 @@ mod tests {
     }
 
     /// IEEE 1364-2005 section 17.1.1.2 gives `%e`, `%f` and `%g` C's
-    /// formatting, so the upper-case forms print C's upper case.
+    /// formatting, so `%E` and `%G` print C's upper case. `%F` is `%f`.
     #[test]
     fn upper_case_real_specifications_print_upper_case() {
         let r = DigitalScalar::Real(1_234_567_890.0);
@@ -1037,7 +1037,7 @@ mod tests {
                 Value(&infinite, true),
                 Value(&infinite, true)
             ]),
-            "[1.234568e+09][1.234568E+09][1.23457e+09][1.23457E+09][INF][inf]"
+            "[1.234568e+09][1.234568E+09][1.23457e+09][1.23457E+09][inf][inf]"
         );
     }
 
