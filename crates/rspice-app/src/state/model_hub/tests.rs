@@ -7,13 +7,16 @@
 //! passes has exercised the actual signature, the actual archive container,
 //! and the actual canonical manifest — not a mock of them.
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::{collections::BTreeMap, sync::Mutex};
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 mod clock;
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 use super::store::FilesystemModelHubStore;
 
@@ -22,12 +25,16 @@ use rspice_pack::{
     SnapshotPart, SnapshotRelease, SourceRef, build_pack, encode_snapshot, sha256_hex, signing_key,
 };
 
+#[cfg(test)]
+use super::ModelHub;
+#[cfg(test)]
+use super::store::{MemoryModelHubStore, ModelHubStore};
 use super::{
-    ModelHub, ModelHubError,
-    store::{MemoryModelHubStore, ModelHubStore},
+    ModelHubError,
     transport::{ArchiveHandoff, CatalogHandoff, ModelHubTransport},
     trust::TrustAnchor,
 };
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 use super::{
     provider::{PartProvenance, PartState},
@@ -40,19 +47,20 @@ use super::{
 /// The horizon is far enough out that a build running in 2099 is the only way
 /// these tests start failing for a reason nobody changed — and near enough to
 /// be a real RFC 3339 instant the format accepts rather than a sentinel.
-pub(crate) const SIGNED_AT: &str = "2026-08-15T09:30:00Z";
-pub(crate) const STANDS_UNTIL: &str = "2099-12-31T23:59:59Z";
+pub const SIGNED_AT: &str = "2026-08-15T09:30:00Z";
+pub const STANDS_UNTIL: &str = "2099-12-31T23:59:59Z";
 /// A horizon every clock this code can run under is already past.
+#[cfg(test)]
 pub(crate) const EXPIRED_AT: &str = "2020-01-01T00:00:00Z";
 
-pub(crate) const PACK_ID: &str = "rspice-proving";
-pub(crate) const VERSION: &str = "1.0.0";
+pub const PACK_ID: &str = "rspice-proving";
+pub const VERSION: &str = "1.0.0";
 /// The successor release. Every fixture that needs two generations of one pack
 /// builds a real archive at this version rather than relabelling the first, so
 /// the manifest inside the bytes agrees with the catalog that lists them.
-pub(crate) const NEXT_VERSION: &str = "1.1.0";
+pub const NEXT_VERSION: &str = "1.1.0";
 pub(crate) const SOURCE_PATH: &str = "models/proving.lib";
-pub(crate) const PART_ID: &str = "RSPICE_PROVING_DIV";
+pub const PART_ID: &str = "RSPICE_PROVING_DIV";
 
 /// The deck the fixture pack publishes.
 ///
@@ -75,15 +83,16 @@ const PROVING_LIB_NEXT: &str = "* RSpice proving pack\n\
                                 R2 OUT 0 1k\n\
                                 .ends RSPICE_PROVING_DIV\n";
 
-pub(crate) fn hub_signing_key() -> rspice_pack::SigningKey {
+pub fn hub_signing_key() -> rspice_pack::SigningKey {
     signing_key(&[0x2A_u8; 32])
 }
 
+#[cfg(test)]
 fn foreign_signing_key() -> rspice_pack::SigningKey {
     signing_key(&[0x5B_u8; 32])
 }
 
-pub(crate) fn anchor_for(key: &rspice_pack::SigningKey) -> TrustAnchor {
+pub fn anchor_for(key: &rspice_pack::SigningKey) -> TrustAnchor {
     TrustAnchor::from_verifying_key(key.verifying_key())
 }
 
@@ -136,7 +145,7 @@ fn template(version: &str, capabilities: &[&str]) -> ManifestTemplate {
 /// pin, and a lane proving that adopting one part leaves another alone needs
 /// them to be two.
 pub(crate) const BIAS_SOURCE_PATH: &str = "models/proving-bias.lib";
-pub(crate) const BIAS_PART_ID: &str = "RSPICE_PROVING_BIAS";
+pub const BIAS_PART_ID: &str = "RSPICE_PROVING_BIAS";
 
 /// The alias the successor release adds to the divider part.
 ///
@@ -145,7 +154,7 @@ pub(crate) const BIAS_PART_ID: &str = "RSPICE_PROVING_BIAS";
 /// actually moving, a diff between two releases could only ever compare part
 /// lists — and a fixture that never exercises the other half would let the
 /// comparison rot unnoticed.
-pub(crate) const DIVIDER_ALIAS_NEXT: &str = "RSPICE_PROVING_DIVIDER";
+pub const DIVIDER_ALIAS_NEXT: &str = "RSPICE_PROVING_DIVIDER";
 
 /// The second part's deck, identical in both releases.
 const PROVING_BIAS_LIB: &str = "* RSpice proving pack\n\
@@ -159,7 +168,7 @@ const PROVING_BIAS_LIB: &str = "* RSpice proving pack\n\
 /// Between the two releases the divider's *source* changes and its catalog
 /// listing gains an alias, while the bias part changes in neither. That is
 /// exactly the pair a per-part adoption has to tell apart.
-pub(crate) fn two_part_archive(
+pub fn two_part_archive(
     key: &rspice_pack::SigningKey,
     capabilities: &[&str],
     version: &str,
@@ -208,7 +217,7 @@ pub(crate) fn two_part_archive(
 /// catalog from publishing something the bytes it points at do not say — which
 /// is precisely the defect a diff computed over the catalog would inherit and
 /// present as fact.
-pub(crate) fn signed_snapshot_projecting(
+pub fn signed_snapshot_projecting(
     key: &rspice_pack::SigningKey,
     releases: &[(&str, &[u8], &[&str])],
 ) -> Vec<u8> {
@@ -262,7 +271,7 @@ pub(crate) fn signed_snapshot_projecting(
 }
 
 /// Builds a real signed archive for the fixture pack at [`VERSION`].
-pub(crate) fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u8> {
+pub fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u8> {
     signed_archive_at(key, capabilities, VERSION)
 }
 
@@ -271,7 +280,7 @@ pub(crate) fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str
 /// The deck follows the version, so `1.1.0` is a genuinely different pack and
 /// not the same bytes wearing a newer label — which is the only way an update
 /// can be told apart from a no-op.
-pub(crate) fn signed_archive_at(
+pub fn signed_archive_at(
     key: &rspice_pack::SigningKey,
     capabilities: &[&str],
     version: &str,
@@ -290,7 +299,7 @@ pub(crate) fn signed_archive_at(
 }
 
 /// Builds a real signed snapshot listing one release of the fixture pack.
-pub(crate) fn signed_snapshot(
+pub fn signed_snapshot(
     key: &rspice_pack::SigningKey,
     archive: &[u8],
     capabilities: &[&str],
@@ -304,7 +313,7 @@ pub(crate) fn signed_snapshot(
 /// A later catalog generation keeps publishing the releases an earlier one
 /// did — withdrawing a version is a separate act — so a fixture that lists
 /// both is the shape a real update is decided against.
-pub(crate) fn signed_snapshot_of(
+pub fn signed_snapshot_of(
     key: &rspice_pack::SigningKey,
     releases: &[(&str, &[u8], &[&str])],
 ) -> Vec<u8> {
@@ -317,10 +326,10 @@ pub(crate) fn signed_snapshot_of(
 /// is about. Every default is the healthy value, which is what keeps a test
 /// that says nothing about expiry from accidentally being a test about it.
 #[derive(Debug, Clone)]
-pub(crate) struct CatalogTerms {
-    pub(crate) serial: u64,
-    pub(crate) expires_at: String,
-    pub(crate) revocations: Vec<Revocation>,
+pub struct CatalogTerms {
+    pub serial: u64,
+    pub expires_at: String,
+    pub revocations: Vec<Revocation>,
 }
 
 impl Default for CatalogTerms {
@@ -335,7 +344,7 @@ impl Default for CatalogTerms {
 
 impl CatalogTerms {
     /// The same catalog published at a later ordinal.
-    pub(crate) fn at_serial(serial: u64) -> Self {
+    pub fn at_serial(serial: u64) -> Self {
         Self {
             serial,
             ..Self::default()
@@ -343,6 +352,7 @@ impl CatalogTerms {
     }
 
     /// A catalog whose horizon has already passed.
+    #[cfg(test)]
     pub(crate) fn expired() -> Self {
         Self {
             expires_at: EXPIRED_AT.to_owned(),
@@ -351,7 +361,7 @@ impl CatalogTerms {
     }
 
     /// A catalog recalling one release of the fixture pack.
-    pub(crate) fn recalling(version: &str, reason: &str) -> Self {
+    pub fn recalling(version: &str, reason: &str) -> Self {
         Self {
             revocations: vec![Revocation {
                 pack_id: PACK_ID.to_owned(),
@@ -364,7 +374,7 @@ impl CatalogTerms {
 }
 
 /// Builds a real signed snapshot on stated terms.
-pub(crate) fn signed_snapshot_on(
+pub fn signed_snapshot_on(
     key: &rspice_pack::SigningKey,
     releases: &[(&str, &[u8], &[&str])],
     terms: &CatalogTerms,
@@ -413,7 +423,7 @@ pub(crate) fn signed_snapshot_on(
 
 /// A transport serving exactly the bytes a test hands it.
 #[derive(Debug, Default)]
-pub(crate) struct StubTransport {
+pub struct StubTransport {
     snapshot: Option<Vec<u8>>,
     archives: BTreeMap<String, Vec<u8>>,
     /// Declared digests, when a test wants the handoff to disagree with the
@@ -425,7 +435,7 @@ pub(crate) struct StubTransport {
 }
 
 impl StubTransport {
-    pub(crate) fn with_snapshot(snapshot: Vec<u8>) -> Self {
+    pub fn with_snapshot(snapshot: Vec<u8>) -> Self {
         Self {
             snapshot: Some(snapshot),
             generation: 7,
@@ -434,16 +444,17 @@ impl StubTransport {
     }
 
     /// Serves this snapshot as a later catalog generation.
-    pub(crate) fn at_generation(mut self, generation: u64) -> Self {
+    pub fn at_generation(mut self, generation: u64) -> Self {
         self.generation = generation;
         self
     }
 
-    pub(crate) fn serving(mut self, version: &str, archive: Vec<u8>) -> Self {
+    pub fn serving(mut self, version: &str, archive: Vec<u8>) -> Self {
         self.archives.insert(version.to_owned(), archive);
         self
     }
 
+    #[cfg(test)]
     fn declaring(self, version: &str, length: u64, digest: &str) -> Self {
         self.declared
             .lock()
@@ -452,11 +463,12 @@ impl StubTransport {
         self
     }
 
-    pub(crate) fn failing_archive_fetch(mut self) -> Self {
+    pub fn failing_archive_fetch(mut self) -> Self {
         self.fail_archive_fetch = true;
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn calls(&self) -> Vec<String> {
         self.calls.lock().expect("stub state").clone()
     }
@@ -539,11 +551,13 @@ impl ModelHubTransport for StubTransport {
 }
 
 /// A filesystem tree that removes itself.
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 struct TempTree {
     root: PathBuf,
 }
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 impl TempTree {
     fn new(label: &str) -> Self {
@@ -563,6 +577,7 @@ impl TempTree {
     }
 }
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for TempTree {
     fn drop(&mut self) {
@@ -570,6 +585,7 @@ impl Drop for TempTree {
     }
 }
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 fn filesystem_hub(tree: &TempTree, key: &rspice_pack::SigningKey) -> ModelHub {
     ModelHub::open(
@@ -580,11 +596,13 @@ fn filesystem_hub(tree: &TempTree, key: &rspice_pack::SigningKey) -> ModelHub {
     .expect("the hub opens over an empty tree")
 }
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 fn packs_root(tree: &TempTree) -> PathBuf {
     tree.path().join("packs")
 }
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 fn staging_directories(tree: &TempTree) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(packs_root(tree)) else {
@@ -1171,6 +1189,7 @@ fn both_stores_retain_the_same_project_document_for_the_same_release() {
 /// The answer is the point: bytes that merely *exist* prove nothing, and the
 /// two releases of the fixture pack divide differently, so the ratio names
 /// which release's source the project is actually running.
+#[cfg(test)]
 fn retained_divider_output(manager: &crate::state::model_library::ModelLibraryManager) -> f64 {
     let cards = manager
         .reference_process_model_cards(crate::product::ProcessCorner::TT)
@@ -1188,6 +1207,7 @@ fn retained_divider_output(manager: &crate::state::model_library::ModelLibraryMa
 }
 
 /// The retained-source identity one library was given.
+#[cfg(test)]
 fn retained_source_id(
     manager: &crate::state::model_library::ModelLibraryManager,
     library: &str,
@@ -1206,6 +1226,7 @@ fn retained_source_id(
 
 /// Replaces every retained-source identity, so two independently built
 /// projects can be compared on everything a fresh identity would mask.
+#[cfg(test)]
 fn fix_retained_source_ids(
     manager: &mut crate::state::model_library::ModelLibraryManager,
     replacement: crate::product::ModelSourceId,
@@ -1232,12 +1253,14 @@ fn fix_retained_source_ids(
 /// The anti-rollback floor is a property of the *store*: a test that could only
 /// reach it through the hub that wrote it could not tell a durable floor from a
 /// field in memory.
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 fn filesystem_store(tree: &TempTree) -> FilesystemModelHubStore {
     FilesystemModelHubStore::new(tree.path())
 }
 
 /// The fixture pack's one release, listed at a stated catalog serial.
+#[cfg(test)]
 fn catalog_at(key: &rspice_pack::SigningKey, archive: &[u8], serial: u64) -> Vec<u8> {
     signed_snapshot_on(
         key,

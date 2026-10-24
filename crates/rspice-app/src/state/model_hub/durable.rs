@@ -71,11 +71,12 @@ use std::sync::Mutex;
 use rspice_pack::{VerifiedPack, sha256_hex};
 
 #[cfg(any(test, target_arch = "wasm32"))]
+use super::ModelHubError;
+#[cfg(any(test, target_arch = "wasm32"))]
 use super::store::StagedPack;
 #[cfg(any(test, target_arch = "wasm32"))]
 use super::{
-    InstalledPack, MemoryModelHubStore, ModelHubError, ModelHubStore, TrustAnchor, accept_archive,
-    release_key,
+    InstalledPack, MemoryModelHubStore, ModelHubStore, TrustAnchor, accept_archive, release_key,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -103,7 +104,7 @@ mod tests;
 /// that is where the ladder is — reads the same bytes the browser will, rather
 /// than a copy of them that can drift.
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) const UNAVAILABLE_AT_OPEN: &str = "Storage for model packs is unavailable in this browser, so installed packs last only as long \
+pub const UNAVAILABLE_AT_OPEN: &str = "Storage for model packs is unavailable in this browser, so installed packs last only as long \
      as this tab.";
 
 /// And when it opened, took an install, and then refused to keep it.
@@ -113,7 +114,7 @@ pub(crate) const UNAVAILABLE_AT_OPEN: &str = "Storage for model packs is unavail
 /// tab was lost. Both land on the same rung, whose consequence — nothing on
 /// this machine changed — is exactly true of both.
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) const UNAVAILABLE_AFTER_WRITE: &str = "Durable storage for model packs became unavailable in this browser, so packs installed now \
+pub const UNAVAILABLE_AFTER_WRITE: &str = "Durable storage for model packs became unavailable in this browser, so packs installed now \
      last only as long as this tab.";
 
 /// Everything one origin has kept about this machine's Model Hub.
@@ -155,11 +156,11 @@ pub(crate) struct StoredArchive {
 /// One restored archive that no longer proves, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) struct RejectedArchive {
+pub struct RejectedArchive {
     /// The digest the bytes actually hash to, which is the key they are stored
     /// under and therefore the one a caller deletes them by.
-    pub(crate) digest: String,
-    pub(crate) error: ModelHubError,
+    pub digest: String,
+    pub error: ModelHubError,
 }
 
 /// What one hydration concluded.
@@ -173,7 +174,7 @@ pub(crate) struct RejectedArchive {
 #[cfg(any(test, target_arch = "wasm32"))]
 pub struct HydrationReport {
     pub restored: usize,
-    pub(crate) rejected: Vec<RejectedArchive>,
+    pub rejected: Vec<RejectedArchive>,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
