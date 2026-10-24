@@ -1630,6 +1630,23 @@ impl Parser<'_> {
         let mut statements = Vec::new();
         while !self.check(TokenKind::End) && !self.at_end() {
             self.parse_attributes()?;
+            let declaration = matches!(
+                self.current().kind,
+                TokenKind::Real | TokenKind::Integer | TokenKind::String | TokenKind::Reg
+            ) || self.keyword_declaration_follows();
+            if declaration && name.is_none() {
+                // IEEE 1364-2005 section 9.8.1 (syntax 9-13): only a named
+                // block declares; IEEE 1800 relaxed this.
+                return Err(ParseError::new(
+                    ParseErrorKind::Expected {
+                        expected: "a statement: an unnamed `begin` block declares nothing \
+                                   (IEEE 1364-2005 section 9.8.1)"
+                            .to_string(),
+                        found: self.current().describe(),
+                    },
+                    self.current_span(),
+                ));
+            }
             match self.current().kind {
                 TokenKind::Real | TokenKind::Integer | TokenKind::String => {
                     variables.push(self.parse_variable_decl()?);

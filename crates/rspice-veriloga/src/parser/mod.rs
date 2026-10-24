@@ -17,6 +17,7 @@ mod gate_arrays;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
+mod scope_rules;
 mod specify;
 mod udp;
 
@@ -693,6 +694,7 @@ impl<'a> Parser<'a> {
                 next_process_id: self.next_process_id,
             })
         });
+        scope_rules::reject_block_name_collisions(&module)?;
         generate::expand(&mut module, &mut self.next_process_id)?;
         module.generate_template = template;
         Ok(module)
@@ -932,6 +934,7 @@ impl<'a> Parser<'a> {
         }
         // Attribute instances may precede any declaration
         let attributes = self.parse_attributes()?;
+        scope_rules::reject_variable_attribute_values(module, &attributes)?;
         // Port and net declarations keep theirs: a connect module reads its
         // supply port's from them, and a mixed module's port carries
         // `supplySensitivity` to the converter on it.
@@ -3499,6 +3502,7 @@ impl<'a> Parser<'a> {
         let start = self.current_span();
 
         if let Some(op) = self.reduction_operator() {
+            self.reject_unary_operand()?;
             let operand = self.nested(Nesting::Expression, Self::parse_unary)?;
             return Ok(Expression::Digital(DigitalExpr::Reduction(ReductionExpr {
                 op,
@@ -3528,6 +3532,7 @@ impl<'a> Parser<'a> {
         };
 
         if let Some(op) = op {
+            self.reject_unary_operand()?;
             let operand = self.nested(Nesting::Expression, Self::parse_unary)?;
             return Ok(Expression::Unary(UnaryExpr {
                 op,
@@ -3537,6 +3542,38 @@ impl<'a> Parser<'a> {
         }
 
         self.parse_primary()
+    }
+
+    /// The operand of a unary operator is a primary (IEEE 1364-2005 A.8.3:
+    /// `unary_operator { attribute_instance } primary`), so a reduction
+    /// cannot follow one: `~ |a` is written `~(|a)`, and `~|a` is one
+    /// operator.
+    ///
+    /// A stacked negation (`- -x`, `!!x`) is held to the same production by
+    /// the standard but still read: compact models write one through a macro
+    /// (EKV 2.6's `` -`NOT_GIVEN `` with `` `NOT_GIVEN `` = `-1.0e21`), and
+    /// Verilog-A compilers read it as the nested negation it spells.
+    fn reject_unary_operand(&self) -> Result<(), ParseError> {
+        let reduction = match self.current().kind {
+            TokenKind::BitAnd | TokenKind::BitOr | TokenKind::BitXor | TokenKind::BitXnor => true,
+            TokenKind::BitNot => self.tokens.get(self.pos + 1).is_some_and(|next| {
+                next.span.start == self.current().span.end
+                    && matches!(next.kind, TokenKind::BitAnd | TokenKind::BitOr)
+            }),
+            _ => false,
+        };
+        if !reduction {
+            return Ok(());
+        }
+        Err(ParseError::new(
+            ParseErrorKind::Expected {
+                expected: "a primary as the operand of a unary operator (IEEE 1364-2005 A.8.3); \
+                           parenthesize the reduction"
+                    .to_string(),
+                found: self.current().describe(),
+            },
+            self.current_span(),
+        ))
     }
 
     /// Consume a reduction operator if one opens the expression under the
@@ -3565,7 +3602,14 @@ impl<'a> Parser<'a> {
             // `~^` and `^~` both lex to one token, so reduction XNOR needs no
             // pair.
             TokenKind::BitXnor => ReductionOp::Xnor,
-            TokenKind::BitNot => match self.tokens.get(self.pos + 1).map(|token| token.kind) {
+            // The pair is one operator only as one token would be, with
+            // nothing between its characters (IEEE 1364-2005 section 3.1).
+            TokenKind::BitNot => match self
+                .tokens
+                .get(self.pos + 1)
+                .filter(|token| token.span.start == self.current().span.end)
+                .map(|token| token.kind)
+            {
                 Some(TokenKind::BitAnd) => {
                     self.advance();
                     ReductionOp::Nand

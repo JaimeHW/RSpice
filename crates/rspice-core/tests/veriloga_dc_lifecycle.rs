@@ -817,7 +817,7 @@ parameter real gain=$simparam("tnom")+50+1000*$simparam("pnjmaxi");
 analog V(out)<+gain+$simparam("tnom")+50;
 endmodule"#,
                 if mixed {
-                    "initial begin integer digital; digital=1; end"
+                    "initial begin : body integer digital; digital=1; end"
                 } else {
                     ""
                 }
@@ -904,7 +904,7 @@ inout out; electrical out;
 analog I(out)<+V(out)-(analysis("nodeset") || V(out)>0.5 ? 1 : -1);
 endmodule"#,
             if mixed {
-                "initial begin integer digital; digital=1; end"
+                "initial begin : body integer digital; digital=1; end"
             } else {
                 ""
             }

@@ -5969,7 +5969,7 @@ endmodule
 
     // No parameter default may disguise a process-local runtime bound.
     for source in [
-        "parameter HI=3; reg [7:0] data; reg [3:0] q; initial begin integer HI; HI=3; q=data[HI:0]; end",
+        "parameter HI=3; reg [7:0] data; reg [3:0] q; initial begin : body integer HI; HI=3; q=data[HI:0]; end",
         "reg [7:0] data; reg [3:0] q; initial q=data[4'bx:0];",
         "reg [7:0] data; reg [3:0] q; initial q=data[3.5:0];",
         "reg [7:0] data; reg [3:0] q; initial q=data[64'h8000000000000000:0];",
@@ -5977,8 +5977,8 @@ endmodule
         "reg [7:0] data; reg [3:0] q; initial q=data[(1 ? 3 : $time):0];",
         "reg [7:0] data; reg [3:0] q; initial q=data[(1 ? 3 : $realtime):0];",
         "reg [7:0] data; reg [3:0] q; initial q=data[(1 ? 3 : V(p)):0];",
-        "parameter HI=4'd3; reg [7:0] data; reg [3:0] q; initial begin reg [3:0] HI; HI=3; q=data[HI[3:0]:0]; end",
-        "parameter HI=2'd3; reg [7:0] data; reg [3:0] q; initial begin integer HI; HI=3; q=data[{1{{1{HI}}}}:0]; end",
+        "parameter HI=4'd3; reg [7:0] data; reg [3:0] q; initial begin : body reg [3:0] HI; HI=3; q=data[HI[3:0]:0]; end",
+        "parameter HI=2'd3; reg [7:0] data; reg [3:0] q; initial begin : body integer HI; HI=3; q=data[{1{{1{HI}}}}:0]; end",
     ] {
         let result =
             VerilogACompiler::default().compile_canonical_ir_module(&digital_module(source), None);
@@ -6852,7 +6852,7 @@ endmodule
         "current-source reads must use the simultaneous mathematical states"
     );
     for source in [
-        "module bad(p,n); inout p,n; electrical p,n; branch(p,n) b; analog V(b)<+1; initial begin real b; b=I(b); end endmodule",
+        "module bad(p,n); inout p,n; electrical p,n; branch(p,n) b; analog V(b)<+1; initial begin : body real b; b=I(b); end endmodule",
         "module bad(p,n); inout p,n; electrical p,n; reg q; analog V(p,n)<+1; initial @(I(p,n)) q=1; endmodule",
         "module bad(p,n); inout p,n; electrical p,n; reg q; analog I(p,n)<+1; initial @(I(p,n)) q=1; endmodule",
     ] {

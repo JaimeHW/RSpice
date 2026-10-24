@@ -4643,6 +4643,65 @@ fn a_concatenation_takes_sized_operands_that_are_not_real() {
     }
 }
 
+/// The parser's IEEE 1364-2005 rules: a unary operator's operand is a primary
+/// (A.8.3), so `~ |a` is not `~|a` and no reduction follows a unary operator,
+/// while a stacked negation stays readable as compact models write it; only a
+/// named `begin` block declares
+/// (section 9.8.1); a named block of a process and a generate block of the
+/// module do not share a name (section 12.7); and an attribute's value is a
+/// constant expression (section 3.8).
+#[test]
+fn unary_operands_block_names_and_attribute_values_follow_ieee_1364() {
+    for (source, expected) in [
+        (
+            "module m; reg r; reg [1:0] a; initial r = ~ |a; endmodule",
+            "a primary as the operand of a unary operator",
+        ),
+        (
+            "module m; reg r; reg [1:0] a; initial r = !&a; endmodule",
+            "a primary as the operand of a unary operator",
+        ),
+        (
+            "module m; reg r; reg [1:0] a; initial r = ~ ~|a; endmodule",
+            "a primary as the operand of a unary operator",
+        ),
+        (
+            "module m; initial begin integer x; x = 1; end endmodule",
+            "an unnamed `begin` block declares nothing",
+        ),
+        (
+            "module m;\n  generate if (1) begin : b wire w; end endgenerate\n  \
+             initial begin : b reg r; r = 0; end\nendmodule",
+            "the name of a generate block of the module",
+        ),
+        (
+            "module m; integer n; (* attr = n *) initial n = 0; endmodule",
+            "a constant expression as the value of attribute `attr`",
+        ),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect_err("the form must be rejected")
+            .to_string();
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+    for source in [
+        "module m; reg r; reg [1:0] a; initial begin r = ~|a; r = ~&a; r = ~(|a); r = -(-a); end endmodule",
+        "module m; integer r; initial r = 2 - -1; endmodule",
+        "module m; integer r; initial r = - -1; endmodule",
+        "module m; initial begin : named integer x; x = 1; end endmodule",
+        "module m;\n  generate if (1) begin : g wire w; end endgenerate\n  \
+         initial begin : b reg r; r = 0; end\nendmodule",
+        "module m; parameter p = 1; (* attr = p *) initial $display(p); endmodule",
+    ] {
+        if let Err(error) =
+            VerilogACompiler::new(CompilerOptions::default()).compile_canonical_ir(source)
+        {
+            panic!("{source}: {error}");
+        }
+    }
+}
+
 /// IEEE 1364-2005 section 5.2.1: `+:` and `-:` are one token each, select at
 /// a run-time base with a positive constant width, of a vector or of one
 /// array element after all its coordinates, and a continuous target's base is

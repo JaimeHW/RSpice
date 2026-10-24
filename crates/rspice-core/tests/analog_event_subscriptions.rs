@@ -1569,7 +1569,7 @@ fn local_event_operands_do_not_capture_shadowed_electrical_nodes() {
     use rspice_core::xspice::verilog::MixedSignalHost;
     for function in ["cross(V(a),1)", "absdelta(V(a),0.1)"] {
         let source = format!(
-            "module local_shadow(a); input a; electrical a; initial begin real a=0; @({function}) a=1; end endmodule"
+            "module local_shadow(a); input a; electrical a; initial begin : body real a=0; @({function}) a=1; end endmodule"
         );
         let error = MixedSignalHost::compile(
             &source,
@@ -1596,7 +1596,7 @@ fn local_event_operands_retract_counter_without_replaying_and_survive_rejection(
 `timescale 1ps/1ps
 module local_above(a);
  input a; electrical a; integer count=0;
- initial begin
+ initial begin : body
    real threshold=0.25;
    repeat(2) @(above(V(a)-threshold)) begin
      count=count+1; threshold=threshold+0.25;

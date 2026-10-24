@@ -523,7 +523,7 @@ module top;
    reg [WIDTH-1:0] state[WIDTH:WIDTH];
    integer count=WIDTH;
    real level=WIDTH+0.25;
-   initial begin
+   initial begin : work
      reg [WIDTH-1:0] scratch;
      scratch=WIDTH;
      state[WIDTH]=scratch;
