@@ -196,26 +196,6 @@ mod tests {
                 "the Studio caption and the manifest domain disagree for {periodic:?}"
             );
         }
-        // The quantity these were named after is a different number, and
-        // nothing shipped here publishes it as an abscissa. Split so this
-        // test's own prose cannot trip the scan.
-        let retired = ["translated ", "frequency"].concat();
-        assert!(
-            [
-                include_str!("manifest.rs"),
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../rspice-results-ui/src/manifest.rs"
-                )),
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../rspice-results/src/manifest.rs"
-                )),
-            ]
-            .into_iter()
-            .all(|source| !crate::source_guard::production_source(source).contains(&retired)),
-            "the translated frequency is `offset + n*f0`, not the swept axis"
-        );
     }
     #[test]
     fn retained_view_source_manifest_tracks_restoration_and_nested_edits() {

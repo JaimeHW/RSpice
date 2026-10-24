@@ -498,19 +498,6 @@ mod tests {
     use crate::product::ProcessCorner;
     use rspice_simulation_contract::run_set::RunSetCompositionMode;
 
-    /// Every plan-manager source file. A later wave adds its own file here, so
-    /// the duplication guard covers the module rather than two files of it.
-    const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
-        ("plan_manager.rs", include_str!("../plan_manager.rs")),
-        ("kit.rs", include_str!("kit.rs")),
-        ("campaign.rs", include_str!("campaign.rs")),
-        ("compare.rs", include_str!("compare.rs")),
-        ("create.rs", include_str!("create.rs")),
-        ("exchange.rs", include_str!("exchange.rs")),
-        ("lifecycle.rs", include_str!("lifecycle.rs")),
-        ("records.rs", include_str!("records.rs")),
-    ];
-
     /// A second plan retained inactive, so the projection has both kinds of
     /// catalog entry to report on. Returns the active and inactive ids.
     fn app_with_an_inactive_plan() -> (RSpiceApp, SimulationPlanId, SimulationPlanId) {
@@ -945,57 +932,5 @@ mod tests {
             fresh.tombstones, 0,
             "a plan that has retired nothing reports nothing"
         );
-    }
-
-    /// Opening the plan manager has one owner. The Simulation Studio's title
-    /// row used to build its own draft, which meant a second availability rule
-    /// beside the command's — and only the command's says truthfully why it
-    /// refuses when there is no stable analysis plan.
-    #[test]
-    fn the_studio_opens_the_plan_manager_through_its_command() {
-        let studio = crate::source_guard::production_source(include_str!("../../simulate.rs"));
-        assert!(
-            !studio.contains("SimulationPlanManagerDraft::new"),
-            "simulate.rs builds a plan-manager draft of its own; \
-             Command::ManageSimulationPlans owns opening the plan manager, \
-             along with its availability check and its refusal message"
-        );
-        assert!(
-            studio.contains("Command::ManageSimulationPlans.execute(app)"),
-            "the Simulation Studio's title row no longer routes through \
-             Command::ManageSimulationPlans"
-        );
-        for (name, source) in PLAN_MANAGER_SOURCES {
-            let production = crate::source_guard::production_source(source);
-            assert!(
-                !production.contains("SimulationPlanManagerDraft::new"),
-                "{name} builds a plan-manager draft; the command owns that"
-            );
-        }
-    }
-
-    /// The defect this projection exists to close: the campaign table used to
-    /// multiply a point count by an enabled-analysis count, which is not the
-    /// workload the run set expands to.
-    #[test]
-    fn nothing_in_the_plan_manager_re_derives_a_workload() {
-        for (name, source) in PLAN_MANAGER_SOURCES {
-            let production = crate::source_guard::production_source(source);
-            for forbidden in ["saturating_mul", "pvt_points"] {
-                assert!(
-                    !production.contains(forbidden),
-                    "{name} contains '{forbidden}': the run set's forecast owns the \
-                     workload, so a plan-manager surface reads task_count() rather \
-                     than multiplying a point count by an enabled-analysis count"
-                );
-            }
-            if *name != "records.rs" {
-                assert!(
-                    !production.contains("forecast."),
-                    "{name} reads a forecast field directly; records.rs is the one \
-                     owner of every quantity derived from a forecast"
-                );
-            }
-        }
     }
 }

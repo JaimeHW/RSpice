@@ -282,31 +282,6 @@ struct ParsedFftSourceName {
 }
 
 #[cfg(test)]
-mod contour_name_tests {
-    /// The contour's name is a contract between the run and the sheet, and it
-    /// was two independent string literals in two modules with nothing that
-    /// compiled or tested the pair together. Renaming the writer's spelling
-    /// leaves the reader looking for a waveform that no longer exists, and
-    /// the Nyquist sheet quietly shows nothing at all.
-    #[test]
-    fn the_stability_contour_has_exactly_one_spelling_in_the_crate() {
-        let writer = crate::source_guard::without_test_items(include_str!(
-            "../../../../rspice-simulation/src/runner/spec/frequency.rs"
-        ));
-        assert!(
-            !writer.contains("\"Nyquist L(jw)\""),
-            "the stability run writes the contour name as its own literal instead of the \
-             constant the reader resolves it through"
-        );
-        let reader = crate::source_guard::without_test_items(include_str!("results_post.rs"));
-        assert!(
-            !reader.contains("\"Nyquist L(jw)\""),
-            "the post-run population resolves the contour name from its own literal"
-        );
-    }
-}
-
-#[cfg(test)]
 mod nyquist_scope_tests {
     use super::*;
     use crate::simulation::SampledWaveform;

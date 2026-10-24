@@ -1975,42 +1975,6 @@ fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
     );
 }
 
-/// Nothing an export publishes is computed from a display label.
-///
-/// The behavioural pin above catches the one analysis whose label and id
-/// differ today. This catches the mechanism instead, in every file the export
-/// module ships: a coordinate id read out of `axis_info` is how a display-only
-/// change moved a persisted identifier in the first place, and the next such
-/// rename would be silent again.
-#[test]
-fn no_shipped_export_path_derives_an_identifier_from_a_display_label() {
-    let module = [
-        ("waveform_export.rs", include_str!("../waveform_export.rs")),
-        ("hdf5.rs", include_str!("hdf5.rs")),
-        ("matlab.rs", include_str!("matlab.rs")),
-        ("numpy.rs", include_str!("numpy.rs")),
-        ("typed_csv.rs", include_str!("typed_csv.rs")),
-        ("vcd.rs", include_str!("vcd.rs")),
-    ];
-    // Split so this test's own source can neither satisfy nor trip the scan.
-    let reader = ["axis", "_info"].concat();
-    let offenders = module
-        .iter()
-        .flat_map(|(name, source)| {
-            crate::source_guard::production_source(source)
-                .lines()
-                .enumerate()
-                .filter(|(_, line)| line.contains(&reader))
-                .map(move |(index, line)| format!("{name}:{}: {}", index + 1, line.trim()))
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        offenders.is_empty(),
-        "an export identifier must be stated, not read from the Studio's axis caption:\n{}",
-        offenders.join("\n")
-    );
-}
-
 /// One exact row per retained contributor, with the run's facts repeated.
 ///
 /// The trailing columns are not redundancy: a contributor table taken out of

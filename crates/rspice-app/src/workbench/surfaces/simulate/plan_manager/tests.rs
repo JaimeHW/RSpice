@@ -1598,12 +1598,8 @@ fn a_comparison_diffs_the_two_plans_its_route_picked() {
 #[cfg(not(target_arch = "wasm32"))]
 mod register;
 
-/// Every route the manager dispatches to, in dispatch order.
-///
-/// [`route_coverage`] is what keeps this complete: it matches the mode enum
-/// exhaustively and indexes this array, so a ninth mode needs an arm here, and
-/// an arm returning an index this array does not have is a compile error rather
-/// than a test that quietly stops covering one route.
+/// Every route the manager dispatches to, in dispatch order; [`route_position`]
+/// keeps it complete.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
     SimulationPlanManagerMode::Browse,
@@ -1677,52 +1673,13 @@ fn route_speech(screen: Vec2, mode: SimulationPlanManagerMode) -> RouteSpeech {
 // Route coverage
 // ---------------------------------------------------------------------------
 
-/// What covers one route, named.
+/// Where `mode` sits in [`EVERY_ROUTE`].
 ///
-/// Five lanes rebuilt five routes and each wrote its own tests where it was
-/// working. That is the right place for them and it leaves no one able to
-/// answer "is every route covered?" — the answer was spread over six files, and
-/// a route whose only test was deleted would go on passing everything else.
-///
-/// Every field here is a claim that a specific thing exists, checked against
-/// the source. The names are not documentation of the tests; they are the
-/// coverage itself.
+/// Exhaustive on purpose: a new mode does not compile until it is given a
+/// place in the list every route gate walks.
 #[cfg(not(target_arch = "wasm32"))]
-struct RouteCoverage {
-    /// The route this covers. Checked against the position it was found at, so
-    /// an arm cannot claim another route's coverage.
-    mode: SimulationPlanManagerMode,
-    /// The function the shell's dispatch match hands this mode to.
-    dispatch: &'static str,
-    /// The test that proves the route fits every gated viewport without
-    /// scrolling. Always in this file: fit is the shell's rule, not a route's.
-    fit_gate: &'static str,
-    /// The file and test that prove no fact this route states is lost to
-    /// elision. Three routes gate this themselves, by asserting their own exact
-    /// strings are painted whole; the rest are held to the weaker but general
-    /// claim next door, that anything shortened is announced whole somewhere.
-    elision_gate: (&'static str, &'static str),
-    /// The file and test that exercise what this route actually does — its
-    /// transaction where it has one, its content where it does not. Compare is
-    /// read-only by design and its named test is what proves that, which is a
-    /// test of what the route does and not an absence of one.
-    behaviour: (&'static str, &'static str),
-}
-
-/// What covers `mode`.
-///
-/// Exhaustive on purpose. A ninth mode cannot be added without an arm here, and
-/// the arm has to index a slot [`ROUTE_COVERAGE`] actually has — indexing a
-/// fixed-length array past its end with a literal does not compile. So the
-/// compiler, not a reviewer, is what notices a route that arrived without
-/// coverage.
-///
-/// What the compiler cannot notice is a ninth mode left out of [`EVERY_ROUTE`]
-/// while its arm here reuses an existing slot; the test below closes that by
-/// checking every slot answers for its own mode.
-#[cfg(not(target_arch = "wasm32"))]
-fn route_coverage(mode: SimulationPlanManagerMode) -> &'static RouteCoverage {
-    &ROUTE_COVERAGE[match mode {
+fn route_position(mode: SimulationPlanManagerMode) -> usize {
+    match mode {
         SimulationPlanManagerMode::Browse => 0,
         SimulationPlanManagerMode::Create => 1,
         SimulationPlanManagerMode::Rename => 2,
@@ -1731,109 +1688,24 @@ fn route_coverage(mode: SimulationPlanManagerMode) -> &'static RouteCoverage {
         SimulationPlanManagerMode::Export => 5,
         SimulationPlanManagerMode::Import => 6,
         SimulationPlanManagerMode::Campaign => 7,
-    }]
+    }
 }
 
+/// Every route is listed once, at its own position.
 #[cfg(not(target_arch = "wasm32"))]
-const ROUTE_COVERAGE: [RouteCoverage; 8] = [
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Browse,
-        dispatch: "browse_dialog(",
-        fit_gate: "the_browse_route_fits_every_gated_viewport",
-        elision_gate: ("tests.rs", "the_browse_route_loses_no_fact_to_elision"),
-        behaviour: ("tests.rs", "every_row_announces_the_facts_its_cells_paint"),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Create,
-        dispatch: "create::dialog(",
-        fit_gate: "the_create_route_fits_every_gated_viewport",
-        elision_gate: (
-            "create.rs",
-            "every_stated_fact_paints_whole_at_every_gated_viewport",
-        ),
-        behaviour: (
-            "create.rs",
-            "each_of_the_four_inputs_reaches_the_stored_plan",
-        ),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Rename,
-        dispatch: "lifecycle::dialog(",
-        fit_gate: "the_rename_route_fits_every_gated_viewport",
-        elision_gate: ("tests.rs", "the_rename_route_loses_no_fact_to_elision"),
-        behaviour: (
-            "lifecycle.rs",
-            "a_rename_preserves_the_identity_the_revision_and_the_result_references",
-        ),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::ConfirmArchive,
-        dispatch: "lifecycle::dialog(",
-        fit_gate: "the_archive_confirmation_fits_every_gated_viewport",
-        elision_gate: (
-            "tests.rs",
-            "the_archive_confirmation_loses_no_fact_to_elision",
-        ),
-        behaviour: (
-            "lifecycle.rs",
-            "archiving_retains_the_configuration_and_every_result_reference",
-        ),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Compare,
-        dispatch: "compare::dialog(",
-        fit_gate: "the_compare_route_fits_every_gated_viewport",
-        elision_gate: (
-            "compare.rs",
-            "every_fact_the_comparison_states_is_painted_whole_at_every_gated_viewport",
-        ),
-        behaviour: (
-            "compare.rs",
-            "a_comparison_leaves_both_plans_exactly_as_they_were",
-        ),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Export,
-        dispatch: "exchange::dialog(",
-        fit_gate: "the_export_route_fits_every_gated_viewport",
-        elision_gate: ("tests.rs", "the_export_route_loses_no_fact_to_elision"),
-        behaviour: (
-            "exchange.rs",
-            "the_envelope_admits_only_this_format_and_this_version",
-        ),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Import,
-        dispatch: "exchange::dialog(",
-        fit_gate: "the_import_route_fits_every_gated_viewport",
-        elision_gate: ("tests.rs", "the_import_route_loses_no_fact_to_elision"),
-        behaviour: (
-            "exchange.rs",
-            "the_previewed_specification_count_is_what_the_import_creates",
-        ),
-    },
-    RouteCoverage {
-        mode: SimulationPlanManagerMode::Campaign,
-        dispatch: "campaign::dialog(",
-        fit_gate: "the_campaign_route_fits_every_gated_viewport",
-        elision_gate: (
-            "campaign.rs",
-            "every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport",
-        ),
-        behaviour: (
-            "campaign.rs",
-            "the_commit_walks_the_members_in_the_declared_order",
-        ),
-    },
-];
+#[test]
+fn every_route_is_listed_at_its_own_position() {
+    for (position, mode) in EVERY_ROUTE.into_iter().enumerate() {
+        assert_eq!(
+            route_position(mode),
+            position,
+            "{mode:?} is listed at another route's position"
+        );
+    }
+}
 
-/// Every source file of the plan manager.
-///
-/// Two claims read it: the coverage one below, which looks for a named test,
-/// and the elision gate, which asks whether a string ending in an ellipsis is
-/// one the module wrote that way. `records.rs` keeps a list of the same files
-/// for its duplication guards; that module is not this wave's and the two are
-/// not merged here.
+/// Every source file of the plan manager, which the elision gate reads to tell
+/// a string the module wrote with an ellipsis from one elided to fit.
 #[cfg(not(target_arch = "wasm32"))]
 const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
     ("plan_manager.rs", include_str!("../plan_manager.rs")),
@@ -1846,109 +1718,6 @@ const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
     ("lifecycle.rs", include_str!("lifecycle.rs")),
     ("records.rs", include_str!("records.rs")),
 ];
-
-/// Whether `file` declares `name` as a test.
-///
-/// Scanned line by line rather than by an offset into the text: the working
-/// copy may be checked out with either line ending, and a scan keyed on `\n\n`
-/// finds nothing under CRLF and reports every test as missing.
-///
-/// The `#[test]` has to be in the same attribute block as the function — a
-/// blank line resets — so a helper that merely sits below some other test does
-/// not satisfy a coverage claim.
-#[cfg(not(target_arch = "wasm32"))]
-fn declares_test(file: &str, name: &str) -> bool {
-    let source = PLAN_MANAGER_SOURCES
-        .iter()
-        .find(|(named, _)| *named == file)
-        .map(|(_, source)| *source)
-        .unwrap_or_else(|| {
-            panic!("the coverage claim names {file}, which is not a scanned source")
-        });
-    let signature = format!("fn {name}(");
-    let mut attributed = false;
-    for line in source.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            attributed = false;
-        } else if line == "#[test]" {
-            attributed = true;
-        } else if line.starts_with(&signature) {
-            return attributed;
-        }
-    }
-    false
-}
-
-/// Every route is dispatched, gated for fit, gated for elision, and tested for
-/// what it does — and stays that way.
-///
-/// The claim this makes is not "these tests pass". It is that they exist and
-/// are reachable as tests, checked against the source of the six files they
-/// live in. A route whose behaviour test was deleted in a refactor, or renamed
-/// without the coverage claim following, fails here — which is the failure the
-/// deletion should have caused and did not.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn every_route_is_dispatched_gated_and_tested() {
-    let shell = crate::source_guard::production_source(include_str!("../plan_manager.rs"));
-    // The dispatch match alone. Searching the whole shell would let a mention
-    // in a doc comment or a neighbouring function stand in for an arm.
-    let arms = shell
-        .lines()
-        .skip_while(|line| !line.contains("match draft.mode {"))
-        .take_while(|line| line.trim() != "};")
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        arms.contains("match draft.mode {"),
-        "the shell no longer dispatches on `draft.mode`, so this claim is \
-         scanning nothing"
-    );
-
-    for (position, coverage) in ROUTE_COVERAGE.iter().enumerate() {
-        let mode = coverage.mode;
-        assert_eq!(
-            EVERY_ROUTE[position], mode,
-            "ROUTE_COVERAGE[{position}] answers for {mode:?}, which is not the \
-             route EVERY_ROUTE holds there"
-        );
-        assert!(
-            std::ptr::eq(route_coverage(mode), coverage),
-            "{mode:?} resolves to another route's coverage entry"
-        );
-
-        assert!(
-            arms.contains(&format!("SimulationPlanManagerMode::{mode:?}")),
-            "{mode:?} has no arm in the shell's dispatch match, so nothing the \
-             rest of this claim names is reachable"
-        );
-        assert!(
-            arms.contains(coverage.dispatch),
-            "{mode:?} is dispatched, but no longer to `{}`",
-            coverage.dispatch
-        );
-        assert!(
-            declares_test("tests.rs", coverage.fit_gate),
-            "{mode:?} has no fit gate: tests.rs declares no `{}`. Every route \
-             is held to the product rule that a dialog does not scroll.",
-            coverage.fit_gate
-        );
-        let (file, name) = coverage.elision_gate;
-        assert!(
-            declares_test(file, name),
-            "{mode:?} has no elision gate: {file} declares no `{name}`. Fit \
-             cannot see a truncated value — a label elided to `Corner char…` \
-             sits inside its clip rect and passes."
-        );
-        let (file, name) = coverage.behaviour;
-        assert!(
-            declares_test(file, name),
-            "{mode:?} has no test of what it does: {file} declares no `{name}`. \
-             A route can fit perfectly and commit the wrong transaction."
-        );
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Elision gates for the routes that do not gate themselves

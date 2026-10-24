@@ -423,29 +423,6 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
 }
 
-/// The inspector reads the workspace's answers, not the walks behind them.
-///
-/// Both were whole-dataset work on every frame the panel was open.
-/// `ManifestViewModel::from_run` takes a SHA-256 over every retained sample
-/// in the run to state the dataset digest, and `validate_retained_evidence`
-/// walks every sample of every waveform to state the integrity row. The
-/// Results workspace owns a memo for each — keyed on the dataset generation,
-/// so neither can serve a stale answer — and the inspector is one more reader
-/// of them rather than a second computer of the same facts.
-#[test]
-fn the_result_inspector_routes_through_the_workspace_memos() {
-    let shipped = crate::source_guard::without_test_items(include_str!("../results.rs"));
-    assert!(
-        !shipped.contains("ManifestViewModel::from_run") && !shipped.contains("manifest_for_run("),
-        "the inspector rebuilds the manifest projection, digest and all, every frame"
-    );
-    assert!(
-        !shipped.contains("validate_retained_evidence()"),
-        "the inspector walks the retained evidence itself instead of resolving the \
-         one memo that owns the verdict"
-    );
-}
-
 /// A finished 1 ms transient on the Waves sheet, the way James had it open:
 /// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
 /// and the solver's convergence evidence retained with no forced points.

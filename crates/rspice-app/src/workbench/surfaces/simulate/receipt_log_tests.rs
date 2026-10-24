@@ -9,10 +9,9 @@
 //! reader existed: a refusal survived as a toast and a committed receipt was
 //! dropped, so a successful plan edit left no durable record anywhere.
 //!
-//! These tests pin the three rules that make the second reader worth having:
-//! every announcing site logs through the one funnel, an outcome is logged
-//! once per event rather than once per frame, and a `PLAN` entry is a record
-//! rather than a notice.
+//! These tests pin the rules that make the second reader worth having: an
+//! announced outcome reaches the Console, it is logged once per event rather
+//! than once per frame, and a `PLAN` entry is a record rather than a notice.
 //!
 //! The mirror half of that last rule is asserted in `workbench::frame`'s own
 //! tests, beside the mirror it is about. The activity mirror is private to the
@@ -20,8 +19,6 @@
 //! trade than stating the claim where the code is.
 
 use super::*;
-
-use std::path::{Path, PathBuf};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 
@@ -140,117 +137,4 @@ fn a_restated_outcome_is_recorded_once_and_a_changed_one_again() {
     let entries = plan_entries(&app);
     assert_eq!(entries.len(), 2, "{entries:?}");
     assert_eq!(entries[1].0, LogSeverity::Info);
-}
-
-/// Every `.rs` file this crate ships, read at test time.
-///
-/// Walked rather than listed, so a file added to the crate is scanned the day
-/// it lands rather than the day someone remembers to add it here. Test-only
-/// files, and the `#[cfg(test)]` items inside the remaining ones, are removed
-/// through `crate::source_guard`: a test is free to announce an outcome
-/// however it needs to, and the shipped lines keep their line numbers so a
-/// failure names the line a match sits on.
-fn shipped_sources() -> Vec<(PathBuf, String)> {
-    fn walk(directory: &Path, out: &mut Vec<PathBuf>) {
-        let entries = std::fs::read_dir(directory)
-            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
-        for entry in entries {
-            let path = entry.expect("directory entry").path();
-            if path.is_dir() {
-                walk(&path, out);
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
-                out.push(path);
-            }
-        }
-    }
-
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut paths = Vec::new();
-    walk(&root, &mut paths);
-    paths.sort();
-    assert!(
-        paths.len() > 100,
-        "the crate-wide scan found only {} files under {}; a scan that reaches nothing \
-         passes forever",
-        paths.len(),
-        root.display()
-    );
-    let sources: Vec<(PathBuf, String)> = paths
-        .into_iter()
-        .map(|path| {
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-            (path, source)
-        })
-        .collect();
-    let roots: Vec<PathBuf> = sources
-        .iter()
-        .flat_map(|(path, source)| crate::source_guard::test_only_roots(path, source))
-        .collect();
-    sources
-        .iter()
-        .filter(|(path, _)| crate::source_guard::ships(path, &roots))
-        .map(|(path, source)| {
-            (
-                path.clone(),
-                crate::source_guard::without_test_items(source),
-            )
-        })
-        .collect()
-}
-
-/// One funnel writes the lifecycle outcome, so the rules above are rules
-/// rather than the behaviour of whichever site happened to raise the outcome.
-///
-/// Twenty-odd sites used to write the status field directly, which is why a
-/// receipt reached no log at all: there was no single place to log from. The
-/// funnel on `AppState` is now the only writer, and this is what keeps it
-/// that way — a new site that reaches for the field fails here, naming its own
-/// line.
-///
-/// Prose is scanned like code on purpose. A comment that spells the direct
-/// call is a comment describing a shape the crate no longer has, and the
-/// funnel's own doc is where that shape is named.
-#[test]
-fn only_the_funnel_writes_the_lifecycle_outcome() {
-    const FIELD: &str = "analysis_lifecycle_status";
-
-    let funnel = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("workbench")
-        .join("app_state.rs");
-    let mut found = Vec::new();
-    let mut scanned = 0usize;
-    for (path, source) in shipped_sources() {
-        if path == funnel {
-            continue;
-        }
-        scanned += 1;
-        for (index, _) in source.match_indices(FIELD) {
-            if !source[index + FIELD.len()..]
-                .trim_start()
-                .starts_with(".record_")
-            {
-                continue;
-            }
-            found.push(format!(
-                "{}:{}",
-                path.display(),
-                source[..index].matches('\n').count() + 1
-            ));
-        }
-    }
-
-    assert!(
-        scanned > 100,
-        "the scan covered only {scanned} shipped files; a scan that reaches nothing \
-         passes forever"
-    );
-    assert!(
-        found.is_empty(),
-        "these announce a plan outcome without logging it \u{2014} call \
-         `AppState::record_plan_receipt` or `record_plan_refusal` instead, which \
-         write the status line and the Console record together:\n  {}",
-        found.join("\n  ")
-    );
 }

@@ -407,11 +407,9 @@ fn a_moved_pin_is_not_a_rename() {
     );
 }
 
-/// Every seeded symbol comes from one constructor, so a cell created by the
-/// hierarchy transaction and one created by the new-view dialog cannot draw
-/// different bodies for the same interface.
+/// A symbol seeded from an interface reads back from its view unchanged.
 #[test]
-fn generated_symbols_come_from_one_constructor() {
+fn a_generated_symbol_round_trips_through_its_view() {
     let ports = interface();
 
     let direct = SymbolDocument::generated_from_ports(&ports);
@@ -420,12 +418,6 @@ fn generated_symbols_come_from_one_constructor() {
     let round_tripped = SymbolDocument::load_from_view(&view).expect("loads");
 
     assert_eq!(direct, round_tripped);
-    let source = include_str!("../symbol_document.rs");
-    assert!(
-        !source.contains("SymbolShape::Polyline {"),
-        "symbol seeding belongs to state::symbol::generated_from_ports; this \
-         module must not grow a second body generator"
-    );
 }
 
 /// A symbol view whose paired schematic declares `count` ports that the

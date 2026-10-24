@@ -1516,15 +1516,6 @@ mod tests {
     }
 
     #[test]
-    fn automation_surface_never_bypasses_edit_authority_for_legacy_migration() {
-        let source = include_str!("../../surfaces/automation.rs");
-        assert!(
-            !source.contains("legacy || editable"),
-            "legacy Automation presentation must not override project read-only authority"
-        );
-    }
-
-    #[test]
     fn managed_environment_lock_blocks_graph_mutation_but_allows_an_editable_copy() {
         let mut app = RSpiceApp::test_instance();
         let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);

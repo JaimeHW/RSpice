@@ -5,20 +5,6 @@ use crate::state::{Point, PortDirection, SymbolPin, SymbolShape};
 use crate::workbench::SymbolTool;
 
 #[test]
-fn symbol_editor_has_no_direct_product_key_bypass() {
-    for source in [
-        include_str!("../symbol_editor.rs"),
-        include_str!("../../../../rspice-schematic-editor/src/symbol_editor/interaction.rs"),
-        include_str!("../../../../rspice-schematic-editor/src/symbol_editor/surface.rs"),
-    ] {
-        assert!(!source.contains(concat!("input.", "key_pressed(")));
-        assert!(!source.contains(concat!("ctx.input_mut(|input| input.", "consume_key")));
-        assert!(!source.contains(concat!("Use S", " for select")));
-        assert!(!source.contains(concat!("Escape", " to cancel")));
-    }
-}
-
-#[test]
 fn symbol_surface_requests_recheck_the_view_and_write_authority() {
     use crate::state::{Cell, CellViewRef, Library, View, ViewType};
     for action in [

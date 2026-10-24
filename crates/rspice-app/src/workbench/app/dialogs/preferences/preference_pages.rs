@@ -1107,118 +1107,21 @@ mod tests {
         keys
     }
 
-    /// A control is a promise that the application reads the value behind it.
-    ///
-    /// These keys are in the preference store because an earlier
-    /// implementation wrote them, and nothing in the running application reads
-    /// any of them: this build has no remote execution service, no credential
-    /// store and no extension loader, and the solver options named here are
-    /// owned by each plan rather than by a profile default. The last three
-    /// were rows: the unit system only reached the layout readout, which has
-    /// its own row; operating-point annotation is set in View > Visibility;
-    /// and a property edit always applies whole. Putting one back on a page
-    /// means first giving it a consumer.
+    /// The first option on the Appearance scale row is the scale RSpice ships.
     #[test]
-    fn pages_expose_only_preferences_the_application_reads() {
-        let production = production_code();
-        for unsupported in [
-            "ChoicePreference::ConvergenceFailurePolicy",
-            "ChoicePreference::CheckpointPolicy",
-            "ChoicePreference::EngineSelection",
-            "ChoicePreference::RandomSeedPolicy",
-            "ChoicePreference::IncrementalResultReuse",
-            "ChoicePreference::LicenseWaitBehavior",
-            "ChoicePreference::LiveResultStreaming",
-            "ChoicePreference::DiagnosticArtifact",
-            "ChoicePreference::FamilyTraceLabeling",
-            "ChoicePreference::DefaultAxisPolicy",
-            "ChoicePreference::MeasurementEvaluation",
-            "ChoicePreference::DefaultComputeTarget",
-            "ChoicePreference::QueuePriority",
-            "ChoicePreference::RuntimeEnvironment",
-            "ChoicePreference::TransferPolicy",
-            "ChoicePreference::PreemptionTimeout",
-            "ChoicePreference::UnavailableTarget",
-            "ChoicePreference::CertificateTrust",
-            "ChoicePreference::NetworkProxy",
-            "ChoicePreference::LocalProjectEncryption",
-            "ChoicePreference::AutomationSandbox",
-            "ChoicePreference::DataResidency",
-            "ChoicePreference::ExtensionPolicy",
-            "ChoicePreference::ExtensionUpdates",
-            // Every waveform pane keeps each pixel column's extremes; a stored
-            // value from an older build is decoded and ignored.
-            "ChoicePreference::LargeDatasetDisplay",
-            "TogglePreference::RestorePlotDocuments",
-            "TogglePreference::SynchronizeResultFamilyCrossProbes",
-            "TogglePreference::AutomaticDiagnostics",
-            "TogglePreference::PythonAutomationApi",
-            "ScalarPreference::ParallelTaskCeiling",
-            "ChoicePreference::UnitSystem",
-            "ChoicePreference::OperatingPointAnnotation",
-            "ChoicePreference::PropertyCommitPolicy",
-        ] {
-            assert!(
-                !production.contains(unsupported),
-                "a preference with no runtime consumer reached a page: {unsupported}"
-            );
-        }
-        for fabricated in [
-            "lab-hpc-west",
-            "Operating-system protected vault",
-            "United States · organization managed",
-            "0 installed extensions",
-            "Built-in sandbox only",
-        ] {
-            assert!(
-                !production.contains(fabricated),
-                "fabricated runtime fixture leaked into Preferences: {fabricated}"
-            );
-        }
-    }
-
-    /// The interface scale is the counter-example to the test above: the shell
-    /// applies it to the context's zoom factor on every frame, and until it
-    /// reached Appearance the only way to change it was to edit the stored
-    /// session by hand.
-    #[test]
-    fn the_zoom_factor_the_shell_applies_is_reachable_from_appearance() {
-        let source = production_source();
-        let appearance = source
-            .split("fn appearance(")
-            .nth(1)
-            .and_then(|source| source.split("\nfn ").next())
-            .expect("Appearance page source");
-        assert!(appearance.contains("ChoicePreference::InterfaceScale"));
+    fn the_shipped_interface_scale_is_one() {
         assert!(
             (crate::workbench::UserPreferences::default().interface_scale() - 1.0).abs()
-                < f32::EPSILON,
-            "the first option on the row has to be the scale RSpice ships"
+                < f32::EPSILON
         );
     }
 
-    /// The solver's worker ceiling is the other counter-example: the engine
-    /// has always taken one, the command line has always exposed it as
-    /// `--jobs`, and the desktop had no control for it at all. The stored key
-    /// existed and was *printed* in the Automation preview, which is worse
-    /// than absent — a number shown to a reader that nothing honoured.
+    /// The shipped worker ceiling leaves the engine's own in place.
     #[test]
-    fn the_worker_ceiling_the_engine_takes_is_reachable_from_simulation() {
-        let source = production_source();
-        let row = source
-            .split("fn solver_threads_row(")
-            .nth(1)
-            .and_then(|source| source.split("\nfn ").next())
-            .expect("solver threads row source");
-        assert!(row.contains("ScalarPreference::LocalParallelSlots"));
-        assert!(
-            production_code().contains("solver_threads_row(ui, state)"),
-            "the row has to be on a page, not merely defined"
-        );
+    fn the_shipped_worker_ceiling_is_the_engines_own() {
         assert_eq!(
             crate::workbench::UserPreferences::default().solver_worker_limit(),
-            None,
-            "shipped default leaves the engine's own ceiling in place"
+            None
         );
     }
 

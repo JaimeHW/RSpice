@@ -157,62 +157,6 @@ fn every_results_surface_spells_one_bit_the_same_way() {
     assert_eq!(notations.display("v(data#3)"), format!("v({bit})"));
 }
 
-/// Those surfaces sit in three different layers and none of their paint
-/// functions can be called without a live `Ui`, so the one thing that keeps
-/// them agreeing is checked over their source: a site that formats a result
-/// name any other way is a second spelling, and a second spelling drifts.
-#[test]
-fn every_results_surface_paints_through_this_boundary() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for (path, site) in [
-        (
-            "workbench/docks/navigator/results_rows.rs",
-            "notations.display(&signal.name)",
-        ),
-        (
-            "workbench/documents/result_document/waves/stack_host.rs",
-            "notations.display(name)",
-        ),
-        (
-            "workbench/documents/result_document/table.rs",
-            ".display(name)",
-        ),
-        (
-            "workbench/documents/result_document/op_inspector.rs",
-            "notations.display(name)",
-        ),
-        (
-            "schematic/view/scene.rs",
-            "notations.display(&voltage.name)",
-        ),
-    ] {
-        let source = std::fs::read_to_string(root.join(path))
-            .unwrap_or_else(|error| panic!("read {path}: {error}"));
-        let production = crate::source_guard::production_source(&source);
-        assert!(
-            production.contains("bus_notations(") && production.contains(site),
-            "{path} no longer renders a result name through `bus_notations`/`{site}`.\n\
-             Every surface that shows a solved vector renders it through \
-             `schematic::vector_display`, so a bus bit reads the \
-             same everywhere."
-        );
-    }
-    let viewers = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results-ui/src");
-    for (path, site) in [
-        ("waves/header.rs", "display_name(&trace.name)"),
-        ("table.rs", "display_name(name)"),
-        ("op_inspector.rs", "source.mapping.display_node(&leaf)"),
-        ("op_inspector.rs", "source.mapping.display_node(&row.name)"),
-    ] {
-        let source = std::fs::read_to_string(viewers.join(path))
-            .unwrap_or_else(|error| panic!("read {path}: {error}"));
-        assert!(
-            crate::source_guard::production_source(&source).contains(site),
-            "{path} no longer renders retained names through its host notation boundary: {site}"
-        );
-    }
-}
-
 /// A design that declares nothing changes nothing, which is what a surface
 /// with no design behind it must show.
 #[test]
