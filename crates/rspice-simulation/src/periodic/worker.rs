@@ -4,7 +4,6 @@ use rspice_simulation_contract::worker_run_config::{
     WorkerPacRunConfig, WorkerPeriodicCarrier, WorkerPnoiseReference, WorkerPnoiseRunConfig,
     WorkerPstbRunConfig, WorkerPxfRunConfig,
 };
-use rspice_simulation_contract::worker_spec::WorkerSweepType;
 
 impl From<&PacRunConfig> for WorkerPacRunConfig {
     fn from(value: &PacRunConfig) -> Self {
@@ -15,7 +14,7 @@ impl From<&PacRunConfig> for WorkerPacRunConfig {
             start_freq: value.start_freq,
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
-            sweep: WorkerSweepType::from(value.sweep),
+            sweep: value.sweep,
             sideband_max: value.sideband_max,
             // Written only where the range is not symmetric, so a symmetric
             // request is the same document it has always been.
@@ -41,7 +40,7 @@ impl From<WorkerPacRunConfig> for PacRunConfig {
             start_freq: value.start_freq,
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
-            sweep: PacFrequencySweep::from(value.sweep),
+            sweep: value.sweep,
             sideband_max: value.sideband_max,
             sideband_min: value.sideband_min.unwrap_or(-value.sideband_max),
             input_source: value.input_source,
@@ -65,7 +64,7 @@ impl From<&PxfRunConfig> for WorkerPxfRunConfig {
             start_freq: value.start_freq,
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
-            sweep: WorkerSweepType::from(value.sweep),
+            sweep: value.sweep,
             input_source: value.input_source.clone(),
             input_sideband: value.input_sideband,
             output_node: value.output_node.clone(),
@@ -88,7 +87,7 @@ impl From<WorkerPxfRunConfig> for PxfRunConfig {
             start_freq: value.start_freq,
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
-            sweep: PxfFrequencySweep::from(value.sweep),
+            sweep: value.sweep,
             input_source: value.input_source,
             input_sideband: value.input_sideband,
             output_node: value.output_node,
@@ -114,7 +113,7 @@ impl From<&PnoiseRunConfig> for WorkerPnoiseRunConfig {
             start_freq: value.start_freq,
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
-            sweep: WorkerSweepType::from(value.sweep),
+            sweep: value.sweep,
             max_sideband: value.max_sideband,
             output_node: value.output_node.clone(),
             output_ref: value.output_ref.clone(),
@@ -141,7 +140,7 @@ impl From<WorkerPnoiseRunConfig> for PnoiseRunConfig {
             start_freq: value.start_freq,
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
-            sweep: PnoiseFrequencySweep::from(value.sweep),
+            sweep: value.sweep,
             max_sideband: value.max_sideband,
             output_node: value.output_node,
             output_ref: value.output_ref,
@@ -184,66 +183,6 @@ impl From<WorkerPstbRunConfig> for PstbRunConfig {
             stability_threshold: value.stability_threshold,
             detect_subharmonics: value.detect_subharmonics,
             eigenvalue_tolerance: value.eigenvalue_tolerance,
-        }
-    }
-}
-
-impl From<PacFrequencySweep> for WorkerSweepType {
-    fn from(value: PacFrequencySweep) -> Self {
-        match value {
-            PacFrequencySweep::Decade => Self::Decade,
-            PacFrequencySweep::Octave => Self::Octave,
-            PacFrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<PxfFrequencySweep> for WorkerSweepType {
-    fn from(value: PxfFrequencySweep) -> Self {
-        match value {
-            PxfFrequencySweep::Decade => Self::Decade,
-            PxfFrequencySweep::Octave => Self::Octave,
-            PxfFrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<PnoiseFrequencySweep> for WorkerSweepType {
-    fn from(value: PnoiseFrequencySweep) -> Self {
-        match value {
-            PnoiseFrequencySweep::Decade => Self::Decade,
-            PnoiseFrequencySweep::Octave => Self::Octave,
-            PnoiseFrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for PacFrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for PxfFrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for PnoiseFrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
         }
     }
 }

@@ -9,7 +9,6 @@ use super::helpers::{
     parse_positive_points, spell_as_the_deck,
 };
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
-use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::setup_state::SimulationSetup;
 use rspice_simulation_contract::spice_value::parse_spice_value_checked;
 
@@ -104,7 +103,7 @@ pub fn pac_run_config_from_dialog(
     draft: &rspice_simulation_contract::pac_draft::PacDialogState,
     producer: Option<&AnalysisDraft>,
 ) -> Result<crate::periodic::PacRunConfig, String> {
-    use crate::periodic::{PacFrequencySweep, PacRunConfig};
+    use crate::periodic::PacRunConfig;
 
     let mut pac_state = draft.clone();
     pac_state.ensure_initialized();
@@ -114,11 +113,7 @@ pub fn pac_run_config_from_dialog(
 
     let basis = PeriodicCarrierBasis::read(state, producer, pac_cfg.carrier, "PAC")?;
 
-    let sweep = match pac_cfg.sweep_type {
-        rspice_simulation_contract::pac_draft::PacSweepType::Decade => PacFrequencySweep::Decade,
-        rspice_simulation_contract::pac_draft::PacSweepType::Octave => PacFrequencySweep::Octave,
-        rspice_simulation_contract::pac_draft::PacSweepType::Linear => PacFrequencySweep::Linear,
-    };
+    let sweep = pac_cfg.sweep_type;
 
     let output_ref = deck_reference(&pac_cfg.output_ref);
     let (reltol, abstol) = authored_or_plan_tolerances(state, pac_cfg.reltol, pac_cfg.abstol);
@@ -150,7 +145,7 @@ pub fn pnoise_run_config_from_dialog(
     draft: &rspice_simulation_contract::pnoise_draft::PnoiseDialogState,
     producer: Option<&AnalysisDraft>,
 ) -> Result<crate::periodic::PnoiseRunConfig, String> {
-    use crate::periodic::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
+    use crate::periodic::{PnoiseReference, PnoiseRunConfig};
 
     let mut pnoise_state = draft.clone();
     pnoise_state.ensure_initialized();
@@ -160,17 +155,7 @@ pub fn pnoise_run_config_from_dialog(
 
     let basis = PeriodicCarrierBasis::read(state, producer, pnoise_cfg.carrier, "PNOISE")?;
 
-    let sweep = match pnoise_cfg.sweep_type {
-        rspice_simulation_contract::pnoise_draft::PnoiseSweepType::Decade => {
-            PnoiseFrequencySweep::Decade
-        }
-        rspice_simulation_contract::pnoise_draft::PnoiseSweepType::Octave => {
-            PnoiseFrequencySweep::Octave
-        }
-        rspice_simulation_contract::pnoise_draft::PnoiseSweepType::Linear => {
-            PnoiseFrequencySweep::Linear
-        }
-    };
+    let sweep = pnoise_cfg.sweep_type;
 
     let noise_ref = match pnoise_cfg.noise_ref {
         rspice_simulation_contract::pnoise_draft::NoiseReferenceType::Output => {
@@ -224,7 +209,7 @@ pub fn pxf_run_config_from_dialog(
     draft: &rspice_simulation_contract::pxf_draft::PxfDialogState,
     producer: Option<&AnalysisDraft>,
 ) -> Result<crate::periodic::PxfRunConfig, String> {
-    use crate::periodic::{PxfFrequencySweep, PxfRunConfig};
+    use crate::periodic::PxfRunConfig;
 
     let mut pxf_state = draft.clone();
     pxf_state.ensure_initialized();
@@ -234,11 +219,7 @@ pub fn pxf_run_config_from_dialog(
 
     let basis = PeriodicCarrierBasis::read(state, producer, pxf_cfg.carrier, "PXF")?;
 
-    let sweep = match pxf_cfg.sweep_type {
-        rspice_simulation_contract::pxf_draft::PxfSweepType::Decade => PxfFrequencySweep::Decade,
-        rspice_simulation_contract::pxf_draft::PxfSweepType::Octave => PxfFrequencySweep::Octave,
-        rspice_simulation_contract::pxf_draft::PxfSweepType::Linear => PxfFrequencySweep::Linear,
-    };
+    let sweep = pxf_cfg.sweep_type;
 
     let output_ref = deck_reference(&pxf_cfg.output_ref);
     let (reltol, abstol) = authored_or_plan_tolerances(state, pxf_cfg.reltol, pxf_cfg.abstol);
@@ -310,7 +291,7 @@ pub fn temp_run_config_from_dialog(
     state: &SimulationSetup,
     temp_cfg: &rspice_simulation_contract::temp_draft::TempConfig,
 ) -> Result<crate::sweeps::TempRunConfig, String> {
-    use crate::sweeps::{CornerBaseMode, CornerFrequencySweep, TempRunConfig};
+    use crate::sweeps::{CornerBaseMode, TempRunConfig};
     use rspice_simulation_contract::temp_draft::TempBaseAnalysis;
 
     let temperatures_c = if !temp_cfg.specific_temps.is_empty() {
@@ -324,11 +305,7 @@ pub fn temp_run_config_from_dialog(
         TempBaseAnalysis::Dc => CornerBaseMode::from_dc_config(&state.dc.to_config()?),
         TempBaseAnalysis::Transient => transient_study_base_mode(state)?,
         TempBaseAnalysis::Ac => {
-            let sweep = match map_frequency_sweep(state.ac.sweep) {
-                FrequencySweep::Decade => CornerFrequencySweep::Decade,
-                FrequencySweep::Octave => CornerFrequencySweep::Octave,
-                FrequencySweep::Linear => CornerFrequencySweep::Linear,
-            };
+            let sweep = map_frequency_sweep(state.ac.sweep);
             CornerBaseMode::Ac {
                 start_freq: parse_spice_value_checked(&state.ac.fstart)
                     .map_err(|e| format!("invalid temperature AC start frequency: {}", e))?,
@@ -352,7 +329,7 @@ pub fn corner_run_config_from_dialog(
     corner_cfg: &rspice_simulation_contract::corner_config::CornerConfig,
     sealed_model_sources: &crate::model_sources::SealedModelExecutionSources,
 ) -> Result<crate::sweeps::CornerRunConfig, String> {
-    use crate::sweeps::{CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig};
+    use crate::sweeps::{CornerBaseMode, CornerPoint, CornerRunConfig};
     use rspice_simulation_contract::corner_config::CornerBaseAnalysis;
 
     let process_corners = corner_cfg.process_corners.clone();
@@ -378,11 +355,7 @@ pub fn corner_run_config_from_dialog(
         CornerBaseAnalysis::Dc => CornerBaseMode::from_dc_config(&state.dc.to_config()?),
         CornerBaseAnalysis::Transient => transient_study_base_mode(state)?,
         CornerBaseAnalysis::Ac => {
-            let sweep = match map_frequency_sweep(state.ac.sweep) {
-                FrequencySweep::Decade => CornerFrequencySweep::Decade,
-                FrequencySweep::Octave => CornerFrequencySweep::Octave,
-                FrequencySweep::Linear => CornerFrequencySweep::Linear,
-            };
+            let sweep = map_frequency_sweep(state.ac.sweep);
             CornerBaseMode::Ac {
                 start_freq: parse_spice_value_checked(&state.ac.fstart)
                     .map_err(|e| format!("invalid corner AC start frequency: {}", e))?,

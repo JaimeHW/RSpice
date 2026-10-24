@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use super::AcSweepType;
+use crate::config::FrequencySweep;
 
 /// Check that conversion sidebands fit the configured noise-folding window.
 pub fn validate_noise_sidebands(input: i32, output: i32, maximum: usize) -> Result<(), String> {
@@ -231,7 +231,7 @@ pub struct NoiseAnalysisConfig {
     /// Independent input source used for input-referred noise.
     pub input_source: String,
     /// Fixed-grid sweep type. Ignored when `explicit_frequencies` is present.
-    pub sweep_type: AcSweepType,
+    pub sweep_type: FrequencySweep,
     /// Number of points per decade/octave, or total points for linear.
     pub num_points: usize,
     /// Start frequency (Hz) for fixed-grid sweeps.
@@ -261,7 +261,7 @@ impl Default for NoiseAnalysisConfig {
             output_node: String::new(),
             reference_node: "0".to_owned(),
             input_source: String::new(),
-            sweep_type: AcSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             num_points: 30,
             start_freq: 10.0,
             stop_freq: 1.0e6,
@@ -305,7 +305,7 @@ impl NoiseAnalysisConfig {
         format!(
             ".noise {output} {} {} {} {} {}",
             self.input_source.trim(),
-            self.sweep_type.spice_name(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             self.start_freq,
             self.stop_freq

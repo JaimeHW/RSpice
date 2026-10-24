@@ -593,7 +593,7 @@ fn an_unauthored_carrier_leaves_the_plan_digest_unchanged() {
         writer.f64(config.start_freq);
         writer.f64(config.stop_freq);
         writer.usize(config.points_per_unit);
-        writer.u8(pac_sweep_tag(config.sweep));
+        writer.u8(frequency_sweep_tag(config.sweep));
         writer.i32(config.sideband_max);
         writer.string(&config.input_source);
         writer.string(&config.output_node);
@@ -680,7 +680,7 @@ fn a_pss_carried_request_keeps_its_digest() {
         writer.f64(config.start_freq);
         writer.f64(config.stop_freq);
         writer.usize(config.points_per_unit);
-        writer.u8(pac_sweep_tag(config.sweep));
+        writer.u8(frequency_sweep_tag(config.sweep));
         writer.i32(config.sideband_max);
         writer.string(&config.input_source);
         writer.string(&config.output_node);

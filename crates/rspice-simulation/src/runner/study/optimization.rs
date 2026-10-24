@@ -280,9 +280,8 @@ mod tests {
     use rspice_simulation_contract::analysis_spec::OptimizationAlgorithm;
     use rspice_simulation_contract::analysis_spec::OptimizationGoal;
     use rspice_simulation_contract::analysis_spec::OptimizationVariable;
-    use rspice_simulation_contract::config::{
-        AcAnalysisConfig, AcSweepType, TransientAnalysisConfig,
-    };
+    use rspice_simulation_contract::config::FrequencySweep;
+    use rspice_simulation_contract::config::{AcAnalysisConfig, TransientAnalysisConfig};
 
     fn base(analysis: AnalysisConfig, measurement: &str) -> StudyRunConfig {
         StudyRunConfig {
@@ -307,7 +306,7 @@ mod tests {
                 start_freq: 1000.0,
                 stop_freq: 1000.0,
                 num_points: 1,
-                sweep_type: AcSweepType::Linear,
+                sweep_type: FrequencySweep::Linear,
             }),
             "bin:0:magnitude:V(out)",
         );
@@ -438,7 +437,7 @@ mod tests {
                     start_freq: 1000.0,
                     stop_freq: 1000.0,
                     num_points: 1,
-                    sweep_type: AcSweepType::Linear,
+                    sweep_type: FrequencySweep::Linear,
                 }),
                 "gain",
                 1.0 / 1.0_f64.hypot(std::f64::consts::TAU * 2.0),

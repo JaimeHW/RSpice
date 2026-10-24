@@ -81,9 +81,8 @@ mod tests {
     use crate::runner::worker_contract::WorkerSpecExecutionOptions;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
     use rspice_simulation_contract::analysis_spec::AnalysisSpec;
-    use rspice_simulation_contract::config::{
-        AcAnalysisConfig, AcSweepType, TransientAnalysisConfig,
-    };
+    use rspice_simulation_contract::config::FrequencySweep;
+    use rspice_simulation_contract::config::{AcAnalysisConfig, TransientAnalysisConfig};
 
     fn base(analysis: AnalysisConfig, names: &[&str]) -> StudyRunConfig {
         StudyRunConfig {
@@ -104,7 +103,7 @@ mod tests {
             start_freq: 1000.0,
             stop_freq: 1000.0,
             num_points: 1,
-            sweep_type: AcSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
         })
     }
     fn spec(source: McVariationSource) -> AnalysisSpec {

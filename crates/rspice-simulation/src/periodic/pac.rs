@@ -1,25 +1,8 @@
 use super::normalize_pac_node_name;
 use crate::error::{ServiceRunError, ServiceRunResult};
 use rspice_core::Value;
+use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
-
-/// Frequency sweep type for PAC analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum PacFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl PacFrequencySweep {
-    fn to_core(self) -> rspice_core::analysis::pac::PacSweepType {
-        match self {
-            Self::Decade => rspice_core::analysis::pac::PacSweepType::Decade,
-            Self::Octave => rspice_core::analysis::pac::PacSweepType::Octave,
-            Self::Linear => rspice_core::analysis::pac::PacSweepType::Linear,
-        }
-    }
-}
 
 /// Explicit configuration for PAC execution.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -31,7 +14,7 @@ pub struct PacRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: PacFrequencySweep,
+    pub sweep: FrequencySweep,
     /// Lowest output sideband index the lifted solve spans.
     ///
     /// The engine's `.PAC` card states the range in either of two ways and
@@ -69,7 +52,7 @@ impl Default for PacRunConfig {
             start_freq: 1e3,
             stop_freq: 1e9,
             points_per_unit: 10,
-            sweep: PacFrequencySweep::Decade,
+            sweep: FrequencySweep::Decade,
             sideband_min: -5,
             sideband_max: 5,
             input_source: "VRF".to_string(),
@@ -142,7 +125,7 @@ impl PacRunConfig {
 
         let mut pac_config = PacConfig::new()
             .with_sweep(self.start_freq, self.stop_freq, self.points_per_unit)
-            .with_sweep_type(self.sweep.to_core())
+            .with_sweep_type(core_pac_sweep(self.sweep))
             .with_sidebands(self.sideband_min, self.sideband_max)
             .with_input_source(self.input_source.trim())
             .with_output_node(&normalize_pac_node_name(&self.output_node))
@@ -161,5 +144,14 @@ impl PacRunConfig {
             ServiceRunError::Failure(format!("PAC configuration error: {error}"))
         })?;
         Ok(pac_config)
+    }
+}
+
+/// The engine's PAC sweep kind for a sweep.
+pub(crate) fn core_pac_sweep(sweep: FrequencySweep) -> rspice_core::analysis::pac::PacSweepType {
+    match sweep {
+        FrequencySweep::Decade => rspice_core::analysis::pac::PacSweepType::Decade,
+        FrequencySweep::Octave => rspice_core::analysis::pac::PacSweepType::Octave,
+        FrequencySweep::Linear => rspice_core::analysis::pac::PacSweepType::Linear,
     }
 }

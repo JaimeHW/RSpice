@@ -2,8 +2,7 @@
 use super::*;
 use crate::netlist_preparation::splice_before_terminal_end_card;
 use crate::periodic::{
-    PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-    PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
+    PacRunConfig, PnoiseReference, PnoiseRunConfig, PstbRunConfig, PxfRunConfig,
 };
 use rspice_simulation_contract::analysis_spec::PssMethod;
 use rspice_simulation_contract::config::FrequencySweep;
@@ -112,7 +111,7 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
             start_freq: 100.0,
             stop_freq: 200.0,
             points_per_unit: 3,
-            sweep: PacFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             sideband_min: -1,
             sideband_max: 0,
             input_source: "VIN".into(),
@@ -131,7 +130,7 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
             start_freq: 100.0,
             stop_freq: 200.0,
             points_per_unit: 3,
-            sweep: PxfFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             input_source: "VIN".into(),
             output_node: "out".into(),
             max_sideband: 1,
@@ -150,7 +149,7 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
             start_freq: 100.0,
             stop_freq: 200.0,
             points_per_unit: 3,
-            sweep: PnoiseFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             input_source: "VIN".into(),
             output_node: "out".into(),
             max_sideband: 1,

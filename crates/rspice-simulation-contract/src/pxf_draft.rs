@@ -39,6 +39,7 @@
 //! The output probe is spelled `out=` because the engine spells it that way,
 //! so the whole periodic family reads one way.
 
+use crate::config::FrequencySweep;
 use crate::periodic_carrier::PeriodicCarrier;
 
 use crate::options::{format_freq, parse_si_value};
@@ -51,29 +52,6 @@ use crate::pac_draft::{optional_tolerance, optional_tolerance_text};
 // =============================================================================
 // PXF Sweep Type
 // =============================================================================
-
-/// Type of frequency sweep for PXF analysis
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum PxfSweepType {
-    /// Decades (logarithmic)
-    #[default]
-    Decade,
-    /// Octaves (logarithmic)
-    Octave,
-    /// Linear
-    Linear,
-}
-
-impl PxfSweepType {
-    /// SPICE keyword
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
 
 // =============================================================================
 // PXF Configuration
@@ -89,7 +67,7 @@ pub struct PxfConfig {
     /// Number of points
     pub num_points: u32,
     /// Sweep type
-    pub sweep_type: PxfSweepType,
+    pub sweep_type: FrequencySweep,
     /// Output node name
     pub output_node: String,
     /// Output reference node
@@ -123,7 +101,7 @@ impl Default for PxfConfig {
             start_freq: 1e3,
             stop_freq: 1e9,
             num_points: 10,
-            sweep_type: PxfSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             output_node: "VOUT".to_string(),
             output_ref: String::new(),
             output_sideband: 1,
@@ -146,7 +124,7 @@ impl PxfConfig {
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pxf {} {} {} {}",
-            self.sweep_type.spice_keyword(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             format_freq(self.start_freq),
             format_freq(self.stop_freq)
@@ -295,9 +273,9 @@ impl PxfDialogState {
             stop_freq: format_freq(config.stop_freq),
             num_points: config.num_points.to_string(),
             sweep_type_idx: match config.sweep_type {
-                PxfSweepType::Decade => 0,
-                PxfSweepType::Octave => 1,
-                PxfSweepType::Linear => 2,
+                FrequencySweep::Decade => 0,
+                FrequencySweep::Octave => 1,
+                FrequencySweep::Linear => 2,
             },
             output_node: config.output_node.clone(),
             output_ref: config.output_ref.clone(),
@@ -333,9 +311,9 @@ impl PxfDialogState {
             .map_err(|_| "Invalid max sideband")?;
 
         let sweep_type = match self.sweep_type_idx {
-            0 => PxfSweepType::Decade,
-            1 => PxfSweepType::Octave,
-            _ => PxfSweepType::Linear,
+            0 => FrequencySweep::Decade,
+            1 => FrequencySweep::Octave,
+            _ => FrequencySweep::Linear,
         };
 
         let config = PxfConfig {

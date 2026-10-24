@@ -146,11 +146,7 @@ fn run_sparameter(
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<(SimulationResult, Option<f64>), SimulationError> {
     let abort = context.abort;
-    let sweep = match request.sweep {
-        FrequencySweep::Decade => svc_runner::SParameterSweep::Decade,
-        FrequencySweep::Octave => svc_runner::SParameterSweep::Octave,
-        FrequencySweep::Linear => svc_runner::SParameterSweep::Linear,
-    };
+    let sweep = request.sweep;
     let mut configured_ports = Vec::with_capacity(request.ports.len());
     for port in request.ports {
         super::ensure_not_aborted(abort)?;
@@ -737,8 +733,9 @@ fn pnoise_result(
 #[cfg(test)]
 #[test]
 fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
-    use crate::periodic::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
+    use crate::periodic::{PnoiseReference, PnoiseRunConfig};
     use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
+    use rspice_simulation_contract::config::FrequencySweep;
     use svc_runner::test_entry::{ctx, parse};
     use svc_runner::{HbRunConfig, HbToneRunConfig};
     let netlist = parse("sampled studio\nI1 0 out SIN(0 1m 1k) AC 1\nR1 out 0 1k\n.end\n");
@@ -776,7 +773,7 @@ fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
             start_freq: 100.0,
             stop_freq: 250.0,
             points_per_unit: 3,
-            sweep: PnoiseFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             max_sideband: 1,
             output_node: "out".into(),
             input_source: "I1".into(),

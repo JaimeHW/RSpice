@@ -1312,7 +1312,8 @@ fn an_sp_port_against_the_drawn_ground_is_a_port_to_node_zero() {
     use rspice_results::analysis_result::AnalysisResult;
     use rspice_results::run::SimulationRun;
     use rspice_simulation_contract::analysis_draft::AnalysisDraft;
-    use rspice_simulation_contract::sp_config::{SpConfig, SpPortConfig, SpSweepType};
+    use rspice_simulation_contract::config::FrequencySweep;
+    use rspice_simulation_contract::sp_config::{SpConfig, SpPortConfig};
     use rspice_simulation_contract::sp_draft::{SpDialogState, SpPortSource};
 
     let mut bench = Bench::new();
@@ -1326,7 +1327,7 @@ fn an_sp_port_against_the_drawn_ground_is_a_port_to_node_zero() {
         start_freq: 1e6,
         stop_freq: 1e6,
         num_points: 1,
-        sweep_type: SpSweepType::Linear,
+        sweep_type: FrequencySweep::Linear,
         ports: vec![SpPortConfig::differential(1, "in", "GND!")],
         ..SpConfig::default()
     });

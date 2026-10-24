@@ -7,9 +7,6 @@
 
 use super::encode_dc_modes;
 
-use crate::periodic::PacFrequencySweep;
-use crate::periodic::PnoiseFrequencySweep;
-use crate::periodic::PxfFrequencySweep;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
 use rspice_simulation_contract::analysis_spec::EnvelopeExtractionPath;
@@ -1629,11 +1626,7 @@ fn encode_integration_method(method: IntegrationMethod) -> u8 {
 }
 
 fn encode_frequency_sweep(writer: &mut CanonicalWriter, sweep: FrequencySweep) {
-    writer.u8(match sweep {
-        FrequencySweep::Decade => 0,
-        FrequencySweep::Octave => 1,
-        FrequencySweep::Linear => 2,
-    });
+    writer.u8(frequency_sweep_tag(sweep));
 }
 
 pub(super) fn encode_noise_contribution_detail(
@@ -1698,27 +1691,11 @@ pub(super) fn corner_process_tag(process: ProcessCorner) -> u8 {
     }
 }
 
-pub(super) fn pac_sweep_tag(sweep: PacFrequencySweep) -> u8 {
+pub(super) fn frequency_sweep_tag(sweep: FrequencySweep) -> u8 {
     match sweep {
-        PacFrequencySweep::Decade => 0,
-        PacFrequencySweep::Octave => 1,
-        PacFrequencySweep::Linear => 2,
-    }
-}
-
-pub(super) fn pxf_sweep_tag(sweep: PxfFrequencySweep) -> u8 {
-    match sweep {
-        PxfFrequencySweep::Decade => 0,
-        PxfFrequencySweep::Octave => 1,
-        PxfFrequencySweep::Linear => 2,
-    }
-}
-
-pub(super) fn pnoise_sweep_tag(sweep: PnoiseFrequencySweep) -> u8 {
-    match sweep {
-        PnoiseFrequencySweep::Decade => 0,
-        PnoiseFrequencySweep::Octave => 1,
-        PnoiseFrequencySweep::Linear => 2,
+        FrequencySweep::Decade => 0,
+        FrequencySweep::Octave => 1,
+        FrequencySweep::Linear => 2,
     }
 }
 

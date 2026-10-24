@@ -3,8 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::parse::{parse_positive, parse_positive_usize};
+use crate::config::FrequencySweep;
 use crate::config::{
-    AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
+    NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };
 
 /// Noise draft with an independent, losslessly persisted analysis contract.
@@ -85,9 +86,9 @@ impl NoiseDraft {
                     );
                 }
                 let sweep_type = match self.sweep {
-                    NoiseSweepType::Decade => AcSweepType::Decade,
-                    NoiseSweepType::Octave => AcSweepType::Octave,
-                    NoiseSweepType::Linear => AcSweepType::Linear,
+                    NoiseSweepType::Decade => FrequencySweep::Decade,
+                    NoiseSweepType::Octave => FrequencySweep::Octave,
+                    NoiseSweepType::Linear => FrequencySweep::Linear,
                     _ => unreachable!("matched fixed noise sweep"),
                 };
                 (sweep_type, num_points, start_freq, stop_freq, None)
@@ -97,7 +98,7 @@ impl NoiseDraft {
                 let start = frequencies.first().copied().unwrap_or_default();
                 let stop = frequencies.last().copied().unwrap_or_default();
                 (
-                    AcSweepType::Decade,
+                    FrequencySweep::Decade,
                     frequencies.len(),
                     start,
                     stop,

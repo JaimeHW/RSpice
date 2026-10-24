@@ -10,7 +10,6 @@ use rspice_simulation_contract::analysis_spec::OptimizationGoal;
 use rspice_simulation_contract::analysis_spec::OptimizationVariable;
 use rspice_simulation_contract::analysis_spec::PssMethod;
 use rspice_simulation_contract::analysis_spec::SpPort;
-use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::config::OpConfig;
 use rspice_simulation_contract::config::OpTemperatureMode;
 
@@ -18,9 +17,9 @@ const CIRCUIT: &str = "Periodic RF study\n.param R=1000 ACTUAL={2*R}\nVIN in 0 S
 
 fn base(kind: usize, hb: bool) -> StudyRunConfig {
     use crate::periodic::{
-        PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-        PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
+        PacRunConfig, PnoiseReference, PnoiseRunConfig, PstbRunConfig, PxfRunConfig,
     };
+    use rspice_simulation_contract::config::FrequencySweep;
     use services::*;
     let carrier = if hb {
         PeriodicCarrier::Hb
@@ -37,7 +36,7 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
                 start_freq: 100.0,
                 stop_freq: 200.0,
                 points_per_unit: 3,
-                sweep: PacFrequencySweep::Linear,
+                sweep: FrequencySweep::Linear,
                 sideband_min: -1,
                 sideband_max: 0,
                 input_source: "VIN".into(),
@@ -60,7 +59,7 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
                 start_freq: 100.0,
                 stop_freq: 200.0,
                 points_per_unit: 3,
-                sweep: PxfFrequencySweep::Linear,
+                sweep: FrequencySweep::Linear,
                 input_source: "VIN".into(),
                 output_node: "out".into(),
                 output_ref: None,
@@ -87,7 +86,7 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
                 start_freq: 100.0,
                 stop_freq: 200.0,
                 points_per_unit: 3,
-                sweep: PnoiseFrequencySweep::Linear,
+                sweep: FrequencySweep::Linear,
                 input_source: "VIN".into(),
                 output_node: "out".into(),
                 output_ref: None,

@@ -4,6 +4,7 @@
 //! point. It consumes the exact frozen HB coefficients and delegates the
 //! cyclostationary adjoint solve to `rspice-core`.
 
+use rspice_simulation_contract::config::FrequencySweep;
 use std::collections::HashSet;
 
 use rspice_core::Value;
@@ -19,24 +20,6 @@ use super::{
 };
 use crate::error::{ensure_not_aborted, poll_periodically};
 
-/// Frequency sweep type for HBNOISE.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HbnoiseFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl HbnoiseFrequencySweep {
-    const fn keyword(self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
-
 /// Exact retained-HB noise request.
 #[derive(Debug, Clone)]
 pub struct HbnoiseRunConfig {
@@ -46,7 +29,7 @@ pub struct HbnoiseRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: HbnoiseFrequencySweep,
+    pub sweep: FrequencySweep,
     pub output_node: String,
     pub output_ref: Option<String>,
     pub input_source: String,
@@ -62,7 +45,7 @@ impl HbnoiseRunConfig {
             self.start_freq,
             self.stop_freq,
             self.points_per_unit,
-            self.sweep == HbnoiseFrequencySweep::Linear,
+            self.sweep == FrequencySweep::Linear,
             self.max_sideband,
             self.integrated_noise || self.contributor_ranking,
         )
@@ -129,7 +112,7 @@ pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_context(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
-        config.sweep.keyword(),
+        config.sweep.runner_keyword(),
         context.limits.max_analysis_points,
         abort,
     )?;
@@ -352,7 +335,7 @@ mod tests {
             start_freq: 1.0e3,
             stop_freq: 1.0e4,
             points_per_unit: 3,
-            sweep: HbnoiseFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             output_node: "out".to_owned(),
             output_ref: None,
             input_source: "vin".to_owned(),
@@ -408,7 +391,7 @@ mod tests {
             start_freq: 1.0,
             stop_freq: 10.0,
             points_per_unit: 2,
-            sweep: HbnoiseFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             output_node: "out".to_owned(),
             output_ref: None,
             input_source: "vin".to_owned(),
@@ -433,9 +416,9 @@ mod tests {
         let deck = "spot noise\nV1 in 0 0\nRs in out 1k\nRl out 0 1k\n.end\n";
         let state = retained_hb(deck);
         for sweep in [
-            HbnoiseFrequencySweep::Linear,
-            HbnoiseFrequencySweep::Decade,
-            HbnoiseFrequencySweep::Octave,
+            FrequencySweep::Linear,
+            FrequencySweep::Decade,
+            FrequencySweep::Octave,
         ] {
             let mut config = HbnoiseRunConfig {
                 input_sideband: 0,
@@ -499,7 +482,7 @@ mod tests {
             start_freq: 1e3,
             stop_freq: 1e4,
             points_per_unit: 2,
-            sweep: HbnoiseFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             output_node: "out".into(),
             output_ref: None,
             input_source: "V1".into(),

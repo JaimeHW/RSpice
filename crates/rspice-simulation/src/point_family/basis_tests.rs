@@ -1,9 +1,10 @@
 //! A family's signal basis must describe every retained point without invention.
 
 use super::*;
-use crate::sweeps::{CornerFrequencySweep, CornerRunConfig, TempRunConfig};
+use crate::sweeps::{CornerRunConfig, TempRunConfig};
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_type::AnalysisType;
+use rspice_simulation_contract::config::FrequencySweep;
 
 const CONDITIONAL: &str = "Conditional family\n\
     VDD vdd 0 DC 1.8 AC 1\n\
@@ -64,7 +65,7 @@ fn base_modes() -> [CornerBaseMode; 6] {
             start_freq: 1.0e3,
             stop_freq: 1.0e4,
             points_per_unit: 2,
-            sweep: CornerFrequencySweep::Decade,
+            sweep: FrequencySweep::Decade,
         },
     ]
 }

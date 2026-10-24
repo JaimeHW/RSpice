@@ -6,7 +6,8 @@
 //! axis and the probe names, and nothing about a solve that precedes it.
 
 use crate::analysis_spec::AnalysisSpec;
-use crate::config::{AcSweepType, NoiseAnalysisConfig, NoiseSweepType};
+use crate::config::FrequencySweep;
+use crate::config::{NoiseAnalysisConfig, NoiseSweepType};
 
 /// Validate one configured specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
@@ -41,21 +42,14 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             stop_freq,
             points_per_unit,
             sweep,
-        } => {
-            use crate::config::FrequencySweep;
-            crate::config::AcAnalysisConfig {
-                start_freq: *start_freq,
-                stop_freq: *stop_freq,
-                num_points: *points_per_unit,
-                sweep_type: match sweep {
-                    FrequencySweep::Decade => AcSweepType::Decade,
-                    FrequencySweep::Octave => AcSweepType::Octave,
-                    FrequencySweep::Linear => AcSweepType::Linear,
-                },
-            }
-            .validate()
-            .map_err(|errors| errors.join("; "))
+        } => crate::config::AcAnalysisConfig {
+            start_freq: *start_freq,
+            stop_freq: *stop_freq,
+            num_points: *points_per_unit,
+            sweep_type: *sweep,
         }
+        .validate()
+        .map_err(|errors| errors.join("; ")),
         AnalysisSpec::AcData {
             table_name,
             frequencies,
@@ -80,10 +74,10 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         } => {
             let sweep_type = match sweep {
                 NoiseSweepType::Decade | NoiseSweepType::ExplicitFrequencyList => {
-                    AcSweepType::Decade
+                    FrequencySweep::Decade
                 }
-                NoiseSweepType::Octave => AcSweepType::Octave,
-                NoiseSweepType::Linear => AcSweepType::Linear,
+                NoiseSweepType::Octave => FrequencySweep::Octave,
+                NoiseSweepType::Linear => FrequencySweep::Linear,
                 NoiseSweepType::Unsupported(index) => {
                     return Err(format!(
                         "Noise sweep mode {index} is outside the supported schema"

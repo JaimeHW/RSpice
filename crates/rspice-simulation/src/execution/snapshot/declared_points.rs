@@ -359,7 +359,6 @@ fn point_base_analysis_request(
     Option<rspice_simulation_contract::config::AnalysisConfig>,
     String,
 ) {
-    use crate::sweeps::CornerFrequencySweep;
     use rspice_simulation_contract::config::FrequencySweep;
     use rspice_simulation_contract::config::OpConfig;
     use rspice_simulation_contract::config::OpRunPointContext;
@@ -495,9 +494,9 @@ fn point_base_analysis_request(
             sweep,
         } => {
             let (sweep, keyword) = match sweep {
-                CornerFrequencySweep::Decade => (FrequencySweep::Decade, "dec"),
-                CornerFrequencySweep::Octave => (FrequencySweep::Octave, "oct"),
-                CornerFrequencySweep::Linear => (FrequencySweep::Linear, "lin"),
+                FrequencySweep::Decade => (FrequencySweep::Decade, "dec"),
+                FrequencySweep::Octave => (FrequencySweep::Octave, "oct"),
+                FrequencySweep::Linear => (FrequencySweep::Linear, "lin"),
             };
             (
                 AnalysisSpec::Ac {

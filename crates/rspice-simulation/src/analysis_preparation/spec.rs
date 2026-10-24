@@ -1,14 +1,13 @@
 //! Lower authored analysis drafts into exact engine-facing specifications.
 
-use super::helpers::map_ac_sweep;
 use rspice_simulation_contract::analysis_spec::{
     AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     PssMethod, SpPort,
 };
 use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+    AcAnalysisConfig, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
+    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use rspice_simulation_contract::setup_state::SimulationSetup;
 
@@ -80,7 +79,7 @@ pub fn analysis_spec_to_config(spec: &AnalysisSpec) -> Result<AnalysisConfig, St
             start_freq: *start_freq,
             stop_freq: *stop_freq,
             num_points: *points_per_unit,
-            sweep_type: map_ac_sweep(*sweep),
+            sweep_type: *sweep,
         })),
         AnalysisSpec::Transient {
             stop_time,
@@ -114,10 +113,10 @@ pub fn analysis_spec_to_config(spec: &AnalysisSpec) -> Result<AnalysisConfig, St
             input_source: input_source.clone(),
             sweep_type: match sweep {
                 NoiseSweepType::Decade | NoiseSweepType::ExplicitFrequencyList => {
-                    AcSweepType::Decade
+                    FrequencySweep::Decade
                 }
-                NoiseSweepType::Octave => AcSweepType::Octave,
-                NoiseSweepType::Linear => AcSweepType::Linear,
+                NoiseSweepType::Octave => FrequencySweep::Octave,
+                NoiseSweepType::Linear => FrequencySweep::Linear,
                 NoiseSweepType::Unsupported(index) => {
                     return Err(format!(
                         "noise sweep mode {index} is outside the supported schema"
@@ -232,11 +231,7 @@ pub fn build_stb_spec(
         probe_node: stb_cfg.probe_source,
         start_freq: stb_cfg.start_freq,
         stop_freq: stb_cfg.stop_freq,
-        sweep: match stb_cfg.sweep_type {
-            rspice_simulation_contract::stb_draft::StbSweepType::Decade => FrequencySweep::Decade,
-            rspice_simulation_contract::stb_draft::StbSweepType::Octave => FrequencySweep::Octave,
-            rspice_simulation_contract::stb_draft::StbSweepType::Linear => FrequencySweep::Linear,
-        },
+        sweep: stb_cfg.sweep_type,
         points_per_decade: stb_cfg.num_points as usize,
         compute_nyquist: stb_cfg.compute_nyquist,
     })
@@ -339,11 +334,7 @@ pub fn build_sp_spec(
         start_freq: sp_cfg.start_freq,
         stop_freq: sp_cfg.stop_freq,
         points_per_unit: sp_cfg.num_points as usize,
-        sweep: match sp_cfg.sweep_type {
-            rspice_simulation_contract::sp_config::SpSweepType::Decade => FrequencySweep::Decade,
-            rspice_simulation_contract::sp_config::SpSweepType::Octave => FrequencySweep::Octave,
-            rspice_simulation_contract::sp_config::SpSweepType::Linear => FrequencySweep::Linear,
-        },
+        sweep: sp_cfg.sweep_type,
         z0: sp_cfg.z0,
         ports,
         do_noise: sp_cfg.do_noise,

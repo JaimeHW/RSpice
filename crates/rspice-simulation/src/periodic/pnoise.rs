@@ -1,5 +1,6 @@
 use crate::error::ServiceRunError;
 use rspice_core::Value;
+use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 use std::fmt;
 
@@ -28,24 +29,6 @@ impl From<PnoiseRunError> for ServiceRunError {
     }
 }
 
-/// Frequency sweep type for periodic-noise analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum PnoiseFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl PnoiseFrequencySweep {
-    pub fn keyword(self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
-
 /// PNoise noise-reference mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PnoiseReference {
@@ -68,7 +51,7 @@ pub struct PnoiseRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: PnoiseFrequencySweep,
+    pub sweep: FrequencySweep,
     pub max_sideband: i32,
     pub output_node: String,
     pub output_ref: Option<String>,
@@ -94,7 +77,7 @@ impl Default for PnoiseRunConfig {
             start_freq: 1.0,
             stop_freq: 1e6,
             points_per_unit: 10,
-            sweep: PnoiseFrequencySweep::Decade,
+            sweep: FrequencySweep::Decade,
             max_sideband: 5,
             output_node: "VOUT".to_string(),
             output_ref: None,
@@ -166,7 +149,7 @@ impl PnoiseRunConfig {
         }
         if self.integrated_noise
             && (self.start_freq == self.stop_freq
-                || (self.sweep == PnoiseFrequencySweep::Linear && self.points_per_unit <= 2))
+                || (self.sweep == FrequencySweep::Linear && self.points_per_unit <= 2))
         {
             return Err(PnoiseRunError::Validation(
                 "PNOISE integrated noise requires at least two distinct frequency points".into(),

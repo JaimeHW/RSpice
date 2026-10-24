@@ -661,7 +661,7 @@ mod tests {
     use rspice_core::analysis::{NoiseSourceIdentity, NoiseSourceType};
 
     use super::*;
-    use rspice_simulation_contract::config::AcSweepType;
+    use rspice_simulation_contract::config::FrequencySweep;
 
     const DIFFERENTIAL_NOISE_DECK: &str = "\
 differential noise bridge
@@ -677,7 +677,7 @@ R3 n 0 3k
             output_node: "p".to_string(),
             reference_node: "n".to_string(),
             input_source: input_source.to_string(),
-            sweep_type: AcSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
             num_points: 2,
             start_freq: 1.0e3,
             stop_freq: 2.0e3,

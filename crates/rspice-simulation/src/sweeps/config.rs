@@ -2,6 +2,7 @@
 
 use rspice_core::Value;
 use rspice_model_library::CornerModelBinding;
+use rspice_simulation_contract::config::FrequencySweep;
 use rspice_vocabulary::product::ProcessCorner;
 
 /// Explicit configuration for temperature sweep execution.
@@ -59,14 +60,6 @@ pub struct CornerRunConfig {
     pub points: Vec<CornerPoint>,
 }
 
-/// Frequency sweep type used by corner AC base analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CornerFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
 /// Base analysis executed at each corner point.
 #[derive(Debug, Clone, Default)]
 pub enum CornerBaseMode {
@@ -110,7 +103,7 @@ pub enum CornerBaseMode {
         start_freq: Value,
         stop_freq: Value,
         points_per_unit: usize,
-        sweep: CornerFrequencySweep,
+        sweep: FrequencySweep,
     },
 }
 

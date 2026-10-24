@@ -305,7 +305,7 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
         start_freq: 1000.0,
         stop_freq: 1000.0,
         num_points: 1,
-        sweep_type: crate::simulation::config::AcSweepType::Linear,
+        sweep_type: rspice_simulation_contract::config::FrequencySweep::Linear,
     });
     let executable = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         &composed,

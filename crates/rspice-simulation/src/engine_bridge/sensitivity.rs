@@ -219,9 +219,8 @@ mod tests {
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 
     use super::*;
-    use rspice_simulation_contract::config::{
-        AcSweepType, DESIGN_PARAMETERS_FILTER, SensitivitySweep,
-    };
+    use rspice_simulation_contract::config::FrequencySweep;
+    use rspice_simulation_contract::config::{DESIGN_PARAMETERS_FILTER, SensitivitySweep};
 
     fn study(source: &str, output: &str, ac_mode: bool) -> SensitivityStudyEvidence {
         let netlist = rspice_core::Netlist::parse(source).unwrap();
@@ -488,7 +487,7 @@ mod tests {
                     sweep: Some(SensitivitySweep {
                         stop_frequency: 1.0e6,
                         points: 4,
-                        variation: AcSweepType::Decade,
+                        variation: FrequencySweep::Decade,
                     }),
                 },
                 &NoAbort,
@@ -538,7 +537,7 @@ mod tests {
                     sweep: Some(SensitivitySweep {
                         stop_frequency: corner * 100.0,
                         points: 5,
-                        variation: AcSweepType::Decade,
+                        variation: FrequencySweep::Decade,
                     }),
                 },
                 &NoAbort,
@@ -599,7 +598,7 @@ mod tests {
             Some(SensitivitySweep {
                 stop_frequency: 1.0e5,
                 points: 3,
-                variation: AcSweepType::Decade,
+                variation: FrequencySweep::Decade,
             }),
         ] {
             for ac_mode in [false, true] {
@@ -731,7 +730,7 @@ mod tests {
                     sweep: Some(SensitivitySweep {
                         stop_frequency: 1.0,
                         points: 10,
-                        variation: AcSweepType::Decade,
+                        variation: FrequencySweep::Decade,
                     }),
                 },
                 &NoAbort,

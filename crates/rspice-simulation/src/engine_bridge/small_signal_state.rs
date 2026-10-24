@@ -135,7 +135,8 @@ impl EngineBridge {
 mod tests {
     use rspice_core::NoAbort;
     use rspice_core::netlist::SmallSignalStateSource;
-    use rspice_simulation_contract::config::{AcAnalysisConfig, AcSweepType};
+    use rspice_simulation_contract::config::AcAnalysisConfig;
+    use rspice_simulation_contract::config::FrequencySweep;
 
     use super::*;
 
@@ -153,7 +154,7 @@ mod tests {
 
     fn ac_config() -> AnalysisConfig {
         AnalysisConfig::Ac(AcAnalysisConfig {
-            sweep_type: AcSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             num_points: 2,
             start_freq: 1e3,
             stop_freq: 1e6,
@@ -234,7 +235,7 @@ mod tests {
                 output_node: "out".to_owned(),
                 reference_node: "0".to_owned(),
                 input_source: "v1".to_owned(),
-                sweep_type: AcSweepType::Decade,
+                sweep_type: FrequencySweep::Decade,
                 num_points: 2,
                 start_freq: 1e3,
                 stop_freq: 1e6,

@@ -1,24 +1,7 @@
 use super::normalize_pac_node_name;
 use rspice_core::Value;
+use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
-
-/// Frequency sweep type for periodic transfer-function analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum PxfFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl PxfFrequencySweep {
-    fn to_variation(self) -> rspice_core::netlist::FreqVariation {
-        match self {
-            Self::Decade => rspice_core::netlist::FreqVariation::Dec,
-            Self::Octave => rspice_core::netlist::FreqVariation::Oct,
-            Self::Linear => rspice_core::netlist::FreqVariation::Lin,
-        }
-    }
-}
 
 /// Explicit configuration for PXF execution.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -30,7 +13,7 @@ pub struct PxfRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: PxfFrequencySweep,
+    pub sweep: FrequencySweep,
     pub input_source: String,
     pub input_sideband: i32,
     pub output_node: String,
@@ -52,7 +35,7 @@ impl Default for PxfRunConfig {
             start_freq: 1e3,
             stop_freq: 1e9,
             points_per_unit: 10,
-            sweep: PxfFrequencySweep::Decade,
+            sweep: FrequencySweep::Decade,
             input_source: "VIN".to_string(),
             input_sideband: 1,
             output_node: "VOUT".to_string(),
@@ -141,7 +124,7 @@ impl PxfRunConfig {
     pub fn to_card(&self) -> rspice_core::netlist::PxfCard {
         rspice_core::netlist::PxfCard {
             sweep: rspice_core::netlist::PeriodicSweep {
-                variation: self.sweep.to_variation(),
+                variation: self.sweep.freq_variation(),
                 points: self.points_per_unit,
                 start_freq: self.start_freq,
                 stop_freq: self.stop_freq,

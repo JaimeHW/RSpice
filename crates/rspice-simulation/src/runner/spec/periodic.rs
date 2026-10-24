@@ -290,11 +290,7 @@ fn run_hbnoise(
         start_freq: request.start_freq,
         stop_freq: request.stop_freq,
         points_per_unit: request.points_per_unit,
-        sweep: match request.sweep {
-            FrequencySweep::Decade => svc_runner::HbnoiseFrequencySweep::Decade,
-            FrequencySweep::Octave => svc_runner::HbnoiseFrequencySweep::Octave,
-            FrequencySweep::Linear => svc_runner::HbnoiseFrequencySweep::Linear,
-        },
+        sweep: request.sweep,
         output_node: request.output_node,
         output_ref: Some(request.output_ref),
         input_source: request.input_source,
@@ -486,11 +482,7 @@ fn run_periodic_sparameters(
         start_freq,
         stop_freq,
         points_per_unit,
-        sweep: match sweep {
-            FrequencySweep::Decade => svc_runner::PspSweep::Decade,
-            FrequencySweep::Octave => svc_runner::PspSweep::Octave,
-            FrequencySweep::Linear => svc_runner::PspSweep::Linear,
-        },
+        sweep,
         ports: configured_ports,
         max_sideband,
         reltol,
@@ -1361,11 +1353,6 @@ pub(super) fn run_disto(
         sweep,
         f2_over_f1,
     } = request;
-    let sweep = match sweep {
-        FrequencySweep::Decade => svc_runner::DistoFrequencySweep::Decade,
-        FrequencySweep::Octave => svc_runner::DistoFrequencySweep::Octave,
-        FrequencySweep::Linear => svc_runner::DistoFrequencySweep::Linear,
-    };
     let cfg = svc_runner::DistoRunConfig {
         start_freq,
         stop_freq,

@@ -1,10 +1,7 @@
 //! Bound OP environment must survive HB startup and every HB consumer.
 use super::*;
 use crate::netlist_preparation::splice_before_terminal_end_card;
-use crate::periodic::{
-    PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-    PxfFrequencySweep, PxfRunConfig,
-};
+use crate::periodic::{PacRunConfig, PnoiseReference, PnoiseRunConfig, PxfRunConfig};
 use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::config::OpConfig;
 use rspice_simulation_contract::config::OpTemperatureMode;
@@ -150,7 +147,7 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
             start_freq: 100.0,
             stop_freq: 200.0,
             points_per_unit: 3,
-            sweep: PacFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             sideband_min: -1,
             sideband_max: 0,
             input_source: "VIN".into(),
@@ -169,7 +166,7 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
             start_freq: 100.0,
             stop_freq: 200.0,
             points_per_unit: 3,
-            sweep: PxfFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             input_source: "VIN".into(),
             output_node: "out".into(),
             max_sideband: 1,
@@ -188,7 +185,7 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
             start_freq: 100.0,
             stop_freq: 200.0,
             points_per_unit: 3,
-            sweep: PnoiseFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             input_source: "VIN".into(),
             output_node: "out".into(),
             max_sideband: 1,

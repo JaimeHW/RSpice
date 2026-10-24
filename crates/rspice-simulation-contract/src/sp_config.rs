@@ -1,27 +1,6 @@
 //! S-parameter sweep configuration.
 
-/// Type of frequency sweep for S-parameter analysis
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SpSweepType {
-    /// Decades (logarithmic) - most common for RF
-    #[default]
-    Decade,
-    /// Octaves (logarithmic)
-    Octave,
-    /// Linear
-    Linear,
-}
-
-impl SpSweepType {
-    /// SPICE keyword
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
+use crate::config::FrequencySweep;
 
 /// Configuration for a single port
 #[derive(Debug, Clone)]
@@ -79,7 +58,7 @@ pub struct SpConfig {
     /// Number of points (per decade/octave for log, total for linear)
     pub num_points: u32,
     /// Sweep type
-    pub sweep_type: SpSweepType,
+    pub sweep_type: FrequencySweep,
     /// Reference impedance - default 50 Ohms
     pub z0: f64,
     /// Port definitions
@@ -98,7 +77,7 @@ impl Default for SpConfig {
             start_freq: 1e6,
             stop_freq: 10e9,
             num_points: 10,
-            sweep_type: SpSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             z0: 50.0,
             ports: vec![
                 SpPortConfig::single_ended(1, "IN"),
@@ -122,7 +101,7 @@ impl SpConfig {
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".sp {} {} {} {}",
-            self.sweep_type.spice_keyword(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             self.start_freq,
             self.stop_freq
@@ -149,7 +128,8 @@ impl SpConfig {
     pub fn validate(&self) -> Result<(), String> {
         if !self.start_freq.is_finite()
             || self.start_freq < 0.0
-            || (self.start_freq == 0.0 && (self.sweep_type != SpSweepType::Linear || self.do_noise))
+            || (self.start_freq == 0.0
+                && (self.sweep_type != FrequencySweep::Linear || self.do_noise))
         {
             return Err("Start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());
         }

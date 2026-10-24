@@ -3,7 +3,8 @@
 use super::*;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
-use rspice_simulation_contract::config::{AcAnalysisConfig, AcSweepType, TransientAnalysisConfig};
+use rspice_simulation_contract::config::FrequencySweep;
+use rspice_simulation_contract::config::{AcAnalysisConfig, TransientAnalysisConfig};
 
 #[test]
 fn monte_carlo_bases_execute_configured_ac_and_transient_measurements_on_each_trial() {
@@ -15,7 +16,7 @@ fn monte_carlo_bases_execute_configured_ac_and_transient_measurements_on_each_tr
                 start_freq: 1000.0,
                 stop_freq: 1000.0,
                 num_points: 1,
-                sweep_type: AcSweepType::Linear,
+                sweep_type: FrequencySweep::Linear,
             }),
             "gain",
         ),
@@ -80,7 +81,7 @@ fn materialized_studies_retain_worker_resource_limits() {
             start_freq: 1.0,
             stop_freq: 10.0,
             num_points: 10,
-            sweep_type: AcSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
         }),
         &netlist,
         &NoAbort,

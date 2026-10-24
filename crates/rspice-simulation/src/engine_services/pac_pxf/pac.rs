@@ -439,8 +439,8 @@ pub(crate) fn run_pac_analysis_on_materialized_with_context(
 mod tests {
     use super::*;
     use crate::engine_services::test_entry::{ctx, parse};
-    use crate::periodic::PacFrequencySweep;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_simulation_contract::config::FrequencySweep;
     use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     #[test]
@@ -463,7 +463,7 @@ mod tests {
             start_freq: 1.0e4,
             stop_freq: 1.0e4,
             points_per_unit: 1,
-            sweep: PacFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             sideband_min: 0,
             sideband_max: 0,
             input_source: "V1".to_owned(),
@@ -523,7 +523,7 @@ mod tests {
         config.start_freq = 1.0e5;
         config.stop_freq = 1.0e7;
         config.points_per_unit = 2;
-        config.sweep = PacFrequencySweep::Decade;
+        config.sweep = FrequencySweep::Decade;
         config.pac_magnitude = 1.0;
         config.sideband_min = -1;
         config.sideband_max = 1;

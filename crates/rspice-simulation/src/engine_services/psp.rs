@@ -6,6 +6,7 @@
 
 mod noise;
 pub(crate) use noise::PspNoiseData;
+use rspice_simulation_contract::config::FrequencySweep;
 
 use std::collections::HashMap;
 
@@ -17,21 +18,13 @@ use rspice_core::analysis::s_param;
 use super::{SParameterPort, ServiceContext, ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 
-/// Sweep type for periodic S-parameter analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PspSweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
 /// Exact periodic-network request consumed by the service layer.
 #[derive(Debug, Clone)]
 pub struct PspRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: PspSweep,
+    pub sweep: FrequencySweep,
     /// Optional port-plane assertions. An empty list discovers producer ports.
     pub ports: Vec<SParameterPort>,
     pub max_sideband: usize,
@@ -210,11 +203,7 @@ fn run_periodic_sparameter_on_materialized(
         sweep_start: config.start_freq,
         sweep_stop: config.stop_freq,
         num_points: config.points_per_unit,
-        sweep_type: match config.sweep {
-            PspSweep::Decade => rspice_core::analysis::pac::PacSweepType::Decade,
-            PspSweep::Octave => rspice_core::analysis::pac::PacSweepType::Octave,
-            PspSweep::Linear => rspice_core::analysis::pac::PacSweepType::Linear,
-        },
+        sweep_type: crate::periodic::core_pac_sweep(config.sweep),
         sideband_min: -max_sideband,
         sideband_max: max_sideband,
         reltol: config.reltol,
@@ -557,7 +546,7 @@ mod tests {
             start_freq: 1.0e3,
             stop_freq: 1.0e6,
             points_per_unit: 3,
-            sweep: PspSweep::Decade,
+            sweep: FrequencySweep::Decade,
             ports: vec![
                 SParameterPort {
                     node_pos: "P1".to_owned(),
@@ -709,7 +698,7 @@ mod tests {
         request.start_freq = 1.0e4;
         request.stop_freq = 1.0e4;
         request.points_per_unit = 1;
-        request.sweep = PspSweep::Linear;
+        request.sweep = FrequencySweep::Linear;
 
         let result = run_psp_analysis_from_pss_on_materialized_with_context(
             &netlist,
@@ -783,7 +772,7 @@ mod tests {
         request.start_freq = 1.0e4;
         request.stop_freq = 1.0e4;
         request.points_per_unit = 1;
-        request.sweep = PspSweep::Linear;
+        request.sweep = FrequencySweep::Linear;
 
         let result = run_hbsp_analysis_from_hb_on_materialized_with_context(
             &parse(deck),
@@ -856,7 +845,7 @@ mod tests {
         request.start_freq = 1e4;
         request.stop_freq = 1e4;
         request.points_per_unit = 1;
-        request.sweep = PspSweep::Linear;
+        request.sweep = FrequencySweep::Linear;
         hbsp_fixture_request(deck, &request)
     }
 
@@ -948,7 +937,7 @@ mod tests {
         request.start_freq = 1e4;
         request.stop_freq = 1e4;
         request.points_per_unit = 1;
-        request.sweep = PspSweep::Linear;
+        request.sweep = FrequencySweep::Linear;
         request.ports.clear();
         request.mixed_mode = true;
         request.noise_parameters = true;

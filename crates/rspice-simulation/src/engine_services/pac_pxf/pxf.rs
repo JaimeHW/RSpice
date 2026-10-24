@@ -147,8 +147,8 @@ pub(crate) fn run_pxf_analysis_on_materialized_with_context(
 mod tests {
     use super::*;
     use crate::engine_services::test_entry::{ctx, parse};
-    use crate::periodic::PxfFrequencySweep;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_simulation_contract::config::FrequencySweep;
     use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     /// An RC low-pass whose corner sits exactly on the carrier fundamental, so
@@ -174,7 +174,7 @@ mod tests {
             start_freq: FIXTURE_OFFSETS[0],
             stop_freq: FIXTURE_OFFSETS[2],
             points_per_unit: FIXTURE_OFFSETS.len(),
-            sweep: PxfFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             input_source: "VIN".to_owned(),
             input_sideband,
             output_node: "OUT".to_owned(),

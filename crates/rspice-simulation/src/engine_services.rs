@@ -57,7 +57,7 @@ pub(crate) use transient_state::TransientStateStore;
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.
 pub use crate::error::{ServiceRunError, ServiceRunResult};
-pub use disto::{DistoFrequencySweep, DistoRunConfig};
+pub use disto::DistoRunConfig;
 #[cfg(test)]
 pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 #[cfg(test)]
@@ -72,7 +72,7 @@ pub(crate) use hb::HbData;
 pub(crate) use hb::HbSpectrum;
 pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_context;
 pub use hb::{HbRunConfig, HbToneRunConfig};
-pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
+pub use hbnoise::{HbNoiseReference, HbnoiseRunConfig};
 pub(crate) use hbnoise::{
     integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_context,
 };
@@ -97,11 +97,11 @@ pub use periodic_carrier::PeriodicCarrier;
 pub(crate) use periodic_carrier::PeriodicCarrierState;
 pub(crate) use pnoise::PnoiseData;
 pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_context;
+pub use psp::PspRunConfig;
 pub(crate) use psp::{
     PspData, run_hbsp_analysis_from_hb_on_materialized_with_context,
     run_psp_analysis_from_pss_on_materialized_with_context,
 };
-pub use psp::{PspRunConfig, PspSweep};
 pub use pss::PssRunConfig;
 pub(crate) use pss::{PssData, run_pss_analysis_on_materialized_with_context};
 pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_context};
@@ -113,7 +113,7 @@ pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_context};
 // module is the RF and advanced layer. Duplicates of all four once sat here
 // unreachable; adding a fifth would mean the same thing again.
 pub use soa::{SoaRunConfig, run_soa_analysis_with_context};
-pub use sparameter::{SParameterPort, SParameterRunConfig, SParameterSweep};
+pub use sparameter::{SParameterPort, SParameterRunConfig};
 pub use sweeps::{
     run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,

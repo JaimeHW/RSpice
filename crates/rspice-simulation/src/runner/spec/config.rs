@@ -3,9 +3,8 @@
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig, SensitivitySweep,
-    TransientAnalysisConfig,
+    AcAnalysisConfig, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
+    PoleZeroConfig, PzAnalysisType, SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
 };
 
 pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisConfig> {
@@ -107,7 +106,7 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             points_per_unit,
             sweep,
         } => Some(AnalysisConfig::Ac(AcAnalysisConfig {
-            sweep_type: ac_sweep_type_from_spec(*sweep),
+            sweep_type: *sweep,
             num_points: *points_per_unit,
             start_freq: *start_freq,
             stop_freq: *stop_freq,
@@ -131,10 +130,10 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             input_source: input_source.clone(),
             sweep_type: match sweep {
                 NoiseSweepType::Decade | NoiseSweepType::ExplicitFrequencyList => {
-                    AcSweepType::Decade
+                    FrequencySweep::Decade
                 }
-                NoiseSweepType::Octave => AcSweepType::Octave,
-                NoiseSweepType::Linear => AcSweepType::Linear,
+                NoiseSweepType::Octave => FrequencySweep::Octave,
+                NoiseSweepType::Linear => FrequencySweep::Linear,
                 NoiseSweepType::Unsupported(_) => return None,
             },
             num_points: *points_per_decade,
@@ -175,15 +174,6 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             sweep: sweep.map(SensitivitySweep::from_spec),
         })),
         _ => None,
-    }
-}
-
-#[inline]
-fn ac_sweep_type_from_spec(sweep: FrequencySweep) -> AcSweepType {
-    match sweep {
-        FrequencySweep::Decade => AcSweepType::Decade,
-        FrequencySweep::Octave => AcSweepType::Octave,
-        FrequencySweep::Linear => AcSweepType::Linear,
     }
 }
 

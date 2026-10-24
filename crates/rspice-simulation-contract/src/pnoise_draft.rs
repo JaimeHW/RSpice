@@ -18,6 +18,7 @@
 //! + out=VOUT maxsideband=5
 //! ```
 
+use crate::config::FrequencySweep;
 use crate::periodic_carrier::PeriodicCarrier;
 
 use crate::options::{format_freq, parse_si_value};
@@ -28,29 +29,6 @@ use sampling::SamplingDraft;
 // =============================================================================
 // PNoise Sweep Type
 // =============================================================================
-
-/// Type of frequency sweep for PNoise analysis
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum PnoiseSweepType {
-    /// Decades (logarithmic)
-    #[default]
-    Decade,
-    /// Octaves (logarithmic)
-    Octave,
-    /// Linear
-    Linear,
-}
-
-impl PnoiseSweepType {
-    /// SPICE keyword
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
 
 // =============================================================================
 // Noise Reference Type
@@ -87,7 +65,7 @@ pub struct PnoiseConfig {
     /// Number of points (per decade for log, total for linear)
     pub num_points: u32,
     /// Sweep type
-    pub sweep_type: PnoiseSweepType,
+    pub sweep_type: FrequencySweep,
     /// Maximum sideband index for noise folding
     pub max_sideband: i32,
     /// Output node name
@@ -115,7 +93,7 @@ impl Default for PnoiseConfig {
             start_freq: 1.0, // 1 Hz (for phase noise)
             stop_freq: 1e6,  // 1 MHz
             num_points: 10,  // 10 per decade
-            sweep_type: PnoiseSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             max_sideband: 5, // Sidebands to fold
             output_node: "VOUT".to_string(),
             output_ref: String::new(),
@@ -153,7 +131,7 @@ impl PnoiseConfig {
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pnoise {} {} {} {}",
-            self.sweep_type.spice_keyword(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             format_freq(self.start_freq),
             format_freq(self.stop_freq)
@@ -231,7 +209,7 @@ impl PnoiseConfig {
         }
         if self.integrated_noise
             && (self.start_freq == self.stop_freq
-                || (self.sweep_type == PnoiseSweepType::Linear && self.num_points <= 2))
+                || (self.sweep_type == FrequencySweep::Linear && self.num_points <= 2))
         {
             return Err("Integrated noise requires at least two distinct frequency points".into());
         }
@@ -388,9 +366,9 @@ impl PnoiseDialogState {
             stop_freq: format_freq(config.stop_freq),
             num_points: config.num_points.to_string(),
             sweep_type_idx: match config.sweep_type {
-                PnoiseSweepType::Decade => 0,
-                PnoiseSweepType::Octave => 1,
-                PnoiseSweepType::Linear => 2,
+                FrequencySweep::Decade => 0,
+                FrequencySweep::Octave => 1,
+                FrequencySweep::Linear => 2,
             },
             max_sideband: config.max_sideband.to_string(),
             output_node: config.output_node.clone(),
@@ -421,9 +399,9 @@ impl PnoiseDialogState {
         let max_sb: i32 = self.max_sideband.parse().map_err(|_| "Invalid sideband")?;
 
         let sweep_type = match self.sweep_type_idx {
-            0 => PnoiseSweepType::Decade,
-            1 => PnoiseSweepType::Octave,
-            _ => PnoiseSweepType::Linear,
+            0 => FrequencySweep::Decade,
+            1 => FrequencySweep::Octave,
+            _ => FrequencySweep::Linear,
         };
 
         let noise_ref = match self.noise_ref_idx {
@@ -492,9 +470,9 @@ mod tests {
     #[test]
     fn pnoise_spot_frequency_round_trips_without_fabricating_a_band_total() {
         for sweep in [
-            PnoiseSweepType::Linear,
-            PnoiseSweepType::Decade,
-            PnoiseSweepType::Octave,
+            FrequencySweep::Linear,
+            FrequencySweep::Decade,
+            FrequencySweep::Octave,
         ] {
             let mut config = PnoiseConfig {
                 sweep_type: sweep,
@@ -554,7 +532,7 @@ mod tests {
         }
         assert!(
             PnoiseConfig {
-                sweep_type: PnoiseSweepType::Linear,
+                sweep_type: FrequencySweep::Linear,
                 num_points: 2,
                 integrated_noise: true,
                 ..Default::default()
@@ -614,7 +592,7 @@ mod tests {
         assert!(
             PnoiseConfig {
                 num_points: 1,
-                sweep_type: PnoiseSweepType::Linear,
+                sweep_type: FrequencySweep::Linear,
                 integrated_noise: true,
                 ..Default::default()
             }

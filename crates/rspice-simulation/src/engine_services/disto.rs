@@ -7,26 +7,9 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::DistortionProduct;
 use rspice_core::engine::Engine;
+use rspice_simulation_contract::config::FrequencySweep;
 use std::collections::HashSet;
 use std::fmt;
-
-/// Sweep type for DISTO analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DistoFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl DistoFrequencySweep {
-    fn keyword(self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
 
 /// Explicit configuration for DISTO execution.
 #[derive(Debug, Clone)]
@@ -34,7 +17,7 @@ pub struct DistoRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: DistoFrequencySweep,
+    pub sweep: FrequencySweep,
     /// Optional secondary tone ratio for IMD estimates.
     pub f2_over_f1: Option<Value>,
 }
@@ -280,7 +263,7 @@ fn run_disto_analysis_volterra(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
-        config.sweep.keyword(),
+        config.sweep.runner_keyword(),
         context.limits.max_analysis_points,
         abort,
     )
@@ -643,7 +626,7 @@ mod tests {
             start_freq: -1.0,
             stop_freq: -2.0,
             points_per_unit: 0,
-            sweep: DistoFrequencySweep::Decade,
+            sweep: FrequencySweep::Decade,
             f2_over_f1: None,
         };
         let abort = AbortOnPoll {
@@ -662,7 +645,7 @@ mod tests {
             start_freq: 1.0e3,
             stop_freq: 2.0e3,
             points_per_unit: 3,
-            sweep: DistoFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             f2_over_f1: Some(0.9),
         };
         assert!(valid.validate().is_ok());
@@ -680,7 +663,7 @@ mod tests {
             start_freq: 1.0e3,
             stop_freq: 2.0e3,
             points_per_unit: 3,
-            sweep: DistoFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             f2_over_f1: None,
         };
         let data = run_disto_analysis_with_context(
@@ -722,7 +705,7 @@ mod tests {
             start_freq: 1e3,
             stop_freq: 2.6e3,
             points_per_unit: 5,
-            sweep: DistoFrequencySweep::Linear,
+            sweep: FrequencySweep::Linear,
             f2_over_f1: Some(0.9),
         };
         let data = run_disto_analysis_with_context(

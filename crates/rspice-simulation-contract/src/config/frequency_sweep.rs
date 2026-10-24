@@ -23,6 +23,15 @@ impl FrequencySweep {
             FrequencySweep::Linear => "lin",
         }
     }
+
+    /// The engine's own sweep kind, which is what its grid functions take.
+    pub fn freq_variation(self) -> rspice_core::netlist::FreqVariation {
+        match self {
+            FrequencySweep::Decade => rspice_core::netlist::FreqVariation::Dec,
+            FrequencySweep::Octave => rspice_core::netlist::FreqVariation::Oct,
+            FrequencySweep::Linear => rspice_core::netlist::FreqVariation::Lin,
+        }
+    }
 }
 
 /// The rest of an AC sensitivity band, beyond the start frequency.

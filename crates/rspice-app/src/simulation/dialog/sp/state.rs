@@ -37,7 +37,7 @@ pub fn port_roster_error(draft: &SpDialogState, placed: &[PlacedRfPort]) -> Opti
 #[cfg(test)]
 use super::{SpConfig, SpPortConfig};
 #[cfg(test)]
-use rspice_simulation_contract::sp_config::SpSweepType;
+use rspice_simulation_contract::config::FrequencySweep;
 
 #[cfg(test)]
 mod tests {
@@ -118,7 +118,7 @@ mod tests {
             start_freq: 3e3,
             stop_freq: 7e6,
             num_points: 31,
-            sweep_type: SpSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
             z0: 75.0,
             ports: vec![SpPortConfig::differential(1, "P", "N")],
             do_noise: true,

@@ -1,6 +1,7 @@
 //! Extended worker-wire contract tests across analysis kinds and failure paths.
 
 use super::*;
+use rspice_simulation_contract::config::FrequencySweep;
 
 #[test]
 fn worker_response_id_validation_rejects_outer_inner_mismatch() {
@@ -194,7 +195,7 @@ fn analysis_config_round_trips_supported_variants() {
             uic: true,
         }),
         AnalysisConfig::Ac(AcAnalysisConfig {
-            sweep_type: AcSweepType::Octave,
+            sweep_type: FrequencySweep::Octave,
             num_points: 12,
             start_freq: 10.0,
             stop_freq: 1e6,
@@ -203,7 +204,7 @@ fn analysis_config_round_trips_supported_variants() {
             output_node: "out".to_string(),
             reference_node: "0".to_string(),
             input_source: "VIN".to_string(),
-            sweep_type: AcSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
             num_points: 3,
             start_freq: 1.0,
             stop_freq: 100.0,
@@ -229,7 +230,7 @@ fn analysis_config_round_trips_supported_variants() {
             sweep: Some(rspice_simulation_contract::config::SensitivitySweep {
                 stop_frequency: 1e6,
                 points: 10,
-                variation: rspice_simulation_contract::config::AcSweepType::Octave,
+                variation: rspice_simulation_contract::config::FrequencySweep::Octave,
             }),
         }),
     ];
@@ -637,7 +638,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         start_freq: 100.0,
         stop_freq: 10.0e6,
         points_per_unit: 13,
-        sweep: crate::periodic::PacFrequencySweep::Octave,
+        sweep: rspice_simulation_contract::config::FrequencySweep::Octave,
         input_source: "VRF".to_string(),
         output_node: "mix_out".to_string(),
         output_ref: Some("vref".to_string()),
@@ -661,7 +662,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         start_freq: 50.0,
         stop_freq: 20.0e6,
         points_per_unit: 11,
-        sweep: crate::periodic::PxfFrequencySweep::Linear,
+        sweep: rspice_simulation_contract::config::FrequencySweep::Linear,
         input_source: "VIN".to_string(),
         input_sideband: -1,
         output_node: "if_out".to_string(),
@@ -740,7 +741,7 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         start_freq: 10.0,
         stop_freq: 5.0e6,
         points_per_unit: 19,
-        sweep: crate::periodic::PnoiseFrequencySweep::Linear,
+        sweep: rspice_simulation_contract::config::FrequencySweep::Linear,
         max_sideband: 6,
         output_node: "vout".to_string(),
         output_ref: Some("vref".to_string()),
@@ -831,7 +832,7 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
             start_freq: 10.0,
             stop_freq: 1.0e6,
             points_per_unit: 21,
-            sweep: crate::sweeps::CornerFrequencySweep::Octave,
+            sweep: rspice_simulation_contract::config::FrequencySweep::Octave,
         },
     };
     let request = SimulationRequest::Spec {

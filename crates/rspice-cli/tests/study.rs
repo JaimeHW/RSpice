@@ -737,10 +737,8 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
 
 #[test]
 fn periodic_studies_accept_and_enforce_custom_execution_limits() {
-    use rspice_simulation::periodic::{
-        PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseRunConfig, PstbRunConfig,
-        PxfFrequencySweep, PxfRunConfig,
-    };
+    use rspice_simulation::periodic::FrequencySweep;
+    use rspice_simulation::periodic::{PacRunConfig, PnoiseRunConfig, PstbRunConfig, PxfRunConfig};
     let root = common::test_dir("study-periodic-execution-limits");
     let mut document = fixture(&root);
     let source = "Periodic policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\nLPROBE lp 0 .01\nRPROBE lp 0 1\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRSP p1 p2 1k\n.end\n";
@@ -799,7 +797,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
                         start_freq: 10.0,
                         stop_freq: 100.0,
                         points_per_unit: 3,
-                        sweep: PacFrequencySweep::Linear,
+                        sweep: FrequencySweep::Linear,
                         sideband_min: -1,
                         sideband_max: 1,
                         input_source: "V1".into(),
@@ -817,7 +815,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
                         start_freq: 10.0,
                         stop_freq: 100.0,
                         points_per_unit: 3,
-                        sweep: PxfFrequencySweep::Linear,
+                        sweep: FrequencySweep::Linear,
                         max_sideband: 1,
                         input_source: "V1".into(),
                         output_node: "out".into(),
@@ -834,7 +832,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
                         start_freq: 10.0,
                         stop_freq: 100.0,
                         points_per_unit: 3,
-                        sweep: PnoiseFrequencySweep::Linear,
+                        sweep: FrequencySweep::Linear,
                         max_sideband: 1,
                         input_source: "V1".into(),
                         output_node: "out".into(),

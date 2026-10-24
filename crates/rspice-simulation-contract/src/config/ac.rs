@@ -1,46 +1,18 @@
 //! AC analysis configuration: sweep type, range, and points per decade.
 
+use crate::config::FrequencySweep;
+
+/// The AC sweep is the shared sweep vocabulary; an application test still names it so.
+pub type AcSweepType = FrequencySweep;
+
 // AC Analysis Configuration
 //=============================================================================
-
-/// AC sweep type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AcSweepType {
-    /// Decade (logarithmic)
-    #[default]
-    Decade,
-    /// Octave
-    Octave,
-    /// Linear
-    Linear,
-}
-
-impl AcSweepType {
-    pub(super) fn spice_name(&self) -> &'static str {
-        match self {
-            AcSweepType::Decade => "dec",
-            AcSweepType::Octave => "oct",
-            AcSweepType::Linear => "lin",
-        }
-    }
-
-    /// The engine's own sweep kind, which is what its grid functions take.
-    ///
-    /// The execution adapter uses the same grid vocabulary as the deck parser.
-    pub fn freq_variation(&self) -> rspice_core::netlist::FreqVariation {
-        match self {
-            AcSweepType::Decade => rspice_core::netlist::FreqVariation::Dec,
-            AcSweepType::Octave => rspice_core::netlist::FreqVariation::Oct,
-            AcSweepType::Linear => rspice_core::netlist::FreqVariation::Lin,
-        }
-    }
-}
 
 /// AC analysis configuration
 #[derive(Debug, Clone)]
 pub struct AcAnalysisConfig {
     /// Sweep type
-    pub sweep_type: AcSweepType,
+    pub sweep_type: FrequencySweep,
     /// Number of points (per decade/octave, or total for linear)
     pub num_points: usize,
     /// Start frequency (Hz)
@@ -52,7 +24,7 @@ pub struct AcAnalysisConfig {
 impl Default for AcAnalysisConfig {
     fn default() -> Self {
         Self {
-            sweep_type: AcSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             num_points: 10,
             start_freq: 1.0,
             stop_freq: 1e9,
@@ -65,7 +37,7 @@ impl AcAnalysisConfig {
     pub fn to_spice(&self) -> String {
         format!(
             ".ac {} {} {} {}",
-            self.sweep_type.spice_name(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             self.start_freq,
             self.stop_freq
@@ -79,7 +51,7 @@ impl AcAnalysisConfig {
         if !self.start_freq.is_finite() {
             errors.push("Start frequency must be finite".to_string());
         } else if self.start_freq < 0.0
-            || (self.start_freq == 0.0 && self.sweep_type != AcSweepType::Linear)
+            || (self.start_freq == 0.0 && self.sweep_type != FrequencySweep::Linear)
         {
             errors.push(
                 "Start frequency must be nonnegative for LIN and positive for DEC/OCT".to_string(),
@@ -379,7 +351,7 @@ mod single_frequency_tests {
 
     #[test]
     fn zero_frequency_remains_invalid_on_a_logarithmic_axis() {
-        for kind in [AcSweepType::Decade, AcSweepType::Octave] {
+        for kind in [FrequencySweep::Decade, FrequencySweep::Octave] {
             assert!(
                 AcAnalysisConfig {
                     sweep_type: kind,

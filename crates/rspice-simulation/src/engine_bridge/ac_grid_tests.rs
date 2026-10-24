@@ -2,22 +2,23 @@
 
 use crate::engine_bridge::EngineBridge;
 use crate::results::SimulationResult;
+use rspice_simulation_contract::config::AcAnalysisConfig;
 use rspice_simulation_contract::config::AnalysisConfig;
-use rspice_simulation_contract::config::{AcAnalysisConfig, AcSweepType};
+use rspice_simulation_contract::config::FrequencySweep;
 
 #[test]
 fn single_frequency_and_zero_start_lin_run_the_requested_grid() {
     for (kind, start, stop, count, expected) in [
-        (AcSweepType::Linear, 0.0, 0.0, 1, vec![0.0]),
+        (FrequencySweep::Linear, 0.0, 0.0, 1, vec![0.0]),
         (
-            AcSweepType::Linear,
+            FrequencySweep::Linear,
             0.0,
             1000.0,
             3,
             vec![0.0, 500.0, 1000.0],
         ),
-        (AcSweepType::Decade, 1000.0, 1000.0, 10, vec![1000.0]),
-        (AcSweepType::Octave, 1000.0, 1000.0, 4, vec![1000.0]),
+        (FrequencySweep::Decade, 1000.0, 1000.0, 10, vec![1000.0]),
+        (FrequencySweep::Octave, 1000.0, 1000.0, 4, vec![1000.0]),
     ] {
         let config = AcAnalysisConfig {
             sweep_type: kind,

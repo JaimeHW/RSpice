@@ -7,47 +7,9 @@
 //! the analysis always extracts them and reports them as measurements, so a
 //! control that claimed to enable them would only be able to lie.
 
+use crate::config::FrequencySweep;
 use crate::options::{format_freq, parse_si_value};
 use serde::{Deserialize, Deserializer, Serialize};
-
-/// Frequency sweep shape for the loop-gain sweep.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum StbSweepType {
-    /// Points per decade (logarithmic)
-    #[default]
-    Decade,
-    /// Points per octave (logarithmic)
-    Octave,
-    /// Total points, linearly spaced
-    Linear,
-}
-
-impl StbSweepType {
-    /// SPICE keyword, matching the `.STB` directive the parser accepts.
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-
-    fn from_index(index: usize) -> Self {
-        match index {
-            0 => Self::Decade,
-            1 => Self::Octave,
-            _ => Self::Linear,
-        }
-    }
-
-    fn selection_index(&self) -> usize {
-        match self {
-            Self::Decade => 0,
-            Self::Octave => 1,
-            Self::Linear => 2,
-        }
-    }
-}
 
 /// Where a loop-probe name came from.
 ///
@@ -129,7 +91,7 @@ pub struct StbConfig {
     /// Points per decade or octave; total points for a linear sweep
     pub num_points: u32,
     /// Sweep shape
-    pub sweep_type: StbSweepType,
+    pub sweep_type: FrequencySweep,
     /// Retain the Nyquist contour alongside the Bode data
     pub compute_nyquist: bool,
 }
@@ -144,7 +106,7 @@ impl Default for StbConfig {
             start_freq: 1.0,
             stop_freq: 1e9,
             num_points: 10,
-            sweep_type: StbSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             compute_nyquist: true,
         }
     }
@@ -156,7 +118,7 @@ impl StbConfig {
     pub fn to_spice(&self) -> String {
         format!(
             ".stb {} {} {} {} probe={} NYQUIST={}",
-            self.sweep_type.spice_keyword(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             self.start_freq,
             self.stop_freq,
@@ -270,7 +232,7 @@ impl StbDialogState {
             start_freq: format_freq(config.start_freq),
             stop_freq: format_freq(config.stop_freq),
             num_points: config.num_points.to_string(),
-            sweep_type_idx: config.sweep_type.selection_index(),
+            sweep_type_idx: sweep_selection_index(config.sweep_type),
             compute_nyquist: config.compute_nyquist,
             initialized: true,
         }
@@ -286,7 +248,7 @@ impl StbDialogState {
             start_freq: start,
             stop_freq: stop,
             num_points: points,
-            sweep_type: StbSweepType::from_index(self.sweep_type_idx),
+            sweep_type: sweep_from_index(self.sweep_type_idx),
             compute_nyquist: self.compute_nyquist,
         };
         config.validate()?;
@@ -297,6 +259,22 @@ impl StbDialogState {
         if !self.initialized {
             *self = Self::from_config(&StbConfig::default());
         }
+    }
+}
+
+fn sweep_from_index(index: usize) -> FrequencySweep {
+    match index {
+        0 => FrequencySweep::Decade,
+        1 => FrequencySweep::Octave,
+        _ => FrequencySweep::Linear,
+    }
+}
+
+fn sweep_selection_index(sweep: FrequencySweep) -> usize {
+    match sweep {
+        FrequencySweep::Decade => 0,
+        FrequencySweep::Octave => 1,
+        FrequencySweep::Linear => 2,
     }
 }
 
@@ -317,7 +295,7 @@ mod tests {
     #[test]
     fn linear_sweep_reaches_the_directive() {
         let config = StbConfig {
-            sweep_type: StbSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
             num_points: 200,
             ..StbConfig::default()
         };

@@ -55,10 +55,10 @@ use super::*;
 // which one each site means.
 use crate::execution_options::SpecExecutionOptions;
 use crate::periodic::{
-    PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-    PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
+    PacRunConfig, PnoiseReference, PnoiseRunConfig, PstbRunConfig, PxfRunConfig,
 };
 use rspice_simulation_contract::analysis_spec::{AnalysisSpec, PssMethod};
+use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::periodic_carrier::PeriodicCarrier as CarrierSelector;
 
 #[derive(Debug)]
@@ -653,11 +653,7 @@ fn parse_pac(
         start_freq,
         stop_freq,
         points_per_unit,
-        sweep: match sweep {
-            FrequencySweepKind::Decade => PacFrequencySweep::Decade,
-            FrequencySweepKind::Octave => PacFrequencySweep::Octave,
-            FrequencySweepKind::Linear => PacFrequencySweep::Linear,
-        },
+        sweep,
         sideband_min,
         sideband_max,
         input_source,
@@ -799,11 +795,7 @@ fn parse_pnoise(
         start_freq,
         stop_freq,
         points_per_unit,
-        sweep: match sweep {
-            FrequencySweepKind::Decade => PnoiseFrequencySweep::Decade,
-            FrequencySweepKind::Octave => PnoiseFrequencySweep::Octave,
-            FrequencySweepKind::Linear => PnoiseFrequencySweep::Linear,
-        },
+        sweep,
         // The engine's own default folded bound for a card that does not say.
         max_sideband: optional_i32(card, "maxsideband", 6, params)?,
         output_node,
@@ -865,11 +857,7 @@ fn parse_pxf(
         start_freq,
         stop_freq,
         points_per_unit,
-        sweep: match sweep {
-            FrequencySweepKind::Decade => PxfFrequencySweep::Decade,
-            FrequencySweepKind::Octave => PxfFrequencySweep::Octave,
-            FrequencySweepKind::Linear => PxfFrequencySweep::Linear,
-        },
+        sweep,
         input_source,
         input_sideband: optional_i32(card, "inputsideband", 1, params)?,
         output_node,
@@ -1203,27 +1191,20 @@ fn i32_value_for(card: &ParsedCard, key: &str, params: &ParamContext) -> Result<
     i32_value(value, key, params)
 }
 
-#[derive(Debug, Clone, Copy)]
-enum FrequencySweepKind {
-    Decade,
-    Octave,
-    Linear,
-}
-
 fn frequency_sweep(
     card: &ParsedCard,
     directive: &str,
     params: &ParamContext,
-) -> Result<(FrequencySweepKind, usize, f64, f64), String> {
+) -> Result<(FrequencySweep, usize, f64, f64), String> {
     if card.positional.len() != 4 {
         return Err(format!(
             "{directive} requires SWEEP POINTS START STOP before keyed options"
         ));
     }
     let sweep = match card.positional[0].to_ascii_lowercase().as_str() {
-        "dec" => FrequencySweepKind::Decade,
-        "oct" => FrequencySweepKind::Octave,
-        "lin" => FrequencySweepKind::Linear,
+        "dec" => FrequencySweep::Decade,
+        "oct" => FrequencySweep::Octave,
+        "lin" => FrequencySweep::Linear,
         value => {
             return Err(format!(
                 "{directive} sweep {value:?} must be DEC, OCT, or LIN"

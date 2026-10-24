@@ -19,14 +19,12 @@ mod qpxf_controls_tests;
 pub use analysis_spec::analysis_kind_tag;
 use analysis_spec::{
     corner_process_tag, encode_analysis_spec, encode_f64_slice, encode_noise_contribution_detail,
-    encode_noise_integration_mode, encode_periodic_carrier_tail, pac_sweep_tag, pnoise_sweep_tag,
-    pxf_sweep_tag,
+    encode_noise_integration_mode, encode_periodic_carrier_tail, frequency_sweep_tag,
 };
 
 use crate::execution_options::SpecExecutionOptions;
 use crate::periodic::PnoiseReference;
 use crate::sweeps::CornerBaseMode;
-use crate::sweeps::CornerFrequencySweep;
 use rspice_design::drc::DrcLocation;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::DrcSeverity;
@@ -34,7 +32,6 @@ use rspice_design::drc::DrcViolation;
 use rspice_design::drc::DrcViolationType;
 use rspice_results::analysis_tag::CanonicalAnalysisKind;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
-use rspice_simulation_contract::config::AcSweepType;
 use rspice_simulation_contract::config::AnalysisConfig;
 use rspice_simulation_contract::config::OpAccuracy;
 use rspice_simulation_contract::config::OpAnnotation;
@@ -354,11 +351,7 @@ fn encode_analysis_config(writer: &mut CanonicalWriter, config: Option<&Analysis
         }
         AnalysisConfig::Ac(config) => {
             writer.u8(3);
-            writer.u8(match config.sweep_type {
-                AcSweepType::Decade => 0,
-                AcSweepType::Octave => 1,
-                AcSweepType::Linear => 2,
-            });
+            writer.u8(frequency_sweep_tag(config.sweep_type));
             writer.usize(config.num_points);
             writer.f64(config.start_freq);
             writer.f64(config.stop_freq);
@@ -368,11 +361,7 @@ fn encode_analysis_config(writer: &mut CanonicalWriter, config: Option<&Analysis
             writer.string(&config.output_node);
             writer.string(&config.reference_node);
             writer.string(&config.input_source);
-            writer.u8(match config.sweep_type {
-                AcSweepType::Decade => 0,
-                AcSweepType::Octave => 1,
-                AcSweepType::Linear => 2,
-            });
+            writer.u8(frequency_sweep_tag(config.sweep_type));
             writer.usize(config.num_points);
             writer.f64(config.start_freq);
             writer.f64(config.stop_freq);
@@ -818,7 +807,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.start_freq);
         writer.f64(config.stop_freq);
         writer.usize(config.points_per_unit);
-        writer.u8(pac_sweep_tag(config.sweep));
+        writer.u8(frequency_sweep_tag(config.sweep));
         // The top of the range keeps the slot the single symmetric bound held,
         // because for every symmetric run the two are the same number. The
         // bottom is a conditional tail below, so a symmetric run — which is
@@ -844,7 +833,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.start_freq);
         writer.f64(config.stop_freq);
         writer.usize(config.points_per_unit);
-        writer.u8(pxf_sweep_tag(config.sweep));
+        writer.u8(frequency_sweep_tag(config.sweep));
         writer.string(&config.input_source);
         writer.i32(config.input_sideband);
         writer.string(&config.output_node);
@@ -866,7 +855,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.start_freq);
         writer.f64(config.stop_freq);
         writer.usize(config.points_per_unit);
-        writer.u8(pnoise_sweep_tag(config.sweep));
+        writer.u8(frequency_sweep_tag(config.sweep));
         writer.i32(config.max_sideband);
         writer.string(&config.output_node);
         writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
@@ -1167,11 +1156,7 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
             writer.f64(*start_freq);
             writer.f64(*stop_freq);
             writer.usize(*points_per_unit);
-            writer.u8(match sweep {
-                CornerFrequencySweep::Decade => 0,
-                CornerFrequencySweep::Octave => 1,
-                CornerFrequencySweep::Linear => 2,
-            });
+            writer.u8(frequency_sweep_tag(*sweep));
         }
     }
 }

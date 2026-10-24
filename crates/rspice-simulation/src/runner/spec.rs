@@ -1227,7 +1227,7 @@ R2 out 0 1k\n\
                 start_freq: 1e3,
                 stop_freq: 1e4,
                 points_per_unit: 3,
-                sweep: crate::periodic::PnoiseFrequencySweep::Linear,
+                sweep: rspice_simulation_contract::config::FrequencySweep::Linear,
                 pss_num_harmonics: 8,
                 max_sideband: 0,
                 integrated_noise: true,
@@ -1327,7 +1327,7 @@ R2 out 0 1k\n\
             start_freq: 1e3,
             stop_freq: 1e6,
             points_per_unit: 3,
-            sweep: crate::periodic::PnoiseFrequencySweep::Linear,
+            sweep: rspice_simulation_contract::config::FrequencySweep::Linear,
             output_node: "out".into(),
             integrated_noise: true,
             noise_summary: true,
@@ -1986,11 +1986,10 @@ R2 out 0 1k\n\
     fn sp_single_point_and_zero_linear_grids_survive_configuration_and_solve() {
         use rspice_simulation_contract::config::FrequencySweep;
         use rspice_simulation_contract::sp_config::SpConfig;
-        use rspice_simulation_contract::sp_config::SpSweepType;
         use rspice_simulation_contract::sp_draft::SpDialogState;
         for (kind, sweep, start, stop, count, expected, noise) in [
             (
-                SpSweepType::Linear,
+                FrequencySweep::Linear,
                 FrequencySweep::Linear,
                 0.0,
                 0.0,
@@ -1999,7 +1998,7 @@ R2 out 0 1k\n\
                 false,
             ),
             (
-                SpSweepType::Linear,
+                FrequencySweep::Linear,
                 FrequencySweep::Linear,
                 0.0,
                 1000.0,
@@ -2008,7 +2007,7 @@ R2 out 0 1k\n\
                 false,
             ),
             (
-                SpSweepType::Decade,
+                FrequencySweep::Decade,
                 FrequencySweep::Decade,
                 1000.0,
                 1000.0,
@@ -2017,7 +2016,7 @@ R2 out 0 1k\n\
                 false,
             ),
             (
-                SpSweepType::Octave,
+                FrequencySweep::Octave,
                 FrequencySweep::Octave,
                 1000.0,
                 1000.0,
@@ -2073,7 +2072,7 @@ R2 out 0 1k\n\
             );
         }
         let config = SpConfig {
-            sweep_type: SpSweepType::Linear,
+            sweep_type: FrequencySweep::Linear,
             start_freq: 0.0,
             do_noise: true,
             ..Default::default()

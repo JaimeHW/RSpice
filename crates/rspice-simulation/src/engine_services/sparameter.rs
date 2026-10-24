@@ -8,24 +8,7 @@ use crate::error::ensure_not_aborted;
 use rspice_core::Value;
 use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
-
-/// Sweep type for S-parameter analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SParameterSweep {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl SParameterSweep {
-    fn keyword(self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
+use rspice_simulation_contract::config::FrequencySweep;
 
 /// Port definition for S-parameter analysis.
 #[derive(Debug, Clone)]
@@ -41,7 +24,7 @@ pub struct SParameterRunConfig {
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
-    pub sweep: SParameterSweep,
+    pub sweep: FrequencySweep,
     pub z0: Value,
     pub ports: Vec<SParameterPort>,
     pub do_noise: bool,
@@ -51,7 +34,7 @@ impl SParameterRunConfig {
     fn validate(&self) -> Result<(), String> {
         if !self.start_freq.is_finite()
             || self.start_freq < 0.0
-            || (self.start_freq == 0.0 && (self.sweep != SParameterSweep::Linear || self.do_noise))
+            || (self.start_freq == 0.0 && (self.sweep != FrequencySweep::Linear || self.do_noise))
         {
             return Err("Start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());
         }
@@ -129,7 +112,7 @@ pub(crate) fn run_sparameter_analysis_with_bias(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
-        config.sweep.keyword(),
+        config.sweep.runner_keyword(),
         context.limits.max_analysis_points,
         abort,
     )?;
@@ -223,7 +206,7 @@ mod tests {
             start_freq: 0.0,
             stop_freq: 1.0,
             points_per_unit: 0,
-            sweep: SParameterSweep::Decade,
+            sweep: FrequencySweep::Decade,
             z0: 50.0,
             ports: Vec::new(),
         }
@@ -242,7 +225,7 @@ mod tests {
             start_freq: 1e6,
             stop_freq: 1e9,
             points_per_unit: 1,
-            sweep: SParameterSweep::Decade,
+            sweep: FrequencySweep::Decade,
             z0: 50.0,
             ports: vec![
                 SParameterPort {

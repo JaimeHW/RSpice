@@ -91,7 +91,7 @@ pub(crate) fn run_pnoise_analysis_on_materialized_with_context(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
-        config.sweep.keyword(),
+        config.sweep.runner_keyword(),
         context.limits.max_analysis_points,
         abort,
     )?;

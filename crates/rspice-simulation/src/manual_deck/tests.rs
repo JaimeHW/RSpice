@@ -942,7 +942,7 @@ fn manual_deck_reports_no_analysis() {
 /// and a bare card now means what the engine means by it.
 #[test]
 fn a_hand_written_sens_card_keeps_its_filter_and_its_sweep() {
-    use rspice_simulation_contract::config::AcSweepType;
+    use rspice_simulation_contract::config::FrequencySweep;
 
     let deck =
         |card: &str| format!("sens deck\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1n\n{card}\n.end\n");
@@ -993,7 +993,7 @@ fn a_hand_written_sens_card_keeps_its_filter_and_its_sweep() {
     assert_eq!(sweep.points, 5);
     assert_eq!(
         rspice_simulation_contract::config::SensitivitySweep::from_spec(sweep).variation,
-        AcSweepType::Octave
+        FrequencySweep::Octave
     );
 }
 

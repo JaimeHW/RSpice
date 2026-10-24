@@ -4,11 +4,12 @@
 
 use super::types::ParametricData;
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
+use crate::sweeps::CornerBaseMode;
 use crate::sweeps::expand_step_sweep_values_with_abort;
-use crate::sweeps::{CornerBaseMode, CornerFrequencySweep};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, StepCommand, StepSweep, StepTarget};
+use rspice_simulation_contract::config::FrequencySweep;
 use std::path::Path;
 
 /// Run parametric analysis by executing the first design-parameter `.STEP`
@@ -318,9 +319,9 @@ fn run_base_analysis(
             sweep,
         } => {
             let variation = match sweep {
-                CornerFrequencySweep::Decade => rspice_core::netlist::FreqVariation::Dec,
-                CornerFrequencySweep::Octave => rspice_core::netlist::FreqVariation::Oct,
-                CornerFrequencySweep::Linear => rspice_core::netlist::FreqVariation::Lin,
+                FrequencySweep::Decade => rspice_core::netlist::FreqVariation::Dec,
+                FrequencySweep::Octave => rspice_core::netlist::FreqVariation::Oct,
+                FrequencySweep::Linear => rspice_core::netlist::FreqVariation::Lin,
             };
             let frequencies = rspice_core::analysis::ac::ac_sweep_frequencies(
                 variation,

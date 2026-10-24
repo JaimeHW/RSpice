@@ -15,14 +15,11 @@ use rspice_core::netlist::{
 };
 use rspice_simulation_contract::analysis_spec::{AnalysisSpec, HbToneSpec};
 use rspice_simulation_contract::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, FrequencySweep,
-    NoiseAnalysisConfig, NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig,
-    TransientAnalysisConfig,
+    AcAnalysisConfig, AnalysisConfig, DcSweepConfig, FrequencySweep, NoiseAnalysisConfig,
+    NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 
-use crate::sweeps::{
-    CornerBaseMode, CornerFrequencySweep, TempRunConfig, expand_step_sweep_values,
-};
+use crate::sweeps::{CornerBaseMode, TempRunConfig, expand_step_sweep_values};
 
 mod periodic;
 pub(crate) use periodic::has_pss_card;
@@ -645,11 +642,11 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
     }
 }
 
-fn corner_frequency_sweep(variation: FreqVariation) -> CornerFrequencySweep {
+fn corner_frequency_sweep(variation: FreqVariation) -> FrequencySweep {
     match variation {
-        FreqVariation::Lin => CornerFrequencySweep::Linear,
-        FreqVariation::Oct => CornerFrequencySweep::Octave,
-        FreqVariation::Dec => CornerFrequencySweep::Decade,
+        FreqVariation::Lin => FrequencySweep::Linear,
+        FreqVariation::Oct => FrequencySweep::Octave,
+        FreqVariation::Dec => FrequencySweep::Decade,
     }
 }
 
@@ -715,11 +712,11 @@ fn frequency_sweep(variation: FreqVariation) -> FrequencySweep {
     }
 }
 
-fn ac_sweep(variation: FreqVariation) -> AcSweepType {
+fn ac_sweep(variation: FreqVariation) -> FrequencySweep {
     match variation {
-        FreqVariation::Lin => AcSweepType::Linear,
-        FreqVariation::Oct => AcSweepType::Octave,
-        FreqVariation::Dec => AcSweepType::Decade,
+        FreqVariation::Lin => FrequencySweep::Linear,
+        FreqVariation::Oct => FrequencySweep::Octave,
+        FreqVariation::Dec => FrequencySweep::Decade,
     }
 }
 
@@ -751,7 +748,8 @@ fn sensitivity_sweep_from_card(
     sweep: &rspice_core::netlist::SensitivityAcSweep,
 ) -> Option<rspice_simulation_contract::config::SensitivitySweep> {
     use rspice_core::netlist::FreqVariation;
-    use rspice_simulation_contract::config::{AcSweepType, SensitivitySweep};
+    use rspice_simulation_contract::config::FrequencySweep;
+    use rspice_simulation_contract::config::SensitivitySweep;
 
     if sweep.variation == FreqVariation::Dec
         && sweep.points == 1
@@ -763,9 +761,9 @@ fn sensitivity_sweep_from_card(
         stop_frequency: sweep.stop_freq,
         points: u32::try_from(sweep.points).unwrap_or(u32::MAX),
         variation: match sweep.variation {
-            FreqVariation::Dec => AcSweepType::Decade,
-            FreqVariation::Oct => AcSweepType::Octave,
-            FreqVariation::Lin => AcSweepType::Linear,
+            FreqVariation::Dec => FrequencySweep::Decade,
+            FreqVariation::Oct => FrequencySweep::Octave,
+            FreqVariation::Lin => FrequencySweep::Linear,
         },
     })
 }
@@ -1241,7 +1239,7 @@ pub(crate) fn command_to_queue_item(
                 output_node: output_node.clone(),
                 reference_node: reference_node.clone(),
                 input_source: input_source.clone(),
-                sweep_type: AcSweepType::Decade,
+                sweep_type: FrequencySweep::Decade,
                 num_points: frequencies.len(),
                 start_freq,
                 stop_freq,

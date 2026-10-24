@@ -1730,7 +1730,7 @@ mod tests {
                 output_node: "out".to_string(),
                 reference_node: "0".to_string(),
                 input_source: "V1".to_string(),
-                sweep_type: rspice_simulation_contract::config::AcSweepType::Decade,
+                sweep_type: rspice_simulation_contract::config::FrequencySweep::Decade,
                 num_points: 10,
                 start_freq: 12.0,
                 stop_freq: 34.0,

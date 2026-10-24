@@ -175,9 +175,9 @@ impl SensDialogState {
                 .sweep
                 .map_or_else(|| "10".to_owned(), |sweep| sweep.points.to_string()),
             ac_sweep_idx: config.sweep.map_or(0, |sweep| match sweep.variation {
-                crate::config::AcSweepType::Decade => 0,
-                crate::config::AcSweepType::Octave => 1,
-                crate::config::AcSweepType::Linear => 2,
+                crate::config::FrequencySweep::Decade => 0,
+                crate::config::FrequencySweep::Octave => 1,
+                crate::config::FrequencySweep::Linear => 2,
             }),
             initialized: true,
         }
@@ -211,9 +211,9 @@ impl SensDialogState {
                 .parse::<u32>()
                 .map_err(|_| "Sweep points must be a positive whole number".to_owned())?;
             let variation = match self.ac_sweep_idx {
-                0 => crate::config::AcSweepType::Decade,
-                1 => crate::config::AcSweepType::Octave,
-                2 => crate::config::AcSweepType::Linear,
+                0 => crate::config::FrequencySweep::Decade,
+                1 => crate::config::FrequencySweep::Octave,
+                2 => crate::config::FrequencySweep::Linear,
                 _ => return Err("Select a valid sweep kind (dec, oct or lin)".to_owned()),
             };
             Some(crate::config::SensitivitySweep {
@@ -308,7 +308,8 @@ mod tests {
     /// rows that divide it reach the card.
     #[test]
     fn a_swept_sensitivity_card_carries_its_sweep() {
-        use crate::config::{AcSweepType, SensitivityConfig};
+        use crate::config::FrequencySweep;
+        use crate::config::SensitivityConfig;
 
         let mut state = SensDialogState::from_config(&SensConfig::default());
         state.sens_type_idx = 1;
@@ -321,7 +322,7 @@ mod tests {
         let sweep = state.to_config().unwrap().sweep.expect("a band was typed");
         assert_eq!(sweep.stop_frequency, 1.0e6);
         assert_eq!(sweep.points, 10);
-        assert_eq!(sweep.variation, AcSweepType::Octave);
+        assert_eq!(sweep.variation, FrequencySweep::Octave);
 
         // And the card the run carries states exactly that band.
         let card = SensitivityConfig {

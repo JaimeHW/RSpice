@@ -4,7 +4,6 @@ use rspice_simulation_contract::worker_run_config::{
     WorkerCornerBaseMode, WorkerCornerModelBinding, WorkerCornerPoint, WorkerCornerProcess,
     WorkerCornerRunConfig, WorkerTempRunConfig,
 };
-use rspice_simulation_contract::worker_spec::WorkerSweepType;
 
 impl From<&super::TempRunConfig> for WorkerTempRunConfig {
     fn from(value: &super::TempRunConfig) -> Self {
@@ -157,7 +156,7 @@ impl From<&super::CornerBaseMode> for WorkerCornerBaseMode {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 points_per_unit: *points_per_unit,
-                sweep: WorkerSweepType::from(*sweep),
+                sweep: *sweep,
             },
         }
     }
@@ -231,28 +230,8 @@ impl From<WorkerCornerBaseMode> for super::CornerBaseMode {
                 start_freq,
                 stop_freq,
                 points_per_unit,
-                sweep: super::CornerFrequencySweep::from(sweep),
+                sweep,
             },
-        }
-    }
-}
-
-impl From<super::CornerFrequencySweep> for WorkerSweepType {
-    fn from(value: super::CornerFrequencySweep) -> Self {
-        match value {
-            super::CornerFrequencySweep::Decade => Self::Decade,
-            super::CornerFrequencySweep::Octave => Self::Octave,
-            super::CornerFrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for super::CornerFrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
         }
     }
 }

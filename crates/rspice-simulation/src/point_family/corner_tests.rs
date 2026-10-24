@@ -1,9 +1,10 @@
 //! What a corner declaration's family says about the points it declared.
 
 use super::*;
-use crate::sweeps::{CornerBaseMode, CornerFrequencySweep, CornerRunConfig};
+use crate::sweeps::{CornerBaseMode, CornerRunConfig};
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
+use rspice_simulation_contract::config::FrequencySweep;
 use rspice_vocabulary::product::ProcessCorner;
 
 /// A 1:1 resistive divider on a supply the corner axis derates by 10%, so
@@ -161,7 +162,7 @@ fn an_ac_corner_contributes_terminal_frequency_magnitude() {
         start_freq: 1.0e3,
         stop_freq: 1.0e6,
         points_per_unit: 5,
-        sweep: CornerFrequencySweep::Decade,
+        sweep: FrequencySweep::Decade,
     });
 
     assert_eq!(trace_names(&traces), vec!["|V(OUT)|", "|V(VDD)|"]);

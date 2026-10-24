@@ -359,7 +359,7 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                     );
                     assert_eq!(
                         *sweep,
-                        rspice_simulation::sweeps::CornerFrequencySweep::Octave
+                        rspice_simulation_contract::config::FrequencySweep::Octave
                     );
                 }
                 CornerBaseMode::DcSweepNested {

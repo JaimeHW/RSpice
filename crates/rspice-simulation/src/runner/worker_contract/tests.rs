@@ -555,8 +555,8 @@ use rspice_simulation_contract::analysis_spec::PssMethod;
 use rspice_simulation_contract::analysis_spec::SpPort;
 use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+    AcAnalysisConfig, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
+    PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use rspice_simulation_contract::options::IntegrationMethod;
 use std::collections::HashMap;

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::worker_spec::WorkerSweepType;
+use crate::config::FrequencySweep;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkerTempRunConfig {
@@ -104,7 +104,7 @@ pub enum WorkerCornerBaseMode {
         start_freq: f64,
         stop_freq: f64,
         points_per_unit: usize,
-        sweep: WorkerSweepType,
+        sweep: FrequencySweep,
     },
 }
 
@@ -116,7 +116,7 @@ pub struct WorkerPacRunConfig {
     pub start_freq: f64,
     pub stop_freq: f64,
     pub points_per_unit: usize,
-    pub sweep: WorkerSweepType,
+    pub sweep: FrequencySweep,
     /// The top of the sideband range, under the wire name the single symmetric
     /// bound had: for every symmetric run the two are the same number, so an
     /// older worker's request decodes as exactly the run it described.
@@ -147,7 +147,7 @@ pub struct WorkerPxfRunConfig {
     pub start_freq: f64,
     pub stop_freq: f64,
     pub points_per_unit: usize,
-    pub sweep: WorkerSweepType,
+    pub sweep: FrequencySweep,
     pub input_source: String,
     pub input_sideband: i32,
     pub output_node: String,
@@ -174,7 +174,7 @@ pub struct WorkerPnoiseRunConfig {
     pub start_freq: f64,
     pub stop_freq: f64,
     pub points_per_unit: usize,
-    pub sweep: WorkerSweepType,
+    pub sweep: FrequencySweep,
     pub max_sideband: i32,
     pub output_node: String,
     pub output_ref: Option<String>,

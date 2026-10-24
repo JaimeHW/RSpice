@@ -1,7 +1,8 @@
 //! S-parameter port dialog state.
 
+use crate::config::FrequencySweep;
 use crate::options::{format_freq, parse_si_value};
-use crate::sp_config::{SpConfig, SpPortConfig, SpSweepType};
+use crate::sp_config::{SpConfig, SpPortConfig};
 use rspice_vocabulary::quantity::parse_engineering_value;
 use std::collections::HashMap;
 
@@ -232,9 +233,9 @@ impl SpDialogState {
             stop_freq: format_freq(config.stop_freq),
             num_points: config.num_points.to_string(),
             sweep_type_idx: match config.sweep_type {
-                SpSweepType::Decade => 0,
-                SpSweepType::Octave => 1,
-                SpSweepType::Linear => 2,
+                FrequencySweep::Decade => 0,
+                FrequencySweep::Octave => 1,
+                FrequencySweep::Linear => 2,
             },
             z0: config.z0.to_string(),
             ports: port_states,
@@ -303,9 +304,9 @@ impl SpDialogState {
         let z0 = parse_si_value(&self.z0).map_err(|error| format!("Invalid Z0: {error}"))?;
 
         let sweep_type = match self.sweep_type_idx {
-            0 => SpSweepType::Decade,
-            1 => SpSweepType::Octave,
-            _ => SpSweepType::Linear,
+            0 => FrequencySweep::Decade,
+            1 => FrequencySweep::Octave,
+            _ => FrequencySweep::Linear,
         };
 
         let ports = self.resolve_ports(design)?;

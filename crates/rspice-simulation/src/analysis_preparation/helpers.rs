@@ -4,7 +4,6 @@
 //! step values a user typed, with the field name carried into the error so a
 //! rejection says which input was wrong.
 
-use rspice_simulation_contract::config::AcSweepType;
 use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::spice_value::parse_spice_value_checked;
 
@@ -128,14 +127,6 @@ pub fn map_frequency_sweep(idx: usize) -> FrequencySweep {
         1 => FrequencySweep::Octave,
         2 => FrequencySweep::Linear,
         _ => FrequencySweep::Decade,
-    }
-}
-
-pub(super) fn map_ac_sweep(sweep: FrequencySweep) -> AcSweepType {
-    match sweep {
-        FrequencySweep::Decade => AcSweepType::Decade,
-        FrequencySweep::Octave => AcSweepType::Octave,
-        FrequencySweep::Linear => AcSweepType::Linear,
     }
 }
 

@@ -17,9 +17,9 @@ use crate::analysis_spec::{
     TfAccuracy, TfNormalization,
 };
 use crate::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, FrequencySweep,
-    NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
-    PoleZeroConfig, PzAnalysisType, SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
+    AcAnalysisConfig, AnalysisConfig, DcSweepConfig, FrequencySweep, NoiseAnalysisConfig,
+    NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PoleZeroConfig, PzAnalysisType,
+    SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
 };
 use crate::options::IntegrationMethod;
 
@@ -107,7 +107,7 @@ pub enum WorkerAnalysisSpec {
         start_freq: f64,
         stop_freq: f64,
         points_per_unit: usize,
-        sweep: WorkerSweepType,
+        sweep: FrequencySweep,
     },
     AcData {
         table_name: String,
@@ -217,7 +217,7 @@ pub enum WorkerAnalysisSpec {
         probe_node: String,
         start_freq: f64,
         stop_freq: f64,
-        sweep: WorkerSweepType,
+        sweep: FrequencySweep,
         points_per_decade: usize,
         #[serde(default = "worker_default_true")]
         compute_nyquist: bool,
@@ -226,7 +226,7 @@ pub enum WorkerAnalysisSpec {
         start_freq: f64,
         stop_freq: f64,
         points_per_unit: usize,
-        sweep: WorkerSweepType,
+        sweep: FrequencySweep,
         z0: f64,
         ports: Vec<SpPort>,
         #[serde(default)]
@@ -236,7 +236,7 @@ pub enum WorkerAnalysisSpec {
         start_freq: f64,
         stop_freq: f64,
         points_per_unit: usize,
-        sweep: WorkerSweepType,
+        sweep: FrequencySweep,
         f2_over_f1: Option<f64>,
     },
     Pss {
@@ -342,54 +342,6 @@ pub enum WorkerAnalysisSpec {
     CanonicalSpec(AnalysisSpec),
 }
 
-/// Stable frequency-sweep tag in worker requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WorkerSweepType {
-    Decade,
-    Octave,
-    Linear,
-}
-
-impl From<AcSweepType> for WorkerSweepType {
-    fn from(value: AcSweepType) -> Self {
-        match value {
-            AcSweepType::Decade => Self::Decade,
-            AcSweepType::Octave => Self::Octave,
-            AcSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<FrequencySweep> for WorkerSweepType {
-    fn from(value: FrequencySweep) -> Self {
-        match value {
-            FrequencySweep::Decade => Self::Decade,
-            FrequencySweep::Octave => Self::Octave,
-            FrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for AcSweepType {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for FrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
 impl From<&AnalysisSpec> for WorkerAnalysisSpec {
     fn from(value: &AnalysisSpec) -> Self {
         match value {
@@ -470,7 +422,7 @@ impl From<&AnalysisSpec> for WorkerAnalysisSpec {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 points_per_unit: *points_per_unit,
-                sweep: WorkerSweepType::from(*sweep),
+                sweep: *sweep,
             },
             AnalysisSpec::AcData {
                 table_name,
@@ -637,7 +589,7 @@ impl From<&AnalysisSpec> for WorkerAnalysisSpec {
                 probe_node: probe_node.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
-                sweep: WorkerSweepType::from(*sweep),
+                sweep: *sweep,
                 points_per_decade: *points_per_decade,
                 compute_nyquist: *compute_nyquist,
             },
@@ -653,7 +605,7 @@ impl From<&AnalysisSpec> for WorkerAnalysisSpec {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 points_per_unit: *points_per_unit,
-                sweep: WorkerSweepType::from(*sweep),
+                sweep: *sweep,
                 z0: *z0,
                 ports: ports.clone(),
                 do_noise: *do_noise,
@@ -668,7 +620,7 @@ impl From<&AnalysisSpec> for WorkerAnalysisSpec {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 points_per_unit: *points_per_unit,
-                sweep: WorkerSweepType::from(*sweep),
+                sweep: *sweep,
                 f2_over_f1: *f2_over_f1,
             },
             AnalysisSpec::Pss {
@@ -870,7 +822,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 start_freq,
                 stop_freq,
                 points_per_unit,
-                sweep: FrequencySweep::from(sweep),
+                sweep,
             },
             WorkerAnalysisSpec::AcData {
                 table_name,
@@ -1037,7 +989,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 probe_node,
                 start_freq,
                 stop_freq,
-                sweep: FrequencySweep::from(sweep),
+                sweep,
                 points_per_decade,
                 compute_nyquist,
             },
@@ -1053,7 +1005,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 start_freq,
                 stop_freq,
                 points_per_unit,
-                sweep: FrequencySweep::from(sweep),
+                sweep,
                 z0,
                 ports,
                 do_noise,
@@ -1068,7 +1020,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 start_freq,
                 stop_freq,
                 points_per_unit,
-                sweep: FrequencySweep::from(sweep),
+                sweep,
                 f2_over_f1,
             },
             WorkerAnalysisSpec::Pss {
@@ -1221,7 +1173,7 @@ pub enum WorkerAnalysisConfig {
         uic: bool,
     },
     Ac {
-        sweep_type: WorkerSweepType,
+        sweep_type: FrequencySweep,
         num_points: usize,
         start_freq: f64,
         stop_freq: f64,
@@ -1230,7 +1182,7 @@ pub enum WorkerAnalysisConfig {
         output_node: String,
         reference_node: String,
         input_source: String,
-        sweep_type: WorkerSweepType,
+        sweep_type: FrequencySweep,
         num_points: usize,
         start_freq: f64,
         stop_freq: f64,
@@ -1288,7 +1240,7 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 uic: config.uic,
             },
             AnalysisConfig::Ac(config) => Self::Ac {
-                sweep_type: WorkerSweepType::from(config.sweep_type),
+                sweep_type: config.sweep_type,
                 num_points: config.num_points,
                 start_freq: config.start_freq,
                 stop_freq: config.stop_freq,
@@ -1297,7 +1249,7 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 output_node: config.output_node.clone(),
                 reference_node: config.reference_node.clone(),
                 input_source: config.input_source.clone(),
-                sweep_type: WorkerSweepType::from(config.sweep_type),
+                sweep_type: config.sweep_type,
                 num_points: config.num_points,
                 start_freq: config.start_freq,
                 stop_freq: config.stop_freq,
@@ -1373,7 +1325,7 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 start_freq,
                 stop_freq,
             } => Self::Ac(AcAnalysisConfig {
-                sweep_type: AcSweepType::from(sweep_type),
+                sweep_type,
                 num_points,
                 start_freq,
                 stop_freq,
@@ -1395,7 +1347,7 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 output_node,
                 reference_node,
                 input_source,
-                sweep_type: AcSweepType::from(sweep_type),
+                sweep_type,
                 num_points,
                 start_freq,
                 stop_freq,

@@ -3,7 +3,8 @@
 use super::*;
 use rspice_core::ResourceLimits;
 use rspice_core::abort_signal::{AtomicAbort, ImmediateAbort, NoAbort};
-use rspice_simulation_contract::config::{AcAnalysisConfig, AcSweepType};
+use rspice_simulation_contract::config::AcAnalysisConfig;
+use rspice_simulation_contract::config::FrequencySweep;
 use std::num::NonZeroUsize;
 use std::ops::Range;
 
@@ -13,7 +14,7 @@ fn base() -> StudyRunConfig {
         start_freq: 1000.0,
         stop_freq: 1000.0,
         num_points: 1,
-        sweep_type: AcSweepType::Linear,
+        sweep_type: FrequencySweep::Linear,
     });
     StudyRunConfig {
         postprocess: None,

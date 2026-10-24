@@ -1,6 +1,6 @@
 //! Sensitivity analysis configuration.
 
-use super::AcSweepType;
+use crate::config::FrequencySweep;
 
 //=============================================================================
 
@@ -84,7 +84,7 @@ pub fn validate_sensitivity_filter(filter: &str) -> Result<(), String> {
 pub struct SensitivitySweep {
     pub stop_frequency: f64,
     pub points: u32,
-    pub variation: AcSweepType,
+    pub variation: FrequencySweep,
 }
 
 impl SensitivitySweep {
@@ -94,29 +94,19 @@ impl SensitivitySweep {
     /// way out and octaves on the way back would solve a different band than
     /// the plan states.
     pub fn to_spec(self) -> super::SensitivitySweepSpec {
-        use super::FrequencySweep;
         super::SensitivitySweepSpec {
             stop_frequency: self.stop_frequency,
             points: self.points,
-            variation: match self.variation {
-                AcSweepType::Decade => FrequencySweep::Decade,
-                AcSweepType::Octave => FrequencySweep::Octave,
-                AcSweepType::Linear => FrequencySweep::Linear,
-            },
+            variation: self.variation,
         }
     }
 
     /// The inverse of [`SensitivitySweep::to_spec`].
     pub fn from_spec(spec: super::SensitivitySweepSpec) -> Self {
-        use super::FrequencySweep;
         Self {
             stop_frequency: spec.stop_frequency,
             points: spec.points,
-            variation: match spec.variation {
-                FrequencySweep::Decade => AcSweepType::Decade,
-                FrequencySweep::Octave => AcSweepType::Octave,
-                FrequencySweep::Linear => AcSweepType::Linear,
-            },
+            variation: spec.variation,
         }
     }
 }
@@ -162,9 +152,9 @@ impl SensitivityConfig {
             stop_frequency: start_freq,
             points: 1,
             variation: if start_freq == 0.0 {
-                AcSweepType::Linear
+                FrequencySweep::Linear
             } else {
-                AcSweepType::Decade
+                FrequencySweep::Decade
             },
         });
         Some(super::AcAnalysisConfig {
@@ -190,7 +180,7 @@ impl SensitivityConfig {
         if let Some(sweep) = self.ac_sweep_config() {
             card.push_str(&format!(
                 " AC {} {} {} {}",
-                sweep.sweep_type.spice_name().to_uppercase(),
+                sweep.sweep_type.runner_keyword().to_uppercase(),
                 sweep.num_points,
                 sweep.start_freq,
                 sweep.stop_freq,
@@ -217,7 +207,7 @@ impl SensitivityConfig {
                 Some(0.0)
                     if self
                         .sweep
-                        .is_some_and(|sweep| sweep.variation != AcSweepType::Linear) =>
+                        .is_some_and(|sweep| sweep.variation != FrequencySweep::Linear) =>
                 {
                     errors.push(
                         "DEC/OCT sensitivity requires a positive start frequency".to_string(),
@@ -256,7 +246,8 @@ impl SensitivityConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AcSweepType, SensitivityConfig, SensitivitySweep};
+    use super::{SensitivityConfig, SensitivitySweep};
+    use crate::config::FrequencySweep;
 
     #[test]
     fn ac_sensitivity_config_rejects_non_finite_frequency() {
@@ -306,7 +297,7 @@ mod tests {
             sweep: Some(SensitivitySweep {
                 stop_frequency: 1e6,
                 points: 10,
-                variation: AcSweepType::Decade,
+                variation: FrequencySweep::Decade,
             }),
         };
         assert_eq!(
@@ -344,7 +335,7 @@ mod tests {
             sweep: Some(SensitivitySweep {
                 stop_frequency: 1e6,
                 points: 10,
-                variation: AcSweepType::Decade,
+                variation: FrequencySweep::Decade,
             }),
             ..SensitivityConfig::default()
         };

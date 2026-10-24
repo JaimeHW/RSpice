@@ -18,6 +18,7 @@
 //! + maxsideband=5 input=VRF out=VOUT
 //! ```
 
+use crate::config::FrequencySweep;
 use crate::periodic_carrier::PeriodicCarrier;
 
 use crate::options::{format_freq, parse_si_value};
@@ -25,29 +26,6 @@ use crate::options::{format_freq, parse_si_value};
 // =============================================================================
 // PAC Sweep Type
 // =============================================================================
-
-/// Type of frequency sweep for PAC analysis
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum PacSweepType {
-    /// Decades (logarithmic)
-    #[default]
-    Decade,
-    /// Octaves (logarithmic)
-    Octave,
-    /// Linear
-    Linear,
-}
-
-impl PacSweepType {
-    /// SPICE keyword
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
-}
 
 // =============================================================================
 // PAC Configuration
@@ -65,7 +43,7 @@ pub struct PacConfig {
     /// Number of points (per decade for log, total for linear)
     pub num_points: u32,
     /// Sweep type
-    pub sweep_type: PacSweepType,
+    pub sweep_type: FrequencySweep,
     /// Maximum sideband index (both positive and negative).
     ///
     /// The symmetric spelling, `MAXSIDEBAND=n`, which the card reads as
@@ -118,7 +96,7 @@ impl Default for PacConfig {
             start_freq: 1e3, // 1 kHz
             stop_freq: 1e9,  // 1 GHz
             num_points: 10,  // 10 per decade
-            sweep_type: PacSweepType::Decade,
+            sweep_type: FrequencySweep::Decade,
             max_sideband: 5, // Sidebands -5 to +5
             sideband_min: None,
             sideband_max: None,
@@ -187,7 +165,7 @@ impl PacConfig {
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pac {} {} {} {}",
-            self.sweep_type.spice_keyword(),
+            self.sweep_type.runner_keyword(),
             self.num_points,
             format_freq(self.start_freq),
             format_freq(self.stop_freq)
@@ -380,9 +358,9 @@ impl PacDialogState {
             stop_freq: format_freq(config.stop_freq),
             num_points: config.num_points.to_string(),
             sweep_type_idx: match config.sweep_type {
-                PacSweepType::Decade => 0,
-                PacSweepType::Octave => 1,
-                PacSweepType::Linear => 2,
+                FrequencySweep::Decade => 0,
+                FrequencySweep::Octave => 1,
+                FrequencySweep::Linear => 2,
             },
             max_sideband: config.max_sideband.to_string(),
             sideband_min: optional_integer_text(config.sideband_min),
@@ -421,9 +399,9 @@ impl PacDialogState {
             .map_err(|_| "Invalid magnitude")?;
 
         let sweep_type = match self.sweep_type_idx {
-            0 => PacSweepType::Decade,
-            1 => PacSweepType::Octave,
-            _ => PacSweepType::Linear,
+            0 => FrequencySweep::Decade,
+            1 => FrequencySweep::Octave,
+            _ => FrequencySweep::Linear,
         };
 
         let config = PacConfig {
