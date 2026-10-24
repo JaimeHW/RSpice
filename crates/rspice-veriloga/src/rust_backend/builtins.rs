@@ -86,6 +86,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/ir",
     "src/ir.rs",
     "src/json_float.rs",
+    "src/keyword_sets.rs",
     "src/laplace.rs",
     "src/lexer.rs",
     "src/metrics.rs",

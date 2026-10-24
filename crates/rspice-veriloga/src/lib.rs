@@ -108,6 +108,7 @@ pub mod generated_source;
 mod integer_runtime;
 pub mod ir;
 pub mod json_float;
+mod keyword_sets;
 pub mod lexer;
 pub mod metrics;
 mod numeric_literal;

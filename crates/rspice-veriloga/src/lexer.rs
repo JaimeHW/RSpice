@@ -83,6 +83,21 @@ pub enum TokenKind {
     Endmodule,
     Connectmodule,
 
+    // === Keywords - SystemVerilog (IEEE 1800-2017), reserved only under its
+    // keyword set; see `crate::keyword_sets` ===
+    /// `package` (section 26.2).
+    Package,
+    /// `endpackage`.
+    Endpackage,
+    /// `import` (section 26.3).
+    Import,
+    /// `nettype` (section 6.6.7).
+    Nettype,
+    /// An IEEE 1800-2017 reserved word outside the SystemVerilog subset this
+    /// compiler reads. The token's `text` carries the word, so the refusal can
+    /// name it; like [`TokenKind::AmsDigital`] it is never accepted as a name.
+    SvReserved,
+
     // === Keywords - Connect rules (Verilog-AMS section 7.7) ===
     /// `connectrules`, opening a connect specification block.
     Connectrules,
@@ -317,9 +332,16 @@ pub enum TokenKind {
     Dot,                    // .
     Hash,                   // #
     DoubleHash,             // ##
+    /// `::`, the class scope resolution operator of IEEE 1800-2017 section
+    /// 26.3 (`p::x`). Lexed only under the SystemVerilog keyword set.
+    ColonColon,
 
     // === Compiler Directives ===
     Directive, // `include, `define, etc.
+    /// Where the keyword set in force changes: the token's `text` is the
+    /// specifier of the set the text that follows is read under. Only ever
+    /// between design elements; see `crate::keyword_sets`.
+    KeywordSet,
 
     // === Special ===
     Eof,
@@ -594,6 +616,13 @@ impl TokenKind {
             TokenKind::Idt_Nature => "'idt_nature'",
             TokenKind::Ddt_Nature => "'ddt_nature'",
             TokenKind::AmsDigital => "a digital keyword",
+            TokenKind::Package => "'package'",
+            TokenKind::Endpackage => "'endpackage'",
+            TokenKind::Import => "'import'",
+            TokenKind::Nettype => "'nettype'",
+            TokenKind::SvReserved => "a SystemVerilog keyword",
+            TokenKind::ColonColon => "'::'",
+            TokenKind::KeywordSet => "a keyword-set change",
             TokenKind::Plus => "'+'",
             TokenKind::Minus => "'-'",
             TokenKind::Star => "'*'",
@@ -741,6 +770,12 @@ pub struct Lexer<'a> {
     source_id: SourceId,
     chars: std::iter::Peekable<std::str::CharIndices<'a>>,
     pos: usize,
+    /// The reserved-word set in force (IEEE 1800-2017 section 22.14), which
+    /// the preprocessor's markers set.
+    keywords: crate::keyword_sets::KeywordSet,
+    /// The design element the tokens so far have opened and not closed: its
+    /// keyword and, once lexed, its name.
+    element: Option<(&'static str, Option<String>)>,
 }
 
 impl<'a> Lexer<'a> {
@@ -751,6 +786,8 @@ impl<'a> Lexer<'a> {
             source_id,
             chars: source.char_indices().peekable(),
             pos: 0,
+            keywords: crate::keyword_sets::KeywordSet::VerilogAms,
+            element: None,
         }
     }
 
@@ -770,8 +807,113 @@ impl<'a> Lexer<'a> {
 
     /// Get the next token
     pub fn next_token(&mut self) -> Result<Token, LexerError> {
-        self.skip_whitespace_and_comments()?;
+        loop {
+            if let Some(token) = self.next_token_or_marker()? {
+                self.track_element(&token);
+                return Ok(token);
+            }
+        }
+    }
 
+    /// Which design element `token` opens or closes, if any (IEEE 1800-2017
+    /// section 22.14 allows a keyword-set change only between them).
+    fn track_element(&mut self, token: &Token) {
+        let text = token.text.as_deref();
+        let opens = match token.kind {
+            TokenKind::Module => Some("module"),
+            TokenKind::Macromodule => Some("macromodule"),
+            TokenKind::Connectmodule => Some("connectmodule"),
+            TokenKind::Package => Some("package"),
+            TokenKind::AmsDigital if text == Some("primitive") => Some("primitive"),
+            _ => None,
+        };
+        if let Some(keyword) = opens {
+            self.element = Some((keyword, None));
+            return;
+        }
+        match token.kind {
+            TokenKind::Endmodule | TokenKind::Endpackage => self.element = None,
+            TokenKind::AmsDigital if text == Some("endprimitive") => self.element = None,
+            TokenKind::Identifier | TokenKind::EscapedIdentifier => {
+                if let Some((_, name @ None)) = &mut self.element {
+                    *name = token.text.clone();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The next token, or `None` after a keyword-set marker that changes
+    /// nothing.
+    fn next_token_or_marker(&mut self) -> Result<Option<Token>, LexerError> {
+        self.skip_whitespace_and_comments()?;
+        let marker = format!("`{}", crate::keyword_sets::KEYWORD_MARKER);
+        if self.source[self.pos..].starts_with(&marker)
+            && !self.source[self.pos + marker.len()..]
+                .starts_with(|ch: char| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return self.keyword_marker(marker.len());
+        }
+        self.scan_token().map(Some)
+    }
+
+    /// Read a keyword-set marker, `` `__rspice_keywords "<set>" "<cause>" ``,
+    /// and switch to the set it names. A change is a [`TokenKind::KeywordSet`]
+    /// token, so the parser knows each design element's language; a marker
+    /// that changes nothing is no token at all.
+    fn keyword_marker(&mut self, length: usize) -> Result<Option<Token>, LexerError> {
+        let start = self.pos;
+        for _ in 0..length {
+            self.advance();
+        }
+        let mut operands = Vec::new();
+        while operands.len() < 2 {
+            while self.peek_char().is_some_and(|ch| ch == ' ' || ch == '\t') {
+                self.advance();
+            }
+            if self.peek_char() != Some('"') {
+                break;
+            }
+            let quote = self.pos;
+            self.advance();
+            operands.push(self.scan_string(quote)?.text.unwrap_or_default());
+        }
+        let span = Span::new(self.source_id, start as u32, self.pos as u32);
+        let set = operands
+            .first()
+            .and_then(|specifier| crate::keyword_sets::KeywordSet::from_marker(specifier))
+            .ok_or_else(|| {
+                LexerError::new(
+                    LexerErrorKind::InvalidDirective(crate::keyword_sets::KEYWORD_MARKER.into()),
+                    span,
+                )
+            })?;
+        if set == self.keywords {
+            return Ok(None);
+        }
+        if let Some((keyword, name)) = &self.element {
+            return Err(LexerError::new(
+                LexerErrorKind::KeywordSetInsideElement(Box::new(crate::error::KeywordSetChange {
+                    element: match name {
+                        Some(name) => format!("{keyword} `{name}`"),
+                        None => (*keyword).to_owned(),
+                    },
+                    cause: operands.get(1).cloned().unwrap_or_default(),
+                    specifier: set.specifier().to_owned(),
+                })),
+                span,
+            ));
+        }
+        self.keywords = set;
+        Ok(Some(Token::with_text(
+            TokenKind::KeywordSet,
+            span,
+            set.specifier(),
+        )))
+    }
+
+    /// One token of the source, from the cursor.
+    fn scan_token(&mut self) -> Result<Token, LexerError> {
         let start = self.pos;
         let Some((_, ch)) = self.advance() else {
             return Ok(Token::new(
@@ -796,6 +938,12 @@ impl<'a> Lexer<'a> {
             '.' => TokenKind::Dot,
             '@' => TokenKind::At,
             '?' => TokenKind::Question,
+            ':' if self.keywords == crate::keyword_sets::KeywordSet::SystemVerilog2017
+                && self.peek_char() == Some(':') =>
+            {
+                self.advance();
+                TokenKind::ColonColon
+            }
             ':' => TokenKind::Colon,
             // IEEE 1364-2005 annex A lexes by maximal munch, so `~^` is the
             // XNOR operator rather than a negation applied to an XOR. The two
@@ -1044,7 +1192,7 @@ impl<'a> Lexer<'a> {
         let span = Span::new(self.source_id, start as u32, self.pos as u32);
 
         // Check for keywords - preserve text for parser to use as identifier if needed
-        if let Some(keyword) = TokenKind::keyword(text) {
+        if let Some(keyword) = self.keywords.keyword(text) {
             Ok(Token::with_text(keyword, span, text))
         } else {
             Ok(Token::with_text(TokenKind::Identifier, span, text))
@@ -1355,13 +1503,43 @@ impl<'a> Lexer<'a> {
 
     /// Whether the backtick at `start` is the first non-blank character on its
     /// line.
+    ///
+    /// A keyword-set marker the preprocessor wrote at the start of the line
+    /// counts as blank: it stands where a file begins, and the directive
+    /// after it is still the first thing the author wrote on the line.
     fn directive_opens_its_line(&self, start: usize) -> bool {
         let line_start = self.source[..start]
             .rfind('\n')
             .map_or(0, |offset| offset + 1);
-        self.source[line_start..start]
+        let mut prefix = self.source[line_start..start].trim_start_matches([' ', '\t', '\r']);
+        while let Some(rest) = prefix
+            .strip_prefix('`')
+            .and_then(|rest| rest.strip_prefix(crate::keyword_sets::KEYWORD_MARKER))
+        {
+            prefix = skip_quoted_operands(rest);
+        }
+        prefix
             .chars()
             .all(|ch| ch == ' ' || ch == '\t' || ch == '\r')
+    }
+}
+
+/// `text` after the blank-separated string literals that open it.
+fn skip_quoted_operands(mut text: &str) -> &str {
+    loop {
+        let trimmed = text.trim_start_matches([' ', '\t']);
+        let Some(body) = trimmed.strip_prefix('"') else {
+            return trimmed;
+        };
+        let mut escaped = false;
+        let Some(end) = body.char_indices().find_map(|(offset, ch)| {
+            let closes = ch == '"' && !escaped;
+            escaped = ch == '\\' && !escaped;
+            closes.then_some(offset)
+        }) else {
+            return "";
+        };
+        text = &body[end + 1..];
     }
 }
 
@@ -1635,5 +1813,74 @@ mod tests {
     fn block_comment_with_stars_terminates() {
         let toks = lex("/* ** stars ** */ x");
         assert_eq!(toks[0].kind, TokenKind::Identifier);
+    }
+
+    /// A keyword-set marker switches the table the words after it are read
+    /// under, and is a token only where the set changes.
+    #[test]
+    fn keyword_markers_switch_the_reserved_words() {
+        let source = "package analog a::b `__rspice_keywords \"1800-2017\" \"x\" \
+                      endpackage analog a::b logic \
+                      `__rspice_keywords \"1800-2017\" \"y\" \
+                      `__rspice_keywords \"1364-2005\" \"z\" package analog";
+        let toks = lex(source);
+        let kinds: Vec<_> = toks.iter().map(|token| token.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::Identifier,
+                TokenKind::Analog,
+                TokenKind::Identifier,
+                TokenKind::Colon,
+                TokenKind::Colon,
+                TokenKind::Identifier,
+                TokenKind::KeywordSet,
+                TokenKind::Endpackage,
+                TokenKind::Identifier,
+                TokenKind::Identifier,
+                TokenKind::ColonColon,
+                TokenKind::Identifier,
+                TokenKind::SvReserved,
+                TokenKind::KeywordSet,
+                TokenKind::Identifier,
+                TokenKind::Analog,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(toks[6].text.as_deref(), Some("1800-2017"));
+        assert_eq!(toks[12].text.as_deref(), Some("logic"));
+        assert_eq!(toks[13].text.as_deref(), Some("1364-2005"));
+    }
+
+    /// IEEE 1800-2017 section 22.14: the keyword set changes only between
+    /// design elements, so a marker that would change it inside one is
+    /// refused, naming the element and what changed the set.
+    #[test]
+    fn a_keyword_set_change_inside_a_module_is_refused() {
+        let error = Lexer::new(
+            "module m; `__rspice_keywords \"1800-2017\" \"the SystemVerilog file `x.svh`\" \
+             endmodule",
+            SourceId::new(0),
+        )
+        .collect_tokens()
+        .expect_err("refused");
+        assert_eq!(error.kind.code(), "VA-LEX-KEYWORDS-INSIDE-ELEMENT");
+        let message = error.kind.to_string();
+        assert!(message.contains("inside module `m`"), "{message}");
+        assert!(message.contains("`x.svh`"), "{message}");
+        // The same set is no change, and after `endmodule` a change is fine.
+        lex(
+            "module m; `__rspice_keywords \"1364-2005\" \"x\" endmodule \
+             `__rspice_keywords \"1800-2017\" \"y\" package p; endpackage",
+        );
+    }
+
+    /// A marker at the start of a line leaves the directive after it the
+    /// first thing on its line, so the directive still owns its operand.
+    #[test]
+    fn a_marker_does_not_take_a_directive_off_its_line() {
+        let toks = lex("`__rspice_keywords \"1800-2017\" \"x\" `default_nettype none\nm");
+        assert_eq!(toks[1].kind, TokenKind::Directive);
+        assert!(toks[1].span.end as usize > toks[2].span.start as usize);
     }
 }

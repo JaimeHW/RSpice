@@ -356,10 +356,26 @@ pub struct Module {
     pub(crate) unconnected_drive: Option<bool>,
     /// The library binding this module stands for, once bound.
     pub(crate) binding: Option<ModuleBinding>,
+    /// The language the module is written in: the keyword set in force at
+    /// its `module` keyword (IEEE 1800-2017 section 22.14), which cannot
+    /// change before its `endmodule`.
+    pub language: SourceLanguage,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
     pub span: Span,
+}
+
+/// The language a design element is written in, which its file's name or a
+/// `` `begin_keywords `` directive selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SourceLanguage {
+    /// Verilog-AMS LRM 2.4, over IEEE 1364-2005.
+    #[default]
+    VerilogAms,
+    /// IEEE 1800-2017 SystemVerilog, in the real-number-modelling subset
+    /// this compiler reads.
+    SystemVerilog,
 }
 
 impl Module {
@@ -469,6 +485,7 @@ impl Module {
             library: None,
             unconnected_drive: None,
             binding: None,
+            language: SourceLanguage::VerilogAms,
             attributes: Vec::new(),
             span,
         }

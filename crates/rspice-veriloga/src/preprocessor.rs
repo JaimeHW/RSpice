@@ -249,6 +249,26 @@ impl PreprocessedSource {
         }
     }
 
+    /// `source` before everything expanded so far, as a segment of its own
+    /// so the text after it keeps its columns.
+    fn prepend_source(&mut self, source: &str, logical_path: &Path, source_line: usize) {
+        let length = source.len();
+        self.source.insert_str(0, source);
+        for segment in &mut self.segments {
+            segment.expanded_start += length;
+            segment.expanded_end += length;
+        }
+        self.segments.insert(
+            0,
+            PreprocessedSourceSegment {
+                expanded_start: 0,
+                expanded_end: length,
+                logical_path: logical_path.to_path_buf(),
+                source_line,
+            },
+        );
+    }
+
     fn append(&mut self, mut nested: Self) {
         let offset = self.source.len();
         self.source.push_str(&nested.source);
@@ -651,6 +671,12 @@ pub struct Preprocessor {
     dependency_content: BTreeMap<PathBuf, String>,
     /// Total bytes across unique dependency documents.
     dependency_source_bytes: usize,
+    /// The `` `begin_keywords `` stack (IEEE 1800-2017 section 22.14), with
+    /// the set a SystemVerilog file's name selects pushed for its text.
+    keyword_stack: Vec<crate::keyword_sets::KeywordSet>,
+    /// The depth the file being read started at: its `` `end_keywords ``
+    /// cannot close a region another file opened.
+    keyword_floor: usize,
 }
 
 impl Default for Preprocessor {
@@ -672,6 +698,8 @@ impl Preprocessor {
             include_graph: Vec::new(),
             dependency_content: BTreeMap::new(),
             dependency_source_bytes: 0,
+            keyword_stack: Vec::new(),
+            keyword_floor: 0,
         };
 
         // Add standard Verilog-AMS predefined macros
@@ -859,6 +887,59 @@ impl Preprocessor {
         self.dependency_source_bytes = 0;
         self.include_stack.clear();
         self.current_file = None;
+        self.keyword_stack.clear();
+        self.keyword_floor = 0;
+    }
+
+    /// The keyword set in force.
+    fn keyword_set(&self) -> crate::keyword_sets::KeywordSet {
+        self.keyword_stack.last().copied().unwrap_or_default()
+    }
+
+    /// Apply `` `begin_keywords "<specifier>" `` or `` `end_keywords ``
+    /// (IEEE 1800-2017 section 22.14) to the stack, returning the marker that
+    /// tells the lexer about a change of set.
+    fn keyword_directive(
+        &mut self,
+        directive: &str,
+        operand: &str,
+        line: usize,
+    ) -> Result<Option<String>, PreprocessorError> {
+        let error =
+            |message: String| PreprocessorError::new(message, self.current_file.clone(), line);
+        let before = self.keyword_set();
+        let cause = if directive == "begin_keywords" {
+            let operand = operand.trim();
+            let specifier = operand
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix('"'))
+                .filter(|specifier| !specifier.contains('"'))
+                .ok_or_else(|| {
+                    error(
+                        "`begin_keywords takes one version specifier in quotes, such as \
+                         \"1800-2017\" (IEEE 1800-2017 section 22.14)"
+                            .into(),
+                    )
+                })?;
+            let set = crate::keyword_sets::KeywordSet::from_specifier(specifier).map_err(error)?;
+            self.keyword_stack.push(set);
+            format!("`begin_keywords \"{specifier}\"")
+        } else {
+            if !operand.trim().is_empty() {
+                return Err(error("`end_keywords takes no operand".into()));
+            }
+            if self.keyword_stack.len() <= self.keyword_floor {
+                return Err(error(
+                    "`end_keywords has no `begin_keywords in this file to close; IEEE \
+                     1800-2017 section 22.14 pairs each with the most recent one"
+                        .into(),
+                ));
+            }
+            self.keyword_stack.pop();
+            "`end_keywords".to_owned()
+        };
+        let after = self.keyword_set();
+        Ok((after != before).then(|| keyword_marker(after, &cause)))
     }
 
     fn preprocess_document(
@@ -909,11 +990,53 @@ impl Preprocessor {
 
         self.include_stack.insert(logical_path.clone());
         let previous_file = self.current_file.replace(logical_path.clone());
+        // A SystemVerilog file's text is read under the 1800-2017 keywords
+        // whoever includes it, and whatever its directives leave on the stack
+        // is undone at its end, so an unbalanced `begin_keywords cannot leave
+        // the next file in its set. A file of any other name inherits the
+        // includer's set, as section 22.14 makes the directive lexical.
+        use crate::keyword_sets::KeywordSet;
+        let (depth, floor, before) = (
+            self.keyword_stack.len(),
+            self.keyword_floor,
+            self.keyword_set(),
+        );
+        let wrapped = KeywordSet::for_path(&logical_path) == KeywordSet::SystemVerilog2017;
+        if wrapped {
+            self.keyword_stack.push(KeywordSet::SystemVerilog2017);
+        }
+        self.keyword_floor = self.keyword_stack.len();
         let result =
             self.preprocess_source_with_provider(&document.source, provider, include_depth);
+        let after = self.keyword_set();
+        self.keyword_stack.truncate(depth);
+        self.keyword_floor = floor;
         self.include_stack.remove(&logical_path);
         self.current_file = previous_file;
-        result
+        let mut result = result?;
+        let shown = display_path(&logical_path);
+        if wrapped && before != KeywordSet::SystemVerilog2017 {
+            result.prepend_source(
+                &keyword_marker(
+                    KeywordSet::SystemVerilog2017,
+                    &format!("the SystemVerilog file `{shown}`"),
+                ),
+                &logical_path,
+                1,
+            );
+        }
+        if after != before {
+            let line = result
+                .segments
+                .last()
+                .map_or(1, |segment| segment.source_line);
+            result.push_source(
+                &keyword_marker(before, &format!("the end of `{shown}`")),
+                &logical_path,
+                line,
+            );
+        }
+        Ok(result)
     }
 
     fn record_dependency(
@@ -995,7 +1118,31 @@ impl Preprocessor {
         &mut self,
         source: &str,
     ) -> Result<PreprocessedSource, PreprocessorError> {
-        self.preprocess_source_with_provider(source, &FileSystemSourceProvider, 0)
+        // A source with no file is one file of its own: whatever its
+        // directives leave on the keyword stack ends with it.
+        let (depth, floor, before) = (
+            self.keyword_stack.len(),
+            self.keyword_floor,
+            self.keyword_set(),
+        );
+        self.keyword_floor = depth;
+        let result = self.preprocess_source_with_provider(source, &FileSystemSourceProvider, 0);
+        let after = self.keyword_set();
+        self.keyword_stack.truncate(depth);
+        self.keyword_floor = floor;
+        let mut result = result?;
+        if after != before {
+            let line = result
+                .segments
+                .last()
+                .map_or(1, |segment| segment.source_line);
+            result.push_source(
+                &keyword_marker(before, "the end of the source"),
+                Path::new("<input>"),
+                line,
+            );
+        }
+        Ok(result)
     }
 
     fn preprocess_source_with_provider(
@@ -1096,6 +1243,40 @@ impl Preprocessor {
                                 } else {
                                     break;
                                 }
+                            }
+                        }
+                    }
+                    "begin_keywords" | "end_keywords" => {
+                        // Section 22.14's version specifier is the directive's
+                        // next token, so line ends and comments, which are
+                        // blank by now, may stand between the two.
+                        let mut operand = rest;
+                        let mut operand_lines = 0;
+                        if include_line && directive == "begin_keywords" && rest.trim().is_empty() {
+                            let mut blank = 0;
+                            for (_, next) in lines.clone() {
+                                if next.trim().is_empty() {
+                                    blank += 1;
+                                    continue;
+                                }
+                                if next.trim_start().starts_with('"') {
+                                    operand = next;
+                                    operand_lines = blank + 1;
+                                }
+                                break;
+                            }
+                        }
+                        if include_line {
+                            let marker =
+                                self.keyword_directive(directive, operand, line_num + 1)?;
+                            if let Some(marker) = marker {
+                                output.push_source(&marker, &current_path, line_num + 1);
+                            }
+                        }
+                        output.push_source("\n", &current_path, line_num + 1);
+                        for _ in 0..operand_lines {
+                            if let Some((skipped, _)) = lines.next() {
+                                output.push_source("\n", &current_path, skipped + 1);
                             }
                         }
                     }
@@ -1682,6 +1863,23 @@ impl Preprocessor {
             ));
         };
 
+        // The discipline header declares Verilog-AMS natures and disciplines,
+        // whose words are names under the SystemVerilog keywords, so read
+        // there it would only misparse.
+        if self.keyword_set() == crate::keyword_sets::KeywordSet::SystemVerilog2017
+            && Path::new(filename).file_name() == Some(std::ffi::OsStr::new("disciplines.vams"))
+        {
+            return Err(PreprocessorError::new(
+                format!(
+                    "`include \"{filename}\" in SystemVerilog text: its natures and disciplines \
+                     are Verilog-AMS, which the IEEE 1800-2017 keywords do not read; include it \
+                     from the `.vams` file that declares the analog module"
+                ),
+                self.current_file.clone(),
+                line_num,
+            ));
+        }
+
         // Resolve through the caller-selected provider. There is deliberately
         // no file-system fallback here: virtual compilation must remain sealed
         // to its exact source bundle.
@@ -2107,7 +2305,9 @@ fn strip_utf8_bom(source: &str) -> &str {
 const PREDEFINED_MACROS: [&str; 2] = ["__FILE__", "__LINE__"];
 
 /// The directives the preprocessor processes itself.
-const KNOWN_DIRECTIVES: [&str; 13] = [
+const KNOWN_DIRECTIVES: [&str; 15] = [
+    "begin_keywords",
+    "end_keywords",
     "include",
     "define",
     "undef",
@@ -2124,24 +2324,27 @@ const KNOWN_DIRECTIVES: [&str; 13] = [
 ];
 
 /// IEEE 1364-2005 clause 19 directives that change nothing an analog model
-/// computes: cell marking, keyword-set selection, the line-number remapping of
-/// `` `line `` (which only moves where diagnostics point), the implementation
-/// pragmas section 19.10 says an unrecognized tool shall ignore. The
-/// preprocessor leaves each in the text and the parser reads past it with a
-/// warning.
-pub(crate) const IGNORED_DIRECTIVES: [&str; 6] = [
-    "begin_keywords",
-    "celldefine",
-    "end_keywords",
-    "endcelldefine",
-    "line",
-    "pragma",
-];
+/// computes: cell marking, the line-number remapping of `` `line `` (which
+/// only moves where diagnostics point), the implementation pragmas section
+/// 19.10 says an unrecognized tool shall ignore. The preprocessor leaves each
+/// in the text and the parser reads past it with a warning.
+pub(crate) const IGNORED_DIRECTIVES: [&str; 4] = ["celldefine", "endcelldefine", "line", "pragma"];
 
 /// Section 19.9's pair, which pulls the unconnected input ports of the
 /// modules that follow and restores the floating default. The preprocessor
 /// leaves both in the text for the parser to apply.
 const DRIVE_DIRECTIVES: [&str; 2] = ["unconnected_drive", "nounconnected_drive"];
+
+/// The marker that tells the lexer `set` is in force from here; `cause` says
+/// what changed it, for the refusal of a change inside a design element.
+fn keyword_marker(set: crate::keyword_sets::KeywordSet, cause: &str) -> String {
+    let cause = cause.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "`{} \"{}\" \"{cause}\"",
+        crate::keyword_sets::KEYWORD_MARKER,
+        set.specifier()
+    )
+}
 
 /// The macro or directive name at the start of `text`, which follows its
 /// backtick; empty when no name does.
@@ -2461,9 +2664,59 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
     #[test]
     fn ignorable_directives_pass_to_the_parser_unexpanded() {
         let source = "`celldefine\n`pragma tool option `UNDEFINED\n`line 3 \"a.v\" 0\n\
-                      `begin_keywords \"1364-2005\"\n`end_keywords\n`nounconnected_drive\n\
-                      `unconnected_drive pull1\n`endcelldefine\n";
+                      `nounconnected_drive\n`unconnected_drive pull1\n`endcelldefine\n";
         assert_eq!(pp(source), source);
+    }
+
+    /// `` `begin_keywords `` and `` `end_keywords `` are the preprocessor's
+    /// (IEEE 1800-2017 section 22.14). A 1364 specifier keeps the Verilog-AMS
+    /// set, so neither leaves anything, and a change of set leaves one marker
+    /// on the directive's own line, so no line moves.
+    #[test]
+    fn keyword_directives_leave_a_marker_where_the_set_changes() {
+        assert_eq!(
+            pp("`begin_keywords \"1364-2005\"\n`end_keywords\nx\n"),
+            "\n\nx\n"
+        );
+        assert_eq!(
+            pp("`begin_keywords \"1800-2017\"\nmodule\n`end_keywords\n"),
+            "`__rspice_keywords \"1800-2017\" \"`begin_keywords \\\"1800-2017\\\"\"\nmodule\n\
+             `__rspice_keywords \"1364-2005\" \"`end_keywords\"\n"
+        );
+        // A region left open ends with its source.
+        assert_eq!(
+            pp("`begin_keywords \"1800-2017\"\nm\n"),
+            "`__rspice_keywords \"1800-2017\" \"`begin_keywords \\\"1800-2017\\\"\"\nm\n\
+             `__rspice_keywords \"1364-2005\" \"the end of the source\""
+        );
+        let refusal = |source: &str| {
+            Preprocessor::new()
+                .preprocess_source(source)
+                .expect_err("refused")
+                .message
+        };
+        assert!(refusal("`end_keywords\n").contains("no `begin_keywords in this file"));
+        assert!(refusal("`begin_keywords \"1800-2012\"\n").contains("does not carry"));
+        assert!(refusal("`begin_keywords \"1364-2008\"\n").contains("names no keyword set"));
+        assert!(refusal("`begin_keywords 1800-2017\n").contains("in quotes"));
+    }
+
+    /// The version specifier is the directive's next token (IEEE 1800-2017
+    /// section 22.14), so comments and line ends may stand between the two,
+    /// as Icarus's `br_gh782e` writes them, and every line stays where it was.
+    #[test]
+    fn a_keyword_specifier_may_follow_comments_and_line_ends() {
+        assert_eq!(
+            pp(
+                "/* a */ `begin_keywords /* b */ // c\n/* d */ \"1364-2005\" // e\nm\n`end_keywords\n"
+            ),
+            "\n\nm\n\n"
+        );
+        assert_eq!(
+            pp("`begin_keywords/*\n c */\n\"1800-2017\"\nmodule\n`end_keywords\n"),
+            "`__rspice_keywords \"1800-2017\" \"`begin_keywords \\\"1800-2017\\\"\"\n\n\nmodule\n\
+             `__rspice_keywords \"1364-2005\" \"`end_keywords\"\n"
+        );
     }
 
     #[test]

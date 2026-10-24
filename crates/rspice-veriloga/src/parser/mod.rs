@@ -121,6 +121,9 @@ pub struct Parser<'a> {
     unconnected_drive: Option<bool>,
     /// Which value of a `min : typ : max` expression to keep.
     delay_select: crate::canonical_ir::digital::DigitalDelaySelect,
+    /// The language of the text at the cursor, which the lexer's
+    /// [`TokenKind::KeywordSet`] tokens set between design elements.
+    language: SourceLanguage,
 }
 
 impl<'a> Parser<'a> {
@@ -157,6 +160,7 @@ impl<'a> Parser<'a> {
             ignored_directives: Vec::new(),
             unconnected_drive: None,
             delay_select: Default::default(),
+            language: SourceLanguage::VerilogAms,
         }
     }
 
@@ -208,12 +212,50 @@ impl<'a> Parser<'a> {
 
     /// Parse a complete source file
     pub fn parse(&mut self) -> Result<SourceFile, ParseError> {
+        self.parse_items()
+            .map_err(|error| self.name_reserved_word(error))
+    }
+
+    /// A parse error at a SystemVerilog reserved word outside the subset
+    /// this compiler reads, restated as the refusal of that word: whatever
+    /// production stopped there, the word is what the author has to remove.
+    fn name_reserved_word(&self, error: ParseError) -> ParseError {
+        let index = self
+            .tokens
+            .partition_point(|token| token.span.start < error.span.start);
+        match self.tokens.get(index) {
+            Some(token)
+                if token.kind == TokenKind::SvReserved && token.span.start == error.span.start =>
+            {
+                ParseError::new(
+                    ParseErrorKind::SvOutsideSubset {
+                        word: token.text.clone().unwrap_or_default(),
+                    },
+                    token.span,
+                )
+            }
+            _ => error,
+        }
+    }
+
+    fn parse_items(&mut self) -> Result<SourceFile, ParseError> {
         let start_span = self.current_span();
         let mut items = Vec::new();
         let mut configs = Vec::new();
         let mut primitives = Vec::new();
 
         while !self.at_end() {
+            if self.check(TokenKind::KeywordSet) {
+                self.language = self
+                    .current()
+                    .text
+                    .as_deref()
+                    .and_then(crate::keyword_sets::KeywordSet::from_marker)
+                    .unwrap_or_default()
+                    .language();
+                self.advance();
+                continue;
+            }
             // Skip directives for now (handled by preprocessor)
             if self.check(TokenKind::Directive) {
                 self.skip_directive()?;
@@ -631,6 +673,7 @@ impl<'a> Parser<'a> {
         let mut module = Module::new(name, start);
         module.time_scale = self.time_scale;
         module.unconnected_drive = self.unconnected_drive;
+        module.language = self.language;
 
         let port_parameters = if self.check(TokenKind::Hash) {
             self.parse_parameter_port_list(&mut module)?;
@@ -1138,6 +1181,18 @@ impl<'a> Parser<'a> {
     /// (`branch (a, b) br;`) from other constructs.
     fn parse_identifier_module_item(&mut self, module: &mut Module) -> Result<(), ParseError> {
         let first_text = self.current().text.clone().unwrap_or_default();
+
+        // The Verilog-AMS words are names in SystemVerilog, so an analog
+        // block or a branch reaches here as an identifier. Refused by what it
+        // is rather than as a malformed declaration.
+        if module.language == SourceLanguage::SystemVerilog
+            && (matches!(first_text.as_str(), "analog" | "ground")
+                || (first_text == "branch" && self.peek_is(TokenKind::LParen)))
+        {
+            return Err(self.error(ParseErrorKind::SvAnalog {
+                module: module.name.to_string(),
+            }));
+        }
 
         // Named branch declaration: branch (a [, b]) name1, name2 ;
         if first_text == "branch" && self.peek_is(TokenKind::LParen) {

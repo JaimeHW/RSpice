@@ -145,6 +145,29 @@ pub enum LexerErrorKind {
 
     #[error("Invalid preprocessor directive: `{0}")]
     InvalidDirective(String),
+
+    /// A keyword-set change between `module` and `endmodule` (or another
+    /// design element's ends).
+    #[error("{0}")]
+    KeywordSetInsideElement(Box<KeywordSetChange>),
+}
+
+/// What [`LexerErrorKind::KeywordSetInsideElement`] refuses.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "{cause} changes the keyword set to \"{specifier}\" inside {element}; IEEE 1800-2017 \
+     section 22.14 allows the keyword set to change only outside a design element, so \
+     include a SystemVerilog file, or write `begin_keywords and `end_keywords, between \
+     design elements"
+)]
+pub struct KeywordSetChange {
+    /// The element, as `module `m``.
+    pub element: String,
+    /// What changed the set: an included SystemVerilog file, the end of
+    /// one, or a directive.
+    pub cause: String,
+    /// The specifier of the set it changed to.
+    pub specifier: String,
 }
 
 /// Parser error with source location
@@ -246,6 +269,18 @@ pub enum ParseErrorKind {
     #[error("Verilog-AMS digital construct not yet supported: `{keyword}`")]
     UnsupportedAmsConstruct { keyword: String },
 
+    /// An IEEE 1800-2017 reserved word that opens a construct outside the
+    /// SystemVerilog subset this compiler reads.
+    #[error("SystemVerilog construct `{word}` is outside the RSpice SV-RNM subset")]
+    SvOutsideSubset { word: String },
+
+    /// Verilog-AMS analog content in a SystemVerilog design element.
+    #[error(
+        "Verilog-AMS analog constructs are not SystemVerilog; put module `{module}` in a `.vams` \
+         file and instantiate it"
+    )]
+    SvAnalog { module: String },
+
     /// Source nested deeper than the front end reads.
     ///
     /// Every compiler phase walks the syntax tree recursively, so depth is
@@ -285,6 +320,7 @@ impl LexerErrorKind {
             Self::InvalidEscape(_) => "VA-LEX-INVALID-ESCAPE",
             Self::UnterminatedDirective => "VA-LEX-UNTERMINATED-DIRECTIVE",
             Self::InvalidDirective(_) => "VA-LEX-INVALID-DIRECTIVE",
+            Self::KeywordSetInsideElement(_) => "VA-LEX-KEYWORDS-INSIDE-ELEMENT",
         }
     }
 }
@@ -311,6 +347,8 @@ impl ParseErrorKind {
             Self::UnsupportedConstruct { .. } => "VA-PARSE-UNSUPPORTED-CONSTRUCT",
             Self::UnsupportedGenerate { .. } => "VA-PARSE-UNSUPPORTED-GENERATE",
             Self::UnsupportedAmsConstruct { .. } => "VA-PARSE-UNSUPPORTED-AMS-DIGITAL",
+            Self::SvOutsideSubset { .. } => "VA-PARSE-SV-OUTSIDE-SUBSET",
+            Self::SvAnalog { .. } => "VA-SV-ANALOG",
             Self::NestingLimit { .. } => "VA-PARSE-NESTING-LIMIT",
             Self::Unclosed { .. } => "VA-PARSE-UNCLOSED",
         }
