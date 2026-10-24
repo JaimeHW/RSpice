@@ -436,7 +436,10 @@ use faer.
 
 | Crate | Purpose |
 | :--- | :--- |
-| [`rspice-core`](crates/rspice-core) | The simulation engine: parser, device models, solvers, analyses |
+| [`rspice-core`](crates/rspice-core) | The simulation engine: circuits, analyses, XSPICE and the compiled Verilog-A device, with every family module at its old path |
+| [`rspice-core-base`](crates/rspice-core-base) | The engine's shared vocabulary: configuration, numerics, the sparse solver, the expression VM, waveform I/O and diagnostics |
+| [`rspice-core-netlist`](crates/rspice-core-netlist) | The netlist parser, model libraries and the control protocol |
+| [`rspice-core-devices`](crates/rspice-core-devices) | The built-in device models |
 | [`rspice-matrix`](crates/rspice-matrix) | Sparse matrix storage and LU factorization |
 | [`rspice-veriloga`](crates/rspice-veriloga) | Verilog-AMS compiler: bytecode VM, native and browser JITs, and the generator for the built-in models |
 | [`rspice-veriloga-runtime`](crates/rspice-veriloga-runtime) | Runtime ABI the generated models link against |
