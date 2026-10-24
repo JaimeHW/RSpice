@@ -510,6 +510,9 @@ fn record_instance_names(names: &mut SpectreNames, instance: &SpectreInstance, l
         match parameter.name.as_str() {
             "dev" | "iprobe" if analysis => names.instance(&parameter.value, line, false),
             "param" if analysis => names.parameter(&parameter.value, line, false),
+            // A primitive's `type=` selects a keyword (`sine`, `pulse`), not
+            // a parameter.
+            "type" if primitive => {}
             _ => {
                 if !primitive {
                     names.subcircuit_override(&instance.master, &parameter.name, line);

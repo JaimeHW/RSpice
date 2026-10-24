@@ -505,6 +505,10 @@ mod tests {
         );
         assert!(adapted.contains("RRa In Out Rload"), "{adapted}");
         assert!(adapted.contains(".param Rload=1k"), "{adapted}");
+        // A primitive's type= names a keyword, not a parameter.
+        accepted(
+            "simulator lang=spectre\nparameters Sine=1\nv1 (a 0) vsource type=sine ampl=Sine freq=1k\n",
+        );
     }
 
     #[test]
