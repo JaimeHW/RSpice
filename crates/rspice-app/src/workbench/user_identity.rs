@@ -13,6 +13,28 @@ use crate::services::license::LicenseInfo;
 /// them: no account, no license, and no operating-system user (a browser).
 const UNNAMED_USER: &str = "Local user";
 
+/// Whom the account button names: the signed-in account's display name or
+/// email, else the license holder for an offline installation; `None` when
+/// neither names anyone.
+pub(crate) fn account_holder(
+    cloud: &CloudSessionSnapshot,
+    license: Option<&LicenseInfo>,
+) -> Option<String> {
+    let cloud_identity = cloud.signed_in().then(|| {
+        cloud.principal.as_ref().and_then(|principal| {
+            principal
+                .display_name
+                .clone()
+                .or_else(|| principal.email.clone())
+        })
+    });
+    let license_identity = license.map(|license| license.licensed_to.trim().to_owned());
+    cloud_identity
+        .flatten()
+        .or(license_identity)
+        .filter(|name| !name.is_empty())
+}
+
 /// The user's name, from the first source that has one.
 pub(crate) fn user_display_name(
     cloud: &CloudSessionSnapshot,

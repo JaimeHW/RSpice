@@ -2,6 +2,19 @@
 
 use super::state::{WidthClass, WorkbenchSession};
 
+/// Widest the toolbar's plan chip may grow before its copy is clipped.
+///
+/// Plan names are user-authored and validated up to 96 characters, so some
+/// name always has to be clipped; the question is only where. 190 pt left
+/// 137 pt of copy — barely the default name — and the space the chip takes
+/// comes out of the context-tool lane, which already scrolls. This is the same
+/// ceiling `explicit_label_width` gives the toolbar's other text-bearing
+/// controls, and `trailing_controls_width` must reserve exactly it: a
+/// reservation smaller than the paint width lets the scrolling lane run under
+/// the chip. The layout holds it, as it holds the chip's height, because the
+/// toolbar reserves the room before the chip's owner draws in it.
+pub(crate) const RUN_CONFIG_CHIP_MAX_WIDTH: f32 = 224.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutSpec {
     pub width_class: WidthClass,

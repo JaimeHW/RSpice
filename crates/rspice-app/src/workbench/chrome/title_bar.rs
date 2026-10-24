@@ -8,7 +8,7 @@ use egui::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::host::{Host, Point};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -136,23 +136,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     if search_button(ui, app, viewport_width, large_targets) {
                         app.execute(ids::COMMAND_PALETTE);
                     }
-                    for action in super::presence::session_presence_cluster(ui, app, large_targets)
-                    {
-                        use super::presence::PresenceAction;
-                        match action {
-                            PresenceAction::OpenDialog => app.open_live_session_dialog(),
-                            PresenceAction::EndSession => app.cloud_account.end_live_session(),
-                            PresenceAction::LeaveSession => {
-                                app.cloud_account.leave_live_session();
-                            }
-                            PresenceAction::RequestLease(doc) => {
-                                app.live_session.request_lease(&doc);
-                            }
-                            PresenceAction::ReleaseLease(doc) => {
-                                app.live_session.release_lease(&doc);
-                            }
-                        }
-                    }
+                    app.contribute(Point::Presence { large_targets }, ui);
                     context_right = ui.available_rect_before_wrap().right();
                 });
                 paint_title_context(
@@ -895,27 +879,7 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str, large_target: bool
 /// in and no license names a holder: the button then shows a generic
 /// person, not letters that name no one.
 fn account_initials(app: &RSpiceApp) -> Option<String> {
-    // The signed-in cloud identity names the account; the local license
-    // holder is the fallback identity for offline installations.
-    let cloud = app.cloud_account.snapshot();
-    let cloud_identity = cloud.signed_in().then(|| {
-        cloud.principal.as_ref().and_then(|principal| {
-            principal
-                .display_name
-                .clone()
-                .or_else(|| principal.email.clone())
-        })
-    });
-    let license_identity = app
-        .state
-        .cloud
-        .license
-        .as_ref()
-        .map(|license| license.licensed_to.trim().to_owned());
-    let name = cloud_identity
-        .flatten()
-        .or(license_identity)
-        .filter(|name| !name.is_empty())?;
+    let name = app.account_holder()?;
     let words = name
         .split_whitespace()
         .filter_map(|word| word.chars().next())

@@ -6,9 +6,10 @@
 //! and participant capabilities belong to the session dialog; this module
 //! owns only the title-actions cluster and the popover hanging off it.
 //!
-//! The cluster reads the application and returns what the user asked for.
-//! Executing those requests needs the whole application mutably, and the
-//! title bar already holds it, so the caller runs them.
+//! The title bar leaves the cluster's place to the host, which draws it here.
+//! The cluster reads the application and returns what the user asked for;
+//! executing those requests needs the whole application mutably, which the
+//! host holds, so the host runs them.
 
 use egui::{Align, Align2, Layout, Sense, Ui, Vec2};
 
@@ -108,9 +109,9 @@ fn peer_initials(name: &str) -> String {
 }
 
 /// What the user asked the popover for. The cluster only reads the
-/// application, so these travel back to the title bar — which already holds
-/// it mutably — instead of another function taking the whole application.
-pub(super) enum PresenceAction {
+/// application, so these travel back to the host — which holds it mutably —
+/// instead of another function taking the whole application.
+pub(in crate::workbench) enum PresenceAction {
     OpenDialog,
     EndSession,
     LeaveSession,
@@ -121,7 +122,7 @@ pub(super) enum PresenceAction {
 /// Title-actions presence cluster: a LIVE mark plus up to three participant
 /// chips, present exactly while a session runs. Clicking opens the
 /// participants popover; policy and the join code stay owned by the dialog.
-pub(super) fn session_presence_cluster(
+pub(in crate::workbench) fn session_presence_cluster(
     ui: &mut Ui,
     app: &RSpiceApp,
     large_target: bool,

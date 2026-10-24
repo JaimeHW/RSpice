@@ -284,6 +284,29 @@ impl Host for RSpiceApp {
                     pvt_selector(ui, app, layout.toolbar_control_height);
                 }
             }
+            // The live session's presence: the cluster reads the application
+            // and hands back what the reader asked of it, which runs here.
+            Point::Presence { large_targets } => {
+                use crate::workbench::chrome::presence::{
+                    PresenceAction, session_presence_cluster,
+                };
+
+                for action in session_presence_cluster(ui, app, large_targets) {
+                    match action {
+                        PresenceAction::OpenDialog => app.open_live_session_dialog(),
+                        PresenceAction::EndSession => app.cloud_account.end_live_session(),
+                        PresenceAction::LeaveSession => {
+                            app.cloud_account.leave_live_session();
+                        }
+                        PresenceAction::RequestLease(doc) => {
+                            app.live_session.request_lease(&doc);
+                        }
+                        PresenceAction::ReleaseLease(doc) => {
+                            app.live_session.release_lease(&doc);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -414,6 +437,13 @@ impl Host for RSpiceApp {
             Workspace::Models => "Models & PDKs".to_owned(),
             Workspace::Netlist => code_title_cell(&app.state),
         }
+    }
+
+    fn account_holder(&self) -> Option<String> {
+        crate::workbench::user_identity::account_holder(
+            self.cloud_account.snapshot(),
+            self.state.cloud.license.as_ref(),
+        )
     }
 
     fn rail_entry(&self, workspace: Workspace) -> RailEntry<RSpiceApp> {

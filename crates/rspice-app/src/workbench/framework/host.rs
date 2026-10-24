@@ -49,6 +49,10 @@ pub(crate) enum Point<W, S, L> {
     /// A slot of the context toolbar, drawn to the chrome metrics the shell
     /// resolved for the frame.
     Toolbar(ToolbarSlot<W, S>, L),
+    /// The title bar's live-session presence, in the trailing actions the
+    /// bar lays out right to left, before its search button; touch-sized
+    /// while `large_targets`.
+    Presence { large_targets: bool },
 }
 
 /// Which inspector section answers.
@@ -237,6 +241,10 @@ pub(crate) trait Host: 'static {
 
     /// What the title bar names while `workspace` shows an open project.
     fn title_cell(&self, workspace: Self::WorkspaceKey) -> String;
+
+    /// Whom the title bar's account button names: the signed-in account,
+    /// else the license holder; `None` for no one.
+    fn account_holder(&self) -> Option<String>;
 
     /// What `workspace`'s owner furnishes its activity-rail button with.
     fn rail_entry(&self, workspace: Self::WorkspaceKey) -> RailEntry<Self>;
