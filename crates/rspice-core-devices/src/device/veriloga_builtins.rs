@@ -3287,32 +3287,61 @@ mod tests {
         instance.apply_validated_advance_state();
         instance.set_analysis_step(false, false);
 
-        let event_count = instance
-            .kind
-            .capture_persistent_state()
-            .event_variables
-            .len();
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        let accepted_events = instance.kind.capture_persistent_state().event_variables;
+        let event_count = accepted_events.len();
         assert!(event_count > 0, "VBIC13 must exercise event-variable state");
+        // The state-file emitter packs the rollback values as five `ddt`
+        // lanes, six `idt` lanes, then the accepted and the candidate
+        // event-variable banks. Find the banks from the instance's own lane
+        // counts and hold the accepted one to the persistent capture, so a
+        // layout change fails here instead of writing into another lane.
+        let accepted_start =
+            5 * instance.dynamic_charge_third_back.len() + 6 * instance.dynamic_idt_state_count;
+        let candidate_start = accepted_start + event_count;
         let mut trial = instance.kind.capture_rollback_state();
-        let candidate_start = trial
-            .values
-            .len()
-            .checked_sub(event_count)
-            .expect("rollback state contains its event candidate suffix");
-        for (index, value) in trial.values[candidate_start..].iter_mut().enumerate() {
-            *value = if index == 0 {
-                -0.0
+        assert_eq!(
+            candidate_start + event_count,
+            trial.values.len(),
+            "the event banks close the rollback values"
+        );
+        assert_eq!(
+            bits(&trial.values[accepted_start..candidate_start]),
+            bits(&accepted_events),
+            "the accepted event bank sits where the layout puts it"
+        );
+        // The probe evaluates the module on this candidate, and a static
+        // evaluation refuses a non-finite charge, so the candidate stays one
+        // step from what the event body wrote: a zero changes sign and any
+        // other value moves by its last mantissa bit. Every candidate then
+        // differs from its accepted value in a bit a restore could lose.
+        let mut zeros = 0;
+        for value in &mut trial.values[candidate_start..] {
+            let flip = if *value == 0.0 {
+                zeros += 1;
+                1_u64 << 63
             } else {
-                f64::from_bits(1.0_f64.to_bits() + index as u64)
+                1
             };
+            *value = f64::from_bits(value.to_bits() ^ flip);
         }
+        assert!(
+            zeros > 0 && zeros < event_count,
+            "the candidate exercises both a signed zero and a last-bit step"
+        );
         instance.kind.restore_rollback_state(&trial);
         let before = instance.kind.capture_rollback_state();
-        let before_value_bits = before
-            .values
-            .iter()
-            .map(|value| value.to_bits())
-            .collect::<Vec<_>>();
+        let before_value_bits = bits(&before.values);
+        assert_eq!(
+            before_value_bits,
+            bits(&trial.values),
+            "the instance holds the trial candidate"
+        );
 
         instance
             .stamp_with_mode(
@@ -3330,11 +3359,7 @@ mod tests {
 
         let after = instance.kind.capture_rollback_state();
         assert_eq!(
-            after
-                .values
-                .iter()
-                .map(|value| value.to_bits())
-                .collect::<Vec<_>>(),
+            bits(&after.values),
             before_value_bits,
             "StaticDaeProbe must restore accepted and candidate numeric storage bit-for-bit"
         );
