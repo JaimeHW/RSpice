@@ -1950,6 +1950,29 @@ impl CmContext {
         self.push_pending_digital_event(name, value, effective_delay);
     }
 
+    /// Date an inertial output's pending transition at the key the event queue
+    /// filed it under rather than at the sum it was computed as.
+    ///
+    /// [`Self::set_output_digital_inertial`] remembers `time + delay` and
+    /// compares it exactly against the time of the next evaluation. In a
+    /// coupled run the queue files the transition at that sum made canonical on
+    /// the HDL lattice, which can be a few ulps earlier, and that key is when
+    /// the model is next evaluated. Against the sum, the transition would still
+    /// look pending at the instant it falls, and an evaluation there that
+    /// asks for the value already pending would cancel it. Only a pending time
+    /// with the sum's exact bits moves, so a transition rescheduled or
+    /// cancelled since keeps its own.
+    pub(crate) fn date_inertial_output_at(&mut self, name: &str, sum: Value, key: Value) {
+        if self
+            .inertial_outputs
+            .get(name)
+            .is_some_and(|state| state.when.to_bits() == sum.to_bits())
+            && let Some(state) = self.inertial_outputs.get_mut(name)
+        {
+            state.when = key;
+        }
+    }
+
     fn push_pending_digital_event(&mut self, name: &str, value: DigitalValue, delay: Value) {
         self.pending_events.push(PendingDigitalEvent {
             port_name: name.to_string(),

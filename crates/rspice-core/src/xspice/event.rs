@@ -155,6 +155,23 @@ impl XspiceEventScheduler {
         Some(at)
     }
 
+    /// The sum and the key of an output scheduled from `current_time`, when
+    /// the key is not the sum.
+    ///
+    /// Only a coupled run keys an output anywhere but its sum. A model that
+    /// remembers when its own output falls must remember the key, because the
+    /// key is the instant it is next evaluated at
+    /// ([`super::instance::XspiceInstance::schedule_events`]).
+    pub(crate) fn moved_output_key(
+        &self,
+        current_time: Value,
+        delay: Value,
+    ) -> Option<(Value, Value)> {
+        let sum = scheduled_output_time(current_time, delay)?;
+        let key = self.output_instant(current_time, delay)?;
+        (Instant::from_seconds(sum)? != key).then(|| (sum, key.seconds()))
+    }
+
     /// Schedule an event at an absolute time, superseding this driver's own
     /// pending output at or after that time.
     ///

@@ -3244,6 +3244,7 @@ impl XspiceInstance {
         event_queue: &mut XspiceEventScheduler,
         current_time: Value,
     ) {
+        let mut moved_keys = Vec::new();
         for PendingDigitalEvent {
             port_name,
             start_index,
@@ -3319,8 +3320,16 @@ impl XspiceInstance {
                         );
                     }
                 }
-                _ => {}
+                _ => continue,
             }
+            if let Some(moved) = event_queue.moved_output_key(current_time, delay) {
+                moved_keys.push((port_name, moved));
+            }
+        }
+        // An inertial output is next evaluated at the key its transition was
+        // filed under, so that key is the time it must remember.
+        for (port_name, (sum, key)) in moved_keys {
+            self.context.date_inertial_output_at(&port_name, sum, key);
         }
 
         for PendingRealEvent {
@@ -5095,6 +5104,76 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].node_id, 1);
         assert_eq!(events[0].value, EventValue::Digital(DigitalValue::zero()));
+    }
+
+    /// A coupled queue can file an inertial output's transition a few ulps
+    /// below the sum the model computed, and the model is next evaluated at
+    /// that key. The transition has fallen there: asking for the old value
+    /// again schedules a new transition one delay later, and neither cancels
+    /// the one just delivered nor reverts it at the same instant.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn a_coupled_inertial_output_has_fallen_at_the_key_it_was_filed_under() {
+        use crate::xspice::event_scheduler::{EventLattice, TimeResolution};
+        let resolution = TimeResolution::new(-12).expect("1 ps");
+        let edge = 1.000102e-3_f64.next_up().next_up();
+        let delay = 1.0e-9;
+        let key = resolution
+            .ticks_to_seconds(1_000_103_000)
+            .expect("in range");
+        assert!(key < edge + delay, "the tick image is below the sum");
+
+        let model = model_with_ports(vec![PortSpec::output("out", PortType::Digital)]);
+        let mut instance = XspiceInstance::new(
+            "Abuf",
+            Arc::new(model),
+            vec![PortConnection::Digital(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("digital output should construct");
+        instance.context.analysis = AnalysisType::Transient;
+        let mut event_queue = XspiceEventScheduler::new();
+        let floor = crate::numerics::integration::clock_resolution(key);
+        event_queue.set_lattice(Some(EventLattice::new(resolution, floor)));
+
+        instance.context.time = edge;
+        instance.context.set_output_digital_inertial(
+            "out",
+            DigitalValue::one(),
+            delay,
+            DigitalValue::zero(),
+            None,
+        );
+        instance.schedule_events(&mut event_queue, edge);
+        assert_eq!(
+            event_queue.next_event_time().map(f64::to_bits),
+            Some(key.to_bits()),
+            "the transition is filed at the tick image"
+        );
+        let mut delivered = Vec::new();
+        event_queue
+            .run_due_events(key, |event| delivered.push(event.value))
+            .expect("a queue nothing feeds back into settles");
+        assert_eq!(delivered, vec![EventValue::Digital(DigitalValue::one())]);
+
+        instance.context.time = key;
+        instance.context.set_output_digital_inertial(
+            "out",
+            DigitalValue::zero(),
+            delay,
+            DigitalValue::one(),
+            None,
+        );
+        instance.schedule_events(&mut event_queue, key);
+        assert_eq!(event_queue.len(), 1, "one new transition and no reversion");
+        let next = event_queue.next_event_time().expect("the new transition");
+        assert!(
+            (next - (key + delay)).abs() < 1.0e-15,
+            "the new transition falls one delay after the key, not at {next:e}"
+        );
     }
 
     #[test]
