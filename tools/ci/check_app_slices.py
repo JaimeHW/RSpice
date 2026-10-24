@@ -214,7 +214,7 @@ SLICE_RULES = [
     (W + r"state/workflow_drafts", "simulate"),
     (W + r"shortcuts", "settings"),
     (W + r"preferences\.rs$", "model"),
-    (W + r"preferences/drawing_sheet", "sheets"),
+    (W + r"preferences/drawing_sheet", "model"),
     (W + r"preferences", "settings"),
     (W + r"(account_organization|live_session|user_identity|publication_snapshot)\.rs$", "cloud"),
     (W + r"cross_probe\.rs$", "design"),
