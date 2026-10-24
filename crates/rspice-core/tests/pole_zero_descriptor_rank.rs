@@ -89,7 +89,8 @@ fn sparse_certificates_retain_the_original_algebraic_multiplicity() {
     assert_eq!(result.poles.len(), 1);
     assert!((result.poles[0].re + 1000.0).abs() < 1e-10);
     assert!(result.zeros.is_empty());
-    assert!(result.has_consistent_root_evidence());
+    assert!(result.pole_evidence.is_consistent_with(&result.poles));
+    assert!(result.zero_evidence.is_consistent_with(&result.zeros));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -200,7 +201,8 @@ fn differential_rc_has_one_stable_pole_and_no_finite_zero() {
     assert!(result.poles[0].im.abs() < 1e-12);
     assert!(result.zeros.is_empty(), "{result:?}");
     assert!(result.is_stable());
-    assert!(result.has_consistent_root_evidence());
+    assert!(result.pole_evidence.is_consistent_with(&result.poles));
+    assert!(result.zero_evidence.is_consistent_with(&result.zeros));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

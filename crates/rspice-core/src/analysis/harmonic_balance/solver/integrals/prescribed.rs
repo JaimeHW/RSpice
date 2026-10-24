@@ -579,7 +579,7 @@ mod tests {
         solver.add_prescribed_integral_residual(&mut state).unwrap();
         assert!((state.mna_branch_residual[1][2].re + 1e3).abs() < 1e-7);
         assert!((state.mna_branch_residual_scale[1][2] - 1e3).abs() < 1e-7);
-        assert!(!state.rows_converged(1e-10, 1e-14));
+        assert!(!state.rows_converged_with_branch_tolerances(1e-10, 1e-14, 1e-14));
     }
 
     #[test]

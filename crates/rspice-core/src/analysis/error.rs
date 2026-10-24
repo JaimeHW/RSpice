@@ -588,12 +588,6 @@ impl PersistenceIncompatibleError {
             detail: None,
         }
     }
-
-    #[must_use]
-    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
-        self
-    }
 }
 
 impl std::fmt::Display for PersistenceIncompatibleError {

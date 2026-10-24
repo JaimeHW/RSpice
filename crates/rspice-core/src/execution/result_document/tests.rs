@@ -674,9 +674,11 @@ fn pnoise_result() -> PnoiseResult {
     result.add_point(PhaseNoisePoint::new(1.0e3, -100.0));
     result.add_point(PhaseNoisePoint::new(1.0e4, -120.0));
     let mut contributor = NoiseContributor::new("R1", "resistor");
-    contributor.add_contribution(1.0e3, -105.0);
-    result.add_contributor(contributor);
-    result.set_jitter(1.0e-12, 1.0e-3, (1.0e3, 1.0e6));
+    contributor.contributions.push((1.0e3, -105.0));
+    result.contributors.push(contributor);
+    result.rms_jitter = Some(1.0e-12);
+    result.rms_phase_error = Some(1.0e-3);
+    result.jitter_bandwidth = Some((1.0e3, 1.0e6));
     result.converged = true;
     result
 }
@@ -3372,7 +3374,7 @@ fn a_nested_dc_sweep_publishes_every_authored_sweep_variable() {
         "the outer source must survive beside the inner one"
     );
     assert_eq!(
-        payload.primary_variable().map(|axis| axis.name.as_str()),
+        payload.sweep_variables.last().map(|axis| axis.name.as_str()),
         Some("v1")
     );
 }

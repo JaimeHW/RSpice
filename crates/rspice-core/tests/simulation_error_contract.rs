@@ -228,10 +228,10 @@ fn materialization_mismatches_are_engine_errors_that_name_their_coordinate() {
 
 #[test]
 fn persistence_and_output_commit_failures_are_separate_categories() {
-    let persistence = SimulationError::from(
-        PersistenceIncompatibleError::new("transient checkpoint", Some(99), "1..=17")
-            .with_detail("written by a newer build"),
-    );
+    let mut incompatible =
+        PersistenceIncompatibleError::new("transient checkpoint", Some(99), "1..=17");
+    incompatible.detail = Some("written by a newer build".to_owned());
+    let persistence = SimulationError::from(incompatible);
     let descriptor = persistence.descriptor();
     assert_eq!(
         descriptor.code,

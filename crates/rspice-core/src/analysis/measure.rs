@@ -482,11 +482,6 @@ impl ContinuousMeasureResult {
             && self.records.iter().all(|record| record.passed)
     }
 
-    /// Number of retained rows that failed their per-record contract.
-    pub fn failed_record_count(&self) -> usize {
-        self.records.iter().filter(|record| !record.passed).count()
-    }
-
     /// Validate the mutually exclusive success/failure representation and
     /// the structural validity of published records. Numeric fields retain
     /// IEEE extended-real values, including NaN, to distinguish a computed
@@ -5455,7 +5450,6 @@ mod tests {
             Some(ContinuousMeasureVerificationFailure::FailureLimitExceeded)
         );
         assert!(!result.passed());
-        assert_eq!(result.failed_record_count(), 1);
     }
 
     #[test]

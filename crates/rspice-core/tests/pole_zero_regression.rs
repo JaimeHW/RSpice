@@ -332,7 +332,8 @@ fn scalar_rc_pole_and_zero_spectrum_is_qualified() {
         result.zero_evidence,
         RootSetEvidence::QualifiedEmpty { .. }
     ));
-    assert!(result.has_consistent_root_evidence());
+    assert!(result.pole_evidence.is_consistent_with(&result.poles));
+    assert!(result.zero_evidence.is_consistent_with(&result.zeros));
 }
 
 #[test]
@@ -406,7 +407,8 @@ fn current_driven_rc_engine_path_accepts_its_infinite_zero_chain() {
         result.zero_evidence,
         RootSetEvidence::QualifiedEmpty { .. }
     ));
-    assert!(result.has_consistent_root_evidence());
+    assert!(result.pole_evidence.is_consistent_with(&result.poles));
+    assert!(result.zero_evidence.is_consistent_with(&result.zeros));
 }
 
 #[test]

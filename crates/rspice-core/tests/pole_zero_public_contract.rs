@@ -266,7 +266,8 @@ fn current_port_identity_survives_sparse_dense_and_document_projection() {
         assert_eq!(result.output, "V(OUT,0)");
         assert_eq!(result.poles.len(), count);
         assert!(result.zeros.is_empty());
-        assert!(result.has_consistent_root_evidence());
+        assert!(result.pole_evidence.is_consistent_with(&result.poles));
+        assert!(result.zero_evidence.is_consistent_with(&result.zeros));
         assert!((result.dc_gain.unwrap() - 1000.0).abs() < 1e-8);
         if let Some(pole) = result.poles.first() {
             assert!((pole.re + 1000.0).abs() < 1e-8 && pole.im == 0.0);

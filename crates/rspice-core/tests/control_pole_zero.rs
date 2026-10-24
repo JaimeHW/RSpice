@@ -140,7 +140,8 @@ fn pz_control_documents_match_direct_modes_ports_and_physical_units() {
             if mode != "zer" {
                 close(actual.poles[0], ComplexValue::from(-1000.0));
             }
-            assert!(actual.has_consistent_root_evidence());
+            assert!(actual.pole_evidence.is_consistent_with(&actual.poles));
+            assert!(actual.zero_evidence.is_consistent_with(&actual.zeros));
         }
     }
 }

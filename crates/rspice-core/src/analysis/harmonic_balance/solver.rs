@@ -424,13 +424,10 @@ impl HbSolverState {
             .fold(0.0, |norm, value| norm.hypot(value.re).hypot(value.im));
     }
 
-    /// SPICE-style per-row KCL convergence: every residual entry must
-    /// satisfy |res| <= abstol + reltol * (sum of |contribution| into the
-    /// row), using the scale accumulated during residual assembly.
-    pub fn rows_converged(&self, reltol: Value, abstol: Value) -> bool {
-        self.rows_converged_with_branch_tolerances(reltol, abstol, abstol)
-    }
-
+    /// SPICE-style per-row convergence: every residual entry must satisfy
+    /// |res| <= abstol + reltol * (sum of |contribution| into the row), using
+    /// the scale accumulated during residual assembly. KCL-current and
+    /// KVL-voltage rows each take their own absolute tolerance.
     pub(crate) fn rows_converged_with_branch_tolerances(
         &self,
         reltol: Value,
@@ -456,12 +453,6 @@ impl HbSolverState {
         );
         current_rows_converged
             && self.non_node_rows_converged(reltol, current_abstol, voltage_abstol, false)
-    }
-
-    /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
-    /// the DC operating-point pre-solve which only assembles harmonic 0.
-    pub fn dc_rows_converged(&self, reltol: Value, abstol: Value) -> bool {
-        self.dc_rows_converged_with_branch_tolerances(reltol, abstol, abstol)
     }
 
     /// DC convergence certificate with dimensionally distinct KCL-current and
@@ -693,17 +684,25 @@ mod solver_state_qualification_tests {
         let mut state = HbSolverState::new(1, 0);
         state.residual[0][0] = Complex64::new(1.0, 0.0);
         state.residual_scale[0][0] = Value::INFINITY;
-        assert!(!state.rows_converged(1.0, Value::INFINITY));
-        assert!(!state.dc_rows_converged(1.0, Value::INFINITY));
+        assert!(!state.rows_converged_with_branch_tolerances(
+            1.0,
+            Value::INFINITY,
+            Value::INFINITY
+        ));
+        assert!(!state.dc_rows_converged_with_branch_tolerances(
+            1.0,
+            Value::INFINITY,
+            Value::INFINITY
+        ));
 
         state.residual[0][0] = Complex64::new(Value::INFINITY, 0.0);
         state.residual_scale[0][0] = 1.0;
-        assert!(!state.rows_converged(1.0, 0.0));
-        assert!(!state.dc_rows_converged(1.0, 0.0));
+        assert!(!state.rows_converged_with_branch_tolerances(1.0, 0.0, 0.0));
+        assert!(!state.dc_rows_converged_with_branch_tolerances(1.0, 0.0, 0.0));
 
         state.residual[0][0] = Complex64::new(0.0, 0.0);
-        assert!(!state.rows_converged(Value::NAN, 0.0));
-        assert!(!state.dc_rows_converged(-1.0, 0.0));
+        assert!(!state.rows_converged_with_branch_tolerances(Value::NAN, 0.0, 0.0));
+        assert!(!state.dc_rows_converged_with_branch_tolerances(-1.0, 0.0, 0.0));
     }
 
     #[test]

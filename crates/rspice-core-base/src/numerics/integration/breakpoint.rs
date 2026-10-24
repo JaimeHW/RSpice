@@ -1067,11 +1067,6 @@ impl BreakpointManager {
             .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
 
-    /// Check if we just passed a breakpoint and should use minimal timestep
-    pub fn should_use_minimal_step(&self) -> bool {
-        self.just_passed_breakpoint
-    }
-
     /// Reset the manager for a new simulation
     pub fn reset(&mut self) {
         self.current_index = 0;
@@ -1214,7 +1209,7 @@ mod breakpoint_manager_tests {
         let mut breakpoints = BreakpointManager::new();
         breakpoints.add(10.0);
         let (dt, lands) = breakpoints.limit_step(now, proposed);
-        (dt, lands, breakpoints.should_use_minimal_step())
+        (dt, lands, breakpoints.just_passed_breakpoint)
     }
 
     #[test]
@@ -1239,7 +1234,7 @@ mod breakpoint_manager_tests {
         let restart = restart_after_landing_on_ten(&mut breakpoints);
 
         assert!((restart - 0.6).abs() <= 8.0 * Value::EPSILON);
-        assert!(breakpoints.should_use_minimal_step());
+        assert!(breakpoints.just_passed_breakpoint);
     }
 
     /// A root chase re-proposes the interval it is refining, so the last
@@ -1494,7 +1489,7 @@ mod breakpoint_manager_tests {
 
         assert!((restart - 0.05e-6).abs() <= 8.0 * Value::EPSILON);
         assert_eq!(breakpoints.next_after(event_time), Some(10.0));
-        assert!(breakpoints.should_use_minimal_step());
+        assert!(breakpoints.just_passed_breakpoint);
     }
 
     #[test]

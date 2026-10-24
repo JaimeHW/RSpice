@@ -100,18 +100,6 @@ impl PnoiseResult {
         self.spectral_points.push(point);
     }
 
-    /// Add a noise contributor
-    pub fn add_contributor(&mut self, contributor: NoiseContributor) {
-        self.contributors.push(contributor);
-    }
-
-    /// Set RMS jitter result
-    pub fn set_jitter(&mut self, jitter_seconds: Value, phase_radians: Value, bw: (Value, Value)) {
-        self.rms_jitter = Some(jitter_seconds);
-        self.rms_phase_error = Some(phase_radians);
-        self.jitter_bandwidth = Some(bw);
-    }
-
     /// Interpolate dB noise against log frequency, using linear frequency for
     /// a segment starting at zero. Queries outside the sampled range clamp to
     /// its nearest endpoint. Invalid frequencies/densities return `None`;
@@ -274,11 +262,6 @@ impl NoiseContributor {
             contributions: Vec::new(),
             percentage: None,
         }
-    }
-
-    /// Add contribution at offset frequency
-    pub fn add_contribution(&mut self, offset_freq: Value, contribution_dbc: Value) {
-        self.contributions.push((offset_freq, contribution_dbc));
     }
 }
 

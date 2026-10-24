@@ -338,11 +338,6 @@ pub struct DcSweepPayload {
 }
 
 impl DcSweepPayload {
-    /// The innermost authored sweep variable, which drives the point order.
-    pub fn primary_variable(&self) -> Option<&DcSweepAxisDocument> {
-        self.sweep_variables.last()
-    }
-
     fn validate(&self) -> Result<(), ResultDocumentError> {
         if self.sweep_variables.is_empty() {
             return Err(ResultDocumentError::Malformed {

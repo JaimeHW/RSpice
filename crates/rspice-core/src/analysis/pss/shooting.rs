@@ -182,22 +182,6 @@ impl ShootingNewtonSolver {
         self.iteration >= self.max_iterations
     }
 
-    /// Extract and strictly residual-qualify the complete Floquet spectrum,
-    /// checking for cooperative cancellation around the atomic eigensolve.
-    ///
-    /// Floquet multipliers are eigenvalues of the Monodromy matrix.
-    /// For a stable orbit, all multipliers should have |λ| ≤ 1.
-    /// An autonomous orbit has a unit phase multiplier corresponding to
-    /// perturbations along the orbit; a driven periodic solution need not.
-    pub fn compute_floquet_multipliers_with_abort(
-        &self,
-        monodromy: &[Vec<Value>],
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<num_complex::Complex64>, FloquetSpectrumError> {
-        let (multipliers, _) = self.compute_floquet_spectrum_with_abort(monodromy, abort)?;
-        Ok(multipliers)
-    }
-
     /// Extract a complete Floquet spectrum and retain its canonical residual
     /// certificate, checking cancellation around the atomic eigensolve.
     pub fn compute_floquet_spectrum_with_abort(
@@ -334,17 +318,17 @@ mod tests {
         let solver = ShootingNewtonSolver::default();
         assert!(
             solver
-                .compute_floquet_multipliers_with_abort(&[], &NoAbort)
+                .compute_floquet_spectrum_with_abort(&[], &NoAbort)
                 .is_err()
         );
         assert!(
             solver
-                .compute_floquet_multipliers_with_abort(&[vec![1.0, 0.0], vec![0.0]], &NoAbort)
+                .compute_floquet_spectrum_with_abort(&[vec![1.0, 0.0], vec![0.0]], &NoAbort)
                 .is_err()
         );
         assert!(
             solver
-                .compute_floquet_multipliers_with_abort(&[vec![Value::NAN]], &NoAbort)
+                .compute_floquet_spectrum_with_abort(&[vec![Value::NAN]], &NoAbort)
                 .is_err()
         );
     }
@@ -353,7 +337,7 @@ mod tests {
     fn floquet_spectrum_honors_abort() {
         let solver = ShootingNewtonSolver::default();
         let error = solver
-            .compute_floquet_multipliers_with_abort(&[vec![0.5]], &ImmediateAbort)
+            .compute_floquet_spectrum_with_abort(&[vec![0.5]], &ImmediateAbort)
             .unwrap_err();
         assert_eq!(error, FloquetSpectrumError::Aborted);
     }

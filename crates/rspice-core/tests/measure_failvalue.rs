@@ -166,7 +166,6 @@ fn continuous_dc_ac_and_tran_retain_every_record_and_verify_independently() {
         assert_eq!(result.records[1].raw_value, 1.5, "{analysis}");
         assert!(result.records[1].failure_limit_exceeded, "{analysis}");
         assert!(!result.records[1].passed, "{analysis}");
-        assert_eq!(result.failed_record_count(), 1, "{analysis}");
         assert!(!result.passed(), "{analysis}");
     }
 }

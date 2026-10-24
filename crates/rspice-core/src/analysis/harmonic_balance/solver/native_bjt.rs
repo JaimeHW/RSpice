@@ -1081,7 +1081,10 @@ mod tests {
             let expected = 0.5e-4 * (1.0 + factor);
             assert!((state.residual_scale[0][1] - expected).abs() < 1e-15);
             assert!(state.residual[0][1].norm() < expected);
-            assert_eq!(state.rows_converged(1e-3, 1e-15), accepted);
+            assert_eq!(
+                state.rows_converged_with_branch_tolerances(1e-3, 1e-15, 1e-15),
+                accepted
+            );
         }
     }
 }

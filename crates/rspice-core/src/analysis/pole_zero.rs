@@ -407,12 +407,6 @@ impl PoleZeroResult {
         self.stability_verdict() == StabilityVerdict::Stable
     }
 
-    /// Whether both root vectors agree with their attached evidence.
-    pub fn has_consistent_root_evidence(&self) -> bool {
-        self.pole_evidence.is_consistent_with(&self.poles)
-            && self.zero_evidence.is_consistent_with(&self.zeros)
-    }
-
     fn set_poles(&mut self, spectrum: ComputedSpectrum) {
         self.poles = spectrum.finite;
         self.pole_evidence = spectrum.evidence;
