@@ -213,10 +213,10 @@ br_gh1225c	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
 br_gh1237	vlg	passed	L1	pass	PASSED
 br_gh127a	vlg	gold	L1	pass	matches the gold file
 br_gh127b	vlg	gold	L1	pass	matches the gold file
-br_gh127c	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
+br_gh127c	vlg	gold	L1	fail	differs from the gold file at line 1 (5 lines against 5)
 br_gh127d	vlg	gold	L1	pass	matches the gold file
 br_gh127e	vlg	gold	L1	pass	matches the gold file
-br_gh127f	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
+br_gh127f	vlg	gold	L1	pass	matches the gold file
 br_gh13	vlg	passed	L1	pass	PASSED
 br_gh14	vlg	passed	L1	pass	PASSED
 br_gh142	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'b'
@@ -775,7 +775,7 @@ pr1492075	vlg	gold	L1	pass	matches the gold file
 pr1508882	vlg	passed	L1	pass	PASSED
 pr1510724	vlg	passed	L4	pass	PASSED
 pr1515168	vlg	passed	L1	pass	PASSED
-pr1520314	vlg	co	L6	deviation	IEEE 1364-2005 §12.3.9.1 and §15.8: `D`, the delayed reference of all four checks, is an input port of `kk_timing`, which nothing inside the module may drive, so the delayed copy that drives it is a compile error; Icarus compiles it, and with `D` an internal wire RSpice does too
+pr1520314	vlg	co	L6	pass	compiled
 pr1522570	vlg	passed	L1	pass	PASSED
 pr1530426	vlg	passed	L1	pass	PASSED
 pr1561597	vlg	passed	L1	pass	PASSED
@@ -1260,7 +1260,7 @@ pr312	vlg	passed	L1	pass	PASSED
 pr3149494	vlg	gold	L1	pass	matches the gold file
 pr3190941	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: port `x` of instance `foo` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler conn...
 pr3190948	vlg	passed	L1	pass	PASSED
-pr3194155	vlg	gold	L7	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `x`, which module `foo` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input por...
+pr3194155	vlg	gold	L7	refused:feature	Semantic error: Unsupported feature: port `x` of instance `bar5` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler con...
 pr3197861	vlg	passed	-	excluded:systemverilog:var	
 pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected ')', found '['
 pr3270320	vlg	ce	L3	pass	language error: Semantic error: Undeclared symbol: 'missing'
@@ -2103,8 +2103,8 @@ task_return_fail1	vvp	ce	-	excluded:flag-g2005-sv
 task_return_fail2	vvp	ce	-	excluded:flag-g2005-sv	
 test_va_math	vvp	gold	-	excluded:flag-mva_math	
 test_vams_math	vvp	gold	-	excluded:flag-gverilog-ams	
-timing_check_delayed_signals	vvp	passed	L6	deviation	IEEE 1364-2005 §15.5 and A.7.5.2: a notifier is a variable (`notifier ::= variable_identifier`), so the wire `notifier` both checks name is a compile error; Icarus, which evaluates no timing check, compiles it
-timing_check_syntax	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$timeskew`
+timing_check_delayed_signals	vvp	passed	L6	fail	compile error: Semantic error: Invalid expression: `$setuphold` notifier `notifier` is not a variable of module `test`; IEEE 1364-2005 A.7.5.2 makes a notifier a variable (`no...
+timing_check_syntax	vvp	passed	L6	fail	compile error: Semantic error: Invalid expression: `$setup` notifier `notifier` is not a variable of module `test`; IEEE 1364-2005 A.7.5.2 makes a notifier a variable (`notifi...
 uwire_fail2	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: `w` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 permits a `uwire` one driver of each bit, so decl...
 uwire_fail3	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: `w` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 permits a `uwire` one driver of each bit, so decl...
 va_math	vvp	passed	-	excluded:nonstandard-systf:$abs	
