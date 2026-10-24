@@ -93,8 +93,18 @@ use rspice_veriloga::canonical_ir::digital_eval::{
     any_real_term_is_satisfied, any_term_is_satisfied, apply_deferred as apply_deferred_update,
     resume_in as resume_process, run_observer, start_in as start_process,
 };
+use rspice_veriloga::canonical_ir::digital_progress::{DigitalProgress, blocks_without_progress};
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
+
+/// `#0` resumptions of one time step after which the host asks whether a
+/// thread can still let time advance, and again at every doubling.
+///
+/// The question has an exact answer, so this only decides when to ask: late
+/// enough that a legal step stepping through `#0` waits never pays for it, and
+/// early enough that a loop of nothing but `#0` waits is refused in a fraction
+/// of a second rather than at the per-tick ceiling.
+const ZERO_DELAY_SUSPICION: u32 = 1 << 16;
 
 use super::effects::{CallOrigin, HdlEffects, HdlEffectsConfig};
 
@@ -222,6 +232,17 @@ pub enum DigitalRunError {
         /// Which process.
         process: String,
     },
+    /// A thread can only ever wait on `#0` from where it stands, on every
+    /// path. IEEE 1364-2005 section 9.7.7 resumes a `#0` in the same time
+    /// step, so the step never ends and simulation time never advances.
+    ZeroDelayForever {
+        /// Which process.
+        process: String,
+        /// The tick it holds open.
+        tick: u64,
+        /// The step's `#0` resumptions when the loop was found.
+        resumptions: u32,
+    },
     /// The design names no signal by this name.
     UnknownSignal {
         /// The name that was asked for.
@@ -331,6 +352,17 @@ impl fmt::Display for DigitalRunError {
                 f,
                 "process {process} returned, but IEEE 1364-2005 section 9.9.2 makes it restart; \
                  its lowered graph should carry a back edge rather than a return"
+            ),
+            Self::ZeroDelayForever {
+                process,
+                tick,
+                resumptions,
+            } => write!(
+                f,
+                "process {process} is in a loop whose only timing control on any path is `#0`, \
+                 which resumes in the same time step (IEEE 1364-2005 section 9.7.7), so \
+                 simulation time can never advance past tick {tick} ({resumptions} zero-delay \
+                 resumptions at that tick)"
             ),
             Self::UnknownSignal { name } => {
                 write!(f, "the compiled design declares no signal named `{name}`")
@@ -1387,12 +1419,15 @@ impl DigitalHost {
             let mut promoted = false;
 
             if region == DigitalSchedulingRegion::Inactive && !self.inactive.is_empty() {
+                // Work a `#0` deferred resumes: what follows is progress the
+                // design asked for, not events waking each other.
+                let resumptions = self.scheduler.note_zero_delay();
+                if resumptions >= ZERO_DELAY_SUSPICION && resumptions.is_power_of_two() {
+                    self.refuse_zero_delay_loop(tick, resumptions)?;
+                }
                 for index in std::mem::take(&mut self.inactive) {
                     self.queue_ready(index, tick)?;
                 }
-                // Work a `#0` deferred resumes: what follows is progress the
-                // design asked for, not events waking each other.
-                self.scheduler.note_zero_delay();
                 promoted = true;
             }
 
@@ -2088,13 +2123,51 @@ impl DigitalHost {
         self.scratch.recycle_terms(terms);
     }
 
-    /// A process, as a diagnostic names it.
+    /// Refuse the step if a thread about to resume from `#0` can only ever
+    /// wait on `#0` again: it holds the time step open forever, and the
+    /// per-tick ceiling, sized for legal programs, would take seconds to say
+    /// so. The graph says it as soon as the step looks suspicious.
+    fn refuse_zero_delay_loop(&self, tick: u64, resumptions: u32) -> Result<(), DigitalRunError> {
+        for &index in &self.inactive {
+            let Some(slot) = self.slots.get(index) else {
+                continue;
+            };
+            let (Some(resume), Some(process)) =
+                (&slot.resume, self.plan.processes.get(slot.process))
+            else {
+                continue;
+            };
+            let function = match resume.routine() {
+                Some(routine) => match self.plan.routine(routine) {
+                    Some(routine) => &routine.function,
+                    None => continue,
+                },
+                None => &process.function,
+            };
+            let trapped = blocks_without_progress(function, DigitalProgress::AdvancesTime);
+            if trapped
+                .get(usize::from(resume.block()))
+                .copied()
+                .unwrap_or(false)
+            {
+                return Err(DigitalRunError::ZeroDelayForever {
+                    process: self.describe(index),
+                    tick,
+                    resumptions,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// A process, as a diagnostic names it: its keyword and ordinal, its kind
+    /// and the file and line it was written on ([`process_label`]).
     fn describe(&self, index: usize) -> String {
         let process = self.slots.get(index).map_or(index, |slot| slot.process);
         self.plan
             .processes
             .get(process)
-            .map(|process| format!("{} #{}", process.kind.keyword(), usize::from(process.id)))
+            .map(|process| process_label(process, usize::from(process.id)))
             .unwrap_or_else(|| format!("#{index}"))
     }
 }

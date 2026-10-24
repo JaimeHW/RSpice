@@ -1576,6 +1576,8 @@ pub struct EventScheduler {
     /// Of those, the delta cycles since the slot's last zero-delay
     /// resumption (see [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`]).
     slot_delta_chain: u32,
+    /// Zero-delay resumptions of the open due slot ([`Self::note_zero_delay`]).
+    slot_zero_delays: u32,
     /// Events executed against the open due slot, for the same reason.
     slot_events_executed: u64,
     /// A failed slot is not an accepted checkpoint boundary.
@@ -1592,6 +1594,7 @@ impl Clone for EventScheduler {
             started,
             slot_delta_cycles,
             slot_delta_chain,
+            slot_zero_delays,
             slot_events_executed,
             failed_slot,
         } = self;
@@ -1602,6 +1605,7 @@ impl Clone for EventScheduler {
             started: *started,
             slot_delta_cycles: *slot_delta_cycles,
             slot_delta_chain: *slot_delta_chain,
+            slot_zero_delays: *slot_zero_delays,
             slot_events_executed: *slot_events_executed,
             failed_slot: *failed_slot,
         }
@@ -1615,6 +1619,7 @@ impl Clone for EventScheduler {
             started,
             slot_delta_cycles,
             slot_delta_chain,
+            slot_zero_delays,
             slot_events_executed,
             failed_slot,
         } = self;
@@ -1625,6 +1630,7 @@ impl Clone for EventScheduler {
             started: source_started,
             slot_delta_cycles: source_slot_delta_cycles,
             slot_delta_chain: source_slot_delta_chain,
+            slot_zero_delays: source_slot_zero_delays,
             slot_events_executed: source_slot_events_executed,
             failed_slot: source_failed_slot,
         } = source;
@@ -1634,6 +1640,7 @@ impl Clone for EventScheduler {
         *started = *source_started;
         *slot_delta_cycles = *source_slot_delta_cycles;
         *slot_delta_chain = *source_slot_delta_chain;
+        *slot_zero_delays = *source_slot_zero_delays;
         *slot_events_executed = *source_slot_events_executed;
         *failed_slot = *source_failed_slot;
     }
@@ -1649,6 +1656,7 @@ impl EventScheduler {
             started: false,
             slot_delta_cycles: 0,
             slot_delta_chain: 0,
+            slot_zero_delays: 0,
             slot_events_executed: 0,
             failed_slot: false,
         }
@@ -2038,10 +2046,13 @@ impl EventScheduler {
 
     /// Record that the open slot resumed work deferred by a zero delay
     /// (`#0`): the delta cycles after it are a new run as far as
-    /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`] is concerned.
+    /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`] is concerned. Returns how many
+    /// such resumptions the slot has had, this one included.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn note_zero_delay(&mut self) {
+    pub(crate) fn note_zero_delay(&mut self) -> u32 {
         self.slot_delta_chain = 0;
+        self.slot_zero_delays = self.slot_zero_delays.saturating_add(1);
+        self.slot_zero_delays
     }
 
     /// Count one delta cycle of the open slot against both of its ceilings.
@@ -2084,6 +2095,7 @@ impl EventScheduler {
         self.started = true;
         self.slot_delta_cycles = 0;
         self.slot_delta_chain = 0;
+        self.slot_zero_delays = 0;
         self.slot_events_executed = 0;
         self.queues.clear_activations();
     }
@@ -2117,6 +2129,7 @@ impl EventScheduler {
         // does not carry one mode's accounting into the other's.
         self.slot_delta_cycles = 0;
         self.slot_delta_chain = 0;
+        self.slot_zero_delays = 0;
         self.slot_events_executed = 0;
         let mut delta_cycles: u32 = 0;
         let mut events_executed: u64 = 0;

@@ -142,7 +142,8 @@ endmodule
 fn analog_initialization_finish_precedes_all_digital_process_execution() {
     use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
     // This design is valid but never settles its first digital time slot.
-    // Without a prior analog finish, the scheduler must diagnose the loop.
+    // Without a prior analog finish, the host must diagnose the loop, whose
+    // only timing control is `#0`.
     let digital = "reg q; initial q=0; always #0 q=~q;";
     let engine = Engine::default();
     for placement in ["absent", "same", "before", "after"] {
@@ -184,7 +185,7 @@ fn analog_initialization_finish_precedes_all_digital_process_execution() {
         if placement == "absent" {
             let error = outcome.expect_err("the control design must execute its non-settling loop");
             assert!(
-                error.to_string().contains("did not settle at tick 0"),
+                error.to_string().contains("never advance past tick 0"),
                 "{error}"
             );
         } else {

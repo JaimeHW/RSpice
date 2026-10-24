@@ -31,6 +31,7 @@ pub mod digital;
 pub mod digital_eval;
 pub mod digital_link;
 pub mod digital_lower;
+pub mod digital_progress;
 mod digital_validate;
 pub mod digital_value;
 pub(crate) mod frequency;

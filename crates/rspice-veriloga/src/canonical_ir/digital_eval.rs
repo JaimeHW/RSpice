@@ -953,6 +953,10 @@ pub enum DigitalEvalError {
     UnknownBitsToReal(ValueId),
     /// The process ran this many blocks without suspending or returning.
     StepLimitExceeded(usize),
+    /// The process stands where no path through its graph reaches a timing
+    /// control, a return, or anything that could end the run: it loops in
+    /// zero time forever (see [`super::digital_progress`]).
+    LoopNeverWaits,
     /// The plan names a system call site it does not declare, or a call node
     /// disagrees with its site.
     InvalidSystemCall(ValueId),
@@ -1117,6 +1121,10 @@ impl std::fmt::Display for DigitalEvalError {
                 f,
                 "the process entered {limit} blocks without suspending or returning"
             ),
+            Self::LoopNeverWaits => f.write_str(
+                "it is in a loop with no timing control and no way out on any path, so it \
+                 runs forever without letting simulation time advance",
+            ),
             Self::InvalidSystemCall(value) => write!(
                 f,
                 "value {} names a system call the plan does not declare consistently",
@@ -1145,6 +1153,12 @@ impl std::error::Error for DigitalEvalError {}
 /// over every 16-bit base without suspending), and this is over ten times
 /// that. A loop that never suspends reaches it in under ten seconds.
 pub const DEFAULT_PROCESS_STEP_LIMIT: usize = 64_000_000;
+
+/// Blocks one activation runs between asking whether the thread can still
+/// suspend at all ([`DigitalEvalError::LoopNeverWaits`]). A loop with no way
+/// out is reported within this many blocks of entering it, a small fraction of
+/// a second, instead of at [`DEFAULT_PROCESS_STEP_LIMIT`].
+const PROGRESS_CHECK_INTERVAL: usize = 1 << 18;
 
 /// The deepest a thread's task and function calls may nest (design P2 §4.1).
 pub const MAX_CALL_DEPTH: usize = 100_000;
@@ -2578,6 +2592,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             // Re-read per block: a call or a return switches the running
             // function.
             let function = self.function();
+            // A long run in one activation is legal, so it is not the run's
+            // length that ends it early: it is standing where the graph has
+            // no way out, which no later step can change.
+            if steps % PROGRESS_CHECK_INTERVAL == 0
+                && super::digital_progress::blocks_without_progress(
+                    function,
+                    super::digital_progress::DigitalProgress::Suspends,
+                )[usize::from(block)]
+            {
+                return Err(DigitalEvalError::LoopNeverWaits);
+            }
             for (index, instruction) in function
                 .block(block)
                 .instructions

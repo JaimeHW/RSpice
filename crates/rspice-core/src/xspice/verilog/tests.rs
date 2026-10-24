@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::xspice::event_scheduler::{Instant, OscillationCause, SchedulerError, SchedulerLimits};
+use rspice_veriloga::canonical_ir::digital_eval::DigitalEvalError;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 
 fn port(name: &str, width: u32) -> DigitalPort {
@@ -827,6 +828,117 @@ fn a_settling_design_stays_far_below_the_delta_ceiling() {
         .expect("settles");
     let y = host.signal("y").expect("`y` is declared");
     assert_eq!(host.read(y).expect("declared").spelling(), "1");
+}
+
+/// Start `source` under ceilings far above what the runaway checks below need,
+/// so a refusal that arrives is theirs and not the ceiling's.
+fn start_runaway(source: &str) -> Result<(), DigitalRunError> {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let artifact = compiler
+        .compile_canonical_ir_module(source, None)
+        .expect("the design compiles");
+    let limits = SchedulerLimits {
+        max_delta_cycles_per_tick: 400_000,
+        max_events_per_tick: 4_000_000,
+        ..SchedulerLimits::default()
+    };
+    let mut host = DigitalHost::new(
+        &artifact.digital,
+        TimeResolution::new(TIME_UNIT_EXPONENT).expect("1 ns is a legal resolution"),
+        limits,
+    );
+    host.start()
+}
+
+/// `always #0 x = ~x;` can only ever wait on `#0`, which resumes in the same
+/// time step: time can never advance. The graph says so, so the host refuses
+/// at its first check, naming the process by its line, rather than at the
+/// per-tick ceiling seconds later (17 s at the production ceiling).
+#[test]
+fn a_loop_of_zero_delays_is_refused_by_its_line_before_the_ceiling() {
+    let error =
+        start_runaway("module spin;\n  reg x;\n  initial x = 0;\n  always #0 x = ~x;\nendmodule\n")
+            .expect_err("time can never advance");
+    let DigitalRunError::ZeroDelayForever {
+        process,
+        tick,
+        resumptions,
+    } = &error
+    else {
+        panic!("expected the zero-delay refusal, got {error:?}: {error}");
+    };
+    assert_eq!(process, "always#1 (always, <input>:4)");
+    assert_eq!((*tick, *resumptions), (0, 1 << 16));
+    assert!(
+        error.to_string().contains("never advance past tick 0"),
+        "{error}"
+    );
+}
+
+/// The same number of `#0` waits in a loop that ends is a legal program
+/// (ivtest `pow_ca_signed` steps through millions), and runs to its end.
+#[test]
+fn a_finite_run_of_zero_delays_is_not_refused() {
+    start_runaway(
+        "module steps;\n  integer i;\n  reg done;\n  initial begin\n    \
+         for (i = 0; i < 70000; i = i + 1) #0;\n    done = 1;\n  end\nendmodule\n",
+    )
+    .expect("a loop that ends is legal however many `#0` it waits on");
+}
+
+/// `forever n = n + 1;` never suspends. The interpreter refuses it once it
+/// stands where no path reaches a timing control, naming the process by its
+/// line, rather than after 64 million blocks (21 s).
+#[test]
+fn a_loop_with_no_timing_control_is_refused_by_its_line() {
+    let error = start_runaway(
+        "module spin;\n  integer n;\n  initial begin\n    n = 0;\n    forever n = n + 1;\n  \
+         end\nendmodule\n",
+    )
+    .expect_err("the loop never waits");
+    let DigitalRunError::Evaluation {
+        process,
+        error: cause,
+    } = &error
+    else {
+        panic!("expected an evaluation refusal, got {error:?}: {error}");
+    };
+    assert_eq!(process, "initial#0 (initial, <input>:3)");
+    assert_eq!(*cause, DigitalEvalError::LoopNeverWaits, "{error}");
+    let text = error.to_string();
+    assert!(
+        text.starts_with("process initial#0 (initial, <input>:3) could not run: it is in a loop"),
+        "{text}"
+    );
+
+    // `while (1)` too: its condition is a constant, so the exit edge is one
+    // the branch can never take.
+    let error = start_runaway(
+        "module spin;\n  integer n;\n  initial begin\n    n = 0;\n    while (1) n = n + 1;\n  \
+         end\nendmodule\n",
+    )
+    .expect_err("the loop never waits");
+    assert!(
+        matches!(
+            &error,
+            DigitalRunError::Evaluation {
+                error: DigitalEvalError::LoopNeverWaits,
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
+
+/// A long loop that ends is not a runaway, however many blocks it enters
+/// between suspensions.
+#[test]
+fn a_long_loop_that_ends_is_not_refused() {
+    start_runaway(
+        "module count;\n  integer i;\n  integer n;\n  initial begin\n    n = 0;\n    \
+         for (i = 0; i < 400000; i = i + 1) n = n + 1;\n  end\nendmodule\n",
+    )
+    .expect("a loop that ends is legal however long it runs");
 }
 
 // ===========================================================================
