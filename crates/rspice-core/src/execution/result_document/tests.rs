@@ -3374,7 +3374,10 @@ fn a_nested_dc_sweep_publishes_every_authored_sweep_variable() {
         "the outer source must survive beside the inner one"
     );
     assert_eq!(
-        payload.sweep_variables.last().map(|axis| axis.name.as_str()),
+        payload
+            .sweep_variables
+            .last()
+            .map(|axis| axis.name.as_str()),
         Some("v1")
     );
 }
