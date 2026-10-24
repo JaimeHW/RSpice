@@ -6,7 +6,9 @@
 //! frame lays out, its name, its state and where it sits. Each scene here runs
 //! whole application frames through `eframe::App::ui`, the frame eframe runs,
 //! and writes the last frame's tree to its own text file, one node per line in
-//! tree order. A build is unchanged when its files match the files of the
+//! tree order. A scene that opens a menu, the palette or More tools then has
+//! the pointer rest on or press a node of that tree, as a reader does, and
+//! runs frames again. A build is unchanged when its files match the files of the
 //! build before it. Bounds are rounded to half a point and the UUIDs a new
 //! session mints are written as `<uuid>`, so two runs of one build match.
 //!
@@ -23,8 +25,8 @@ use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use egui::accesskit::{Node, NodeId, TreeUpdate};
-use egui::{Pos2, Rect, Vec2};
+use egui::accesskit::{Node, NodeId, Role, TreeUpdate};
+use egui::{Event, Modifiers, PointerButton, Pos2, Rect, Vec2};
 
 use super::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use super::{AppState, RSpiceApp};
@@ -54,8 +56,76 @@ const ROUTE_SURFACES: [SurfaceId; 5] = [
     SurfaceId::LibraryCellviewManager,
 ];
 
+/// The application menus, by the names their triggers carry, in the bar's
+/// order.
+const APPLICATION_MENUS: [&str; 11] = [
+    "File",
+    "Edit",
+    "View",
+    "Design",
+    "Simulate",
+    "Results",
+    "Verify",
+    "Models",
+    "Automation",
+    "Window",
+    "Help",
+];
+
+/// The command palette's search scopes, by the names their chips carry.
+const PALETTE_SCOPES: [&str; 11] = [
+    "All",
+    "Navigate",
+    "Commands",
+    "Design",
+    "Simulation",
+    "Results",
+    "Verification",
+    "Models",
+    "Automation",
+    "Signals",
+    "Help",
+];
+
 type Setup = Box<dyn Fn(&mut RSpiceApp)>;
 type Holds = Box<dyn Fn(&RSpiceApp) -> bool>;
+type Shows = Box<dyn Fn(&TreeUpdate) -> bool>;
+
+/// What a reader does once a scene's frames have run: the pointer comes to
+/// rest over the node of `role` named `label` in the last frame's tree, and
+/// presses `press` there when it is set.
+#[derive(Clone, Copy)]
+struct Gesture {
+    role: Role,
+    label: &'static str,
+    press: Option<PointerButton>,
+}
+
+impl Gesture {
+    const fn click(role: Role, label: &'static str) -> Self {
+        Self {
+            role,
+            label,
+            press: Some(PointerButton::Primary),
+        }
+    }
+
+    const fn secondary_click(role: Role, label: &'static str) -> Self {
+        Self {
+            role,
+            label,
+            press: Some(PointerButton::Secondary),
+        }
+    }
+
+    const fn hover(role: Role, label: &'static str) -> Self {
+        Self {
+            role,
+            label,
+            press: None,
+        }
+    }
+}
 
 /// One state of the application to dump.
 struct Scene {
@@ -63,12 +133,22 @@ struct Scene {
     size: Vec2,
     /// Puts a fresh test instance into the scene's state.
     setup: Setup,
+    /// What the reader does after the setup's frames, in order; each gesture
+    /// is followed by frames of its own.
+    gestures: Vec<Gesture>,
     /// Whether the scene is still the state it is named for after its frames;
     /// a scene that quietly fell back to another would dump the wrong tree.
     holds: Holds,
+    /// Whether the last frame's main tree shows the state the scene is named
+    /// for, such as an open menu, which lives in egui's memory rather than in
+    /// the application.
+    shows: Shows,
     /// Draws secondary windows as native viewports rather than embedded in the
     /// main one.
     native_viewports: bool,
+    /// Writes what a row tells a reader beyond its name: whether it is
+    /// greyed, why, its key and whether it is expanded.
+    detailed: bool,
 }
 
 impl Scene {
@@ -77,8 +157,11 @@ impl Scene {
             name: name.into(),
             size,
             setup: Box::new(setup),
+            gestures: Vec::new(),
             holds: Box::new(|_| true),
+            shows: Box::new(|_| true),
             native_viewports: false,
+            detailed: false,
         }
     }
 
@@ -86,6 +169,142 @@ impl Scene {
         self.holds = Box::new(holds);
         self
     }
+
+    /// The scene after `gesture`, with every row written in detail.
+    fn then(mut self, gesture: Gesture) -> Self {
+        self.gestures.push(gesture);
+        self.detailed = true;
+        self
+    }
+
+    fn showing(mut self, shows: impl Fn(&TreeUpdate) -> bool + 'static) -> Self {
+        self.shows = Box::new(shows);
+        self
+    }
+}
+
+/// The node of `role` named `label` in `tree`.
+fn find_node<'a>(tree: &'a TreeUpdate, role: Role, label: &str) -> Option<&'a Node> {
+    tree.nodes
+        .iter()
+        .map(|(_, node)| node)
+        .find(|node| node.role() == role && node.label() == Some(label))
+}
+
+/// Whether `tree` shows the menu `trigger` opens: the trigger expanded and its
+/// menu, named after it, in the tree.
+fn menu_is_open(tree: &TreeUpdate, trigger: &str) -> bool {
+    find_node(tree, Role::MenuItem, trigger).is_some_and(|node| node.is_expanded() == Some(true))
+        && find_node(tree, Role::Menu, &format!("{trigger} menu")).is_some()
+}
+
+/// Whether `tree` shows the submenu the row `label` opens.
+fn submenu_is_open(tree: &TreeUpdate, label: &str) -> bool {
+    tree.nodes.iter().any(|(_, node)| {
+        node.role() == Role::MenuItem
+            && node.label() == Some(label)
+            && node.is_expanded() == Some(true)
+    })
+}
+
+/// A drawing open in Design: the page the application menus are read over.
+fn open_design(app: &mut RSpiceApp) {
+    app.state.open_project_session();
+    app.state.workbench.activate(Workspace::Design);
+}
+
+/// The scenes that open what a reader opens on top of a page: each
+/// application menu and its submenu, the compact menu and each of its
+/// submenus, the source editor's context menu, the command palette in each
+/// scope, and the toolbar's More tools.
+fn opened_scenes() -> Vec<Scene> {
+    let mut scenes = Vec::new();
+    for menu in APPLICATION_MENUS {
+        scenes.push(
+            Scene::new(
+                format!("menu-{}", menu.to_lowercase()),
+                DESKTOP,
+                open_design,
+            )
+            .then(Gesture::click(Role::MenuItem, menu))
+            .showing(move |tree| menu_is_open(tree, menu)),
+        );
+    }
+    scenes.push(
+        Scene::new("menu-design-arrange", DESKTOP, open_design)
+            .then(Gesture::click(Role::MenuItem, "Design"))
+            .then(Gesture::hover(Role::MenuItem, "Arrange"))
+            .showing(|tree| menu_is_open(tree, "Design") && submenu_is_open(tree, "Arrange")),
+    );
+    // Edit and View hold rows of their own while a source editor is the
+    // document.
+    for menu in ["Edit", "View"] {
+        scenes.push(
+            Scene::new(
+                format!("menu-{}-source-editor", menu.to_lowercase()),
+                DESKTOP,
+                |app| {
+                    app.state.open_project_session();
+                    open_a_veriloga_view(&mut app.state);
+                },
+            )
+            .then(Gesture::click(Role::MenuItem, menu))
+            .holding(|app| app.state.workbench.active_source_editor.is_some())
+            .showing(move |tree| menu_is_open(tree, menu)),
+        );
+    }
+    scenes.push(
+        Scene::new("menu-compact", PHONE, |app| on_a_phone(app, None))
+            .then(Gesture::click(Role::MenuItem, "Menu"))
+            .showing(|tree| menu_is_open(tree, "Menu")),
+    );
+    for menu in APPLICATION_MENUS {
+        scenes.push(
+            Scene::new(
+                format!("menu-compact-{}", menu.to_lowercase()),
+                PHONE,
+                |app| on_a_phone(app, None),
+            )
+            .then(Gesture::click(Role::MenuItem, "Menu"))
+            .then(Gesture::hover(Role::MenuItem, menu))
+            .showing(move |tree| menu_is_open(tree, "Menu") && submenu_is_open(tree, menu)),
+        );
+    }
+    scenes.push(
+        Scene::new("menu-source-editor", DESKTOP, |app| {
+            app.state.open_project_session();
+            open_a_veriloga_view(&mut app.state);
+        })
+        .then(Gesture::secondary_click(
+            Role::MultilineTextInput,
+            "Verilog-A source editor",
+        ))
+        .showing(|tree| find_node(tree, Role::Menu, "Source editor menu").is_some()),
+    );
+    for scope in PALETTE_SCOPES {
+        let mut scene = Scene::new(
+            format!("palette-{}", scope.to_lowercase()),
+            DESKTOP,
+            move |app| {
+                open_design(app);
+                app.state.workbench.command_palette.open_in_scope(scope);
+            },
+        )
+        .holding(|app| app.state.workbench.command_palette.open)
+        .showing(|tree| find_node(tree, Role::ListBox, "Matching commands").is_some());
+        scene.detailed = true;
+        scenes.push(scene);
+    }
+    scenes.push(
+        Scene::new("toolbar-overflow", PHONE, |app| on_a_phone(app, None))
+            .then(Gesture::click(Role::Button, "More tools"))
+            // A phone's tool row has no slot for Undo, so it is a row of
+            // More tools, which says whether it is the armed tool.
+            .showing(|tree| {
+                find_node(tree, Role::Button, "Undo").is_some_and(|node| node.toggled().is_some())
+            }),
+    );
+    scenes
 }
 
 fn scenes() -> Vec<Scene> {
@@ -202,6 +421,7 @@ fn scenes() -> Vec<Scene> {
         Scene::new("secondary-window", DESKTOP, open_a_second_window).holding(has_a_second_window);
     native.native_viewports = true;
     scenes.push(native);
+    scenes.extend(opened_scenes());
     scenes
 }
 
@@ -326,32 +546,49 @@ fn run(scene: &Scene) -> Vec<(String, TreeUpdate)> {
     app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
     (scene.setup)(&mut app);
     let mut frame = eframe::Frame::_new_kittest();
-    let mut trees = Vec::new();
-    for index in 0..FRAMES {
-        VIEWPORT_TREES.with_borrow_mut(Vec::clear);
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, scene.size)),
-                time: Some(f64::from(index) * FRAME_SECONDS),
-                focused: true,
-                ..Default::default()
-            },
-            |ui| eframe::App::ui(&mut app, ui, &mut frame),
+    let mut frames = Frames {
+        ctx: &ctx,
+        app: &mut app,
+        frame: &mut frame,
+        size: scene.size,
+        next: 0,
+    };
+    let mut trees = frames.run(Vec::new());
+    for gesture in &scene.gestures {
+        let bounds = find_node(&trees[0].1, gesture.role, gesture.label)
+            .and_then(Node::bounds)
+            .unwrap_or_else(|| {
+                panic!(
+                    "scene {} has no {:?} named {:?} to reach",
+                    scene.name, gesture.role, gesture.label
+                )
+            });
+        // The frame laid the node out in `f32` points.
+        let at = Pos2::new(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
         );
-        trees = vec![(
-            "main".to_owned(),
-            output
-                .platform_output
-                .accesskit_update
-                .expect("a frame with AccessKit on publishes its tree"),
-        )];
-        for (index, tree) in VIEWPORT_TREES.take().into_iter().enumerate() {
-            trees.push((format!("native viewport {}", index + 1), tree));
+        let mut events = vec![Event::PointerMoved(at)];
+        if let Some(button) = gesture.press {
+            for pressed in [true, false] {
+                events.push(Event::PointerButton {
+                    pos: at,
+                    button,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                });
+            }
         }
+        trees = frames.run(events);
     }
     assert!(
         (scene.holds)(&app),
         "scene {} is no longer the state it is named for after its frames",
+        scene.name
+    );
+    assert!(
+        (scene.shows)(&trees[0].1),
+        "scene {}'s tree does not show the state it is named for",
         scene.name
     );
     if scene.native_viewports {
@@ -364,13 +601,56 @@ fn run(scene: &Scene) -> Vec<(String, TreeUpdate)> {
     trees
 }
 
+/// A scene's application and the frames it has run so far.
+struct Frames<'a> {
+    ctx: &'a egui::Context,
+    app: &'a mut RSpiceApp,
+    frame: &'a mut eframe::Frame,
+    size: Vec2,
+    /// The index of the next frame, which sets its time.
+    next: u32,
+}
+
+impl Frames<'_> {
+    /// Run [`FRAMES`] frames, the first of them carrying `events`, and return
+    /// the last one's trees.
+    fn run(&mut self, mut events: Vec<Event>) -> Vec<(String, TreeUpdate)> {
+        let mut trees = Vec::new();
+        for index in self.next..self.next + FRAMES {
+            VIEWPORT_TREES.with_borrow_mut(Vec::clear);
+            let output = self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
+                    time: Some(f64::from(index) * FRAME_SECONDS),
+                    focused: true,
+                    events: std::mem::take(&mut events),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(self.app, ui, self.frame),
+            );
+            trees = vec![(
+                "main".to_owned(),
+                output
+                    .platform_output
+                    .accesskit_update
+                    .expect("a frame with AccessKit on publishes its tree"),
+            )];
+            for (index, tree) in VIEWPORT_TREES.take().into_iter().enumerate() {
+                trees.push((format!("native viewport {}", index + 1), tree));
+            }
+        }
+        self.next += FRAMES;
+        trees
+    }
+}
+
 /// A bound rounded to the nearest half point, so subpixel layout noise is not
 /// a difference.
 fn half_point(value: f64) -> f64 {
     (value * 2.0).round() / 2.0 + 0.0
 }
 
-fn describe(node: &Node) -> String {
+fn describe(node: &Node, detailed: bool) -> String {
     let mut line = format!("{:?}", node.role());
     if let Some(label) = node.label() {
         write!(line, " label={label:?}").expect("a String takes any write");
@@ -383,6 +663,20 @@ fn describe(node: &Node) -> String {
     }
     if let Some(selected) = node.is_selected() {
         write!(line, " selected={selected}").expect("a String takes any write");
+    }
+    if detailed {
+        if node.is_disabled() {
+            line.push_str(" disabled");
+        }
+        if let Some(expanded) = node.is_expanded() {
+            write!(line, " expanded={expanded}").expect("a String takes any write");
+        }
+        if let Some(shortcut) = node.keyboard_shortcut() {
+            write!(line, " shortcut={shortcut:?}").expect("a String takes any write");
+        }
+        if let Some(description) = node.description() {
+            write!(line, " description={description:?}").expect("a String takes any write");
+        }
     }
     if let Some(bounds) = node.bounds() {
         write!(
@@ -438,7 +732,7 @@ fn without_uuids(text: &str) -> String {
 
 /// `tree` one node per line, depth first from its root, indented by depth.
 /// A node the root does not reach is listed after the tree, in update order.
-fn write_tree(into: &mut String, name: &str, tree: &TreeUpdate) -> usize {
+fn write_tree(into: &mut String, name: &str, tree: &TreeUpdate, detailed: bool) -> usize {
     let nodes = tree
         .nodes
         .iter()
@@ -458,7 +752,7 @@ fn write_tree(into: &mut String, name: &str, tree: &TreeUpdate) -> usize {
         if !reached.insert(id) {
             continue;
         }
-        writeln!(into, "{}{}", "  ".repeat(depth), describe(node))
+        writeln!(into, "{}{}", "  ".repeat(depth), describe(node, detailed))
             .expect("a String takes any write");
         pending.extend(
             node.children()
@@ -469,7 +763,8 @@ fn write_tree(into: &mut String, name: &str, tree: &TreeUpdate) -> usize {
     }
     for (id, node) in &tree.nodes {
         if !reached.contains(id) {
-            writeln!(into, "unreached {}", describe(node)).expect("a String takes any write");
+            writeln!(into, "unreached {}", describe(node, detailed))
+                .expect("a String takes any write");
         }
     }
     tree.nodes.len()
@@ -501,7 +796,7 @@ fn accesskit_dump() {
         );
         let mut nodes = 0;
         for (name, tree) in run(scene) {
-            nodes += write_tree(&mut text, &name, &tree);
+            nodes += write_tree(&mut text, &name, &tree, scene.detailed);
         }
         assert!(nodes > 0, "scene {} has an empty tree", scene.name);
         let path = dir.join(format!("{}.txt", scene.name));
