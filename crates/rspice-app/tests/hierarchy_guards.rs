@@ -640,7 +640,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
 /// by definition, so counting it would make this guard pass unconditionally.
 const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
     ("workbench/chrome/title_bar.rs", "menu"),
-    ("workbench/chrome/title_bar/menus.rs", "menu"),
+    ("workbench/shell_host/menus.rs", "menu"),
     ("workbench/menu_bar.rs", "menu"),
     ("workbench/menu_bar/", "menu"),
     ("workbench/chrome/toolbar.rs", "toolbar"),

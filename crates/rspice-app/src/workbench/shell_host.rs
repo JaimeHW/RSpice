@@ -10,6 +10,7 @@
 //! The containers hold the commands they offer by key. Here, and only here,
 //! a key becomes the command it names, which then answers as it always has.
 
+mod menus;
 mod palette_icons;
 mod status_order;
 
@@ -20,10 +21,8 @@ use crate::state::ViewType;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
+use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
-use crate::workbench::chrome::title_bar::menus::{
-    self, ApplicationMenu, COMPACT_MENU, SOURCE_EDITOR_MENU,
-};
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
@@ -37,6 +36,7 @@ use crate::workbench::framework::host::{
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{ProjectPage, VerificationPage, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
+use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU};
 
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
@@ -514,7 +514,7 @@ impl Host for RSpiceApp {
 
     fn validate_commands(&self) -> Result<(), String> {
         let mut keys = Vec::new();
-        for menu in menus::ALL_MENUS {
+        for menu in application_menus::ALL_MENUS {
             menu_keys(menu.entries(), &mut keys);
         }
         menu_keys(COMPACT_MENU, &mut keys);

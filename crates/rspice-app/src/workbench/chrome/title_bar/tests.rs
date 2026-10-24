@@ -5,7 +5,9 @@
 //! capability the workbench does not have.
 
 use super::*;
+use crate::state::ModelsPage;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
+use crate::workbench::state::{VerificationPage, Workspace};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn title_test_app() -> RSpiceApp {

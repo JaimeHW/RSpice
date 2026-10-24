@@ -12,17 +12,23 @@ use crate::workbench::framework::host::Host;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
-use super::super::state::{VerificationPage, WorkbenchSession, Workspace};
-use crate::state::ModelsPage;
+use super::super::state::WorkbenchSession;
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::framework::command_registry::ids;
 
+pub(in crate::workbench) mod application_menus;
 pub(in crate::workbench) mod code;
 pub(in crate::workbench) mod design;
 mod keyboard;
 pub(in crate::workbench) mod menu_entries;
 mod menu_row;
-pub(in crate::workbench) mod menus;
+#[cfg(test)]
+use application_menus::menu_popup_height_for_viewport;
+pub(in crate::workbench) use application_menus::source_editor_context_menu;
+use application_menus::{
+    ALL_MENUS, ApplicationMenu, configure_menu_popup, file_menu_shows_exit, menu_popup_max_height,
+    shortcut_for_occurrence,
+};
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
     claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
@@ -30,13 +36,6 @@ use keyboard::{
 };
 use menu_entries::{MenuEntry, menu_rows, show_scrolled_menu_rows};
 use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};
-#[cfg(test)]
-use menus::menu_popup_height_for_viewport;
-pub(in crate::workbench) use menus::source_editor_context_menu;
-use menus::{
-    ALL_MENUS, ApplicationMenu, configure_menu_popup, file_menu_shows_exit, menu_popup_max_height,
-    shortcut_for_occurrence,
-};
 
 /// The narrowest a menu popup is; it widens to fit its longest row up to
 /// [`MENU_MAX_OUTER_WIDTH`].
