@@ -17,6 +17,7 @@ use crate::workbench::app_state::Model;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use super::command_registry::{CommandAvailability, CommandSpec};
+use super::dialogs::DialogKey;
 use super::requests::{Drain, Outbox, Request};
 
 #[cfg(test)]
@@ -152,9 +153,22 @@ impl<F: Feature> FeatureCommand<F> {
     }
 }
 
+/// A step of the frame's dialogs a feature draws in its context. The shell
+/// lists it by `key` in its dialog order, which says where it is drawn and
+/// how it holds the workbench.
+pub(crate) struct FeatureDialog<F: Feature> {
+    pub(crate) key: DialogKey,
+    /// Whether what the step draws is open, as the modal gates ask it.
+    pub(crate) is_open: fn(&F::State) -> bool,
+    /// Run the step for this frame: draw what of it is open, and nothing
+    /// when none of it is.
+    pub(crate) render: fn(&mut Cx<'_, F>, &egui::Context),
+}
+
 /// Everything one feature registered, built once.
 pub(crate) struct FeatureRegistry<F: Feature> {
     commands: Vec<FeatureCommand<F>>,
+    dialogs: &'static [FeatureDialog<F>],
 }
 
 impl<F: Feature> FeatureRegistry<F> {
@@ -162,9 +176,26 @@ impl<F: Feature> FeatureRegistry<F> {
     pub(crate) fn build() -> Self {
         let mut registry = Self {
             commands: Vec::new(),
+            dialogs: &[],
         };
         F::register(&mut registry);
         registry
+    }
+
+    /// Register the feature's dialog steps.
+    pub(crate) fn dialogs(&mut self, dialogs: &'static [FeatureDialog<F>]) {
+        self.dialogs = dialogs;
+    }
+
+    /// The registered dialog step `key` names, if the feature draws one.
+    pub(crate) fn dialog(&self, key: DialogKey) -> Option<&FeatureDialog<F>> {
+        self.dialogs.iter().find(|dialog| dialog.key == key)
+    }
+
+    /// Every dialog step the feature registered.
+    #[cfg(test)]
+    pub(crate) fn registered_dialogs(&self) -> &'static [FeatureDialog<F>] {
+        self.dialogs
     }
 
     /// Register every command of `C`.

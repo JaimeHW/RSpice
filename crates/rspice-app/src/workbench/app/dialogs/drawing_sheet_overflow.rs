@@ -6,17 +6,17 @@
 
 use egui::{Align, Context, Frame, Label, Layout, RichText, Stroke, Ui, vec2};
 
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+
 use crate::schematic::view::drawing_sheet::{
     DrawingSheetOverflowItem, DrawingSheetOverflowSummary, DrawingSheetOverflowTarget,
-    drawing_sheet_overflow_summary, show_drawing_sheet_overflow_target,
+    overflow_summary, show_overflow_target,
 };
-use crate::schematic::view::schematic_symbol_context;
 use crate::state::{DrawingSheetDisplayUnit, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::app::{HardcopyWorkflow, RSpiceApp};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 
 const TITLE: &str = "Content outside the drawing sheet";
 const DESCRIPTION: &str = "Every object that falls outside the authored drawing area of this sheet, with its sheet coordinates and a way to reach it.";
@@ -45,63 +45,75 @@ pub(crate) fn open_drawing_sheet_overflow_review(state: &mut AppState) -> bool {
     true
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_drawing_sheet_overflow_dialog(&mut self, ctx: &Context) {
-        if !self.state.sheets.drawing_sheet_overflow_open {
-            return;
-        }
+/// What the overflow review hands on once it closes: a step another part
+/// takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverflowFollowUp {
+    /// Show the sheet's properties.
+    SheetProperties,
+    /// Open the print workflow.
+    Print,
+}
 
-        let (report, format, display_unit) = {
-            let symbol_context = schematic_symbol_context(&self.state);
-            let sheet = self.state.model.active_drawing_sheet();
-            let format = sheet.format_label();
-            (
-                drawing_sheet_overflow_summary(&self.state, &symbol_context, &sheet),
-                format,
-                sheet.format.display_unit,
-            )
-        };
-        let mut action = OverflowReviewAction::None;
-        let choice = Dialog::new(TITLE, "Close")
-            .description(DESCRIPTION)
-            .size(DialogSize::DrawingSheetWorkflow)
-            .initial_height(610.0)
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::Primary)
-            .show(ctx, |ui| {
-                action = overflow_review_body(ui, &report, &format, display_unit);
-            });
+/// Draw the overflow review while `open` holds, over the drawing as it shows
+/// `review_markers`, and answer the step it hands on.
+pub(crate) fn render_drawing_sheet_overflow_dialog(
+    ctx: &Context,
+    open: &mut bool,
+    model: &mut Model,
+    review_markers: SchematicReviewMarkerVisibility,
+) -> Option<OverflowFollowUp> {
+    if !*open {
+        return None;
+    }
 
-        match choice {
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.sheets.drawing_sheet_overflow_open = false;
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
+    let (report, format, display_unit) = {
+        let symbol_context = model.schematic_symbol_context();
+        let sheet = model.active_drawing_sheet();
+        let format = sheet.format_label();
+        (
+            overflow_summary(model, review_markers, &symbol_context, &sheet),
+            format,
+            sheet.format.display_unit,
+        )
+    };
+    let mut action = OverflowReviewAction::None;
+    let choice = Dialog::new(TITLE, "Close")
+        .description(DESCRIPTION)
+        .size(DialogSize::DrawingSheetWorkflow)
+        .initial_height(610.0)
+        .primary_on_enter(false)
+        .initial_focus(DialogInitialFocus::Primary)
+        .show(ctx, |ui| {
+            action = overflow_review_body(ui, &report, &format, display_unit);
+        });
+
+    match choice {
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
+            *open = false;
         }
-        match action {
-            OverflowReviewAction::None => {}
-            OverflowReviewAction::Show(target) => {
-                self.state.sheets.drawing_sheet_overflow_open = false;
-                show_drawing_sheet_overflow_target(&mut self.state, target);
-            }
-            OverflowReviewAction::FitContent => {
-                self.state.sheets.drawing_sheet_overflow_open = false;
-                self.state.model.schematic.session.editor.needs_fit = true;
-                self.state
-                    .model
-                    .schematic
-                    .session
-                    .editor
-                    .needs_drawing_sheet_fit = false;
-            }
-            OverflowReviewAction::SheetProperties => {
-                self.state.sheets.drawing_sheet_overflow_open = false;
-                crate::workbench::app::reveal_sheet_properties(&mut self.state);
-            }
-            OverflowReviewAction::Hardcopy => {
-                self.state.sheets.drawing_sheet_overflow_open = false;
-                crate::workbench::app::open_hardcopy_workflow(self, HardcopyWorkflow::Print);
-            }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+    match action {
+        OverflowReviewAction::None => None,
+        OverflowReviewAction::Show(target) => {
+            *open = false;
+            show_overflow_target(model, review_markers, target);
+            None
+        }
+        OverflowReviewAction::FitContent => {
+            *open = false;
+            model.schematic.session.editor.needs_fit = true;
+            model.schematic.session.editor.needs_drawing_sheet_fit = false;
+            None
+        }
+        OverflowReviewAction::SheetProperties => {
+            *open = false;
+            Some(OverflowFollowUp::SheetProperties)
+        }
+        OverflowReviewAction::Hardcopy => {
+            *open = false;
+            Some(OverflowFollowUp::Print)
         }
     }
 }

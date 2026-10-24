@@ -14,5 +14,6 @@ pub(crate) use draft::{
     standard_orientation_advisory, standard_size_choice_label,
 };
 pub(crate) use transaction::{
-    DrawingSheetEdit, apply_drawing_sheet_edit, drawing_sheet_editable, mixed_size_advisory,
+    DrawingSheetEdit, apply_drawing_sheet_edit, apply_drawing_sheet_edit_on,
+    drawing_sheet_editable, mixed_size_advisory,
 };

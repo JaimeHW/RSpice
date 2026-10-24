@@ -277,7 +277,9 @@ const SHOW: &[Step] = &[
 /// The frame's dialog steps as `render_frame_dialogs` wrote them out before
 /// they became the dialog order: each step's call, as the source wrote it
 /// less `self.` and the shell's own path, and the slice that owns it. Every
-/// dialog the frame draws is drawn by one of these, bottom first.
+/// dialog the frame draws is drawn by one of these, bottom first. A step a
+/// registered feature now draws is `features::render_dialog`, under the key
+/// its spec names.
 const DIALOG_STEPS: &[(&str, &str)] = &[
     ("synchronize_route_owned_dialogs", "shell"),
     ("synchronize_design_management_route", "shell"),
@@ -298,7 +300,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_builtin_xspice_placement_dialog", "design"),
     ("render_net_label_dialog", "design"),
     ("render_grid_snap_routing_dialog", "design"),
-    ("render_drawing_sheet_overflow_dialog", "sheets"),
+    ("features::render_dialog", "sheets"),
     ("render_schematic_visibility_dialog", "design"),
     ("render_descend_hierarchy_dialog", "design"),
     ("render_engineering_table_dialog", "design"),
@@ -315,10 +317,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_create_hierarchy_dialog", "design"),
     ("render_check_and_save_dialog", "project"),
     ("render_connectivity_manager_dialog", "design"),
-    (
-        "dialogs::delete_sheet::render_delete_sheet_confirmation",
-        "sheets",
-    ),
+    ("features::render_dialog", "sheets"),
     ("render_design_management_dialog", "project"),
     ("render_selection_bulk_edit_dialog", "design"),
     ("render_project_revision_history_dialog", "project"),
@@ -330,9 +329,9 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_configuration_sets_dialog", "simulate"),
     ("dialogs::rule_setup::render_rule_setup_dialog", "design"),
     ("invalidate_simulation_preflight", "shell"),
-    ("render_drawing_sheet_defaults_dialog", "sheets"),
-    ("render_drawing_sheet_preset_dialogs", "sheets"),
-    ("render_drawing_sheet_support_dialogs", "sheets"),
+    ("features::render_dialog", "sheets"),
+    ("features::render_dialog", "sheets"),
+    ("features::render_dialog", "sheets"),
     ("render_hardcopy_dialog", "hardcopy"),
     ("render_object_properties_dialog", "design"),
     ("render_rename_selection_dialog", "design"),

@@ -74,26 +74,30 @@ pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
 /// is closed, and it is scrolled to its Sheet section. Only an editable sheet
 /// is shown so; anywhere else nothing changes.
 pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
-    if reveal_sheet_properties_on(&mut state.model, &mut state.workbench) {
-        state.sheets.reveal_sheet_section = true;
-    }
+    reveal_sheet_properties_on(
+        &mut state.model,
+        &mut state.workbench,
+        &mut state.sheets.reveal_sheet_section,
+    );
 }
 
-/// [`reveal_sheet_properties`] up to the inspector's own Sheet section,
-/// answering whether the sheet was shown, so the caller asks that section to
-/// come into view.
+/// [`reveal_sheet_properties`] over the parts it writes: the model's
+/// selection, the session's inspector, and `reveal_sheet_section`, the
+/// sheets slot's request that the inspector bring its Sheet section into
+/// view.
 pub(crate) fn reveal_sheet_properties_on(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
-) -> bool {
+    reveal_sheet_section: &mut bool,
+) {
     if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(workbench, model) {
-        return false;
+        return;
     }
     model.schematic.session.editor.selection.clear();
     model.schematic.session.editor.net_highlight.clear();
     workbench.inspector_visible = true;
     workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
-    true
+    *reveal_sheet_section = true;
 }
 
 pub(in crate::workbench) fn active_sheet_id(state: &AppState) -> Option<SheetId> {

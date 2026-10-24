@@ -16,8 +16,7 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model};
+use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
 use crate::workbench::state::WorkbenchSession;
 
 use super::drawing_sheet_preview::{
@@ -148,60 +147,60 @@ pub(crate) fn open_sheet_format_manager(
     Ok(())
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_drawing_sheet_support_dialogs(&mut self, ctx: &Context) {
-        if !self.state.sheets.drawing_sheet_support.manager.open {
-            return;
-        }
-        let authority_error = validate_manager_authority(
-            &self.state,
-            &self.state.sheets.drawing_sheet_support.manager,
-        )
-        .err();
-        let selected = self
-            .state
-            .sheets
-            .drawing_sheet_support
-            .manager
-            .rows
-            .iter()
-            .any(|row| row.selected);
-        let enabled = authority_error.is_none() && selected;
-        let choice = Dialog::new(
-            "Sheet formats",
-            "Apply to selected sheets",
-        )
-        .description("Compare and reconcile the authored drawing sheet of every sheet in this schematic. Page numbering, print sets and exports all read these formats.")
-        .size(DialogSize::DrawingSheetWorkflow)
-        .ghost("Close")
-        .primary_enabled(enabled)
-        .show(ctx, |ui| {
-            sheet_format_manager_body(
-                ui,
-                &mut self.state.sheets.drawing_sheet_support.manager,
-                authority_error.as_deref(),
+/// Draw the sheet format manager while it is open, over the open drawing's
+/// model. `reveal_sheet_section` is the sheets slot's request that the
+/// inspector bring its Sheet section into view, which the manager raises
+/// when it hands the open sheet on to Sheet properties.
+pub(crate) fn render_drawing_sheet_support_dialogs(
+    ctx: &Context,
+    support: &mut DrawingSheetSupportState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    reveal_sheet_section: &mut bool,
+) {
+    if !support.manager.open {
+        return;
+    }
+    let authority_error = validate_manager_authority(model, &support.manager).err();
+    let selected = support.manager.rows.iter().any(|row| row.selected);
+    let enabled = authority_error.is_none() && selected;
+    let choice = Dialog::new(
+        "Sheet formats",
+        "Apply to selected sheets",
+    )
+    .description("Compare and reconcile the authored drawing sheet of every sheet in this schematic. Page numbering, print sets and exports all read these formats.")
+    .size(DialogSize::DrawingSheetWorkflow)
+    .ghost("Close")
+    .primary_enabled(enabled)
+    .show(ctx, |ui| {
+        sheet_format_manager_body(
+            ui,
+            &mut support.manager,
+            authority_error.as_deref(),
+        );
+    });
+    match choice {
+        DialogChoice::Primary
+            if support.manager.source == SheetManagerFormatSource::SheetProperties =>
+        {
+            support.manager = Default::default();
+            crate::workbench::app::sheets::reveal_sheet_properties_on(
+                model,
+                workbench,
+                reveal_sheet_section,
             );
-        });
-        match choice {
-            DialogChoice::Primary
-                if self.state.sheets.drawing_sheet_support.manager.source
-                    == SheetManagerFormatSource::SheetProperties =>
-            {
-                self.state.sheets.drawing_sheet_support.manager = Default::default();
-                crate::workbench::app::reveal_sheet_properties(&mut self.state);
-            }
-            DialogChoice::Primary => match apply_sheet_format_manager(self) {
-                Ok(message) => {
-                    self.state.prompt(message);
-                    self.state.sheets.drawing_sheet_support.manager = Default::default();
-                }
-                Err(error) => self.state.sheets.drawing_sheet_support.manager.error = Some(error),
-            },
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.sheets.drawing_sheet_support.manager = Default::default();
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
         }
+        DialogChoice::Primary => match apply_sheet_format_manager(&support.manager, model) {
+            Ok(message) => {
+                workbench.prompt(message);
+                support.manager = Default::default();
+            }
+            Err(error) => support.manager.error = Some(error),
+        },
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            support.manager = Default::default();
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 
@@ -499,16 +498,16 @@ fn manager_apply_notes(ui: &mut Ui) {
 }
 
 fn validate_manager_authority(
-    app: &AppState,
+    model: &Model,
     state: &SheetFormatManagerState,
 ) -> Result<(), String> {
-    let designs = &app.model.workspace.content.design_management;
+    let designs = &model.workspace.content.design_management;
     state
         .edit
         .as_ref()
         .ok_or_else(|| "Sheet Format Manager has no edit authority.".to_owned())?
-        .validate(app, "Sheet Format Manager")?;
-    if app.model.workspace.content.active_key() != state.owner_key {
+        .validate(model, "Sheet Format Manager")?;
+    if model.workspace.content.active_key() != state.owner_key {
         return Err("The active cell/view changed. Close and reopen Sheet Formats.".to_owned());
     }
     if designs.revision() != state.design_management_revision {
@@ -525,9 +524,12 @@ fn validate_manager_authority(
     Ok(())
 }
 
-fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
-    let transaction = app.state.sheets.drawing_sheet_support.manager.clone();
-    validate_manager_authority(&app.state, &transaction)?;
+fn apply_sheet_format_manager(
+    manager: &SheetFormatManagerState,
+    model: &mut Model,
+) -> Result<String, String> {
+    let transaction = manager.clone();
+    validate_manager_authority(model, &transaction)?;
     let selected = transaction
         .rows
         .iter()
@@ -560,7 +562,7 @@ fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
         .try_update(|draft| draft.inheritance = inheritance)
         .map_err(|error| error.to_string())?
         .without_project_owned_title_values();
-    let before = (*app.state.model.workspace.content.design_management).clone();
+    let before = (*model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let mut changed = 0_usize;
     let mut applied_sheet_ids = Vec::new();
@@ -616,7 +618,7 @@ fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
         unchanged_sheet_ids,
         skipped,
     )?;
-    commit_candidate(app, "Sheet formats", before, candidate)?;
+    commit_candidate(model, "Sheet formats", before, candidate)?;
     if changed == 0 {
         return Ok(format!(
             "No selected sheets changed. Skipped sheets were recorded: {skipped_summary}."
@@ -679,45 +681,31 @@ fn format_is_organization_managed(format: &SchematicSheetFormat) -> bool {
 }
 
 fn commit_candidate(
-    app: &mut RSpiceApp,
+    model: &mut Model,
     description: &str,
     before: crate::state::DesignManagementCatalog,
     candidate: crate::state::DesignManagementCatalog,
 ) -> Result<(), String> {
     candidate.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = app
-        .state
-        .model
-        .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app
-        .state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference();
-    let committed_revision = app
-        .state
-        .model
+    let schematic_tx = model.prepare_design_management_schematic_transaction(&candidate)?;
+    let owner = model.workspace.content.active_schematic_reference();
+    let committed_revision = model
         .workspace
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
-    app.state
-        .model
-        .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*app.state.model.workspace.content.design_management).clone();
-    app.state
-        .model
-        .record_design_management_transaction(DesignManagementHistoryEntry {
-            description: description.to_owned(),
-            owner,
-            before,
-            after,
-            before_schematics: schematic_tx.before,
-            after_schematics: schematic_tx.after,
-            references: schematic_tx.references,
-            committed_revision,
-        });
+    model.apply_design_management_schematic_transaction(&schematic_tx);
+    let after = (*model.workspace.content.design_management).clone();
+    model.record_design_management_transaction(DesignManagementHistoryEntry {
+        description: description.to_owned(),
+        owner,
+        before,
+        after,
+        before_schematics: schematic_tx.before,
+        after_schematics: schematic_tx.after,
+        references: schematic_tx.references,
+        committed_revision,
+    });
     Ok(())
 }
 
@@ -913,6 +901,7 @@ mod tests {
         DrawingSheetStandard, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
         SchematicPageOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
+    use crate::workbench::app::RSpiceApp;
 
     /// [`open_sheet_format_manager`] on the application's own parts.
     fn open_manager(state: &mut crate::workbench::app_state::AppState) -> Result<(), String> {
@@ -1165,7 +1154,11 @@ mod tests {
             row.selected = true;
         }
 
-        let message = apply_sheet_format_manager(&mut app).unwrap();
+        let message = apply_sheet_format_manager(
+            &app.state.sheets.drawing_sheet_support.manager,
+            &mut app.state.model,
+        )
+        .unwrap();
 
         let catalog = app
             .state
@@ -1226,7 +1219,11 @@ mod tests {
         app.state.sheets.drawing_sheet_support.manager.source =
             SheetManagerFormatSource::SheetProperties;
         assert_eq!(
-            apply_sheet_format_manager(&mut app).unwrap_err(),
+            apply_sheet_format_manager(
+                &app.state.sheets.drawing_sheet_support.manager,
+                &mut app.state.model
+            )
+            .unwrap_err(),
             "Edit the open sheet in Sheet properties."
         );
         assert!(!app.state.model.can_undo_project_design());

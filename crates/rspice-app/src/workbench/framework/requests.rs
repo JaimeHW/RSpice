@@ -176,6 +176,16 @@ impl Request for ExportFigure {
     const DRAIN: Drain = Drain::EndOfPrepare;
 }
 
+/// Open the print workflow on the active view. Raised by a feature that
+/// offers printing as the next step of its own dialog, so the workflow opens
+/// straight after that dialog is drawn, in the same frame.
+#[derive(Clone, Debug)]
+pub(crate) struct PrintActiveView;
+
+impl Request for PrintActiveView {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Put this text on the platform clipboard.
 #[derive(Clone, Debug)]
 pub(crate) struct ClipboardText(pub(crate) String);

@@ -11,7 +11,8 @@ use egui::{Context, Id};
 use crate::state::SheetId;
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::sheets::{self as sheet_actions, SheetDeletePlan};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
 const PRIMARY: &str = "Delete sheet";
 
@@ -39,8 +40,15 @@ impl PendingSheetDelete {
     }
 }
 
-pub(in crate::workbench) fn render_delete_sheet_confirmation(ctx: &Context, state: &mut AppState) {
-    let Some(pending) = state.sheets.delete_sheet.clone() else {
+/// Draw the confirmation while `pending_delete` waits for one, and run the
+/// delete it confirms on `model`.
+pub(in crate::workbench) fn render_delete_sheet_confirmation(
+    ctx: &Context,
+    pending_delete: &mut Option<PendingSheetDelete>,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) {
+    let Some(pending) = pending_delete.clone() else {
         return;
     };
     let title = pending.title();
@@ -61,10 +69,10 @@ pub(in crate::workbench) fn render_delete_sheet_confirmation(ctx: &Context, stat
         });
     match choice {
         DialogChoice::Primary => {
-            state.sheets.delete_sheet = None;
-            confirm_sheet_delete(state, &pending);
+            *pending_delete = None;
+            confirm_sheet_delete(model, workbench, &pending);
         }
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.sheets.delete_sheet = None,
+        DialogChoice::Ghost | DialogChoice::Cancelled => *pending_delete = None,
         DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
@@ -75,18 +83,15 @@ pub(in crate::workbench) fn render_delete_sheet_confirmation(ctx: &Context, stat
 /// confirmation is open changes the outcome, and a delete is not run on an
 /// outcome nobody saw.
 pub(in crate::workbench) fn confirm_sheet_delete(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     pending: &PendingSheetDelete,
 ) {
-    let plan = sheet_actions::plan_delete(&state.model, pending.sheet);
+    let plan = sheet_actions::plan_delete(model, pending.sheet);
     if pending.still_planned(&plan) {
-        let _ = sheet_actions::commit_delete_sheet(
-            &mut state.model,
-            &mut state.workbench,
-            pending.sheet,
-        );
+        let _ = sheet_actions::commit_delete_sheet(model, workbench, pending.sheet);
     } else {
-        state.prompt(format!(
+        workbench.prompt(format!(
             "Sheet \u{201c}{}\u{201d} changed while the delete waited for confirmation, so \
              nothing was deleted.",
             pending.name

@@ -8,6 +8,7 @@
 
 use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
+use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
 use crate::workbench::{RSpiceApp, SurfaceId};
 
@@ -121,8 +122,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_overflow"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.sheets.drawing_sheet_overflow_open),
-        render: |app, ctx| app.render_drawing_sheet_overflow_dialog(ctx),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("sheets.drawing_sheet_overflow"))
+        }),
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("sheets.drawing_sheet_overflow"))
+        },
     },
     DialogSpec {
         key: DialogKey("design.schematic_visibility"),
@@ -206,10 +211,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("sheets.delete_sheet"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.sheets.delete_sheet.is_some()),
-        render: |app, ctx| {
-            dialogs::delete_sheet::render_delete_sheet_confirmation(ctx, &mut app.state)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("sheets.delete_sheet"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("sheets.delete_sheet")),
     },
     DialogSpec {
         key: DialogKey("project.design_management"),
@@ -282,20 +285,32 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_defaults"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.sheets.drawing_sheet_defaults.open),
-        render: |app, ctx| app.render_drawing_sheet_defaults_dialog(ctx),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("sheets.drawing_sheet_defaults"))
+        }),
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("sheets.drawing_sheet_defaults"))
+        },
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_presets"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.sheets.drawing_sheet_presets.any_open()),
-        render: |app, ctx| app.render_drawing_sheet_preset_dialogs(ctx),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("sheets.drawing_sheet_presets"))
+        }),
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("sheets.drawing_sheet_presets"))
+        },
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_support"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.sheets.drawing_sheet_support.any_open()),
-        render: |app, ctx| app.render_drawing_sheet_support_dialogs(ctx),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("sheets.drawing_sheet_support"))
+        }),
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("sheets.drawing_sheet_support"))
+        },
     },
     DialogSpec {
         key: DialogKey("hardcopy.hardcopy"),
@@ -658,7 +673,36 @@ impl ModalGate for AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppState, DIALOG_ORDER};
+    use super::{AppState, DIALOG_ORDER, features};
+
+    /// The order lists every dialog step a registered feature draws, under
+    /// the key the feature draws it by and in the order the feature registers
+    /// them, and lists no other step of that feature's slot.
+    #[test]
+    fn the_order_lists_exactly_the_steps_the_features_draw() {
+        let registered = features::registered_dialogs();
+        assert!(!registered.is_empty());
+        let owned_by_a_feature = |key: &str| {
+            key.split_once('.')
+                .is_some_and(|(owner, _)| registered.iter().any(|(slot, _)| *slot == owner))
+        };
+        let listed = DIALOG_ORDER
+            .iter()
+            .map(|spec| spec.key)
+            .filter(|key| owned_by_a_feature(key.0))
+            .collect::<Vec<_>>();
+        let drawn = registered.iter().map(|(_, key)| *key).collect::<Vec<_>>();
+        assert_eq!(listed, drawn);
+        for (slot, key) in &registered {
+            assert!(
+                key.0
+                    .strip_prefix(slot)
+                    .is_some_and(|rest| rest.starts_with('.')),
+                "`{}` is drawn by the feature in slot `{slot}`",
+                key.0
+            );
+        }
+    }
 
     /// Every dialog starts closed, so in a fresh session no step that says
     /// whether it is open says yes.

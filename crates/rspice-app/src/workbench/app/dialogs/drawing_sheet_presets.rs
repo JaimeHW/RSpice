@@ -22,8 +22,9 @@ use crate::state::{
 };
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::DrawingSheetPersonalPreferences;
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
 pub(crate) use model::capture_personal_preset_into_project;
 
@@ -115,41 +116,43 @@ pub(crate) fn open_custom_sheet_size_library(
     true
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_drawing_sheet_preset_dialogs(&mut self, ctx: &Context) {
+/// The custom sheet size dialogs over the parts they work on: their own
+/// state, the model they publish sizes into, the session that says whether
+/// the open sheet can take one, and `reveal_sheet_section`, the sheets slot's
+/// request that the inspector bring its Sheet section into view.
+pub(crate) struct PresetDialogs<'a> {
+    pub(crate) dialogs: &'a mut DrawingSheetPresetDialogsState,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) reveal_sheet_section: &'a mut bool,
+}
+
+impl PresetDialogs<'_> {
+    /// Draw the custom sheet size dialogs that are open.
+    pub(crate) fn render(&mut self, ctx: &Context) {
         self.poll_drawing_sheet_preset_exchanges(ctx);
 
-        if self.state.sheets.drawing_sheet_presets.library_open {
+        if self.dialogs.library_open {
             self.render_drawing_sheet_preset_library(ctx);
         }
-        if self.state.sheets.drawing_sheet_presets.editor.is_some() {
+        if self.dialogs.editor.is_some() {
             self.render_drawing_sheet_preset_editor(ctx);
         }
-        if self.state.sheets.drawing_sheet_presets.transfer.open {
+        if self.dialogs.transfer.open {
             self.render_drawing_sheet_preset_transfer(ctx);
         }
-        if self.state.sheets.drawing_sheet_presets.delete.is_some() {
+        if self.dialogs.delete.is_some() {
             self.render_drawing_sheet_preset_delete(ctx);
         }
     }
 
     fn render_drawing_sheet_preset_library(&mut self, ctx: &Context) {
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let presets = sorted_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
-        let usage = usage_counts(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
-        let authority_error =
-            validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets).err();
-        let personal_stale = personal != self.state.sheets.drawing_sheet_presets.baseline_personal;
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let presets =
+            sorted_visible_presets(&self.model.workspace.content.design_management, &personal);
+        let usage = usage_counts(&self.model.workspace.content.design_management, &personal);
+        let authority_error = validate_project_authority(self.model, self.dialogs).err();
+        let personal_stale = personal != self.dialogs.baseline_personal;
         let hint = authority_error.as_deref().or(personal_stale.then_some(
             "Personal drawing-sheet preferences changed. Close and reopen this library.",
         ));
@@ -171,14 +174,14 @@ impl RSpiceApp {
             .show(ctx, |ui| {
                 action = render::library_body(
                     ui,
-                    &mut self.state.sheets.drawing_sheet_presets.search,
+                    &mut self.dialogs.search,
                     &presets,
                     &usage,
                     authority_error.is_none(),
                     !personal_stale,
                     hint,
                 );
-                if let Some(error) = self.state.sheets.drawing_sheet_presets.error.as_deref() {
+                if let Some(error) = self.dialogs.error.as_deref() {
                     render::error_notice(ui, error);
                 }
             });
@@ -187,16 +190,16 @@ impl RSpiceApp {
             self.handle_preset_library_action(action);
         }
         if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-            self.state.sheets.drawing_sheet_presets.close();
+            self.dialogs.close();
         }
     }
 
     fn handle_preset_library_action(&mut self, action: LibraryBodyAction) {
-        self.state.sheets.drawing_sheet_presets.error = None;
+        self.dialogs.error = None;
         let result = match action {
             LibraryBodyAction::New => {
-                self.state.sheets.drawing_sheet_presets.library_open = false;
-                self.state.sheets.drawing_sheet_presets.editor = Some(PresetEditorDraft::default());
+                self.dialogs.library_open = false;
+                self.dialogs.editor = Some(PresetEditorDraft::default());
                 return;
             }
             LibraryBodyAction::Import => {
@@ -211,13 +214,13 @@ impl RSpiceApp {
             LibraryBodyAction::Duplicate(key) => self.duplicate_preset(&key),
             LibraryBodyAction::Rename(key) => self.open_preset_rename(&key),
             LibraryBodyAction::Delete(key) => {
-                self.state.sheets.drawing_sheet_presets.library_open = false;
-                self.state.sheets.drawing_sheet_presets.delete = Some(key);
+                self.dialogs.library_open = false;
+                self.dialogs.delete = Some(key);
                 return;
             }
         };
         if let Err(error) = result {
-            self.state.sheets.drawing_sheet_presets.error = Some(error);
+            self.dialogs.error = Some(error);
         }
     }
 
@@ -241,28 +244,22 @@ impl RSpiceApp {
             last_valid_preview: preset.format.clone(),
             error: None,
         };
-        self.state.sheets.drawing_sheet_presets.library_open = false;
-        self.state.sheets.drawing_sheet_presets.editor = Some(draft);
+        self.dialogs.library_open = false;
+        self.dialogs.editor = Some(draft);
         Ok(())
     }
 
     fn duplicate_preset(&mut self, key: &PresetKey) -> Result<(), String> {
-        validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets)?;
+        validate_project_authority(self.model, self.dialogs)?;
         let source = self
             .find_visible_preset(key)
             .ok_or_else(|| "That custom size is no longer available.".to_owned())?;
         if unavailable(&source) {
             return Err("An unavailable custom size cannot be duplicated.".to_owned());
         }
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let visible =
+            all_visible_presets(&self.model.workspace.content.design_management, &personal);
         let id = format!("custom-{}", uuid::Uuid::new_v4().simple());
         let name = unique_copy_name(&format!("{} copy", source.name), &visible);
         let format = source
@@ -283,7 +280,7 @@ impl RSpiceApp {
             format: format.as_reusable_drawing_sheet_preset(),
         };
         self.publish_project_preset(copy, "Duplicate custom sheet size")?;
-        self.state.record(
+        self.model.record(
             LogSeverity::Info,
             LogSource::Studio,
             format!("Created project custom size '{name}'."),
@@ -299,32 +296,28 @@ impl RSpiceApp {
             return Err("This custom size has an unavailable managed dependency.".to_owned());
         }
         // The sheet takes the size, then its properties show what it made.
-        crate::workbench::app::drawing_sheet_edit::apply_drawing_sheet_edit(
-            &mut self.state,
+        crate::workbench::app::drawing_sheet_edit::apply_drawing_sheet_edit_on(
+            self.model,
+            self.workbench,
             crate::workbench::app::drawing_sheet_edit::DrawingSheetEdit::Preset(Box::new(preset)),
         )?;
-        self.state.sheets.drawing_sheet_presets.close();
-        crate::workbench::app::reveal_sheet_properties(&mut self.state);
+        self.dialogs.close();
+        crate::workbench::app::sheets::reveal_sheet_properties_on(
+            self.model,
+            self.workbench,
+            self.reveal_sheet_section,
+        );
         Ok(())
     }
 
     fn render_drawing_sheet_preset_editor(&mut self, ctx: &Context) {
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
-        let project_error =
-            validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets).err();
-        let personal_stale = personal != self.state.sheets.drawing_sheet_presets.baseline_personal;
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let visible =
+            all_visible_presets(&self.model.workspace.content.design_management, &personal);
+        let project_error = validate_project_authority(self.model, self.dialogs).err();
+        let personal_stale = personal != self.dialogs.baseline_personal;
         let draft = self
-            .state
-            .sheets
-            .drawing_sheet_presets
+            .dialogs
             .editor
             .as_ref()
             .expect("editor presence was checked");
@@ -363,10 +356,7 @@ impl RSpiceApp {
             .ghost("Cancel")
             .primary_enabled(primary_enabled)
             .show(ctx, |ui| {
-                let draft = self
-                    .state
-                    .sheets
-                    .drawing_sheet_presets
+                let draft = self.dialogs
                     .editor
                     .as_mut()
                     .expect("editor presence was checked");
@@ -379,7 +369,7 @@ impl RSpiceApp {
                 );
             });
         if matches!(action, Some(EditorBodyAction::RefreshPreview))
-            && let Some(draft) = self.state.sheets.drawing_sheet_presets.editor.as_mut()
+            && let Some(draft) = self.dialogs.editor.as_mut()
             && let Ok(candidate) = editor_candidate(draft, &visible)
         {
             draft.last_valid_preview = candidate.format;
@@ -388,18 +378,18 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match self.apply_preset_editor() {
                 Ok(message) => {
-                    self.state
+                    self.model
                         .record(LogSeverity::Info, LogSource::Studio, message);
-                    self.state.sheets.drawing_sheet_presets.return_to_library();
+                    self.dialogs.return_to_library();
                 }
                 Err(error) => {
-                    if let Some(draft) = self.state.sheets.drawing_sheet_presets.editor.as_mut() {
+                    if let Some(draft) = self.dialogs.editor.as_mut() {
                         draft.error = Some(error);
                     }
                 }
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.sheets.drawing_sheet_presets.return_to_library();
+                self.dialogs.return_to_library();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -407,21 +397,13 @@ impl RSpiceApp {
 
     fn apply_preset_editor(&mut self) -> Result<String, String> {
         let draft = self
-            .state
-            .sheets
-            .drawing_sheet_presets
+            .dialogs
             .editor
             .clone()
             .ok_or_else(|| "The custom-size editor is not open.".to_owned())?;
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let visible =
+            all_visible_presets(&self.model.workspace.content.design_management, &personal);
         let preset = if draft.mode == PresetEditorMode::Edit {
             let name = validate_editor_name(&draft, &visible)?;
             let baseline = draft
@@ -469,9 +451,7 @@ impl RSpiceApp {
 
     fn render_drawing_sheet_preset_delete(&mut self, ctx: &Context) {
         let key = self
-            .state
-            .sheets
-            .drawing_sheet_presets
+            .dialogs
             .delete
             .as_ref()
             .expect("delete presence was checked")
@@ -480,13 +460,9 @@ impl RSpiceApp {
         let name = preset
             .as_ref()
             .map_or("Unavailable preset", |preset| preset.name.as_str());
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
         let used_by = usage_count(
-            &self.state.model.workspace.content.design_management,
+            &self.model.workspace.content.design_management,
             &personal,
             key.scope,
             &key.id,
@@ -509,21 +485,21 @@ impl RSpiceApp {
             .primary_enabled(preset.is_some() && used_by == 0)
             .show(ctx, |ui| {
                 render::delete_body(ui, preset.as_ref(), used_by);
-                if let Some(error) = self.state.sheets.drawing_sheet_presets.error.as_deref() {
+                if let Some(error) = self.dialogs.error.as_deref() {
                     render::error_notice(ui, error);
                 }
             });
         match choice {
             DialogChoice::Primary => match self.delete_preset(&key) {
                 Ok(message) => {
-                    self.state
+                    self.model
                         .record(LogSeverity::Info, LogSource::Studio, message);
-                    self.state.sheets.drawing_sheet_presets.return_to_library();
+                    self.dialogs.return_to_library();
                 }
-                Err(error) => self.state.sheets.drawing_sheet_presets.error = Some(error),
+                Err(error) => self.dialogs.error = Some(error),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.sheets.drawing_sheet_presets.return_to_library();
+                self.dialogs.return_to_library();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -535,14 +511,14 @@ impl RSpiceApp {
             .ok_or_else(|| "That custom size is no longer available.".to_owned())?;
         match key.scope {
             DrawingSheetPresetScope::Project => {
-                validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets)?;
-                let before = (*self.state.model.workspace.content.design_management).clone();
+                validate_project_authority(self.model, self.dialogs)?;
+                let before = (*self.model.workspace.content.design_management).clone();
                 let mut candidate = before.clone();
                 candidate
                     .remove_drawing_sheet_preset(candidate.revision(), &key.id)
                     .map_err(|error| error.to_string())?;
                 super::drawing_sheet_defaults::commit_project_candidate(
-                    self,
+                    self.model,
                     "Delete custom sheet size",
                     before,
                     candidate,
@@ -550,7 +526,7 @@ impl RSpiceApp {
             }
             DrawingSheetPresetScope::User => {
                 self.ensure_personal_fresh()?;
-                let mut preferences = self.state.model.preferences.clone();
+                let mut preferences = self.model.preferences.clone();
                 let mut personal = preferences.drawing_sheet_personal_preferences();
                 if personal_default_references_preset(&personal, &key.id) {
                     return Err(
@@ -567,7 +543,7 @@ impl RSpiceApp {
                     return Err("That personal custom size is no longer available.".to_owned());
                 }
                 preferences.set_drawing_sheet_personal_preferences(personal)?;
-                self.state.model.preferences = preferences;
+                self.model.preferences = preferences;
             }
             DrawingSheetPresetScope::Organization => {
                 return Err(
@@ -580,15 +556,9 @@ impl RSpiceApp {
     }
 
     fn open_preset_transfer(&mut self, mode: TransferMode) {
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let visible =
+            all_visible_presets(&self.model.workspace.content.design_management, &personal);
         let export_ids = visible
             .iter()
             .filter(|preset| unsigned_exportable(preset))
@@ -599,8 +569,8 @@ impl RSpiceApp {
         } else {
             "rspice-sheet-formats.json".to_owned()
         };
-        self.state.sheets.drawing_sheet_presets.library_open = false;
-        self.state.sheets.drawing_sheet_presets.transfer = PresetTransferState {
+        self.dialogs.library_open = false;
+        self.dialogs.transfer = PresetTransferState {
             open: true,
             mode,
             package_name,
@@ -617,16 +587,10 @@ impl RSpiceApp {
     }
 
     fn render_drawing_sheet_preset_transfer(&mut self, ctx: &Context) {
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let visible = sorted_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
-        let transfer = &self.state.sheets.drawing_sheet_presets.transfer;
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let visible =
+            sorted_visible_presets(&self.model.workspace.content.design_management, &personal);
+        let transfer = &self.dialogs.transfer;
         let is_import = transfer.mode == TransferMode::Import;
         let title = if is_import {
             "Import sheet-format presets"
@@ -644,8 +608,7 @@ impl RSpiceApp {
                     .import_candidates
                     .iter()
                     .any(|candidate| candidate.selected)
-                && validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets)
-                    .is_ok()
+                && validate_project_authority(self.model, self.dialogs).is_ok()
         } else {
             !transfer.export_ids.is_empty()
         };
@@ -664,7 +627,7 @@ impl RSpiceApp {
         .show(ctx, |ui| {
             action = render::transfer_body(
                 ui,
-                &mut self.state.sheets.drawing_sheet_presets.transfer,
+                &mut self.dialogs.transfer,
                 &visible,
             );
         });
@@ -680,18 +643,18 @@ impl RSpiceApp {
                 };
                 match result {
                     Ok(Some(message)) => {
-                        self.state
+                        self.model
                             .record(LogSeverity::Info, LogSource::Studio, message);
-                        self.state.sheets.drawing_sheet_presets.return_to_library();
+                        self.dialogs.return_to_library();
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        self.state.sheets.drawing_sheet_presets.transfer.error = Some(error);
+                        self.dialogs.transfer.error = Some(error);
                     }
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.sheets.drawing_sheet_presets.return_to_library();
+                self.dialogs.return_to_library();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -711,11 +674,11 @@ impl RSpiceApp {
                     PRESET_PACKAGE,
                     model::MAX_PACKAGE_BYTES,
                 ) {
-                    self.state.sheets.drawing_sheet_presets.transfer.error = Some(error);
+                    self.dialogs.transfer.error = Some(error);
                 }
             }
             TransferBodyAction::SelectAllExport(selected) => {
-                let transfer = &mut self.state.sheets.drawing_sheet_presets.transfer;
+                let transfer = &mut self.dialogs.transfer;
                 transfer.export_ids.clear();
                 if selected {
                     transfer.export_ids.extend(
@@ -734,9 +697,9 @@ impl RSpiceApp {
         source: &str,
         visible: &[DrawingSheetPreset],
     ) -> Result<(), String> {
-        let package = parse_package(source, &self.state.model.pdk_config.publisher_trust_store)?;
+        let package = parse_package(source, &self.model.pdk_config.publisher_trust_store)?;
         let candidates = prepare_import_candidates(&package, visible)?;
-        let transfer = &mut self.state.sheets.drawing_sheet_presets.transfer;
+        let transfer = &mut self.dialogs.transfer;
         transfer.reviewed_digest = Some(package.source_digest_sha256);
         transfer.import_candidates = candidates;
         transfer.error = None;
@@ -744,29 +707,20 @@ impl RSpiceApp {
     }
 
     fn apply_preset_import(&mut self) -> Result<Option<String>, String> {
-        validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets)?;
+        validate_project_authority(self.model, self.dialogs)?;
         self.ensure_personal_fresh()?;
-        let transfer = self.state.sheets.drawing_sheet_presets.transfer.clone();
-        let package = parse_package(
-            &transfer.json,
-            &self.state.model.pdk_config.publisher_trust_store,
-        )?;
+        let transfer = self.dialogs.transfer.clone();
+        let package = parse_package(&transfer.json, &self.model.pdk_config.publisher_trust_store)?;
         if transfer.reviewed_digest.as_deref() != Some(package.source_digest_sha256.as_str()) {
             return Err(
                 "The package changed after review. Review the current JSON before importing."
                     .to_owned(),
             );
         }
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        let mut visible = all_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        );
-        let before = (*self.state.model.workspace.content.design_management).clone();
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        let mut visible =
+            all_visible_presets(&self.model.workspace.content.design_management, &personal);
+        let before = (*self.model.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         let mut created = 0_usize;
         let mut mapped = 0_usize;
@@ -887,7 +841,7 @@ impl RSpiceApp {
             .update_drawing_sheet_settings(candidate.revision(), settings)
             .map_err(|error| error.to_string())?;
         super::drawing_sheet_defaults::commit_project_candidate(
-            self,
+            self.model,
             "Import custom sheet sizes",
             before,
             candidate,
@@ -909,7 +863,7 @@ impl RSpiceApp {
         ctx: &Context,
         visible: &[DrawingSheetPreset],
     ) -> Result<Option<String>, String> {
-        let transfer = &self.state.sheets.drawing_sheet_presets.transfer;
+        let transfer = &self.dialogs.transfer;
         let selected = visible
             .iter()
             .filter(|preset| {
@@ -935,11 +889,7 @@ impl RSpiceApp {
             name,
             source.into_bytes(),
         )?;
-        self.state
-            .sheets
-            .drawing_sheet_presets
-            .transfer
-            .pending_export = Some(PendingExport {
+        self.dialogs.transfer.pending_export = Some(PendingExport {
             preset_count: package.presets.len(),
             digest: package.source_digest_sha256,
         });
@@ -963,54 +913,42 @@ impl RSpiceApp {
     /// what releases the picker's id — so the guard is here rather than at the
     /// poll.
     fn adopt_preset_import(&mut self, outcome: file_exchange::Outcome<file_exchange::OpenedFile>) {
-        if !self.state.sheets.drawing_sheet_presets.transfer.open {
+        if !self.dialogs.transfer.open {
             return;
         }
         match outcome {
             Ok(Some(package)) => {
-                let personal = self
-                    .state
-                    .model
-                    .preferences
-                    .drawing_sheet_personal_preferences();
-                let visible = all_visible_presets(
-                    &self.state.model.workspace.content.design_management,
-                    &personal,
-                );
+                let personal = self.model.preferences.drawing_sheet_personal_preferences();
+                let visible =
+                    all_visible_presets(&self.model.workspace.content.design_management, &personal);
                 let source = package.text;
                 {
-                    let transfer = &mut self.state.sheets.drawing_sheet_presets.transfer;
+                    let transfer = &mut self.dialogs.transfer;
                     transfer.package_name = package.name;
                     transfer.json.clone_from(&source);
                 }
                 if let Err(error) = self.review_import_source(&source, &visible) {
-                    self.state.sheets.drawing_sheet_presets.transfer.error = Some(error);
+                    self.dialogs.transfer.error = Some(error);
                 }
             }
             // A cancelled pick leaves the dialog on whatever it was reviewing.
             Ok(None) => {}
             Err(error) => {
-                self.state.sheets.drawing_sheet_presets.transfer.error = Some(error);
+                self.dialogs.transfer.error = Some(error);
             }
         }
     }
 
     /// Report an export once its destination has actually been written.
     fn adopt_preset_export(&mut self, outcome: file_exchange::Outcome<file_exchange::SavedFile>) {
-        if !self.state.sheets.drawing_sheet_presets.transfer.open {
+        if !self.dialogs.transfer.open {
             return;
         }
-        let pending = self
-            .state
-            .sheets
-            .drawing_sheet_presets
-            .transfer
-            .pending_export
-            .take();
+        let pending = self.dialogs.transfer.pending_export.take();
         match outcome {
             Ok(Some(saved)) => {
                 if let Some(pending) = pending {
-                    self.state.record(
+                    self.model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         format!(
@@ -1022,29 +960,22 @@ impl RSpiceApp {
                         ),
                     );
                 }
-                self.state.sheets.drawing_sheet_presets.return_to_library();
+                self.dialogs.return_to_library();
             }
             // A cancelled save leaves the dialog open on its selection, so the
             // reader can pick a different destination without reselecting.
             Ok(None) => {}
             Err(error) => {
-                self.state.sheets.drawing_sheet_presets.transfer.error = Some(error);
+                self.dialogs.transfer.error = Some(error);
             }
         }
     }
 
     fn find_visible_preset(&self, key: &PresetKey) -> Option<DrawingSheetPreset> {
-        let personal = self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences();
-        all_visible_presets(
-            &self.state.model.workspace.content.design_management,
-            &personal,
-        )
-        .into_iter()
-        .find(|preset| preset.scope == key.scope && preset.id.eq_ignore_ascii_case(&key.id))
+        let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        all_visible_presets(&self.model.workspace.content.design_management, &personal)
+            .into_iter()
+            .find(|preset| preset.scope == key.scope && preset.id.eq_ignore_ascii_case(&key.id))
     }
 
     fn publish_project_preset(
@@ -1052,15 +983,15 @@ impl RSpiceApp {
         mut preset: DrawingSheetPreset,
         description: &str,
     ) -> Result<(), String> {
-        validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets)?;
+        validate_project_authority(self.model, self.dialogs)?;
         preset.format = preset.format.as_reusable_drawing_sheet_preset();
-        let before = (*self.state.model.workspace.content.design_management).clone();
+        let before = (*self.model.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         candidate
             .publish_drawing_sheet_preset(candidate.revision(), preset)
             .map_err(|error| error.to_string())?;
         super::drawing_sheet_defaults::commit_project_candidate(
-            self,
+            self.model,
             description,
             before,
             candidate,
@@ -1070,14 +1001,14 @@ impl RSpiceApp {
     }
 
     fn rename_project_preset(&mut self, preset_id: &str, name: String) -> Result<(), String> {
-        validate_project_authority(&self.state, &self.state.sheets.drawing_sheet_presets)?;
-        let before = (*self.state.model.workspace.content.design_management).clone();
+        validate_project_authority(self.model, self.dialogs)?;
+        let before = (*self.model.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         candidate
             .rename_drawing_sheet_preset(candidate.revision(), preset_id, name)
             .map_err(|error| error.to_string())?;
         super::drawing_sheet_defaults::commit_project_candidate(
-            self,
+            self.model,
             "Rename custom sheet size",
             before,
             candidate,
@@ -1089,7 +1020,7 @@ impl RSpiceApp {
     fn publish_personal_preset(&mut self, mut preset: DrawingSheetPreset) -> Result<(), String> {
         self.ensure_personal_fresh()?;
         preset.format = preset.format.as_reusable_drawing_sheet_preset();
-        let mut preferences = self.state.model.preferences.clone();
+        let mut preferences = self.model.preferences.clone();
         let mut personal = preferences.drawing_sheet_personal_preferences();
         if let Some(existing) = personal
             .presets
@@ -1101,18 +1032,14 @@ impl RSpiceApp {
             personal.presets.push(preset);
         }
         preferences.set_drawing_sheet_personal_preferences(personal)?;
-        self.state.model.preferences = preferences;
+        self.model.preferences = preferences;
         self.refresh_preset_authorities();
         Ok(())
     }
 
     fn ensure_personal_fresh(&self) -> Result<(), String> {
-        if self
-            .state
-            .model
-            .preferences
-            .drawing_sheet_personal_preferences()
-            != self.state.sheets.drawing_sheet_presets.baseline_personal
+        if self.model.preferences.drawing_sheet_personal_preferences()
+            != self.dialogs.baseline_personal
         {
             return Err(
                 "Personal drawing-sheet preferences changed. Close and reopen this library."
@@ -1123,27 +1050,27 @@ impl RSpiceApp {
     }
 
     fn refresh_preset_authorities(&mut self) {
-        let state = &self.state;
+        let model = &*self.model;
         let refreshed = DrawingSheetPresetDialogsState {
-            edit: Some(SchematicEditAuthority::capture(state)),
-            catalog_revision: state.model.workspace.content.design_management.revision(),
-            baseline_personal: state.model.preferences.drawing_sheet_personal_preferences(),
-            ..self.state.sheets.drawing_sheet_presets.clone()
+            edit: Some(SchematicEditAuthority::capture(model)),
+            catalog_revision: model.workspace.content.design_management.revision(),
+            baseline_personal: model.preferences.drawing_sheet_personal_preferences(),
+            ..self.dialogs.clone()
         };
-        self.state.sheets.drawing_sheet_presets = refreshed;
+        *self.dialogs = refreshed;
     }
 }
 
 fn validate_project_authority(
-    app: &AppState,
+    model: &Model,
     state: &DrawingSheetPresetDialogsState,
 ) -> Result<(), String> {
     state
         .edit
         .as_ref()
         .ok_or_else(|| "Custom sheet sizes has no project edit authority.".to_owned())?
-        .validate(app, "Custom sheet sizes")?;
-    if app.model.workspace.content.design_management.revision() != state.catalog_revision {
+        .validate(model, "Custom sheet sizes")?;
+    if model.workspace.content.design_management.revision() != state.catalog_revision {
         return Err(
             "Project drawing-sheet presets changed. Close and reopen Custom sheet sizes."
                 .to_owned(),
@@ -1367,8 +1294,20 @@ mod tests {
     };
 
     use crate::state::pdk_config::{PdkPublisherTrustStore, TrustedPdkPublisherKey};
+    use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     use super::*;
+
+    /// The custom sheet size dialogs over the parts of `state`.
+    fn preset_dialogs(state: &mut AppState) -> PresetDialogs<'_> {
+        PresetDialogs {
+            dialogs: &mut state.sheets.drawing_sheet_presets,
+            model: &mut state.model,
+            workbench: &mut state.workbench,
+            reveal_sheet_section: &mut state.sheets.reveal_sheet_section,
+        }
+    }
 
     /// Using a custom size from the library puts the open sheet on it, as one
     /// sheet edit, closes the library and shows the sheet's properties.
@@ -1397,7 +1336,8 @@ mod tests {
             &app.state.model
         ));
 
-        app.handle_preset_library_action(LibraryBodyAction::Use(PresetKey::from(&preset)));
+        preset_dialogs(&mut app.state)
+            .handle_preset_library_action(LibraryBodyAction::Use(PresetKey::from(&preset)));
 
         let sheet = app.state.model.active_drawing_sheet();
         assert_eq!(sheet.format.authored_size.label(), "Lab panel");
@@ -1605,7 +1545,9 @@ mod tests {
             &app.state.model.workspace.content.design_management,
             &personal,
         );
-        app.review_import_source(&source, &visible).unwrap();
+        preset_dialogs(&mut app.state)
+            .review_import_source(&source, &visible)
+            .unwrap();
         {
             let candidates = &mut app
                 .state
@@ -1627,7 +1569,10 @@ mod tests {
         }
         app.state.sheets.drawing_sheet_presets.transfer.json = source;
 
-        let message = app.apply_preset_import().unwrap().unwrap();
+        let message = preset_dialogs(&mut app.state)
+            .apply_preset_import()
+            .unwrap()
+            .unwrap();
         assert!(message.contains("durable receipt retained"));
         let settings = app
             .state

@@ -31,7 +31,7 @@ use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec,
 };
 use crate::workbench::framework::feature::Execute;
-use crate::workbench::framework::requests;
+use crate::workbench::framework::requests::{self, PrintActiveView};
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
 /// The dispatcher by key: where a key becomes the command it names, a
@@ -103,10 +103,26 @@ impl RSpiceApp {
             return;
         }
         features::execute(&mut self.state, spec.key);
+        self.after_contribution();
+    }
+
+    /// Answer what a feature's call raised for straight after it: the
+    /// commands it ran next, and the print workflow it opened.
+    pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
             |app, Execute(key)| app.execute_command_key(key),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, PrintActiveView| {
+                crate::workbench::app::open_hardcopy_workflow(
+                    app,
+                    crate::workbench::app::HardcopyWorkflow::Print,
+                );
+            },
         );
     }
 }

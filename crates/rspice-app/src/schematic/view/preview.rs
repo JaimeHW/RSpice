@@ -9,7 +9,7 @@ use crate::state::transform_preview_memo::{
     DrawingInputs, TransformPreviewKey, TransformPreviewOutcome,
 };
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
 use std::sync::Arc;
@@ -245,13 +245,13 @@ fn draw_stretch_selection_preview(
 /// What a canvas derivation reads from the open drawing besides its own
 /// inputs.
 pub(super) fn drawing_inputs(
-    state: &AppState,
+    model: &Model,
     symbol_context: &SchematicSymbolContext,
 ) -> DrawingInputs {
-    let catalog = super::sheet_visibility::active_sheet_catalog(state);
+    let catalog = model.active_sheet_catalog();
     DrawingInputs {
-        topology_version: state.model.schematic.topology_version(),
-        content_version: state.model.schematic.content_version(),
+        topology_version: model.schematic.topology_version(),
+        content_version: model.schematic.content_version(),
         symbol_revision: symbol_context.revision(),
         active_sheet: catalog.and_then(crate::state::SheetCatalog::active_sheet_id),
         sheet_catalog_revision: catalog.map(crate::state::SheetCatalog::revision),
@@ -295,7 +295,7 @@ pub(super) fn move_preview_diff(
         delta,
         mode,
         selection: Box::new(state.model.schematic.session.editor.selection.clone()),
-        drawing: drawing_inputs(state, symbol_context),
+        drawing: drawing_inputs(&state.model, symbol_context),
     };
     held_transform_preview(state, key, |state| {
         let (candidate, result) = move_preview_candidate(state, symbol_context, delta, mode);
@@ -323,7 +323,7 @@ pub(super) fn stretch_preview_diff(
         delta,
         target,
         policy,
-        drawing: drawing_inputs(state, symbol_context),
+        drawing: drawing_inputs(&state.model, symbol_context),
     };
     held_transform_preview(state, key, |state| {
         match stretch_preview_candidate(state, symbol_context, delta, target, policy) {

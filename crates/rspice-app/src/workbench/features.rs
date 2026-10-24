@@ -10,8 +10,10 @@
 use std::sync::LazyLock;
 
 use crate::state::command_catalog::CommandKey;
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, Peers, Reads, Session};
 use crate::workbench::framework::requests::Outbox;
 use crate::workbench::sheets::SheetsFeature;
@@ -84,6 +86,41 @@ macro_rules! features {
                 }
             )+
             None
+        }
+
+        /// Whether what the feature dialog step `key` names draws is open;
+        /// `false` for a key no registered feature draws.
+        pub(super) fn dialog_open(state: &AppState, key: DialogKey) -> bool {
+            $(
+                if let Some(dialog) = <$feature as Registered>::registry().dialog(key) {
+                    return (dialog.is_open)(&*state.$slot);
+                }
+            )+
+            false
+        }
+
+        /// Every dialog step each registered feature draws, with the slot of
+        /// the feature that draws it.
+        #[cfg(test)]
+        pub(super) fn registered_dialogs() -> Vec<(&'static str, DialogKey)> {
+            let mut dialogs = Vec::new();
+            $(
+                for dialog in <$feature as Registered>::registry().registered_dialogs() {
+                    dialogs.push((stringify!($slot), dialog.key));
+                }
+            )+
+            dialogs
+        }
+
+        /// Draw the feature dialog step `key` names for this frame, then
+        /// answer what it raised for straight after.
+        pub(super) fn render_dialog(app: &mut RSpiceApp, ctx: &egui::Context, key: DialogKey) {
+            $(
+                if let Some(dialog) = <$feature as Registered>::registry().dialog(key) {
+                    (dialog.render)(&mut <$feature as Registered>::cx(&mut app.state), ctx);
+                }
+            )else+
+            app.after_contribution();
         }
 
         /// Carry out the feature command `key` names, once the shell's

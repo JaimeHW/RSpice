@@ -86,12 +86,23 @@ pub(crate) fn apply_drawing_sheet_edit(
     state: &mut AppState,
     edit: DrawingSheetEdit,
 ) -> Result<String, String> {
-    if !drawing_sheet_editable(&state.workbench, &state.model) {
+    apply_drawing_sheet_edit_on(&mut state.model, &state.workbench, edit)
+}
+
+/// [`apply_drawing_sheet_edit`] over the parts it reads and writes: the model
+/// the sheet is published into, and the session that says whether the sheet
+/// can be edited at all.
+pub(crate) fn apply_drawing_sheet_edit_on(
+    model: &mut Model,
+    workbench: &WorkbenchSession,
+    edit: DrawingSheetEdit,
+) -> Result<String, String> {
+    if !drawing_sheet_editable(workbench, model) {
         return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
-    let mut transaction = SheetTransaction::open(state);
-    transaction.stage(state, edit)?;
-    transaction.commit(state)
+    let mut transaction = SheetTransaction::open(model);
+    transaction.stage(model, edit)?;
+    transaction.commit(model)
 }
 
 /// The governed sheet an edit lands on, as it stood when the edit began.
@@ -121,10 +132,10 @@ struct SheetTransaction {
 
 impl SheetTransaction {
     /// The active sheet's transaction, drafted from what the sheet draws.
-    fn open(state: &AppState) -> Self {
-        let cell_view_key = state.model.workspace.content.active_key();
-        let resolved = state.model.active_drawing_sheet();
-        let designs = &state.model.workspace.content.design_management;
+    fn open(model: &Model) -> Self {
+        let cell_view_key = model.workspace.content.active_key();
+        let resolved = model.active_drawing_sheet();
+        let designs = &model.workspace.content.design_management;
         let governed = designs
             .sheet_catalog(&cell_view_key)
             .and_then(|catalog| catalog.active())
@@ -153,7 +164,7 @@ impl SheetTransaction {
     }
 
     /// Stage `edit` in the draft, or refuse it in words the panel shows.
-    fn stage(&mut self, state: &AppState, edit: DrawingSheetEdit) -> Result<(), String> {
+    fn stage(&mut self, model: &Model, edit: DrawingSheetEdit) -> Result<(), String> {
         let draft = &mut self.draft;
         match edit {
             DrawingSheetEdit::Size(standard) => {
@@ -256,13 +267,13 @@ impl SheetTransaction {
             }
             DrawingSheetEdit::TitleField(field, value) => {
                 refuse_organization_locked(draft, field)?;
-                self.stage_title_value(state, field, value);
+                self.stage_title_value(model, field, value);
             }
             DrawingSheetEdit::Status(status) => {
-                self.stage_document_control(state, |control| control.status = status);
+                self.stage_document_control(model, |control| control.status = status);
             }
             DrawingSheetEdit::ChangeReference(reference) => {
-                self.stage_document_control(state, |control| {
+                self.stage_document_control(model, |control| {
                     control.change_reference = reference;
                 });
             }
@@ -273,25 +284,19 @@ impl SheetTransaction {
     /// Stage one title-block value where its field keeps it: the revision
     /// and its date in the document control, the values every sheet shares
     /// on the project, and the rest on this sheet.
-    fn stage_title_value(
-        &mut self,
-        state: &AppState,
-        field: DrawingSheetTitleFieldId,
-        value: String,
-    ) {
+    fn stage_title_value(&mut self, model: &Model, field: DrawingSheetTitleFieldId, value: String) {
         match field {
             DrawingSheetTitleFieldId::Revision => {
-                self.stage_document_control(state, |control| control.revision = value);
+                self.stage_document_control(model, |control| control.revision = value);
             }
             DrawingSheetTitleFieldId::Date => {
-                self.stage_document_control(state, |control| control.revision_date_utc = value);
+                self.stage_document_control(model, |control| control.revision_date_utc = value);
             }
             _ if field.is_project_owned() => {
                 // Every project-owned value staged is published, so the ones
                 // not being edited are staged as they stand, including a
                 // value an older build left on the sheet itself.
-                let mut values = state
-                    .model
+                let mut values = model
                     .workspace
                     .content
                     .design_management
@@ -327,11 +332,10 @@ impl SheetTransaction {
     /// Stage the project's document control with one change made to it.
     fn stage_document_control(
         &mut self,
-        state: &AppState,
+        model: &Model,
         change: impl FnOnce(&mut DrawingSheetDocumentControl),
     ) {
-        let mut control = state
-            .model
+        let mut control = model
             .workspace
             .content
             .design_management
@@ -343,13 +347,13 @@ impl SheetTransaction {
     }
 
     /// Validate the draft whole and publish it as one undo entry.
-    fn commit(self, state: &mut AppState) -> Result<String, String> {
+    fn commit(self, model: &mut Model) -> Result<String, String> {
         let mut draft = self.draft.clone();
         draft.enforce_managed_authority(&self.baseline);
         let format = draft.validate()?;
         match &self.governed {
-            Some(governed) => apply_governed_sheet_edit(state, &self, governed, format),
-            None => apply_first_sheet_edit(state, &self, format),
+            Some(governed) => apply_governed_sheet_edit(model, &self, governed, format),
+            None => apply_first_sheet_edit(model, &self, format),
         }
     }
 }
@@ -376,14 +380,14 @@ fn refuse_organization_locked(
 
 /// The paper every other sheet of the active schematic is drawn on: a sheet
 /// that follows the project default is drawn on the default's.
-fn other_sheet_sizes(state: &AppState) -> Vec<AuthoredDrawingSheetSize> {
-    let designs = &state.model.workspace.content.design_management;
+fn other_sheet_sizes(model: &Model) -> Vec<AuthoredDrawingSheetSize> {
+    let designs = &model.workspace.content.design_management;
     let default_size = &designs
         .drawing_sheet_settings()
         .default_format
         .authored_size;
     designs
-        .sheet_catalog(&state.model.workspace.content.active_key())
+        .sheet_catalog(&model.workspace.content.active_key())
         .map(|catalog| {
             let active = catalog.active_sheet_id();
             catalog
@@ -408,7 +412,7 @@ pub(crate) fn mixed_size_advisory(
 ) -> Option<&'static str> {
     (format.frame_convention() == DrawingSheetFrameConvention::AsmeY141
         && drawing_sheet_sizes_mixed(
-            std::iter::once(&format.authored_size).chain(&other_sheet_sizes(state)),
+            std::iter::once(&format.authored_size).chain(&other_sheet_sizes(&state.model)),
         ))
     .then_some(DRAWING_SHEET_MIXED_SIZES_ADVISORY)
 }
@@ -464,19 +468,19 @@ fn edited_sheet_format(
 }
 
 fn apply_governed_sheet_edit(
-    state: &mut AppState,
+    model: &mut Model,
     transaction: &SheetTransaction,
     governed: &GovernedSheet,
     format: SchematicSheetFormat,
 ) -> Result<String, String> {
-    let before = (*state.model.workspace.content.design_management).clone();
+    let before = (*model.workspace.content.design_management).clone();
     let target_authority = before
         .sheet_catalog(&governed.cell_view_key)
         .and_then(|catalog| catalog.find(governed.sheet_id))
         .map(|sheet| sheet.page_format().clone())
         .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
     let mut candidate = before.clone();
-    let personal_before = state.model.preferences.drawing_sheet_personal_preferences();
+    let personal_before = model.preferences.drawing_sheet_personal_preferences();
     let mut personal = personal_before.clone();
     let sheet_format = edited_sheet_format(
         &mut candidate,
@@ -518,26 +522,26 @@ fn apply_governed_sheet_edit(
         transaction.draft.save_custom_preset,
         project_settings_changed,
     )?;
-    commit_sheet_candidate(state, before, candidate, personal_before, personal)?;
+    commit_sheet_candidate(model, before, candidate, personal_before, personal)?;
     Ok(format!("Sheet {} changed.", transaction.sheet_name))
 }
 
 /// The first edit to a schematic's sheet gives it its governed sheet.
 fn apply_first_sheet_edit(
-    state: &mut AppState,
+    model: &mut Model,
     transaction: &SheetTransaction,
     format: SchematicSheetFormat,
 ) -> Result<String, String> {
-    let before = (*state.model.workspace.content.design_management).clone();
+    let before = (*model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
-    let personal_before = state.model.preferences.drawing_sheet_personal_preferences();
+    let personal_before = model.preferences.drawing_sheet_personal_preferences();
     let mut personal = personal_before.clone();
-    let owner_key = state.model.workspace.content.active_key();
+    let owner_key = model.workspace.content.active_key();
     let sheet_id = candidate
         .bootstrap_for_cell_view(
             &owner_key,
             transaction.sheet_name.clone(),
-            all_stable_object_ids(&state.model.schematic),
+            all_stable_object_ids(&model.schematic),
         )
         .map_err(|error| error.to_string())?;
     let sheet_format =
@@ -566,7 +570,7 @@ fn apply_first_sheet_edit(
         transaction.draft.save_custom_preset,
         project_settings_changed,
     )?;
-    commit_sheet_candidate(state, before, candidate, personal_before, personal)?;
+    commit_sheet_candidate(model, before, candidate, personal_before, personal)?;
     Ok("The active schematic now has its own drawing sheet.".to_owned())
 }
 
@@ -607,44 +611,37 @@ fn record_drawing_sheet_transaction(
 
 /// Publish `candidate` and the person's custom sizes as one undo entry.
 fn commit_sheet_candidate(
-    state: &mut AppState,
+    model: &mut Model,
     before: crate::state::DesignManagementCatalog,
     candidate: crate::state::DesignManagementCatalog,
     personal_before: crate::workbench::DrawingSheetPersonalPreferences,
     personal: crate::workbench::DrawingSheetPersonalPreferences,
 ) -> Result<(), String> {
-    let mut preferences = state.model.preferences.clone();
+    let mut preferences = model.preferences.clone();
     if personal != personal_before {
         preferences.set_drawing_sheet_personal_preferences(personal)?;
     }
     candidate.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = state
-        .model
-        .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = state.model.workspace.content.active_schematic_reference();
-    let committed_revision = state
-        .model
+    let schematic_tx = model.prepare_design_management_schematic_transaction(&candidate)?;
+    let owner = model.workspace.content.active_schematic_reference();
+    let committed_revision = model
         .workspace
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
-    state
-        .model
-        .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*state.model.workspace.content.design_management).clone();
-    state
-        .model
-        .record_design_management_transaction(DesignManagementHistoryEntry {
-            description: "Sheet format".to_owned(),
-            owner,
-            before,
-            after,
-            before_schematics: schematic_tx.before,
-            after_schematics: schematic_tx.after,
-            references: schematic_tx.references,
-            committed_revision,
-        });
-    state.model.preferences = preferences;
+    model.apply_design_management_schematic_transaction(&schematic_tx);
+    let after = (*model.workspace.content.design_management).clone();
+    model.record_design_management_transaction(DesignManagementHistoryEntry {
+        description: "Sheet format".to_owned(),
+        owner,
+        before,
+        after,
+        before_schematics: schematic_tx.before,
+        after_schematics: schematic_tx.after,
+        references: schematic_tx.references,
+        committed_revision,
+    });
+    model.preferences = preferences;
     Ok(())
 }
 

@@ -281,7 +281,14 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// signatures are gone. The other two slots were never occupied: the
 /// measurement stood at 769 when the work began, and the ceiling follows it
 /// down rather than keeping them.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 721;
+///
+/// 721 -> 718 on 2026-10-24, when the sheets feature began drawing its own
+/// dialogs. The drawing-sheet defaults and the sheet format manager applied
+/// their drafts, and published the catalog they built, through the
+/// application whole; they read and write only their dialog and the model,
+/// so they take those. The new feature dialog entry the shell's dialog order
+/// calls takes the application once, for all of them.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 718;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

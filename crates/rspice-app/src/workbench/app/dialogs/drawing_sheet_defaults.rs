@@ -32,8 +32,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::DrawingSheetPersonalPreferences;
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model};
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
+use crate::workbench::state::WorkbenchSession;
 
 use super::drawing_sheet_preview::{drawing_sheet_preview, sheet_desk_color};
 
@@ -97,28 +98,26 @@ pub(crate) fn open_drawing_sheet_defaults(
 /// save settings. An untouched draft silently follows so the catalog stays
 /// current; a touched draft keeps its baseline and the authority check
 /// reports the conflict instead.
-fn refresh_untouched_baselines(state: &mut AppState) {
-    let catalog_revision = state.model.workspace.content.design_management.revision();
-    if state.sheets.drawing_sheet_defaults.catalog_revision != catalog_revision
-        && state.sheets.drawing_sheet_defaults.draft_project
-            == state.sheets.drawing_sheet_defaults.baseline_project
+fn refresh_untouched_baselines(defaults: &mut DrawingSheetDefaultsDialogState, model: &Model) {
+    let catalog_revision = model.workspace.content.design_management.revision();
+    if defaults.catalog_revision != catalog_revision
+        && defaults.draft_project == defaults.baseline_project
     {
-        let project = state
-            .model
+        let project = model
             .workspace
             .content
             .design_management
             .drawing_sheet_settings()
             .clone();
-        let authority = SchematicEditAuthority::capture(state);
-        let dialog = &mut state.sheets.drawing_sheet_defaults;
+        let authority = SchematicEditAuthority::capture(model);
+        let dialog = &mut *defaults;
         dialog.baseline_project = project.clone();
         dialog.draft_project = project;
         dialog.catalog_revision = catalog_revision;
         dialog.edit = Some(authority);
     }
-    let personal_now = state.model.preferences.drawing_sheet_personal_preferences();
-    let dialog = &mut state.sheets.drawing_sheet_defaults;
+    let personal_now = model.preferences.drawing_sheet_personal_preferences();
+    let dialog = defaults;
     if dialog.draft_personal == dialog.baseline_personal && personal_now != dialog.baseline_personal
     {
         dialog.baseline_personal = personal_now.clone();
@@ -126,64 +125,68 @@ fn refresh_untouched_baselines(state: &mut AppState) {
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_drawing_sheet_defaults_dialog(&mut self, ctx: &Context) {
-        if !self.state.sheets.drawing_sheet_defaults.open {
-            return;
-        }
-        refresh_untouched_baselines(&mut self.state);
-        let following_sheets = DefaultReach::of(&self.state);
-        let transaction = &self.state.sheets.drawing_sheet_defaults;
-        let project_changed = transaction.draft_project != transaction.baseline_project;
-        let personal_changed = transaction.draft_personal != transaction.baseline_personal;
-        let project_authority = project_changed
-            .then(|| validate_project_authority(&self.state, transaction).err())
-            .flatten();
-        let project_editable = validate_project_authority(&self.state, transaction).is_ok();
-        let valid = transaction.draft_project.validate().is_ok()
-            && transaction.draft_personal.validate().is_ok();
-        let enabled = valid && project_authority.is_none() && (project_changed || personal_changed);
+/// Draw the drawing-sheet defaults while they are open, over the open
+/// drawing's model, opening the custom sheet size library over them when the
+/// reader asks for a new size.
+pub(crate) fn render_drawing_sheet_defaults_dialog(
+    ctx: &Context,
+    defaults: &mut DrawingSheetDefaultsDialogState,
+    presets: &mut super::drawing_sheet_presets::DrawingSheetPresetDialogsState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) {
+    if !defaults.open {
+        return;
+    }
+    refresh_untouched_baselines(defaults, model);
+    let following_sheets = DefaultReach::of(model);
+    let transaction = &*defaults;
+    let project_changed = transaction.draft_project != transaction.baseline_project;
+    let personal_changed = transaction.draft_personal != transaction.baseline_personal;
+    let project_authority = project_changed
+        .then(|| validate_project_authority(model, transaction).err())
+        .flatten();
+    let project_editable = validate_project_authority(model, transaction).is_ok();
+    let valid = transaction.draft_project.validate().is_ok()
+        && transaction.draft_personal.validate().is_ok();
+    let enabled = valid && project_authority.is_none() && (project_changed || personal_changed);
 
-        let mut open_presets = false;
-        let choice = Dialog::new(TITLE, "Save sheet defaults")
-            .description(DESCRIPTION)
-            .size(DialogSize::DrawingSheetWorkflow)
-            // The body is one bordered shell whose regions meet on their own
-            // 1 px seams. The dialog's default 12 pt inset framed that shell in
-            // a band of elevated background instead of letting it reach the
-            // surface edge.
-            .flush_body()
-            .ghost("Cancel")
-            .primary_enabled(enabled)
-            .show(ctx, |ui| {
-                drawing_sheet_defaults_body(
-                    ui,
-                    &mut self.state.sheets.drawing_sheet_defaults,
-                    project_authority.as_deref(),
-                    project_editable,
-                    following_sheets.as_ref(),
-                    &mut open_presets,
-                );
-            });
-        if open_presets {
-            super::drawing_sheet_presets::open_custom_sheet_size_library(
-                &mut self.state.sheets.drawing_sheet_presets,
-                &self.state.model,
+    let mut open_presets = false;
+    let choice = Dialog::new(TITLE, "Save sheet defaults")
+        .description(DESCRIPTION)
+        .size(DialogSize::DrawingSheetWorkflow)
+        // The body is one bordered shell whose regions meet on their own
+        // 1 px seams. The dialog's default 12 pt inset framed that shell in
+        // a band of elevated background instead of letting it reach the
+        // surface edge.
+        .flush_body()
+        .ghost("Cancel")
+        .primary_enabled(enabled)
+        .show(ctx, |ui| {
+            drawing_sheet_defaults_body(
+                ui,
+                defaults,
+                project_authority.as_deref(),
+                project_editable,
+                following_sheets.as_ref(),
+                &mut open_presets,
             );
-        }
-        match choice {
-            DialogChoice::Primary => match apply_drawing_sheet_defaults(self) {
-                Ok(message) => {
-                    self.state.prompt(message);
-                    self.state.sheets.drawing_sheet_defaults = Default::default();
-                }
-                Err(error) => self.state.sheets.drawing_sheet_defaults.error = Some(error),
-            },
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.sheets.drawing_sheet_defaults = Default::default();
+        });
+    if open_presets {
+        super::drawing_sheet_presets::open_custom_sheet_size_library(presets, model);
+    }
+    match choice {
+        DialogChoice::Primary => match apply_drawing_sheet_defaults(defaults, model) {
+            Ok(message) => {
+                workbench.prompt(message);
+                *defaults = Default::default();
             }
-            DialogChoice::Secondary | DialogChoice::None => {}
+            Err(error) => defaults.error = Some(error),
+        },
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            *defaults = Default::default();
         }
+        DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 
@@ -199,13 +202,12 @@ struct DefaultReach {
 impl DefaultReach {
     /// The reach of the project default into the active schematic, when it
     /// has sheets for it to reach.
-    fn of(state: &AppState) -> Option<Self> {
-        let catalog = state
-            .model
+    fn of(model: &Model) -> Option<Self> {
+        let catalog = model
             .workspace
             .content
             .design_management
-            .sheet_catalog(&state.model.workspace.content.active_key())?;
+            .sheet_catalog(&model.workspace.content.active_key())?;
         let mut reach = Self::default();
         for sheet in catalog.sheets() {
             let names =
@@ -1666,15 +1668,15 @@ fn enum_combo<T: Copy + PartialEq>(
 }
 
 fn validate_project_authority(
-    app: &AppState,
+    model: &Model,
     state: &DrawingSheetDefaultsDialogState,
 ) -> Result<(), String> {
     state
         .edit
         .as_ref()
         .ok_or_else(|| "Drawing-sheet Defaults has no project edit authority.".to_owned())?
-        .validate(app, "Drawing-sheet Defaults")?;
-    if app.model.workspace.content.design_management.revision() != state.catalog_revision {
+        .validate(model, "Drawing-sheet Defaults")?;
+    if model.workspace.content.design_management.revision() != state.catalog_revision {
         return Err(
             "Project drawing-sheet settings changed. Close and reopen Defaults.".to_owned(),
         );
@@ -1682,8 +1684,11 @@ fn validate_project_authority(
     Ok(())
 }
 
-fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
-    let mut transaction = app.state.sheets.drawing_sheet_defaults.clone();
+fn apply_drawing_sheet_defaults(
+    defaults: &DrawingSheetDefaultsDialogState,
+    model: &mut Model,
+) -> Result<String, String> {
+    let mut transaction = defaults.clone();
     enforce_managed_default_authority(
         &mut transaction.draft_project.default_format,
         &transaction.baseline_project.default_format,
@@ -1713,13 +1718,7 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
         .validate()
         .map_err(|error| error.to_string())?;
     transaction.draft_personal.validate()?;
-    if app
-        .state
-        .model
-        .preferences
-        .drawing_sheet_personal_preferences()
-        != transaction.baseline_personal
-    {
+    if model.preferences.drawing_sheet_personal_preferences() != transaction.baseline_personal {
         return Err(
             "Personal drawing-sheet preferences changed. Close and reopen Defaults.".to_owned(),
         );
@@ -1730,20 +1729,20 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
         return Ok("Drawing-sheet defaults already matched the saved values.".to_owned());
     }
 
-    let mut personal_candidate = app.state.model.preferences.clone();
+    let mut personal_candidate = model.preferences.clone();
     personal_candidate
         .set_drawing_sheet_personal_preferences(transaction.draft_personal.clone())?;
 
     if project_changed {
-        validate_project_authority(&app.state, &transaction)?;
-        let before = (*app.state.model.workspace.content.design_management).clone();
+        validate_project_authority(model, &transaction)?;
+        let before = (*model.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         candidate
             .update_drawing_sheet_settings(candidate.revision(), transaction.draft_project.clone())
             .map_err(|error| error.to_string())?;
-        commit_project_candidate(app, "Drawing-sheet defaults", before, candidate)?;
+        commit_project_candidate(model, "Drawing-sheet defaults", before, candidate)?;
     }
-    app.state.model.preferences = personal_candidate;
+    model.preferences = personal_candidate;
 
     Ok(match (project_changed, personal_changed) {
         (true, true) => {
@@ -1771,51 +1770,38 @@ fn enforce_managed_default_authority(
 }
 
 pub(super) fn commit_project_candidate(
-    app: &mut RSpiceApp,
+    model: &mut Model,
     description: &str,
     before: crate::state::DesignManagementCatalog,
     candidate: crate::state::DesignManagementCatalog,
 ) -> Result<(), String> {
     candidate.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = app
-        .state
-        .model
-        .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app
-        .state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference();
-    let committed_revision = app
-        .state
-        .model
+    let schematic_tx = model.prepare_design_management_schematic_transaction(&candidate)?;
+    let owner = model.workspace.content.active_schematic_reference();
+    let committed_revision = model
         .workspace
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
-    app.state
-        .model
-        .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*app.state.model.workspace.content.design_management).clone();
-    app.state
-        .model
-        .record_design_management_transaction(DesignManagementHistoryEntry {
-            description: description.to_owned(),
-            owner,
-            before,
-            after,
-            before_schematics: schematic_tx.before,
-            after_schematics: schematic_tx.after,
-            references: schematic_tx.references,
-            committed_revision,
-        });
+    model.apply_design_management_schematic_transaction(&schematic_tx);
+    let after = (*model.workspace.content.design_management).clone();
+    model.record_design_management_transaction(DesignManagementHistoryEntry {
+        description: description.to_owned(),
+        owner,
+        before,
+        after,
+        before_schematics: schematic_tx.before,
+        after_schematics: schematic_tx.after,
+        references: schematic_tx.references,
+        committed_revision,
+    });
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
 
     /// A format reaches several sheets through the project default: a new
     /// default is the new format of every sheet that follows it, a sheet with
@@ -1827,7 +1813,7 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        assert_eq!(DefaultReach::of(&app.state), None);
+        assert_eq!(DefaultReach::of(&app.state.model), None);
         let key = app.state.model.workspace.content.active_key();
         let designs = &mut app.state.model.workspace.content.design_management;
         let first = designs
@@ -1879,7 +1865,7 @@ mod tests {
         }
         catalog.set_active(first).unwrap();
 
-        let reach = DefaultReach::of(&app.state).unwrap();
+        let reach = DefaultReach::of(&app.state.model).unwrap();
         assert_eq!(reach.following_text(), "Sheet 1");
         assert_eq!(reach.own_text().as_deref(), Some("Sheet 2"));
 
@@ -1897,7 +1883,11 @@ mod tests {
         )
         .try_update(|draft| draft.inheritance = DrawingSheetInheritance::ProjectDefault)
         .unwrap();
-        apply_drawing_sheet_defaults(&mut app).unwrap();
+        apply_drawing_sheet_defaults(
+            &app.state.sheets.drawing_sheet_defaults,
+            &mut app.state.model,
+        )
+        .unwrap();
 
         let drawn = |app: &RSpiceApp| {
             app.state
@@ -1964,7 +1954,11 @@ mod tests {
             .revision();
 
         assert_eq!(
-            apply_drawing_sheet_defaults(&mut app).unwrap(),
+            apply_drawing_sheet_defaults(
+                &app.state.sheets.drawing_sheet_defaults,
+                &mut app.state.model
+            )
+            .unwrap(),
             "Drawing-sheet defaults already matched the saved values."
         );
         assert_eq!(
@@ -2017,7 +2011,11 @@ mod tests {
             .content
             .design_management
             .revision();
-        apply_drawing_sheet_defaults(&mut app).unwrap();
+        apply_drawing_sheet_defaults(
+            &app.state.sheets.drawing_sheet_defaults,
+            &mut app.state.model,
+        )
+        .unwrap();
 
         assert_eq!(
             app.state
@@ -2090,7 +2088,11 @@ mod tests {
             })
             .unwrap();
 
-        apply_drawing_sheet_defaults(&mut app).unwrap();
+        apply_drawing_sheet_defaults(
+            &app.state.sheets.drawing_sheet_defaults,
+            &mut app.state.model,
+        )
+        .unwrap();
 
         let saved = &app
             .state

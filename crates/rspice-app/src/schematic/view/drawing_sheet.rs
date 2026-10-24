@@ -5,6 +5,7 @@ use super::{AppState, SchematicSymbolContext, schematic_symbol_context};
 use crate::state::overflow_memo::OverflowKey;
 use crate::workbench::app_state::{Model, model_design_view};
 use egui::{Painter, Rect};
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
 pub(crate) use rspice_schematic_editor::view::drawing_sheet::{
     ActiveDrawingSheet, DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetOverflowItem,
@@ -45,41 +46,47 @@ pub(super) fn draw_overflow_advisories(
     if !sheet_view::overflow_advisories_shown(painter, viewport) {
         return;
     }
-    let summary = held_overflow_summary(state, symbol_context, sheet);
+    let summary = held_overflow_summary(&state.model, review_markers(state), symbol_context, sheet);
     sheet_view::draw_overflow_advisories(painter, available, viewport, &summary);
 }
 
 fn overflow_key(
-    state: &AppState,
+    model: &Model,
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) -> OverflowKey {
     OverflowKey {
-        drawing: super::preview::drawing_inputs(state, symbol_context),
+        drawing: super::preview::drawing_inputs(model, symbol_context),
         geometry: sheet.geometry.clone(),
     }
 }
 
 /// The advisories held for the drawing and sheet as they stand, or found
-/// afresh when nothing is held for them.
+/// afresh, through the drawing as it shows `review_markers`, when nothing is
+/// held for them.
 fn held_overflow_summary(
-    state: &AppState,
+    model: &Model,
+    review_markers: SchematicReviewMarkerVisibility,
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) -> Arc<DrawingSheetOverflowSummary> {
-    state
-        .model
+    model
         .schematic
         .session
         .overflow_summary
-        .current(&overflow_key(state, symbol_context, sheet))
+        .current(&overflow_key(model, symbol_context, sheet))
         .unwrap_or_else(|| {
             Arc::new(sheet_view::drawing_sheet_overflow_summary(
-                &super::schematic_design_view(state),
+                &model_design_view(model, review_markers),
                 symbol_context,
                 sheet,
             ))
         })
+}
+
+/// The review markers the drawing shows.
+fn review_markers(state: &AppState) -> SchematicReviewMarkerVisibility {
+    state.design.schematic_visibility.review_markers
 }
 
 /// Find the overflow advisories afresh only when the drawing or the sheet
@@ -104,7 +111,7 @@ fn hold_overflow_summary(
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) {
-    let key = overflow_key(state, symbol_context, sheet);
+    let key = overflow_key(&state.model, symbol_context, sheet);
     if state
         .model
         .schematic
@@ -136,7 +143,18 @@ pub(crate) fn drawing_sheet_overflow_summary(
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) -> DrawingSheetOverflowSummary {
-    held_overflow_summary(state, symbol_context, sheet)
+    overflow_summary(&state.model, review_markers(state), symbol_context, sheet)
+}
+
+/// [`drawing_sheet_overflow_summary`], through the drawing as it shows
+/// `review_markers`.
+pub(crate) fn overflow_summary(
+    model: &Model,
+    review_markers: SchematicReviewMarkerVisibility,
+    symbol_context: &SchematicSymbolContext,
+    sheet: &ActiveDrawingSheet,
+) -> DrawingSheetOverflowSummary {
+    held_overflow_summary(model, review_markers, symbol_context, sheet)
         .as_ref()
         .clone()
 }
@@ -145,7 +163,7 @@ pub(crate) fn drawing_sheet_overflow_summary(
 /// `review_markers`.
 pub(crate) fn drawing_sheet_printable_preview(
     model: &Model,
-    review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+    review_markers: SchematicReviewMarkerVisibility,
 ) -> Vec<DrawingSheetPrintablePreview> {
     sheet_view::drawing_sheet_printable_preview(
         &model_design_view(model, review_markers),
@@ -166,10 +184,21 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     state: &mut AppState,
     target: DrawingSheetOverflowTarget,
 ) -> bool {
+    let review_markers = review_markers(state);
+    show_overflow_target(&mut state.model, review_markers, target)
+}
+
+/// Select `target` and center the canvas on it, as the advisories the
+/// drawing shows with `review_markers` place it.
+pub(crate) fn show_overflow_target(
+    model: &mut Model,
+    review_markers: SchematicReviewMarkerVisibility,
+    target: DrawingSheetOverflowTarget,
+) -> bool {
     let center = {
-        let symbol_context = schematic_symbol_context(state);
-        let sheet = state.model.active_drawing_sheet();
-        drawing_sheet_overflow_summary(state, &symbol_context, &sheet)
+        let symbol_context = model.schematic_symbol_context();
+        let sheet = model.active_drawing_sheet();
+        overflow_summary(model, review_markers, &symbol_context, &sheet)
             .items
             .into_iter()
             .find(|item| item.target == target)
@@ -180,8 +209,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     };
     match target {
         DrawingSheetOverflowTarget::Component(id) => {
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -189,8 +217,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_component(id);
         }
         DrawingSheetOverflowTarget::Wire(id) => {
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -198,17 +225,10 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_wire(id);
         }
         DrawingSheetOverflowTarget::Bus(id) => {
-            state
-                .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .select_only_bus(id);
+            model.schematic.session.editor.selection.select_only_bus(id);
         }
         DrawingSheetOverflowTarget::BusTap(id) => {
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -216,8 +236,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_bus_tap(id);
         }
         DrawingSheetOverflowTarget::Junction(id) => {
-            let Some(position) = state
-                .model
+            let Some(position) = model
                 .schematic
                 .document()
                 .junctions
@@ -227,8 +246,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
             else {
                 return false;
             };
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -236,8 +254,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_junction(position);
         }
         DrawingSheetOverflowTarget::NetLabel(id) => {
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -245,8 +262,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_net_label(id);
         }
         DrawingSheetOverflowTarget::DesignNote(id) => {
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -254,8 +270,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_design_note(id);
         }
         DrawingSheetOverflowTarget::DocumentationShape(id) => {
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
@@ -263,7 +278,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_documentation_shape(id);
         }
     }
-    state.model.schematic.session.editor.center_request = Some(center);
+    model.schematic.session.editor.center_request = Some(center);
     true
 }
 
@@ -376,7 +391,7 @@ mod tests {
                 .schematic
                 .session
                 .overflow_summary
-                .current(&overflow_key(state, &symbol_context, sheet))
+                .current(&overflow_key(&state.model, &symbol_context, sheet))
         };
         let hold = |state: &mut AppState, sheet: &ActiveDrawingSheet| {
             let symbol_context = schematic_symbol_context(state);

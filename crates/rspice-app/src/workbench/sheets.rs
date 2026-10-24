@@ -1,16 +1,26 @@
 //! The sheets feature: the drawing sheet a schematic is drawn on, its
 //! properties, formats and sizes, and the sheets of one drawing.
 //!
-//! Its commands run in a [`Cx`] over the feature's own dialogs, the model and
-//! the session. Whatever the open drawing is, the model answers; design's
-//! review markers, which the format manager's previews show, are read through
-//! the [`DesignPort`](crate::workbench::framework::feature::DesignPort).
+//! Its commands and its dialogs run in a [`Cx`] over the feature's own dialog
+//! state, the model and the session. Whatever the open drawing is, the model
+//! answers; design's review markers, which the format manager's previews and
+//! the overflow review show, are read through the
+//! [`DesignPort`](crate::workbench::framework::feature::DesignPort).
 
 pub(crate) mod commands;
 #[cfg(test)]
 mod tests;
 
+use egui::Context;
+
 use crate::state::ViewType;
+use crate::workbench::app::dialogs::delete_sheet::render_delete_sheet_confirmation;
+use crate::workbench::app::dialogs::drawing_sheet_defaults::render_drawing_sheet_defaults_dialog;
+use crate::workbench::app::dialogs::drawing_sheet_overflow::{
+    OverflowFollowUp, render_drawing_sheet_overflow_dialog,
+};
+use crate::workbench::app::dialogs::drawing_sheet_presets::PresetDialogs;
+use crate::workbench::app::dialogs::drawing_sheet_support::render_drawing_sheet_support_dialogs;
 use crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable;
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::app::{
@@ -18,7 +28,11 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
-use crate::workbench::framework::feature::{CommandSet, Cx, Feature, FeatureRegistry, Reads};
+use crate::workbench::framework::dialogs::DialogKey;
+use crate::workbench::framework::feature::{
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, Reads, Session,
+};
+use crate::workbench::framework::requests::PrintActiveView;
 use crate::workbench::slots::SheetsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 
@@ -33,7 +47,85 @@ impl Feature for SheetsFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SheetsCommand>();
+        registry.dialogs(DIALOGS);
     }
+}
+
+/// The dialog steps the feature draws, each under the key the shell's dialog
+/// order lists it by.
+const DIALOGS: &[FeatureDialog<SheetsFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("sheets.drawing_sheet_overflow"),
+        is_open: |sheets| sheets.drawing_sheet_overflow_open,
+        render: render_overflow_review,
+    },
+    FeatureDialog {
+        key: DialogKey("sheets.delete_sheet"),
+        is_open: |sheets| sheets.delete_sheet.is_some(),
+        render: |cx, ctx| {
+            render_delete_sheet_confirmation(ctx, &mut cx.state.delete_sheet, cx.model, cx.wb);
+        },
+    },
+    FeatureDialog {
+        key: DialogKey("sheets.drawing_sheet_defaults"),
+        is_open: |sheets| sheets.drawing_sheet_defaults.open,
+        render: |cx, ctx| {
+            render_drawing_sheet_defaults_dialog(
+                ctx,
+                &mut cx.state.drawing_sheet_defaults,
+                &mut cx.state.drawing_sheet_presets,
+                cx.model,
+                cx.wb,
+            );
+        },
+    },
+    FeatureDialog {
+        key: DialogKey("sheets.drawing_sheet_presets"),
+        is_open: |sheets| sheets.drawing_sheet_presets.any_open(),
+        render: |cx, ctx| {
+            PresetDialogs {
+                dialogs: &mut cx.state.drawing_sheet_presets,
+                model: cx.model,
+                workbench: cx.wb,
+                reveal_sheet_section: &mut cx.state.reveal_sheet_section,
+            }
+            .render(ctx);
+        },
+    },
+    FeatureDialog {
+        key: DialogKey("sheets.drawing_sheet_support"),
+        is_open: |sheets| sheets.drawing_sheet_support.any_open(),
+        render: |cx, ctx| {
+            render_drawing_sheet_support_dialogs(
+                ctx,
+                &mut cx.state.drawing_sheet_support,
+                cx.model,
+                cx.wb,
+                &mut cx.state.reveal_sheet_section,
+            );
+        },
+    },
+];
+
+/// The overflow review, and the step it hands on: the sheet's properties, or
+/// the print workflow, which opens straight after the review is drawn.
+fn render_overflow_review(cx: &mut Cx<'_, SheetsFeature>, ctx: &Context) {
+    let review_markers = cx.peers.design().review_markers();
+    match render_drawing_sheet_overflow_dialog(
+        ctx,
+        &mut cx.state.drawing_sheet_overflow_open,
+        cx.model,
+        review_markers,
+    ) {
+        Some(OverflowFollowUp::SheetProperties) => reveal_sheet_properties(cx),
+        Some(OverflowFollowUp::Print) => cx.wb.outbox().push(PrintActiveView),
+        None => {}
+    }
+}
+
+/// Show the open sheet's properties in the inspector.
+fn reveal_sheet_properties(cx: &mut Cx<'_, SheetsFeature>) {
+    sheet_actions::reveal_sheet_properties_on(cx.model, cx.wb, &mut cx.state.reveal_sheet_section);
 }
 
 /// Whether the design workspace shows a schematic or testbench editor: where
@@ -158,11 +250,7 @@ impl CommandSet for SheetsCommand {
         match self {
             // Sheet properties and custom sheet sizes are disabled whenever
             // they would refuse, so a refusal here needs no words.
-            Self::SheetProperties => {
-                if sheet_actions::reveal_sheet_properties_on(cx.model, cx.wb) {
-                    cx.state.reveal_sheet_section = true;
-                }
-            }
+            Self::SheetProperties => reveal_sheet_properties(cx),
             Self::SheetFormatManager => {
                 let review_markers = cx.peers.design().review_markers();
                 if let Err(error) = open_sheet_format_manager(
