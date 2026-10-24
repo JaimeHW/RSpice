@@ -457,3 +457,19 @@ oracle = "O6"
 expect = "c12::errors"
 abs = 1e-12
 why = "by the O5-O1 references every step lies 1.6 to 5.9 mV above the narrowed window's 7 mV, so codes 1..15 are each flagged once, at line 40, when the reading is taken: k 100 us + 99 us; one record per code, exact on the 1 ps tick"
+
+# ---- ckpt: the testbench resumed from inside its trim sequence ---------------
+# The design's continuation contract: the run resumed from the 850 us
+# checkpoint, between code 8's latch and its reading, is the uninterrupted run
+# from there on, to the testbench's own $finish, which ends both runs.
+
+[[q]]
+id = "resume"
+analysis = "ckpt"
+variants = ["full"]
+kind = "identical"
+window = [8.5e-4, 1.65e-3]
+trials = 1
+oracle = "O7"
+abs = 0.0
+why = "resumed = uninterrupted over [850 us, the finish]: every event and every analog signal exact at the accepted times the runs share, as the engine's own resume is bit for bit (design)"

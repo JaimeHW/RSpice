@@ -53,3 +53,13 @@ variants = ["full", "unrolled", "top", "oomr"]
 oracles = ["O5", "O6", "O5-O1"]
 timeout_s = 30
 phase = "P3"
+
+# ckpt: full, checkpointed inside its trim sequence and resumed to the
+# testbench's own $finish, which ends both runs.
+[[analysis]]
+id = "ckpt"
+variants = ["full"]
+oracles = ["O5", "O6", "O7"]
+timeout_s = 30
+checkpoint_at = [8.5e-4]
+phase = "P8"

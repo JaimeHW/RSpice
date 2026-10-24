@@ -17,3 +17,5 @@ top	op	interp	pass	op (O5) [0] |a−e|=2.246e-11 allowed 2.151e-5 (a=1.151161e0,
 top	op	native	pass	op (O5) [0] |a−e|=2.246e-11 allowed 2.151e-5 (a=1.151161e0, e=1.151161e0)
 oomr	op	interp	pass	op (O5) [0] |a−e|=2.890e-11 allowed 2.151e-5 (a=1.151161e0, e=1.151161e0)
 oomr	op	native	pass	op (O5) [0] |a−e|=2.890e-11 allowed 2.151e-5 (a=1.151161e0, e=1.151161e0)
+full	ckpt	interp	pass	resume (O7) resumed@8.5e-4: identical; 118314 of 118314 accepted times shared, 1 nets
+full	ckpt	native	pass	resume (O7) resumed@8.5e-4: identical; 118314 of 118314 accepted times shared, 1 nets
