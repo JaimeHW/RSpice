@@ -679,6 +679,78 @@ fn mark_xspice_event_connection_nets(
     }
 }
 
+#[inline]
+fn set_projected_node(
+    solution: &mut [Value],
+    node: usize,
+    value: Value,
+    rollback: &mut Vec<(usize, Value)>,
+) {
+    if node > 0
+        && let Some(slot) = solution.get_mut(node - 1)
+        && *slot != value
+    {
+        rollback.push((node - 1, *slot));
+        *slot = value;
+    }
+}
+
+#[inline]
+fn projected_node_value(solution: &[Value], node: usize) -> Option<Value> {
+    if node == 0 {
+        Some(0.0)
+    } else {
+        solution.get(node - 1).copied()
+    }
+}
+
+/// Write one ideal voltage output `value` across `pos` and `neg` of the
+/// candidate solution, recording each overwritten entry in `rollback`.
+///
+/// A grounded output sets its node. A floating pair takes half the
+/// correction on each node, which keeps the pair's common mode where the
+/// solve put it. That split need not realize `value` exactly in floating
+/// point: when the corrected difference lands on a rounding tie, both nodes
+/// move by one unit in the last place, the rounded difference lands just as
+/// far from `value` on the other side, and the next projection moves them
+/// back. A coupled acceptance re-projects until nothing moves, so it would
+/// never settle. The pair is therefore written only when the move brings its
+/// rounded difference strictly closer to `value`, which makes projecting an
+/// already projected pair a no-op.
+#[inline]
+fn project_voltage_pair(
+    solution: &mut [Value],
+    pos: usize,
+    neg: usize,
+    value: Value,
+    rollback: &mut Vec<(usize, Value)>,
+) {
+    if !value.is_finite() {
+        return;
+    }
+    match (pos, neg) {
+        (0, 0) => {}
+        (node, 0) => set_projected_node(solution, node, value, rollback),
+        (0, node) => set_projected_node(solution, node, -value, rollback),
+        (pos, neg) => {
+            let Some(pos_value) = projected_node_value(solution, pos) else {
+                return;
+            };
+            let Some(neg_value) = projected_node_value(solution, neg) else {
+                return;
+            };
+            let correction = value - (pos_value - neg_value);
+            let next_pos = pos_value + 0.5 * correction;
+            let next_neg = neg_value - 0.5 * correction;
+            if correction.is_finite() && (value - (next_pos - next_neg)).abs() >= correction.abs() {
+                return;
+            }
+            set_projected_node(solution, pos, next_pos, rollback);
+            set_projected_node(solution, neg, next_neg, rollback);
+        }
+    }
+}
+
 /// Render a scheduler settling failure as the analysis-level diagnostic.
 ///
 /// The old bounded relaxation could only say which nodes were still changing
@@ -3568,60 +3640,6 @@ impl CircuitData {
         num_nodes: usize,
         accepted_time: Option<Value>,
     ) -> (Vec<(usize, Value)>, Result<(), crate::device::StampError>) {
-        #[inline]
-        fn set_node(
-            solution: &mut [Value],
-            node: usize,
-            value: Value,
-            rollback: &mut Vec<(usize, Value)>,
-        ) {
-            if node > 0
-                && let Some(slot) = solution.get_mut(node - 1)
-                && *slot != value
-            {
-                rollback.push((node - 1, *slot));
-                *slot = value;
-            }
-        }
-
-        #[inline]
-        fn node_value(solution: &[Value], node: usize) -> Option<Value> {
-            if node == 0 {
-                Some(0.0)
-            } else {
-                solution.get(node - 1).copied()
-            }
-        }
-
-        #[inline]
-        fn project_voltage_pair(
-            solution: &mut [Value],
-            pos: usize,
-            neg: usize,
-            value: Value,
-            rollback: &mut Vec<(usize, Value)>,
-        ) {
-            if !value.is_finite() {
-                return;
-            }
-            match (pos, neg) {
-                (0, 0) => {}
-                (node, 0) => set_node(solution, node, value, rollback),
-                (0, node) => set_node(solution, node, -value, rollback),
-                (pos, neg) => {
-                    let Some(pos_value) = node_value(solution, pos) else {
-                        return;
-                    };
-                    let Some(neg_value) = node_value(solution, neg) else {
-                        return;
-                    };
-                    let correction = value - (pos_value - neg_value);
-                    set_node(solution, pos, pos_value + 0.5 * correction, rollback);
-                    set_node(solution, neg, neg_value - 0.5 * correction, rollback);
-                }
-            }
-        }
-
         let mut rollback = Vec::new();
         if num_nodes == 0 || solution.is_empty() {
             return (rollback, Ok(()));
@@ -6879,6 +6897,39 @@ endmodule"#;
         let _ = circuit.project_xspice_voltage_outputs(&mut solution, num_nodes, Some(1.0e-9));
 
         assert_eq!(solution[out_node - 1], 1.0);
+    }
+
+    #[test]
+    fn projecting_a_projected_differential_pair_moves_nothing() {
+        // A gain block's %vd output pair at a sigma-delta integrator's first
+        // accepted step. Its solved difference and the model's value differ by
+        // a rounding tie: half the correction on each node moved both by one
+        // unit in the last place, the rounded difference landed as far off on
+        // the other side, and each projection undid the last one.
+        let value = 0.003999962981963915;
+        let solved = vec![0.001999981490981966, -0.0019999814909819483];
+        let tie = vec![0.0019999814909819665, -0.0019999814909819487];
+        for start in [solved, tie] {
+            let mut solution = start.clone();
+            let mut rollback = Vec::new();
+            project_voltage_pair(&mut solution, 1, 2, value, &mut rollback);
+            assert_eq!(
+                (solution.clone(), rollback.len()),
+                (start, 0),
+                "a pair one rounding tie from its value is as close as the split \
+                 can bring it; moving it only flips the tie"
+            );
+        }
+
+        // A real correction is still split evenly between the two nodes, and
+        // projecting the result again writes nothing.
+        let mut solution = vec![0.25, 0.25];
+        let mut rollback = Vec::new();
+        project_voltage_pair(&mut solution, 1, 2, 2.0, &mut rollback);
+        assert_eq!(solution, vec![1.25, -0.75]);
+        assert_eq!(rollback, vec![(0, 0.25), (1, 0.25)]);
+        project_voltage_pair(&mut solution, 1, 2, 2.0, &mut rollback);
+        assert_eq!(rollback.len(), 2, "a projected pair projects to itself");
     }
 
     #[test]
