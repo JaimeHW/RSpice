@@ -816,7 +816,7 @@ fn render_inspector(
                     // is byte-identical to the one they reach from there.
                     let deck_held = row.executed_deck_points > 0;
                     let deck = crate::ui::widgets::Button::new(
-                        crate::workbench::commands::vocabulary::OPEN_TASK_DECK,
+                        crate::workbench::localization::OPEN_TASK_DECK,
                     )
                     .enabled(deck_held)
                     .show(ui);

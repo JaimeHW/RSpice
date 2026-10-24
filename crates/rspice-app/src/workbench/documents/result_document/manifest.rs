@@ -82,7 +82,7 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
             saved_outputs,
             executed_deck_points,
             plan_block,
-            open_task_deck_label: crate::workbench::commands::vocabulary::OPEN_TASK_DECK,
+            open_task_deck_label: crate::workbench::localization::OPEN_TASK_DECK,
         },
     );
     if let Some(viewer::MaterializeRequest {

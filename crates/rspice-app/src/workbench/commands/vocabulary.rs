@@ -18,6 +18,7 @@ use crate::state::command_catalog::{
 };
 use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
+use crate::workbench::localization::OPEN_TASK_DECK;
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1122,15 +1123,6 @@ pub(in crate::workbench) const fn spec(
 ) -> CommandSpec {
     CommandSpec { id, label, group }
 }
-
-/// The one spelling of the action that opens a run's executed task deck.
-///
-/// Four surfaces printed it as a literal of their own: this vocabulary's
-/// palette entry, the netlist run strip's catalog message, the Results
-/// manifest's button and the jobs manager's. Four literals is four chances for
-/// an operator to meet the same command under two names, and the vocabulary is
-/// where a command's label is decided — so it is decided here, once.
-pub(in crate::workbench) const OPEN_TASK_DECK: &str = "Open task deck";
 
 /// Every command registered with application chrome. Search, menus,
 /// accessibility help, and keyboard resolution all project from this list.

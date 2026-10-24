@@ -625,7 +625,7 @@ mod tests {
         );
     }
 
-    /// Only the command vocabulary spells the task-deck action.
+    /// Only the message catalog spells the task-deck action.
     ///
     /// Four surfaces printed the same words as a literal of their own: the
     /// palette entry, the netlist run strip's catalog message, the Results
@@ -633,17 +633,15 @@ mod tests {
     /// and four literals is four chances for an operator to meet it under two
     /// names.
     ///
-    /// The label is decided in `commands::vocabulary`, which is where a
-    /// command's label is decided, and this is what stops a fifth literal
-    /// appearing beside it. The needle is assembled rather than written, so
-    /// this file is not itself a match — a detector that matched itself would
-    /// be a detector nobody could keep green.
+    /// The label is decided in `localization`, the catalog the command's own
+    /// label reads it from, and this is what stops a fifth literal appearing
+    /// beside it. The needle is assembled rather than written, so this file is
+    /// not itself a match — a detector that matched itself would be a
+    /// detector nobody could keep green.
     #[test]
-    fn only_the_command_vocabulary_spells_the_task_deck_action() {
+    fn only_the_message_catalog_spells_the_task_deck_action() {
         let needle = format!("\"{}\"", ["Open", "task", "deck"].join(" "));
-        let owner = Path::new("workbench")
-            .join("commands")
-            .join("vocabulary.rs");
+        let owner = Path::new("workbench").join("localization.rs");
 
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
@@ -675,13 +673,13 @@ mod tests {
 
         assert_eq!(
             owner_spellings, 1,
-            "the vocabulary states the label once; {owner_spellings} spellings there is the \
+            "the catalog states the label once; {owner_spellings} spellings there is the \
              same duplication moved indoors"
         );
         assert!(
             found.is_empty(),
             "these spell the task-deck action themselves — read \
-             `workbench::commands::vocabulary::OPEN_TASK_DECK`:\n  {}",
+             `workbench::localization::OPEN_TASK_DECK`:\n  {}",
             found.join("\n  ")
         );
     }

@@ -59,6 +59,15 @@ macro_rules! define_messages {
     };
 }
 
+/// The one spelling of the action that opens a run's executed task deck.
+///
+/// Four surfaces printed it as a literal of their own: the command's palette
+/// entry, the netlist run strip's message below, the Results manifest's button
+/// and the jobs manager's. Four literals is four chances for an operator to
+/// meet the same command under two names, so the catalog decides it here,
+/// once, and the command's own label reads it from here.
+pub(in crate::workbench) const OPEN_TASK_DECK: &str = "Open task deck";
+
 define_messages! {
     EditorGeneratedSpiceNetlistViewer => "Generated SPICE netlist viewer",
     EditorProjectSpiceNetlistEditor => "Project SPICE netlist editor",
@@ -169,7 +178,7 @@ define_messages! {
     NetlistRunStripExecutedPointShort => "{point} · {revision}",
     NetlistRunStripOpenDeck => "Open the deck this run used",
     NetlistRunStripOpenResults => "Open in Results",
-    NetlistRunStripOpenTaskDeck => crate::workbench::commands::vocabulary::OPEN_TASK_DECK,
+    NetlistRunStripOpenTaskDeck => OPEN_TASK_DECK,
     NetlistRunStripOpenTaskDeckTooltip => "Opens the deck Run {id} gave its first task, as a read-only document saved with the run.",
     NetlistRunStripNextTask => "Task {index}/{count}",
     NetlistRunStripNextTaskTooltip => "Showing task {index} of {count}. Opens the next task's executed deck.",

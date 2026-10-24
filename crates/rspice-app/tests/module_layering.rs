@@ -623,14 +623,15 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "routing/navigation",
     "logging",
     "layout",
+    // The interface text catalog and its locales. It names nothing of the
+    // workbench; the command vocabulary reads the labels it owns, and the
+    // editors, docks and surfaces read it.
+    "localization",
     // The command vocabulary: what commands exist, their portable identity,
     // and the label a menu shows. Shortcut profiles, preferences, and the
     // artifact writers name a command without reaching the dispatcher that
     // runs it, which is up at `commands`.
     "commands/vocabulary",
-    // The interface text catalog and its locales. It names a command only to
-    // label it; the editors, docks and surfaces read it.
-    "localization",
     "shortcuts",
     "preferences",
     "design_system",
