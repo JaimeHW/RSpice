@@ -1523,6 +1523,60 @@ class CiConfigurationTests(unittest.TestCase):
             read_text(".github/workflows/python.yml"),
         )
 
+    def test_model_gated_core_library_units_have_an_executing_build(self) -> None:
+        """A core-library unit gated on a generated model runs somewhere.
+
+        The generated-route suites name integration targets, which leave the
+        library out, so no job ran these units: VBIC13's static-DAE probe test
+        stood red for six weeks unseen, and R2_CMC's task test never
+        compiled under its own feature because it leaned on imports only
+        DIODE_CMC's tests brought in. Per push, every model the device
+        library's units name gets a build carrying that model alone, read from
+        the source so a new gate cannot arrive without one. Nightly, the
+        device library runs over the complete catalog and rspice-core's
+        model-gated units run in their two builds.
+        """
+        model_gate = re.compile(r'feature\s*=\s*"(veriloga-model-[a-z0-9-]+)"')
+        device_models = {
+            model
+            for path in sorted((ROOT / "crates/rspice-core-devices/src").rglob("*.rs"))
+            for predicate in cfg_predicates(path.read_text(encoding="utf-8"))
+            for model in model_gate.findall(predicate)
+        }
+        self.assertIn("veriloga-model-vbic13", device_models, "the gate scan found nothing")
+
+        per_push = workflow_step_body(
+            workflow_job_body(read_text(".github/workflows/ci.yml"), "generated-veriloga"),
+            "Test the device library against each model its units name",
+        )
+        builds = [
+            line.strip()
+            for line in per_push.splitlines()
+            if line.strip().startswith("cargo test")
+        ]
+        self.assertEqual(
+            builds,
+            [
+                f"cargo test --locked -p rspice-core-devices --lib --features {model}"
+                for model in sorted(device_models)
+            ],
+            "one build per model, carrying that model alone",
+        )
+
+        nightly = workflow_step_body(
+            workflow_job_body(read_text(".github/workflows/nightly.yml"), "veriloga-corpus"),
+            "Core library units against the generated catalog",
+        )
+        self.assertIn("if: ${{ !cancelled() }}", nightly)
+        for build in (
+            "cargo test --locked -p rspice-core-devices --lib --features veriloga-builtins\n",
+            "cargo test --locked -p rspice-core --lib --features veriloga-model-diode-cmc,"
+            "veriloga-model-r2-cmc,veriloga-model-vbic13,veriloga-model-vbic13-4t,"
+            "veriloga-builtins-noise\n",
+            "cargo test --locked -p rspice-core --lib --features veriloga-model-ekv-va\n",
+        ):
+            self.assertIn(build, nightly)
+
     def test_windows_ci_runs_native_veriloga_jit_tests(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 

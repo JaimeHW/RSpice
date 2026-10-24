@@ -275,6 +275,21 @@ jobs:
           cargo test --locked --release -p rspice-veriloga --features native --lib
           shipped_model_machine_code_census_digest
           -- --ignored --nocapture --test-threads=1
+      - name: Core library units against the generated catalog
+        # Debug, as `cargo test` builds these units everywhere else, so none of
+        # the release tree above is shared. The device library's units hold
+        # all 43 models to the adapter's contracts in one build. rspice-core's
+        # model-gated units take two: DIODE_CMC, R2_CMC, VBIC13 and VBIC13_4T
+        # with the noise runtime, and EKV without it, since with it the
+        # generated EKV does not yet export the EKV 2.6 oracle deck's sources.
+        # Reports even when a gate above has failed.
+        if: ${{ !cancelled() }}
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: |
+          cargo test --locked -p rspice-core-devices --lib --features veriloga-builtins
+          cargo test --locked -p rspice-core --lib --features veriloga-model-diode-cmc,veriloga-model-r2-cmc,veriloga-model-vbic13,veriloga-model-vbic13-4t,veriloga-builtins-noise
+          cargo test --locked -p rspice-core --lib --features veriloga-model-ekv-va
       - name: Upload Verilog-A stamp qualification
         if: ${{ !cancelled() && steps.stamp.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

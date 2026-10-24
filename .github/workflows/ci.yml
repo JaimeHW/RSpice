@@ -354,6 +354,17 @@ jobs:
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards --test transient_noise_veriloga
           cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
+      # One model per build, as a `--features veriloga-model-<name>` build
+      # compiles them: a unit gated on one model can lean on an import only
+      # another model's units bring in, and a build carrying both never shows
+      # it. These are the models the device library's units name; the units
+      # over the complete catalog run nightly.
+      - name: Test the device library against each model its units name
+        run: |
+          cargo test --locked -p rspice-core-devices --lib --features veriloga-model-diode-cmc
+          cargo test --locked -p rspice-core-devices --lib --features veriloga-model-ekv-va
+          cargo test --locked -p rspice-core-devices --lib --features veriloga-model-r2-cmc
+          cargo test --locked -p rspice-core-devices --lib --features veriloga-model-vbic13
       - name: Audit complete generated Verilog-A catalog
         run: cargo run --locked -p rspice-veriloga-catalog-dump -- --validate-only
       - name: Audit built-in XSPICE registry
