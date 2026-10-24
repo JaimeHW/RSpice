@@ -214,7 +214,7 @@ class BrowserWorkbenchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             browser = Mock(output=Path(directory))
             with (patch("check_browser_workbench.choose_command"),
-                  patch("check_browser_workbench.controls", return_value=[{"value": "Run 1 completed"}]),
+                  patch("check_browser_workbench.controls", return_value=[{"value": "Run 1 finished"}]),
                   patch("check_browser_workbench.time.time_ns", return_value=105_000_000),
                   patch("check_browser_workbench.checkpoint_records",
                         side_effect=[before, before, snapshot_only, published]) as read):

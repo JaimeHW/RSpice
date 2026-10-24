@@ -45,10 +45,16 @@ def wall_clock(browser, value):
         browser.record_input("wall_clock_restored")
 
 
+def reports(rendered, text):
+    # A Console row carries its line as its label; a status line, as its value.
+    text = text.lower()
+    return any(text in control["label"].lower() or text in control["value"].lower()
+               for control in rendered)
+
+
 def verify_clock_rejection(snapshot, operation, draft=None):
     rendered = controls(snapshot)
-    expected = f"{operation} could not be timestamped".lower()
-    if not any(expected in control["value"].lower() for control in rendered):
+    if not reports(rendered, f"{operation} could not be timestamped"):
         raise AssertionError("The operation did not report its timestamp failure")
     if draft is not None and not any(control["value"] == draft and
                                     control["role"] in ("textInput", "multilineTextInput")
@@ -63,22 +69,32 @@ def reject_review_clock(browser, action, draft, name):
             verify_clock_rejection(browser.capture(f"{name}-clock-{fault}"), "Review update", draft)
 
 
+def clear_console(browser):
+    # Clear is named for what it does, and is off while the log is empty.
+    if any(control["label"] == "Clear the session log" for control in controls(browser.snapshot())):
+        browser.click("Clear the session log", "button")
+
+
 def reject_checkpoint_clock(browser, name):
+    # A refused manual checkpoint is a Console error and a notice, not a toast.
+    browser.click("Expand console", "button")
     before = checkpoint_records(browser)
     for fault in CLOCK_FAULTS:
+        clear_console(browser)
         with wall_clock(browser, fault):
             browser.click("Create checkpoint", "button")
             verify_clock_rejection(browser.capture(f"{name}-clock-{fault}"), "Project checkpoint")
             if checkpoint_records(browser) != before:
                 raise AssertionError("A failed timestamp operation changed durable checkpoint records")
+    browser.click("Collapse console", "button")
 
 
 def verify_age(browser, name, now_ms):
     for value, expected, suffix in ((now_ms - 86_400_000, "clock skew", "rollback"),
-                                    (now_ms + 86_400_000, "1 d ago", "forward"),
+                                    (now_ms + 86_400_000, "yesterday", "forward"),
                                     ("nonfinite", "time unavailable", "unavailable")):
         if name == "checkpoint":
-            expected = {"clock skew": "time unavailable", "1 d ago": "yesterday"}.get(expected, expected)
+            expected = {"clock skew": "time unavailable"}.get(expected, expected)
         with wall_clock(browser, value):
             snapshot = browser.capture(f"{name}-age-{suffix}")
             if not any(control["value"] == expected or (
@@ -214,16 +230,13 @@ def model_validation_clock(browser):
     browser.click("Close", "button")
     choose_command(browser, "Corners & sections")
     browser.click("Expand console", "button")
-    rendered = controls(browser.snapshot())
-    if not any(control["value"] == "Engine messages will appear here." for control in rendered):
-        browser.click("Clear console output", "button")
+    clear_console(browser)
     before_save = canonical_projects(browser)
     started_ms = time.time_ns() // 1_000_000
     browser.click("Validate bindings", "button")
-    snapshot = browser.capture("model-bindings-validated")
-    if not any("Published durable model-validation receipt" in control["value"]
-               for control in controls(snapshot)):
-        raise AssertionError("Model validation did not publish a receipt")
+    # A validation that worked says nothing on the page; the durable receipt
+    # read back below is its evidence.
+    browser.capture("model-bindings-validated")
     finished_ms = time.time_ns() // 1_000_000
     # Receipt-only changes must enable Save all even when no library changed.
     choose_command(browser, "Save all")
@@ -246,12 +259,11 @@ def model_validation_clock(browser):
             or receipt["platform"] != "browser-wasm32"):
         raise AssertionError("Model validation retained an incorrect timestamp or runtime")
     for fault in CLOCK_FAULTS:
-        browser.click("Clear console output", "button")
+        clear_console(browser)
         with wall_clock(browser, fault):
             browser.click("Validate bindings", "button")
             snapshot = browser.capture(f"model-validation-clock-{fault}")
-            if not any("system clock cannot timestamp model validation" in control["value"]
-                       for control in controls(snapshot)):
+            if not reports(controls(snapshot), "system clock cannot timestamp model validation"):
                 raise AssertionError("Model validation did not report its clock failure")
         if unsaved(browser.snapshot()):
             raise AssertionError("A failed model validation dirtied the saved project")
@@ -314,8 +326,9 @@ def provider_decision_clock(browser):
                 raise AssertionError("Expected one model source folder picker")
             identity = elements[0]["element-6066-11e4-a52e-4f735466cecf"]
             browser.call("POST", f"/element/{identity}/value", {"text": str(folder), "value": list(str(folder))})
-            wait_for(lambda: any("Imported" in c["value"] and name in c["value"]
-                                 for c in controls(browser.snapshot())), "the imported " + name + " source")
+            wait_for(lambda: any("Imported" in text and name in text
+                                 for c in controls(browser.snapshot())
+                                 for text in (c["label"], c["value"])), "the imported " + name + " source")
             browser.capture("provider-imported-" + name)
     finally:
         browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": False})
@@ -350,7 +363,7 @@ def provider_decision_clock(browser):
                 browser.click("Publish provider decision", "button")
                 snapshot = browser.capture(f"provider-{index}-clock-{fault}")
                 rendered = controls(snapshot)
-                if not any("system clock cannot timestamp provider decision" in c["value"] for c in rendered):
+                if not reports(rendered, "system clock cannot timestamp provider decision"):
                     raise AssertionError("Provider publication did not report its clock failure")
                 if not any(c["role"] == "multilineTextInput" and c["value"] == draft for c in rendered):
                     raise AssertionError("Provider publication lost its editable audit reason")
@@ -405,7 +418,7 @@ def run_with_saved_provider(browser, decision):
     # Run the circuit authored above after restoring the model decision,
     # including its multiline audit reason, through the normal project loader.
     browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
-    wait_for(lambda: any("Run 1" in c["value"] and "completed" in c["value"]
+    wait_for(lambda: any(c["value"] == "Run 1 finished"
                         for c in controls(browser.snapshot())), "the saved-provider simulation", 120)
     browser.capture("provider-run-completed")
     choose_command(browser, "Open recovery center")
@@ -442,13 +455,13 @@ def create_and_resolve_review(browser):
     choose_command(browser, "Review comments", input_burst=True)
     # The click and immediate editing input share one WebDriver request.
     browser.click("New comment", "button", keyboard=(("a", ("\ue009",)), (REVIEW_TITLE, ())))
-    browser.click("Arm text tool", "button")
+    browser.click("Place", "button")
     browser.click("Schematic canvas", "canvas")
     browser.keys("\ue00c")
     choose_command(browser, "Review comments", keyboard=((REVIEW_BODY, ()),))
-    reject_review_clock(browser, "Publish review update", REVIEW_BODY, "review-post")
+    reject_review_clock(browser, "Post reply", REVIEW_BODY, "review-post")
     posted_start = time.time_ns() // 1_000_000
-    browser.click("Publish review update", "button")
+    browser.click("Post reply", "button")
     browser.capture("review-posted")
     posted_end = time.time_ns() // 1_000_000
     browser.click("", "multilineTextInput")
