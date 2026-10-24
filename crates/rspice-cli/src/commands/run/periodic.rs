@@ -20,7 +20,7 @@ use rspice_core::netlist::{
 };
 
 use super::RunContext;
-use super::advanced::ensure_not_cancelled;
+use super::advanced::{ensure_not_cancelled, map_advanced_simulation_error};
 use super::context::PeriodicArtifact;
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
@@ -37,7 +37,7 @@ pub(super) fn run_pss_card(ctx: &RunContext<'_>, card: &PssCard) -> Result<(), C
     let operating_point = ctx
         .engine
         .run_pss_operating_point_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
-        .map_err(|error| map_periodic_error(ctx, "PSS", error))?;
+        .map_err(|error| map_advanced_simulation_error(ctx, "PSS", error))?;
     ensure_not_cancelled(ctx)?;
     let analysis = operating_point.analysis();
     super::advanced::report_pss(ctx, analysis.iterations, analysis.period, &analysis.result)?;
@@ -81,7 +81,7 @@ pub(super) fn run_pac_card(ctx: &RunContext<'_>, card: &PacCard) -> Result<(), C
             return Err(missing_carrier(".PAC", artifact.analysis, upstream));
         }
     }
-    .map_err(|error| map_periodic_error(ctx, "PAC", error))?;
+    .map_err(|error| map_advanced_simulation_error(ctx, "PAC", error))?;
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
@@ -128,7 +128,7 @@ pub(super) fn run_pxf_card(ctx: &RunContext<'_>, card: &PxfCard) -> Result<(), C
             return Err(missing_carrier(".PXF", artifact.analysis, upstream));
         }
     }
-    .map_err(|error| map_periodic_error(ctx, "PXF", error))?;
+    .map_err(|error| map_advanced_simulation_error(ctx, "PXF", error))?;
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
@@ -174,7 +174,7 @@ pub(super) fn run_pstb_card(ctx: &RunContext<'_>, card: &PstbCard) -> Result<(),
             return Err(missing_carrier(".PSTB", artifact.analysis, upstream));
         }
     }
-    .map_err(|error| map_periodic_error(ctx, "PSTB", error))?;
+    .map_err(|error| map_advanced_simulation_error(ctx, "PSTB", error))?;
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
@@ -223,7 +223,7 @@ pub(super) fn run_pnoise_card(ctx: &RunContext<'_>, card: &PnoiseCard) -> Result
             return Err(missing_carrier(".PNOISE", artifact.analysis, upstream));
         }
     }
-    .map_err(|error| map_periodic_error(ctx, "PNoise", error))?;
+    .map_err(|error| map_advanced_simulation_error(ctx, "PNoise", error))?;
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
@@ -279,7 +279,7 @@ pub(super) fn run_envelope_card(ctx: &RunContext<'_>, card: &EnvelopeCard) -> Re
             card.max_step,
             &crate::abort::ProcessAbort,
         )
-        .map_err(|error| map_periodic_error(ctx, "Envelope", error))?;
+        .map_err(|error| map_advanced_simulation_error(ctx, "Envelope", error))?;
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
@@ -985,25 +985,4 @@ fn missing_carrier(
         ),
         card.trim_start_matches('.'),
     )
-}
-
-fn map_periodic_error(
-    ctx: &RunContext<'_>,
-    analysis: &str,
-    error: rspice_core::SimulationError,
-) -> CliError {
-    if matches!(error, rspice_core::SimulationError::Aborted) {
-        super::cancellation_cli_error(ctx.args.timeout)
-    } else {
-        // Carry the engine's typed failure rather than its text. All four
-        // cards of this family - .PSS, .PAC, .PNOISE and .ENVELOPE - report
-        // through here, so stringifying re-decided every one of their failures
-        // as the simulation category: a device the periodic solver refuses
-        // left this process with the same status as one that would not
-        // converge.
-        CliError::CoreSimulationError {
-            source: error,
-            analysis: Some(analysis.to_string()),
-        }
-    }
 }

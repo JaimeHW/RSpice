@@ -1,19 +1,8 @@
 //! PZ control results use the ordinary exports and atomic script publication.
 mod common;
+use common::run_to as run;
 use rspice_core::execution::{AnalysisResultDocument, ResultPayload, SignalUnit};
-use std::path::Path;
-use std::process::{Command, Output};
-
-fn run(deck: &Path, output: &Path, format: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "run"])
-        .arg(deck)
-        .arg("-o")
-        .arg(output)
-        .args(["-f", format])
-        .output()
-        .unwrap()
-}
+use std::process::Command;
 
 const RLC: &str = "PZ\nV1 in 0 0\nR1 in mid 1\nL1 mid out 1\nC1 out 0 1\n";
 

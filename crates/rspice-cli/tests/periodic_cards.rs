@@ -8,7 +8,9 @@
 
 mod common;
 
-use common::{AxisRunSet, read_json, test_dir};
+use common::{
+    AxisRunSet, read_json, sibling_json as artifact, stderr_document as error_document, test_dir,
+};
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -77,23 +79,6 @@ fn assert_ran(output: &Output) {
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-fn error_document(output: &Output) -> serde_json::Value {
-    serde_json::from_slice(&output.stderr).unwrap_or_else(|error| {
-        panic!(
-            "stderr must be exactly one JSON document: {error}; stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )
-    })
-}
-
-fn artifact(requested: &Path, tag: &str) -> PathBuf {
-    let stem = requested
-        .file_stem()
-        .expect("output stem")
-        .to_string_lossy();
-    requested.with_file_name(format!("{stem}.{tag}.json"))
 }
 
 /// One real series of a published document, by canonical name.

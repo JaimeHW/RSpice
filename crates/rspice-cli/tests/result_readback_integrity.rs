@@ -1,17 +1,8 @@
 //! Analysis results must survive the CLI's own readers and converters.
 mod common;
 
-use common::test_dir;
+use common::{quiet as run, test_dir};
 use std::path::Path;
-use std::process::{Command, Output};
-
-fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .unwrap()
-}
 
 fn simulate(
     dir: &Path,

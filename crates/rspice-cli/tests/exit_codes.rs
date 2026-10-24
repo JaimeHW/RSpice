@@ -11,7 +11,7 @@
 
 mod common;
 
-use common::test_dir;
+use common::{stderr_document as fatal_diagnostic, test_dir};
 
 use std::process::Command;
 
@@ -1401,15 +1401,6 @@ fn failed_measurement_marks_run_verdict_in_machine_reports() {
 //=============================================================================
 
 /// The machine-readable diagnostic a failing invocation printed.
-fn fatal_diagnostic(output: &std::process::Output) -> serde_json::Value {
-    serde_json::from_slice(&output.stderr).unwrap_or_else(|error| {
-        panic!(
-            "stderr must be exactly one JSON document: {error}; stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )
-    })
-}
-
 /// Run one deck and return its fatal diagnostic with the observed status.
 fn run_json(dir: &std::path::Path, name: &str, deck: &str, extra: &[&str]) -> serde_json::Value {
     let path = dir.join(name);

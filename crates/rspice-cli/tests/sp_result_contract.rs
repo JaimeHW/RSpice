@@ -1,6 +1,6 @@
 mod common;
 
-use common::{quiet_json_errors as cli, read_json, test_dir};
+use common::{column as signal, quiet_json_errors as cli, read_json, test_dir};
 use serde_json::Value;
 use std::path::Path;
 
@@ -29,15 +29,6 @@ fn convert(input: &Path, output: &Path, format: &str) {
 
 fn write_deck(path: &Path) {
     std::fs::write(path, "* mixed reference impedances\nV1 in 0 DC 0 AC 1 PORTNUM 1 Z0 50\nV2 out 0 DC 0 AC 0 PORTNUM 2 Z0 75\nR1 in out 50\n.SP LIN 3 1k 3k\n.END\n").unwrap();
-}
-
-fn signal<'a>(table: &'a Value, name: &str) -> &'a Value {
-    table["signals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|signal| signal["name"] == name)
-        .unwrap_or_else(|| panic!("missing {name}: {table}"))
 }
 
 fn assert_references(table: &Value, units: bool) {

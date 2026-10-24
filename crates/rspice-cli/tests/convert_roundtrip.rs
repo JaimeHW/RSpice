@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::test_dir;
+use common::{quiet_ok as rspice, test_dir};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -331,20 +331,6 @@ fn bus_deck(dir: &Path) -> String {
          .end\n",
         model.display().to_string().replace('\\', "/")
     )
-}
-
-fn rspice(args: &[&str]) {
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .expect("run rspice");
-    assert!(
-        output.status.success(),
-        "rspice {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn simulate(dir: &Path, deck: &str, format: &str, out_name: &str) -> PathBuf {

@@ -22,7 +22,7 @@ use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
 use crate::commands::publish;
 use crate::hdf5::{
     Hdf5FftCoordinate, Hdf5FftHarmonic, Hdf5FftMetrics, Hdf5FftResult, Hdf5FftSection,
-    Hdf5SimulationData, write_hdf5_to_writer,
+    Hdf5SimulationData, fft_phase_distance_degrees, fft_values_close, write_hdf5_to_writer,
 };
 use std::path::Path;
 
@@ -1639,20 +1639,6 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn fft_values_close(actual: f64, expected: f64) -> bool {
-    if actual == expected {
-        return true;
-    }
-    let scale = actual.abs().max(expected.abs());
-    let tolerance = 128.0 * f64::EPSILON * scale;
-    (actual - expected).abs() <= tolerance
-}
-
-fn fft_phase_distance_degrees(actual: f64, expected: f64) -> f64 {
-    let delta = (actual - expected).rem_euclid(360.0);
-    delta.min(360.0 - delta)
 }
 
 fn validate_fft_raw_metrics_against_bins(

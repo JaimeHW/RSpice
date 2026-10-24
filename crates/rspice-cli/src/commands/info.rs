@@ -11,12 +11,7 @@ mod hierarchy;
 mod parameters;
 
 /// Execute the info command
-pub fn execute(
-    args: InfoArgs,
-    config: &Config,
-    _verbose: bool,
-    quiet: bool,
-) -> Result<(), CliError> {
+pub fn execute(args: InfoArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     let netlist = crate::commands::parse_netlist_input(&args.input, &args.netlist_options, config)?;
 
     let mut out = std::io::stdout().lock();

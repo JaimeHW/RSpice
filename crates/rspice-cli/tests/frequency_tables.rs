@@ -1,18 +1,11 @@
 //! AC/noise DATA rows must survive normal runs, control runs and conversion.
 mod common;
+use common::passed;
 use common::run_to as run;
 use rspice_core::execution::AnalysisResultDocument;
-use std::process::{Command, Output};
+use std::process::Command;
 
 const NETWORK: &str = "Table export\n.param resistance=1k\nV1 in 0 AC 1\nR1 in out {resistance}\nC1 out 0 1u\n.data points FREQ resistance\n100 1k\n10 2k\n100 3k\n.enddata\n";
-
-fn success(output: Output) {
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 
 #[test]
 fn direct_and_control_tables_publish_the_same_coordinates_and_samples() {
@@ -30,14 +23,14 @@ fn direct_and_control_tables_publish_the_same_coordinates_and_samples() {
             let input = directory.join(format!("{family}-{name}.cir"));
             let output = directory.join(format!("{family}-{name}.json"));
             std::fs::write(&input, format!("{NETWORK}{cards}\n.end\n")).unwrap();
-            success(
-                Command::new(env!("CARGO_BIN_EXE_rspice"))
+            passed(
+                &Command::new(env!("CARGO_BIN_EXE_rspice"))
                     .args(["--quiet", "check"])
                     .arg(&input)
                     .output()
                     .unwrap(),
             );
-            success(run(&input, &output, "json"));
+            passed(&run(&input, &output, "json"));
             let published = if name == "direct" {
                 output
             } else {
@@ -87,15 +80,15 @@ fn flat_exports_and_typed_conversion_keep_duplicate_frequency_rows_aligned() {
             ] {
                 let stem = format!("{family}-{control}-{format}");
                 let output = directory.join(format!("{stem}.{extension}"));
-                success(run(&input, &output, format));
+                passed(&run(&input, &output, format));
                 let published = if control {
                     directory.join(format!("{stem}.{family}-001.{extension}"))
                 } else {
                     output
                 };
                 let converted = directory.join(format!("{stem}-converted.csv"));
-                success(
-                    Command::new(env!("CARGO_BIN_EXE_rspice"))
+                passed(
+                    &Command::new(env!("CARGO_BIN_EXE_rspice"))
                         .args(["--quiet", "convert"])
                         .arg(&published)
                         .arg(&converted)
@@ -129,8 +122,8 @@ fn flat_exports_and_typed_conversion_keep_duplicate_frequency_rows_aligned() {
                     assert_eq!(row[parameter], resistance, "{stem}");
                 }
                 if format == "json" {
-                    success(
-                        Command::new(env!("CARGO_BIN_EXE_rspice"))
+                    passed(
+                        &Command::new(env!("CARGO_BIN_EXE_rspice"))
                             .args(["--quiet", "convert"])
                             .arg(&published)
                             .arg(&converted)
@@ -164,7 +157,7 @@ fn compare_detects_changed_row_bindings_even_when_the_response_is_identical() {
     let reference = directory.join("reference.json");
     let changed = directory.join("changed.json");
     std::fs::write(&input, format!("{NETWORK}.ac data=points\n.end\n")).unwrap();
-    success(run(&input, &reference, "json"));
+    passed(&run(&input, &reference, "json"));
     let mut wire: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&reference).unwrap()).unwrap();
     wire["axes"][1]["values"]["values"][1] = 2500.into();
@@ -190,8 +183,8 @@ fn table_execution_uses_compact_coordinates_instead_of_retaining_every_row_netli
     let rows = "100 1k\n".repeat(128);
     std::fs::write(&input, format!("Compact table\n.param resistance=1k\nV1 out 0 AC 1\nR1 out 0 {{resistance}}\n.data points FREQ resistance\n{rows}.enddata\n.ac data=points\n.end\n")).unwrap();
     std::fs::write(&config, "[resources]\nmax_expanded_source_bytes = 16384\n").unwrap();
-    success(
-        Command::new(env!("CARGO_BIN_EXE_rspice"))
+    passed(
+        &Command::new(env!("CARGO_BIN_EXE_rspice"))
             .arg("--config")
             .arg(&config)
             .args(["--quiet", "run"])
@@ -253,7 +246,7 @@ fn changing_resistance_and_temperature_rows_match_circuit_equations() {
                 format!(".{command}")
             };
             std::fs::write(&input, format!("{network}{cards}\n.end\n")).unwrap();
-            success(run(&input, &output, "json"));
+            passed(&run(&input, &output, "json"));
             let path = if control {
                 directory.join(format!("{stem}.{family}-001.json"))
             } else {
@@ -340,7 +333,7 @@ fn noise_integrates_only_a_frequency_band_with_constant_physical_coordinates() {
                 .output()
                 .unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            success(output);
+            passed(&output);
             assert_eq!(
                 stdout.contains("Total integrated output noise:"),
                 integrates,

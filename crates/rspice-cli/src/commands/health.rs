@@ -5,12 +5,7 @@ use std::time::Instant;
 use crate::cli::{CliError, Config, HealthArgs, HealthMode};
 use rspice_core::{Engine, EngineHealthReport};
 
-pub fn execute(
-    args: HealthArgs,
-    config: &Config,
-    _verbose: bool,
-    quiet: bool,
-) -> Result<(), CliError> {
+pub fn execute(args: HealthArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     // The readiness probe parses, builds, and solves a deck. That is real
     // engine work, so Ctrl-C has to reach it the same way it reaches a run:
     // the probe polls the process abort source and a cancelled probe reports

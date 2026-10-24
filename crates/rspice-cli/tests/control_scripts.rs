@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::test_dir;
+use common::{passed, test_dir};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -16,14 +16,6 @@ fn run(deck: &Path, output: &Path, extra: &[&str]) -> Output {
         .args(extra)
         .output()
         .expect("execute public CLI")
-}
-
-fn passed(output: &Output) {
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn document(path: &Path) -> serde_json::Value {

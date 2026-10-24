@@ -1,6 +1,6 @@
 mod common;
 
-use common::{read_json, test_dir};
+use common::{convert_to_json as convert, read_json, test_dir};
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -13,16 +13,6 @@ fn run(deck: &Path, output: &Path) -> Output {
         .arg("-o")
         .arg(output)
         .args(["-f", "csv"])
-        .output()
-        .unwrap()
-}
-
-fn convert(input: &Path, output: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "--error-format", "json", "convert"])
-        .arg(input)
-        .arg(output)
-        .args(["--to", "json"])
         .output()
         .unwrap()
 }

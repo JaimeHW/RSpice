@@ -1,5 +1,6 @@
 //! Trial samples and campaign context must survive every numeric export format.
 mod common;
+use common::column;
 
 use serde_json::{Value, json};
 use std::{
@@ -127,15 +128,6 @@ fn compare(source: &Path, baseline: &Path, flags: &[&str]) -> Output {
 
 fn hex(value: &str) -> String {
     value.bytes().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn column<'a>(table: &'a Value, name: &str) -> &'a Value {
-    table["signals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|signal| signal["name"] == name)
-        .unwrap_or_else(|| panic!("missing {name}: {table}"))
 }
 
 #[test]

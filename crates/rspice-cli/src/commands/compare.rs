@@ -161,12 +161,7 @@ impl CompareResult {
 }
 
 /// Execute the compare command
-pub fn execute(
-    args: CompareArgs,
-    config: &Config,
-    _verbose: bool,
-    quiet: bool,
-) -> Result<(), CliError> {
+pub fn execute(args: CompareArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     validate_compare_tolerance("--abstol", args.abstol)?;
     validate_compare_tolerance("--reltol", args.reltol)?;
     if args.bless {

@@ -1,6 +1,6 @@
 //! Composition of script execution with the ordinary transient and axis policy.
 mod common;
-use common::{read_json, test_dir};
+use common::{passed, read_json, test_dir};
 use serde_json::Value;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -15,13 +15,6 @@ fn run(deck: &Path, output: &Path, format: &str, extra: &[&str]) -> Output {
         .args(extra)
         .output()
         .unwrap()
-}
-fn passed(output: Output) {
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 fn documents(dir: &Path, prefix: &str) -> Vec<Value> {
     std::fs::read_dir(dir)
@@ -62,7 +55,7 @@ fn control_checkpoint_resume_and_compression_follow_the_analytic_rc_response() {
     let deck = dir.join("rc.cir");
     std::fs::write(&deck, "control RC\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1u ic=0\n.control\ntran 10u 2m uic\n.endc\n.end\n").unwrap();
     let checkpoint = dir.join("state.chk");
-    passed(run(
+    passed(&run(
         &deck,
         &dir.join("first.csv"),
         "csv",
@@ -81,7 +74,7 @@ fn control_checkpoint_resume_and_compression_follow_the_analytic_rc_response() {
         (voltage - (1.0 - (-1.0f64).exp())).abs() < 0.003,
         "{voltage}"
     );
-    passed(run(
+    passed(&run(
         &deck,
         &dir.join("resume.csv"),
         "csv",
@@ -100,8 +93,8 @@ fn repeated_control_runs_publish_unique_fft_and_fourier_children_before_compress
     let dir = test_dir("control-postprocess");
     let deck = dir.join("sine.cir");
     std::fs::write(&deck, "control sine\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 1u 2m\n.four 1k V(out)\n.fft V(out) np=64 freq=1k\n.control\nop\nrun\nrun\n.endc\n.end\n").unwrap();
-    passed(run(&deck, &dir.join("full.json"), "json", &[]));
-    passed(run(
+    passed(&run(&deck, &dir.join("full.json"), "json", &[]));
+    passed(&run(
         &deck,
         &dir.join("compressed.json"),
         "json",
@@ -149,7 +142,7 @@ fn a_dynamic_control_transient_binds_declarative_postprocessing_without_a_tran_c
     let dir = test_dir("control-dynamic-postprocess");
     let deck = dir.join("sine.cir");
     std::fs::write(&deck, "dynamic sine\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.fft V(out) np=64 freq=1k\n.control\ntran 1u 2m\n.endc\n.end\n").unwrap();
-    passed(run(
+    passed(&run(
         &deck,
         &dir.join("result.json"),
         "json",
@@ -172,7 +165,7 @@ fn control_scripts_execute_at_every_step_and_temperature_coordinate() {
     let dir = test_dir("control-axes");
     let deck = dir.join("divider.cir");
     std::fs::write(&deck, "control axes\n.param rval=1k\nV1 in 0 1\nR1 in out {rval}\nR2 out 0 1k\n.step param rval list 1k 2k\n.temp 20 60\n.control\nop\n.endc\n.end\n").unwrap();
-    passed(run(&deck, &dir.join("result.json"), "json", &[]));
+    passed(&run(&deck, &dir.join("result.json"), "json", &[]));
     let docs = documents(&dir, "result.");
     let ops = docs
         .iter()
@@ -237,7 +230,7 @@ fn scheduled_restart_checkpoints_are_qualified_for_each_control_transient() {
     let dir = test_dir("control-restart");
     let deck = dir.join("restart.cir");
     std::fs::write(&deck, "control restart\nV1 out 0 1\nR1 out 0 1k\n.options restart job=state initial_interval=5u\n.control\ntran 1u 10u\ntran 1u 10u\n.endc\n.end\n").unwrap();
-    passed(run(&deck, &dir.join("result.csv"), "csv", &["--compress"]));
+    passed(&run(&deck, &dir.join("result.csv"), "csv", &["--compress"]));
     let files = std::fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -259,7 +252,7 @@ fn control_axis_checkpoints_resume_their_own_coordinate_with_compression() {
     let deck = dir.join("rc.cir");
     std::fs::write(&deck, "control axis RC\n.param rval=1k\nV1 in 0 1\nR1 in out {rval}\nC1 out 0 1u ic=0\n.step param rval list 1k 2k\n.temp 20 60\n.control\ntran 10u 2m uic\n.endc\n.end\n").unwrap();
     let checkpoint = dir.join("state.chk");
-    passed(run(
+    passed(&run(
         &deck,
         &dir.join("first.csv"),
         "csv",
@@ -277,7 +270,7 @@ fn control_axis_checkpoints_resume_their_own_coordinate_with_compression() {
         .filter(|path| path.extension().is_some_and(|ext| ext == "chk"))
         .count();
     assert_eq!(states, 4);
-    passed(run(
+    passed(&run(
         &deck,
         &dir.join("resume.csv"),
         "csv",

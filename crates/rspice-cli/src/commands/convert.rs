@@ -16,12 +16,7 @@ use crate::commands::vcd_io;
 use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
 
 /// Execute the convert command
-pub fn execute(
-    args: ConvertArgs,
-    config: &Config,
-    _verbose: bool,
-    quiet: bool,
-) -> Result<(), CliError> {
+pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     validate_range(args.start.as_ref(), args.stop.as_ref())?;
     crate::commands::publish::destinations::protect_sources(&args.output, config.source_paths())?;
     if !args.input.exists() {

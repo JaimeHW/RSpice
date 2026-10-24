@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::test_dir;
+use common::{quiet_ok as rspice_ok, test_dir};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,20 +15,6 @@ c1 out 0 1u
 .tran 10u 100u
 .end
 ";
-
-fn rspice_ok(args: &[&str]) {
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .expect("run rspice");
-    assert!(
-        output.status.success(),
-        "rspice {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 
 fn simulate(dir: &Path, format: &str, out_name: &str) -> PathBuf {
     let deck_path = dir.join("deck.sp");

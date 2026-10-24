@@ -15,7 +15,7 @@ fn invalid(message: impl Into<String>, suggestion: Option<&str>) -> CliError {
 /// spool 81,000 lines at the terminal.
 const BROWSE_LIMIT: usize = 200;
 
-pub fn models(args: ModelsArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
+pub fn models(args: ModelsArgs, quiet: bool) -> Result<(), CliError> {
     let index = match &args.models_dir {
         Some(dir) => Some(SpiceLibraryIndex::open(dir).map_err(|source| {
             invalid(

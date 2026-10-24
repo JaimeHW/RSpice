@@ -1,19 +1,7 @@
 //! Header interpretation must preserve the meaning of imported RF samples.
 mod common;
 
-use common::{read_json, test_dir};
-use std::path::Path;
-use std::process::{Command, Output};
-
-fn convert(input: &Path, output: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "--error-format", "json", "convert"])
-        .arg(input)
-        .arg(output)
-        .args(["--to", "json"])
-        .output()
-        .unwrap()
-}
+use common::{convert_to_json as convert, read_json, test_dir};
 
 fn signal<'a>(table: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
     table["signals"]

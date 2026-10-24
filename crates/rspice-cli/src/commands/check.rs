@@ -41,12 +41,7 @@ impl ValidationResult {
 }
 
 /// Execute the check command
-pub fn execute(
-    args: CheckArgs,
-    config: &Config,
-    _verbose: bool,
-    quiet: bool,
-) -> Result<(), CliError> {
+pub fn execute(args: CheckArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     if !quiet && !args.json {
         crate::console::line(format_args!("Checking: {}", args.input.display()))?;
     }
@@ -995,7 +990,6 @@ mod tests {
                 json: false,
             },
             &Config::default(),
-            false,
             true,
         );
         let _ = std::fs::remove_file(path);
@@ -1043,7 +1037,6 @@ mod tests {
                 json: false,
             },
             &Config::default(),
-            false,
             true,
         );
         let _ = std::fs::remove_file(path);

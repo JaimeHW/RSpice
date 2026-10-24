@@ -212,6 +212,18 @@ pub fn quiet(args: &[&str]) -> Output {
         .unwrap()
 }
 
+/// `rspice --quiet <args>`, which must succeed.
+#[allow(dead_code)]
+pub fn quiet_ok(args: &[&str]) {
+    let output = quiet(args);
+    assert!(
+        output.status.success(),
+        "rspice {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// `rspice --quiet --error-format json <args>`.
 #[allow(dead_code)]
 pub fn quiet_json_errors(args: &[&str]) -> Output {
@@ -220,6 +232,28 @@ pub fn quiet_json_errors(args: &[&str]) -> Output {
         .args(args)
         .output()
         .unwrap()
+}
+
+/// Assert the CLI exited successfully, showing its stderr if not.
+#[allow(dead_code)]
+pub fn passed(output: &Output) {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The one JSON diagnostic document a failing `--error-format json` run
+/// wrote to stderr.
+#[allow(dead_code)]
+pub fn stderr_document(output: &Output) -> serde_json::Value {
+    serde_json::from_slice(&output.stderr).unwrap_or_else(|error| {
+        panic!(
+            "stderr must be exactly one JSON document: {error}; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
 }
 
 /// `rspice --quiet run <deck> -o <output> -f <format>`.
@@ -250,6 +284,18 @@ pub fn convert_with_flags(input: &Path, output: &Path, format: &str, flags: &[&s
         .arg(output)
         .args(["--to", format])
         .args(flags)
+        .output()
+        .unwrap()
+}
+
+/// `rspice --quiet --error-format json convert <input> <output> --to json`.
+#[allow(dead_code)]
+pub fn convert_to_json(input: &Path, output: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "convert"])
+        .arg(input)
+        .arg(output)
+        .args(["--to", "json"])
         .output()
         .unwrap()
 }
@@ -305,7 +351,8 @@ pub fn axis_schema_manifest_path(requested: &Path) -> PathBuf {
     sibling_json(requested, "step_schema")
 }
 
-fn sibling_json(requested: &Path, tag: &str) -> PathBuf {
+/// `<requested stem>.<tag>.json` beside `requested`.
+pub fn sibling_json(requested: &Path, tag: &str) -> PathBuf {
     let stem = requested
         .file_stem()
         .expect("output stem")

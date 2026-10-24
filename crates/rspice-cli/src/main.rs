@@ -249,14 +249,14 @@ fn main() -> ExitCode {
     // Execute command
     let result: Result<(), cli::CliError> = match cli.command {
         Commands::Run(args) => commands::run(args, &config, cli.verbose, cli.quiet),
-        Commands::Health(args) => commands::health(args, &config, cli.verbose, cli.quiet),
+        Commands::Health(args) => commands::health(args, &config, cli.quiet),
         Commands::Capabilities(args) => commands::capabilities::execute(args, cli.quiet),
         Commands::Study(args) => commands::study::execute(args, &config, cli.quiet),
-        Commands::Info(args) => commands::info(args, &config, cli.verbose, cli.quiet),
-        Commands::Models(args) => commands::models(args, cli.verbose, cli.quiet),
+        Commands::Info(args) => commands::info(args, &config, cli.quiet),
+        Commands::Models(args) => commands::models(args, cli.quiet),
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),
-        Commands::Check(args) => commands::check(args, &config, cli.verbose, cli.quiet),
-        Commands::Convert(args) => commands::convert(args, &config, cli.verbose, cli.quiet),
+        Commands::Check(args) => commands::check(args, &config, cli.quiet),
+        Commands::Convert(args) => commands::convert(args, &config, cli.quiet),
         Commands::Completions(args) => {
             use clap::CommandFactory;
             // clap_complete treats writer failures as internal panics. Its
@@ -285,7 +285,7 @@ fn main() -> ExitCode {
                 bless: args.bless,
                 interpolate: args.interpolate,
             };
-            commands::compare::execute(compare_args, &config, cli.verbose, cli.quiet)
+            commands::compare::execute(compare_args, &config, cli.quiet)
         }
     };
 
