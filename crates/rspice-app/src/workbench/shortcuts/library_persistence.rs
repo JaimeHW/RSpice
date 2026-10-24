@@ -584,20 +584,6 @@ fn prepare_update(
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
-#[cfg(any(test, target_arch = "wasm32"))]
-fn edit_in_store(
-    store: &impl ShortcutLibraryStore,
-    predecessor: &PersistedShortcutProfileLibrary,
-    edit: impl FnOnce(&mut ShortcutProfileLibrary) -> Result<(), String>,
-) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
-    let mut candidate = predecessor.library.clone();
-    edit(&mut candidate).map_err(|message| {
-        ShortcutLibraryPersistenceError::new("shortcut-library.edit-rejected", message)
-    })?;
-    update_in_store(store, predecessor, &candidate)
-}
-
 fn compatible_after_publication(
     bytes: &[u8],
 ) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
@@ -1526,28 +1512,6 @@ mod tests {
         };
         assert!(initialized_from_session);
         assert_eq!(persisted.token().generation(), 1);
-    }
-
-    #[test]
-    fn edit_closure_persists_candidate_before_returning_it_for_live_apply() {
-        let store = MemoryStore::default();
-        let first = create_in_store(&store, &ShortcutProfileLibrary::default()).unwrap();
-        let next = edit_in_store(&store, &first, |library| {
-            library
-                .edit_active(|profile| {
-                    profile.policies_mut().set_chord_timeout(
-                        crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds,
-                    );
-                })
-                .map_err(|error| error.to_string())?;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(
-            next.library().active().policies().chord_timeout(),
-            crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds
-        );
-        assert_eq!(next.token().generation(), 2);
     }
 
     #[test]

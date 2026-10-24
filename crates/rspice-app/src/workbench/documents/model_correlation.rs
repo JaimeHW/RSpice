@@ -413,18 +413,6 @@ impl ModelCorrelationWorkspaceState {
     pub const fn dialog_open(&self) -> bool {
         self.dialog.is_some()
     }
-
-    #[cfg(test)]
-    pub fn reset_for_navigation(&mut self) {
-        self.section = ModelCorrelationSection::Datasets;
-        self.dialog = None;
-        self.dialog_source = None;
-        self.selected_suite_id = None;
-        self.selected_dataset_id = None;
-        self.selected_metric_id = None;
-        self.notice = None;
-        self.scroll_offset = 0.0;
-    }
 }
 
 #[cfg(test)]
@@ -445,18 +433,5 @@ mod tests {
                 "Gate",
             ]
         );
-    }
-
-    #[test]
-    fn transactional_dialogs_are_not_authoritative_project_state() {
-        let mut state = ModelCorrelationWorkspaceState {
-            dialog: Some(ModelCorrelationDialog::AddDataset(
-                CorrelationDatasetDraft::default(),
-            )),
-            ..ModelCorrelationWorkspaceState::default()
-        };
-        state.reset_for_navigation();
-        assert!(state.dialog.is_none());
-        assert_eq!(state.section, ModelCorrelationSection::Datasets);
     }
 }
