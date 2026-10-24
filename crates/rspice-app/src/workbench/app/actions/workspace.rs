@@ -232,30 +232,16 @@ impl AppState {
 }
 
 impl AppState {
-    /// Whether the active cellview refuses writes, whatever kind of document
-    /// it is.
-    ///
-    /// Safe mode is one of the three owners of that refusal, alongside a
-    /// read-only library master and a read-only hierarchy reference. It
-    /// belongs here rather than only in the schematic gate because every
-    /// document class — symbol, layout, hierarchy reference, review comment —
-    /// writes into the same project that safe mode opened read-only.
+    /// [`Model::active_view_read_only`](crate::workbench::app_state::Model::active_view_read_only)
+    /// for the session's model.
     pub(crate) fn active_view_read_only(&self) -> bool {
-        self.model.safe_mode.project_read_only()
-            || self.model.workspace.content.active_read_only_reference()
-            || self
-                .model
-                .library_manager
-                .get_library(&self.model.workspace.content.active_view.library)
-                .is_some_and(|library| library.read_only)
+        self.model.active_view_read_only()
     }
 
-    /// Single late-bound authority for every schematic mutation surface.
-    ///
-    /// Safe mode can be activated after a tool or dialog was armed, so callers
-    /// must not rely only on the persisted schematic flag captured earlier.
+    /// [`Model::schematic_edit_read_only`](crate::workbench::app_state::Model::schematic_edit_read_only)
+    /// for the session's model.
     pub(crate) fn schematic_edit_read_only(&self) -> bool {
-        self.model.schematic.session.read_only || self.active_view_read_only()
+        self.model.schematic_edit_read_only()
     }
 
     /// Names the owner of the refusal, in the order

@@ -15,9 +15,17 @@ use super::diagnostic_store::listing::{ListingInputs, ListingSource};
 #[cfg(test)]
 use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
 use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
-use super::{AppState, SlotFacts};
+use super::{AppState, Model, SlotFacts};
 use crate::state::CellViewRef;
 use crate::time_compat::Instant;
+
+/// The model a session holds, for the operations that read nothing else and
+/// take any holder of it.
+impl AsRef<Model> for AppState {
+    fn as_ref(&self) -> &Model {
+        &self.model
+    }
+}
 
 impl AppState {
     /// What model code reads of the features' state, as it stands now.

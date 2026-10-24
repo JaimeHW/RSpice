@@ -48,7 +48,6 @@
   },
   "lower->upper": {
     "framework->session": 490,
-    "model->session": 6,
     "run->code": 2,
     "run->session": 1,
     "services->project": 9,

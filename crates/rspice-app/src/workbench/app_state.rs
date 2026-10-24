@@ -21,7 +21,7 @@ mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 #[cfg(test)]
 mod modal_gate_tests;
-mod model;
+pub(in crate::workbench) mod model;
 mod model_access;
 pub(in crate::workbench) mod problems_view;
 mod rule_deck;

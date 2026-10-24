@@ -55,6 +55,7 @@ D = "^workbench/app/dialogs/"
 # Source path (relative to src/) -> slice. First match wins.
 SLICE_RULES = [
     (r"^(lib|main|workbench)\.rs$", "shell"),
+    (r"^feature_tests(\.rs$|/)", "shell"),
     (W + r"app\.rs$", "shell"),
     (W + r"app/browser_history\.rs$", "shell"),
     (W + r"frame\.rs$", "shell"),

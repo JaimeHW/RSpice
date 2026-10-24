@@ -102,6 +102,9 @@ const LAYERS: &[(&str, u32)] = &[
     // workflows that mutate them. Its interior is ordered separately by
     // [`WORKBENCH_LAYERS`] — see `workbench_references_respect_the_layer_order`.
     ("workbench", 9),
+    // Test-only: whole-application tests of one slice's behaviour, which
+    // construct `AppState` or `RSpiceApp` and so sit above the shell.
+    ("feature_tests", 10),
 ];
 
 /// Layer-order violations present in the tree today, with exact counts.

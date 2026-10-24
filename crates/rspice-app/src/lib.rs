@@ -114,6 +114,11 @@ mod source_guard;
 #[cfg(test)]
 mod fixture_root;
 
+/// Tests that construct the whole application to observe one slice's
+/// behaviour, kept in the shell because only the shell can build it.
+#[cfg(test)]
+mod feature_tests;
+
 // =============================================================================
 // The crate's entire external surface
 // =============================================================================
