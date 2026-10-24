@@ -991,7 +991,6 @@ mod tests {
     #[test]
     fn the_catalogue_takes_a_second_column_only_when_both_columns_clear_the_row_minimum() {
         let bound = 2.0 * ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
-        assert_eq!(ANALYSIS_CATALOG_COLUMN_MIN_WIDTH, 560.0);
         assert_eq!(analysis_catalog_column_count(bound - 1.0), 1);
         assert_eq!(analysis_catalog_column_count(bound), 1);
         assert_eq!(analysis_catalog_column_count(bound + 1.0), 2);

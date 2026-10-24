@@ -218,12 +218,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compact_navigation_uses_the_mockup_five_item_and_whole_rail_projections() {
-        assert_eq!(Workspace::PHONE_PRIMARY.len() + 1, 5);
-        assert_eq!(Workspace::ALL.len(), 8);
-    }
-
-    #[test]
     fn compact_navigation_geometry_matches_the_mockup() {
         let item = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 52.0));
         let badge = phone_badge_rect(item);

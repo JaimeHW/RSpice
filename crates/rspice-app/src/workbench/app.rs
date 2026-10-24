@@ -1129,11 +1129,6 @@ impl RSpiceApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         self.state.shell.exit_requested = false;
     }
-
-    /// Toggle the console panel between expanded and collapsed.
-    pub fn toggle_console(&mut self) {
-        self.state.workbench.console_visible = !self.state.workbench.console_visible;
-    }
 }
 
 fn should_warn_before_browser_unload(

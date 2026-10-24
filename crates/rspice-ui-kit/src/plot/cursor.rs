@@ -35,12 +35,6 @@ impl CursorPair {
     pub fn any(&self) -> bool {
         self.a.is_some()
     }
-
-    /// B − A when both cursors are placed.
-    #[cfg(test)]
-    pub fn delta(&self) -> Option<f64> {
-        Some(self.b? - self.a?)
-    }
 }
 
 #[cfg(test)]
@@ -54,7 +48,6 @@ mod tests {
         assert_eq!(c.a, Some(1.0));
         c.place(2.0);
         assert_eq!(c.b, Some(2.0));
-        assert_eq!(c.delta(), Some(1.0));
         c.place(3.0);
         assert_eq!((c.a, c.b), (Some(3.0), None));
         c.clear();

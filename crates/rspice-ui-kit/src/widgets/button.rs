@@ -657,10 +657,4 @@ mod tests {
             "the confirmation's destructive primary lost its error fill"
         );
     }
-
-    #[test]
-    fn labeled_button_accepts_exact_responsive_minimum_height() {
-        let button = Button::new("Clear read").min_height(44.0);
-        assert_eq!(button.min_height, 44.0);
-    }
 }

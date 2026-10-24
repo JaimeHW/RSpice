@@ -912,12 +912,7 @@ pub(super) fn switch_cell(ui: &mut Ui, name: &str, value: &mut bool) -> Response
 /// row. That is the mockup's rule for the simulation stage and its advanced
 /// options — `label.switch` throughout, with `.check-row` appearing only in
 /// the project launcher and the results and platform workflows — and the
-/// studio now holds it in full. [`tests::the_studio_paints_no_tick_box`] is
-/// what keeps it: the doc here once claimed a tick box on four rows and a
-/// switch on every other, which was true of the four and false of the rest,
-/// and it went on being false at narrow widths for as long as the ban named
-/// only egui's spellings. A claim about how many of something ships drifts
-/// back to being wrong the moment nothing checks it.
+/// studio now holds it in full.
 ///
 /// Returns whether the reader changed the value. The label elides rather than
 /// wrapping, because these rows sit inside cards whose width is the page's.

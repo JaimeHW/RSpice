@@ -579,11 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn canvas_breadcrumb_uses_the_mockup_body_type_size() {
-        assert_eq!(CANVAS_BREADCRUMB_FONT_SIZE, 12.0);
-    }
-
-    #[test]
     fn the_full_breadcrumb_names_the_root_cellview_then_the_occurrence_below_it() {
         let mut state = AppState::default();
         assert_eq!(

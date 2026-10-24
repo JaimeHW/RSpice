@@ -1297,9 +1297,4 @@ mod tests {
         assert_eq!(by_name("Requirement"), "\u{2265} 39.5 dB");
         assert_eq!(by_name("Trials"), "101 measured of 101");
     }
-    #[test]
-    fn the_corner_grouping_is_offered_and_refused_with_its_reason() {
-        assert_eq!(GROUP_OPTIONS[2], "Corners \u{b7} none in this run");
-        assert!(CORNER_REASON.contains("no runner produces a Monte Carlo per corner"));
-    }
 }

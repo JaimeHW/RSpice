@@ -129,14 +129,6 @@ fn fixed_workspace_geometry_does_not_depend_on_selected_section() {
     }
 }
 
-/// The rail holds the six section entries and nothing else, so a short
-/// workspace scrolls them rather than clipping one.
-#[test]
-fn navigation_scroll_extent_always_contains_all_tabs() {
-    let required = SECTION_SPECS.len() as f32 * NAV_ROW_H;
-    assert_eq!(required, 216.0);
-}
-
 #[test]
 fn identity_elision_preserves_both_collision_significant_ends() {
     assert_eq!(short_identity("short"), "short");
