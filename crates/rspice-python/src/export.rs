@@ -58,53 +58,12 @@ fn unknown_option(kind: &str, value: &str, accepted: &[&str]) -> String {
 // Shared helpers
 //=============================================================================
 
-/// asctime-style UTC timestamp, matching the header ngspice writes.
-///
-/// Civil-date conversion uses Hinnant's days-from-epoch algorithm;
-/// 1970-01-01 was a Thursday.
+/// asctime-style UTC timestamp of now, matching the header ngspice writes.
 fn asctime_utc_now() -> String {
-    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    let days = (seconds / 86_400) as i64;
-    let time_of_day = seconds % 86_400;
-    let (hour, minute, second) = (
-        time_of_day / 3600,
-        (time_of_day % 3600) / 60,
-        time_of_day % 60,
-    );
-
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_position = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_position + 2) / 5 + 1;
-    let month = if month_position < 10 {
-        month_position + 3
-    } else {
-        month_position - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-
-    format!(
-        "{} {} {day} {hour:02}:{minute:02}:{second:02} {year}",
-        WEEKDAYS
-            .get(days.rem_euclid(7) as usize)
-            .copied()
-            .unwrap_or("Thu"),
-        MONTHS
-            .get(month.saturating_sub(1) as usize)
-            .copied()
-            .unwrap_or("Jan"),
-    )
+    rspice_core::time_compat::asctime_utc(seconds)
 }
 
 //=============================================================================

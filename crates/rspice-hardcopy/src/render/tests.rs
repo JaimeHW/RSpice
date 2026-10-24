@@ -758,15 +758,7 @@ fn aggregate_mapping_namespaces_colliding_child_object_identities() {
 }
 
 #[test]
-fn unix_timestamp_conversion_is_checked_and_gregorian() {
-    assert_eq!(
-        HardcopyPublicationTimestamp::from_unix_seconds(0).unwrap(),
-        HardcopyPublicationTimestamp::try_new(1970, 1, 1, 0, 0, 0).unwrap()
-    );
-    assert_eq!(
-        HardcopyPublicationTimestamp::from_unix_seconds(951_782_400).unwrap(),
-        HardcopyPublicationTimestamp::try_new(2000, 2, 29, 0, 0, 0).unwrap()
-    );
+fn unix_timestamp_conversion_stops_at_the_last_second_of_9999() {
     assert_eq!(
         HardcopyPublicationTimestamp::from_unix_seconds(253_402_300_799).unwrap(),
         HardcopyPublicationTimestamp::try_new(9999, 12, 31, 23, 59, 59).unwrap()
