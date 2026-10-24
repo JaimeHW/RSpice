@@ -34,6 +34,7 @@ pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;
 #[cfg(test)]
 mod stack_budget;
+pub(in crate::workbench) mod symbol_contract;
 #[cfg(test)]
 mod technology_demand_tests;
 mod transaction;
