@@ -183,6 +183,17 @@ pub(super) fn solver_window(stop_time: f64, max_step: Option<f64>) -> PyResult<f
     Ok(max_step.unwrap_or(stop_time / 50.0))
 }
 
+/// The checkpoint a checkpointed or resumed transient ends with. A run the
+/// design finished with `$finish`, `$stop` or `$fatal` has none to extend, so
+/// Python sees the engine's refusal, which names when the run ended.
+pub(super) fn extending_checkpoint(
+    end: rspice_core::engine::TransientEnd,
+) -> PyResult<PyTransientCheckpoint> {
+    end.into_checkpoint()
+        .map(PyTransientCheckpoint::new)
+        .map_err(crate::errors::simulation_error_to_pyerr)
+}
+
 /// Spell a node identifier the way an authored card names it.
 ///
 /// A numeric index is a legal node name in SPICE, and `resolve_node` reads it
