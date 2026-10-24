@@ -27,7 +27,7 @@ use super::schematic_for_reference;
 /// An empty membership map means "this transaction restores no sheet
 /// assignments", never "assign everything to the default sheet".
 #[derive(Debug, Clone)]
-pub(super) struct DocumentCompensation {
+pub struct DocumentCompensation {
     reference: CellViewRef,
     before_sheet_assignments: BTreeMap<u64, SheetId>,
 }
@@ -59,7 +59,7 @@ impl DocumentCompensation {
     }
 
     #[cfg(test)]
-    pub(super) fn reference(&self) -> &CellViewRef {
+    pub fn reference(&self) -> &CellViewRef {
         &self.reference
     }
 
@@ -124,7 +124,7 @@ impl DocumentCompensation {
 /// The part of a project undo record that means the same thing for every kind
 /// of transaction.
 #[derive(Debug, Clone)]
-pub(super) struct RecordHeader {
+pub struct RecordHeader {
     sequence: UndoSequence,
     documents: Vec<DocumentCompensation>,
     activated_before: Option<CellViewRef>,
@@ -166,7 +166,7 @@ impl RecordHeader {
         self.sequence = next_undo_sequence();
     }
 
-    pub(super) fn documents(&self) -> &[DocumentCompensation] {
+    pub fn documents(&self) -> &[DocumentCompensation] {
         &self.documents
     }
 

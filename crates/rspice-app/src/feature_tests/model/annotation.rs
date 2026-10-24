@@ -1,6 +1,12 @@
 //! Annotation publication, dependent references and shared project history.
 
-use super::*;
+use crate::state::CellViewRef;
+use crate::state::ComponentType;
+use crate::state::DesignManagementCatalog;
+use crate::state::SchematicSnapshot;
+use crate::state::SchematicState;
+use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
+use crate::workbench::app_state::design_history::schematic_for_reference;
 
 mod live_references;
 mod manual_edit;

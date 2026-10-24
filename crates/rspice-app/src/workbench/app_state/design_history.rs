@@ -20,7 +20,7 @@
 //! has been applied, and each carries what its sweep cleared: that identity is
 //! the one part of a project step neither side of the design can re-derive.
 
-mod annotation;
+pub(crate) mod annotation;
 mod compensation;
 mod component_rename;
 mod hierarchy_extraction;
@@ -37,11 +37,6 @@ use crate::state::workspace::{ReferenceChanges, SchematicReferenceTransaction};
 use compensation::{DocumentCompensation, RecordHeader};
 
 use crate::product::ObjectRevision;
-#[cfg(test)]
-use crate::state::model_library::{
-    CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSuite, ModelCorrelationState,
-    ModelSourceEvidenceBinding, ProjectModelDefinition, ProjectModelRevisionDefinition,
-};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority, ProjectModelCommit};
 use crate::state::{
     Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryCellInstance, LibraryManager,
@@ -54,8 +49,8 @@ const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 
 #[derive(Debug, Clone, Default)]
 pub struct ProjectDesignHistory {
-    undo: Vec<ProjectDesignRecord>,
-    redo: Vec<ProjectDesignRecord>,
+    pub undo: Vec<ProjectDesignRecord>,
+    pub redo: Vec<ProjectDesignRecord>,
     /// Where the newest transaction committed here sits in the global order.
     /// Undo and redo only move records between the stacks, so they leave it.
     committed: Option<UndoSequence>,
@@ -64,9 +59,9 @@ pub struct ProjectDesignHistory {
 /// One project transaction: where it sits in the global undo order and which
 /// documents it restores, beside the design content it restores them with.
 #[derive(Debug, Clone)]
-struct ProjectDesignRecord {
-    header: RecordHeader,
-    body: ProjectDesignBody,
+pub struct ProjectDesignRecord {
+    pub header: RecordHeader,
+    pub body: ProjectDesignBody,
     /// What the last application of this record cost the documents it does not
     /// own. Empty when the record is committed and refilled at every crossing;
     /// see [`StrandedPlacement`].
@@ -90,7 +85,7 @@ struct StrandedPlacement {
 }
 
 #[derive(Debug, Clone)]
-enum ProjectDesignBody {
+pub enum ProjectDesignBody {
     ComponentRename(Box<component_rename::ComponentRenameRecord>),
     HierarchyExtraction(Box<HierarchyExtractionRecord>),
     DesignManagement(Box<DesignManagementRecord>),
@@ -110,7 +105,7 @@ enum PreparedReferenceMutation {
 }
 
 #[derive(Debug, Clone)]
-struct HierarchyExtractionRecord {
+pub struct HierarchyExtractionRecord {
     description: String,
     parent_ref: CellViewRef,
     target_schematic_ref: CellViewRef,
@@ -120,10 +115,10 @@ struct HierarchyExtractionRecord {
     child: SchematicSnapshot,
     child_template: SchematicState,
     target_cell: Cell,
-    open_views_before: Vec<OpenCellView>,
+    pub open_views_before: Vec<OpenCellView>,
     hierarchy_stack_before: Vec<CellViewRef>,
     hierarchy_instances_before: Vec<String>,
-    open_views_after: Vec<OpenCellView>,
+    pub open_views_after: Vec<OpenCellView>,
     hierarchy_stack_after: Vec<CellViewRef>,
     hierarchy_instances_after: Vec<String>,
 }
@@ -132,7 +127,7 @@ struct HierarchyExtractionRecord {
 /// are immutable before/after values; logical project revisions are guards,
 /// not values to restore, so undo and redo each advance revision monotonically.
 #[derive(Debug, Clone)]
-struct DesignManagementRecord {
+pub struct DesignManagementRecord {
     description: String,
     owner: CellViewRef,
     before: DesignManagementCatalog,
@@ -150,7 +145,7 @@ struct DesignManagementRecord {
 /// form are project-scoped edits, but neither operation owns unrelated
 /// schematics or libraries.
 #[derive(Debug, Clone)]
-struct SymbolDefinitionRecord {
+pub struct SymbolDefinitionRecord {
     description: String,
     library: String,
     cell: String,
@@ -172,7 +167,7 @@ struct SymbolDefinitionFixtureRecord {
 /// model library is retained; manager filters, selection, and unrelated
 /// libraries are presentation or independent domain state.
 #[derive(Debug, Clone)]
-struct ModelDefinitionRecord {
+pub struct ModelDefinitionRecord {
     description: String,
     library: String,
     model: String,
@@ -184,7 +179,7 @@ struct ModelDefinitionRecord {
 
 /// One guarded replacement of the complete loaded model-library set.
 #[derive(Debug, Clone)]
-struct ModelLibrariesRecord {
+pub struct ModelLibrariesRecord {
     description: String,
     before: Vec<ModelLibrary>,
     after: Vec<ModelLibrary>,
@@ -193,7 +188,7 @@ struct ModelLibrariesRecord {
 }
 
 #[derive(Debug, Clone)]
-struct ModelResolutionRecordsRecord {
+pub struct ModelResolutionRecordsRecord {
     description: String,
     before: Vec<crate::state::model_library::ModelResolutionRecord>,
     after: Vec<crate::state::model_library::ModelResolutionRecord>,
@@ -1892,7 +1887,7 @@ fn cell_semantics_match(left: Option<&Cell>, right: Option<&Cell>) -> bool {
     }
 }
 
-fn schematic_for_reference<'a>(
+pub fn schematic_for_reference<'a>(
     state: &'a Model,
     reference: &CellViewRef,
 ) -> Option<crate::state::SchematicEditorRef<'a>> {
@@ -2190,7 +2185,7 @@ fn apply_schematic_map(
 /// was published is not part of it: membership is republished as objects come
 /// and go, and an undo that takes an object away again leaves the catalog as
 /// it was.
-fn design_management_semantics_match(
+pub fn design_management_semantics_match(
     left: &DesignManagementCatalog,
     right: &DesignManagementCatalog,
 ) -> bool {
@@ -2235,6 +2230,3 @@ fn document_read_only(state: &Model, reference: &CellViewRef) -> bool {
             .is_some_and(|library| library.read_only)
         || schematic_read_only(state, reference)
 }
-
-#[cfg(test)]
-mod tests;

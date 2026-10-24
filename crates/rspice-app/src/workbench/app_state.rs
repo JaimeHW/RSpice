@@ -13,9 +13,9 @@
 //! `workflows::project_workflow`). Only accessors over this struct's own
 //! fields are defined here.
 
-pub(in crate::workbench) mod cell_usage;
-pub(in crate::workbench) mod design_checks;
-pub(in crate::workbench) mod design_history;
+pub(crate) mod cell_usage;
+pub(crate) mod design_checks;
+pub(crate) mod design_history;
 pub(crate) mod diagnostic_store;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
@@ -24,7 +24,7 @@ mod modal_gate_tests;
 pub(in crate::workbench) mod model;
 mod model_access;
 pub(in crate::workbench) mod problems_view;
-mod rule_deck;
+pub(crate) mod rule_deck;
 mod run_access;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
@@ -39,7 +39,7 @@ pub(in crate::workbench) mod symbol_contract;
 mod technology_demand_tests;
 mod transaction;
 pub(in crate::workbench) mod viewer_capabilities;
-pub(in crate::workbench) mod waivers;
+pub(crate) mod waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::NoticeKind;

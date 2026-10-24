@@ -1,6 +1,7 @@
 //! Manual annotation authority across projection, compensation and native persistence.
 
 use super::*;
+use crate::state::SchematicSnapshot;
 
 fn executable_fixture() -> Fixture {
     let mut fixture = fixture(&["V42"]);

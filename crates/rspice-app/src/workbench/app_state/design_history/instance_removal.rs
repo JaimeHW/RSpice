@@ -10,7 +10,7 @@ use super::*;
 /// one step here. A record per document would make Undo walk back through a
 /// decision the reader made once.
 #[derive(Debug, Clone)]
-pub(super) struct InstanceRemovalRecord {
+pub struct InstanceRemovalRecord {
     pub(super) description: String,
     documents: Vec<InstanceRemovalDocument>,
 }

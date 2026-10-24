@@ -16,7 +16,7 @@ impl AppState {
     /// about that tells the published findings: without this a finding whose
     /// waiver was undone would still be listed waived, and still not count.
     // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
+    pub(crate) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
         let after = self.model.stored_waivers();
         if after.symbol_changed_since(before) {
             // The pin checks read the symbol document, waivers and all.
@@ -32,7 +32,7 @@ impl AppState {
     /// Waive the finding at `target` for `reason`, as an edit of the document
     /// that stores it, and state every published finding again.
     // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn waive_finding(
+    pub(crate) fn waive_finding(
         &mut self,
         target: &WaiverTarget,
         reason: &str,
@@ -44,10 +44,7 @@ impl AppState {
     /// Remove the waiver stored at `target`, as an edit of the document that
     /// stores it, and state every published finding again.
     // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn remove_finding_waiver(
-        &mut self,
-        target: &WaiverTarget,
-    ) -> Result<(), String> {
+    pub(crate) fn remove_finding_waiver(&mut self, target: &WaiverTarget) -> Result<(), String> {
         self.edit_waivers(&target.cell_view, StoredWaiverEdit::remove(target))
     }
 

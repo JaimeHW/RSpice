@@ -6,11 +6,26 @@
 //! that "fixes up" any of these silently discards work the operator can still
 //! see on screen.
 
-use super::*;
+use crate::product::ObjectRevision;
+use crate::state::CellViewRef;
+use crate::state::DesignManagementCatalog;
+use crate::state::OpenCellView;
+use crate::state::SchematicSnapshot;
+use crate::state::SchematicState;
+use crate::state::model_library::CorrelationDatasetClass;
+use crate::state::model_library::CorrelationDatasetRevision;
+use crate::state::model_library::CorrelationSuite;
+use crate::state::model_library::ModelCorrelationState;
+use crate::state::model_library::ModelSourceAuthority;
+use crate::state::model_library::ModelSourceEvidenceBinding;
+use crate::state::model_library::ProjectModelDefinition;
+use crate::state::model_library::ProjectModelRevisionDefinition;
 use crate::state::write_policy::LocalSafeModeOptions;
 use crate::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_history::*;
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
+use std::collections::BTreeMap;
 
 #[test]
 fn library_transaction_cannot_smuggle_a_provider_ledger_change() {

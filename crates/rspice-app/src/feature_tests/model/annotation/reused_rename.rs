@@ -1,6 +1,8 @@
 //! Single edits must preserve references in every occurrence of a reused master.
 
 use super::*;
+use crate::state::SchematicSnapshot;
+use std::collections::BTreeSet;
 
 #[test]
 fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {

@@ -1,11 +1,13 @@
 //! When live checking runs, what it states, and how it composes with the
 //! explicit checks on the one list.
 
-use super::*;
 use crate::state::{ComponentType, Point};
+use crate::time_compat::Instant;
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_checks::DiagnosticInputs;
 use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::app_state::waivers::WaiverAction;
+use crate::workbench::preferences::TogglePreference;
 
 fn open_state() -> AppState {
     let mut state = AppState::default();

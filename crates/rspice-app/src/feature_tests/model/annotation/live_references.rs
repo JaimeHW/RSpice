@@ -1,6 +1,10 @@
 //! References added between history operations retain current scope and atomic publication.
 
 use super::*;
+use crate::state::CellViewRef;
+use crate::state::ComponentType;
+use crate::state::SchematicSnapshot;
+use crate::state::SchematicState;
 
 fn add_output(
     state: &mut AppState,

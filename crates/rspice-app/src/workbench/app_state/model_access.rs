@@ -42,7 +42,7 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn publish_diagnostics(
+    pub(crate) fn publish_diagnostics(
         &mut self,
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
@@ -52,10 +52,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    pub(in crate::workbench) fn diagnostic_batch_standing(
-        &self,
-        batch: &DiagnosticBatch,
-    ) -> BatchStanding {
+    pub(crate) fn diagnostic_batch_standing(&self, batch: &DiagnosticBatch) -> BatchStanding {
         self.model
             .diagnostic_batch_standing(batch, self.slot_facts())
     }
@@ -100,10 +97,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    pub(in crate::workbench) fn publish_dispatch_diagnostics(
-        &mut self,
-        report: &crate::state::PreflightReport,
-    ) {
+    pub(crate) fn publish_dispatch_diagnostics(&mut self, report: &crate::state::PreflightReport) {
         let facts = self.slot_facts();
         self.model.publish_dispatch_diagnostics(report, facts);
     }
@@ -132,7 +126,7 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn reconcile_current_finding(&mut self) {
+    pub(crate) fn reconcile_current_finding(&mut self) {
         let sources = self.code.diagnostic_sources();
         self.model.reconcile_current_finding(&sources);
     }
@@ -212,23 +206,20 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn refresh_live_checks(&mut self, now: Instant) -> Option<Duration> {
+    pub(crate) fn refresh_live_checks(&mut self, now: Instant) -> Option<Duration> {
         let facts = self.slot_facts();
         self.model.refresh_live_checks(now, facts)
     }
 
     // Application half of a model operation; it becomes a request.
     #[cfg(test)]
-    pub(in crate::workbench) fn run_live_check(
-        &mut self,
-        subject: CellViewRef,
-    ) -> Result<DrcResult, String> {
+    pub(crate) fn run_live_check(&mut self, subject: CellViewRef) -> Result<DrcResult, String> {
         let facts = self.slot_facts();
         self.model.run_live_check(subject, facts)
     }
 
     #[cfg(test)]
-    pub(in crate::workbench) fn current_live_receipt(
+    pub(crate) fn current_live_receipt(
         &self,
         subject: &CellViewRef,
     ) -> Option<&super::design_checks::CellViewCheckReceipt> {

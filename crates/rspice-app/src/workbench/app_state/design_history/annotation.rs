@@ -3,9 +3,6 @@
 use super::reference_preparation::validate_reference_document;
 use super::*;
 
-#[cfg(test)]
-mod tests;
-
 impl Model {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn retain_annotation_history_after_save_descriptor(

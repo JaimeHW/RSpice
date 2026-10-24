@@ -7,7 +7,7 @@ use crate::state::workspace::PreparedReferences;
 use crate::state::{AnnotationState, Component, SchematicObjectKey};
 
 #[derive(Debug, Clone)]
-pub(super) struct ComponentRenameRecord {
+pub struct ComponentRenameRecord {
     pub(super) description: String,
     document: CellViewRef,
     before: BTreeMap<String, SchematicSnapshot>,

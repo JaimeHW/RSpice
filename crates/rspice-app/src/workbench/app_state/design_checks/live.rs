@@ -311,6 +311,3 @@ pub(in crate::workbench) fn live_check_digest(
     digest.update(material);
     Ok(ContentDigest::from_bytes(digest.finalize().into()))
 }
-
-#[cfg(test)]
-mod tests;

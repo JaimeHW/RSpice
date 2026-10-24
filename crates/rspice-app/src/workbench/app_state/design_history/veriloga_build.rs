@@ -39,7 +39,7 @@ pub struct VerilogAModuleBinding {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct VerilogABuildSettingsRecord {
+pub struct VerilogABuildSettingsRecord {
     pub(super) description: String,
     profile: Option<ProfileStep>,
     binding: Option<VerilogAModuleBinding>,

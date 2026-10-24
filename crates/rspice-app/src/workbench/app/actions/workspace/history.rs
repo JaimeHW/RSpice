@@ -48,11 +48,7 @@ impl AppState {
 
     /// Bring the document a history step restores to the front: the editor
     /// takes up the drawing the model swapped in, and the console says so.
-    pub(in crate::workbench) fn activate_history_document(
-        &mut self,
-        reference: &CellViewRef,
-        operation: &str,
-    ) {
+    pub(crate) fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
         if self.model.activate_history_document(reference) {
             self.bump_active_schematic_epoch();
             self.prompt(format!(

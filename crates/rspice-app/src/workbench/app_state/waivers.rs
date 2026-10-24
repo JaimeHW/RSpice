@@ -25,9 +25,6 @@ use super::diagnostic_store::{
 use super::model::Model;
 use crate::state::{CellViewRef, ViewType};
 
-#[cfg(test)]
-mod tests;
-
 /// The producer every record about a stored waiver carries.
 const WAIVER_PRODUCER: &str = "rspice.design.waivers";
 
