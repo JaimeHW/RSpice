@@ -6151,8 +6151,11 @@ impl ProcessLowerer<'_> {
     /// poisoned the result whenever any operand bit was unknown would get the
     /// first of those wrong.
     ///
-    /// A one-bit operand reduces to itself (with the inversion, for the
-    /// complemented forms), which is what a fold with no second element is.
+    /// A one-bit operand folds against the operator's identity (`1` for AND,
+    /// `0` for OR and XOR), so `0`, `1` and `x` reduce to themselves and `z`
+    /// to `x`: a reduction's result is a bitwise operator's output, and no row
+    /// of those tables yields `z` (IEEE 1364-2005 section 5.1.11). Folding
+    /// nothing would hand the `z` through unchanged.
     fn reduce_value(&mut self, block: BlockId, reduction: ReductionOp, input: ValueId) -> ValueId {
         let width = self.value_width(input);
         let op = match reduction {
@@ -6177,6 +6180,24 @@ impl ProcessLowerer<'_> {
         // indexed. The operators are associative and commutative over the
         // section 5.1.9 tables, so the direction is a readability choice.
         let mut folded = bit(self, 0);
+        if width == 1 {
+            let identity = self.builder.push_leaf(
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::FourStateConstant(FourStateValue::from_u64(
+                    1,
+                    u64::from(op == BitwiseOp::And),
+                )),
+            );
+            folded = self.builder.push(
+                block,
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::DigitalBitwise {
+                    op,
+                    left: identity,
+                    right: folded,
+                },
+            );
+        }
         for index in 1..width {
             let next = bit(self, index);
             folded = self.builder.push(

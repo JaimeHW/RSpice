@@ -2527,15 +2527,26 @@ fn a_reduction_folds_a_concatenation() {
     }
 }
 
-/// A one-bit operand reduces to itself: a fold with nothing to fold against.
+/// A one-bit operand reduces to itself when it is `0`, `1` or `x`, and a `z`
+/// reduces to `x`: the result is a bitwise operator's output, which is never
+/// `z` (IEEE 1364-2005 section 5.1.11).
 #[test]
-fn a_one_bit_reduction_is_the_bit_itself() {
+fn a_one_bit_reduction_is_the_bit_itself_and_z_reads_as_x() {
     for (operator, input, expected) in [
         ("&", "1", "1"),
+        ("&", "0", "0"),
         ("|", "0", "0"),
+        ("|", "1", "1"),
         ("^", "x", "x"),
+        ("^", "1", "1"),
         ("~&", "1", "0"),
         ("~^", "0", "1"),
+        ("&", "z", "x"),
+        ("|", "z", "x"),
+        ("^", "z", "x"),
+        ("~&", "z", "x"),
+        ("~|", "z", "x"),
+        ("~^", "z", "x"),
     ] {
         let mut harness = Harness::new(&format!(
             "    wire a;\n\
