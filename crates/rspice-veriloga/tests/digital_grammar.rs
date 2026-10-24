@@ -4852,12 +4852,8 @@ fn specify_paths_lower_one_path_per_source_and_destination() {
 fn specify_items_outside_paths_are_refused() {
     for (item, expected) in [
         (
-            "$timeskew(posedge c, a, 2);",
-            "Unsupported `specify` timing check: `$timeskew`",
-        ),
-        (
-            "$fullskew(posedge c, negedge a, 2, 3);",
-            "Unsupported `specify` timing check: `$fullskew`",
+            "$timecheck(posedge c, a, 2);",
+            "Unsupported `specify` timing check: `$timecheck`",
         ),
         (
             "$width(c, 2);",

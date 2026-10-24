@@ -464,7 +464,7 @@ fn lower_with_analog_variables(
             .iter()
             .flat_map(AnalyzedDigitalSignal::elaboration_expressions)
             .chain(digital.paths.iter().flat_map(|path| &path.delays))
-            .chain(digital.timing_checks.iter().flat_map(|check| &check.limits)),
+            .chain(digital.timing_checks.iter().flat_map(check_constants)),
     )?;
     let instance_constants = digital
         .instances
@@ -481,12 +481,7 @@ fn lower_with_analog_variables(
                     .iter()
                     .flat_map(|signal| signal.declared.elaboration_expressions())
                     .chain(instance.paths.iter().flat_map(|path| &path.delays))
-                    .chain(
-                        instance
-                            .timing_checks
-                            .iter()
-                            .flat_map(|check| &check.limits),
-                    ),
+                    .chain(instance.timing_checks.iter().flat_map(check_constants)),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1655,6 +1650,28 @@ fn path_delay(
         transitions,
         exponent: precision,
     })
+}
+
+/// The constant expressions of a timing check: its limits, `$timeskew`'s
+/// and `$fullskew`'s flags, and its events' selects (IEEE 1364-2005 A.7.5.2
+/// and A.7.5.3).
+fn check_constants(check: &crate::ast::SpecifyTimingCheck) -> impl Iterator<Item = &Expression> {
+    use crate::ast::TerminalSelect;
+    let selects = std::iter::once(&check.reference)
+        .chain(&check.data)
+        .flat_map(|event| match &event.terminal.select {
+            Some(TerminalSelect::Bit { index, .. }) => vec![index.as_ref()],
+            Some(TerminalSelect::Part { first, second, .. }) => {
+                vec![first.as_ref(), second.as_ref()]
+            }
+            None => Vec::new(),
+        });
+    check
+        .limits
+        .iter()
+        .chain(&check.event_based_flag)
+        .chain(&check.remain_active_flag)
+        .chain(selects)
 }
 
 /// A frame's module path delays (IEEE 1364-2005 section 14), its names

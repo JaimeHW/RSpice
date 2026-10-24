@@ -149,10 +149,14 @@ pub(super) fn lower_timing_checks(
                 TimingCheckKind::Removal => DigitalTimingCheckKind::Removal,
                 TimingCheckKind::RecRem => DigitalTimingCheckKind::RecRem,
                 TimingCheckKind::Skew => DigitalTimingCheckKind::Skew,
+                TimingCheckKind::TimeSkew => DigitalTimingCheckKind::TimeSkew,
+                TimingCheckKind::FullSkew => DigitalTimingCheckKind::FullSkew,
                 TimingCheckKind::Period => DigitalTimingCheckKind::Period,
                 TimingCheckKind::Width => DigitalTimingCheckKind::Width,
                 TimingCheckKind::NoChange => DigitalTimingCheckKind::NoChange,
             },
+            event_based: flag(check.event_based_flag.as_ref(), constants)?,
+            remain_active: flag(check.remain_active_flag.as_ref(), constants)?,
             reference: event(&check.reference)?,
             data: check.data.as_ref().map(event).transpose()?,
             limits,
@@ -367,6 +371,26 @@ fn delayed_signal_delays(
         .into_iter()
         .map(|(net, variable)| (net, delays[variable]))
         .collect()
+}
+
+/// Whether a `$timeskew` or `$fullskew` flag is set: written, and a constant
+/// other than zero (IEEE 1364-2005 section 15.3 and A.7.5.2).
+fn flag(
+    written: Option<&Expression>,
+    (resolved, time_scale): (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
+) -> Result<bool, DigitalLoweringDiagnostic> {
+    let Some(written) = written else {
+        return Ok(false);
+    };
+    match constants::scalar(written, resolved, time_scale) {
+        Some(Integer(value)) => Ok(value != 0),
+        Some(Real(value)) => Ok(value != 0.0),
+        None => Err(DigitalLoweringDiagnostic::refusal(
+            "a timing check flag that is not a constant expression (IEEE 1364-2005 A.7.5.2)"
+                .to_string(),
+            written.span().into(),
+        )),
+    }
 }
 
 /// The storage bits a timing check event's bit- or part-select names (IEEE

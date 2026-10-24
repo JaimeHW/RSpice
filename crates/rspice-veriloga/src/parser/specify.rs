@@ -570,6 +570,8 @@ impl Parser<'_> {
             "$removal" => Removal,
             "$recrem" => RecRem,
             "$skew" => Skew,
+            "$timeskew" => TimeSkew,
+            "$fullskew" => FullSkew,
             "$period" => Period,
             "$width" => Width,
             "$nochange" => NoChange,
@@ -602,7 +604,7 @@ impl Parser<'_> {
             ))));
         }
         let mut limits = Vec::new();
-        for _ in 0..if matches!(kind, SetupHold | RecRem | NoChange) {
+        for _ in 0..if matches!(kind, SetupHold | RecRem | NoChange | FullSkew) {
             2
         } else {
             1
@@ -619,10 +621,14 @@ impl Parser<'_> {
                 "delayed reference",
                 "delayed data",
             ],
+            // A.7.5.1: `[ , [ notifier ] [ , [ event_based_flag ] [ , [
+            // remain_active_flag ] ] ] ]`.
+            TimeSkew | FullSkew => &["notifier", "event-based flag", "remain-active flag"],
             _ => &["notifier"],
         };
         let (mut notifier, mut delayed_reference, mut delayed_data) = (None, None, None);
         let (mut timestamp_condition, mut timecheck_condition) = (None, None);
+        let (mut event_based_flag, mut remain_active_flag) = (None, None);
         for slot in optional {
             if !self.match_token(TokenKind::Comma) {
                 break;
@@ -640,6 +646,12 @@ impl Parser<'_> {
                 }
                 "delayed data" => {
                     delayed_data = Some(self.parse_delayed_signal("delayed data")?);
+                }
+                // A.7.5.2: `event_based_flag ::= constant_expression` and
+                // `remain_active_flag ::= constant_mintypmax_expression`.
+                "event-based flag" => event_based_flag = Some(self.parse_expression()?),
+                "remain-active flag" => {
+                    remain_active_flag = Some(self.parse_mintypmax_expression()?);
                 }
                 // A.7.5.2: `stamptime_condition` and `checktime_condition`
                 // are mintypmax expressions.
@@ -741,6 +753,8 @@ impl Parser<'_> {
             timecheck_condition,
             delayed_reference,
             delayed_data,
+            event_based_flag,
+            remain_active_flag,
             span,
         });
         Ok(())

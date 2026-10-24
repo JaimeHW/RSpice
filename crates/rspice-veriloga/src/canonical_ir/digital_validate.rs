@@ -1915,6 +1915,21 @@ impl CanonicalDigitalPlan {
                      design's time grid",
                 ));
             }
+            // Section 15.3: only `$timeskew` and `$fullskew` take the flags,
+            // and their limits are not negative.
+            let skew = matches!(
+                check.kind,
+                super::digital::DigitalTimingCheckKind::TimeSkew
+                    | super::digital::DigitalTimingCheckKind::FullSkew
+            );
+            if ((check.event_based || check.remain_active) && !skew)
+                || (skew && check.limits.iter().any(|limit| *limit < 0))
+            {
+                return Err(error(
+                    "digital timing check carries a skew flag it takes none of, or a negative \
+                     skew limit",
+                ));
+            }
             // Section 15.5.1: delays that leave both limits non-negative
             // between the delayed signals, and none for other checks.
             let [first, second] = check.limits;

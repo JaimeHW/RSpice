@@ -505,6 +505,9 @@ pub(crate) struct DigitalHost {
     /// The timing checks (IEEE 1364-2005 section 15); `None` for a design
     /// with none, or a run that leaves them out.
     checks: Option<checks::TimingChecks>,
+    /// The wakeup at the earliest deadline of the timer-based `$timeskew`
+    /// and `$fullskew` checks; `None` for a design with none.
+    check_timer: Option<TargetId>,
     /// What the run leaves out of the design's `specify` blocks.
     drops: delays::Drops,
     external_targets: Vec<TargetId>,
@@ -716,12 +719,14 @@ impl DigitalHost {
         let charge = charge::ChargeTimers::for_plan(&plan, &mut scheduler);
         let pending = delays::PendingDrives::for_plan(&plan, &mut scheduler);
         let checks = checks::TimingChecks::for_plan(&plan);
+        let check_timer = checks::TimingChecks::timer_for_plan(&plan, &mut scheduler);
         Self {
             checkpoint_failed: false,
             nba_target,
             charge,
             pending,
             checks,
+            check_timer,
             drops: delays::Drops::default(),
             external_targets: Vec::new(),
             external_real_targets: Vec::new(),
@@ -1295,6 +1300,10 @@ impl DigitalHost {
                         self.fire_pending_drives(tick)?;
                         continue;
                     }
+                    if self.check_timer == Some(*target) {
+                        self.fire_check_timers(tick)?;
+                        continue;
+                    }
                     let index = self.process_of_target[usize::from(*target)];
                     if self.withdrawn.remove(&index) {
                         continue;
@@ -1789,7 +1798,7 @@ impl DigitalHost {
             // A module path's source changing (IEEE 1364-2005 section 14).
             self.note_path_changes(drained, tick);
             // A timing check's events (IEEE 1364-2005 section 15).
-            self.note_timing_checks(drained, tick);
+            self.note_timing_checks(drained, tick)?;
             let observed = self.effects.observes_changes();
             for transition in drained.iter() {
                 // IEEE 1364-2005 sections 17.1.3, 17.2.2 and 18.1: a change of

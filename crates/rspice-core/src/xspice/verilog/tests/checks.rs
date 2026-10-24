@@ -677,15 +677,18 @@ endmodule
 /// `$setup` violated for -3 < rel < 0, `d[0]` changing at 10 is no event of
 /// `d[1]`, so the edge at 12 violates only the whole-signal check; `d[1]` at
 /// 23 against the edge at 24 (rel -1) violates both; `d[2]` at 30 against
-/// the edge at 31 again only the whole-signal one.
+/// the edge at 31 again only the whole-signal one. `d[B]`, `B` a localparam
+/// of 1, is `d[1]`.
 #[test]
 fn a_bit_select_event_is_a_change_of_that_bit() {
     let report = bench(
         r#"`timescale 1ns/1ns
 module b(input [3:0] d, input c);
+  localparam B = 1;
   specify
     $setup(d, posedge c, 3);
     $setup(d[1], posedge c, 3);
+    $setup(d[B], posedge c, 3);
   endspecify
 endmodule
 module t;
@@ -710,6 +713,7 @@ endmodule
     let mut expected = violations("$setup(d, posedge c, 3)", &[12]);
     expected.extend(violations("$setup(d, posedge c, 3)", &[24]));
     expected.extend(violations("$setup(d[1], posedge c, 3)", &[24]));
+    expected.extend(violations("$setup(d[B], posedge c, 3)", &[24]));
     expected.extend(violations("$setup(d, posedge c, 3)", &[31]));
     assert_eq!(warnings(&report), expected);
 }
@@ -762,4 +766,174 @@ endmodule
         }
     }
     assert_eq!(warnings(&report), expected);
+}
+
+/// `instance: check violated at time ns`, for each instance and time.
+fn named_violations(check: &str, at: &[(&str, u32)]) -> Vec<String> {
+    at.iter()
+        .map(|(instance, time)| format!("{instance}: {check} violated at {time} ns"))
+        .collect()
+}
+
+/// IEEE 1364-2005 section 15.3, `$timeskew(posedge c, d, 4)` under each
+/// combination of its flags: `t0` neither, `t1` event-based, `t2`
+/// event-based and remain-active, `t3` remain-active alone. The check is
+/// violated when `d` changes more than 4 after the rising edge, and never by
+/// simultaneous events.
+///
+/// - Edge at 10, `d` at 12 (2, within), 20 (10) and 22 (12): the timer-based
+///   checks end at 12; `t1` reports 20 and goes dormant; `t2` reports 20 and
+///   22.
+/// - Edge at 40, `d` at 47 (7) and 49 (9): the timer-based checks report 45,
+///   the first tick past 44; `t1` reports 47; `t2` 47 and 49.
+/// - Edge at 60, `d` at 62 (within); edge and `d` at 80 (simultaneous); `d`
+///   at 90 (10): the timer-based checks end at 62 and at 80; the
+///   event-based ones report 90.
+///
+/// `t3`'s remain-active flag has nothing to keep active: a timer-based check
+/// reports when its limit elapses, not at a late event.
+#[test]
+fn timeskew_reports_by_timer_or_by_event_per_its_flags() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module s0(input d, input c);
+  specify $timeskew(posedge c, d, 4); endspecify
+endmodule
+module s1(input d, input c);
+  parameter EVENT = 1;
+  specify $timeskew(posedge c, d, 4, , EVENT); endspecify
+endmodule
+module s2(input d, input c);
+  specify $timeskew(posedge c, d, 4, , 1'b1, 1); endspecify
+endmodule
+module s3(input d, input c);
+  specify $timeskew(posedge c, d, 4, , 0, 1); endspecify
+endmodule
+module t;
+  reg d, c;
+  s0 t0(d, c);
+  s1 t1(d, c);
+  s2 t2(d, c);
+  s3 t3(d, c);
+  initial begin
+    c = 0; d = 0;
+    #10 c = 1;
+    #2 d = 1;
+    #8 d = 0;
+    #2 d = 1;
+    #8 c = 0;
+    #10 c = 1;
+    #7 d = 0;
+    #2 d = 1;
+    #6 c = 0;
+    #5 c = 1;
+    #2 d = 0;
+    #13 c = 0;
+    #5 c = 1; d = 1;
+    #10 d = 0;
+    #10 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        warnings(&report),
+        named_violations(
+            "$timeskew(posedge c, d, 4)",
+            &[
+                ("t1", 20),
+                ("t2", 20),
+                ("t2", 22),
+                ("t0", 45),
+                ("t3", 45),
+                ("t1", 47),
+                ("t2", 47),
+                ("t2", 49),
+                ("t1", 90),
+                ("t2", 90),
+            ]
+        )
+    );
+}
+
+/// IEEE 1364-2005 section 15.3, `$fullskew(posedge c, posedge e, 4, 2)`:
+/// `e` may follow `c` by at most 4 and `c` follow `e` by at most 2, the
+/// first of the two being the timestamp event. `f0` is timer-based, `f1`
+/// event-based, `f2` event-based and remain-active. The rising edges of `c`
+/// are at 10, 25, 41 and 55, and of `e` at 13, 20, 40, 50 and 52.
+///
+/// - `f0`: `c` at 10 is met by `e` at 13 (3). `e` at 20 starts the check
+///   again, unmet by 22, so it reports 23; likewise `c` at 25 reports 30.
+///   `e` at 40 is met by `c` at 41 (1). `e` at 50 starts it, `e` at 52
+///   starts it again, and it reports 55; `c` at 55 then starts it, and it
+///   reports 60.
+/// - `f1`: `c` at 10, `e` at 13 within, `e` at 20 (10) reports and goes
+///   dormant; `c` at 25 restarts and `e` at 40 (15) reports; `c` at 41
+///   restarts and `e` at 50 (9) reports; `e` at 52, the check dormant, is a
+///   timestamp event, and `c` at 55 (3) reports.
+/// - `f2`: as `f1` to 50, but active still, so `e` at 52 (11 after `c` at
+///   41) reports, and `c` at 55 restarts it.
+#[test]
+fn fullskew_takes_either_order_per_its_flags() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module g0(input e, input c);
+  specify $fullskew(posedge c, posedge e, 4, 2); endspecify
+endmodule
+module g1(input e, input c);
+  specify $fullskew(posedge c, posedge e, 4, 2, , 1); endspecify
+endmodule
+module g2(input e, input c);
+  specify $fullskew(posedge c, posedge e, 4, 2, , 1, 1); endspecify
+endmodule
+module t;
+  reg e, c;
+  g0 f0(e, c);
+  g1 f1(e, c);
+  g2 f2(e, c);
+  initial begin
+    c = 0; e = 0;
+    #10 c = 1;
+    #3 e = 1;
+    #5 c = 0;
+    #1 e = 0;
+    #1 e = 1;
+    #5 c = 1;
+    #10 c = 0;
+    #2 e = 0;
+    #3 e = 1;
+    #1 c = 1;
+    #4 c = 0;
+    #4 e = 0;
+    #1 e = 1;
+    #1 e = 0;
+    #1 e = 1;
+    #3 c = 1;
+    #10 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        warnings(&report),
+        named_violations(
+            "$fullskew(posedge c, posedge e, 4, 2)",
+            &[
+                ("f1", 20),
+                ("f2", 20),
+                ("f0", 23),
+                ("f0", 30),
+                ("f1", 40),
+                ("f2", 40),
+                ("f1", 50),
+                ("f2", 50),
+                ("f2", 52),
+                ("f0", 55),
+                ("f1", 55),
+                ("f0", 60),
+            ]
+        )
+    );
 }

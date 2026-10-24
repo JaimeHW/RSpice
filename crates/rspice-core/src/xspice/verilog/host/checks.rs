@@ -20,6 +20,10 @@
 //! The other checks:
 //!
 //! - `$skew` is violated when `rel > limit`.
+//! - `$timeskew` and `$fullskew` are violated when their timecheck event
+//!   follows their timestamp event by more than the limit, reported when
+//!   the limit elapses or, event-based, at the late event (section 15.3;
+//!   see `skew_step`).
 //! - `$period` is violated when a reference edge follows the last by less
 //!   than the limit.
 //! - `$width` is violated when the opposite edge follows the reference edge
@@ -32,8 +36,9 @@
 //! (it complements `$recovery` as `$hold` complements `$setup`), and
 //! `$nochange`'s open window is an interpretation.
 //!
-//! An event counts on its edges of the terminal's least significant bit, or
-//! on any change of the terminal when it names no edge. It counts only while
+//! An event counts on its edges of the least significant bit the terminal
+//! names, or on any change of the bits it names when it names no edge: the
+//! whole signal, or a bit- or part-select's bits (A.7.5.3). It counts only while
 //! its `&&&` condition holds (section 15.6).
 //!
 //! `$setuphold` and `$recrem` take a timestamp and a timecheck condition
@@ -73,7 +78,37 @@ struct Check {
     timestamp: Option<DigitalCheckCondition>,
     timecheck: Option<DigitalCheckCondition>,
     notifier: Option<DigitalSignalId>,
+    /// `$timeskew`'s and `$fullskew`'s flags.
+    event_based: bool,
+    remain_active: bool,
     label: String,
+}
+
+impl Check {
+    /// A `$timeskew` or `$fullskew` that reports when its limit elapses.
+    fn timed(&self) -> bool {
+        matches!(self.kind, Kind::TimeSkew | Kind::FullSkew) && !self.event_based
+    }
+
+    /// The tick at which an active timer-based skew check that `state`
+    /// stamped is violated: the first at which the time since the stamp
+    /// exceeds the limit its other event must meet.
+    fn deadline(&self, state: &CheckState) -> Option<u64> {
+        if !self.timed() || !state.active {
+            return None;
+        }
+        let [after_reference, after_data] = self.limits;
+        let (stamp, limit) = match (state.reference, state.data) {
+            (Some(stamp), _) => (stamp, after_reference),
+            (None, Some(stamp)) => (stamp, after_data),
+            (None, None) => return None,
+        };
+        Some(
+            stamp
+                .saturating_add(u64::try_from(limit).unwrap_or(0))
+                .saturating_add(1),
+        )
+    }
 }
 
 /// A stability window over `rel`, a data event's tick less its reference
@@ -131,10 +166,16 @@ impl Window {
 struct CheckTables {
     checks: Vec<Check>,
     by_signal: BTreeMap<DigitalSignalId, Vec<usize>>,
+    /// The timer-based `$timeskew` and `$fullskew` checks, by index.
+    timed: Vec<usize>,
 }
 
 /// One check's last event ticks, as the host image's `specify` section
 /// stores them.
+///
+/// A `$timeskew` or `$fullskew` keeps only its timestamp event: in
+/// `reference` or, a `$fullskew` whose data event came first, in `data`;
+/// `active` while it waits for the other event.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CheckState {
@@ -145,6 +186,8 @@ pub(super) struct CheckState {
     /// `$nochange`'s last opposite reference edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     trailing: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    active: bool,
 }
 
 /// The plan's timing checks and each one's last event ticks.
@@ -192,6 +235,7 @@ impl TimingChecks {
         let mut tables = CheckTables {
             checks: Vec::with_capacity(plan.delays.checks.len()),
             by_signal: BTreeMap::new(),
+            timed: Vec::new(),
         };
         for (index, check) in plan.delays.checks.iter().enumerate() {
             let scale = u32::try_from(i32::from(check.exponent) - i32::from(precision))
@@ -227,13 +271,40 @@ impl TimingChecks {
                 timestamp: check.timestamp_condition,
                 timecheck: check.timecheck_condition,
                 notifier: check.notifier,
+                event_based: check.event_based,
+                remain_active: check.remain_active,
                 label: check.label.clone(),
             });
+            if tables.checks[index].timed() {
+                tables.timed.push(index);
+            }
         }
         Some(Self {
             states: vec![CheckState::default(); tables.checks.len()],
             tables: Arc::new(tables),
         })
+    }
+
+    /// The wakeup of a plan's timer-based `$timeskew` and `$fullskew`
+    /// checks; `None` for a plan with none, which interns no wakeup.
+    pub(super) fn timer_for_plan(
+        plan: &CanonicalDigitalPlan,
+        scheduler: &mut EventScheduler,
+    ) -> Option<TargetId> {
+        plan.delays
+            .checks
+            .iter()
+            .any(|check| {
+                matches!(check.kind, Kind::TimeSkew | Kind::FullSkew) && !check.event_based
+            })
+            .then(|| {
+                scheduler.intern_target(EventTarget {
+                    node_id: usize::MAX,
+                    port_name: "timing check limits".to_string(),
+                    driver_index: 0,
+                    instance: "specify".to_string(),
+                })
+            })
     }
 
     /// The warnings a run starts with: each check whose negative limit the
@@ -269,7 +340,13 @@ impl TimingChecks {
         tick: u64,
         precision: i8,
     ) -> Vec<Violation> {
-        let mut violations = Vec::new();
+        // A timer due by now has elapsed before this round's events, so the
+        // order the host takes the timer's wakeup and the round in does not
+        // matter.
+        let mut violations = self.expire(tick, precision);
+        // The `$fullskew` checks whose reference event this round was a
+        // timecheck event, which therefore stamps nothing.
+        let mut timechecked = BTreeSet::new();
         for pass in [Pass::Reference, Pass::Stamp, Pass::Data] {
             for transition in drained {
                 let Some(checks) = self.tables.by_signal.get(&transition.signal) else {
@@ -277,6 +354,37 @@ impl TimingChecks {
                 };
                 for &index in checks {
                     let check = &self.tables.checks[index];
+                    if matches!(check.kind, Kind::TimeSkew | Kind::FullSkew) {
+                        let events = Events {
+                            reference: counts(&check.reference, transition, store),
+                            data: check
+                                .data
+                                .as_ref()
+                                .is_some_and(|event| counts(event, transition, store)),
+                            trailing: false,
+                            stamps: true,
+                            checks: true,
+                        };
+                        if skew_step(
+                            check,
+                            &mut self.states[index],
+                            events,
+                            tick,
+                            pass,
+                            &mut timechecked,
+                            index,
+                        ) {
+                            violations.push(Violation {
+                                message: format!(
+                                    "{} violated at {}",
+                                    check.label,
+                                    time_text(tick, precision)
+                                ),
+                                notifier: check.notifier,
+                            });
+                        }
+                        continue;
+                    }
                     let events = Events {
                         reference: counts(&check.reference, transition, store),
                         data: check
@@ -317,8 +425,130 @@ impl TimingChecks {
         if states.len() != self.states.len() {
             return Err("host specify section names other than one state per timing check".into());
         }
+        // Only a `$timeskew` or `$fullskew` is ever active, on one stamp.
+        for (check, state) in self.tables.checks.iter().zip(states) {
+            let skew = matches!(check.kind, Kind::TimeSkew | Kind::FullSkew);
+            if (state.active && (!skew || state.reference.is_none() == state.data.is_none()))
+                || (skew && state.reference.is_some() && state.data.is_some())
+            {
+                return Err("host specify section holds a skew state no check can reach".into());
+            }
+        }
         self.states.clone_from_slice(states);
         Ok(())
+    }
+
+    /// The earliest tick at which a timer-based `$timeskew` or `$fullskew`
+    /// is violated, which the host keeps a wakeup at.
+    pub(super) fn next_deadline(&self) -> Option<u64> {
+        self.tables
+            .timed
+            .iter()
+            .filter_map(|&index| self.tables.checks[index].deadline(&self.states[index]))
+            .min()
+    }
+
+    /// The violations of every timer-based `$timeskew` and `$fullskew` whose
+    /// limit has elapsed by `tick` without its timecheck event, each at the
+    /// tick it was violated; each then goes dormant until its next timestamp
+    /// event (IEEE 1364-2005 section 15.3).
+    pub(super) fn expire(&mut self, tick: u64, precision: i8) -> Vec<Violation> {
+        let mut violations = Vec::new();
+        for &index in &self.tables.timed {
+            let check = &self.tables.checks[index];
+            let state = &mut self.states[index];
+            let Some(deadline) = check.deadline(state).filter(|deadline| *deadline <= tick) else {
+                continue;
+            };
+            state.active = false;
+            violations.push(Violation {
+                message: format!(
+                    "{} violated at {}",
+                    check.label,
+                    time_text(deadline, precision)
+                ),
+                notifier: check.notifier,
+            });
+        }
+        violations
+    }
+}
+
+/// One `$timeskew` or `$fullskew` response to its events at `tick` in one
+/// pass; whether it is violated (IEEE 1364-2005 section 15.3).
+///
+/// The timestamp event starts the check, which then waits, active, for its
+/// timecheck event; the check is violated when the timecheck event follows
+/// the timestamp event by more than the limit, so never by simultaneous
+/// events. `$timeskew`'s reference event is its timestamp event and its
+/// data event its timecheck event, under its one limit. `$fullskew` takes
+/// either order: the first of the two is the timestamp event, and the data
+/// event must follow the reference event within the first limit, the
+/// reference event the data event within the second. A timestamp event
+/// that comes again restarts the check.
+///
+/// By default the check is timer-based: the violation is reported as the
+/// limit elapses ([`TimingChecks::expire`]), at the first tick past it, and
+/// a timecheck event within the limit ends the check. With the event-based
+/// flag the violation is reported at the late timecheck event, and the
+/// check stays active through timecheck events within the limit; after a
+/// violation it goes dormant until its next timestamp event unless the
+/// remain-active flag is set.
+///
+/// The passes keep two events at one tick in one order: a `$fullskew`
+/// reference event first checks a data timestamp, then events stamp, then
+/// data events check a reference timestamp.
+fn skew_step(
+    check: &Check,
+    state: &mut CheckState,
+    events: Events,
+    tick: u64,
+    pass: Pass,
+    timechecked: &mut BTreeSet<usize>,
+    index: usize,
+) -> bool {
+    let full = check.kind == Kind::FullSkew;
+    let [after_reference, after_data] = check.limits;
+    let timecheck = |state: &mut CheckState, stamp: u64, limit: i64| {
+        let elapsed = i64::try_from(tick.saturating_sub(stamp)).unwrap_or(i64::MAX);
+        if elapsed > limit {
+            state.active = check.event_based && check.remain_active;
+            true
+        } else {
+            if !check.event_based {
+                state.active = false;
+            }
+            false
+        }
+    };
+    match pass {
+        Pass::Reference if full && events.reference => {
+            let Some(stamp) = state.data.filter(|_| state.active) else {
+                return false;
+            };
+            timechecked.insert(index);
+            timecheck(state, stamp, after_data)
+        }
+        Pass::Stamp => {
+            if events.reference && !timechecked.contains(&index) {
+                state.reference = Some(tick);
+                state.data = None;
+                state.active = true;
+            }
+            if full && events.data && !(state.active && state.reference.is_some()) {
+                state.data = Some(tick);
+                state.reference = None;
+                state.active = true;
+            }
+            false
+        }
+        Pass::Data if events.data => {
+            let Some(stamp) = state.reference.filter(|_| state.active) else {
+                return false;
+            };
+            timecheck(state, stamp, after_reference)
+        }
+        Pass::Reference | Pass::Data => false,
     }
 }
 

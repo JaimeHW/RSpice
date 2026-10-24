@@ -2728,6 +2728,11 @@ pub struct SpecifyTimingCheck {
     /// (section 15.8), each driven by a delayed copy of its signal.
     pub delayed_reference: Option<SpecifyTerminal>,
     pub delayed_data: Option<SpecifyTerminal>,
+    /// `$timeskew`'s and `$fullskew`'s `event_based_flag` and
+    /// `remain_active_flag` (section 15.3 and A.7.5.2), constant
+    /// expressions.
+    pub event_based_flag: Option<Expression>,
+    pub remain_active_flag: Option<Expression>,
     pub span: Span,
 }
 
@@ -2741,6 +2746,8 @@ pub enum TimingCheckKind {
     Removal,
     RecRem,
     Skew,
+    TimeSkew,
+    FullSkew,
     Period,
     Width,
     NoChange,
@@ -2757,6 +2764,8 @@ impl TimingCheckKind {
             Self::Removal => "$removal",
             Self::RecRem => "$recrem",
             Self::Skew => "$skew",
+            Self::TimeSkew => "$timeskew",
+            Self::FullSkew => "$fullskew",
             Self::Period => "$period",
             Self::Width => "$width",
             Self::NoChange => "$nochange",

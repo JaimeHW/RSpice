@@ -79,7 +79,9 @@ pub(crate) struct HostCheckpoint {
 
 /// The specify section, tagged with its own version: each module path's
 /// last counted source change, and each timing check's last reference,
-/// data and trailing edge ticks, in plan order.
+/// data and trailing edge ticks, in plan order. Version 2 adds whether a
+/// `$timeskew` or `$fullskew` is active on its timestamp event, which its
+/// next event and its timer read.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SpecifySection {
@@ -90,7 +92,7 @@ struct SpecifySection {
     checks: Option<Vec<super::checks::CheckState>>,
 }
 
-const SPECIFY_SECTION_VERSION: u32 = 1;
+const SPECIFY_SECTION_VERSION: u32 = 2;
 
 /// The pending drives section, tagged with its own version: each pending
 /// update's due tick, owner and value, in due order.
@@ -520,6 +522,7 @@ impl DigitalHost {
             .chain([&self.nba_target])
             .chain(self.charge.as_ref().map(|timers| &timers.target))
             .chain(self.pending.as_ref().map(|pending| &pending.target))
+            .chain(self.check_timer.as_ref())
             .chain(&self.external_targets)
             .chain(&self.external_real_targets)
             .map(|target| usize::from(*target) + 1)
@@ -861,6 +864,7 @@ impl DigitalHost {
             .chain([&self.nba_target])
             .chain(charge_target.as_ref())
             .chain(pending_target.as_ref())
+            .chain(self.check_timer.as_ref())
             .chain(&self.external_targets)
             .chain(&self.external_real_targets)
             .copied()
@@ -870,6 +874,9 @@ impl DigitalHost {
             || processes.contains_key(&self.nba_target)
             || charge_target.is_some_and(|target| processes.contains_key(&target))
             || pending_target.is_some_and(|target| processes.contains_key(&target))
+            || self
+                .check_timer
+                .is_some_and(|target| processes.contains_key(&target))
         {
             return Err("scheduler target registration differs from the host".into());
         }
@@ -880,8 +887,14 @@ impl DigitalHost {
             .pending
             .as_ref()
             .and_then(super::delays::PendingDrives::next);
+        // And the timing checks' at the earliest limit still running.
+        let next_deadline = self
+            .checks
+            .as_ref()
+            .and_then(super::checks::TimingChecks::next_deadline);
         let mut drive_wakeups = 0usize;
         let mut decay_wakeups = 0usize;
+        let mut deadline_wakeups = 0usize;
         let mut activations = vec![0usize; self.slots.len()];
         let mut buckets = BTreeSet::new();
         for (at, region, target, value) in scheduler.live_events() {
@@ -908,6 +921,11 @@ impl DigitalHost {
                 if drive_wakeups != 1 || next_drive != Some(tick) {
                     return Err("delayed drive wakeup differs from the pending drives".into());
                 }
+            } else if Some(target) == self.check_timer {
+                deadline_wakeups += 1;
+                if deadline_wakeups != 1 || next_deadline != Some(tick) {
+                    return Err("timing check wakeup differs from the checks' limits".into());
+                }
             } else if let Some(index) = processes.get(&target) {
                 activations[*index] += 1;
                 if activations[*index] != 1 {
@@ -925,6 +943,9 @@ impl DigitalHost {
         }
         if next_drive.is_some() && drive_wakeups == 0 {
             return Err("pending delayed drive has no wakeup".into());
+        }
+        if next_deadline.is_some() && deadline_wakeups == 0 {
+            return Err("running timing check limit has no wakeup".into());
         }
         for (slot, count) in self.slots.iter().zip(activations) {
             if count != usize::from(matches!(slot.status, ProcessStatus::Queued)) {
@@ -1247,7 +1268,7 @@ endmodule
         original.advance_to(11).unwrap();
         let saved = transport(&image(&original));
         let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
-        assert_eq!(section, json!({"version": 1, "path_changes": [10]}));
+        assert_eq!(section, json!({"version": 2, "path_changes": [10]}));
         let mut restored = host(PATH);
         restored
             .restore_checkpoint(&saved, HostCheckpointLimits::default())
@@ -1267,7 +1288,7 @@ endmodule
         for edit in [
             |value: &mut Value| value["specify"] = Value::Null,
             |value: &mut Value| value["specify"]["path_changes"] = json!([10, 10]),
-            |value: &mut Value| value["specify"]["version"] = json!(2),
+            |value: &mut Value| value["specify"]["version"] = json!(1),
         ] {
             let mut value = base.clone();
             edit(&mut value);
@@ -1305,7 +1326,7 @@ endmodule
         let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
         assert_eq!(
             section,
-            json!({"version": 1, "checks": [
+            json!({"version": 2, "checks": [
                 {"reference": 10, "data": 13},
                 {"reference": 10, "data": 1},
             ]})
@@ -1347,6 +1368,60 @@ endmodule
         }
     }
 
+    /// IEEE 1364-2005 section 15.3: an image taken while a timer-based
+    /// `$timeskew` waits for its data event carries the check's timestamp
+    /// event, that it is active, and the host's wakeup at its deadline. The
+    /// reference edge at 10 under a limit of 4 is violated at 15, the first
+    /// tick past 14, on the original and the restored host alike, and the
+    /// notifier goes from `x` to 0. An image that claims an active check
+    /// with no timestamp, or no wakeup for a running limit, is refused.
+    #[test]
+    fn host_checkpoint_resumes_a_timer_based_skew_check() {
+        const SKEW: &str = "`timescale 1ns/1ns\nmodule s(input d, input k);\n  reg ntf;\n  \
+             specify $timeskew(posedge k, d, 4, ntf); endspecify\nendmodule\n";
+        let mut original = host(SKEW);
+        original.start().unwrap();
+        force(&mut original, "k", 1, 0, 1);
+        force(&mut original, "k", 1, 1, 10);
+        original.advance_to(12).unwrap();
+        assert!(original.drain_hdl_output().is_empty());
+        let saved = transport(&image(&original));
+        let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
+        assert_eq!(
+            section,
+            json!({"version": 2, "checks": [{"reference": 10, "active": true}]})
+        );
+        let mut restored = host(SKEW);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            host.advance_to(20).unwrap();
+            let warnings: Vec<String> = host
+                .drain_hdl_output()
+                .into_iter()
+                .map(|record| record.text)
+                .collect();
+            assert_eq!(warnings, ["$timeskew(posedge k, d, 4) violated at 15 ns"]);
+            assert_eq!(host.read(signal(host, "ntf")).unwrap().spelling(), "0");
+        }
+        let base = serde_json::to_value(&saved).unwrap();
+        for edit in [
+            |value: &mut Value| value["specify"]["checks"] = json!([{"active": true}]),
+            |value: &mut Value| value["specify"]["checks"] = json!([{"reference": 10}]),
+        ] {
+            let mut value = base.clone();
+            edit(&mut value);
+            let bad: HostCheckpoint = serde_json::from_value(value).unwrap();
+            assert!(
+                host(SKEW)
+                    .restore_checkpoint(&bad, HostCheckpointLimits::default())
+                    .is_err()
+            );
+        }
+    }
+
     /// IEEE 1364-2005 sections 15.5.1 and 15.5.2: an image taken inside the
     /// windows of two `$setuphold` checks that share the delayed clock `dk`
     /// resumes both. The second check's setup of -4 delays `dk` by 4, so the
@@ -1372,7 +1447,7 @@ endmodule
         let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
         assert_eq!(
             section,
-            json!({"version": 1, "path_changes": [10], "checks": [
+            json!({"version": 2, "path_changes": [10], "checks": [
                 {"reference": 10, "data": 1},
                 {"reference": 10, "data": 1},
             ]})

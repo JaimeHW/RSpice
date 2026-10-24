@@ -351,16 +351,41 @@ impl DigitalHost {
     /// transitions at `tick`: each violation writes a warning record and
     /// toggles its check's notifier (IEEE 1364-2005 section 15.5), which
     /// the next round takes as any change.
-    pub(super) fn note_timing_checks(&mut self, drained: &[SignalTransition], tick: u64) {
+    pub(super) fn note_timing_checks(
+        &mut self,
+        drained: &[SignalTransition],
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
         let Some(checks) = &mut self.checks else {
-            return;
+            return Ok(());
         };
+        let before = checks.next_deadline();
         let violations = checks.note(
             &self.store,
             drained,
             tick,
             self.plan.timing.precision_exponent,
         );
+        self.report_violations(violations);
+        self.rearm_check_timer(before)
+    }
+
+    /// Report the timer-based `$timeskew` and `$fullskew` checks whose
+    /// limits have elapsed by `tick`; the wakeup that brought the host here
+    /// was the earliest.
+    pub(super) fn fire_check_timers(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        let Some(checks) = &mut self.checks else {
+            return Ok(());
+        };
+        let before = checks.next_deadline();
+        let violations = checks.expire(tick, self.plan.timing.precision_exponent);
+        self.report_violations(violations);
+        self.rearm_check_timer(before)
+    }
+
+    /// Each violation writes a warning record and toggles its check's
+    /// notifier (IEEE 1364-2005 section 15.5).
+    fn report_violations(&mut self, violations: Vec<super::checks::Violation>) {
         for violation in violations {
             let clock = DigitalEnvironment::read_clock(&self.store);
             self.effects.warn_unsited(clock, &violation.message);
@@ -368,6 +393,28 @@ impl DigitalHost {
                 self.store.toggle_notifier(notifier);
             }
         }
+    }
+
+    /// Keep the one timing check wakeup at the earliest deadline.
+    fn rearm_check_timer(&mut self, before: Option<u64>) -> Result<(), DigitalRunError> {
+        let (Some(target), Some(checks)) = (self.check_timer, &self.checks) else {
+            return Ok(());
+        };
+        let next = checks.next_deadline();
+        if next == before {
+            return Ok(());
+        }
+        self.scheduler.cancel_target(target);
+        if let Some(next) = next {
+            let at = self.instant_of(next)?;
+            self.scheduler.schedule_id_at(
+                at,
+                SchedulerRegion::Active,
+                target,
+                EventValue::Digital(DigitalValue::default()),
+            )?;
+        }
+        Ok(())
     }
 
     /// Apply the inertial rule to every value the store held back at `tick`.

@@ -1202,6 +1202,15 @@ pub struct DigitalTimingCheck {
     /// The `reg` toggled on each violation (section 15.5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifier: Option<DigitalSignalId>,
+    /// `$timeskew`'s and `$fullskew`'s `event_based_flag`: a violation is
+    /// reported at the late event rather than when the limit elapses
+    /// (section 15.3).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub event_based: bool,
+    /// Their `remain_active_flag`: an event-based check stays active after
+    /// a violation instead of going dormant until its next timestamp event.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remain_active: bool,
     /// The check as a violation names it: `u1: $setup(d, posedge c, 2)`.
     pub label: String,
 }
@@ -1220,6 +1229,8 @@ pub enum DigitalTimingCheckKind {
     Removal,
     RecRem,
     Skew,
+    TimeSkew,
+    FullSkew,
     Period,
     Width,
     NoChange,

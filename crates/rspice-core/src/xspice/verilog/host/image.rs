@@ -25,6 +25,7 @@ impl Clone for DigitalHost {
             charge,
             pending,
             checks,
+            check_timer,
             drops,
             external_targets,
             external_real_targets,
@@ -63,6 +64,7 @@ impl Clone for DigitalHost {
             charge: charge.clone(),
             pending: pending.clone(),
             checks: checks.clone(),
+            check_timer: *check_timer,
             drops: *drops,
             external_targets: external_targets.clone(),
             external_real_targets: external_real_targets.clone(),
@@ -113,6 +115,7 @@ impl Clone for DigitalHost {
             charge,
             pending,
             checks,
+            check_timer,
             drops,
             external_targets,
             external_real_targets,
@@ -151,6 +154,7 @@ impl Clone for DigitalHost {
             charge: source_charge,
             pending: source_pending,
             checks: source_checks,
+            check_timer: source_check_timer,
             drops: source_drops,
             external_targets: source_external_targets,
             external_real_targets: source_external_real_targets,
@@ -188,6 +192,7 @@ impl Clone for DigitalHost {
         charge.clone_from(source_charge);
         pending.clone_from(source_pending);
         checks.clone_from(source_checks);
+        *check_timer = *source_check_timer;
         *drops = *source_drops;
         external_targets.clone_from(source_external_targets);
         external_real_targets.clone_from(source_external_real_targets);
