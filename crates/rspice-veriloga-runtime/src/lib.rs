@@ -3454,23 +3454,6 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
-    pub fn new_with_static_cache(
-        matrix: &'a mut ComplexMatrix,
-        num_nodes: usize,
-        omega: Value,
-        cache: &'a GeneratedStaticStampCache,
-    ) -> Self {
-        Self {
-            matrix,
-            cache,
-            nodes: &[],
-            branches: &[],
-            num_nodes,
-            omega,
-        }
-    }
-
-    #[inline]
     pub fn new_with_local_maps_and_static_cache(
         matrix: &'a mut ComplexMatrix,
         nodes: &'a [usize],
