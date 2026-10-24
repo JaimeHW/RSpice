@@ -207,7 +207,7 @@ pub(crate) trait Host: 'static {
     /// The workspaces a point is keyed by.
     type WorkspaceKey: Copy + PartialEq + 'static;
     /// The routes whose surface brings tools of its own.
-    type SurfaceKey;
+    type SurfaceKey: Copy;
     /// The chrome metrics the shell resolves for a frame.
     type Layout;
     /// What the status cells read in common on a frame.

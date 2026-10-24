@@ -7,3 +7,4 @@ pub(crate) mod command_registry;
 pub(crate) mod dialogs;
 pub(crate) mod host;
 pub(crate) mod requests;
+pub(crate) mod workbench_host;

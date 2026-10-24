@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::state::ModelsPage;
+use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::state::{VerificationPage, Workspace};
 

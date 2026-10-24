@@ -6,8 +6,7 @@ use egui::{Frame, Panel, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};
 use super::super::state::Workspace;
@@ -56,7 +55,7 @@ pub(super) fn paint_numeric_badge(
     );
 }
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
+pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -67,11 +66,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
         .show_separator_line(true)
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            if let Some(on_visible) = app.rail_entry(app.state.workbench.workspace).on_visible {
+            if let Some(on_visible) = app.rail_entry(app.workbench().workspace).on_visible {
                 on_visible(app);
             }
             for workspace in Workspace::ALL {
-                let active = app.state.workbench.workspace == workspace;
+                let active = app.workbench().workspace == workspace;
                 let entry = app.rail_entry(workspace);
                 let new_result_count = entry.badge.map_or(0, |badge| badge(app, active));
                 let command = app.open_workspace(workspace);

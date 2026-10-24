@@ -13,8 +13,9 @@ use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::AppState;
 use crate::workbench::framework::host::DocumentHost;
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -35,12 +36,12 @@ const HIDDEN_BUTTON_WIDTH: f32 = 40.0;
 /// Past this many hidden tabs, their menu offers a filter.
 const HIDDEN_MENU_FILTER_THRESHOLD: usize = 8;
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
-    reconcile_document_registry(&mut app.state);
-    let documents = visible_documents(&app.state);
-    if !document_strip_visible(app.state.workbench.workspace, documents.len()) {
+    reconcile_document_registry(app.state_mut());
+    let documents = visible_documents(app.state());
+    if !document_strip_visible(app.workbench().workspace, documents.len()) {
         return;
     }
 
@@ -68,7 +69,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         ui.painter(),
                         &document.label,
                         document.dirty,
-                        document_is_closable(&app.state, &document.id),
+                        document_is_closable(app.state(), &document.id),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -92,7 +93,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                     let tabs = ui.horizontal(|ui| {
                                         document_tabs(
                                             ui,
-                                            &mut app.state,
+                                            app.state_mut(),
                                             &documents,
                                             height,
                                             fit.cap,
@@ -117,7 +118,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         .collect::<Vec<_>>();
                     hidden_documents_button(
                         ui,
-                        &mut app.state,
+                        app.state_mut(),
                         &hidden,
                         Vec2::new(hidden_button_width, height),
                     );
@@ -317,10 +318,10 @@ fn hidden_documents_button(
     response.on_hover_text(description);
 }
 
-pub(in crate::workbench) fn is_visible(app: &RSpiceApp) -> bool {
+pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost) -> bool {
     document_strip_visible(
-        app.state.workbench.workspace,
-        visible_documents(&app.state).len(),
+        app.workbench().workspace,
+        visible_documents(app.state()).len(),
     )
 }
 
@@ -1083,6 +1084,7 @@ mod tests {
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
         NetlistDocument, NetlistDocumentId, SimulationRun, SourceLocator,
     };
+    use crate::workbench::RSpiceApp;
 
     fn multi_document_netlist_state() -> AppState {
         const ROOT: &str = "tabs\n.include \"models/resistor.inc\"\n.end\n";

@@ -7,8 +7,8 @@ use egui::{
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::framework::host::{Host, Point};
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -54,7 +54,11 @@ const SEARCH_KEYCAP_INLINE_PADDING: f32 = 4.0;
 const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const BRAND_WORDMARK_WIDTH: f32 = 88.0;
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(
+    root: &mut Ui,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
+    layout: LayoutSpec,
+) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -118,11 +122,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         }
                         if notification_action(
                             ui,
-                            app.state.workbench.toasts.unread_count(),
+                            app.workbench().toasts.unread_count(),
                             large_targets,
-                            panel_hangs_here(ui.ctx(), &app.state.workbench),
+                            panel_hangs_here(ui.ctx(), app.workbench()),
                         ) {
-                            press_bell(ui.ctx(), &mut app.state.workbench);
+                            press_bell(ui.ctx(), app.workbench_mut());
                         }
                         if icon_action(
                             ui,
@@ -198,7 +202,7 @@ impl MenuProjection {
 
 fn brand(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     show_wordmark: bool,
     height: f32,
     large_target: bool,
@@ -257,7 +261,7 @@ fn brand(
 
 fn menus(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
     projection: MenuProjection,
     large_targets: bool,
     title_bar_height: f32,
@@ -288,7 +292,7 @@ fn menus(
             node.set_role(egui::accesskit::Role::Menu);
             node.set_label("Application menu");
         });
-    handle_menu_bar_keyboard(ui.ctx(), &triggers, !app.state.application_modal_open());
+    handle_menu_bar_keyboard(ui.ctx(), &triggers, !app.state().application_modal_open());
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -346,7 +350,7 @@ fn menu_trigger_width(ui: &Ui, label: &str) -> f32 {
 
 fn top_menu(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
     menu: ApplicationMenu,
     large_targets: bool,
     title_bar_height: f32,
@@ -370,7 +374,7 @@ fn top_menu(
 /// on touch rows whatever the pointer, since the layout is a touch one.
 fn compact_menu_button(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
     title_bar_height: f32,
 ) -> MenuTriggerResponse {
     let width = menu_trigger_width(ui, COMPACT_MENU_LABEL).max(MENU_TOUCH_ROW_HEIGHT);
@@ -390,7 +394,7 @@ fn compact_menu_button(
 
 fn menu_trigger(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     key: MenuTriggerKey,
     presentation: MenuTriggerPresentation,
     entries: &[MenuEntry],
@@ -529,7 +533,7 @@ fn known_application_popup_ids() -> Vec<Id> {
 
 fn paint_title_context(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    app: &impl WorkbenchHost,
     bounds: egui::Rect,
     compact: bool,
     left_aligned: bool,
@@ -538,8 +542,8 @@ fn paint_title_context(
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let dirty = app.state.platform.project_lifecycle.is_open()
-        && (app.state.model.schematic.session.is_dirty || app.state.model.workspace.any_dirty());
+    let dirty = app.state().platform.project_lifecycle.is_open()
+        && (app.model().schematic.session.is_dirty || app.model().workspace.any_dirty());
     let cell = active_title_cell(app);
     let full = title_context_text(app, compact);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
@@ -591,10 +595,10 @@ fn paint_title_context(
     );
     ui.ctx().accesskit_node_builder(status.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        if app.state.platform.project_lifecycle.is_open() {
+        if app.state().platform.project_lifecycle.is_open() {
             node.set_label(format!(
                 "Active project: {}; {}; {}",
-                app.state.model.workspace.content.project.display_name(),
+                app.model().workspace.content.project.display_name(),
                 cell,
                 if dirty {
                     "unsaved changes"
@@ -617,8 +621,8 @@ const UNSAVED_TITLE_MARKER: &str = "*";
 /// project-name branch, so the closed-project rule was asserted by a test
 /// against a function the application never called and the shipped title read
 /// "Untitled Project" with nothing open.
-fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
-    if !app.state.platform.project_lifecycle.is_open() {
+fn title_context_text(app: &impl WorkbenchHost, compact: bool) -> String {
+    if !app.state().platform.project_lifecycle.is_open() {
         return if compact {
             "No project open"
         } else {
@@ -633,8 +637,7 @@ fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
         // document tab and the local canvas breadcrumb. Keep the centered
         // title scoped to project identity so the shell does not repeat the
         // same context three times.
-        app.state
-            .model
+        app.model()
             .workspace
             .content
             .project
@@ -685,11 +688,11 @@ fn ellipsize_to_width(
         .collect()
 }
 
-fn active_title_cell(app: &RSpiceApp) -> String {
-    if !app.state.platform.project_lifecycle.is_open() {
+fn active_title_cell(app: &impl WorkbenchHost) -> String {
+    if !app.state().platform.project_lifecycle.is_open() {
         return "No project open".to_owned();
     }
-    app.title_cell(app.state.workbench.workspace)
+    app.title_cell(app.workbench().workspace)
 }
 
 fn ellipsize(value: &str, maximum_characters: usize) -> String {
@@ -708,7 +711,12 @@ fn ellipsize(value: &str, maximum_characters: usize) -> String {
     shortened
 }
 
-fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target: bool) -> bool {
+fn search_button(
+    ui: &mut Ui,
+    app: &impl WorkbenchHost,
+    viewport_width: f32,
+    large_target: bool,
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let shortcut = app.shortcut_label(
         ids::COMMAND_PALETTE,
@@ -878,7 +886,7 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str, large_target: bool
 /// The initials the account button shows, or `None` when no one is signed
 /// in and no license names a holder: the button then shows a generic
 /// person, not letters that name no one.
-fn account_initials(app: &RSpiceApp) -> Option<String> {
+fn account_initials(app: &impl WorkbenchHost) -> Option<String> {
     let name = app.account_holder()?;
     let words = name
         .split_whitespace()

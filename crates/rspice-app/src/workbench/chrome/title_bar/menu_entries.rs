@@ -65,8 +65,8 @@ pub(crate) enum MenuContext {
 }
 
 impl MenuContext {
-    fn holds(self, app: &RSpiceApp, platform: CommandPlatform) -> bool {
-        let editor = app.state.workbench.active_source_editor;
+    fn holds(self, app: &impl WorkbenchHost, platform: CommandPlatform) -> bool {
+        let editor = app.workbench().active_source_editor;
         match self {
             Self::SourceEditor => editor.is_some(),
             Self::NavigableSourceEditor => editor.is_some_and(|editor| editor.navigable),
@@ -152,7 +152,11 @@ pub(super) struct CommandRow {
 }
 
 /// The rows `entries` show in the window `ctx` draws.
-pub(super) fn menu_rows(entries: &[MenuEntry], app: &RSpiceApp, ctx: &Context) -> Vec<MenuRow> {
+pub(super) fn menu_rows(
+    entries: &[MenuEntry],
+    app: &impl WorkbenchHost,
+    ctx: &Context,
+) -> Vec<MenuRow> {
     resolve_menu_rows(
         entries,
         app,
@@ -165,7 +169,7 @@ pub(super) fn menu_rows(entries: &[MenuEntry], app: &RSpiceApp, ctx: &Context) -
 /// a test can see what a menu leaves out.
 pub(super) fn resolve_menu_rows(
     entries: &[MenuEntry],
-    app: &RSpiceApp,
+    app: &impl WorkbenchHost,
     platform: CommandPlatform,
     os: OperatingSystem,
 ) -> Vec<MenuRow> {
@@ -177,7 +181,7 @@ pub(super) fn resolve_menu_rows(
 fn push_menu_rows(
     rows: &mut Vec<MenuRow>,
     entries: &[MenuEntry],
-    app: &RSpiceApp,
+    app: &impl WorkbenchHost,
     platform: CommandPlatform,
     os: OperatingSystem,
 ) {
@@ -217,9 +221,9 @@ pub(super) struct MenuChoice {
 }
 
 impl MenuChoice {
-    pub(super) fn run(self, app: &mut RSpiceApp) {
+    pub(super) fn run(self, app: &mut impl WorkbenchHost) {
         if let Some(scope) = self.palette_scope {
-            app.state.workbench.command_palette.open_in_scope(scope);
+            app.workbench_mut().command_palette.open_in_scope(scope);
         } else {
             app.execute(self.command);
         }

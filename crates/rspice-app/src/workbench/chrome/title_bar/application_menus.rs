@@ -69,7 +69,10 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
 /// The source editor's right-click menu, drawn with the menu bar's own rows
 /// and separators so its row height, text edge and rules match the menus
 /// above it. A long press opens it on touch.
-pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn source_editor_context_menu(
+    response: &Response,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
+) {
     let ctx = response.ctx.clone();
     let large_targets = ctx.content_rect().width() <= 820.0
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;

@@ -20,6 +20,7 @@ use egui::os::OperatingSystem;
 use crate::state::ViewType;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
+use crate::workbench::app_state::Model;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
@@ -33,8 +34,11 @@ use crate::workbench::framework::host::{
     DocumentHost, Host, InspectorScope, NavigatorSection, Point, RailEntry, StatusCell,
     ToolbarScope, ToolbarSlot,
 };
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
-use crate::workbench::state::{ProjectPage, VerificationPage, Workspace, WorkspaceDocumentId};
+use crate::workbench::state::{
+    ProjectPage, VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId,
+};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU};
 
@@ -549,6 +553,28 @@ impl Host for RSpiceApp {
         menu_keys(COMPACT_MENU, &mut keys);
         menu_keys(SOURCE_EDITOR_MENU, &mut keys);
         command_registry().validate(ids::named().chain(keys.into_iter().map(|key| ("a menu", key))))
+    }
+}
+
+impl WorkbenchHost for RSpiceApp {
+    fn workbench(&self) -> &WorkbenchSession {
+        &self.state.workbench
+    }
+
+    fn workbench_mut(&mut self) -> &mut WorkbenchSession {
+        &mut self.state.workbench
+    }
+
+    fn model(&self) -> &Model {
+        &self.state.model
+    }
+
+    fn state(&self) -> &AppState {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut AppState {
+        &mut self.state
     }
 }
 

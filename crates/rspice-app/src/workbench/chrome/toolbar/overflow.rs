@@ -13,11 +13,11 @@ use super::ToolbarCommandPresentation;
 use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::Host;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 
 /// A tool the row had no slot for this frame.
@@ -60,7 +60,7 @@ impl OverflowTool {
         }
     }
 
-    fn availability(&self, app: &RSpiceApp) -> CommandAvailability {
+    fn availability(&self, app: &impl WorkbenchHost) -> CommandAvailability {
         match self.action {
             OverflowAction::Command(command, _) => app.availability(command),
             OverflowAction::Run(_) => CommandAvailability::Available,
@@ -87,7 +87,7 @@ pub(super) fn set_aside(ui: &egui::Ui, tool: OverflowTool) {
 
 /// The last slot: More tools when the row set two or more tools aside this
 /// frame, the one tool itself when it set one aside, nothing otherwise.
-pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let tools = ui
         .data_mut(|data| data.remove_temp::<Vec<OverflowTool>>(overflow_id()))
         .unwrap_or_default();
@@ -101,7 +101,7 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
             }
             OverflowAction::Run(run) => {
                 if icon_button(ui, tool.icon, &tool.label, tool.selected, size).clicked() {
-                    run(&mut app.state);
+                    run(app.state_mut());
                 }
             }
         }
@@ -127,7 +127,7 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
                     OverflowAction::Command(command, _) => {
                         app.execute(command);
                     }
-                    OverflowAction::Run(run) => run(&mut app.state),
+                    OverflowAction::Run(run) => run(app.state_mut()),
                 }
                 ui.close();
             }
@@ -137,7 +137,7 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
 
 /// One set-aside tool: its icon and label, accented when it is the armed
 /// tool. Returns whether it was taken.
-fn tool_row(ui: &mut egui::Ui, app: &RSpiceApp, tool: &OverflowTool, height: f32) -> bool {
+fn tool_row(ui: &mut egui::Ui, app: &impl WorkbenchHost, tool: &OverflowTool, height: f32) -> bool {
     let t = Tokens::get(ui.ctx());
     let availability = tool.availability(app);
     let enabled = availability == CommandAvailability::Available;
@@ -198,6 +198,7 @@ fn tool_row(ui: &mut egui::Ui, app: &RSpiceApp, tool: &OverflowTool, height: f32
 mod tests {
     use super::*;
     use crate::state::Tool;
+    use crate::workbench::RSpiceApp;
     use egui::{Event, Key, Pos2, Stroke};
 
     /// The toolbar's last slot with two tools set aside, driven by real frames

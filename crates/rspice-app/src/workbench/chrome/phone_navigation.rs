@@ -5,8 +5,7 @@ use egui::{Align2, Frame, Panel, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -34,7 +33,7 @@ fn phone_badge_rect(item_rect: egui::Rect) -> egui::Rect {
     )
 }
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -43,9 +42,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
         .show(root, |ui| {
-            if app.state.workbench.workspace == Workspace::Results {
-                app.state.results.results_seen_version =
-                    app.state.model.simulation.view.data_version;
+            if app.workbench().workspace == Workspace::Results {
+                app.state_mut().results.results_seen_version =
+                    app.model().simulation.view.data_version;
             }
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal(|ui| {
@@ -67,13 +66,13 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     &Workspace::ALL
                 };
                 for workspace in workspaces.iter().copied() {
-                    let active = app.state.workbench.workspace == workspace;
+                    let active = app.workbench().workspace == workspace;
                     let new_result_count = usize::from(
                         workspace == Workspace::Results
                             && !active
-                            && app.state.model.simulation.retained.has_results()
-                            && app.state.results.results_seen_version
-                                != app.state.model.simulation.view.data_version,
+                            && app.model().simulation.retained.has_results()
+                            && app.state().results.results_seen_version
+                                != app.model().simulation.view.data_version,
                     );
                     let command = app.open_workspace(workspace);
                     let response = ui
@@ -91,8 +90,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         .inner;
                     if response.clicked() {
                         if workspace == Workspace::Results {
-                            app.state.results.results_seen_version =
-                                app.state.model.simulation.view.data_version;
+                            app.state_mut().results.results_seen_version =
+                                app.model().simulation.view.data_version;
                         }
                         app.execute(command);
                     }
@@ -102,7 +101,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         ui,
                         WorkbenchIcon::More,
                         "More",
-                        app.state.workbench.drawer == Some(Drawer::Workspaces),
+                        app.workbench().drawer == Some(Drawer::Workspaces),
                         0,
                         width,
                         layout.phone_navigation_height,
@@ -114,7 +113,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 more.id,
                             );
                         });
-                        app.state.workbench.toggle_drawer(Drawer::Workspaces);
+                        app.workbench_mut().toggle_drawer(Drawer::Workspaces);
                     }
                 }
             });

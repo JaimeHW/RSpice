@@ -12,11 +12,11 @@ use crate::simulation::status::EngineAvailability;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
 use crate::workbench::framework::host::{
     Host, StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
 };
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::layout::LayoutSpec;
 
@@ -24,7 +24,7 @@ const STATUS_PADDING_X: f32 = 9.0;
 const STATUS_MARK_GAP: f32 = 5.0;
 const STATUS_FONT_SIZE: f32 = tokens::FS_1;
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -38,7 +38,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let bar_width = ui.available_width();
             let height = ui.available_height();
             let frame = app.status_frame(ctx);
-            let workspace = app.state.workbench.workspace;
+            let workspace = app.workbench().workspace;
             let (leading, trailing) = status_zones(app, &frame, workspace, visibility);
             let mut leading_desired = leading.each_ref().map(|cell| status_cell_width(ui, cell));
             let trailing_desired = trailing.each_ref().map(|cell| status_cell_width(ui, cell));
@@ -609,6 +609,7 @@ mod tests {
     use super::run::{preflight_status, simulation_engine_status, simulation_progress_percent};
     use super::sheets::sheet_position_summary;
     use super::*;
+    use crate::workbench::RSpiceApp;
     use crate::workbench::state::Workspace;
 
     /// The counts the bar states, read as the page reads them.

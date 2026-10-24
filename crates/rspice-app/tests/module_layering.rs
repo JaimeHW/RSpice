@@ -668,6 +668,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // needs one part of it should take that part as a parameter, which is what
     // retires the `-> app_state` entries below.
     "app_state",
+    // The host the workbench's containers are drawn for, keyed by the
+    // workbench's own types. It hands them the session, so it sits above the
+    // session aggregate; every container that takes it sits above it.
+    "framework/workbench_host",
     // The live-session engine the application pumps each frame, and result
     // import. Both take the session aggregate, not the application root.
     "live_session",

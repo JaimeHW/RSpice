@@ -16,9 +16,9 @@ use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::host::{Host, Point, ToolbarScope, ToolbarSlot};
+use crate::workbench::framework::host::{Point, ToolbarScope, ToolbarSlot};
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::{LayoutSpec, RUN_CONFIG_CHIP_MAX_WIDTH};
@@ -27,16 +27,16 @@ use crate::workbench::framework::command_registry::CommandAvailability;
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
     let viewport_width = ctx.content_rect().width();
     let padding = toolbar_horizontal_padding(viewport_width);
     let outer_gap = toolbar_outer_gap(viewport_width);
-    let show_simulation_context = app.state.platform.project_lifecycle.is_open()
+    let show_simulation_context = app.state().platform.project_lifecycle.is_open()
         && matches!(
-            app.state.workbench.workspace,
+            app.workbench().workspace,
             Workspace::Design | Workspace::Simulate
         );
     Panel::top("workbench.context_toolbar")
@@ -58,23 +58,22 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         ui,
                         WorkbenchIcon::Navigator,
                         "Open navigator",
-                        app.state.workbench.drawer == Some(Drawer::Navigator),
+                        app.workbench().drawer == Some(Drawer::Navigator),
                         panel_toggle_size(layout),
                     );
                     if navigator_toggle.clicked() {
-                        let opening = app.state.workbench.drawer != Some(Drawer::Navigator);
+                        let opening = app.workbench().drawer != Some(Drawer::Navigator);
                         remember_drawer_invoker(ui.ctx(), Drawer::Navigator, navigator_toggle.id);
                         if opening {
-                            app.state
-                                .workbench
+                            app.workbench_mut()
                                 .outbox
                                 .push(crate::workbench::framework::requests::FocusNavigatorSearch);
                             mark_drawer_focus_pending(ui.ctx(), Drawer::Navigator);
                         }
-                        app.state.workbench.toggle_drawer(Drawer::Navigator);
+                        app.workbench_mut().toggle_drawer(Drawer::Navigator);
                     }
                 }
-                if app.state.platform.project_lifecycle.is_open() {
+                if app.state().platform.project_lifecycle.is_open() {
                     global_document_tools(ui, app, layout);
                 }
 
@@ -120,11 +119,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             ui,
                             WorkbenchIcon::Inspector,
                             "Open inspector",
-                            app.state.workbench.drawer == Some(Drawer::Inspector),
+                            app.workbench().drawer == Some(Drawer::Inspector),
                             panel_toggle_size(layout),
                         );
                         if inspector_toggle.clicked() {
-                            let opening = app.state.workbench.drawer != Some(Drawer::Inspector);
+                            let opening = app.workbench().drawer != Some(Drawer::Inspector);
                             remember_drawer_invoker(
                                 ui.ctx(),
                                 Drawer::Inspector,
@@ -133,7 +132,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             if opening {
                                 mark_drawer_focus_pending(ui.ctx(), Drawer::Inspector);
                             }
-                            app.state.workbench.toggle_drawer(Drawer::Inspector);
+                            app.workbench_mut().toggle_drawer(Drawer::Inspector);
                         }
                     }
                     if show_simulation_context {
@@ -152,8 +151,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// Save is the only document command with identical meaning in every
 /// workspace. Keep it outside the horizontally scrolling context-tool lane so
 /// it remains reachable even when a dense engineering toolbar overflows.
-fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state);
+fn global_document_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
+    let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(app.state());
     let shortcut = app.shortcut_label(
         ids::SAVE,
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -237,24 +236,24 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 { 2.0 } else { 5.0 }
 }
 
-fn run_control_label(app: &RSpiceApp, layout: LayoutSpec) -> String {
-    if app.state.runs.preflight.checking.is_some() {
+fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
+    if app.state().runs.preflight.checking.is_some() {
         "Stop".to_owned()
-    } else if app.state.model.simulation.cancellation_is_pending() {
+    } else if app.model().simulation.cancellation_is_pending() {
         "Stopping…".to_owned()
-    } else if app.state.model.simulation.execution.has_active_execution() {
+    } else if app.model().simulation.execution.has_active_execution() {
         "Stop".to_owned()
     } else if layout.compact_shell {
         format!(
             "Run · {}",
-            app.state.model.sim_setup.reference_pvt.process.short_name()
+            app.model().sim_setup.reference_pvt.process.short_name()
         )
     } else {
         "Run plan".to_owned()
     }
 }
 
-fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec) -> f32 {
+fn reserved_run_control_width(ui: &egui::Ui, app: &impl WorkbenchHost, layout: LayoutSpec) -> f32 {
     let label = run_control_label(app, layout);
     let t = Tokens::get(ui.ctx());
     let label_width = ui
@@ -275,9 +274,9 @@ fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec
     primary_width + menu_width
 }
 
-fn reserved_pvt_selector_width(ui: &egui::Ui, app: &RSpiceApp) -> f32 {
-    let reference = app.state.model.sim_setup.reference_pvt;
-    let quantity_policy = app.state.model.preferences.quantity_presentation_policy();
+fn reserved_pvt_selector_width(ui: &egui::Ui, app: &impl WorkbenchHost) -> f32 {
+    let reference = app.model().sim_setup.reference_pvt;
+    let quantity_policy = app.model().preferences.quantity_presentation_policy();
     let label = format!(
         "{} · {}",
         reference.process.short_name(),
@@ -344,8 +343,8 @@ fn trailing_controls_width(
     width + (controls.saturating_sub(1) as f32 * TOOLBAR_CONTEXT_GAP) + outer_gap
 }
 
-fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let workspace = app.state.workbench.workspace;
+fn workspace_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
+    let workspace = app.workbench().workspace;
     ui.data_mut(|data| {
         data.insert_temp(projected_tool_count_id(), 0_usize);
     });
@@ -358,15 +357,15 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 /// The upgraded shell keeps focus mode at the end of every project toolbar,
 /// independent of the active workspace's domain tools.
-fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     context_separator(ui, layout);
     toolbar_icon_command_selected_as(
         ui,
         app,
         ids::TOGGLE_FOCUS_MODE,
         WorkbenchIcon::Focus,
-        app.state.workbench.focus_mode,
-        if app.state.workbench.focus_mode {
+        app.workbench().focus_mode,
+        if app.workbench().focus_mode {
             "Restore workspace layout"
         } else {
             "Focus workspace"
@@ -379,7 +378,7 @@ fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
 /// for all direct canvas transforms and placement modes.
 fn toolbar_icon_command(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     command: CommandKey,
     icon: WorkbenchIcon,
     layout: LayoutSpec,
@@ -389,7 +388,7 @@ fn toolbar_icon_command(
 
 fn toolbar_icon_command_selected(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     command: CommandKey,
     icon: WorkbenchIcon,
     selected: bool,
@@ -410,7 +409,7 @@ fn toolbar_icon_command_selected(
 
 fn toolbar_icon_command_selected_as(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     command: CommandKey,
     icon: WorkbenchIcon,
     selected: bool,
@@ -435,7 +434,7 @@ fn toolbar_icon_command_selected_as(
 /// visible without opening a menu.
 fn toolbar_text_command(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     command: CommandKey,
     icon: WorkbenchIcon,
     label: &'static str,
@@ -465,7 +464,7 @@ enum ToolbarCommandPresentation {
 
 fn toolbar_command(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     command: CommandKey,
     layout: LayoutSpec,
     presentation: ToolbarCommandPresentation,
