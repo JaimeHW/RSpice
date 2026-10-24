@@ -2647,7 +2647,23 @@ pub struct SpecifyPath {
 #[derive(Debug, Clone)]
 pub struct SpecifyTerminal {
     pub name: SmolStr,
+    /// The select written after the name. A module path and a timing check
+    /// event take the whole signal whatever it is; a delayed signal and the
+    /// signal it copies take a bit-select's bit (IEEE 1364-2005 A.7.5.2).
+    pub select: Option<TerminalSelect>,
     pub span: Span,
+}
+
+/// A specify terminal's select.
+#[derive(Debug, Clone)]
+pub enum TerminalSelect {
+    /// One bit: `d[0]`'s index, and the index as written.
+    Bit {
+        index: Box<Expression>,
+        text: SmolStr,
+    },
+    /// A part-select, constant or indexed.
+    Part,
 }
 
 /// A `PATHPULSE$` specparam (IEEE 1364-2005 section 14.6.1): the pulse

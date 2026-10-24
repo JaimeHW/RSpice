@@ -4871,6 +4871,41 @@ fn timing_check_operands_follow_section_15() {
     ));
 }
 
+/// A.7.5.2: a delayed signal is a net or one bit of it, and copies its
+/// signal or the bit of it the check names, so the widths it compares are
+/// the bits named. A bit's copy that a negative limit delays is refused by
+/// name: the module path that delays it would delay the whole net.
+#[test]
+fn a_delayed_signal_may_copy_one_bit() {
+    let module = |items: &str| {
+        format!(
+            "module m(input c, input [1:0] v);\n  wire [1:0] w;\n  wire x;\n  specify {items} \
+             endspecify\nendmodule\n"
+        )
+    };
+    analyze(&module(
+        "$setuphold(posedge c, v[1], 1, 1, , , , x, w[0]); \
+         $setuphold(posedge c, v[0], 1, 1, , , , x, w[1]);",
+    ));
+    let error = analyze_error(&module("$setuphold(posedge c, v[1], 1, 1, , , , , w);"));
+    assert!(
+        error.contains("delayed signal `w` is not a net of module `m` as wide as `v`"),
+        "{error}"
+    );
+    let error = lowering_error(&module("$setuphold(posedge c, v[1], -1, 2, , , , w[0], );"));
+    assert!(
+        error.contains(
+            "a delayed signal that is one bit of a net, delayed by a negative timing check limit"
+        ),
+        "{error}"
+    );
+    let error = parse_error(&module("$setuphold(posedge c, v[1:0], 1, 1, , , , , w);"));
+    assert!(
+        error.contains("delayed signal `w` of a part-select of `v`"),
+        "{error}"
+    );
+}
+
 /// Section 15.6: a condition is any expression, `~` it, or it compared with
 /// a scalar constant, read at its least significant bit. A vector signal is
 /// read directly; any other expression, a parameter among them, drives a

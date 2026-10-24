@@ -82,16 +82,25 @@ pub(super) fn lower_timing_checks(
                 check.span.into(),
             ));
         }
-        let mut copied = [None; 2];
+        let mut copied: [Option<DelayedCopy>; 2] = [None, None];
         for (slot, (delayed, source)) in copied.iter_mut().zip([
             (&check.delayed_reference, Some(&check.reference)),
             (&check.delayed_data, check.data.as_ref()),
         ]) {
             if let (Some(delayed), Some(source)) = (delayed, source) {
-                *slot = Some((
-                    resolve(&source.terminal.name, source.terminal.span)?,
-                    resolve(&delayed.name, delayed.span)?,
-                ));
+                *slot = Some(DelayedCopy {
+                    source: resolve(&source.terminal.name, source.terminal.span)?,
+                    delayed: (
+                        resolve(&delayed.name, delayed.span)?,
+                        match &delayed.select {
+                            Some(crate::ast::TerminalSelect::Bit { text, .. }) => {
+                                Some(text.clone())
+                            }
+                            _ => None,
+                        },
+                    ),
+                    span: delayed.span,
+                });
             }
         }
         copies.push(copied);
@@ -152,26 +161,41 @@ pub(super) fn lower_timing_checks(
     }
     let named: Vec<_> = copies
         .iter()
-        .map(|copied| copied.map(|copy| copy.map(|(_, net)| net)))
+        .map(|copied| {
+            [
+                copied[0].as_ref().map(|copy| copy.delayed.clone()),
+                copied[1].as_ref().map(|copy| copy.delayed.clone()),
+            ]
+        })
         .collect();
     let delays = delayed_signal_delays(&mut lowered[first..], &named);
     // One transport-delayed copy (every change passes) from each signal to
     // each delayed net that copies it.
     let mut emitted = BTreeSet::new();
-    for &(source, net) in copies.iter().flatten().flatten() {
+    for copy in copies.iter().flatten().flatten() {
         let Some(ticks) = delays
-            .get(&net)
+            .get(&copy.delayed)
             .and_then(|delay| u64::try_from(*delay).ok())
             .filter(|ticks| *ticks > 0)
         else {
             continue;
         };
-        if !emitted.insert((source, net)) {
+        let (net, bit) = &copy.delayed;
+        if bit.is_some() {
+            return Err(DigitalLoweringDiagnostic::refusal(
+                "a delayed signal that is one bit of a net, delayed by a negative timing check \
+                 limit: the module path that delays it would delay the whole net (IEEE \
+                 1364-2005 section 15.8)"
+                    .to_string(),
+                copy.span.into(),
+            ));
+        }
+        if !emitted.insert((copy.source, *net)) {
             continue;
         }
         paths.push(DigitalModulePath {
-            source,
-            destination: net,
+            source: copy.source,
+            destination: *net,
             edge: None,
             condition: None,
             ifnone: false,
@@ -186,6 +210,16 @@ pub(super) fn lower_timing_checks(
         });
     }
     Ok(())
+}
+
+/// A delayed signal: a net, and the bit of it a check names as written.
+type Delayed = (DigitalSignalId, Option<SmolStr>);
+
+/// A check's delayed signal and the signal it copies.
+struct DelayedCopy {
+    source: DigitalSignalId,
+    delayed: Delayed,
+    span: crate::source::Span,
 }
 
 /// A `$setuphold`'s or `$recrem`'s window over a data event's tick less its
@@ -216,8 +250,8 @@ fn window(check: &DigitalTimingCheck) -> Option<(i64, i64)> {
 /// whose limit is taken as 0 is marked for the warning the section requires.
 fn delayed_signal_delays(
     checks: &mut [DigitalTimingCheck],
-    named: &[[Option<DigitalSignalId>; 2]],
-) -> BTreeMap<DigitalSignalId, i64> {
+    named: &[[Option<Delayed>; 2]],
+) -> BTreeMap<Delayed, i64> {
     let mut variables = BTreeMap::new();
     let mut count = 0_usize;
     let mut fresh = || {
@@ -229,7 +263,7 @@ fn delayed_signal_delays(
         .zip(named)
         .map(|(check, names)| {
             window(check)?;
-            Some(names.map(|name| match name {
+            Some(names.clone().map(|name| match name {
                 Some(net) => *variables.entry(net).or_insert_with(&mut fresh),
                 None => fresh(),
             }))

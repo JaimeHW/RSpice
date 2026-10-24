@@ -499,6 +499,42 @@ fn a_shared_delayed_signal_takes_the_delay_every_check_needs() {
     assert_eq!(warnings(&report), expected);
 }
 
+/// A.7.5.2: a delayed signal may be one bit of a net, and copies the bit of
+/// its signal the check names. With non-negative limits the copies are
+/// undelayed: `w[0]` follows `d[1]` and `w[1]` follows `d[0]`, so `w` is `d`
+/// reversed.
+#[test]
+fn a_delayed_bit_copies_the_bit_its_check_names() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module bs(output [1:0] q, input [1:0] d, input clk);
+  wire [1:0] w;
+  specify
+    $setuphold(posedge clk, d[1], 1, 1, , , , , w[0]);
+    $setuphold(posedge clk, d[0], 1, 1, , , , , w[1]);
+  endspecify
+  assign q = w;
+endmodule
+module t;
+  reg [1:0] d;
+  reg clk;
+  wire [1:0] q;
+  bs u(q, d, clk);
+  initial begin
+    $monitor("%0t q=%b", $time, q);
+    clk = 0; d = 2'b01;
+    #10 d = 2'b11;
+    #10 d = 2'b10;
+    #5 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(stdout(&report), "0 q=10\n10 q=11\n20 q=01\n");
+    assert!(warnings(&report).is_empty(), "{:?}", warnings(&report));
+}
+
 /// Section 15.5.1: no delays satisfy both checks, whose delayed signals
 /// meet at least 10 and at most -3 after the edge. The smallest negative
 /// limit, the first check's -10, is taken as 0; still none do, so the next,

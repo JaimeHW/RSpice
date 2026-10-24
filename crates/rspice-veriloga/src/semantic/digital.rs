@@ -1881,10 +1881,19 @@ impl SemanticAnalyzer {
                 let (Some(delayed), Some(source)) = (delayed, source) else {
                     continue;
                 };
+                // A.7.5.2: a bit-select names one bit.
+                let width = |terminal: &crate::ast::SpecifyTerminal,
+                             found: &AnalyzedDigitalSignal| {
+                    match terminal.select {
+                        Some(crate::ast::TerminalSelect::Bit { .. }) => 1,
+                        _ => found.width,
+                    }
+                };
                 let fits = signal(&delayed.name).is_some_and(|found| {
                     matches!(found.class, DigitalSignalClass::Net(_))
-                        && signal(&source.terminal.name)
-                            .is_some_and(|source| source.width == found.width)
+                        && signal(&source.terminal.name).is_some_and(|copied| {
+                            width(&source.terminal, copied) == width(delayed, found)
+                        })
                 });
                 if !fits {
                     problems.push((

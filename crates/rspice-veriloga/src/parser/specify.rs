@@ -37,6 +37,14 @@ fn refusal(context: &str, found: impl Into<String>, span: Span) -> ParseError {
     )
 }
 
+/// A terminal's bit-select as written, or `None` for a whole signal.
+fn bit_text(terminal: &SpecifyTerminal) -> Option<&str> {
+    match &terminal.select {
+        Some(TerminalSelect::Bit { text, .. }) => Some(text),
+        _ => None,
+    }
+}
+
 impl Parser<'_> {
     /// `specify ... endspecify`, at its opening keyword.
     pub(super) fn parse_specify_block(&mut self, module: &mut Module) -> Result<(), ParseError> {
@@ -342,7 +350,18 @@ impl Parser<'_> {
     fn parse_specify_terminal(&mut self, context: &str) -> Result<SpecifyTerminal, ParseError> {
         let span = self.current_span();
         let name = self.expect_identifier(context)?;
+        let mut select = None;
         if self.match_token(TokenKind::LBracket) {
+            let start = self.pos;
+            let index = self.parse_expression()?;
+            select = Some(if self.check(TokenKind::RBracket) {
+                TerminalSelect::Bit {
+                    text: self.written_since(start).into(),
+                    index: Box::new(index),
+                }
+            } else {
+                TerminalSelect::Part
+            });
             let mut depth = 1;
             while depth > 0 {
                 if self.at_end() {
@@ -357,6 +376,29 @@ impl Parser<'_> {
         }
         Ok(SpecifyTerminal {
             name: name.into(),
+            select,
+            span: span.extend(self.previous_span()),
+        })
+    }
+
+    /// A delayed signal (A.7.5.2 `delayed_reference` and `delayed_data`): a
+    /// net, or one bit of it by a constant mintypmax expression.
+    fn parse_delayed_signal(&mut self, context: &str) -> Result<SpecifyTerminal, ParseError> {
+        let span = self.current_span();
+        let name = self.expect_identifier(context)?;
+        let mut select = None;
+        if self.match_token(TokenKind::LBracket) {
+            let start = self.pos;
+            let index = self.parse_mintypmax_expression()?;
+            select = Some(TerminalSelect::Bit {
+                text: self.written_since(start).into(),
+                index: Box::new(index),
+            });
+            self.expect(TokenKind::RBracket)?;
+        }
+        Ok(SpecifyTerminal {
+            name: name.into(),
+            select,
             span: span.extend(self.previous_span()),
         })
     }
@@ -436,6 +478,7 @@ impl Parser<'_> {
             Expression::Identifier(identifier) if !constant_name(&identifier.name) => {
                 SpecifyTerminal {
                     name: identifier.name,
+                    select: None,
                     span: identifier.span,
                 }
             }
@@ -463,7 +506,11 @@ impl Parser<'_> {
                     }],
                     span,
                 });
-                SpecifyTerminal { name, span }
+                SpecifyTerminal {
+                    name,
+                    select: None,
+                    span,
+                }
             }
         };
         Ok(TimingCheckCondition {
@@ -580,10 +627,10 @@ impl Parser<'_> {
                     notifier = Some(self.parse_specify_terminal("timing check notifier")?)
                 }
                 "delayed reference" => {
-                    delayed_reference = Some(self.parse_specify_terminal("delayed reference")?);
+                    delayed_reference = Some(self.parse_delayed_signal("delayed reference")?);
                 }
                 "delayed data" => {
-                    delayed_data = Some(self.parse_specify_terminal("delayed data")?);
+                    delayed_data = Some(self.parse_delayed_signal("delayed data")?);
                 }
                 // A.7.5.2: `stamptime_condition` and `checktime_condition`
                 // are mintypmax expressions.
@@ -600,16 +647,30 @@ impl Parser<'_> {
         self.expect(TokenKind::RParen)?;
         self.expect(TokenKind::Semicolon)?;
         let span = start.extend(self.previous_span());
-        // Each delayed net is driven by a copy of its signal, which a module
-        // path delays (section 15.8). A net several checks name for one
-        // signal is driven once; its delay comes from all of them (section
-        // 15.5.1).
+        // Each delayed net, or bit of one, is driven by a copy of its signal
+        // or of the bit of it the check names (A.7.5.2), which a module path
+        // delays (section 15.8). One that several checks name for one signal
+        // is driven once; its delay comes from all of them (section 15.5.1).
         for (delayed, source) in [
             (&delayed_reference, Some(&reference)),
             (&delayed_data, data.as_ref()),
         ] {
             let (Some(delayed), Some(source)) = (delayed, source) else {
                 continue;
+            };
+            let source = &source.terminal;
+            if matches!(source.select, Some(TerminalSelect::Part)) {
+                return Err(refusal(
+                    "`specify` timing check",
+                    format!(
+                        "delayed signal `{}` of a part-select of `{}`",
+                        delayed.name, source.name
+                    ),
+                    source.span,
+                ));
+            }
+            let same = |one: &SpecifyTerminal, other: &SpecifyTerminal| {
+                one.name == other.name && bit_text(one) == bit_text(other)
             };
             let copied = module.timing_checks.iter().any(|check| {
                 [
@@ -618,25 +679,43 @@ impl Parser<'_> {
                 ]
                 .into_iter()
                 .any(|(other, other_source)| {
-                    other
-                        .as_ref()
-                        .is_some_and(|other| other.name == delayed.name)
-                        && other_source
-                            .is_some_and(|other| other.terminal.name == source.terminal.name)
+                    other.as_ref().is_some_and(|other| same(other, delayed))
+                        && other_source.is_some_and(|other| same(&other.terminal, source))
                 })
             });
             if copied {
                 continue;
             }
-            module.continuous_assigns.push(ContinuousAssign {
-                target: DigitalLValue::Identifier {
+            let target = match &delayed.select {
+                Some(TerminalSelect::Bit { index, .. }) => DigitalLValue::BitSelect {
+                    name: delayed.name.clone(),
+                    index: index.clone(),
+                    span: delayed.span,
+                },
+                _ => DigitalLValue::Identifier {
                     name: delayed.name.clone(),
                     span: delayed.span,
                 },
-                value: Expression::Identifier(Identifier {
-                    name: source.terminal.name.clone(),
-                    span: source.terminal.span,
+            };
+            let value = match &source.select {
+                Some(TerminalSelect::Bit { index, .. }) => {
+                    Expression::ArrayAccess(ArrayAccessExpr {
+                        normalized: false,
+                        packed: None,
+                        array: source.name.clone(),
+                        discrete_validity: None,
+                        index: index.clone(),
+                        span: source.span,
+                    })
+                }
+                _ => Expression::Identifier(Identifier {
+                    name: source.name.clone(),
+                    span: source.span,
                 }),
+            };
+            module.continuous_assigns.push(ContinuousAssign {
+                target,
+                value,
                 delay: None,
                 strength: None,
                 gate: None,
