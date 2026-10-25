@@ -147,8 +147,6 @@ pub struct ParsedModel {
     pub wmin: Option<f64>,
     /// Maximum channel width for this bin (meters)
     pub wmax: Option<f64>,
-    /// Bin name prefix (e.g., "nch" for "nch.1", "nch.2", etc.)
-    pub bin_prefix: Option<String>,
 }
 
 impl ParsedModel {
@@ -181,21 +179,7 @@ impl ParsedModel {
             lmax: None,
             wmin: None,
             wmax: None,
-            bin_prefix: None,
         }
-    }
-
-    /// Extract bin prefix from model name (e.g., "nch.1" -> "nch")
-    pub fn extract_bin_prefix(&self) -> Option<String> {
-        // Common PDK naming: prefix.binnum (e.g., nch.1, nch_hvt.2)
-        if let Some(dot_pos) = self.name.rfind('.') {
-            let suffix = &self.name[dot_pos + 1..];
-            // Check if suffix is numeric (bin number)
-            if suffix.chars().all(|c| c.is_ascii_digit()) {
-                return Some(self.name[..dot_pos].to_string());
-            }
-        }
-        None
     }
 
     /// Get a parameter value, returning default if not found
@@ -1516,9 +1500,6 @@ impl LibParser {
         model.lmax = model.get_param("lmax");
         model.wmin = model.get_param("wmin");
         model.wmax = model.get_param("wmax");
-
-        // Extract bin prefix from model name for grouping related bins
-        model.bin_prefix = model.extract_bin_prefix();
 
         Ok(model)
     }

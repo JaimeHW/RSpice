@@ -108,10 +108,6 @@ pub struct FlattenerConfig {
     pub max_depth: usize,
     /// Maximum number of leaf device records emitted after expansion.
     pub max_elements: usize,
-    /// Preserve hierarchical node names for debugging (X1.X2.node format)
-    /// When true, internal nodes keep the full hierarchical path
-    /// When false, uses shorter hash-based names for efficiency
-    pub preserve_hierarchy: bool,
     /// Separator character for hierarchical names (default: '.')
     pub hierarchy_separator: char,
     /// Collect expanded instance metadata and resolved real parameter scopes
@@ -123,7 +119,6 @@ impl Default for FlattenerConfig {
         Self {
             max_depth: 100,
             max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
-            preserve_hierarchy: true, // Default to full path for debugging
             hierarchy_separator: '.',
             collect_metadata: false,
         }
@@ -136,29 +131,6 @@ impl FlattenerConfig {
         Self {
             max_depth: 100,
             max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
-            preserve_hierarchy: true,
-            hierarchy_separator: '.',
-            collect_metadata: true,
-        }
-    }
-
-    /// Create a config optimized for performance (shorter names)
-    pub fn production() -> Self {
-        Self {
-            max_depth: 100,
-            max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
-            preserve_hierarchy: false,
-            hierarchy_separator: '_',
-            collect_metadata: false,
-        }
-    }
-
-    /// Create a standard config
-    pub fn spectre() -> Self {
-        Self {
-            max_depth: 256,
-            max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
-            preserve_hierarchy: true,
             hierarchy_separator: '.',
             collect_metadata: true,
         }

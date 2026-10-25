@@ -36,8 +36,6 @@ pub(super) struct NetInfo {
     /// How many of those terminals belong to drawn ground symbols. A ground
     /// symbol that reaches nothing else grounds nothing.
     pub(super) ground_symbol_count: usize,
-    pub(super) has_voltage_source: bool,
-    pub(super) has_current_source: bool,
     pub(super) is_ground: bool,
     /// Every placed terminal on this node, where a finding about the node
     /// sends a reader: by component id and pin.
@@ -132,8 +130,6 @@ pub(super) fn fold_nets(
             if component.is_ground_symbol {
                 entry.ground_symbol_count += 1;
             }
-            entry.has_voltage_source |= component.is_voltage_source;
-            entry.has_current_source |= component.is_current_source;
             if pin.direction == Some(PortDirection::In) {
                 entry.declared_inputs.push(terminal.clone());
             }

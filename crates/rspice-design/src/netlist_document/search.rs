@@ -573,9 +573,7 @@ struct SourceCursor<'a> {
     offset: usize,
     /// One-based line containing `offset`.
     line: usize,
-    /// Byte offset of the first character of `line`.
-    line_start: usize,
-    /// Characters between `line_start` and `offset`.
+    /// Characters between the start of `line` and `offset`.
     characters: usize,
 }
 
@@ -585,7 +583,6 @@ impl<'a> SourceCursor<'a> {
             source,
             offset: 0,
             line: 1,
-            line_start: 0,
             characters: 0,
         }
     }
@@ -597,13 +594,9 @@ impl<'a> SourceCursor<'a> {
         if offset < self.offset {
             *self = Self::new(self.source);
         }
-        for (index, byte) in self.source.as_bytes()[self.offset..offset]
-            .iter()
-            .enumerate()
-        {
+        for byte in &self.source.as_bytes()[self.offset..offset] {
             if *byte == b'\n' {
                 self.line += 1;
-                self.line_start = self.offset + index + 1;
                 self.characters = 0;
             } else if byte & 0xC0 != 0x80 {
                 // Continuation bytes belong to a character already counted.
