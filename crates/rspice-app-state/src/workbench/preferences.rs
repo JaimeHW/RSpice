@@ -214,34 +214,6 @@ pub use rspice_results::display_preferences::{
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum LargeDatasetDisplay {
-    #[default]
-    EnvelopeExtrema,
-    UniformDisplaySampling,
-    NoDisplayDecimation,
-}
-
-impl LargeDatasetDisplay {
-    const fn index(self) -> usize {
-        match self {
-            Self::EnvelopeExtrema => 0,
-            Self::UniformDisplaySampling => 1,
-            Self::NoDisplayDecimation => 2,
-        }
-    }
-
-    fn from_index(index: usize) -> Result<Self, &'static str> {
-        match index {
-            0 => Ok(Self::EnvelopeExtrema),
-            1 => Ok(Self::UniformDisplaySampling),
-            2 => Ok(Self::NoDisplayDecimation),
-            _ => Err("large-dataset display index is outside its domain"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum EngineeringExportFormat {
     #[default]
     Csv,
@@ -321,7 +293,11 @@ pub struct ResultsPreferences {
     displayed_significant_digits: DisplayedSignificantDigits,
     cursor_interpolation: CursorInterpolation,
     complex_number_display: ComplexNumberDisplay,
-    large_dataset_display: LargeDatasetDisplay,
+    /// Retired: every pane keeps each pixel column's extremes. A value an
+    /// older build saved is read and dropped here, so it is neither kept as
+    /// an unknown field nor written back.
+    #[serde(rename = "large-dataset-display", skip_serializing)]
+    _large_dataset_display: serde::de::IgnoredAny,
     engineering_export: EngineeringExportFormat,
     #[serde(flatten)]
     unknown: BTreeMap<String, Value>,
@@ -337,7 +313,6 @@ impl ResultsPreferences {
             displayed_significant_digits: self.displayed_significant_digits,
             cursor_interpolation: self.cursor_interpolation,
             complex_number_display: self.complex_number_display,
-            large_dataset_display: self.large_dataset_display,
             engineering_export: if self.engineering_export.is_runtime_supported() {
                 self.engineering_export
             } else {
@@ -353,9 +328,6 @@ pub struct ResultPresentationPolicy {
     displayed_significant_digits: DisplayedSignificantDigits,
     cursor_interpolation: CursorInterpolation,
     complex_number_display: ComplexNumberDisplay,
-    /// Stored for older sessions and reported back to them; no pane reads
-    /// it, because every pane keeps each pixel column's extremes.
-    large_dataset_display: LargeDatasetDisplay,
     engineering_export: EngineeringExportFormat,
 }
 
@@ -567,7 +539,10 @@ pub enum ChoicePreference {
     ComplexNumberDisplay,
     FamilyTraceLabeling,
     DefaultAxisPolicy,
-    LargeDatasetDisplay,
+    /// Retired persisted key. Every pane keeps each pixel column's extremes,
+    /// so a restored value is discarded.
+    #[serde(rename = "large-dataset-display")]
+    LegacyLargeDatasetDisplay,
     MeasurementEvaluation,
     EngineeringExport,
     DefaultComputeTarget,
@@ -641,7 +616,7 @@ impl ChoicePreference {
         Self::ComplexNumberDisplay,
         Self::FamilyTraceLabeling,
         Self::DefaultAxisPolicy,
-        Self::LargeDatasetDisplay,
+        Self::LegacyLargeDatasetDisplay,
         Self::MeasurementEvaluation,
         Self::EngineeringExport,
         Self::DefaultComputeTarget,
@@ -704,7 +679,7 @@ impl ChoicePreference {
             Self::ComplexNumberDisplay => "complex-number-display",
             Self::FamilyTraceLabeling => "family-trace-labeling",
             Self::DefaultAxisPolicy => "default-axis-policy",
-            Self::LargeDatasetDisplay => "large-dataset-display",
+            Self::LegacyLargeDatasetDisplay => "large-dataset-display",
             Self::MeasurementEvaluation => "measurement-evaluation",
             Self::EngineeringExport => "engineering-export",
             Self::DefaultComputeTarget => "default-compute-target",
@@ -753,7 +728,7 @@ impl ChoicePreference {
             | Self::ComplexNumberDisplay
             | Self::FamilyTraceLabeling
             | Self::DefaultAxisPolicy
-            | Self::LargeDatasetDisplay
+            | Self::LegacyLargeDatasetDisplay
             | Self::EngineeringExport
             | Self::DefaultComputeTarget
             | Self::QueuePriority
@@ -801,6 +776,7 @@ impl ChoicePreference {
             Self::LegacyWorkspacePreset
                 | Self::LegacyConsoleOnLaunch
                 | Self::LegacySchematicGrid
+                | Self::LegacyLargeDatasetDisplay
                 | Self::FamilyTraceLabeling
                 | Self::DefaultAxisPolicy
                 | Self::MeasurementEvaluation
@@ -1136,7 +1112,6 @@ impl UserPreferences {
         let value = match key {
             ChoicePreference::CursorInterpolation => results.cursor_interpolation.index(),
             ChoicePreference::ComplexNumberDisplay => results.complex_number_display.index(),
-            ChoicePreference::LargeDatasetDisplay => results.large_dataset_display.index(),
             ChoicePreference::EngineeringExport => results.engineering_export.index(),
             _ => usize::MAX,
         };
@@ -1187,11 +1162,6 @@ impl UserPreferences {
             ChoicePreference::ComplexNumberDisplay => {
                 self.results.current_mut()?.complex_number_display =
                     ComplexNumberDisplay::from_index(value)?;
-                return Ok(());
-            }
-            ChoicePreference::LargeDatasetDisplay => {
-                self.results.current_mut()?.large_dataset_display =
-                    LargeDatasetDisplay::from_index(value)?;
                 return Ok(());
             }
             ChoicePreference::EngineeringExport => {
@@ -1247,10 +1217,6 @@ impl UserPreferences {
                     }
                     ChoicePreference::ComplexNumberDisplay => {
                         results.complex_number_display = ComplexNumberDisplay::default();
-                        continue;
-                    }
-                    ChoicePreference::LargeDatasetDisplay => {
-                        results.large_dataset_display = LargeDatasetDisplay::default();
                         continue;
                     }
                     ChoicePreference::EngineeringExport => {
@@ -1477,12 +1443,6 @@ impl UserPreferences {
             && let Ok(value) = ComplexNumberDisplay::from_index(index)
         {
             results.complex_number_display = value;
-        }
-        if let Some(index) =
-            take_legacy_choice(&mut self.choices, ChoicePreference::LargeDatasetDisplay)
-            && let Ok(value) = LargeDatasetDisplay::from_index(index)
-        {
-            results.large_dataset_display = value;
         }
         if let Some(index) =
             take_legacy_choice(&mut self.choices, ChoicePreference::EngineeringExport)
@@ -1864,9 +1824,6 @@ mod tests {
             .set_choice(ChoicePreference::ComplexNumberDisplay, 1)
             .unwrap();
         preferences
-            .set_choice(ChoicePreference::LargeDatasetDisplay, 2)
-            .unwrap();
-        preferences
             .set_choice(ChoicePreference::EngineeringExport, 1)
             .unwrap();
 
@@ -1876,10 +1833,6 @@ mod tests {
         assert_eq!(
             policy.complex_number_display(),
             ComplexNumberDisplay::RealImaginary
-        );
-        assert_eq!(
-            preferences.choice(ChoicePreference::LargeDatasetDisplay),
-            LargeDatasetDisplay::NoDisplayDecimation.index()
         );
         assert_eq!(
             policy.engineering_export(),
@@ -1892,10 +1845,6 @@ mod tests {
         assert_eq!(
             encoded["results"]["complex-number-display"],
             "real-imaginary"
-        );
-        assert_eq!(
-            encoded["results"]["large-dataset-display"],
-            "no-display-decimation"
         );
         assert_eq!(
             encoded["results"]["engineering-export"],
@@ -1917,7 +1866,6 @@ mod tests {
                 "choices":{
                     "cursor-interpolation":2,
                     "complex-number-display":1,
-                    "large-dataset-display":2,
                     "engineering-export":1
                 },
                 "scalars":{"displayed-significant-digits":13}
@@ -1935,7 +1883,6 @@ mod tests {
             preferences.choice(ChoicePreference::ComplexNumberDisplay),
             1
         );
-        assert_eq!(preferences.choice(ChoicePreference::LargeDatasetDisplay), 2);
         assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 1);
         let encoded = serde_json::to_value(preferences).unwrap();
         assert!(encoded["choices"].get("cursor-interpolation").is_none());
@@ -1944,6 +1891,74 @@ mod tests {
                 .get("displayed-significant-digits")
                 .is_none()
         );
+    }
+
+    /// Older builds saved the retired large-dataset display setting twice: as
+    /// a numeric choice and in the Results domain. A preferences file holding
+    /// both loads with its other settings intact and is written back without
+    /// either.
+    #[test]
+    fn a_preferences_file_saved_with_the_retired_large_dataset_display_loads() {
+        let mut preferences = UserPreferences::default();
+        preferences
+            .set_choice(ChoicePreference::CursorInterpolation, 1)
+            .unwrap();
+        let written = serde_json::to_value(&preferences).unwrap();
+        let mut saved = written.clone();
+        saved["choices"]["large-dataset-display"] = Value::from(2);
+        saved["results"]["large-dataset-display"] = Value::from("no-display-decimation");
+
+        let mut restored: UserPreferences = serde_json::from_value(saved).unwrap();
+        restored.normalize();
+
+        assert_eq!(
+            restored.result_presentation_policy().cursor_interpolation(),
+            CursorInterpolation::Linear
+        );
+        assert_eq!(
+            restored.choice(ChoicePreference::LegacyLargeDatasetDisplay),
+            0
+        );
+        assert!(
+            restored
+                .set_choice(ChoicePreference::LegacyLargeDatasetDisplay, 2)
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(&restored).unwrap(), written);
+    }
+
+    /// The same settings as an older build's eframe session (RON) carried
+    /// them restore the same way.
+    #[test]
+    fn a_ron_session_saved_with_the_retired_large_dataset_display_restores() {
+        let mut preferences = UserPreferences::default();
+        preferences
+            .set_choice(ChoicePreference::CursorInterpolation, 1)
+            .unwrap();
+        let written = ron::ser::to_string(&preferences).unwrap();
+        let neighbour = r#""cursor-interpolation":linear"#;
+        let choices = r#""choices":{}"#;
+        assert_eq!(written.matches(neighbour).count(), 1, "{written}");
+        assert_eq!(written.matches(choices).count(), 1, "{written}");
+        let saved = written
+            .replacen(
+                neighbour,
+                &format!(r##"{neighbour},"large-dataset-display":r#no-display-decimation"##),
+                1,
+            )
+            .replacen(choices, r#""choices":{"large-dataset-display":2}"#, 1);
+
+        let mut restored: UserPreferences = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(&saved)
+            .expect("an older session's preferences restore");
+        restored.normalize();
+
+        assert_eq!(
+            restored.result_presentation_policy().cursor_interpolation(),
+            CursorInterpolation::Linear
+        );
+        assert_eq!(ron::ser::to_string(&restored).unwrap(), written);
     }
 
     #[test]
