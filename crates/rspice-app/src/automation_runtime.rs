@@ -19,6 +19,8 @@ use rspice_automation_runtime::{
 };
 use semver::{Version, VersionReq};
 
+use crate::build_identity::BuildIdentity;
+
 const RUNTIME_RELATIVE_PATH: &str = "runtimes/python";
 
 pub(crate) struct NativeAutomationRuntime {
@@ -387,9 +389,16 @@ fn installed_runtime_root() -> Result<PathBuf, String> {
 }
 
 fn runtime_requirement() -> Result<RuntimeRequirement, String> {
+    let build = BuildIdentity::installed().ok_or_else(|| {
+        "this application has not recorded the target it was built for".to_owned()
+    })?;
+    requirement_for(build)
+}
+
+fn requirement_for(build: &BuildIdentity) -> Result<RuntimeRequirement, String> {
     Ok(RuntimeRequirement {
-        target_triple: env!("RSPICE_BUILD_TARGET").to_owned(),
-        architecture: env!("RSPICE_BUILD_ARCH").to_owned(),
+        target_triple: build.target.to_owned(),
+        architecture: build.arch.to_owned(),
         python: VersionReq::parse(">=3.14.0,<3.15.0")
             .map_err(|error| format!("the compiled Python requirement is invalid: {error}"))?,
         rspice_api: VersionReq::parse(">=1.0.0,<2.0.0")
@@ -435,7 +444,14 @@ mod tests {
 
     #[test]
     fn compiled_runtime_requirement_is_valid() {
-        let requirement = runtime_requirement().expect("compiled runtime requirement");
+        let build = BuildIdentity {
+            hash: "unknown",
+            target: "x86_64-pc-windows-msvc",
+            arch: "x86_64",
+        };
+        let requirement = requirement_for(&build).expect("compiled runtime requirement");
+        assert_eq!(requirement.target_triple, build.target);
+        assert_eq!(requirement.architecture, build.arch);
         assert!(requirement.python.matches(&Version::new(3, 14, 0)));
         assert!(requirement.rspice_api.matches(&Version::new(1, 0, 0)));
     }

@@ -99,6 +99,9 @@ pub(crate) use rspice_app_state::quantity;
 /// model and the structured, filterable application log.
 pub(crate) use rspice_app_state::diagnostics;
 
+/// The build this process runs, installed by the shell at startup for the
+/// layers below it.
+pub(crate) mod build_identity;
 pub(crate) use rspice_app_state::source_revision;
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.

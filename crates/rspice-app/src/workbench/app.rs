@@ -422,6 +422,13 @@ impl RSpiceApp {
 
     /// Create a new application instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Only the shell's build script stamps the build; the layers below
+        // read it from what the shell installs here, before anything runs.
+        crate::build_identity::BuildIdentity::install(crate::build_identity::BuildIdentity {
+            hash: env!("RSPICE_BUILD_HASH"),
+            target: env!("RSPICE_BUILD_TARGET"),
+            arch: env!("RSPICE_BUILD_ARCH"),
+        });
         // Load the persisted session, with the preferences file read over it.
         let mut state = AppState::restore_with_preferences_file(cc.storage);
 

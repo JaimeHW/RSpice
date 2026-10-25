@@ -63,6 +63,10 @@ const LAYERS: &[(&str, u32)] = &[
     // `simulation` and `workbench` all reference it, so the bottom layer is
     // the only position that clears every inbound edge at once.
     ("source_guard", 0),
+    // The build this process runs, which the shell installs at startup. It
+    // references nothing, and `automation_runtime`, `simulation` and
+    // `workbench` all read it, so it sits at the bottom with `source_guard`.
+    ("build_identity", 0),
     // The design system.
     ("ui", 1),
     // Managed-runtime ownership for the Automation workspace: the native

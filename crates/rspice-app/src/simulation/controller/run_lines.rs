@@ -258,7 +258,7 @@ pub(super) fn analysis_figures(
 /// The product and version the About dialog shows, with its build when the
 /// build knows it.
 fn product_version() -> String {
-    let build = env!("RSPICE_BUILD_HASH");
+    let build = crate::build_identity::BuildIdentity::source_hash();
     if build == "unknown" {
         concat!("RSpice ", env!("CARGO_PKG_VERSION")).to_owned()
     } else {

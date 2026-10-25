@@ -981,8 +981,12 @@ pub(crate) fn open_diagnostics_folder(
         writeln!(snapshot, "RSpice diagnostic snapshot").expect("String writes cannot fail");
         writeln!(snapshot, "version={}", env!("CARGO_PKG_VERSION"))
             .expect("String writes cannot fail");
-        writeln!(snapshot, "build={}", env!("RSPICE_BUILD_HASH"))
-            .expect("String writes cannot fail");
+        writeln!(
+            snapshot,
+            "build={}",
+            crate::build_identity::BuildIdentity::source_hash()
+        )
+        .expect("String writes cannot fail");
         writeln!(
             snapshot,
             "platform={} {}",

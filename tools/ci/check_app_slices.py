@@ -246,7 +246,7 @@ SLICE_RULES = [
     (r"^services/model_qualification", "models"),
     (r"^services/drc_tests", "design"),
     (r"^(services|io)(\.rs$|/)", "services"),
-    (r"^automation_runtime", "services"),
+    (r"^(automation_runtime|build_identity)", "services"),
     (r"^automation_workflow", "code"),
     (r"^analysis(\.rs$|/)", "results"),
     (r"^ui\.rs$", "framework"),
