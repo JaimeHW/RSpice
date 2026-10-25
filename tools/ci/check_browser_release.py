@@ -1,4 +1,4 @@
-"""Qualify packaged UI startup, playground solves, and the pinned Python worker."""
+"""Qualify packaged UI startup and the pinned Python worker."""
 
 import argparse
 import base64
@@ -102,52 +102,9 @@ def open_page(browser, url, width, height):
     browser.navigate(url)
 
 
-def playground_layout(browser):
-    state = browser.script("""
-        const width = document.documentElement.clientWidth;
-        const ids = ['btn-summary', 'btn-op', 'btn-ac', 'btn-tran',
-                     'tstop', 'hmax', 'fstart', 'fstop', 'fpoints'];
-        return {
-            width, scroll_width: document.documentElement.scrollWidth,
-            controls: ids.map(id => {
-                const element = document.getElementById(id);
-                const bounds = element?.getBoundingClientRect();
-                return {id, visible: !!element?.getClientRects().length,
-                        left: bounds?.left, right: bounds?.right};
-            }),
-        };
-    """)
-    clipped = [control for control in state["controls"]
-               if not control["visible"] or control["left"] < -1
-               or control["right"] > state["width"] + 1]
-    if state["scroll_width"] > state["width"] + 1 or clipped:
-        raise AssertionError(f"Playground controls overflow the viewport: {state}")
-    return state
-
-
-def playground_result(browser):
-    state = browser.script(r"""
-        const notices = [...document.querySelectorAll('#log .ok')].map(node => node.textContent);
-        const points = notices.map(text => text.match(/^tran:.*?· (\d+) pts/)).find(Boolean);
-        return {
-            points: points ? Number(points[1]) : 0,
-            errors: [...document.querySelectorAll('#log .err')].map(node => node.textContent),
-            traces: [...document.querySelectorAll('#plot path')].map(path => {
-                const data = path.getAttribute('d') || '';
-                return { points: (data.match(/[ML]/g) || []).length,
-                         finite: !/NaN|Infinity|undefined/.test(data) };
-            }),
-        };
-    """)
-    if (state["points"] < 2 or state["errors"] or not state["traces"]
-            or any(trace["points"] < 2 or not trace["finite"] for trace in state["traces"])):
-        raise AssertionError(f"Playground did not render measured transient samples: {state}")
-    return state
-
-
 def release_inputs(root):
     inputs = {"_headers": hashlib.sha256((root / "_headers").read_bytes()).hexdigest()}
-    for path in sorted([*(root / "ide").rglob("*"), *(root / "play").rglob("*")]):
+    for path in sorted((root / "ide").rglob("*")):
         if path.is_symlink():
             raise ValueError(f"release input must not be a symlink: {path}")
         if path.is_file():
@@ -172,7 +129,7 @@ def main():
               "qualification_source_sha": subprocess.check_output(
                   ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
                   text=True).strip(),
-              "scope": "UI startup at emulated viewports, playground solves, and Python debugger integration",
+              "scope": "UI startup at emulated viewports and Python debugger integration",
               "software_webgpu": args.software_webgpu,
               "harness": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                           for name in ("check_browser_release.py", "browser_workbench.py",
@@ -196,17 +153,6 @@ def main():
                 browser.assert_no_errors()
                 capture(browser, label, state)
                 report["viewports"].append({"label": label, **state})
-                open_page(browser, browser.origin + "/play/", width, height)
-                wait_for(lambda: browser.script("""
-                    return document.body.innerText.includes('worker ready') &&
-                        document.body.innerText.includes('solved in');
-                """), f"{label} playground transient solve", timeout=120)
-                browser.assert_no_errors()
-                capture(browser, label + "-playground", {
-                    "body": browser.script("return document.body.innerText"),
-                    "layout": playground_layout(browser),
-                    "result": playground_result(browser),
-                })
             report["webgpu"] = browser.webgpu_adapter()
             open_page(browser, browser.origin + AUTOMATION_PAGE + "?" + urllib.parse.urlencode(
                 {"worker": asset_url + "automation-worker.js"}), 1280, 900)

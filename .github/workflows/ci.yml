@@ -121,15 +121,12 @@ jobs:
       - name: Vendored cloud client integrity
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_cloud_client_vendor.py
-      - name: WASM playground worker tests
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: python3 tools/ci/test_wasm_playground.py
       - name: WASM IDE worker tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_ide_worker.py
       - name: Browser module loading tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: node --test tools/ci/test_wasm_loader.mjs tools/ci/test_wasm_playground.mjs
+        run: node --test tools/ci/test_wasm_loader.mjs
       - name: Native release packager tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/release/test_package_native.py
@@ -156,7 +153,7 @@ jobs:
         run: python3 tools/ci/test_compare_trifamily_fingerprints.py
       - name: Clippy (warnings denied)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
-        run: cargo clippy --locked --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
+        run: cargo clippy --locked --workspace --exclude rspice-python --all-targets --message-format short -- -D warnings
 
   test-linux:
     name: Test core & conformance (Linux)
@@ -312,7 +309,7 @@ jobs:
           cargo test --locked --workspace --no-fail-fast --features rspice-output/durable-file
           --exclude rspice-core --exclude rspice-core-base --exclude rspice-core-netlist
           --exclude rspice-core-devices --exclude rspice-app --exclude rspice-conformance
-          --exclude rspice-python --exclude rspice-wasm
+          --exclude rspice-python
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
 
   test-ui:
@@ -536,7 +533,7 @@ jobs:
       - name: Check
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked --workspace --exclude rspice-python --exclude rspice-wasm
+        run: cargo check --locked --workspace --exclude rspice-python
       - name: Qualify portable generated Verilog-A shard
         env:
           RUSTFLAGS: -D warnings
@@ -726,14 +723,6 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - name: Check rspice-wasm
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown
-      - name: Build rspice-wasm release library
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo build --locked -p rspice-wasm --lib --target wasm32-unknown-unknown --release
       - name: Check rspice-app
         env:
           RUSTFLAGS: -D warnings
@@ -788,10 +777,10 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Install pinned wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
-      - name: Test browser binding and cloud transport
+      - name: Test cloud transport in a browser window
         env:
           WASM_BINDGEN_USE_BROWSER: '1'
-        run: cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown
+        run: cargo test --locked -p rspice-cloud-client --lib --target wasm32-unknown-unknown
       - name: Test core GP, pole-zero and control contracts in a WebAssembly worker
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
@@ -951,7 +940,7 @@ jobs:
           --features veriloga-builtins
 
   surface-gates:
-    name: Lint & test surface crates
+    name: Lint the engine adapter
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -962,16 +951,10 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - name: Clippy rspice-wasm (warnings denied)
-        run: >-
-          cargo clippy --locked -p rspice-wasm --all-targets --all-features
-          --message-format short -- -D warnings
       - name: Clippy rspice-engine-adapter (warnings denied)
         run: >-
           cargo clippy --locked -p rspice-engine-adapter --all-targets --all-features
           --message-format short -- -D warnings
-      - name: Test rspice-wasm
-        run: cargo test --locked -p rspice-wasm --all-features
 
   feature-matrix:
     name: Clippy feature shard (${{ matrix.label }})

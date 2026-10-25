@@ -16,7 +16,7 @@ from check_browser_workbench import (
     run_with_saved_provider, verify_checkpoint, verify_clock_rejection, verify_recovery_copy,
     wait_for_checkpoint_publication,
 )
-from check_browser_release import ReleaseHandler, playground_result, startup_ready, verify_worker_urls
+from check_browser_release import ReleaseHandler, startup_ready, verify_worker_urls
 from check_wasm_jit_browser import qualification_worker
 
 
@@ -37,15 +37,6 @@ class BrowserWorkbenchTests(unittest.TestCase):
                        {"draft": ""}, {"draft": "Changed reply"}, {"role": "label"}):
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 verify_clock_rejection(snapshot(**change), "Review update", "Retained reply")
-
-    def test_solved_notice_requires_finite_rendered_measurements(self):
-        valid = {"points": 630, "errors": [], "traces": [{"points": 630, "finite": True}]}
-        self.assertEqual(playground_result(Mock(script=Mock(return_value=valid))), valid)
-        for change in ({"points": 0}, {"traces": []}, {"errors": ["solver failed"]},
-                       {"traces": [{"points": 0, "finite": True}]},
-                       {"traces": [{"points": 630, "finite": False}]}):
-            with self.subTest(change=change), self.assertRaisesRegex(AssertionError, "measured transient samples"):
-                playground_result(Mock(script=Mock(return_value={**valid, **change})))
 
     def test_packaged_headers_apply_to_real_and_virtual_browser_pages(self):
         with tempfile.TemporaryDirectory() as directory:

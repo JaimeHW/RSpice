@@ -36,7 +36,7 @@ jobs:
             packages: >-
               --workspace --exclude rspice-core --exclude rspice-core-base
               --exclude rspice-core-netlist --exclude rspice-core-devices --exclude rspice-app
-              --exclude rspice-python --exclude rspice-wasm --exclude rspice-conformance
+              --exclude rspice-python --exclude rspice-conformance
               --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
     env:
       CARGO_BUILD_JOBS: "2"

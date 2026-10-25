@@ -52,7 +52,7 @@ jobs:
         # nightly. This previously read `-- --skip test_ngspice_ --skip
         # test_full_ngspice`, which depended on test names never changing.
         run: >-
-          cargo test --locked --workspace --exclude rspice-python --exclude rspice-wasm
+          cargo test --locked --workspace --exclude rspice-python
           --exclude rspice-conformance --release --no-fail-fast
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
       - name: Xyce conformance suite (release)

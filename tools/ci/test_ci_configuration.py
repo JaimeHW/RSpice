@@ -479,7 +479,6 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-cli",
             "rspice-app",
             "rspice-python",
-            "rspice-wasm",
             "rspice-core",
             "rspice-core-base",
             "rspice-core-netlist",
@@ -662,7 +661,6 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-core-devices",
             "rspice-app",
             "rspice-python",
-            "rspice-wasm",
             "rspice-conformance",
         }
         generated = {name for name in workspace_member_names()
@@ -708,7 +706,8 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner", job)
         self.assertIn("WASM_BINDGEN_USE_BROWSER: '1'", job)
         self.assertIn("WASM_BINDGEN_USE_DEDICATED_WORKER: '1'", job)
-        self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
+        self.assertIn("cargo test --locked -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
+        self.assertIn("--test wasm_engine_numerics", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
         self.assertIn("cargo test --locked -p rspice-worker --target wasm32-unknown-unknown --test browser_worker_transport", job)
 
@@ -952,37 +951,25 @@ class CiConfigurationTests(unittest.TestCase):
                 f"{name!r} runs cargo or rustfmt from the script it invokes",
             )
 
-    def test_surface_crates_are_linted_and_tested_on_every_change(self) -> None:
-        """rspice-wasm and rspice-engine-adapter gate on pull requests.
+    def test_engine_adapter_is_linted_on_every_change(self) -> None:
+        """rspice-engine-adapter's every feature is linted on pull requests.
 
-        The workspace Clippy lane passes `--exclude rspice-wasm`, and no
-        pull-request lane ran `cargo test` for either crate: the adapter's
-        three integration targets only ran in nightly and release, and
-        rspice-wasm had no test lane at all. Both crates translate requests
-        and serialize results for a first-party surface, which is precisely
-        the code plan rule 5 forbids from drifting.
+        The adapter translates requests and serializes results for a
+        first-party surface, which is precisely the code plan rule 5 forbids
+        from drifting, and the workspace Clippy lane sees only its defaults.
         """
         workflow = read_text(".github/workflows/ci.yml")
         self.assertIn("surface-gates:", workflow)
         job = workflow.split("  surface-gates:", 1)[1].split("\n  feature-matrix:", 1)[0]
 
-        for command in (
-            "cargo clippy --locked -p rspice-wasm --all-targets --all-features",
+        self.assertIn(
             "cargo clippy --locked -p rspice-engine-adapter --all-targets --all-features",
-            "cargo test --locked -p rspice-wasm --all-features",
-        ):
-            self.assertIn(command, job)
+            job,
+        )
         self.assertEqual(
             job.count("-- -D warnings"),
-            2,
-            "both surface Clippy invocations must deny warnings",
-        )
-        # The wasm32 link check is what proves the crate still builds for the
-        # target it ships to; the host lane above proves its translation is
-        # right. Neither replaces the other.
-        self.assertIn(
-            "cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown",
-            workflow,
+            1,
+            "the adapter's Clippy invocation must deny warnings",
         )
 
     def test_feature_shards_cover_what_the_workspace_union_cannot(self) -> None:
@@ -1478,7 +1465,7 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn(
-            "cargo clippy --locked --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings",
+            "cargo clippy --locked --workspace --exclude rspice-python --all-targets --message-format short -- -D warnings",
             workflow,
         )
 
@@ -1514,7 +1501,7 @@ class CiConfigurationTests(unittest.TestCase):
         # The two lanes whose blind spots make the line above load-bearing.
         self.assertIn(
             "cargo clippy --locked --workspace --exclude rspice-python"
-            " --exclude rspice-wasm --all-targets --message-format short -- -D warnings",
+            " --all-targets --message-format short -- -D warnings",
             workflow,
         )
         self.assertIn(
@@ -1761,10 +1748,9 @@ class CiConfigurationTests(unittest.TestCase):
             self.assertNotIn('rspice-veriloga feature "native"', tree)
             self.assertIn('rspice-core feature "veriloga"', tree)
 
-    def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
+    def test_wasm_ci_checks_ui_and_worker_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 
-        self.assertIn("cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown", workflow)
         self.assertIn(
             "cargo check --locked -p rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown",
             workflow,
@@ -1784,10 +1770,6 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo build --locked -p rspice-wasm --lib --target wasm32-unknown-unknown --release",
-            workflow,
-        )
-        self.assertIn(
             "cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown",
             workflow,
         )
@@ -1798,7 +1780,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertGreaterEqual(
             workflow.count("RUSTFLAGS: -D warnings"),
             2,
-            "wasm checks should deny warnings for both wasm crates",
+            "wasm checks should deny warnings for the UI and worker crates",
         )
 
     def test_native_release_is_immutable_attested_and_recoverable(self) -> None:
@@ -2134,14 +2116,11 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("remains a release gate", readme)
 
-    def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
+    def test_browser_ide_docs_call_it_experimental(self) -> None:
         ui_readme = read_text("crates/rspice-app/README.md")
-        playground_readme = read_text("crates/rspice-wasm/web/README.md")
 
-        self.assertNotIn("later milestone", playground_readme)
         self.assertNotIn("not this crate", ui_readme)
         self.assertIn("experimental browser IDE", ui_readme)
-        self.assertIn("experimental browser IDE", playground_readme)
 
     def test_notice_includes_vendored_compact_model_attributions(self) -> None:
         notice = read_text("NOTICE")
