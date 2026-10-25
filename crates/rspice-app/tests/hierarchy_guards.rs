@@ -552,13 +552,21 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
 /// design that does not exist yet — so there is no projection to read. Both
 /// its baseline and its candidate are maps it assembled itself.
 ///
+/// Re-measured 2026-10-25: the netlist that joins an extraction's terminals,
+/// which the dialog runs over its candidates, is the model's
+/// (`Model::hierarchy_netlist`), because a sheet move reads the same
+/// extraction plan. The call moved with it; the total is unchanged.
+///
 /// `services/drc_tests.rs`, the app netlisting integration fixtures,
 /// and `workbench/commands.rs` also
 /// call these constructors, but only from their own test modules, so they are
 /// not sites. The definition sites need no exemption either: they declare
 /// `from_workspace` and `from_buffers`, they do not call
 /// `HierarchySource::from_workspace` or `HierarchySource::from_buffers`.
-const RAW_BUFFER_READERS: &[(&str, usize)] = &[("workbench/app/dialogs/hierarchy/create.rs", 3)];
+const RAW_BUFFER_READERS: &[(&str, usize)] = &[
+    ("workbench/app/dialogs/hierarchy/create.rs", 2),
+    ("workbench/app_state/model/sheet_move.rs", 1),
+];
 
 #[test]
 fn interactive_surfaces_do_not_read_raw_workspace_buffers() {

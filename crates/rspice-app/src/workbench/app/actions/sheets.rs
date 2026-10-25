@@ -12,12 +12,9 @@
 //! outcome on the status bar.
 
 use crate::state::{
-    CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition, CrossSheetPortDirection,
-    CrossSheetPortEndpoint, CrossSheetSignalType, DrawingSheetInheritance,
-    DrawingSheetNewSheetPolicy, MoveBoundaryResolution, MoveSelectionRequest, PortDirection,
-    PortDiscipline, ReorderPageNumbering, SchematicSheetFormat, SheetCatalog, SheetDefinition,
-    SheetDeleteBehavior, SheetDeleteResolution, SheetId, SheetMoveConnectivityPlan,
-    SheetPortPolicy, SheetTemplate,
+    DrawingSheetInheritance, DrawingSheetNewSheetPolicy, MoveSelectionRequest,
+    ReorderPageNumbering, SchematicSheetFormat, SheetCatalog, SheetDefinition, SheetDeleteBehavior,
+    SheetDeleteResolution, SheetId, SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete;
 use crate::workbench::app_state::{AppState, Model};
@@ -335,75 +332,23 @@ pub(in crate::workbench) fn move_sheet(
 /// Move the retained instance selection onto `destination`, creating the typed
 /// off-sheet ports every boundary net now needs.
 pub(in crate::workbench) fn move_selection_to_sheet(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     destination: SheetId,
 ) -> Result<String, String> {
-    let outcome = move_selection(state, destination);
-    state.workbench.report(outcome)
+    let outcome = move_selection(model, destination);
+    workbench.report(outcome)
 }
 
-/// The explicit boundary-port contract for one sheet move.
-///
 /// Both the strip's "Move selection here" and the design manager's reviewed
-/// Move-selection page publish through this, so a boundary net receives the
+/// Move-selection page publish through
+/// [`Model::sheet_move_boundary_resolution`], so a boundary net receives the
 /// same typed contract whichever surface asked for the move.
-pub(in crate::workbench) fn boundary_resolution(
-    plan: &SheetMoveConnectivityPlan,
-    source: SheetId,
-    destination: SheetId,
-) -> MoveBoundaryResolution {
-    let ports = plan
-        .boundaries
-        .iter()
-        .map(|boundary| CrossSheetPortDefinition {
-            net_name: boundary.net_name.clone(),
-            first: CrossSheetPortEndpoint {
-                sheet_id: source,
-                anchor: CrossSheetPortAnchor::WirePoint {
-                    wire_id: boundary.stationary_wire_id,
-                    point: boundary.stationary_point,
-                },
-            },
-            second: CrossSheetPortEndpoint {
-                sheet_id: destination,
-                anchor: CrossSheetPortAnchor::ComponentTerminal {
-                    component_id: boundary.moved_component_id,
-                    terminal_name: boundary.moved_terminal_name.clone(),
-                },
-            },
-            direction: match boundary.direction {
-                PortDirection::In => CrossSheetPortDirection::Input,
-                PortDirection::Out => CrossSheetPortDirection::Output,
-                PortDirection::InOut => CrossSheetPortDirection::InOut,
-                PortDirection::Supply => CrossSheetPortDirection::Supply,
-            },
-            signal_type: match (boundary.direction, boundary.discipline) {
-                (PortDirection::Supply, _) => CrossSheetSignalType::Power,
-                (_, PortDiscipline::Logic) => CrossSheetSignalType::Logic,
-                _ => CrossSheetSignalType::Analog,
-            },
-            discipline: match boundary.discipline {
-                PortDiscipline::Electrical => CrossSheetDiscipline::Electrical,
-                PortDiscipline::Logic => CrossSheetDiscipline::Logic,
-                PortDiscipline::Wreal => CrossSheetDiscipline::Wreal,
-                PortDiscipline::Thermal => CrossSheetDiscipline::Thermal,
-            },
-        })
-        .collect::<Vec<_>>();
-    if ports.is_empty() {
-        MoveBoundaryResolution::VerifiedNoBoundaryNets
-    } else {
-        MoveBoundaryResolution::ExplicitPorts { ports }
-    }
-}
-
-fn move_selection(state: &mut AppState, destination: SheetId) -> Result<String, String> {
-    let connectivity =
-        crate::workbench::app::dialogs::hierarchy::create::selected_component_sheet_move_plan(
-            state,
-        )?;
-    let all_objects = live_object_ids(&state.model);
-    let source = active_sheet_catalog(state)
+fn move_selection(model: &mut Model, destination: SheetId) -> Result<String, String> {
+    let connectivity = model.selected_component_sheet_move_plan()?;
+    let all_objects = live_object_ids(model);
+    let source = model
+        .active_sheet_catalog()
         .and_then(|catalog| {
             connectivity
                 .source_component_ids
@@ -415,28 +360,26 @@ fn move_selection(state: &mut AppState, destination: SheetId) -> Result<String, 
     if source == destination {
         return Err("The selection already lives on that sheet.".to_owned());
     }
-    let resolution = boundary_resolution(&connectivity, source, destination);
+    let resolution = Model::sheet_move_boundary_resolution(&connectivity, source, destination);
     let moved = connectivity.moved_object_ids.clone();
-    let receipt = state
-        .model
-        .edit_sheet_catalog("move selection to sheet", move |catalog| {
-            let active = catalog.active_sheet_id();
-            catalog
-                .reconcile_object_assignments(catalog.revision(), all_objects, active)
-                .map_err(|error| error.to_string())?;
-            catalog
-                .move_selection(MoveSelectionRequest {
-                    expected_catalog_revision: catalog.revision(),
-                    object_ids: moved,
-                    destination_sheet_id: destination,
-                    boundary_resolution: resolution,
-                })
-                .map_err(|error| error.to_string())
-        })?;
+    let receipt = model.edit_sheet_catalog("move selection to sheet", move |catalog| {
+        let active = catalog.active_sheet_id();
+        catalog
+            .reconcile_object_assignments(catalog.revision(), all_objects, active)
+            .map_err(|error| error.to_string())?;
+        catalog
+            .move_selection(MoveSelectionRequest {
+                expected_catalog_revision: catalog.revision(),
+                object_ids: moved,
+                destination_sheet_id: destination,
+                boundary_resolution: resolution,
+            })
+            .map_err(|error| error.to_string())
+    })?;
     Ok(format!(
         "Moved {} object(s) to `{}` with {} explicit boundary port(s).",
         receipt.object_ids.len(),
-        state.model.sheet_name(destination),
+        model.sheet_name(destination),
         receipt.created_port_ids.len()
     ))
 }

@@ -246,7 +246,7 @@ impl Command {
             }
             Self::CreateHierarchy => {
                 active_schematic_editor(app)
-                    && crate::workbench::app::create_hierarchy_available(state)
+                    && state.model.create_hierarchy_available()
             }
             Self::ConnectivityManager => {
                 active_schematic_editor(app) && state.platform.project_lifecycle.is_open()

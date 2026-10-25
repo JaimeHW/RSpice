@@ -207,9 +207,7 @@ pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
 pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
 pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
-pub(crate) use dialogs::hierarchy::create::{
-    create_hierarchy_available, open_create_hierarchy_dialog,
-};
+pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
 pub(crate) use dialogs::hierarchy::descend::open_descend_hierarchy_dialog;
 pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,

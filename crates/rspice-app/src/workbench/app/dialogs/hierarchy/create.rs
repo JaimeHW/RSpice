@@ -11,10 +11,7 @@ use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBu
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
-    Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
-    HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec,
-    SheetMoveConnectivityPlan, View, ViewType, hierarchy_terminal_direction,
-    hierarchy_terminal_discipline,
+    Cell, CellViewRef, HierarchyExtractionPlan, NetLabel, PortDirection, PortSpec, View, ViewType,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -24,15 +21,14 @@ use crate::ui::widgets::{
 };
 use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
-use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::{
     HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
 };
+use crate::workbench::app_state::{AppState, Model};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateHierarchyPortDraft {
@@ -137,52 +133,12 @@ const SETTING_ROW_MIN_HEIGHT: f32 = 54.0;
 const SURFACE_WITHOUT_TABLE_ROWS: f32 = 267.0;
 const TABLE_ROW_HEIGHT: f32 = 28.0;
 
-pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
-    !state.schematic_edit_read_only()
-        && !state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .components
-            .is_empty()
-        && state.model.schematic.session.editor.selection.count()
-            == state
-                .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .components
-                .len()
-        && state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .components
-            .iter()
-            .all(|id| {
-                state
-                    .model
-                    .schematic
-                    .document()
-                    .components
-                    .iter()
-                    .any(|component| {
-                        component.id == *id && component.kind != crate::state::ComponentType::Port
-                    })
-            })
-}
-
 pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
     // The command is greyed whenever this does not hold.
-    if !create_hierarchy_available(state) {
+    if !state.model.create_hierarchy_available() {
         return;
     }
-    let plan = match source_plan(state) {
+    let plan = match state.model.hierarchy_source_plan() {
         Ok(plan) => plan,
         Err(error) => {
             state.prompt(format!("Create hierarchy cannot open: {error}"));
@@ -591,113 +547,6 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     Ok(plan)
 }
 
-fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
-    let symbols = schematic_symbol_context(state);
-    let component_bounds = state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .map(|component| (component.id, symbols.component_bounds_tuple(component)))
-        .collect::<std::collections::HashMap<_, _>>();
-    let terminals = state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .flat_map(|component| {
-            symbols
-                .named_terminal_points(component)
-                .into_iter()
-                .map(move |(name, point)| {
-                    let (direction, discipline) =
-                        resolved_terminal_contract(state, component, &name);
-                    HierarchyExtractionTerminal {
-                        component_id: component.id,
-                        direction,
-                        discipline,
-                        terminal_name: name,
-                        point,
-                    }
-                })
-        })
-        .collect::<Vec<_>>();
-    let result = generated_for(
-        state,
-        &state.model.schematic,
-        &state.model.workspace.content.schematic_buffers,
-        &state.model.library_manager,
-    );
-    state
-        .model
-        .schematic
-        .plan_hierarchy_extraction(
-            &terminals,
-            &HierarchyNetConnectivity {
-                point_to_net: result.point_to_net,
-                net_segments: result.net_segments,
-            },
-            &component_bounds,
-        )
-        .map_err(|error| error.to_string())
-}
-
-/// Resolve the live selected-instance partition through the same canonical
-/// connectivity authority used by transactional hierarchy extraction.  Sheet
-/// management consumes this result to preserve internal conductors and create
-/// exact typed contracts for every source/destination boundary terminal.
-pub(in crate::workbench) fn selected_component_sheet_move_plan(
-    state: &AppState,
-) -> Result<SheetMoveConnectivityPlan, String> {
-    if !create_hierarchy_available(state) {
-        return Err(
-            "A governed sheet move requires one or more complete, writable schematic instances and no partial or non-instance selections."
-                .to_owned(),
-        );
-    }
-    source_plan(state)?
-        .sheet_move_connectivity(
-            state.model.schematic.document(),
-            state.model.schematic.topology_version(),
-        )
-        .map_err(|error| error.to_string())
-}
-
-fn resolved_terminal_contract(
-    state: &AppState,
-    component: &crate::state::Component,
-    terminal_name: &str,
-) -> (Option<PortDirection>, PortDiscipline) {
-    let fallback = (
-        hierarchy_terminal_direction(component, terminal_name),
-        hierarchy_terminal_discipline(component, terminal_name),
-    );
-    let Some(binding) = component.library_cell.as_ref() else {
-        return fallback;
-    };
-    let reference = CellViewRef::new(&binding.library, &binding.cell, "schematic");
-    let Some(master) = state
-        .model
-        .workspace
-        .content
-        .schematic_buffers
-        .get(&reference.key())
-    else {
-        return fallback;
-    };
-    master
-        .document()
-        .components
-        .iter()
-        .filter_map(|port| port.port_contract().map(|contract| (port, contract)))
-        .find(|(port, _)| port.value.trim().eq_ignore_ascii_case(terminal_name))
-        .map_or(fallback, |(_, contract)| {
-            (Some(contract.direction), contract.discipline)
-        })
-}
-
 fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let plan = validate_draft(state)?;
     let authority = state
@@ -708,7 +557,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         .cloned()
         .ok_or_else(|| "The retained source authority is unavailable.".to_owned())?;
     authority.validate(state, "Create hierarchy")?;
-    let current_plan = source_plan(state)?;
+    let current_plan = state.model.hierarchy_source_plan()?;
     if current_plan
         != state
             .design
@@ -773,8 +622,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         &state.model.schematic,
     );
     let baseline_failures = unresolved_hierarchy(&baseline_resolution);
-    let baseline_generation = generated_for(
-        state,
+    let baseline_generation = Model::hierarchy_netlist(
         &state.model.schematic,
         &state.model.workspace.content.schematic_buffers,
         &state.model.library_manager,
@@ -799,14 +647,12 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
             new_failures.join("; ")
         ));
     }
-    let parent_generation = generated_for(
-        state,
+    let parent_generation = Model::hierarchy_netlist(
         &candidate.parent,
         &next_workspace.content.schematic_buffers,
         &next_libraries,
     );
-    let child_generation = generated_for(
-        state,
+    let child_generation = Model::hierarchy_netlist(
         &candidate.child,
         &next_workspace.content.schematic_buffers,
         &next_libraries,
@@ -906,23 +752,6 @@ fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state
     let mut schematic = state.model.schematic.clone();
     schematic.rebuild_connections_from_terminals(&terminals);
     schematic
-}
-
-fn generated_for(
-    _state: &AppState,
-    schematic: &crate::state::SchematicState,
-    buffers: &std::collections::HashMap<String, rspice_design::schematic::owned::Schematic>,
-    libraries: &crate::state::LibraryManager,
-) -> rspice_simulation::netlist_gen::NetlistResult {
-    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), buffers);
-    generate_netlist_hierarchical(
-        schematic,
-        &[],
-        &hierarchy,
-        &rspice_simulation::netlist_gen::NetlistSourceData::new(
-            &crate::simulation::table_route::SourceFiles,
-        ),
-    )
 }
 
 fn unresolved_hierarchy(
@@ -1083,7 +912,7 @@ mod tests {
             .editor
             .selection
             .select_wire(wire);
-        assert!(!create_hierarchy_available(&state));
+        assert!(!state.model.create_hierarchy_available());
     }
 
     #[test]

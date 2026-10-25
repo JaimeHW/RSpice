@@ -1349,7 +1349,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "Select one editable instance that a different ready master can stand in for",
         ),
         ContextAction::CreateHierarchy => (
-            crate::workbench::app::create_hierarchy_available(state),
+            state.model.create_hierarchy_available(),
             "Select one or more complete editable instances and no partial objects",
         ),
         ContextAction::CreateSymbolFromPorts => (

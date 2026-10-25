@@ -11,6 +11,7 @@
 mod drawing_sheet;
 mod schematic_sync;
 mod sheet_catalog;
+mod sheet_move;
 mod symbol_context;
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};

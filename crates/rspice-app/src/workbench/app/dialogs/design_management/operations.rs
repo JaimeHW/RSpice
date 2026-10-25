@@ -29,9 +29,7 @@ impl RSpiceApp {
                         .to_owned(),
                 );
             }
-            if !crate::workbench::app::dialogs::hierarchy::create::create_hierarchy_available(
-                &self.state,
-            ) {
+            if !self.state.model.create_hierarchy_available() {
                 return Err(
                     "Create hierarchy requires the retained complete instance-only selection and a writable active schematic."
                         .to_owned(),
@@ -147,10 +145,7 @@ impl RSpiceApp {
                 let destination = inputs
                     .move_destination
                     .ok_or_else(|| "Destination sheet is required.".to_owned())?;
-                let connectivity =
-                    crate::workbench::app::dialogs::hierarchy::create::selected_component_sheet_move_plan(
-                        &self.state,
-                    )?;
+                let connectivity = self.state.model.selected_component_sheet_move_plan()?;
                 if connectivity.source_component_ids != selection {
                     return Err(
                         "The retained selection changed while the sheet move was being reviewed. Close and reopen Design Management."
@@ -191,11 +186,12 @@ impl RSpiceApp {
                 // One owner builds the typed boundary contract, so the strip's
                 // "Move selection here" and this reviewed page cannot disagree
                 // about what a boundary net becomes.
-                let boundary_resolution = crate::workbench::app::sheets::boundary_resolution(
-                    &connectivity,
-                    source,
-                    destination,
-                );
+                let boundary_resolution =
+                    crate::workbench::app_state::Model::sheet_move_boundary_resolution(
+                        &connectivity,
+                        source,
+                        destination,
+                    );
                 let moved = catalog
                     .move_selection(MoveSelectionRequest {
                         expected_catalog_revision: catalog.revision(),

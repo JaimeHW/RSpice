@@ -151,7 +151,11 @@ fn apply(app: &mut RSpiceApp, action: StripAction, entries: &[SheetEntry]) {
             );
         }
         StripAction::MoveSelection(id) => {
-            let _ = sheet_actions::move_selection_to_sheet(&mut app.state, id);
+            let _ = sheet_actions::move_selection_to_sheet(
+                &mut app.state.model,
+                &mut app.state.workbench,
+                id,
+            );
         }
         StripAction::SheetProperties(id) => {
             let _ = sheet_actions::activate_sheet(&mut app.state, id);
