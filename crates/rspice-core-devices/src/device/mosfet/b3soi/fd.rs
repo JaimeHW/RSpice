@@ -543,29 +543,39 @@ impl B3SoiFd {
         let gcedb = c.gcedb * ag0;
         let gcesb = c.gcesb * ag0;
         let gceeb = c.gceeb * ag0;
-        let gcg_t = c.gcg_t * ag0;
-        let gcb_t = c.gcb_t * ag0;
-        let gcd_t = c.gcd_t * ag0;
-        let gce_t = c.gce_t * ag0;
+        // A node charge is `type * q`, so its temperature column carries the
+        // type sign, and its `delTemp` term is subtracted after the type flip
+        // so that the right-hand side matches that column. ngspice-46 FD signs
+        // the column but subtracts it inside the flip (b3soifdld.c:2804-2886,
+        // 2980-2987, 3125), which leaves every PMOS charge current off by
+        // 2*gc_t*delTemp. B4SOI's g/d/s rows form this right-hand side, the
+        // sign dropped inside the flip (b4soild.c:9529-9546), but stamp the
+        // unsigned value on the column (b4soild.c:10662-10666), so B4SOI's
+        // own column is inconsistent with it.
+        let mt = self.mtype;
+        let gcg_t = mt * c.gcg_t * ag0;
+        let gcb_t = mt * c.gcb_t * ag0;
+        let gcd_t = mt * c.gcd_t * ag0;
+        let gce_t = mt * c.gce_t * ag0;
         let gcs_t = -(gcg_t + gcb_t + gcd_t + gce_t);
 
         // Equivalent charge currents (b3soifdld.c:3131-3140). The body charge
         // `cqb`/`ceqqb` is folded into the source node (current sum) as ngspice
         // does, but never stamped to a body node.
-        let mut ceqqg =
-            cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb - gcg_t * bias.del_temp;
-        let mut ceqqb =
-            cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb - gcb_t * bias.del_temp;
-        let mut ceqqd =
-            cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb - gcd_t * bias.del_temp;
-        let mut ceqqe =
-            cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb - gce_t * bias.del_temp;
+        let mut ceqqg = cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb;
+        let mut ceqqb = cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb;
+        let mut ceqqd = cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb;
+        let mut ceqqe = cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb;
         if self.mtype < 0.0 {
             ceqqg = -ceqqg;
             ceqqb = -ceqqb;
             ceqqd = -ceqqd;
             ceqqe = -ceqqe;
         }
+        ceqqg -= gcg_t * bias.del_temp;
+        ceqqb -= gcb_t * bias.del_temp;
+        ceqqd -= gcd_t * bias.del_temp;
+        ceqqe -= gce_t * bias.del_temp;
         let gc_tt = self.thermal_capacitance() * ag0;
         let ceqqth = cqth - gc_tt * bias.del_temp;
 

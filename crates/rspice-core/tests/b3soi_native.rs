@@ -1276,6 +1276,14 @@ fn fd_complementary_cards() -> (String, String) {
     )
 }
 
+fn pd_complementary_cards() -> (String, String) {
+    complementary_cards(
+        pd_n1_model_card(),
+        ["NSUB    = -1E+15", "NSUB    = 4.7E+17"],
+        ["VTH0 = .42", "VTH0 = -.42"],
+    )
+}
+
 /// ngspice-46 FD (BSIMSOI 2.1) keeps the self-heating term of the equivalent
 /// drain current inside the type factor (b3soifdld.c:3017-3018, 3072-3073),
 /// so its PMOS answer cannot be the reference. The complementary FD pair
@@ -1333,6 +1341,92 @@ fn native_soi_fd_pmos_self_heating_mirrors_its_nmos_complement() {
                 assert_rel(&format!("{at} NMOS i(vd)"), n[0], current, SH_REL);
                 assert_rel(&format!("{at} NMOS rise"), n[2], rise, SH_REL);
             }
+        }
+    }
+}
+
+/// One self-heated SOI device under a 20 ps gate ramp to 1.5 V at
+/// vd = 1.5 V, every voltage times `sign`, over 100 ps:
+/// `(time, [i(vd), i(vs), i(vg), i(ve)], temperature rise)`.
+fn soi_self_heating_gate_ramp(
+    card: &str,
+    model: &str,
+    sign: Value,
+) -> (Vec<Value>, [Vec<Value>; 4], Vec<Value>) {
+    let card = card
+        .replacen("SHMOD = 0", "SHMOD = 1", 1)
+        .replacen("SHMOD =0", "SHMOD = 1", 1);
+    let v = sign * 1.5;
+    let deck = format!(
+        "* SOI self-heating gate ramp\n\
+         vd d 0 dc {v}\n\
+         vs s 0 dc 0\n\
+         vg g 0 pwl(0 0 20p {v})\n\
+         ve e 0 dc 0\n\
+         m1 d g s e {model} w=10u l=0.25u\n\
+         .option gmin=1e-25 itl1=500\n\
+         {card}\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("gate-ramp deck parses");
+    let result = engine()
+        .run_tran(&netlist, 100.0e-12, 1.0e-12)
+        .expect("self-heating gate ramp runs");
+    let currents = ["vd", "vs", "vg", "ve"].map(|name| {
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|branch| branch.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("missing branch {name} in {:?}", result.branch_names));
+        result.branch_currents[branch].clone()
+    });
+    let rise =
+        transient_node_series(&result.node_names, &result.voltages, "m1.__temp.internal").to_vec();
+    (result.time, currents, rise)
+}
+
+/// A self-heated charge companion must subtract the same temperature
+/// derivative its matrix column carries. ngspice-46 FD and PD sign the column
+/// by the type but subtract it inside the type flip (b3soifdld.c:2804-2886,
+/// 2980-2987, 3125; b3soipdld.c:3661-3741, 3835-3842, 3987), so every PMOS
+/// charge row carries a phantom 2*gc_t*delTemp. The complementary FD and PD
+/// pairs (NSUB = NCH, VTH0 negated, no source/drain area) under this gate ramp
+/// with self-heating off negate in ngspice-46 to every printed digit (`tran 1p
+/// 100p 0 1p`, `wrdata` at `numdgt=15`); with SHMOD = 1 the PMOS FD gate draws
+/// 2.34e-4 A at 100 ps, where the NMOS draws 2.2e-15 A. So the PMOS twin must
+/// equal its NMOS mirror over the whole ramp.
+#[test]
+fn native_soi_pmos_self_heating_transient_mirrors_its_nmos_complement() {
+    for (family, (nmos, pmos)) in [
+        ("FD", fd_complementary_cards()),
+        ("PD", pd_complementary_cards()),
+    ] {
+        let (n_time, n_currents, n_rise) = soi_self_heating_gate_ramp(&nmos, "n1", 1.0);
+        let (p_time, p_currents, p_rise) = soi_self_heating_gate_ramp(&pmos, "p1", -1.0);
+        assert_eq!(
+            n_time, p_time,
+            "{family}: the mirrored ramps take the same steps"
+        );
+        for (name, (n, p)) in ["i(vd)", "i(vs)", "i(vg)", "i(ve)"]
+            .iter()
+            .zip(n_currents.iter().zip(&p_currents))
+        {
+            let scale = n.iter().fold(0.0, |m: Value, x| m.max(x.abs()));
+            for (k, (n, p)) in n.iter().zip(p).enumerate() {
+                assert!(
+                    (p + n).abs() <= 1.0e-9 * scale,
+                    "{family} {name} at t={:.4e}: PMOS {p:.12e} A, NMOS {n:.12e} A",
+                    n_time[k]
+                );
+            }
+        }
+        let scale = n_rise.iter().fold(0.0, |m: Value, x| m.max(x.abs()));
+        for (k, (n, p)) in n_rise.iter().zip(&p_rise).enumerate() {
+            assert!(
+                (p - n).abs() <= 1.0e-9 * scale,
+                "{family} rise at t={:.4e}: PMOS {p:.12e} K, NMOS {n:.12e} K",
+                n_time[k]
+            );
         }
     }
 }
