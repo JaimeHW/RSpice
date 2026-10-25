@@ -9,6 +9,7 @@
 
 pub(crate) mod commands;
 pub(crate) mod report;
+pub(crate) mod report_authoring;
 
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{

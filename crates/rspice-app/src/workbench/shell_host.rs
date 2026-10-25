@@ -73,10 +73,11 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
+                use crate::workbench::hardcopy::report_authoring;
                 use crate::workbench::surfaces::{
                     automation, design, library_cellview_manager, model_correlation, model_editor,
-                    models, netlist, pdk_technology_admin, project, report_authoring, results,
-                    simulate, stimulus, verify,
+                    models, netlist, pdk_technology_admin, project, results, simulate, stimulus,
+                    verify,
                 };
 
                 if app.state.workbench.current_route().surface_id()
