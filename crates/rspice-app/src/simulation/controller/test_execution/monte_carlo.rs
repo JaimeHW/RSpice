@@ -13,8 +13,8 @@ use rspice_simulation_contract::mc_checkpoint::McCheckpointConfig;
 use rspice_simulation_contract::mc_draft::{McConfig, McDialogState, McDistribution};
 use std::sync::Arc;
 
-pub(crate) fn checkpoint_state() -> AppState {
-    let mut state = AppState::default();
+pub(crate) fn checkpoint_state() -> RunTestHost {
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
     for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
@@ -91,7 +91,7 @@ pub(crate) fn checkpoint_state() -> AppState {
 }
 
 pub(crate) fn start_checkpoint_run(
-    state: &AppState,
+    state: &RunTestHost,
 ) -> ((AnalysisSpec, SpecExecutionOptions), SimulationRunner) {
     let mut controller = SimulationController::new();
     controller

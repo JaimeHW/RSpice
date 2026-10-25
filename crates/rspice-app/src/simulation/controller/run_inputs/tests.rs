@@ -5,7 +5,7 @@ use super::*;
 use crate::simulation::controller::test_execution::monte_carlo::{
     checkpoint_state, completed_checkpoint_fixture,
 };
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use crate::state::{MonteCarloCheckpointEvidence, SimulationRun};
 use rspice_simulation_contract::mc_draft::McDialogState;
 
@@ -13,7 +13,7 @@ use rspice_simulation_contract::mc_draft::McDialogState;
 const RESUMED: &str = "the retained runs a checkpoint resumes from";
 
 /// Set the checkpoint fixture's Monte Carlo to resume from `image`.
-fn resume_from(state: &mut AppState, image: crate::product::ContentDigest) {
+fn resume_from(state: &mut RunTestHost, image: crate::product::ContentDigest) {
     let plan = state
         .model
         .sim_setup

@@ -26,7 +26,7 @@ use rspice_vocabulary::canonical::content_digest;
 #[cfg(test)]
 mod ground_expression_tests;
 #[cfg(test)]
-mod measurement_tests;
+pub(crate) mod measurement_tests;
 
 use rspice_simulation::model_sources::validate_projected_model_binding_authority;
 #[cfg(test)]
@@ -42,9 +42,7 @@ use rspice_simulation::output_contract::selection::{
     effective_plan_capture, projection_occurrence_nets,
 };
 #[cfg(test)]
-use rspice_simulation::project_veriloga::preparation::{
-    prepared_configuration_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
-};
+use rspice_simulation::project_veriloga::preparation::prepared_configuration_veriloga_runtimes;
 use rspice_simulation::project_veriloga::preparation::{
     prepared_model_library_veriloga_runtimes, prepared_signed_pdk_veriloga_runtimes,
 };
@@ -1055,7 +1053,7 @@ impl SimulationController {
     /// A run set or a manual deck dispatches the very snapshot its
     /// preparation authorized, once nothing it was prepared from has moved;
     /// nothing is prepared here.
-    pub(super) fn consume_snapshot_for_dispatch(
+    pub(crate) fn consume_snapshot_for_dispatch(
         &mut self,
         state: &impl RunHost,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
@@ -1068,7 +1066,7 @@ impl SimulationController {
         })
     }
 
-    fn build_prepared_snapshot(
+    pub(crate) fn build_prepared_snapshot(
         state: &impl RunHost,
         intent: SimulationRunIntent,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
@@ -1288,9 +1286,9 @@ mod binned_family_tests;
 mod dispatch_parity_tests;
 #[cfg(test)]
 mod recorded_fft_tests;
-// Visible to the controller rather than private, because `runnable_state` is
-// the one fixture in this layer that produces a preparable project — and the
-// projection ratchet has to prepare one without reaching up to the shell for
-// a whole application.
+// Visible to the crate rather than private, because `runnable_state` is the
+// one fixture in this layer that produces a preparable project: the
+// projection ratchet prepares one on the run test host, and the shell's
+// feature tests build their whole sessions from it.
 #[cfg(test)]
-pub(in crate::simulation::controller) mod tests;
+pub(crate) mod tests;

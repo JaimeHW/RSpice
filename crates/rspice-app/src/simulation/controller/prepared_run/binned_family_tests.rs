@@ -7,7 +7,7 @@
 //! and W, or refuses an instance no bin holds.
 
 use super::*;
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use crate::state::ComponentType;
 use rspice_design::drc::DrcResult;
 use std::fs;
@@ -21,7 +21,7 @@ const FAMILY: &str = "\
 
 /// The CMOS inverter example with its pull-down bound to the family `nch`
 /// from a library file holding [`FAMILY`], at `length`.
-fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::path::PathBuf) {
+fn inverter_bound_to_the_family(label: &str, length: &str) -> (RunTestHost, std::path::PathBuf) {
     let directory = std::env::temp_dir().join(format!(
         "rspice-binned-family-{label}-{}",
         std::process::id()
@@ -30,7 +30,7 @@ fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::pa
     let path = directory.join("kit.lib");
     fs::write(&path, FAMILY).expect("write the family");
 
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
@@ -72,7 +72,7 @@ fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::pa
 }
 
 /// The executable deck the run set dispatches.
-fn prepared_deck(state: &AppState) -> String {
+fn prepared_deck(state: &RunTestHost) -> String {
     SimulationController::build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)
         .expect("the bound family prepares")
         .executable_netlist()

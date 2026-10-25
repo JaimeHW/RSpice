@@ -5,4 +5,5 @@
 //! the code it tests. One module per slice.
 
 mod model;
+mod run;
 mod services;

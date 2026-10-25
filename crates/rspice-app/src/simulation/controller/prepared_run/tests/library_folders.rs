@@ -14,12 +14,12 @@ const DECK: &str = "deck\n.include device.inc\nV1 out 0 1\n.op\n.end\n";
 
 /// A manual deck in its own folder whose one include is in none of the
 /// places a deck is searched from by default.
-fn deck_in(directory: &Path) -> AppState {
+fn deck_in(directory: &Path) -> RunTestHost {
     let deck = directory.join("deck");
     fs::create_dir_all(&deck).expect("create deck folder");
     let origin = deck.join("deck.cir");
     fs::write(&origin, DECK).expect("write deck");
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(DECK.to_owned());
     state.model.workspace.content.netlist_source_path = Some(origin);
@@ -40,7 +40,7 @@ fn read_from(file: &Path, folder: &Path) -> bool {
     file.parent().map(canonical) == Some(canonical(folder))
 }
 
-fn set_library_folders(state: &mut AppState, folders: Vec<PathBuf>) {
+fn set_library_folders(state: &mut RunTestHost, folders: Vec<PathBuf>) {
     state
         .model
         .preferences

@@ -10,7 +10,7 @@ use crate::state::{CanonicalAnalysisKind, PreparedRunReceipt, PreparedRunTaskRec
 
 fn controller_fixture(
     (spec, options): (AnalysisSpec, SpecExecutionOptions),
-) -> (SimulationController, AppState) {
+) -> (SimulationController, RunTestHost) {
     let provenance = synthetic_result_provenance();
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
@@ -36,7 +36,7 @@ fn controller_fixture(
         ],
     })
     .unwrap();
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run = state.model.simulation.start_run();
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .unwrap();

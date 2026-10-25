@@ -652,13 +652,6 @@ impl AppState {
             .provision_test_project_technology_with_models(models);
     }
 
-    /// [`Model::provision_test_project_veriloga_technology_contract`].
-    #[cfg(test)]
-    pub(crate) fn provision_test_project_veriloga_technology_contract(&mut self) {
-        self.model
-            .provision_test_project_veriloga_technology_contract();
-    }
-
     /// [`Model::provision_test_project_symbol_technology_contract`].
     #[cfg(test)]
     pub(crate) fn provision_test_project_symbol_technology_contract(&mut self) {

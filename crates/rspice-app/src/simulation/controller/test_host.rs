@@ -59,6 +59,20 @@ impl RunTestHost {
         self.model.provision_test_project_technology_contract();
     }
 
+    /// [`Model::provision_test_project_veriloga_technology_contract`].
+    pub(crate) fn provision_test_project_veriloga_technology_contract(&mut self) {
+        self.model
+            .provision_test_project_veriloga_technology_contract();
+    }
+
+    /// Whether the project's technology governs its runs, as the model's
+    /// technology inputs answer it.
+    pub(crate) fn project_technology_in_effect(&self) -> bool {
+        self.model
+            .technology_inputs()
+            .project_technology_in_effect()
+    }
+
     /// The application's half of a design check: the drawing's annotation is
     /// brought into the workspace first where restoring it failed.
     fn run_design_check(

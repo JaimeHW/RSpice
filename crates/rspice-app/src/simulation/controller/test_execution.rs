@@ -4,6 +4,7 @@ use super::test_host::RunTestHost;
 use super::{SimulationController, SimulationRunIntent, SimulationRunner};
 use crate::simulation::RunHost;
 use crate::simulation::controller::tests::AppState;
+use rspice_design::drc::DrcResult;
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_simulation::results::SimulationResult;
 use std::time::{Duration, Instant};
@@ -11,6 +12,22 @@ use std::time::{Duration, Instant};
 pub(crate) mod monte_carlo;
 pub(crate) mod pvt;
 pub(crate) mod saved_outputs;
+
+/// The divider on the signed test technology, its design check current and
+/// clean.
+pub(crate) fn state_with_current_clean_drc() -> RunTestHost {
+    let mut state = RunTestHost::default();
+    state.provision_test_project_technology_contract();
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut state.model.schematic,
+    );
+    let mut result = DrcResult::new();
+    result.completed = true;
+    state.model.design_checks.drc_results = Some(result);
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
+    state
+}
 
 pub(crate) fn start_manual_deck(source: &str) -> SimulationRunner {
     let mut state = RunTestHost::default();

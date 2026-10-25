@@ -7,7 +7,7 @@
 use super::tests::runnable_state;
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest};
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::SimulationRunIntent;
@@ -30,7 +30,7 @@ fn edit_transient(
 /// A runnable project whose plan holds one transient, and optionally one FFT
 /// bound to it. `stop` is what the FFT's `To` states; `None` leaves it
 /// unauthored, which is the engine's own default of the transient stop time.
-fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> AppState {
+fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> RunTestHost {
     let mut state = runnable_state();
     let plan = state
         .model
@@ -67,7 +67,7 @@ fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> AppState {
     state
 }
 
-fn compile(state: &AppState) -> Vec<crate::simulation::execution::PreparedTask> {
+fn compile(state: &RunTestHost) -> Vec<crate::simulation::execution::PreparedTask> {
     let frozen =
         SimulationController::build_analysis_plan(&state.model.sim_setup).expect("plan freezes");
     let sealed = state
@@ -94,7 +94,7 @@ type DispatchedTask = (
     String,
 );
 
-fn dispatch_tasks(state: &mut AppState, intent: SimulationRunIntent) -> Vec<DispatchedTask> {
+fn dispatch_tasks(state: &mut RunTestHost, intent: SimulationRunIntent) -> Vec<DispatchedTask> {
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(state, intent).expect("the plan prepares");
@@ -367,7 +367,7 @@ fn an_fft_instance_carries_no_solver_override() {
 fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
     const DECK: &str = "recorded fft deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 8m\n\
          .fft V(out) NP=256 WINDOW=HANN\n.fft V(out) NP=512 WINDOW=RECT FORMAT=UNORM\n.end\n";
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(DECK.to_owned());
     let tasks = dispatch_tasks(&mut state, SimulationRunIntent::ManualDeck);
@@ -400,7 +400,7 @@ fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
 
 #[test]
 fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     // Two transients, which the Studio refuses for `.FOUR` and the engine
     // accepts for `.FFT`: the card belongs to the first one.
@@ -424,7 +424,7 @@ fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
 
 #[test]
 fn a_hand_written_fft_without_a_transient_is_refused_in_the_engine_s_words() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(
         "fft with no transient\nV1 out 0 dc 0 ac 1\nR1 out 0 1k\n.ac dec 10 1 1k\n\

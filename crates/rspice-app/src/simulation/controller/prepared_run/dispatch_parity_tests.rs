@@ -13,13 +13,13 @@ mod catalog;
 mod multirate_envelope;
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisKind, SimulationPlan};
 use crate::state::{CanonicalAnalysisKind, PreparedRunTaskReceipt};
 
 use super::tests::runnable_state as preflight_ready_state;
 
-fn plan_mut(state: &mut AppState) -> &mut SimulationPlan {
+fn plan_mut(state: &mut RunTestHost) -> &mut SimulationPlan {
     state
         .model
         .sim_setup
@@ -135,7 +135,7 @@ fn with_prerequisites(kind: AnalysisKind) -> Vec<AnalysisKind> {
 /// The plan's identity is preserved: the project keeps its variables, outputs
 /// and specifications under that identity, and preparation refuses a plan
 /// whose payload it cannot find.
-fn only(state: &mut AppState, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId> {
+fn only(state: &mut RunTestHost, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId> {
     let plan = plan_mut(state);
     for existing in plan
         .instances()
@@ -191,7 +191,7 @@ fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstance
 
 /// Give the fixture's supply a periodic waveform for the shooting solve to
 /// settle on. The tone that names it is authored when the PSS is inserted.
-fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
+fn drive_pss_from_the_fixture_supply(state: &mut RunTestHost) {
     let supply = state
         .model
         .schematic
@@ -207,7 +207,7 @@ fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
 }
 
 /// The canonical tag of every task a plan compiles to, in queue order.
-fn queued_tags(state: &AppState) -> Result<Vec<u8>, Vec<String>> {
+fn queued_tags(state: &RunTestHost) -> Result<Vec<u8>, Vec<String>> {
     Ok(compiled_queue(state)?
         .iter()
         .map(|task| {
@@ -217,7 +217,7 @@ fn queued_tags(state: &AppState) -> Result<Vec<u8>, Vec<String>> {
 }
 
 fn compiled_queue(
-    state: &AppState,
+    state: &RunTestHost,
 ) -> Result<Vec<crate::simulation::execution::PreparedTask>, Vec<String>> {
     let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)?;
     let sealed = state
@@ -230,7 +230,7 @@ fn compiled_queue(
 
 /// Seal the receipt rows a compiled queue authenticates, which is the step
 /// dispatch performs and preflight now performs with it.
-fn task_receipts(state: &AppState) -> Vec<PreparedRunTaskReceipt> {
+fn task_receipts(state: &RunTestHost) -> Vec<PreparedRunTaskReceipt> {
     compiled_queue(state)
         .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")))
         .iter()

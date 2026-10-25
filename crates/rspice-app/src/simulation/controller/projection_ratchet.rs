@@ -36,7 +36,6 @@
 use serde_json::{Map, Value};
 
 use crate::simulation::controller::test_host::RunTestHost;
-use crate::simulation::controller::tests::AppState;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::model_library::ModelLibraryManager;
 use crate::workbench::app_state::SimSetupState;
@@ -861,7 +860,7 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
         .map(AnalysisInstance::id)
         .expect("a fresh plan holds one enabled transient");
 
-    let digest_of = |state: &AppState| -> Vec<u8> {
+    let digest_of = |state: &RunTestHost| -> Vec<u8> {
         let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
@@ -1000,7 +999,7 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
         soa
     };
 
-    let digest_of = |state: &AppState| -> Vec<u8> {
+    let digest_of = |state: &RunTestHost| -> Vec<u8> {
         let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
@@ -1102,7 +1101,7 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
         hb
     };
 
-    let digest_of = |state: &AppState| -> Vec<u8> {
+    let digest_of = |state: &RunTestHost| -> Vec<u8> {
         let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state

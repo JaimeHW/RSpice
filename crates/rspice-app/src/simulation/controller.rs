@@ -97,12 +97,12 @@ pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform}
 use self::live_transient::LiveTransientAccumulator;
 
 #[derive(Clone)]
-struct PreparedCampaignMember {
+pub(crate) struct PreparedCampaignMember {
     plan_name: String,
     snapshot: crate::simulation::execution::PreparedRunSnapshot,
 }
 
-struct ActiveSimulationCampaign {
+pub(crate) struct ActiveSimulationCampaign {
     id: crate::product::SimulationCampaignId,
     name: String,
     member_count: u32,
@@ -110,7 +110,7 @@ struct ActiveSimulationCampaign {
     completed_count: u32,
     failed_count: u32,
     cancelled: bool,
-    pending: VecDeque<PreparedCampaignMember>,
+    pub(crate) pending: VecDeque<PreparedCampaignMember>,
     /// When the campaign was queued, for the time its summary reports.
     started: crate::time_compat::Instant,
 }
@@ -170,7 +170,7 @@ pub struct SimulationController {
         Option<rspice_simulation::execution_artifact::PreparedArtifactProducer>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
-    current_provenance: Option<AnalysisResultProvenance>,
+    pub(crate) current_provenance: Option<AnalysisResultProvenance>,
     /// Digest of the exact prepared payload currently executing.
     current_config_digest: Option<crate::product::ContentDigest>,
     /// Source identity extended with the exact OP voltage-corner mutation.
@@ -225,7 +225,7 @@ pub struct SimulationController {
     /// App-state design epoch this controller's runner/queue belong to.
     design_execution_epoch: u64,
     /// Retained preflight and generation-safe dispatch authority.
-    run_authorization: crate::simulation::execution::PreparedRunAuthorization,
+    pub(crate) run_authorization: crate::simulation::execution::PreparedRunAuthorization,
     /// What the retained run set was prepared from, which its dispatch
     /// checks. Set and dropped with the retained run; Automation shares it,
     /// and keeps it past the dispatch.
@@ -241,7 +241,7 @@ pub struct SimulationController {
     touchstone_export_policy: TouchstoneExportPolicy,
     /// Frozen, declared-order multi-plan campaign. Each member is an
     /// independent prepared run; this record only schedules and rolls them up.
-    active_campaign: Option<ActiveSimulationCampaign>,
+    pub(crate) active_campaign: Option<ActiveSimulationCampaign>,
 }
 
 impl Default for SimulationController {
@@ -443,7 +443,7 @@ impl SimulationController {
     ///
     /// Builds all enabled analyses into a queue and starts the first one.
     /// Subsequent analyses are started automatically upon completion.
-    fn start_simulation(&mut self, state: &mut impl RunHost) {
+    pub(crate) fn start_simulation(&mut self, state: &mut impl RunHost) {
         log::info!("start_simulation called");
         self.design_execution_epoch = state.model().design_execution_epoch;
 
