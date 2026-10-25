@@ -280,7 +280,6 @@ pub enum BusParseError {
         found: String,
     },
     MixedNotation,
-    DirectionMismatch,
     SelectorOutOfRange,
     InvalidGeometry,
     InvalidBusReference,
@@ -320,7 +319,6 @@ impl fmt::Display for BusParseError {
             Self::MixedNotation => {
                 formatter.write_str("selector delimiter style does not match bus")
             }
-            Self::DirectionMismatch => formatter.write_str("selector direction does not match bus"),
             Self::SelectorOutOfRange => {
                 formatter.write_str("selector is outside the declared bus range")
             }

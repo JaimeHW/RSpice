@@ -376,7 +376,6 @@ pub enum SchematicReplacementError {
     AmbiguousTerminalAlias { name: String },
     AmbiguousParameterAlias { name: String },
     UnmappedConnectedTerminal { terminal: String },
-    IncompatibleTerminalDirection { source: String, target: String },
     MissingRequiredParameter { parameter: String },
     MalformedParameterString { reason: String },
     StaleConnection { wire_id: u64, point_index: usize },
@@ -441,10 +440,6 @@ impl fmt::Display for SchematicReplacementError {
             Self::UnmappedConnectedTerminal { terminal } => write!(
                 formatter,
                 "Connected source terminal '{terminal}' has no replacement mapping."
-            ),
-            Self::IncompatibleTerminalDirection { source, target } => write!(
-                formatter,
-                "Source terminal '{source}' and replacement terminal '{target}' have incompatible directions."
             ),
             Self::MissingRequiredParameter { parameter } => write!(
                 formatter,

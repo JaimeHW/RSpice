@@ -20,8 +20,6 @@ pub enum VdmosRegion {
     Triode,
     /// Normal saturation region
     Saturation,
-    /// Quasi-saturation: drift region limiting current
-    QuasiSaturation,
     /// Body diode conducting (reverse Vds)
     BodyDiode,
 }

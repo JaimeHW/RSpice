@@ -1253,7 +1253,6 @@ impl Vdmos {
             VdmosRegion::Cutoff => crate::op_label::OpLabel::CUTOFF,
             VdmosRegion::Triode => crate::op_label::OpLabel::TRIODE,
             VdmosRegion::Saturation => crate::op_label::OpLabel::SATURATION,
-            VdmosRegion::QuasiSaturation => crate::op_label::OpLabel::QUASI_SATURATION,
             VdmosRegion::BodyDiode => crate::op_label::OpLabel::BODY_DIODE,
         }
     }

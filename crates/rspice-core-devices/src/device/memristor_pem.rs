@@ -299,7 +299,6 @@ pub enum XycePemLegacyTableParseErrorKind {
     MissingFirstValue,
     MissingSeparator,
     MissingSecondValue,
-    TrailingCharacters,
     NonFiniteFirstValue,
     NonFiniteSecondValue,
     TooFewPoints,
@@ -376,9 +375,6 @@ impl fmt::Display for XycePemLegacyTableParseError {
             XycePemLegacyTableParseErrorKind::MissingFirstValue => "missing first numeric value",
             XycePemLegacyTableParseErrorKind::MissingSeparator => "missing separator character",
             XycePemLegacyTableParseErrorKind::MissingSecondValue => "missing second numeric value",
-            XycePemLegacyTableParseErrorKind::TrailingCharacters => {
-                "unexpected characters after second value"
-            }
             XycePemLegacyTableParseErrorKind::NonFiniteFirstValue => "first value must be finite",
             XycePemLegacyTableParseErrorKind::NonFiniteSecondValue => "second value must be finite",
             XycePemLegacyTableParseErrorKind::TooFewPoints => {
@@ -584,10 +580,6 @@ pub enum XycePemMemristorError {
         name: &'static str,
         reason: &'static str,
     },
-    InvalidTable {
-        polarity: &'static str,
-        source: XycePemPwlTableError,
-    },
     NonFiniteInput {
         name: &'static str,
     },
@@ -600,9 +592,6 @@ impl fmt::Display for XycePemMemristorError {
             Self::InvalidParameter { name, reason } => {
                 write!(f, "invalid PEM memristor parameter {name}: {reason}")
             }
-            Self::InvalidTable { polarity, source } => {
-                write!(f, "invalid PEM {polarity} state table: {source}")
-            }
             Self::NonFiniteInput { name } => {
                 write!(f, "PEM memristor input {name} must be finite")
             }
@@ -611,14 +600,7 @@ impl fmt::Display for XycePemMemristorError {
     }
 }
 
-impl Error for XycePemMemristorError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::InvalidTable { source, .. } => Some(source),
-            _ => None,
-        }
-    }
-}
+impl Error for XycePemMemristorError {}
 
 /// Terminal-law values and analytic derivatives at one operating point.
 #[derive(Debug, Clone, Copy, PartialEq)]
