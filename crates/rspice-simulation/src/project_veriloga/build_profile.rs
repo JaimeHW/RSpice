@@ -366,7 +366,9 @@ fn digest(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
 
-fn module_name_from_path(path: &str) -> String {
+/// The module name a profile assumes for a source with none of its own: the
+/// root file's stem, made a legal identifier.
+pub fn module_name_from_path(path: &str) -> String {
     let stem = path
         .rsplit('/')
         .next()

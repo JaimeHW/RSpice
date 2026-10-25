@@ -162,7 +162,8 @@ impl BusTap {
     }
 }
 
-fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
+/// Whether `point` lies on the closed segment `start`..`end`, computed exactly.
+pub(crate) fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
     let px = i128::from(point.x);
     let py = i128::from(point.y);
     let ax = i128::from(start.x);

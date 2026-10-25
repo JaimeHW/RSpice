@@ -22,7 +22,7 @@ use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, run_design_checks,
 };
 use crate::workbench::app::dialogs::operation_primitives::{
-    CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
+    CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, heading, operation_steps,
     paint_body_dividers,
 };
 use crate::workbench::app::dialogs::review_primitives::{
@@ -986,7 +986,7 @@ fn preconditions_panel(ui: &mut Ui, height: f32, preconditions: CheckAndSavePrec
         ui.set_width(ui.available_width());
         ui.set_min_height(height);
         ui.spacing_mut().item_spacing.y = 0.0;
-        section_heading(
+        heading(
             ui,
             if preconditions.saved_snapshot {
                 "Saved snapshot"
@@ -1028,32 +1028,6 @@ fn unmet_line(ui: &mut Ui, text: &str) {
     let announcement = Problem::Warning.announce(text);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
-    });
-}
-
-fn section_heading(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);
-    ui.painter().text(
-        rect.left_center() + vec2(10.0, 0.0),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text,
-    );
-    // `widget_info` is what gives the node its role and its bounds. The
-    // builder on its own only creates a default node, and a node with no
-    // bounds cannot be hit-tested, focused or routed to, so it is dropped
-    // before it ever reaches assistive technology.
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Heading);
-        node.set_label(label);
-        // A `Role::Label`'s text is filed under `value`, so without this the
-        // heading carries its own title twice and is announced twice.
-        node.clear_value();
     });
 }
 

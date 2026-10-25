@@ -29,7 +29,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{ConnectivityAnchor, deck_bit_name};
-use crate::schematic::bus::{Bus, BusDeclaration, BusNotation, BusTargetKind};
+use crate::schematic::bus::{Bus, BusDeclaration, BusNotation, BusTargetKind, point_on_segment};
 use crate::schematic::document::SchematicDocument;
 use rspice_design_model::Point;
 
@@ -419,17 +419,6 @@ fn ratio_in_unit_interval(numerator: i128, denominator: i128) -> bool {
 fn rational_coordinate(origin: i128, delta: i128, numerator: i128, denominator: i128) -> i32 {
     let value = (origin * denominator + delta * numerator) / denominator;
     value.clamp(i128::from(i32::MIN), i128::from(i32::MAX)) as i32
-}
-
-fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
-    let px = i128::from(point.x);
-    let py = i128::from(point.y);
-    let sx = i128::from(start.x);
-    let sy = i128::from(start.y);
-    let ex = i128::from(end.x);
-    let ey = i128::from(end.y);
-    let cross = (px - sx) * (ey - sy) - (py - sy) * (ex - sx);
-    cross == 0 && px >= sx.min(ex) && px <= sx.max(ex) && py >= sy.min(ey) && py <= sy.max(ey)
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ use super::{
         SchematicArrayImpact, SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming,
         SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
     },
-    bus::{Bus, BusNotation, BusSlice, BusTap, MAX_BUS_MEMBER_INDEX},
+    bus::{Bus, BusNotation, BusSlice, BusTap, MAX_BUS_MEMBER_INDEX, point_on_segment},
     clipboard::ClipboardData,
     component::Component,
     design_note::DesignNote,
@@ -2189,17 +2189,6 @@ fn segment_enters_open_rect(
     let x = start_x + sample * dx;
     let y = start_y + sample * dy;
     x > f64::from(min_x) && x < f64::from(max_x) && y > f64::from(min_y) && y < f64::from(max_y)
-}
-
-fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
-    let cross = (i128::from(point.x) - i128::from(start.x))
-        * (i128::from(end.y) - i128::from(start.y))
-        - (i128::from(point.y) - i128::from(start.y)) * (i128::from(end.x) - i128::from(start.x));
-    cross == 0
-        && point.x >= start.x.min(end.x)
-        && point.x <= start.x.max(end.x)
-        && point.y >= start.y.min(end.y)
-        && point.y <= start.y.max(end.y)
 }
 
 fn segments_intersect(

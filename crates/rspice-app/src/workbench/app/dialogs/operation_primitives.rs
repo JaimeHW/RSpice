@@ -112,7 +112,7 @@ pub(crate) fn paint_body_dividers(ui: &Ui, body_rect: egui::Rect, form_width: f3
     );
 }
 
-fn heading(ui: &mut Ui, label: &str) {
+pub(crate) fn heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);

@@ -151,32 +151,6 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     ))
 }
 
-/// A module name for a qualification record that has no module of its own,
-/// derived from the root file's stem.
-pub(super) fn verilog_a_module_name_for_profile(root_path: &str) -> String {
-    let stem = root_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(root_path)
-        .split('.')
-        .next()
-        .unwrap_or_default();
-    let mut module = stem
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '_' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if module.is_empty() || module.starts_with(|character: char| character.is_ascii_digit()) {
-        module.insert_str(0, "model_");
-    }
-    module
-}
-
 fn new_automation_workspace_bundle(
     draft: &super::CodeSourceWorkspaceDialogState,
 ) -> Result<ProjectSourceBundle, String> {

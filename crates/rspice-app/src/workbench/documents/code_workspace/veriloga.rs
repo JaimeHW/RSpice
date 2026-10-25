@@ -1287,9 +1287,7 @@ fn record_veriloga_qualification(
         .or_else(|| selected.selected_module().map(str::to_owned))
         .or_else(|| resolved.profile.entry_modules.first().cloned())
         .unwrap_or_else(|| {
-            super::source_files::verilog_a_module_name_for_profile(
-                selected.bundle().root().logical_path(),
-            )
+            super::veriloga_profile::module_name_from_path(selected.bundle().root().logical_path())
         });
     let report_bytes = match report {
         Some(report) => serde_json::to_vec(report),
