@@ -371,7 +371,8 @@ use rspice_core::analysis::harmonic_balance::{
 // 5,278, with no slack.
 // B3SOI's shared `SoiCharge`, `SoiBias` and `SoiGeometry` bring it to 5,281.
 // B3SOI's shared model-card core, `SoiModelCore`, brings it to 5,282.
-const MAX_PUBLIC_ITEMS: usize = 5282;
+// B3SOI's shared size-dependent core, `SoiSizedCore`, brings it to 5,283.
+const MAX_PUBLIC_ITEMS: usize = 5283;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

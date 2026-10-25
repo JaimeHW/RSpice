@@ -34,6 +34,7 @@
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path and read by
 // the charge models; ngspice keeps them here, so we retain the
 // assignments for faithful correspondence.
+use super::super::common::temp::{extrinsic_sd_charge, temp_ratio_m1};
 use super::super::common::{
     EPSSI, EXPL_THRESHOLD, MAX_EXPL, MIN_EXPL, dexp, junction_t3, smooth_dvt2, smooth_etab,
 };
@@ -1492,11 +1493,6 @@ pub struct ModelConsts {
     pub mtype: Value,
 }
 
-#[inline]
-fn temp_ratio_m1(p: &B3SoiPdSized) -> Value {
-    p.temp / p.tnom - 1.0
-}
-
 /// The gate-sidewall junction potential `PhiBSWG` and capacitance `cjsbs` at
 /// the device temperature (b3soipdld.c:3359-3373).
 fn gate_sidewall_junction(p: &B3SoiPdSized, m: &ModelConsts) -> (Value, Value) {
@@ -2412,57 +2408,5 @@ fn eval_charges_capmod3_finish(
             gceeb: ceeb + cgeo + gcse + gcde,
             ..Default::default()
         }
-    }
-}
-
-/// Extrinsic bottom S/D-to-substrate depletion charge spline
-/// (b3soipdld.c:3499-3598). `v` is the substrate-to-S (or substrate-to-D)
-/// voltage with no type conversion; returns `(charge, conductance)`.
-#[inline]
-fn extrinsic_sd_charge(
-    p: &B3SoiPdSized,
-    v: Value,
-    nsub_pos_type: bool,
-    source: bool,
-) -> (Value, Value) {
-    let (cbox, cmin) = if source {
-        (p.csbox, p.csmin)
-    } else {
-        (p.cdbox, p.cdmin)
-    };
-    let (t2, t3, t4) = if source {
-        (p.st2, p.st3, p.st4)
-    } else {
-        (p.dt2, p.dt3, p.dt4)
-    };
-    let vsdfb = p.vsdfb;
-    let vsdth = p.vsdth;
-    let sdt1 = p.sdt1;
-    if nsub_pos_type {
-        if v < vsdfb {
-            (cbox * (v - vsdfb), cbox)
-        } else if v < sdt1 {
-            let t0 = v - vsdfb;
-            let t1 = t0 * t0;
-            (t0 * (cbox - t2 / 3.0 * t1), cbox - t2 * t1)
-        } else if v < vsdth {
-            let t0 = v - vsdth;
-            let t1 = t0 * t0;
-            (cmin * v + t4 + t3 / 3.0 * t0 * t1, cmin + t3 * t1)
-        } else {
-            (cmin * v + t4, cmin)
-        }
-    } else if v < vsdth {
-        (cmin * (v - vsdth), cmin)
-    } else if v < sdt1 {
-        let t0 = v - vsdth;
-        let t1 = t0 * t0;
-        (t0 * (cmin - t2 / 3.0 * t1), cmin - t2 * t1)
-    } else if v < vsdfb {
-        let t0 = v - vsdfb;
-        let t1 = t0 * t0;
-        (cbox * v + t4 + t3 / 3.0 * t0 * t1, cbox + t3 * t1)
-    } else {
-        (cbox * v + t4, cbox)
     }
 }

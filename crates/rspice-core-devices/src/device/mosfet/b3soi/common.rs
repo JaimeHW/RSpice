@@ -7,6 +7,7 @@ use crate::{NodeId, Value, device::traits::MatrixStamper};
 use std::collections::HashMap;
 
 pub mod params;
+pub mod temp;
 
 /// `Deref`/`DerefMut` from a variant's card or size record to the core it
 /// embeds as `core`, so `p.field` reads the same for shared and own fields.

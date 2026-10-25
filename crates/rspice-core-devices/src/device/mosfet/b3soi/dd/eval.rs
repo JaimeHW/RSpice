@@ -35,6 +35,7 @@
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path but only read
 // by the CAPMOD=2/3 charge model; ngspice keeps them here, so we
 // retain the assignments for a faithful seam rather than dropping them.
+use super::super::common::temp::{extrinsic_sd_charge, temp_ratio_m1};
 use super::super::common::{
     B3SoiDialect, DELT_VBS0DIO, DELT_VBS0EFF, DELT_VBSDIO, DELT_VBSEFF, DELT_VBSMOS, OFF_VBSDIO,
 };
@@ -2261,11 +2262,6 @@ pub struct ModelConsts {
     pub mtype: Value,
 }
 
-#[inline]
-fn temp_ratio_m1(p: &B3SoiDdSized) -> Value {
-    p.temp / p.tnom - 1.0
-}
-
 #[derive(Debug, Clone, Copy)]
 struct BodyCurrents {
     ic: Value,
@@ -4000,57 +3996,5 @@ fn xyce_capmod3_charges(
         dqbody: dqbulk - dqac0 - dqsub0,
         qsrc,
         dqsrc,
-    }
-}
-
-/// Extrinsic bottom S/D-to-substrate depletion charge spline
-/// (b3soiddld.c:3499-3598). `v` is the substrate-to-S (or substrate-to-D)
-/// voltage with no type conversion; returns `(charge, conductance)`.
-#[inline]
-fn extrinsic_sd_charge(
-    p: &B3SoiDdSized,
-    v: Value,
-    nsub_pos_type: bool,
-    source: bool,
-) -> (Value, Value) {
-    let (cbox, cmin) = if source {
-        (p.csbox, p.csmin)
-    } else {
-        (p.cdbox, p.cdmin)
-    };
-    let (t2, t3, t4) = if source {
-        (p.st2, p.st3, p.st4)
-    } else {
-        (p.dt2, p.dt3, p.dt4)
-    };
-    let vsdfb = p.vsdfb;
-    let vsdth = p.vsdth;
-    let sdt1 = p.sdt1;
-    if nsub_pos_type {
-        if v < vsdfb {
-            (cbox * (v - vsdfb), cbox)
-        } else if v < sdt1 {
-            let t0 = v - vsdfb;
-            let t1 = t0 * t0;
-            (t0 * (cbox - t2 / 3.0 * t1), cbox - t2 * t1)
-        } else if v < vsdth {
-            let t0 = v - vsdth;
-            let t1 = t0 * t0;
-            (cmin * v + t4 + t3 / 3.0 * t0 * t1, cmin + t3 * t1)
-        } else {
-            (cmin * v + t4, cmin)
-        }
-    } else if v < vsdth {
-        (cmin * (v - vsdth), cmin)
-    } else if v < sdt1 {
-        let t0 = v - vsdth;
-        let t1 = t0 * t0;
-        (t0 * (cmin - t2 / 3.0 * t1), cmin - t2 * t1)
-    } else if v < vsdfb {
-        let t0 = v - vsdfb;
-        let t1 = t0 * t0;
-        (cbox * v + t4 + t3 / 3.0 * t0 * t1, cbox + t3 * t1)
-    } else {
-        (cbox * v + t4, cbox)
     }
 }
