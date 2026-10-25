@@ -54,4 +54,5 @@ pub mod workbench {
         pub mod waivers;
     }
     pub mod preferences;
+    pub mod workspace;
 }

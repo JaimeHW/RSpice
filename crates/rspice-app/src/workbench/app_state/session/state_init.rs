@@ -5,14 +5,7 @@
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
-
-pub(crate) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
-    let mut manager = crate::state::model_library::ModelLibraryManager::new();
-    manager.load_builtin_models();
-    // The packs ship beside the binary; absence is normal (browser build).
-    manager.discover_spice_packs();
-    manager
-}
+pub(crate) use rspice_app_state::workbench::workspace::default_model_library_manager;
 
 /// Rebuild the application-scoped model catalog from durable PDK settings.
 ///
