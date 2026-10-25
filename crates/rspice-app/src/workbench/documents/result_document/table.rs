@@ -6,8 +6,7 @@ use super::{
     waves::cached_models,
 };
 use crate::{
-    schematic::bus_notations,
-    state::{AnalysisType, RunHistoryRevision},
+    state::{AnalysisType, RunHistoryRevision, bus_notations},
     workbench::AppState,
 };
 use egui::Ui;

@@ -51,9 +51,9 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::analysis::calculator;
-use crate::schematic::bus_notations;
 #[cfg(test)]
 use crate::state::AnalysisType;
+use crate::state::bus_notations;
 use crate::state::{AnalysisResult, SimulationState};
 #[cfg(test)]
 use crate::ui::plot::Trace;

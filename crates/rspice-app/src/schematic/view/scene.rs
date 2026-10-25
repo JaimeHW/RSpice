@@ -8,7 +8,7 @@ use super::{
     sheet_visibility::{active_sheet_has_objects, active_wire_at, object_is_on_active_sheet},
     viewport::Viewport,
 };
-use crate::schematic::bus_notations;
+use crate::state::bus_notations;
 use crate::state::{
     CrossProbeIndex, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
     SchematicNetHighlighting, SheetCatalog, Tool,

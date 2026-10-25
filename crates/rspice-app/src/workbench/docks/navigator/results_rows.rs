@@ -3,7 +3,7 @@
 
 use egui::{Response, ScrollArea, Ui};
 
-use crate::schematic::bus_notations;
+use crate::state::bus_notations;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;

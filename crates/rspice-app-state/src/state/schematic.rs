@@ -59,6 +59,7 @@ pub mod transform_preview_memo;
 use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;
+mod vector_display;
 use rspice_schematic_editor::session::visibility;
 use rspice_schematic_editor::session::wire;
 
@@ -141,6 +142,7 @@ pub use validated_revision::{
     ValidatedRevisionSemanticDelta, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
     ValidationFindingCounts,
 };
+pub use vector_display::{BusNotations, bus_notations};
 pub use visibility::{
     DrawingSheetLayerVisibility, GridStyle, SchematicAnnotationVisibility,
     SchematicBackAnnotationContent, SchematicNetHighlighting, SchematicParameterLabelVisibility,

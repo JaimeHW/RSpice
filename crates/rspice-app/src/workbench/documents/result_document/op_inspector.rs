@@ -5,9 +5,9 @@ use super::{
     frame_work::{self, DatasetWalk},
 };
 use crate::{
-    schematic::{BusNotations, bus_notations},
     state::{
-        AnalysisResultPayload, AnalysisType, RunHistoryRevision, SchematicAnnotationVisibility,
+        AnalysisResultPayload, AnalysisType, BusNotations, RunHistoryRevision,
+        SchematicAnnotationVisibility, bus_notations,
     },
     workbench::AppState,
 };

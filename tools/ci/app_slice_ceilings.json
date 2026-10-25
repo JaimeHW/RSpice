@@ -22,7 +22,7 @@
     "project->results": 1,
     "project->simulate": 3,
     "results->code": 3,
-    "results->design": 16,
+    "results->design": 5,
     "simulate->design": 4,
     "simulate->models": 19,
     "simulate->project": 2,

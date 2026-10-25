@@ -34,7 +34,7 @@ use rspice_design::connectivity::display_bit_name;
 /// answer here: either would quote a spelling the other sheet does not use, so
 /// the bit keeps its deck name rather than picking a side.
 #[derive(Debug, Default)]
-pub(crate) struct BusNotations {
+pub struct BusNotations {
     by_bus: HashMap<String, Option<BusNotation>>,
 }
 
@@ -47,7 +47,7 @@ pub(crate) struct BusNotations {
 /// a drawing, so nothing about the answer is weaker for the design's own cells;
 /// a bus declared only inside a master the project does not own keeps its deck
 /// spelling, which is what an unclaimed bit does anyway.
-pub(crate) fn bus_notations(workspace: &ProjectWorkspace, active: &SchematicState) -> BusNotations {
+pub fn bus_notations(workspace: &ProjectWorkspace, active: &SchematicState) -> BusNotations {
     BusNotations::of_sheets(
         workspace
             .content
@@ -91,7 +91,7 @@ impl BusNotations {
     /// the surfaces that show a result name show whichever of those the engine
     /// returned. Anything else — an expression over two signals, a name no
     /// declaration claims, a scalar — is returned untouched.
-    pub(crate) fn display<'a>(&self, name: &'a str) -> Cow<'a, str> {
+    pub fn display<'a>(&self, name: &'a str) -> Cow<'a, str> {
         let name = name.trim();
         if let Some((accessor, operand)) = name.split_once('(')
             && let Some(operand) = operand.strip_suffix(')')

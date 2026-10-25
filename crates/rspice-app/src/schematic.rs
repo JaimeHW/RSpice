@@ -17,7 +17,4 @@
 pub use rspice_schematic_editor::{ComponentPaletteEntry, component_palette};
 pub(crate) use rspice_schematic_editor::{export, symbols};
 pub(crate) mod symbol_editor;
-mod vector_display;
 pub(crate) mod view;
-
-pub(crate) use vector_display::{BusNotations, bus_notations};
