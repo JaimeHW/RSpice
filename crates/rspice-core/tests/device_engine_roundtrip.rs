@@ -853,6 +853,16 @@ mod b3soi_derivatives {
             let offsets = steps.map(|k| k * sign * H);
             let samples = offsets.map(&mut probe);
             let off_grid = OFF_GRID.map(|t| (quartic_weights(steps, t), probe(t * sign * H)));
+            // A second, independent estimate: the Richardson extrapolation of
+            // the same quotient at H_COARSE and 2*H_COARSE. A wrong stamp misses
+            // the derivative by the same amount at every step, so it fails
+            // both; rounding and quantization move only the fine quotients, and
+            // the extrapolation removes the coarse ones' h^2 truncation.
+            // B3SOIFD's subthreshold drain current (fd/eval.rs) is quantized
+            // along ve on a ~1e-5 V scale, which the fine samples read as a
+            // steady slope 3e-8 off the derivative.
+            const H_COARSE: Value = 1.0e-3;
+            let mut coarse: Option<Vec<Vec<(Value, Value)>>> = None;
             for (r, &(row_label, row)) in nodes.iter().enumerate() {
                 if row == 0 {
                     continue;
@@ -901,6 +911,29 @@ mod b3soi_derivatives {
                     RELATIVE_TOLERANCES.with(|t| t.borrow_mut().push(tol / stamped.abs()));
                 }
                 if (stamped - d1).abs() > tol {
+                    let c = coarse.get_or_insert_with(|| {
+                        let k: &[Value] = if one_sided {
+                            &[1.0, 2.0, 4.0]
+                        } else {
+                            &[-2.0, -1.0, 1.0, 2.0]
+                        };
+                        k.iter().map(|k| probe(k * sign * H_COARSE)).collect()
+                    });
+                    let g = |i: usize| c[i][r].0;
+                    let (c1, c2) = if one_sided {
+                        (
+                            sign * (-3.0 * f[0] + 4.0 * g(0) - g(1)) / (2.0 * H_COARSE),
+                            sign * (-3.0 * f[0] + 4.0 * g(1) - g(2)) / (4.0 * H_COARSE),
+                        )
+                    } else {
+                        (
+                            (g(2) - g(1)) / (2.0 * H_COARSE),
+                            (g(3) - g(0)) / (4.0 * H_COARSE),
+                        )
+                    };
+                    if (stamped - (4.0 * c1 - c2) / 3.0).abs() <= tol {
+                        continue;
+                    }
                     out.push(Mismatch {
                         row: row_label,
                         col: col_label,
