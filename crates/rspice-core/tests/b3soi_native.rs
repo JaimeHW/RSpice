@@ -67,6 +67,14 @@ fn b3soidd_n1_model_card() -> &'static str {
     include_str!("../../../tests/ngspice/bsim3soidd/nmosdd.mod")
 }
 
+fn pd_n1_model_card() -> &'static str {
+    include_str!("../../../tests/ngspice/bsim3soipd/nmospd.mod")
+}
+
+fn pd_p1_model_card() -> &'static str {
+    include_str!("../../../tests/ngspice/bsim3soipd/pmospd.mod")
+}
+
 fn xyce_bsim3soi_self_heating_model_card() -> &'static str {
     include_str!("testdata/xyce_bsim3soi_nmos_3_2.mod")
 }
@@ -1540,6 +1548,90 @@ fn native_soi_dd_inverse_mode_terminal_currents_match_ngspice46_op() {
         assert!(
             total.abs() <= 1e-18,
             "vs={vs} vb={vb}: terminal currents sum to {total:.3e} A"
+        );
+    }
+}
+
+/// The same inverse-mode source-prime junction columns on B3SOIPD: a tied,
+/// forward-biased body in inverse mode, for NMOS and PMOS, against ngspice-46.
+#[test]
+fn native_soi_pd_inverse_mode_terminal_currents_match_ngspice46_op() {
+    // ngspice-46 binds a fifth B3SOIPD node to `bNodeExt` but takes the
+    // floating-body branch when `pNodeExt` is unset (b3soipddef.h:39-41,
+    // b3soipdset.c:1171-1175), so its five-node tie floats. The references
+    // come from the seven-node form `m1 d g s e b 0 b <model> w=10u l=0.25u`
+    // (body b, temperature node ground, contact b): the body is the external
+    // node b, as in RSpice's five-node ideal tie. Run with
+    // `ngspice_con -b`, `.option gmin=1e-25 itl1=500`, `op`, `print all`,
+    // `set numdgt=12`, and the corpus card with RBODY = 0.
+    // (model, sign, |vs|, |vb|) -> ngspice-46 (i(vd), i(vs), i(vb)) with
+    // vd = vg = ve = 0; PMOS takes vs and vb negative.
+    for (card, sign, vs, vb, reference) in [
+        (
+            pd_n1_model_card(),
+            1.0,
+            0.2,
+            0.75,
+            [2.536863208511e-06, -1.12537394904e-06, -1.41148925947e-06],
+        ),
+        (
+            pd_n1_model_card(),
+            1.0,
+            0.4,
+            0.8,
+            [1.065179941117e-05, -2.89779804137e-06, -7.75400136980e-06],
+        ),
+        (
+            pd_p1_model_card(),
+            -1.0,
+            0.4,
+            0.8,
+            [-1.02648945857e-05, 2.510893215876e-06, 7.754001369809e-06],
+        ),
+    ] {
+        let (model, vs, vb) = if sign > 0.0 {
+            ("n1", vs, vb)
+        } else {
+            ("p1", -vs, -vb)
+        };
+        let deck = format!(
+            "* B3SOIPD tied body in inverse mode\n\
+             vd d 0 dc 0\n\
+             vs s 0 dc {vs}\n\
+             vg g 0 dc 0\n\
+             ve e 0 dc 0\n\
+             vb b 0 dc {vb}\n\
+             m1 d g s e b {model} w=10u l=0.25u\n\
+             .option gmin=1e-25 itl1=500\n\
+             .op\n\
+             {}\n\
+             .end\n",
+            card.replace("RBODY = 1e0 ", "RBODY = 0.0 ")
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let op = engine()
+            .run_dc_op(&netlist)
+            .expect("inverse-mode OP converges");
+        // Sources in deck order: vd, vs, vg, ve, vb.
+        let currents = [
+            op.branch_currents[0],
+            op.branch_currents[1],
+            op.branch_currents[4],
+        ];
+        for ((name, current), reference) in ["i(vd)", "i(vs)", "i(vb)"]
+            .iter()
+            .zip(currents)
+            .zip(reference)
+        {
+            assert!(
+                (current - reference).abs() <= 1e-8 * reference.abs(),
+                "{model} vs={vs} vb={vb}: {name}={current:.10e} vs ngspice {reference:.10e}"
+            );
+        }
+        let total: f64 = op.branch_currents.iter().sum();
+        assert!(
+            total.abs() <= 1e-18,
+            "{model} vs={vs} vb={vb}: terminal currents sum to {total:.3e} A"
         );
     }
 }

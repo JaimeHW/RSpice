@@ -1213,12 +1213,15 @@ impl B3SoiPd {
             gddp_t = -mt * op.gjs_t;
             gddpdp = -(gddpg + gddpsp + gddpb + gddpe);
 
+            // In inverse mode the source prime is the mode drain, so the
+            // mode-drain junction's `vds` derivative `gjdd` lands on the
+            // source-prime column (b3soipdld.c:3963-3967).
             gsspg = -op.gjdg;
-            gsspdp = -op.gjdd;
+            gsspsp = -op.gjdd;
             gsspb = -op.gjdb;
             gsspe = -op.gjde;
             gssp_t = -mt * op.gjd_t;
-            gsspsp = -(gsspg + gsspdp + gsspb + gsspe);
+            gsspdp = -(gsspg + gsspsp + gsspb + gsspe);
         }
 
         // type<0: flip junction/body equivalent currents (b3soipdld.c:3997)
