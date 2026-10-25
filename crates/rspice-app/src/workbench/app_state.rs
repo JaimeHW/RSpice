@@ -136,14 +136,7 @@ impl AppState {
     pub(crate) fn result_presentation_policy(
         &self,
     ) -> crate::workbench::preferences::ResultPresentationPolicy {
-        let policy = self.model.preferences.result_presentation_policy();
-        self.results
-            .results
-            .session
-            .document_presentation
-            .map_or(policy, |document| {
-                policy.with_significant_digits(document.significant_digits)
-            })
+        self.results_reads().presentation_policy()
     }
 
     /// Reserve the next project revision before a library membership

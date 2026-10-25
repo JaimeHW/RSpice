@@ -86,6 +86,19 @@ impl RSpiceApp {
         legacy_command(key).is_some_and(|command| command.is_enabled(self))
     }
 
+    /// Carry out the routed command `key` in the feature that takes it where
+    /// the reader is working, and say whether one did. The shell's own arm
+    /// for the command asks it where that feature's turn comes.
+    pub(crate) fn route_command_key(&mut self, key: CommandKey) -> bool {
+        features::route(&mut self.state, key)
+    }
+
+    /// Whether the routed command `key` can run in the feature that takes it
+    /// where the reader is working; `None` when no feature takes it there.
+    pub(crate) fn routed_command_key_enabled(&self, key: CommandKey) -> Option<bool> {
+        features::routed_enabled(&self.state, key)
+    }
+
     /// Carry out the feature command `spec` declares behind the same
     /// prologue as [`Command::dispatch`], then every command it raised.
     fn dispatch_feature_command(&mut self, spec: &CommandSpec) {

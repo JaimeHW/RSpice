@@ -101,6 +101,35 @@ macro_rules! features {
             None
         }
 
+        /// Whether the routed command `key` can run in the feature that takes
+        /// it here; `None` when no registered feature takes it here.
+        pub(super) fn routed_enabled(state: &AppState, key: CommandKey) -> Option<bool> {
+            $(
+                if let Some(routed) = <$feature as Registered>::registry().routed_command(key) {
+                    let reads = <$feature as Registered>::reads(state);
+                    if (routed.takes)(&reads) {
+                        return Some((routed.enabled)(&reads));
+                    }
+                }
+            )+
+            None
+        }
+
+        /// Carry out the routed command `key` in the feature that takes it
+        /// here, and say whether one did. What the feature raises waits in
+        /// the outbox as what the shell's own branch raises does.
+        pub(super) fn route(state: &mut AppState, key: CommandKey) -> bool {
+            $(
+                if let Some(routed) = <$feature as Registered>::registry().routed_command(key)
+                    && (routed.takes)(&<$feature as Registered>::reads(state))
+                {
+                    (routed.execute)(&mut <$feature as Registered>::cx(state));
+                    return true;
+                }
+            )+
+            false
+        }
+
         /// Whether the state the feature command `key` names switches is on;
         /// `None` for a command that acts once, and for a key no registered
         /// feature declares.
@@ -257,6 +286,19 @@ mod tests {
                 Some(key),
                 "the container's key reaches {key:?}"
             );
+        }
+    }
+
+    /// A routed command is the shell's: a feature takes a part in a command
+    /// the registry orders and no feature declares.
+    #[test]
+    fn every_routed_command_is_one_the_shell_orders() {
+        let registry = command_registry();
+        let routed = <ResultsFeature as Registered>::registry().registered_routed();
+        assert!(!routed.is_empty());
+        for part in routed {
+            assert!(registry.order().contains(&part.key), "{:?}", part.key);
+            assert!(spec(part.key).is_none(), "{:?}", part.key);
         }
     }
 

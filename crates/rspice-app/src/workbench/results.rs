@@ -13,21 +13,23 @@ use crate::workbench::commands::result_navigation::{
     dataset_export_is_resolvable, open_run_log, producer_log_hop, producing_plan_hop, task_deck_hop,
 };
 use crate::workbench::documents::result_document::{
-    ResultsParts, ResultsReads, add_pane_available, compare_available, family_available,
-    linked_cursors, open_create_document, open_dataset_browser, open_specification_editor,
-    viewer_is_available, viewer_unavailability_reason,
+    ResultsParts, ResultsReads, add_pane_available, compare_available, copy_cursor_text,
+    family_available, fit_gesture_available, linked_cursors, open_create_document,
+    open_dataset_browser, open_specification_editor, request_view_gesture, viewer_is_available,
+    viewer_unavailability_reason, zoom_gesture_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, Reads, Session,
+    CommandSet, Cx, Feature, FeatureRegistry, Reads, RoutedCommand, Session,
 };
 use crate::workbench::framework::requests::{
-    ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
+    ClipboardText, ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
 };
 use crate::workbench::slots::ResultsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::workflows::result_import_workflow::import_result_dataset;
 use crate::workbench::{ResultViewer, SurfaceId};
+use rspice_results_ui::session::ViewGesture;
 
 use commands::ResultsCommand;
 
@@ -40,6 +42,81 @@ impl Feature for ResultsFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ResultsCommand>();
+        registry.routed(ROUTED);
+    }
+}
+
+/// The workbench commands the results workspace answers for itself: Copy
+/// takes the cursor readout, the zooms and Fit move the active sheet's
+/// viewport, Cancel lets go of the placed cursors, and Reset active view
+/// forgets the sheet's view. Each is the workspace's wherever Results is in
+/// front, Cancel only while a cursor is placed.
+const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
+    RoutedCommand {
+        key: ids::COPY,
+        takes: in_results,
+        enabled: |reads| reads.state.results.session.cursors.a.is_some(),
+        execute: copy_cursor_readout,
+    },
+    RoutedCommand {
+        key: ids::ZOOM_IN,
+        takes: in_results,
+        enabled: |reads| zoom_gesture_available(results_reads(reads)),
+        execute: |cx| request_view_gesture(&mut cx.state.results, ViewGesture::ZoomIn),
+    },
+    RoutedCommand {
+        key: ids::ZOOM_OUT,
+        takes: in_results,
+        enabled: |reads| zoom_gesture_available(results_reads(reads)),
+        execute: |cx| request_view_gesture(&mut cx.state.results, ViewGesture::ZoomOut),
+    },
+    // The waveform sheets key their viewports by analysis, so fitting them
+    // is not a write to the plot-ordinal store.
+    RoutedCommand {
+        key: ids::ZOOM_FIT,
+        takes: in_results,
+        enabled: |reads| fit_gesture_available(results_reads(reads)),
+        execute: |cx| request_view_gesture(&mut cx.state.results, ViewGesture::Fit),
+    },
+    RoutedCommand {
+        key: ids::CANCEL,
+        takes: |reads| in_results(reads) && reads.state.results.session.cursors.any(),
+        enabled: |_| true,
+        execute: |cx| cx.state.results.session.clear_cursors(),
+    },
+    RoutedCommand {
+        key: ids::RESET_ACTIVE_VIEW,
+        takes: in_results,
+        enabled: |_| true,
+        execute: reset_active_view,
+    },
+];
+
+/// Whether the results workspace is the one in front.
+fn in_results(reads: &Reads<'_, ResultsFeature>) -> bool {
+    reads.wb.workspace == Workspace::Results
+}
+
+/// Put the cursor readout on the platform clipboard, when a cursor is placed.
+fn copy_cursor_readout(cx: &mut Cx<'_, ResultsFeature>) {
+    if let Some(text) = copy_cursor_text(&mut results_parts(cx)) {
+        cx.wb.outbox().push(ClipboardText(text));
+    }
+}
+
+/// Forget the active sheet's view: its viewports, its cursors, its pinned
+/// RF marker and, on Waves, the strips hidden or maximized.
+fn reset_active_view(cx: &mut Cx<'_, ResultsFeature>) {
+    let session = &mut cx.state.results.session;
+    let viewer = session.viewer;
+    session
+        .views
+        .retain(|(candidate, _, _), _| *candidate != viewer);
+    session.clear_cursors();
+    session.rf_pin.remove(&viewer);
+    if viewer == ResultViewer::Waves {
+        session.hidden_strips.clear();
+        session.maximized_strip = None;
     }
 }
 

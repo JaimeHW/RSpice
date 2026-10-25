@@ -138,8 +138,8 @@ impl Command {
                 }
             }
             Self::Copy => {
-                if state.workbench.workspace == Workspace::Results {
-                    state.results.results.session.cursors.a.is_some()
+                if let Some(enabled) = app.routed_command_key_enabled(ids::COPY) {
+                    enabled
                 } else if active_symbol_editor(app) {
                     !state.design.symbol.editor.effective_selection().is_empty()
                 } else {
@@ -275,8 +275,7 @@ impl Command {
             Self::ZoomFit => {
                 active_symbol_editor(app)
                     || active_schematic_editor(app)
-                    || (state.workbench.workspace == Workspace::Results
-                        && crate::workbench::documents::result_document::fit_gesture_available(state.results_reads()))
+                    || app.routed_command_key_enabled(ids::ZOOM_FIT) == Some(true)
             }
             Self::FitSchematicContent => active_schematic_editor(app),
             // Magnifying a result viewport needs the sheet's own extents, so
@@ -285,8 +284,7 @@ impl Command {
             Self::ZoomIn | Self::ZoomOut => {
                 active_symbol_editor(app)
                     || active_schematic_editor(app)
-                    || (state.workbench.workspace == Workspace::Results
-                        && crate::workbench::documents::result_document::zoom_gesture_available(state.results_reads()))
+                    || app.routed_command_key_enabled(self.key()) == Some(true)
             }
             Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
             Self::ZoomToSelection => {

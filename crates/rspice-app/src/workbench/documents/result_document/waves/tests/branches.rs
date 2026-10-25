@@ -412,7 +412,8 @@ fn the_copied_cursor_value_stays_on_a_branch_of_the_loop() {
     let forward = quantity_policy.copy_si_value(0.5, "V");
     let artifact = quantity_policy.copy_si_value(4.0, "V");
 
-    let copied = copy_cursor_text(&mut state).expect("a placed cursor has copy data");
+    let copied =
+        copy_cursor_text(&mut state.results_parts()).expect("a placed cursor has copy data");
     let line = copied
         .lines()
         .find(|line| line.starts_with("V(out)"))

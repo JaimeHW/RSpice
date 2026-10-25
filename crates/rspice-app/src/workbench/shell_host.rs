@@ -932,8 +932,10 @@ mod tests {
     fn each_framework_id_names_its_command() {
         for (id, command) in [
             (ids::ACCOUNT_ORGANIZATION, Command::AccountOrganization),
+            (ids::CANCEL, Command::Cancel),
             (ids::CLEAR_CONSOLE, Command::ClearConsole),
             (ids::COMMAND_PALETTE, Command::CommandPalette),
+            (ids::COPY, Command::Copy),
             (
                 ids::DESIGN_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Design),
@@ -957,6 +959,7 @@ mod tests {
                 ids::PROJECT_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Project),
             ),
+            (ids::RESET_ACTIVE_VIEW, Command::ResetActiveView),
             (ids::RESET_LAYOUT, Command::ResetLayout),
             (
                 ids::RESULTS_WORKSPACE,
@@ -986,6 +989,9 @@ mod tests {
                 ids::VERIFY_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Verify),
             ),
+            (ids::ZOOM_FIT, Command::ZoomFit),
+            (ids::ZOOM_IN, Command::ZoomIn),
+            (ids::ZOOM_OUT, Command::ZoomOut),
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(legacy_command(id), Some(command), "{command:?}");

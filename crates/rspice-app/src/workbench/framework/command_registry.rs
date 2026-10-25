@@ -287,8 +287,10 @@ pub(crate) mod ids {
     ids! {
         ACCOUNT_ORGANIZATION = "account-organization";
         CALCULATOR = "calculator";
+        CANCEL = "cancel-active-command";
         CLEAR_CONSOLE = "console-clear";
         COMMAND_PALETTE = "command-palette";
+        COPY = "copy-selection";
         DESIGN_WORKSPACE = "design";
         EDIT_SPECIFICATIONS = "specifications";
         EXPORT_RESULTS = "export-results";
@@ -305,6 +307,7 @@ pub(crate) mod ids {
         PROJECT_LAUNCHER = "project-launcher";
         PROJECT_RECOVERY = "project-recovery";
         PROJECT_WORKSPACE = "project";
+        RESET_ACTIVE_VIEW = "reset-active-view";
         RESET_LAYOUT = "reset-workspace-layout";
         RESULTS_WORKSPACE = "results";
         RESULT_OPERATING_POINT = "result-operating-point";
@@ -323,6 +326,9 @@ pub(crate) mod ids {
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";
+        ZOOM_FIT = "canvas-fit-sheet";
+        ZOOM_IN = "zoom-in";
+        ZOOM_OUT = "zoom-out";
     }
 }
 

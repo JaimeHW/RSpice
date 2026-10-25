@@ -140,7 +140,8 @@ fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
         .fill(10.0);
 
-    let copied = copy_cursor_text(&mut state).expect("the cursor has a retained readout");
+    let copied =
+        copy_cursor_text(&mut state.results_parts()).expect("the cursor has a retained readout");
     let magnitude = copied
         .lines()
         .find(|line| line.ends_with(" dB"))

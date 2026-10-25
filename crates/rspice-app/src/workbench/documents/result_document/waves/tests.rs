@@ -351,7 +351,7 @@ fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
     state.results.results.session.cursor_strip = Some(0);
     state.results.results.session.cursors.a = Some(1.0);
 
-    let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
+    let copied = copy_cursor_text(&mut state.results_parts()).expect("active cursor has copy data");
 
     // The clipboard carried the third copy of the unit mapping, keyed on the
     // strip, so a current pasted as millivolts.
@@ -378,7 +378,7 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
     state.results.results.session.cursor_strip = Some(0);
     state.results.results.session.cursors.a = Some(10.0);
 
-    let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
+    let copied = copy_cursor_text(&mut state.results_parts()).expect("active cursor has copy data");
 
     let noise = copied
         .lines()
@@ -1571,7 +1571,7 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
         .set_choice(ChoicePreference::CopiedValueFormat, 1)
         .unwrap();
 
-    let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
+    let copied = copy_cursor_text(&mut state.results_parts()).expect("active cursor has copy data");
 
     assert!(copied.contains("A f = 1.00000000000000000e1 Hz"));
     // 4e-18 V²/Hz at the cursor → 2 nV/√Hz through the amplitude-density

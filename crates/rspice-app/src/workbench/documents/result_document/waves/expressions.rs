@@ -357,23 +357,24 @@ pub(crate) fn toggle_visibility(
 
 /// Serialize the active Waves cursor readout for the platform clipboard.
 /// This is the Edit → Copy consumer for the Units copied-value policy.
-pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
-    let x = state.results.results.session.cursors.a?;
-    state
+pub(crate) fn copy_cursor_text(
+    parts: &mut crate::workbench::documents::result_document::ResultsParts<'_>,
+) -> Option<String> {
+    let x = parts.results.session.cursors.a?;
+    parts
         .results
-        .results
-        .synchronize_wave_caches(&state.model.simulation);
-    let presentation = state.result_presentation_policy();
-    let quantity_policy = state.model.preferences.quantity_presentation_policy();
+        .synchronize_wave_caches(&parts.model.simulation);
+    let presentation = parts.results_reads().presentation_policy();
+    let quantity_policy = parts.model.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let sample_selection = state.results.results.session.sample_selection.clone();
-    let hidden_family_traces = state.results.results.session.hidden_family_traces.clone();
-    let waveform_visibility = state.results.results.session.waveform_visibility.clone();
-    let phase_continuous = state.results.results.session.presented_phase_continuous();
-    let ac = state.results.results.session.ac_display;
+    let sample_selection = parts.results.session.sample_selection.clone();
+    let hidden_family_traces = parts.results.session.hidden_family_traces.clone();
+    let waveform_visibility = parts.results.session.waveform_visibility.clone();
+    let phase_continuous = parts.results.session.presented_phase_continuous();
+    let ac = parts.results.session.ac_display;
     let mut models = build_models(
-        &state.model.simulation,
-        &mut state.results.results.session.derived,
+        &parts.model.simulation,
+        &mut parts.results.session.derived,
         &Tokens::default(),
         phase_continuous,
         presentation.complex_number_display(),
@@ -383,15 +384,14 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     );
     apply_waveform_visibility(
         &mut models,
-        state.model.simulation.active_run().map(AsRef::as_ref),
+        parts.model.simulation.active_run().map(AsRef::as_ref),
         &waveform_visibility,
         &hidden_family_traces,
     );
     // Same order as the cached path: the extent is a memo of the traces the
     // strip draws, and the overrides above decide which those are.
     super::extent::resolve_x_ranges(&mut models);
-    let model = state
-        .results
+    let model = parts
         .results
         .session
         .cursor_strip
@@ -399,7 +399,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
 
     let mut text = String::new();
     append_copied_cursor(&mut text, "A", x, model, interpolation, quantity_policy);
-    if let Some(b) = state.results.results.session.cursors.b {
+    if let Some(b) = parts.results.session.cursors.b {
         text.push('\n');
         append_copied_cursor(&mut text, "B", b, model, interpolation, quantity_policy);
     }

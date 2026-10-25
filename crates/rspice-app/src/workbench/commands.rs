@@ -10,10 +10,8 @@ use crate::schematic::view::selection_transform::{
 };
 use crate::state::{ComponentType, Tool};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::framework::command_registry::CommandOwner;
-use crate::workbench::framework::requests::{
-    ClipboardText, FocusNavigatorSearch, FocusPlacementSearch,
-};
+use crate::workbench::framework::command_registry::{CommandOwner, ids};
+use crate::workbench::framework::requests::{FocusNavigatorSearch, FocusPlacementSearch};
 use crate::workbench::menu_bar::{
     FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
 };
@@ -755,14 +753,8 @@ impl Command {
                 }
             }
             Self::Copy => {
-                if app.state.workbench.workspace == Workspace::Results {
-                    if let Some(text) =
-                        crate::workbench::documents::result_document::copy_cursor_text(
-                            &mut app.state,
-                        )
-                    {
-                        app.state.workbench.outbox.push(ClipboardText(text));
-                    }
+                if app.route_command_key(ids::COPY) {
+                    // The workspace in front copied what it has selected.
                 } else if active_symbol_editor(app) {
                     app.copy_selected_symbol_shape();
                 } else {
@@ -835,11 +827,8 @@ impl Command {
                 }
             }
             Self::ZoomIn => {
-                if app.state.workbench.workspace == Workspace::Results {
-                    crate::workbench::documents::result_document::request_view_gesture(
-                        &mut app.state,
-                        rspice_results_ui::session::ViewGesture::ZoomIn,
-                    );
+                if app.route_command_key(ids::ZOOM_IN) {
+                    // The workspace in front zoomed its own view.
                 } else if let Some(session) = app.state.symbol_in_place_mut() {
                     session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
                 } else if active_symbol_editor(app) {
@@ -852,11 +841,8 @@ impl Command {
                 }
             }
             Self::ZoomOut => {
-                if app.state.workbench.workspace == Workspace::Results {
-                    crate::workbench::documents::result_document::request_view_gesture(
-                        &mut app.state,
-                        rspice_results_ui::session::ViewGesture::ZoomOut,
-                    );
+                if app.route_command_key(ids::ZOOM_OUT) {
+                    // The workspace in front zoomed its own view.
                 } else if let Some(session) = app.state.symbol_in_place_mut() {
                     session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
                 } else if active_symbol_editor(app) {
@@ -868,13 +854,8 @@ impl Command {
                 }
             }
             Self::ZoomFit => {
-                if app.state.workbench.workspace == Workspace::Results {
-                    // The waveform sheets key their viewports by analysis, so
-                    // fitting them is not a write to the plot-ordinal store.
-                    crate::workbench::documents::result_document::request_view_gesture(
-                        &mut app.state,
-                        rspice_results_ui::session::ViewGesture::Fit,
-                    );
+                if app.route_command_key(ids::ZOOM_FIT) {
+                    // The workspace in front fitted its own view.
                 } else if let Some(bounds) = app.state.symbol_in_place_bounds()
                     && let Some(session) = app.state.symbol_in_place_mut()
                 {
@@ -1320,10 +1301,8 @@ impl Command {
                     app.state.design.object_properties.close();
                 } else if app.state.design.tabbed_property_dialog.open {
                     app.state.design.tabbed_property_dialog.attempt_close();
-                } else if app.state.workbench.workspace == Workspace::Results
-                    && app.state.results.results.session.cursors.any()
-                {
-                    app.state.results.results.session.clear_cursors();
+                } else if app.route_command_key(ids::CANCEL) {
+                    // The workspace in front let go of what it had placed.
                 } else {
                     app.state.model.schematic.cancel_interaction_step();
                 }

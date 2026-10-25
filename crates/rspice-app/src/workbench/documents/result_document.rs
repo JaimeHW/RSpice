@@ -481,8 +481,8 @@ pub use rspice_results::result_presentation::ResultViewer;
 pub(crate) use rspice_results::result_presentation::viewer_uses_wave_stack;
 
 /// Queue a viewport gesture for the active result sheet.
-pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
-    state.results.results.session.pending_view_gesture = Some(gesture);
+pub(crate) fn request_view_gesture(results: &mut ResultsState, gesture: ViewGesture) {
+    results.session.pending_view_gesture = Some(gesture);
 }
 
 /// Whether the active sheet has a viewport that fitting can release.
@@ -627,6 +627,22 @@ pub(crate) struct ResultsParts<'a> {
     pub(crate) model: &'a mut Model,
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) platform: &'a PlatformState,
+}
+
+impl ResultsReads<'_> {
+    /// The reader's result presentation, with the significant digits of the
+    /// project result document the workspace is showing, if any.
+    pub(crate) fn presentation_policy(
+        self,
+    ) -> rspice_app_state::workbench::preferences::ResultPresentationPolicy {
+        let policy = self.model.preferences.result_presentation_policy();
+        self.results
+            .session
+            .document_presentation
+            .map_or(policy, |document| {
+                policy.with_significant_digits(document.significant_digits)
+            })
+    }
 }
 
 impl ResultsParts<'_> {
@@ -1564,7 +1580,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
             }
         };
         if permitted && consume_command_key(ctx, &app.state, command) {
-            request_view_gesture(&mut app.state, gesture);
+            request_view_gesture(&mut app.state.results.results, gesture);
         }
     }
     if viewer_uses_wave_stack(app.state.results.results.session.viewer)

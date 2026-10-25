@@ -266,6 +266,21 @@ impl<F: Feature> FeatureCommand<F> {
     }
 }
 
+/// A feature's part in a routed command: a workbench command, such as Copy
+/// or Zoom in, that the shell sends to whichever part the reader is working
+/// in. The shell asks the feature where its own precedence puts the
+/// feature's turn, so a routed command reaches its owners in the order it
+/// always has.
+pub(crate) struct RoutedCommand<F: Feature> {
+    pub(crate) key: CommandKey,
+    /// Whether the command is the feature's here.
+    pub(crate) takes: fn(&Reads<'_, F>) -> bool,
+    /// Whether the feature can carry the command out, where it takes it.
+    pub(crate) enabled: fn(&Reads<'_, F>) -> bool,
+    /// Carry the command out, where the feature takes it.
+    pub(crate) execute: fn(&mut Cx<'_, F>),
+}
+
 /// A step of the frame's dialogs a feature draws in its context. The shell
 /// lists it by `key` in its dialog order, which says where it is drawn and
 /// how it holds the workbench.
@@ -308,6 +323,7 @@ pub(crate) struct ToolbarTool {
 /// Everything one feature registered, built once.
 pub(crate) struct FeatureRegistry<F: Feature> {
     commands: Vec<FeatureCommand<F>>,
+    routed: &'static [RoutedCommand<F>],
     dialogs: &'static [FeatureDialog<F>],
     inspector: Option<FeatureInspector<F>>,
     surface: Option<FeatureSurface<F>>,
@@ -319,6 +335,7 @@ impl<F: Feature> FeatureRegistry<F> {
     pub(crate) fn build() -> Self {
         let mut registry = Self {
             commands: Vec::new(),
+            routed: &[],
             dialogs: &[],
             inspector: None,
             surface: None,
@@ -401,5 +418,21 @@ impl<F: Feature> FeatureRegistry<F> {
     /// The registered command `key` names, if the feature declares one.
     pub(crate) fn command(&self, key: CommandKey) -> Option<&FeatureCommand<F>> {
         self.commands.iter().find(|command| command.spec.key == key)
+    }
+
+    /// Register the feature's parts in routed commands.
+    pub(crate) fn routed(&mut self, routed: &'static [RoutedCommand<F>]) {
+        self.routed = routed;
+    }
+
+    /// The feature's part in the routed command `key`, if it has one.
+    pub(crate) fn routed_command(&self, key: CommandKey) -> Option<&RoutedCommand<F>> {
+        self.routed.iter().find(|routed| routed.key == key)
+    }
+
+    /// Every routed command the feature takes a part in.
+    #[cfg(test)]
+    pub(crate) fn registered_routed(&self) -> &'static [RoutedCommand<F>] {
+        self.routed
     }
 }
