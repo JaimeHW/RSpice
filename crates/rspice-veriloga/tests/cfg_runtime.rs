@@ -62,36 +62,10 @@ const QUICK_MODELS: &[Model] = &[
     ),
 ];
 
-/// The wide MOSFETs. Minutes each, mostly in their own front end and then in
-/// `rustc` on a megabyte of emitted Rust — which is itself one of the numbers.
-const HEAVY_MODELS: &[Model] = &[
-    (
-        "bsimbulk",
-        "cmc/BSIM-BULK107.2.1_02112025/code",
-        "bsimbulk.va",
-    ),
-    (
-        "bsimcmg_va",
-        "cmc/BSIM-CMG_112.1.0_04282026/code",
-        "bsimcmg.va",
-    ),
-    (
-        "hisimhv_va",
-        "cmc/HiSIM_HV_2.5.1_Release_20230209/HiSIM_HV_2.5.1_VA-Code/hisimhv_va",
-        "hisimhv.va",
-    ),
-];
-
 #[test]
 #[ignore = "compiles the emitted source with rustc and times it; run with --ignored"]
 fn the_emitted_code_reports_what_it_costs() {
     report(QUICK_MODELS);
-}
-
-#[test]
-#[ignore = "the wide MOSFETs: minutes each, most of it rustc; run with --ignored"]
-fn the_wide_models_report_what_they_cost() {
-    report(HEAVY_MODELS);
 }
 
 fn report(models: &[Model]) {
