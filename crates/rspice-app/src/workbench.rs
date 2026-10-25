@@ -62,7 +62,7 @@ mod cross_probe;
 pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
-mod docks;
+pub(crate) mod docks;
 pub(crate) mod documents;
 // The bundled circuits Help's Examples dialog opens as projects are model
 // logic in `rspice_app_state::workbench::examples`. The test fixtures beside
@@ -81,7 +81,7 @@ mod features;
 pub(crate) mod frame;
 pub(crate) mod framework;
 pub(crate) mod hardcopy_adapters;
-mod layout;
+pub(crate) mod layout;
 pub(crate) mod lifecycle {
     //! Opening, checkpointing, and recovering a working session.
     //!

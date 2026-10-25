@@ -1,8 +1,8 @@
 //! Context docks for the clean-room workbench.
 
-mod console;
+pub(crate) mod console;
 mod drawers;
-pub(super) mod inspector;
+pub(crate) mod inspector;
 pub(super) mod navigator;
 
 pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_details};

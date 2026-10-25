@@ -79,7 +79,7 @@ thread_local! {
 pub(in crate::workbench) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
-pub(in crate::workbench) mod command_palette;
+pub(crate) mod command_palette;
 pub(in crate::workbench) mod dialogs;
 pub(in crate::workbench) mod drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
@@ -265,15 +265,15 @@ pub struct RSpiceApp {
     /// Application state
     pub(crate) state: AppState,
     /// First frame flag (for initialization)
-    first_frame: bool,
+    pub(crate) first_frame: bool,
     /// When the autosave timer was armed (first dirty frame) or last fired.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) autosave_last: Option<std::time::Instant>,
     /// Theme last applied to the egui context (re-applied when the user
     /// changes the workbench theme).
-    applied_theme: Option<crate::ui::Theme>,
+    pub(crate) applied_theme: Option<crate::ui::Theme>,
     /// Window title last pushed to the OS (avoids a viewport command per frame).
-    last_window_title: String,
+    pub(crate) last_window_title: String,
     /// SVG symbol library for component rendering
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
@@ -287,7 +287,7 @@ pub struct RSpiceApp {
     pub(crate) automation_runtime: crate::automation_runtime::BrowserAutomationRuntime,
     /// Project identity currently authorized to own the process/worker. Any
     /// identity change terminates the worker before another event is polled.
-    automation_runtime_project_id: crate::product::ProjectId,
+    pub(crate) automation_runtime_project_id: crate::product::ProjectId,
     /// Cloud account session boundary (sign-in, entitlements, license leases).
     pub(crate) cloud_account: crate::services::cloud_account::CloudAccountService,
     /// Distributed model packs: the verified catalog, what is installed, and
@@ -589,7 +589,7 @@ impl RSpiceApp {
         }
     }
 
-    fn prepare_frame(&mut self, ctx: &Context) {
+    pub(crate) fn prepare_frame(&mut self, ctx: &Context) {
         self.state.drain_notices(ctx);
         self.state.reconcile_schematic_drag(ctx, false);
         let initializing_frame = self.first_frame;
@@ -775,7 +775,7 @@ impl RSpiceApp {
         }
     }
 
-    fn render_frame_chrome(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn render_frame_chrome(&mut self, ui: &mut egui::Ui) {
         crate::workbench::show(ui, self);
     }
 
@@ -918,7 +918,7 @@ impl RSpiceApp {
         }
     }
 
-    fn render_frame_dialogs(&mut self, ctx: &Context) {
+    pub(crate) fn render_frame_dialogs(&mut self, ctx: &Context) {
         crate::workbench::framework::dialogs::render(
             self,
             ctx,
@@ -1194,7 +1194,7 @@ mod gesture_tests;
 mod wiring_acceptance;
 
 #[cfg(test)]
-pub(in crate::workbench) mod veriloga_design_tests;
+pub(crate) mod veriloga_design_tests;
 
 #[cfg(test)]
 mod veriloga_cell_source_tests;

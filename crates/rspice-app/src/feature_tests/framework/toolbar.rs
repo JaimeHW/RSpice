@@ -1,19 +1,28 @@
 //! Tests for the context toolbar: run currentness, the mockup's command rows
 //! and glyphs, and the responsive widths every breakpoint reserves.
 
-use super::design::{DESIGN_DIRECT_TOOLBAR_COMMANDS, design_toolbar_command_selected};
-use super::results::{results_document_is_historical, run_has_current_success_authority};
-use super::simulate::{commit_reference_pvt, pvt_menu_height_for_viewport};
-use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::state::{
     AnalysisResultSourceDomain, ComponentType, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
     Tool,
 };
+use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::RSpiceApp;
+use crate::workbench::chrome::toolbar::design::{
+    DESIGN_DIRECT_TOOLBAR_COMMANDS, design_toolbar_command_selected,
+};
+use crate::workbench::chrome::toolbar::results::{
+    results_document_is_historical, run_has_current_success_authority,
+};
+use crate::workbench::chrome::toolbar::simulate::{
+    commit_reference_pvt, pvt_menu_height_for_viewport,
+};
+use crate::workbench::chrome::toolbar::*;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::WorkbenchSession;
+use crate::workbench::layout::LayoutSpec;
+use crate::workbench::state::{WorkbenchSession, Workspace};
+use egui::Vec2;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])

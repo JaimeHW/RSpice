@@ -1,8 +1,6 @@
 //! Unified console, problems, measurements, and task history.
 
 mod log_anchor;
-#[cfg(test)]
-mod measurement_rows_tests;
 mod problems;
 mod transcript;
 
@@ -678,8 +676,8 @@ fn task_log(ui: &mut Ui, app: &mut impl WorkbenchHost) {
 }
 
 #[derive(Debug, Clone)]
-struct MeasurementTableRow {
-    name: String,
+pub(crate) struct MeasurementTableRow {
+    pub(crate) name: String,
     expression: String,
     value: String,
     specification: String,
@@ -715,7 +713,7 @@ fn active_specifications(app: &impl WorkbenchHost) -> Vec<crate::state::SpecEntr
     active.to_vec()
 }
 
-fn active_measurement_rows(
+pub(crate) fn active_measurement_rows(
     app: &impl WorkbenchHost,
     specifications: &[crate::state::SpecEntry],
 ) -> Vec<MeasurementTableRow> {

@@ -1,7 +1,12 @@
 //! Command palette search, navigation, and input ownership regressions.
 
-use super::*;
+use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
+
+use crate::state::command_catalog::CommandPlatform;
+use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::command_palette::*;
+use crate::workbench::framework::command_registry::CommandSpec;
 
 #[test]
 fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {

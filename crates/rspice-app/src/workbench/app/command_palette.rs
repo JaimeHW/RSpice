@@ -78,8 +78,8 @@ impl CommandPaletteState {
 }
 
 const PALETTE_ID: &str = "rspice.command-palette";
-const DIALOG_LABEL: &str = "Search and run a command";
-const DIALOG_DESCRIPTION: &str = "Type to filter commands, cellviews, models, and signals. Use Up and Down Arrow to select a result and Enter to open it.";
+pub(crate) const DIALOG_LABEL: &str = "Search and run a command";
+pub(crate) const DIALOG_DESCRIPTION: &str = "Type to filter commands, cellviews, models, and signals. Use Up and Down Arrow to select a result and Enter to open it.";
 
 const DESKTOP_MAX_WIDTH: f32 = 650.0;
 const DESKTOP_MAX_HEIGHT: f32 = 560.0;
@@ -102,19 +102,19 @@ const RESULT_ICON_COLUMN: f32 = 28.0;
 const RESULT_ICON_SIDE: f32 = 26.0;
 const RESULT_GROUP_HEIGHT: f32 = 22.0;
 const MAX_RECENT: usize = 8;
-const SUGGESTION_LIMIT: usize = 12;
+pub(crate) const SUGGESTION_LIMIT: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct PaletteLayout {
-    surface: Rect,
-    narrow: bool,
+pub(crate) struct PaletteLayout {
+    pub(crate) surface: Rect,
+    pub(crate) narrow: bool,
     coarse: bool,
-    scope_height: f32,
+    pub(crate) scope_height: f32,
 }
 
 impl PaletteLayout {
     /// `touch_target` is the theme's side for a finger-sized control.
-    fn resolve(viewport: Rect, has_touch_screen: bool, touch_target: f32) -> Self {
+    pub(crate) fn resolve(viewport: Rect, has_touch_screen: bool, touch_target: f32) -> Self {
         let narrow = viewport.width() <= NARROW_MAX_WIDTH;
         let coarse = narrow || has_touch_screen;
         let surface = if narrow {
@@ -148,7 +148,7 @@ impl PaletteLayout {
         }
     }
 
-    fn regions(self) -> PaletteRegions {
+    pub(crate) fn regions(self) -> PaletteRegions {
         let inner = self.surface.shrink(1.0);
         let search = Rect::from_min_size(inner.min, vec2(inner.width(), SEARCH_HEIGHT));
         let scope = Rect::from_min_size(
@@ -176,11 +176,11 @@ impl PaletteLayout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct PaletteRegions {
-    search: Rect,
-    scope: Rect,
+pub(crate) struct PaletteRegions {
+    pub(crate) search: Rect,
+    pub(crate) scope: Rect,
     results: Rect,
-    footer: Rect,
+    pub(crate) footer: Rect,
 }
 
 /// Search groups from the reviewed command-dialog mockup. Every indexed item
@@ -188,7 +188,7 @@ struct PaletteRegions {
 /// active-run waveform records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
-enum PaletteScope {
+pub(crate) enum PaletteScope {
     #[default]
     All,
     Navigate,
@@ -204,7 +204,7 @@ enum PaletteScope {
 }
 
 impl PaletteScope {
-    const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::All,
         Self::Navigate,
         Self::Commands,
@@ -234,7 +234,7 @@ impl PaletteScope {
         }
     }
 
-    fn from_label(label: &str) -> Option<Self> {
+    pub(crate) fn from_label(label: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|scope| scope.label().eq_ignore_ascii_case(label))
@@ -242,7 +242,7 @@ impl PaletteScope {
 
     /// The scope of the command `spec` declares, by its group. Opening a
     /// workspace or a project page is navigating, as their groups say.
-    fn for_command(spec: &CommandSpec) -> Self {
+    pub(crate) fn for_command(spec: &CommandSpec) -> Self {
         match spec.group {
             "Navigate" | "Project" => Self::Navigate,
             "Design" => Self::Design,
@@ -259,7 +259,7 @@ impl PaletteScope {
     }
 
     #[cfg(test)]
-    fn contains(self, spec: &CommandSpec) -> bool {
+    pub(crate) fn contains(self, spec: &CommandSpec) -> bool {
         self == Self::All || Self::for_command(spec) == self
     }
 
@@ -320,14 +320,14 @@ impl PaletteKeys {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct CellViewEntry {
+pub(crate) struct CellViewEntry {
     reference: crate::state::CellViewRef,
     view_type: crate::state::ViewType,
     description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ModelEntry {
+pub(crate) struct ModelEntry {
     library: String,
     model: String,
     model_type: String,
@@ -336,7 +336,7 @@ struct ModelEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SignalEntry {
+pub(crate) struct SignalEntry {
     dataset_id: crate::product::DatasetId,
     analysis_id: u64,
     waveform_index: usize,
@@ -349,7 +349,7 @@ struct SignalEntry {
 /// A registered command as the palette lists it: what the registry declares
 /// about it, and the glyph its row wears.
 #[derive(Debug, Clone, Copy)]
-struct PaletteCommand {
+pub(crate) struct PaletteCommand {
     spec: &'static CommandSpec,
     /// The glyph the shell gives the command, where it has one of its own
     /// rather than its scope's.
@@ -357,7 +357,7 @@ struct PaletteCommand {
 }
 
 impl PaletteCommand {
-    const fn key(self) -> CommandKey {
+    pub(crate) const fn key(self) -> CommandKey {
         self.spec.key
     }
 }
@@ -374,7 +374,7 @@ impl PartialEq for PaletteCommand {
 /// deliberately view-only for recency; only registry commands have a stable
 /// command-history identity.
 #[derive(Debug, Clone, PartialEq)]
-enum PaletteEntry {
+pub(crate) enum PaletteEntry {
     Command(PaletteCommand),
     CellView(CellViewEntry),
     Model(ModelEntry),
@@ -483,7 +483,7 @@ impl PaletteEntry {
         }
     }
 
-    fn command(&self) -> Option<CommandKey> {
+    pub(crate) fn command(&self) -> Option<CommandKey> {
         match self {
             Self::Command(command) => Some(command.key()),
             Self::CellView(_) | Self::Model(_) | Self::Signal(_) => None,
@@ -497,7 +497,7 @@ impl PaletteEntry {
         }
     }
 
-    fn execute(self, app: &mut impl WorkbenchHost) -> Result<(), String> {
+    pub(crate) fn execute(self, app: &mut impl WorkbenchHost) -> Result<(), String> {
         match self {
             Self::Command(command) => {
                 app.execute(command.key());
@@ -577,31 +577,31 @@ impl PaletteEntry {
     }
 }
 
-struct PaletteRow {
-    entry: PaletteEntry,
+pub(crate) struct PaletteRow {
+    pub(crate) entry: PaletteEntry,
     marks: Vec<usize>,
-    blocked: Option<&'static str>,
+    pub(crate) blocked: Option<&'static str>,
     shortcut: String,
 }
 
 impl PaletteRow {
-    fn detail(&self) -> String {
+    pub(crate) fn detail(&self) -> String {
         self.blocked.map_or_else(
             || self.entry.detail(),
             |reason| format!("Unavailable: {reason}"),
         )
     }
 
-    fn section_label(&self) -> &'static str {
+    pub(crate) fn section_label(&self) -> &'static str {
         self.entry.scope().label()
     }
 }
 
-fn palette_id() -> Id {
+pub(crate) fn palette_id() -> Id {
     Id::new(PALETTE_ID)
 }
 
-fn search_id() -> Id {
+pub(crate) fn search_id() -> Id {
     palette_id().with("search")
 }
 
@@ -613,7 +613,7 @@ fn scope_id(scope: PaletteScope) -> Id {
     palette_id().with(("scope", scope as u8))
 }
 
-fn scope_group_id() -> Id {
+pub(crate) fn scope_group_id() -> Id {
     palette_id().with("scope-group")
 }
 
@@ -624,7 +624,7 @@ fn result_id(index: usize) -> Id {
 /// Everything searchable is a real registry entry, in registry order. The
 /// registry already excludes the palette itself, context-only Cancel, and
 /// private shell verbs.
-fn palette_commands(host: &impl Host) -> impl Iterator<Item = PaletteCommand> + '_ {
+pub(crate) fn palette_commands(host: &impl Host) -> impl Iterator<Item = PaletteCommand> + '_ {
     host.command_registry()
         .ordered()
         .filter(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
@@ -634,13 +634,13 @@ fn palette_commands(host: &impl Host) -> impl Iterator<Item = PaletteCommand> + 
         })
 }
 
-fn command_name(spec: &CommandSpec) -> &'static str {
+pub(crate) fn command_name(spec: &CommandSpec) -> &'static str {
     spec.label.trim_end_matches('…')
 }
 
 /// How well text matches the query (lower sorts first), with matching display
 /// character indices for accent rendering.
-fn match_spans(text: &str, query: &str) -> Option<(u8, Vec<usize>)> {
+pub(crate) fn match_spans(text: &str, query: &str) -> Option<(u8, Vec<usize>)> {
     if query.is_empty() {
         return Some((3, Vec::new()));
     }
@@ -679,7 +679,7 @@ fn find_chars(haystack: &[char], needle: &[char]) -> Option<usize> {
     (0..=haystack.len() - needle.len()).find(|&at| haystack[at..at + needle.len()] == *needle)
 }
 
-fn match_entry(entry: &PaletteEntry, query: &str) -> Option<(u8, Vec<usize>)> {
+pub(crate) fn match_entry(entry: &PaletteEntry, query: &str) -> Option<(u8, Vec<usize>)> {
     let terms = query.split_whitespace().collect::<Vec<_>>();
     if terms.is_empty() {
         return Some((3, Vec::new()));
@@ -765,7 +765,7 @@ fn palette_entries(app: &impl WorkbenchHost) -> Vec<PaletteEntry> {
     entries
 }
 
-fn palette_rows(
+pub(crate) fn palette_rows(
     app: &impl WorkbenchHost,
     query: &str,
     scope: PaletteScope,
@@ -876,7 +876,7 @@ fn palette_rows(
     ranked.into_iter().map(|(_, row)| row).collect()
 }
 
-pub(in crate::workbench) fn render_command_palette(app: &mut impl WorkbenchHost, ctx: &Context) {
+pub(crate) fn render_command_palette(app: &mut impl WorkbenchHost, ctx: &Context) {
     if !app.workbench().command_palette.open {
         crate::ui::input::InputScope::discard(ctx, palette_id());
         return;
@@ -1588,7 +1588,7 @@ fn matched_name_galley(
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-fn row_icon(entry: &PaletteEntry) -> Icon {
+pub(crate) fn row_icon(entry: &PaletteEntry) -> Icon {
     let PaletteEntry::Command(command) = entry else {
         return match entry {
             PaletteEntry::CellView(_) => Icon::Schematic,
@@ -1782,6 +1782,3 @@ fn restore_focus(ctx: &Context, state_id: Id, search: Id, modal_layer: egui::Lay
         }
     });
 }
-
-#[cfg(test)]
-mod tests;

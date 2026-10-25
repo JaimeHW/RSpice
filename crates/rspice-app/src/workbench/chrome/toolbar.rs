@@ -2,14 +2,14 @@
 //! global run state remains visible at the trailing edge.
 
 pub(in crate::workbench) mod code;
-pub(in crate::workbench) mod design;
+pub(crate) mod design;
 pub(in crate::workbench) mod hardcopy;
 pub(in crate::workbench) mod models;
 mod overflow;
 pub(in crate::workbench) mod project;
-pub(in crate::workbench) mod results;
+pub(crate) mod results;
 pub(in crate::workbench) mod run_config_chip;
-pub(in crate::workbench) mod simulate;
+pub(crate) mod simulate;
 
 use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 
@@ -196,7 +196,7 @@ fn global_document_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout
     context_separator(ui, layout);
 }
 
-fn toolbar_horizontal_padding(viewport_width: f32) -> f32 {
+pub(crate) fn toolbar_horizontal_padding(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 {
         3.0
     } else if viewport_width <= 820.0 {
@@ -232,11 +232,11 @@ fn mark_drawer_focus_pending(ctx: &Context, drawer: Drawer) {
     });
 }
 
-fn toolbar_outer_gap(viewport_width: f32) -> f32 {
+pub(crate) fn toolbar_outer_gap(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 { 2.0 } else { 5.0 }
 }
 
-fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
+pub(crate) fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
     if app.run_preflight_checking() {
         "Stop".to_owned()
     } else if app.model().simulation.cancellation_is_pending() {
@@ -294,7 +294,7 @@ fn reserved_pvt_selector_width(ui: &egui::Ui, app: &impl WorkbenchHost) -> f32 {
         + 42.0
 }
 
-fn context_tools_width(
+pub(crate) fn context_tools_width(
     available_width: f32,
     layout: LayoutSpec,
     right_padding: f32,
@@ -315,7 +315,7 @@ fn context_tools_width(
         .max(1.0)
 }
 
-fn trailing_controls_width(
+pub(crate) fn trailing_controls_width(
     layout: LayoutSpec,
     outer_gap: f32,
     show_simulation_context: bool,
@@ -592,7 +592,7 @@ fn separator(ui: &mut egui::Ui) {
     );
 }
 
-fn toolbar_icon_button_size(layout: LayoutSpec) -> Vec2 {
+pub(crate) fn toolbar_icon_button_size(layout: LayoutSpec) -> Vec2 {
     if layout.toolbar_control_height >= 44.0 {
         Vec2::splat(44.0)
     } else {
@@ -600,7 +600,7 @@ fn toolbar_icon_button_size(layout: LayoutSpec) -> Vec2 {
     }
 }
 
-fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
+pub(crate) fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
     if layout.toolbar_control_height >= 44.0 {
         Vec2::splat(44.0)
     } else {
@@ -608,9 +608,6 @@ fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
     }
 }
 
-fn explicit_label_width(label: &str) -> f32 {
+pub(crate) fn explicit_label_width(label: &str) -> f32 {
     (label.chars().count() as f32 * 6.7 + 36.0).clamp(76.0, 224.0)
 }
-
-#[cfg(test)]
-mod tests;

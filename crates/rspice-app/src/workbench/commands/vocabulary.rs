@@ -1757,7 +1757,7 @@ pub(crate) fn last_repeatable(
 
 /// The command a registered key names. Every registered command is still
 /// declared by this enum, and this table is how a key reaches it.
-pub(in crate::workbench) fn legacy_command(key: CommandKey) -> Option<Command> {
+pub(crate) fn legacy_command(key: CommandKey) -> Option<Command> {
     static BY_KEY: LazyLock<HashMap<CommandKey, Command>> = LazyLock::new(|| {
         let mut commands = HashMap::with_capacity(COMMAND_REGISTRY.len());
         for command in COMMAND_REGISTRY {

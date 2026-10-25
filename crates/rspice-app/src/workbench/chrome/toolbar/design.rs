@@ -18,7 +18,7 @@ use super::{
     toolbar_icon_command_selected_as, toolbar_text_command,
 };
 
-pub(super) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 11] = [
+pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 11] = [
     (Command::SelectTool, WorkbenchIcon::Select, "Select (Esc)"),
     (
         Command::PlaceInstance,
@@ -244,7 +244,7 @@ pub(in crate::workbench) fn design_tools(
     );
 }
 
-pub(super) fn design_toolbar_command_selected(tool: Tool, command: Command) -> bool {
+pub(crate) fn design_toolbar_command_selected(tool: Tool, command: Command) -> bool {
     match command {
         Command::SelectTool => tool == Tool::Select,
         Command::PlaceInstance => {

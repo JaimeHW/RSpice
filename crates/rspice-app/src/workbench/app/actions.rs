@@ -37,7 +37,7 @@ fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
 
 impl RSpiceApp {
     /// Handle keyboard shortcuts
-    pub(in crate::workbench) fn handle_shortcuts(&mut self, ctx: &Context) {
+    pub(crate) fn handle_shortcuts(&mut self, ctx: &Context) {
         if shortcut_dispatch_blocked(&self.state, ctx) {
             self.state.shortcut_resolver.reset();
             return;

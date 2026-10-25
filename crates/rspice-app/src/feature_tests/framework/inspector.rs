@@ -4,10 +4,11 @@
 //! `documents/result_document/axis_range.rs`. Scroll memory is per subject and
 //! bounded, so two schematic subjects cannot inherit each other's offset.
 
-use super::design::bind_component_model_from_catalog;
-use super::*;
 use crate::state::{Component, ComponentType};
 use crate::workbench::RSpiceApp;
+use crate::workbench::docks::inspector::design::bind_component_model_from_catalog;
+use crate::workbench::docks::inspector::*;
+use crate::workbench::state::Workspace;
 
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};

@@ -21,7 +21,7 @@ use crate::workbench::state::Workspace;
 const LIBRARY: &str = "behavioral";
 
 /// A library cell whose `veriloga` view owns a one-file bundle at `root`.
-pub(in crate::workbench) fn add_veriloga_cell(
+pub(crate) fn add_veriloga_cell(
     state: &mut AppState,
     cell: &str,
     root: &str,
@@ -73,14 +73,14 @@ fn module_source(module: &str, extra: &str) -> String {
     )
 }
 
-pub(in crate::workbench) fn open_project_app() -> RSpiceApp {
+pub(crate) fn open_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app
 }
 
 /// Open `reference` the way the library and the schematic do, then show it.
-pub(in crate::workbench) fn open_in_design(state: &mut AppState, reference: &CellViewRef) {
+pub(crate) fn open_in_design(state: &mut AppState, reference: &CellViewRef) {
     state.open_workspace_view(reference.clone());
     state.workbench.activate(Workspace::Design);
 }

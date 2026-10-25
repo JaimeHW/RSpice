@@ -1,7 +1,7 @@
 //! Context inspector with authoritative object and provenance details.
 
 pub(in crate::workbench) mod code_workspace;
-pub(in crate::workbench) mod design;
+pub(crate) mod design;
 mod executed_deck;
 pub(in crate::workbench) mod models;
 pub(in crate::workbench) mod project;
@@ -37,17 +37,17 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 use super::super::state::Workspace;
 use crate::ui::panels::PANEL_HEADER_H;
 
-const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
+pub(crate) const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
 
 #[derive(Clone, Debug, Default)]
-struct InspectorScrollMemory {
+pub(crate) struct InspectorScrollMemory {
     active: Option<String>,
     /// Recent `(subject identity, vertical offset)` entries, oldest first.
-    offsets: Vec<(String, f32)>,
+    pub(crate) offsets: Vec<(String, f32)>,
 }
 
 impl InspectorScrollMemory {
-    fn begin_subject(&mut self, identity: &str) -> Option<f32> {
+    pub(crate) fn begin_subject(&mut self, identity: &str) -> Option<f32> {
         if self.active.as_deref() == Some(identity) {
             return None;
         }
@@ -60,7 +60,7 @@ impl InspectorScrollMemory {
         )
     }
 
-    fn record(&mut self, identity: String, offset: f32) {
+    pub(crate) fn record(&mut self, identity: String, offset: f32) {
         if let Some(index) = self
             .offsets
             .iter()
@@ -197,7 +197,7 @@ fn inspector_body(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     app.contribute(Point::Inspector(scope), ui);
 }
 
-fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
+pub(crate) fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
     let route = app.workbench().current_route();
     if app.workbench().workspace != Workspace::Design {
         return route.to_string();
@@ -211,7 +211,7 @@ fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
     )
 }
 
-fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+pub(crate) fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
@@ -253,7 +253,7 @@ const COMPACT_SIGNIFICANT_DIGITS: usize = 4;
 
 /// `value` in engineering notation with its unit, at the precision a compact
 /// panel row reads at: `96.86 µA`, not `96.86112 µA`.
-fn compact_readout(value: f64, unit: &str) -> String {
+pub(crate) fn compact_readout(value: f64, unit: &str) -> String {
     engineering_readout(value, unit, COMPACT_SIGNIFICANT_DIGITS)
 }
 
@@ -263,6 +263,3 @@ fn compact_readout(value: f64, unit: &str) -> String {
 fn engineering_readout(value: f64, unit: &str, significant_digits: usize) -> String {
     rspice_results_ui::waves::fmt_in_unit_readout(value, unit, significant_digits)
 }
-
-#[cfg(test)]
-mod tests;

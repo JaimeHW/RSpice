@@ -442,11 +442,11 @@ pub(in crate::workbench) fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp,
     theme::paint_focus_ring_outset(ui, &response, response.rect);
 }
 
-pub(super) fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
+pub(crate) fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
     (viewport_height - 72.0).clamp(row_height * 3.0, 484.0)
 }
 
-pub(in crate::workbench) fn commit_reference_pvt(
+pub(crate) fn commit_reference_pvt(
     app: &mut RSpiceApp,
     process: crate::product::ProcessCorner,
     temperature_celsius: f64,

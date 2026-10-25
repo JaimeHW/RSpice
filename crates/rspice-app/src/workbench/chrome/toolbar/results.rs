@@ -185,7 +185,7 @@ fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
     .then(|| crate::state::content_digest(&app.state.model.simulation.source.netlist_content))
 }
 
-pub(super) fn run_has_current_success_authority(
+pub(crate) fn run_has_current_success_authority(
     run: &crate::state::SimulationRun,
     project_revision: ObjectRevision,
     source_digest: Option<ContentDigest>,
@@ -198,7 +198,7 @@ pub(super) fn run_has_current_success_authority(
         })
 }
 
-pub(super) fn results_document_is_historical(app: &RSpiceApp) -> bool {
+pub(crate) fn results_document_is_historical(app: &RSpiceApp) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let project_revision = app.state.model.workspace.content.project.revision();
