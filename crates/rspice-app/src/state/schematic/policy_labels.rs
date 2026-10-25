@@ -8,7 +8,7 @@ use crate::state::SchematicGridPitch;
 ///
 /// Derived from the sheet's calibration rather than spelled by hand, so that
 /// every place a pitch is named agrees with the drawing it prints on.
-pub(crate) fn grid_pitch_label(pitch: SchematicGridPitch) -> String {
+pub fn grid_pitch_label(pitch: SchematicGridPitch) -> String {
     let micrometres = u64::from(pitch.canvas_grid_size().unsigned_abs())
         * rspice_schematic_editor::view::drawing_sheet::DRAWING_SHEET_WORLD_UNIT_UM;
     format!("{} mm", micrometres as f64 / 1_000.0)

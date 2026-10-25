@@ -45,7 +45,7 @@ impl Model {
 
     /// Compose the editor's resolved symbols from the current model-owned
     /// sources.
-    pub(crate) fn schematic_symbol_context(&self) -> SchematicSymbolContext {
+    pub fn schematic_symbol_context(&self) -> SchematicSymbolContext {
         let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
             self.library_manager.catalog(),
             &self.workspace.content.schematic_buffers,

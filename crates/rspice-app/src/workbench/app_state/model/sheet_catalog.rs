@@ -12,20 +12,19 @@
 
 use super::Model;
 use crate::state::{DesignManagementCatalog, SheetCatalog, SheetId};
-use crate::workbench::app_state::DesignManagementHistoryEntry;
+use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 
 impl Model {
     /// The refusal of a sheet operation where the open cell view has no
     /// catalog.
-    pub(crate) const NO_SHEET_CATALOG: &'static str =
+    pub const NO_SHEET_CATALOG: &'static str =
         "The active cell view has no governed sheet catalog.";
     /// The refusal of a sheet operation naming a sheet the catalog has
     /// dropped.
-    pub(crate) const NO_SUCH_SHEET: &'static str =
-        "That sheet is no longer part of the governed catalog.";
+    pub const NO_SUCH_SHEET: &'static str = "That sheet is no longer part of the governed catalog.";
 
     /// The sheet catalog of the cell view the editor has open, if it has one.
-    pub(crate) fn active_sheet_catalog(&self) -> Option<&SheetCatalog> {
+    pub fn active_sheet_catalog(&self) -> Option<&SheetCatalog> {
         self.workspace
             .content
             .design_management
@@ -40,14 +39,14 @@ impl Model {
     }
 
     /// The sheet the open cell view's catalog has active.
-    pub(crate) fn active_sheet_id(&self) -> Option<SheetId> {
+    pub fn active_sheet_id(&self) -> Option<SheetId> {
         self.active_sheet_catalog()
             .and_then(SheetCatalog::active_sheet_id)
     }
 
     /// What a message calls a sheet of the open cell view's catalog: its
     /// name, or its id where the catalog no longer holds it.
-    pub(crate) fn sheet_name(&self, id: SheetId) -> String {
+    pub fn sheet_name(&self, id: SheetId) -> String {
         self.active_sheet_catalog()
             .and_then(|catalog| catalog.find(id))
             .map_or_else(|| id.to_string(), |sheet| sheet.name().to_owned())
@@ -60,7 +59,7 @@ impl Model {
     /// so a chip redrawn every frame cannot advance the project revision.
     /// Otherwise `let_go` first lets go of any gesture still under way on the
     /// sheet being left; the caller holds it.
-    pub(crate) fn activate_sheet(
+    pub fn activate_sheet(
         &mut self,
         id: SheetId,
         let_go: impl FnOnce(&mut Self),
@@ -82,7 +81,7 @@ impl Model {
     }
 
     /// [`Self::activate_sheet`] for the sheet at `index` in catalog order.
-    pub(crate) fn go_to_sheet(
+    pub fn go_to_sheet(
         &mut self,
         index: usize,
         let_go: impl FnOnce(&mut Self),
@@ -99,7 +98,7 @@ impl Model {
 
     /// [`Self::go_to_sheet`] for the sheet `delta` places from the active
     /// one, wrapping at the ends.
-    pub(crate) fn step_sheet(
+    pub fn step_sheet(
         &mut self,
         delta: isize,
         let_go: impl FnOnce(&mut Self),
@@ -128,7 +127,7 @@ impl Model {
     }
 
     /// Retire everything that named the sheet just left and frame the new one.
-    pub(crate) fn enter_active_sheet(&mut self) {
+    pub fn enter_active_sheet(&mut self) {
         let editor = &mut self.schematic.session.editor;
         editor.selection.clear();
         editor.net_highlight.clear();
@@ -139,7 +138,7 @@ impl Model {
     /// Apply one edit to the active cell view's sheet catalog and publish the
     /// result as a single project transaction, so undo restores the whole
     /// change.
-    pub(crate) fn edit_sheet_catalog<T>(
+    pub fn edit_sheet_catalog<T>(
         &mut self,
         description: &str,
         edit: impl FnOnce(&mut SheetCatalog) -> Result<T, String>,
@@ -157,7 +156,7 @@ impl Model {
 
     /// Publish `candidate` over `before` as one project transaction, with the
     /// schematic buffers it moves objects between.
-    pub(crate) fn commit_sheet_catalog(
+    pub fn commit_sheet_catalog(
         &mut self,
         description: &str,
         before: DesignManagementCatalog,

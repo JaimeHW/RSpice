@@ -10,7 +10,7 @@ impl Model {
     /// The sheet the active cell view's catalog has active, with the format
     /// it prints on; the project's default format, named for the cell, where
     /// the cell view has no catalog.
-    pub(crate) fn active_drawing_sheet(&self) -> ActiveDrawingSheet {
+    pub fn active_drawing_sheet(&self) -> ActiveDrawingSheet {
         let key = self.workspace.content.active_schematic_reference().key();
         if let Some(catalog) = self.workspace.content.design_management.sheet_catalog(&key)
             && let Some(sheet) = catalog.active()
@@ -54,7 +54,7 @@ impl Model {
 
     /// Every title-block field `sheet` letters, with the value the project
     /// supplies where the sheet types none of its own.
-    pub(crate) fn title_block_fields(
+    pub fn title_block_fields(
         &self,
         sheet: &ActiveDrawingSheet,
     ) -> Vec<crate::state::ResolvedDrawingSheetTitleField> {

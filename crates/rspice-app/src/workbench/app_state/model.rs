@@ -84,7 +84,7 @@ pub struct Model {
     pub live_write_locks: crate::state::write_policy::LiveWriteLocks,
     /// The sheet-membership and generated-symbol failures the drawing sync
     /// last recorded. Runtime only.
-    pub(crate) recorded_sync_failures: schematic_sync::SyncFailures,
+    pub recorded_sync_failures: schematic_sync::SyncFailures,
 }
 
 impl Model {

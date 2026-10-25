@@ -7,11 +7,11 @@
 use super::Model;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{CellViewRef, View, ViewType};
-use crate::ui::accessibility::counted;
-use crate::workbench::app_state::DesignManagementHistoryEntry;
+use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 use rspice_design::symbol::generated::{
     GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
+use rspice_ui_kit::accessibility::counted;
 use std::collections::BTreeMap;
 
 /// Failures of the per-frame drawing sync that the Console already holds.
@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 /// The drawing is synced every frame, so a failure that stands is recorded
 /// when it first appears or changes, not sixty times a second.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SyncFailures {
+pub struct SyncFailures {
     pub(crate) sheet_membership: Option<String>,
     pub(crate) generated_symbol: Option<String>,
 }
@@ -49,7 +49,7 @@ impl Model {
     /// cross-sheet connection dropped with the objects it anchored to is
     /// stated on the status bar, which the caller owns.
     #[must_use]
-    pub(crate) fn sync_active_schematic_to_workspace(&mut self) -> Option<String> {
+    pub fn sync_active_schematic_to_workspace(&mut self) -> Option<String> {
         let mut prompt = None;
         if is_schematic_like(self.workspace.content.active_view_type()) {
             let active = self.workspace.content.active_schematic_reference();
