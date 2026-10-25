@@ -20,12 +20,18 @@ use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::session::preferences_file::{
-    MAX_SETTINGS_FILE_BYTES, SETTINGS_FILE, stage_settings_import,
+    MAX_SETTINGS_FILE_BYTES, PreferencesFileParts, PreferencesFileRuntime, SETTINGS_FILE,
+    stage_settings_import,
 };
 use crate::workbench::app_state::session::shortcut_library::{
-    ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
+    ShortcutLibraryParts, ShortcutLibraryPersistenceRuntime, ShortcutLibraryPublication,
+    ShortcutLibraryPublicationContinuation,
 };
-use crate::workbench::app_state::{AppState, ShortcutContextMatch};
+use crate::workbench::app_state::{
+    AppState, Model, PlatformState, ShortcutContextMatch, trim_recent_files,
+};
+use crate::workbench::framework::feature::CloudPort;
+use crate::workbench::state::WorkbenchSession;
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
 const SETTINGS_IMPORT_ID: &str = "rspice.preferences.settings-file.import";
@@ -61,31 +67,121 @@ pub(in crate::workbench) struct PreferencePageActions {
         Option<crate::state::shortcuts::ShortcutPreferences>,
 }
 
+/// What Preferences and the windows it opens read and write: the settings
+/// feature's dialogs and its stores, the model whose preferences they edit,
+/// the session, the platform services' state, whose autosave interval and
+/// recent files a page keeps, and what the cloud shows.
+pub(crate) struct PreferencesDialogs<'a> {
+    pub(crate) preferences_open: &'a mut bool,
+    pub(crate) workspace_layout_manager:
+        &'a mut workspace_layout_manager::WorkspaceLayoutManagerState,
+    pub(crate) shortcut_portability:
+        &'a mut shortcut_portability_dialogs::ShortcutPortabilityDialogsState,
+    pub(crate) shortcut_editor: &'a mut shortcut_preferences::ShortcutEditorState,
+    pub(crate) shortcut_policy_candidate:
+        &'a mut Option<crate::state::shortcuts::ShortcutPreferences>,
+    pub(crate) browser_spoken_feedback: &'a mut bool,
+    pub(crate) shortcut_library_persistence: &'a mut ShortcutLibraryPersistenceRuntime,
+    pub(crate) shortcut_library_publication_continuation:
+        &'a mut Option<ShortcutLibraryPublicationContinuation>,
+    pub(crate) preferences_file: &'a mut PreferencesFileRuntime,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) platform: &'a mut PlatformState,
+    pub(crate) cloud: &'a dyn CloudPort,
+}
+
 impl RSpiceApp {
     pub(in crate::workbench) fn render_preferences_dialog(&mut self, ctx: &Context) {
+        preferences_dialogs(&mut self.state).render(ctx);
+        // A library a dialog put in use resets the resolver, and a waveform
+        // default it changed reaches the open view, before the frame goes on.
+        self.state.take_shortcut_resolver_reset();
+        preference_pages::take_waveform_defaults_request(&mut self.state);
+    }
+}
+
+/// Preferences and the windows it opens, over the application state's parts.
+fn preferences_dialogs(state: &mut AppState) -> PreferencesDialogs<'_> {
+    PreferencesDialogs {
+        preferences_open: &mut state.settings.preferences_open,
+        workspace_layout_manager: &mut state.settings.workspace_layout_manager,
+        shortcut_portability: &mut state.settings.shortcut_portability,
+        shortcut_editor: &mut state.settings.shortcut_editor,
+        shortcut_policy_candidate: &mut state.settings.shortcut_policy_candidate,
+        browser_spoken_feedback: &mut state.settings.browser_spoken_feedback,
+        shortcut_library_persistence: &mut state.settings.shortcut_library_persistence,
+        shortcut_library_publication_continuation: &mut state
+            .settings
+            .shortcut_library_publication_continuation,
+        preferences_file: &mut state.settings.preferences_file,
+        model: &mut state.model,
+        workbench: &mut state.workbench,
+        platform: &mut state.platform,
+        cloud: &*state.cloud,
+    }
+}
+
+impl PreferencesDialogs<'_> {
+    /// Answer the gesture just made, on the status bar, as
+    /// [`AppState::prompt`] does.
+    fn prompt(&mut self, text: impl Into<String>) {
+        self.workbench.prompt(text);
+    }
+
+    /// Record an event in the Console, as [`AppState::record`] does.
+    fn record(&mut self, severity: LogSeverity, source: LogSource, text: impl Into<String>) -> u64 {
+        self.model.record(severity, source, text)
+    }
+
+    /// What the shortcut library's persistence reads and writes.
+    fn shortcut_library_parts(&mut self) -> ShortcutLibraryParts<'_> {
+        ShortcutLibraryParts {
+            persistence: &mut *self.shortcut_library_persistence,
+            model: &mut *self.model,
+            outbox: &mut self.workbench.outbox,
+        }
+    }
+
+    /// What the preferences file reads and writes.
+    fn preferences_file_parts(&mut self) -> PreferencesFileParts<'_> {
+        PreferencesFileParts {
+            file: &mut *self.preferences_file,
+            browser_spoken_feedback: &mut *self.browser_spoken_feedback,
+            model: &mut *self.model,
+            workbench: &mut *self.workbench,
+            platform: &mut *self.platform,
+        }
+    }
+
+    /// Drop the recent projects beyond what the page now lists, as
+    /// [`trim_recent_files`] does for the application state.
+    fn trim_recent_files(&mut self) {
+        trim_recent_files(self.model, self.platform);
+    }
+}
+
+impl PreferencesDialogs<'_> {
+    /// Draw Preferences and the windows it opens for this frame.
+    pub(crate) fn render(&mut self, ctx: &Context) {
         self.poll_shortcut_portability_source();
         self.poll_settings_file_transfer(ctx);
         self.finish_shortcut_library_publication();
         let category_id = Id::new(CATEGORY_STATE_ID);
-        let current_surface = self.state.workbench.current_route().surface_id();
+        let current_surface = self.workbench.current_route().surface_id();
         let route_owned = current_surface == SurfaceId::Preferences;
-        let standalone_layout_manager = self.state.settings.workspace_layout_manager.open
-            && !self.state.settings.preferences_open;
+        let standalone_layout_manager =
+            self.workspace_layout_manager.open && !*self.preferences_open;
         if standalone_layout_manager {
-            workspace_layout_manager::render(ctx, &mut self.state);
+            workspace_layout_manager::render(ctx, self);
             return;
         }
         if !route_owned {
-            let portability_action = self
-                .state
-                .settings
-                .shortcut_portability
-                .request_route_close();
+            let portability_action = self.shortcut_portability.request_route_close();
             self.execute_shortcut_portability_action(ctx, portability_action);
-            self.state.settings.preferences_open = false;
+            *self.preferences_open = false;
             #[cfg(target_arch = "wasm32")]
-            let editor_publication_pending =
-                self.state.settings.shortcut_editor.persistence_pending;
+            let editor_publication_pending = self.shortcut_editor.persistence_pending;
             #[cfg(not(target_arch = "wasm32"))]
             // Native persistence is synchronous; a retained pending flag
             // cannot own an actual write across frames.
@@ -95,25 +191,20 @@ impl RSpiceApp {
             #[cfg(target_arch = "wasm32")]
             if editor_publication_pending
                 && matches!(
-                    self.state
-                        .settings
-                        .shortcut_library_publication_continuation,
+                    self.shortcut_library_publication_continuation,
                     Some(ShortcutLibraryPublicationContinuation::Editor)
                 )
                 && self
-                    .state
                     .shortcut_library_parts()
                     .cancel_pending_shortcut_library_publication()
             {
-                self.state
-                    .settings
-                    .shortcut_library_publication_continuation = None;
+                *self.shortcut_library_publication_continuation = None;
                 close_editor = true;
             }
             if close_editor {
-                self.state.settings.shortcut_editor.close_and_discard();
+                self.shortcut_editor.close_and_discard();
             }
-            self.state.settings.workspace_layout_manager.close();
+            self.workspace_layout_manager.close();
             ctx.data_mut(|data| data.remove_temp::<PreferenceCategory>(category_id));
             set_pending_restore(ctx, None);
             preferences_shell::unmount(ctx);
@@ -126,18 +217,14 @@ impl RSpiceApp {
         let mut actions = PreferencePageActions::default();
         // Preferences does not consume Escape while one of its own child
         // executors is open above it.
-        let nested_modal_open = self.state.cloud.license_dialog.open
-            || self.state.settings.shortcut_editor.open
-            || self
-                .state
-                .settings
-                .shortcut_portability
-                .application_modal_open()
-            || self.state.settings.workspace_layout_manager.open
+        let nested_modal_open = self.cloud.license_dialog_open()
+            || self.shortcut_editor.open
+            || self.shortcut_portability.application_modal_open()
+            || self.workspace_layout_manager.open
             || pending_restore(ctx).is_some();
-        let touch_target = self.state.model.preferences.minimum_touch_target();
+        let touch_target = self.model.preferences.minimum_touch_target();
         let shell_response = {
-            let state = &mut self.state;
+            let state = &mut *self;
             preferences_shell::show(
                 ctx,
                 &mut category,
@@ -158,30 +245,29 @@ impl RSpiceApp {
             set_pending_restore(ctx, Some(category));
         }
         if shell_response.close_requested {
-            self.state.settings.preferences_open = false;
+            *self.preferences_open = false;
             set_pending_restore(ctx, None);
             if route_owned {
-                close_preferences(&mut self.state);
+                close_preferences(self);
             }
         }
         self.render_restore_defaults_confirmation(ctx, &mut actions);
-        preference_pages::take_waveform_defaults_request(&mut self.state);
         self.execute_preference_page_actions(ctx, actions);
-        shortcut_preferences::render_editor(ctx, &mut self.state);
-        workspace_layout_manager::render(ctx, &mut self.state);
+        shortcut_preferences::render_editor(ctx, self);
+        workspace_layout_manager::render(ctx, self);
         self.render_shortcut_portability_dialogs(ctx);
     }
 
     fn execute_preference_page_actions(&mut self, ctx: &Context, actions: PreferencePageActions) {
         if actions.open_shortcut_editor {
-            let profile = self.state.model.preferences.shortcuts().clone();
-            self.state.settings.shortcut_editor.open(&profile);
+            let profile = self.model.preferences.shortcuts().clone();
+            self.shortcut_editor.open(&profile);
         }
         if actions.open_shortcut_import {
-            self.state.settings.shortcut_portability.open_import();
+            self.shortcut_portability.open_import();
         }
         if actions.open_shortcut_export {
-            self.state.settings.shortcut_portability.open_export();
+            self.shortcut_portability.open_export();
         }
         if actions.import_settings_file {
             self.begin_settings_import(ctx);
@@ -190,7 +276,7 @@ impl RSpiceApp {
             self.begin_settings_export(ctx);
         }
         if actions.show_settings_file {
-            self.state.preferences_file_parts().show_preferences_file();
+            self.preferences_file_parts().show_preferences_file();
         }
         if let Some(profile) = actions.shortcut_policy_candidate {
             self.begin_shortcut_policy_publication(ctx, profile);
@@ -235,7 +321,7 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => {
                 set_pending_restore(ctx, None);
-                preference_pages::restore_defaults(category, &mut self.state, actions);
+                preference_pages::restore_defaults(category, self, actions);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => set_pending_restore(ctx, None),
             DialogChoice::Secondary | DialogChoice::None => {}
@@ -247,13 +333,12 @@ impl RSpiceApp {
         ctx: &Context,
         profile: crate::state::shortcuts::ShortcutPreferences,
     ) {
-        let mut candidate = self.state.model.preferences.shortcut_profiles().clone();
+        let mut candidate = self.model.preferences.shortcut_profiles().clone();
         if let Err(error) = candidate.replace_active(profile.clone()) {
-            self.state
-                .prompt(format!("Shortcut settings were not saved: {error}"));
+            self.prompt(format!("Shortcut settings were not saved: {error}"));
             return;
         }
-        self.state.settings.shortcut_policy_candidate = Some(profile);
+        *self.shortcut_policy_candidate = Some(profile);
         self.publish_shortcut_candidate(
             ctx,
             &candidate,
@@ -262,21 +347,17 @@ impl RSpiceApp {
     }
 
     fn render_shortcut_portability_dialogs(&mut self, ctx: &Context) {
-        let library = self.state.model.preferences.shortcut_profiles().clone();
+        let library = self.model.preferences.shortcut_profiles().clone();
         let current_contexts = ShortcutContext::ALL
             .into_iter()
-            .filter(|context| context.matches(&self.state.workbench, &self.state.model))
+            .filter(|context| context.matches(self.workbench, self.model))
             .collect::<Vec<_>>();
         let environment = ShortcutExportEnvironment {
             runtime_platform: crate::workbench::app_state::runtime_command_platform(ctx),
             operating_system: ctx.os(),
             current_contexts: &current_contexts,
         };
-        let action = self
-            .state
-            .settings
-            .shortcut_portability
-            .render(ctx, &library, environment);
+        let action = self.shortcut_portability.render(ctx, &library, environment);
         self.execute_shortcut_portability_action(ctx, action);
     }
 
@@ -291,20 +372,14 @@ impl RSpiceApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 match crate::workbench::shortcuts::artifacts::import_shortcut_artifact_source() {
                     Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
-                        let library = self.state.model.preferences.shortcut_profiles().clone();
-                        self.state
-                            .settings
-                            .shortcut_portability
+                        let library = self.model.preferences.shortcut_profiles().clone();
+                        self.shortcut_portability
                             .accept_import_source(&library, *source);
                     }
-                    Ok(ShortcutArtifactImportOutcome::Cancelled) => self
-                        .state
-                        .settings
-                        .shortcut_portability
-                        .import_source_cancelled(),
+                    Ok(ShortcutArtifactImportOutcome::Cancelled) => {
+                        self.shortcut_portability.import_source_cancelled()
+                    }
                     Err(error) => self
-                        .state
-                        .settings
                         .shortcut_portability
                         .import_source_failed(error.to_string()),
                 }
@@ -312,18 +387,13 @@ impl RSpiceApp {
                 if let Err(error) =
                     crate::workbench::shortcuts::artifacts::start_browser_shortcut_artifact_import()
                 {
-                    self.state
-                        .settings
-                        .shortcut_portability
+                    self.shortcut_portability
                         .import_source_failed(error.to_string());
                 }
             }
             ShortcutPortabilityAction::CancelImportSource => {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.state
-                    .settings
-                    .shortcut_portability
-                    .import_source_cancelled();
+                self.shortcut_portability.import_source_cancelled();
                 #[cfg(target_arch = "wasm32")]
                 {
                     let outcome =
@@ -332,8 +402,7 @@ impl RSpiceApp {
                     match outcome {
                         crate::workbench::shortcuts::artifacts::BrowserShortcutArtifactImportCancelOutcome::Cancelled
                         | crate::workbench::shortcuts::artifacts::BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased => {
-                            self.state
-                                .settings
+                            self
                                 .shortcut_portability
                                 .import_source_cancelled();
                         }
@@ -342,67 +411,47 @@ impl RSpiceApp {
                 }
             }
             ShortcutPortabilityAction::CommitImport(plan) => {
-                match stage_shortcut_import(self.state.model.preferences.shortcut_profiles(), &plan)
-                {
+                match stage_shortcut_import(self.model.preferences.shortcut_profiles(), &plan) {
                     Ok((candidate, receipt)) => self.publish_shortcut_candidate(
                         ctx,
                         &candidate,
                         ShortcutLibraryPublicationContinuation::Import(Box::new(receipt)),
                     ),
-                    Err(error) => self
-                        .state
-                        .settings
-                        .shortcut_portability
-                        .complete_import(Err(error)),
+                    Err(error) => self.shortcut_portability.complete_import(Err(error)),
                 }
             }
             ShortcutPortabilityAction::CancelImportCommit => {
                 #[cfg(target_arch = "wasm32")]
                 {
                     let cancelled = self
-                        .state
                         .shortcut_library_parts()
                         .cancel_pending_shortcut_library_publication();
                     if cancelled {
-                        self.state
-                            .settings
-                            .shortcut_library_publication_continuation = None;
-                        self.state
-                            .settings
-                            .shortcut_portability
-                            .import_commit_cancelled(Ok(()));
+                        *self.shortcut_library_publication_continuation = None;
+                        self.shortcut_portability.import_commit_cancelled(Ok(()));
                     } else {
-                        self.state
-                            .settings
-                            .shortcut_portability
-                            .import_commit_cancelled(Err(
-                                "The import had already been saved and is in effect.".to_owned(),
-                            ));
+                        self.shortcut_portability.import_commit_cancelled(Err(
+                            "The import had already been saved and is in effect.".to_owned(),
+                        ));
                     }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                self.state
-                    .settings
-                    .shortcut_portability
-                    .import_commit_cancelled(Err(
-                        "The import was already saved and can no longer be cancelled.".to_owned(),
-                    ));
+                self.shortcut_portability.import_commit_cancelled(Err(
+                    "The import was already saved and can no longer be cancelled.".to_owned(),
+                ));
             }
             ShortcutPortabilityAction::PublishExport(artifact) => {
                 let result = export_shortcut_artifact(&artifact).map_err(|error| error.to_string());
                 if result.as_ref().is_ok_and(|outcome| {
                     !matches!(outcome, ShortcutArtifactExportOutcome::Cancelled)
                 }) {
-                    self.state.record(
+                    self.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         "Exported the keyboard shortcut profile.",
                     );
                 }
-                self.state
-                    .settings
-                    .shortcut_portability
-                    .complete_export(result);
+                self.shortcut_portability.complete_export(result);
             }
         }
     }
@@ -413,42 +462,25 @@ impl RSpiceApp {
         candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         continuation: ShortcutLibraryPublicationContinuation,
     ) {
-        if self
-            .state
-            .settings
-            .shortcut_library_publication_continuation
-            .is_some()
-        {
-            self.state.complete_shortcut_library_publication(
+        if self.shortcut_library_publication_continuation.is_some() {
+            self.complete_shortcut_library_publication(
                 continuation,
                 Err("another shortcut-library publication is awaiting acknowledgement".to_owned()),
             );
             return;
         }
         let published = self
-            .state
             .shortcut_library_parts()
             .publish_shortcut_library_candidate(candidate, ctx);
-        self.state.take_shortcut_resolver_reset();
         match published {
             Ok(ShortcutLibraryPublication::Published) => {
-                self.state
-                    .complete_shortcut_library_publication(continuation, Ok(()));
+                self.complete_shortcut_library_publication(continuation, Ok(()));
             }
             Ok(ShortcutLibraryPublication::Pending) => {
-                debug_assert!(
-                    self.state
-                        .settings
-                        .shortcut_library_publication_continuation
-                        .is_none()
-                );
-                self.state
-                    .settings
-                    .shortcut_library_publication_continuation = Some(continuation);
+                debug_assert!(self.shortcut_library_publication_continuation.is_none());
+                *self.shortcut_library_publication_continuation = Some(continuation);
             }
-            Err(error) => self
-                .state
-                .complete_shortcut_library_publication(continuation, Err(error)),
+            Err(error) => self.complete_shortcut_library_publication(continuation, Err(error)),
         }
     }
 
@@ -459,24 +491,18 @@ impl RSpiceApp {
         {
             match result {
                 Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
-                    let library = self.state.model.preferences.shortcut_profiles().clone();
-                    self.state
-                        .settings
-                        .shortcut_portability
+                    let library = self.model.preferences.shortcut_profiles().clone();
+                    self.shortcut_portability
                         .accept_import_source(&library, *source);
                 }
-                Ok(ShortcutArtifactImportOutcome::Cancelled) => self
-                    .state
-                    .settings
-                    .shortcut_portability
-                    .import_source_cancelled(),
+                Ok(ShortcutArtifactImportOutcome::Cancelled) => {
+                    self.shortcut_portability.import_source_cancelled()
+                }
                 Err(error) => {
                     let message = error.to_string();
-                    self.state
-                        .settings
-                        .shortcut_portability
+                    self.shortcut_portability
                         .import_source_failed(message.clone());
-                    self.state.record(
+                    self.record(
                         LogSeverity::Error,
                         LogSource::Studio,
                         format!("Shortcut profile could not be opened for import: {message}"),
@@ -493,13 +519,12 @@ impl RSpiceApp {
             SETTINGS_FILE,
             MAX_SETTINGS_FILE_BYTES,
         ) {
-            self.state.prompt(refusal);
+            self.prompt(refusal);
         }
     }
 
     fn begin_settings_export(&mut self, ctx: &Context) {
         let started = self
-            .state
             .preferences_file_parts()
             .settings_file_bytes()
             .and_then(|bytes| {
@@ -512,8 +537,7 @@ impl RSpiceApp {
                 )
             });
         if let Err(refusal) = started {
-            self.state
-                .prompt(format!("Settings were not exported: {refusal}"));
+            self.prompt(format!("Settings were not exported: {refusal}"));
         }
     }
 
@@ -522,79 +546,62 @@ impl RSpiceApp {
     fn poll_settings_file_transfer(&mut self, ctx: &Context) {
         match crate::io::file_exchange::take_saved(ctx, Id::new(SETTINGS_EXPORT_ID)) {
             Some(Ok(Some(saved))) => {
-                self.state
-                    .prompt(format!("Settings exported to {}.", saved.name));
+                self.prompt(format!("Settings exported to {}.", saved.name));
             }
-            Some(Err(refusal)) => self.state.prompt(refusal),
+            Some(Err(refusal)) => self.prompt(refusal),
             Some(Ok(None)) | None => {}
         }
         match crate::io::file_exchange::take_opened(ctx, Id::new(SETTINGS_IMPORT_ID)) {
             Some(Ok(Some(file))) => {
-                match stage_settings_import(&self.state.model, &file.name, file.text.as_bytes()) {
+                match stage_settings_import(self.model, &file.name, file.text.as_bytes()) {
                     Ok((shortcuts, staged)) => self.publish_shortcut_candidate(
                         ctx,
                         &shortcuts,
                         ShortcutLibraryPublicationContinuation::SettingsImport(Box::new(staged)),
                     ),
-                    Err(reason) => self.state.prompt(format!(
+                    Err(reason) => self.prompt(format!(
                         "Settings were not imported from {}: {reason}. Nothing was changed.",
                         file.name
                     )),
                 }
             }
-            Some(Err(refusal)) => self.state.prompt(refusal),
+            Some(Err(refusal)) => self.prompt(refusal),
             Some(Ok(None)) | None => {}
         }
     }
 
     fn finish_shortcut_library_publication(&mut self) {
-        if self
-            .state
-            .settings
-            .shortcut_library_publication_continuation
-            .is_none()
-        {
+        if self.shortcut_library_publication_continuation.is_none() {
             if self
-                .state
                 .shortcut_library_parts()
                 .shortcut_library_publication_completion_pending()
             {
                 let _ = self
-                    .state
                     .shortcut_library_parts()
                     .take_shortcut_library_publication_completion();
                 let message = "Saving keyboard shortcuts finished after the dialog that started it had closed. The saved shortcuts are in effect; review them in Preferences.";
-                self.state.settings.shortcut_editor.persistence_pending = false;
-                self.state.settings.shortcut_editor.error_summary = Some(message.to_owned());
-                self.state.settings.shortcut_policy_candidate = None;
-                self.state
-                    .settings
-                    .shortcut_portability
+                self.shortcut_editor.persistence_pending = false;
+                self.shortcut_editor.error_summary = Some(message.to_owned());
+                *self.shortcut_policy_candidate = None;
+                self.shortcut_portability
                     .complete_import(Err(message.to_owned()));
-                self.state
-                    .record(LogSeverity::Error, LogSource::Studio, message);
+                self.record(LogSeverity::Error, LogSource::Studio, message);
             }
             return;
         }
         let Some(result) = self
-            .state
             .shortcut_library_parts()
             .take_shortcut_library_publication_completion()
         else {
             return;
         };
         let continuation = self
-            .state
-            .settings
             .shortcut_library_publication_continuation
             .take()
             .expect("completion owner was checked above");
-        self.state
-            .complete_shortcut_library_publication(continuation, result);
+        self.complete_shortcut_library_publication(continuation, result);
     }
-}
 
-impl AppState {
     fn complete_shortcut_library_publication(
         &mut self,
         continuation: ShortcutLibraryPublicationContinuation,
@@ -602,21 +609,21 @@ impl AppState {
     ) {
         match continuation {
             ShortcutLibraryPublicationContinuation::Editor => {
-                self.settings.shortcut_editor.persistence_pending = false;
+                self.shortcut_editor.persistence_pending = false;
                 match result {
                     Ok(()) => {
-                        self.settings.shortcut_editor.close_and_discard();
+                        self.shortcut_editor.close_and_discard();
                         self.prompt("Keyboard shortcuts saved.");
                     }
                     Err(error) => {
                         let message = format!("Shortcut profile was not saved: {error}");
-                        self.settings.shortcut_editor.error_summary = Some(message.clone());
+                        self.shortcut_editor.error_summary = Some(message.clone());
                         self.record(LogSeverity::Error, LogSource::Studio, message);
                     }
                 }
             }
             ShortcutLibraryPublicationContinuation::Policy => {
-                self.settings.shortcut_policy_candidate = None;
+                *self.shortcut_policy_candidate = None;
                 match result {
                     Ok(()) => self.prompt("Shortcut settings saved."),
                     Err(error) => {
@@ -642,8 +649,7 @@ impl AppState {
                         format!("Shortcut profile import was not saved: {error}"),
                     );
                 }
-                self.settings
-                    .shortcut_portability
+                self.shortcut_portability
                     .complete_import(result.map(|()| *receipt));
             }
             ShortcutLibraryPublicationContinuation::SettingsImport(staged) => {
@@ -670,7 +676,7 @@ fn stage_shortcut_import(
     Ok((staged, receipt))
 }
 
-fn close_preferences(state: &mut AppState) {
+fn close_preferences(state: &mut PreferencesDialogs<'_>) {
     if state
         .workbench
         .navigate_back(RouteTransitionSource::User)
@@ -722,7 +728,7 @@ mod tests {
             state.workbench.take_browser_history_effect(),
             Some(BrowserHistoryEffect::Push(preferences_route()))
         );
-        close_preferences(&mut state);
+        close_preferences(&mut preferences_dialogs(&mut state));
         assert_eq!(state.workbench.current_route(), source);
         assert_eq!(
             state.workbench.take_browser_history_effect(),
@@ -741,7 +747,7 @@ mod tests {
             .workbench
             .navigate(preferences_route(), RouteTransitionSource::BrowserPop)
             .unwrap();
-        close_preferences(&mut state);
+        close_preferences(&mut preferences_dialogs(&mut state));
         assert_eq!(state.workbench.current_route(), fallback);
         assert_eq!(
             state.workbench.take_browser_history_effect(),
@@ -838,7 +844,12 @@ mod tests {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        preference_pages::render(ui, category, &mut state, &mut actions);
+                        preference_pages::render(
+                            ui,
+                            category,
+                            &mut preferences_dialogs(&mut state),
+                            &mut actions,
+                        );
                     });
                 },
             );
@@ -914,7 +925,7 @@ mod tests {
     #[test]
     fn shortcut_editor_action_opens_an_isolated_profile_draft() {
         let mut app = test_app();
-        app.execute_preference_page_actions(
+        preferences_dialogs(&mut app.state).execute_preference_page_actions(
             &Context::default(),
             PreferencePageActions {
                 open_shortcut_editor: true,
@@ -934,7 +945,7 @@ mod tests {
         let ctx = Context::default();
 
         let mut import_app = test_app();
-        import_app.execute_preference_page_actions(
+        preferences_dialogs(&mut import_app.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 open_shortcut_import: true,
@@ -950,7 +961,7 @@ mod tests {
         );
 
         let mut export_app = test_app();
-        export_app.execute_preference_page_actions(
+        preferences_dialogs(&mut export_app.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 open_shortcut_export: true,
@@ -983,14 +994,14 @@ mod tests {
         let mut source = test_app();
         source.state.platform.autosave_minutes = 10;
         script_next_choice(ScriptedChoice::Chose(path.clone()));
-        source.execute_preference_page_actions(
+        preferences_dialogs(&mut source.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 export_settings_file: true,
                 ..PreferencePageActions::default()
             },
         );
-        source.poll_settings_file_transfer(&ctx);
+        preferences_dialogs(&mut source.state).poll_settings_file_transfer(&ctx);
         assert_eq!(
             source.state.prompt_text(),
             Some("Settings exported to rspice-settings.json.")
@@ -1002,14 +1013,14 @@ mod tests {
             .shortcut_library_parts()
             .enable_volatile_test_shortcut_persistence();
         script_next_choice(ScriptedChoice::Chose(path));
-        target.execute_preference_page_actions(
+        preferences_dialogs(&mut target.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 import_settings_file: true,
                 ..PreferencePageActions::default()
             },
         );
-        target.poll_settings_file_transfer(&ctx);
+        preferences_dialogs(&mut target.state).poll_settings_file_transfer(&ctx);
         assert_eq!(target.state.platform.autosave_minutes, 10);
         assert_eq!(
             target.state.prompt_text(),
@@ -1029,7 +1040,7 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             ctx.enable_accesskit();
             let mut app = test_app();
-            app.execute_preference_page_actions(&ctx, actions);
+            preferences_dialogs(&mut app.state).execute_preference_page_actions(&ctx, actions);
             let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -1038,7 +1049,7 @@ mod tests {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ctx| app.render_shortcut_portability_dialogs(ctx),
+                |ctx| preferences_dialogs(&mut app.state).render_shortcut_portability_dialogs(ctx),
             );
             output
                 .platform_output
@@ -1084,7 +1095,7 @@ mod tests {
             .policies_mut()
             .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
 
-        app.execute_preference_page_actions(
+        preferences_dialogs(&mut app.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 shortcut_policy_candidate: Some(candidate.clone()),
@@ -1122,7 +1133,7 @@ mod tests {
                 "simulated canonical storage failure".to_owned(),
             );
 
-        app.execute_preference_page_actions(
+        preferences_dialogs(&mut app.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 shortcut_policy_candidate: Some(candidate),

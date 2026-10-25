@@ -47,6 +47,12 @@ pub(crate) trait DesignPort {
     fn review_markers(&self) -> SchematicReviewMarkerVisibility;
 }
 
+/// What the cloud shows that another feature reads.
+pub(crate) trait CloudPort {
+    /// Whether the license dialog is open, above whatever opened it.
+    fn license_dialog_open(&self) -> bool;
+}
+
 /// Read-only views of the other features a feature reads: live references,
 /// never a copy taken earlier.
 #[derive(Clone, Copy)]

@@ -11,13 +11,13 @@ use crate::workbench::{ChoicePreference, TogglePreference};
 use super::super::preferences_shell::{
     preference_row, searchable_row, section_heading, segmented, value_column,
 };
-use super::{AppState, keyword_choice_row, toggle_row};
+use super::{PreferencesDialogs, keyword_choice_row, toggle_row};
 
 /// The zoom speeds in the order the row shows them, as the stored index each
 /// one keeps. Normal is stored as zero because zero is the shipped value.
 const ZOOM_SPEEDS: [(&str, usize); 3] = [("Slow", 1), ("Normal", 0), ("Fast", 2)];
 
-pub(super) fn page(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn page(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Schematic and symbol canvases");
     keyword_choice_row(
         ui,
@@ -75,7 +75,7 @@ pub(super) fn page(ui: &mut Ui, state: &mut AppState) {
 
 /// Slow, Normal, Fast in that order, over a stored index whose zero is
 /// Normal.
-fn zoom_speed_row(ui: &mut Ui, state: &mut AppState) {
+fn zoom_speed_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     preference_row(ui, "Zoom speed", "How far one wheel notch zooms.", |ui| {
         value_column(ui, |ui| {
             let stored = state

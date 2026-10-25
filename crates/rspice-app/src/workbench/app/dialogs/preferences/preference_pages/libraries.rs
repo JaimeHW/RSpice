@@ -16,7 +16,7 @@ use crate::ui::widgets::{
 use crate::workbench::FolderListPreference;
 
 use super::super::preferences_shell::{searchable_row, section_heading, value_column};
-use super::AppState;
+use super::PreferencesDialogs;
 
 const KEY: FolderListPreference = FolderListPreference::LibraryFolders;
 
@@ -36,7 +36,7 @@ enum Edit {
     Remove(usize),
 }
 
-pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Libraries");
     searchable_row(
         ui,
@@ -304,6 +304,8 @@ fn folder_row(ui: &mut Ui, row: &Row<'_>, width: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::dialogs::preferences::preferences_dialogs;
+    use crate::workbench::app_state::AppState;
 
     type Nodes = Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>;
 
@@ -318,7 +320,8 @@ mod tests {
                 ..egui::RawInput::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| section(ui, state));
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| section(ui, &mut preferences_dialogs(state)));
             },
         );
         output
@@ -426,7 +429,8 @@ mod tests {
             .expect("full paths");
         frame(&ctx, &mut state, Vec::new());
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| section(ui, &mut state));
+            egui::CentralPanel::default()
+                .show(ctx, |ui| section(ui, &mut preferences_dialogs(&mut state)));
         });
         let missing = output
             .shapes

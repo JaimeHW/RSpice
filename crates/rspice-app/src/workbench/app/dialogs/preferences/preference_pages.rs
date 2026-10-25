@@ -28,7 +28,7 @@ use super::preferences_shell::{
     PreferenceCategory, action_buttons, control_width, preference_row, preference_switch,
     searchable_row, section_heading, segmented, value_column,
 };
-use super::{AppState, PreferencePageActions};
+use super::{AppState, PreferencePageActions, PreferencesDialogs};
 use crate::workbench::framework::requests::{self, ApplyWaveformDefaults};
 
 /// Width of a numeric field, which is sized to the digits it holds rather
@@ -46,7 +46,7 @@ const AUTOSAVE_HELP: &str = "Saves the working session in this browser.";
 pub(super) fn render(
     ui: &mut Ui,
     category: PreferenceCategory,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     actions: &mut PreferencePageActions,
 ) {
     match category {
@@ -67,7 +67,7 @@ pub(super) fn render(
 
 fn toggle_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     key: TogglePreference,
     title: &'static str,
     detail: &'static str,
@@ -85,7 +85,7 @@ fn toggle_row(
 
 fn scalar_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     key: ScalarPreference,
     title: &'static str,
     detail: &'static str,
@@ -126,7 +126,7 @@ fn scalar_row(
 /// digit. The engine narrows whatever is asked for to the parallelism the
 /// host reports, which is why a value above the detected count is accepted
 /// instead of refused — a session carried to a smaller machine stays valid.
-fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
+fn solver_threads_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     let detected = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let help = format!(
         "Concurrent workers for one run. {detected} logical core{} on this machine.",
@@ -170,7 +170,7 @@ fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
 
 fn choice_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     key: ChoicePreference,
     title: &'static str,
     detail: &'static str,
@@ -183,7 +183,7 @@ fn choice_row(
 /// for the setting. Its option labels are searched either way.
 fn keyword_choice_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     key: ChoicePreference,
     title: &'static str,
     detail: &'static str,
@@ -212,7 +212,7 @@ fn keyword_choice_row(
     });
 }
 
-fn appearance(ui: &mut Ui, state: &mut AppState) {
+fn appearance(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     const COLOR_MODES: [&str; 3] = ["Dark", "Light", "System"];
     searchable_row(
         ui,
@@ -342,7 +342,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn workspace(ui: &mut Ui, state: &mut AppState) {
+fn workspace(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     // An "Engineering profile" row used to open this page. It narrowed one
     // specialist tool list and nothing else, so it told a reader the
     // workbench was tailored to their domain when it was not.
@@ -467,7 +467,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn units(ui: &mut Ui, state: &mut AppState) {
+fn units(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     // A "Unit system" row used to lead this page. Its only effect was on the
     // layout coordinate readout, which the row below already sets.
     choice_row(
@@ -546,7 +546,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn schematic(ui: &mut Ui, state: &mut AppState) {
+fn schematic(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     // Junction dots and wire routing are one bit each of one stored choice,
     // so the values an earlier build wrote keep their meaning.
     use crate::workbench::app_state::schematic_preferences::{
@@ -554,7 +554,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
     };
     fn junction_bit_row(
         ui: &mut Ui,
-        state: &mut AppState,
+        state: &mut PreferencesDialogs<'_>,
         bit: usize,
         (title, help, id): (&'static str, &'static str, &'static str),
         options: [&'static str; 2],
@@ -706,7 +706,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn results(ui: &mut Ui, state: &mut AppState) {
+fn results(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     scalar_row(
         ui,
         state,
@@ -746,7 +746,7 @@ fn results(ui: &mut Ui, state: &mut AppState) {
 /// The settings file, what saving a project does, and where a deck's
 /// libraries are looked for. The solver preset a new project starts from is
 /// on the Simulation page, with the other settings a new plan takes.
-fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+fn projects(ui: &mut Ui, state: &mut PreferencesDialogs<'_>, actions: &mut PreferencePageActions) {
     // One file holding every preference and the shortcut library in use.
     preference_row(
         ui,
@@ -805,7 +805,7 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
     libraries::section(ui, state);
 }
 
-fn accessibility(ui: &mut Ui, state: &mut AppState) {
+fn accessibility(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     preference_row(
         ui,
         "Reduced motion",
@@ -861,7 +861,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         "Uses the browser speech fallback while a semantic accessibility tree is unavailable.",
         |ui| {
             value_column(ui, |ui| {
-                let mut value = state.settings.browser_spoken_feedback;
+                let mut value = *state.browser_spoken_feedback;
                 if preference_switch(
                     ui,
                     "preferences.accessibility.browser-spoken-feedback",
@@ -885,8 +885,8 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
 
 /// Store the browser speech opt-in and hand it to the browser in the same
 /// step, so the row and Restore defaults cannot disagree about either.
-fn set_browser_spoken_feedback(state: &mut AppState, enabled: bool) {
-    state.settings.browser_spoken_feedback = enabled;
+fn set_browser_spoken_feedback(state: &mut PreferencesDialogs<'_>, enabled: bool) {
+    *state.browser_spoken_feedback = enabled;
     #[cfg(target_arch = "wasm32")]
     crate::workbench::browser::accessibility::set_spoken_feedback(enabled);
 }
@@ -915,7 +915,7 @@ pub(super) fn take_waveform_defaults_request(state: &mut AppState) {
 
 pub(super) fn restore_defaults(
     category: PreferenceCategory,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     actions: &mut PreferencePageActions,
 ) {
     let preferences = &mut state.model.preferences;
@@ -1050,6 +1050,7 @@ pub(super) fn restore_defaults(
 mod tests {
     use super::*;
     use crate::workbench::RSpiceApp;
+    use crate::workbench::app::dialogs::preferences::preferences_dialogs;
 
     /// The page source, with each file's test module cut off its end.
     ///
@@ -1173,7 +1174,7 @@ mod tests {
             );
             restore_defaults(
                 category,
-                &mut app.state,
+                &mut preferences_dialogs(&mut app.state),
                 &mut PreferencePageActions::default(),
             );
             assert_eq!(
@@ -1228,7 +1229,7 @@ mod tests {
                     let state = &mut app.state;
                     let mut actions = PreferencePageActions::default();
                     let _ = show(ctx, &mut category, true, 44.0, |ui, category| {
-                        render(ui, category, state, &mut actions);
+                        render(ui, category, &mut preferences_dialogs(state), &mut actions);
                     });
                 },
             );
@@ -1310,7 +1311,7 @@ mod tests {
                 ))),
             )
             .expect("F6 is a valid binding");
-        app.execute_preference_page_actions(
+        preferences_dialogs(&mut app.state).execute_preference_page_actions(
             &ctx,
             PreferencePageActions {
                 shortcut_policy_candidate: Some(edited.clone()),
@@ -1320,13 +1321,17 @@ mod tests {
         assert_eq!(app.state.model.preferences.shortcuts(), &edited);
 
         let mut actions = PreferencePageActions::default();
-        restore_defaults(PreferenceCategory::Shortcuts, &mut app.state, &mut actions);
+        restore_defaults(
+            PreferenceCategory::Shortcuts,
+            &mut preferences_dialogs(&mut app.state),
+            &mut actions,
+        );
         assert_eq!(
             app.state.model.preferences.shortcuts(),
             &edited,
             "the reset must not write the live profile directly"
         );
-        app.execute_preference_page_actions(&ctx, actions);
+        preferences_dialogs(&mut app.state).execute_preference_page_actions(&ctx, actions);
 
         let shipped = ShortcutPreferences::default();
         assert_eq!(app.state.model.preferences.shortcuts(), &shipped);
@@ -1440,7 +1445,7 @@ mod tests {
         app.state.results.results.session.phase_continuous = true;
         restore_defaults(
             PreferenceCategory::Results,
-            &mut app.state,
+            &mut preferences_dialogs(&mut app.state),
             &mut PreferencePageActions::default(),
         );
         take_waveform_defaults_request(&mut app.state);

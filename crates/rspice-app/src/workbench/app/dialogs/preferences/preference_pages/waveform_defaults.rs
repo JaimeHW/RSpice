@@ -7,13 +7,13 @@ use crate::workbench::framework::requests::ApplyWaveformDefaults;
 use crate::workbench::{ChoicePreference, TogglePreference};
 
 use super::super::preferences_shell::{searchable_row, section_heading, segmented, value_column};
-use super::{AppState, toggle_row};
+use super::{PreferencesDialogs, toggle_row};
 
 /// Thin, Normal, Thick in that order, as the stored index each keeps. Normal
 /// is stored as zero because zero is the shipped value.
 const TRACE_WIDTHS: [(&str, usize); 3] = [("Thin", 1), ("Normal", 0), ("Thick", 2)];
 
-pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Waveform defaults");
     segment_row(
         ui,
@@ -73,7 +73,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
 
 /// Ask the open viewer to start from these defaults, as a new one would
 /// start.
-pub(super) fn apply_to_viewer(state: &mut AppState) {
+pub(super) fn apply_to_viewer(state: &mut PreferencesDialogs<'_>) {
     state.workbench.outbox.push(ApplyWaveformDefaults);
 }
 
@@ -81,7 +81,7 @@ pub(super) fn apply_to_viewer(state: &mut AppState) {
 /// keeps. Returns whether the reader changed it.
 fn segment_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut PreferencesDialogs<'_>,
     key: ChoicePreference,
     title: &str,
     help: &str,

@@ -11,12 +11,12 @@ use crate::workbench::{ChoicePreference, ScalarPreference};
 use super::super::preferences_shell::{
     control_width, searchable_row, section_heading, value_column,
 };
-use super::{AppState, choice_row, solver_threads_row};
+use super::{PreferencesDialogs, choice_row, solver_threads_row};
 
 /// The retention counts offered, smallest first. The shipped one is 20.
 const RUNS_KEPT: [u32; 5] = [5, 10, 20, 50, 100];
 
-pub(super) fn page(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn page(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Solver");
     choice_row(
         ui,
@@ -34,7 +34,7 @@ pub(super) fn page(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// How many runs a new plan keeps before it discards the oldest.
-fn runs_kept_row(ui: &mut Ui, state: &mut AppState) {
+fn runs_kept_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     let labels = RUNS_KEPT.map(|count| format!("{count} runs")).to_vec();
     searchable_row(
         ui,
@@ -69,7 +69,7 @@ fn runs_kept_row(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// The dialect the import review starts from when a deck names none.
-fn imported_dialect_row(ui: &mut Ui, state: &mut AppState) {
+fn imported_dialect_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     let labels = IMPORTABLE_NETLIST_DIALECTS
         .map(|dialect| dialect.label().to_owned())
         .to_vec();

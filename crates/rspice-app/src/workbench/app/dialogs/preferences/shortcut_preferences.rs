@@ -26,7 +26,7 @@ use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 use super::preferences_shell::{
     action_buttons, control_width, preference_row, searchable_row, section_heading, value_column,
 };
-use super::{AppState, PreferencePageActions};
+use super::{PreferencePageActions, PreferencesDialogs};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ShortcutEditorContext {
@@ -117,7 +117,11 @@ const REGISTRY_ROW_HEIGHT: f32 = 28.0;
 const REGISTRY_HEADER_HEIGHT: f32 = 27.0;
 const KEY_CAPTURE_MIN_WIDTH: f32 = 74.0;
 
-pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+pub(super) fn render_page(
+    ui: &mut Ui,
+    state: &mut PreferencesDialogs<'_>,
+    actions: &mut PreferencePageActions,
+) {
     // A read-only five-column table of eleven hand-picked commands used to
     // open this page. The editor below it is the searchable list of every
     // command in the registry, so the table was a sample of the real thing
@@ -160,9 +164,8 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
     section_heading(ui, "Key handling");
     // A browser commit is asynchronous. Keep showing the candidate selected
     // by the user while the persist-before-live owner has the controls locked.
-    let policy_pending = state.settings.shortcut_policy_candidate.is_some();
+    let policy_pending = state.shortcut_policy_candidate.is_some();
     let mut policy_draft = state
-        .settings
         .shortcut_policy_candidate
         .as_ref()
         .unwrap_or_else(|| state.model.preferences.shortcuts())
@@ -355,18 +358,18 @@ fn registry_status_tone(audit: &ShortcutProfileAudit, command: CommandKey) -> Ta
     }
 }
 
-pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
-    if !state.settings.shortcut_editor.open {
+pub(super) fn render_editor(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
+    if !state.shortcut_editor.open {
         return;
     }
 
-    if !state.settings.shortcut_editor.persistence_pending {
-        process_key_capture(ctx, &mut state.settings.shortcut_editor);
-        synchronize_editor_validation(&mut state.settings.shortcut_editor);
+    if !state.shortcut_editor.persistence_pending {
+        process_key_capture(ctx, state.shortcut_editor);
+        synchronize_editor_validation(state.shortcut_editor);
     }
 
     let save_enabled = {
-        let editor = &state.settings.shortcut_editor;
+        let editor = &state.shortcut_editor;
         let audit = editor
             .draft
             .as_ref()
@@ -377,7 +380,7 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
     };
 
     let choice = {
-        let editor = &mut state.settings.shortcut_editor;
+        let editor = &mut state.shortcut_editor;
         let mut scroll_offset = editor.body_scroll_offset;
         let cancel_label = if editor.discard_confirmation {
             "Discard changes"
@@ -430,16 +433,16 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
     match choice {
         DialogChoice::Primary => commit_editor(ctx, state),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            if state.settings.shortcut_editor.persistence_pending {
+            if state.shortcut_editor.persistence_pending {
                 #[cfg(target_arch = "wasm32")]
                 if state
                     .shortcut_library_parts()
                     .cancel_pending_shortcut_library_publication()
                 {
-                    state.settings.shortcut_library_publication_continuation = None;
-                    state.settings.shortcut_editor.close_and_discard();
+                    *state.shortcut_library_publication_continuation = None;
+                    state.shortcut_editor.close_and_discard();
                 } else {
-                    state.settings.shortcut_editor.error_summary = Some(
+                    state.shortcut_editor.error_summary = Some(
                         "The shortcuts are already being saved. Keep this editor open until it finishes."
                             .to_owned(),
                     );
@@ -1222,9 +1225,8 @@ fn blocking_issue_count(audit: &ShortcutProfileAudit) -> usize {
         .count()
 }
 
-fn commit_editor(ctx: &Context, state: &mut AppState) {
+fn commit_editor(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
     let audit = state
-        .settings
         .shortcut_editor
         .draft
         .as_ref()
@@ -1232,19 +1234,18 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
         .audit(&CommandRegistry);
     if !audit.is_valid() {
         let count = blocking_issue_count(&audit);
-        state.settings.shortcut_editor.error_summary = Some(format!(
+        state.shortcut_editor.error_summary = Some(format!(
             "Shortcut profile was not saved. Resolve {count} blocking conflict(s); focus moved to the first affected binding."
         ));
-        state.settings.shortcut_editor.focus_error = first_error_target(&audit);
-        if let Some(target) = state.settings.shortcut_editor.focus_error {
-            state.settings.shortcut_editor.query.clear();
-            state.settings.shortcut_editor.context = editor_context(target.command);
-            state.settings.shortcut_editor.selected_command = Some(target.command);
+        state.shortcut_editor.focus_error = first_error_target(&audit);
+        if let Some(target) = state.shortcut_editor.focus_error {
+            state.shortcut_editor.query.clear();
+            state.shortcut_editor.context = editor_context(target.command);
+            state.shortcut_editor.selected_command = Some(target.command);
         }
         return;
     }
     let draft = state
-        .settings
         .shortcut_editor
         .draft
         .as_ref()
@@ -1253,15 +1254,11 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
     let mut candidate = state.model.preferences.shortcut_profiles().clone();
     if let Err(error) = candidate.replace_active(draft) {
         // The editor stays open and states the refusal in place.
-        state.settings.shortcut_editor.error_summary =
+        state.shortcut_editor.error_summary =
             Some(format!("Shortcut profile was not saved: {error}"));
         return;
     }
-    if state
-        .settings
-        .shortcut_library_publication_continuation
-        .is_some()
-    {
+    if state.shortcut_library_publication_continuation.is_some() {
         state.complete_shortcut_library_publication(
             super::ShortcutLibraryPublicationContinuation::Editor,
             Err("another shortcut-library publication is awaiting acknowledgement".to_owned()),
@@ -1271,7 +1268,6 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
     let published = state
         .shortcut_library_parts()
         .publish_shortcut_library_candidate(&candidate, ctx);
-    state.take_shortcut_resolver_reset();
     match published {
         Ok(super::ShortcutLibraryPublication::Published) => state
             .complete_shortcut_library_publication(
@@ -1279,8 +1275,8 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
                 Ok(()),
             ),
         Ok(super::ShortcutLibraryPublication::Pending) => {
-            state.settings.shortcut_editor.persistence_pending = true;
-            state.settings.shortcut_library_publication_continuation =
+            state.shortcut_editor.persistence_pending = true;
+            *state.shortcut_library_publication_continuation =
                 Some(super::ShortcutLibraryPublicationContinuation::Editor);
         }
         Err(error) => state.complete_shortcut_library_publication(
@@ -1304,19 +1300,20 @@ fn first_error_target(audit: &ShortcutProfileAudit) -> Option<ShortcutCaptureTar
         })
 }
 
-fn request_editor_cancel(state: &mut AppState) {
-    cancel_capture(&mut state.settings.shortcut_editor);
-    if state.settings.shortcut_editor.dirty && !state.settings.shortcut_editor.discard_confirmation
-    {
-        state.settings.shortcut_editor.discard_confirmation = true;
+fn request_editor_cancel(state: &mut PreferencesDialogs<'_>) {
+    cancel_capture(state.shortcut_editor);
+    if state.shortcut_editor.dirty && !state.shortcut_editor.discard_confirmation {
+        state.shortcut_editor.discard_confirmation = true;
     } else {
-        state.settings.shortcut_editor.close_and_discard();
+        state.shortcut_editor.close_and_discard();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::dialogs::preferences::preferences_dialogs;
+    use crate::workbench::app_state::AppState;
     use crate::workbench::commands::vocabulary::Command;
 
     fn input(width: f32, height: f32) -> egui::RawInput {
@@ -1349,7 +1346,7 @@ mod tests {
         let mut actions = PreferencePageActions::default();
         let first = ctx.run_ui(input(1_100.0, 900.0), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_page(ui, &mut state, &mut actions);
+                render_page(ui, &mut preferences_dialogs(&mut state), &mut actions);
             });
         });
         let nodes = first
@@ -1381,7 +1378,7 @@ mod tests {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        render_page(ui, &mut state, &mut actions);
+                        render_page(ui, &mut preferences_dialogs(&mut state), &mut actions);
                     });
                 },
             );
@@ -1648,7 +1645,7 @@ mod tests {
             .unwrap();
         state.settings.shortcut_editor.dirty = true;
 
-        commit_editor(&Context::default(), &mut state);
+        commit_editor(&Context::default(), &mut preferences_dialogs(&mut state));
 
         assert!(!state.settings.shortcut_editor.open);
         assert_eq!(
@@ -1691,7 +1688,7 @@ mod tests {
         state.settings.shortcut_editor.query = "schematic only".to_owned();
         state.settings.shortcut_editor.context = ShortcutEditorContext::Schematic;
 
-        commit_editor(&Context::default(), &mut state);
+        commit_editor(&Context::default(), &mut preferences_dialogs(&mut state));
 
         assert!(state.settings.shortcut_editor.open);
         assert!(state.settings.shortcut_editor.error_summary.is_some());
@@ -1713,7 +1710,7 @@ mod tests {
         let mut actions = PreferencePageActions::default();
         let output = ctx.run_ui(input(1_100.0, 900.0), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_page(ui, &mut state, &mut actions);
+                render_page(ui, &mut preferences_dialogs(&mut state), &mut actions);
             });
         });
         let nodes = output
@@ -1803,7 +1800,7 @@ mod tests {
         let mut actions = PreferencePageActions::default();
         let output = ctx.run_ui(input(390.0, 844.0), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_page(ui, &mut state, &mut actions);
+                render_page(ui, &mut preferences_dialogs(&mut state), &mut actions);
             });
         });
         let nodes = output
@@ -1832,7 +1829,9 @@ mod tests {
         let mut state = AppState::default();
         let profile = state.model.preferences.shortcuts().clone();
         state.settings.shortcut_editor.open(&profile);
-        let output = ctx.run_ui(input(390.0, 844.0), |ctx| render_editor(ctx, &mut state));
+        let output = ctx.run_ui(input(390.0, 844.0), |ctx| {
+            render_editor(ctx, &mut preferences_dialogs(&mut state))
+        });
         let nodes = output
             .platform_output
             .accesskit_update
@@ -1920,7 +1919,7 @@ mod tests {
                 }],
                 ..egui::RawInput::default()
             },
-            |ctx| render_editor(ctx, &mut state),
+            |ctx| render_editor(ctx, &mut preferences_dialogs(&mut state)),
         );
 
         let after = &state.settings.shortcut_editor;

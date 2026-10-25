@@ -11,14 +11,14 @@ use crate::workbench::{ChoicePreference, TogglePreference};
 use super::super::preferences_shell::{
     control_width, searchable_row, section_heading, value_column,
 };
-use super::AppState;
+use super::PreferencesDialogs;
 #[cfg(not(target_arch = "wasm32"))]
 use super::{keyword_choice_row, toggle_row};
 
 /// The recent-list lengths offered, shortest first. The shipped one is 8.
 const RECENT_FILES_LISTED: [u32; 4] = [5, 8, 12, 20];
 
-pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Startup and files");
     // The browser binds its project file after startup, once its storage
     // answers, and a browser save is a download with no earlier file to keep,
@@ -46,7 +46,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// How many recent projects the start page lists.
-fn recent_files_row(ui: &mut Ui, state: &mut AppState) {
+fn recent_files_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     let labels = RECENT_FILES_LISTED
         .map(|count| format!("{count} projects"))
         .to_vec();

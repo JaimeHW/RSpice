@@ -7,7 +7,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select};
 use crate::workbench::{WorkspacePreset, state::Workspace};
 
-use super::AppState;
+use super::PreferencesDialogs;
 use super::preferences_shell::{control_width, setting_row, value_column};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -98,12 +98,12 @@ impl WorkspaceLayoutManagerState {
     }
 }
 
-pub(super) fn render(ctx: &Context, state: &mut AppState) {
-    if !state.settings.workspace_layout_manager.open {
+pub(super) fn render(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
+    if !state.workspace_layout_manager.open {
         return;
     }
 
-    let mut draft = state.settings.workspace_layout_manager.clone();
+    let mut draft = state.workspace_layout_manager.clone();
     let choice = Dialog::new("Workspace layout manager", "Apply selected layout")
         .description(
             "Apply a device-local dock and console composition without changing project data.",
@@ -118,10 +118,10 @@ pub(super) fn render(ctx: &Context, state: &mut AppState) {
     match choice {
         DialogChoice::Primary => {
             apply_layout(state, draft.template, draft.scope);
-            state.settings.workspace_layout_manager.close();
+            state.workspace_layout_manager.close();
         }
-        DialogChoice::Cancelled => state.settings.workspace_layout_manager.close(),
-        _ => state.settings.workspace_layout_manager = draft,
+        DialogChoice::Cancelled => state.workspace_layout_manager.close(),
+        _ => *state.workspace_layout_manager = draft,
     }
 }
 
@@ -199,7 +199,7 @@ fn layout_template_card(ui: &mut Ui, label: &str, detail: &str, selected: bool) 
     response.clicked()
 }
 
-fn render_workspace_table(ui: &mut Ui, state: &AppState) {
+fn render_workspace_table(ui: &mut Ui, state: &PreferencesDialogs<'_>) {
     ui.add_space(12.0);
     ui.heading("Remembered layouts");
     egui::ScrollArea::horizontal()
@@ -284,7 +284,7 @@ fn render_scope(ui: &mut Ui, state: &mut WorkspaceLayoutManagerState) {
     );
 }
 
-fn apply_layout(state: &mut AppState, template: LayoutTemplate, scope: LayoutScope) {
+fn apply_layout(state: &mut PreferencesDialogs<'_>, template: LayoutTemplate, scope: LayoutScope) {
     if let Some(preset) = template.workspace_preset() {
         match scope {
             LayoutScope::CurrentWorkspace => state.workbench.apply_workspace_preset(preset),

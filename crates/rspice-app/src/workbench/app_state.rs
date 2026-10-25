@@ -1093,25 +1093,7 @@ impl AppState {
             .recent_files
             .retain(|recent| recent.path != entry.path);
         self.platform.recent_files.insert(0, entry);
-        self.trim_recent_files();
-    }
-
-    /// Drop the oldest recent projects beyond what Projects and files ▸
-    /// Recent projects listed keeps, so lowering it shortens the start page's
-    /// list at once. The count is of projects, the only kind that list shows:
-    /// schematics are capped at the same count on their own, so opening them
-    /// never pushes a project off the page.
-    pub(crate) fn trim_recent_files(&mut self) {
-        let listed = self.model.preferences.recent_files_listed();
-        let (mut projects, mut schematics) = (0, 0);
-        self.platform.recent_files.retain(|recent| {
-            let kept = match recent.kind {
-                RecentKind::Project => &mut projects,
-                RecentKind::Schematic => &mut schematics,
-            };
-            *kept += 1;
-            *kept <= listed
-        });
+        trim_recent_files(&self.model, &mut self.platform);
     }
 
     /// Where a paste should land, snapped to the schematic grid: under the
@@ -1133,6 +1115,24 @@ impl AppState {
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
         self.model.schematic.has_pending_operation() || self.design.floating_paste.is_some()
     }
+}
+
+/// Drop the oldest recent projects beyond what Projects and files ▸ Recent
+/// projects listed keeps, so lowering it shortens the start page's list at
+/// once. The count is of projects, the only kind that list shows: schematics
+/// are capped at the same count on their own, so opening them never pushes a
+/// project off the page.
+pub(crate) fn trim_recent_files(model: &Model, platform: &mut PlatformState) {
+    let listed = model.preferences.recent_files_listed();
+    let (mut projects, mut schematics) = (0, 0);
+    platform.recent_files.retain(|recent| {
+        let kept = match recent.kind {
+            RecentKind::Project => &mut projects,
+            RecentKind::Schematic => &mut schematics,
+        };
+        *kept += 1;
+        *kept <= listed
+    });
 }
 
 fn schematic_has_authored_content(
@@ -1264,7 +1264,7 @@ mod tests {
             .preferences
             .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 5)
             .expect("5 is an offered count");
-        state.trim_recent_files();
+        trim_recent_files(&state.model, &mut state.platform);
         let kept = state
             .platform
             .recent_files

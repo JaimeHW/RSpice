@@ -1,6 +1,8 @@
 //! The cloud feature's dialogs: license activation, web publication and live
 //! sessions.
 
+use crate::workbench::framework::feature::CloudPort;
+
 /// What the cloud feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CloudState {
@@ -21,4 +23,10 @@ pub(crate) struct CloudState {
     pub(crate) license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
+}
+
+impl CloudPort for CloudState {
+    fn license_dialog_open(&self) -> bool {
+        self.license_dialog.open
+    }
 }
