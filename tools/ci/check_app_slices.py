@@ -671,16 +671,17 @@ def measure(source_root: Path):
                 if d["public"]:
                     public_in[d["name"]].add(owner[p])
     # Names other code also spells as an enum variant (`TransferFailure::Request`,
-    # `SheetText::Field`) or as an item another crate defines and a module re-exports
-    # (`crate::state::Point`, `crate::ui::input::consume_keys`,
-    # `crate::workbench::design_system::elide_text`), which a bare name cannot
-    # tell apart, are left out; `crate::` paths to the item itself are still
-    # counted below.
+    # `SheetText::Field`, `SessionKept::WithoutRuns`), as a test-only item of its
+    # own (`thread_preparations::record` under `#[cfg(test)]`), or as an item
+    # another crate defines and a module re-exports (`crate::state::Point`,
+    # `crate::ui::input::consume_keys`, `crate::workbench::design_system::elide_text`),
+    # which a bare name cannot tell apart, are left out; `crate::` paths to the
+    # item itself are still counted below.
     symbols = {
         name: next(iter(found)) for name, found in public_in.items()
         if len(name) >= 4 and len(defined_in[name]) == 1
         and name not in ("Cell", "Align", "Request", "ResultRun", "Point", "Command", "Field",
-                         "consume_keys", "elide_text")
+                         "WithoutRuns", "record", "consume_keys", "elide_text")
     }
 
     # `use` declarations: re-export table, external roots, per-file imports and globs.

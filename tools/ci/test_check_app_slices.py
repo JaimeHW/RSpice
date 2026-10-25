@@ -120,6 +120,22 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(values["feature->feature"], {})
         self.assertEqual((stats["files"], stats["production"]), (6, 5))
 
+    def test_a_variant_or_test_item_spelled_like_another_slices_item_is_not_coupling(self) -> None:
+        values, _, _ = measure_tree({
+            "workbench/app_state/session/serialization.rs": "pub struct WithoutRuns(pub u32);\n",
+            "services/session.rs": "pub enum SessionKept { Whole, WithoutRuns(u32) }\n",
+            "workbench/lifecycle/recovery.rs": (
+                "use crate::services::session::SessionKept;\n"
+                "pub fn lean(kept: &SessionKept) -> bool { matches!(kept, SessionKept::WithoutRuns(_)) }\n"
+            ),
+            "workbench/docks/inspector/executed_deck.rs": "pub fn record() {}\n",
+            "simulation/controller/prepared_run.rs": (
+                "pub fn prepare() {\n    #[cfg(test)]\n    thread_preparations::record();\n}\n"
+                "#[cfg(test)]\nmod thread_preparations {\n    pub fn record() {}\n}\n"
+            ),
+        })
+        self.assertEqual(values["lower->upper"], {})
+
     def test_whole_app_methods_and_parameters_outside_their_home_are_counted(self) -> None:
         values, _, _ = measure_tree({
             "workbench/app.rs": "pub struct RSpiceApp;\nimpl RSpiceApp {\n    pub fn frame(&mut self) {}\n}\n",

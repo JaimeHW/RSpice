@@ -35,7 +35,7 @@
     "results->simulate": 2,
     "settings->code": 3,
     "sheets->design": 2,
-    "simulate->code": 2,
+    "simulate->code": 1,
     "simulate->design": 4,
     "simulate->models": 19,
     "simulate->project": 2,
@@ -43,10 +43,9 @@
   },
   "lower->upper": {
     "framework->session": 486,
-    "run->code": 2,
     "run->session": 1,
     "services->project": 9,
-    "services->session": 20,
+    "services->session": 17,
     "services->shell": 1
   },
   "whole-app": {
