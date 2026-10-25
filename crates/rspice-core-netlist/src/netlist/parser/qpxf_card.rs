@@ -1,7 +1,7 @@
 //! Strict native `.QPXF` parsing with signed frequency and sideband lists.
 use super::analysis_card_scan::{
-    at_card_end, at_keyword, bind_once, card_bool, card_count, card_error, card_name, card_number,
-    card_signed, take_keyword,
+    at_card_end, at_keyword, bind_once, card_bool, card_choice, card_count, card_error, card_list,
+    card_number, card_signed, take_keyword,
 };
 use super::*;
 use crate::netlist::{QpacSweep, QpxfCard, QpxfCardLattices, QpxfCardOutput, QpxfCardSources};
@@ -10,25 +10,6 @@ fn error(line: usize, message: impl Into<String>) -> ParseError {
     ParseError::Syntax {
         line,
         message: format!(".QPXF: {}", message.into()),
-    }
-}
-fn list<T>(
-    stream: &mut TokenStream,
-    line: usize,
-    mut item: impl FnMut(&mut TokenStream) -> Result<T, ParseError>,
-) -> Result<Vec<T>, ParseError> {
-    if !stream.consume(&TokenKind::LParen) {
-        return Err(error(line, "lists require parentheses"));
-    }
-    let mut values = Vec::new();
-    loop {
-        values.push(item(stream)?);
-        if stream.consume(&TokenKind::RParen) {
-            return Ok(values);
-        }
-        if !stream.consume(&TokenKind::Comma) {
-            return Err(error(line, "expected ',' or ')' in list"));
-        }
     }
 }
 fn number(
@@ -52,21 +33,6 @@ fn name(stream: &mut TokenStream, line: usize) -> Result<String, ParseError> {
     }
     Ok(expect_node_with_authored_spelling(stream, line)?.1)
 }
-fn choice(
-    stream: &mut TokenStream,
-    line: usize,
-    field: &'static str,
-    choices: &[&str],
-) -> Result<String, ParseError> {
-    let value = card_name(stream, line, CARD, field)?.to_ascii_uppercase();
-    if !choices.contains(&value.as_str()) {
-        return Err(error(
-            line,
-            format!("{field} must be {}", choices.join(" or ")),
-        ));
-    }
-    Ok(value)
-}
 pub(super) fn parse(
     stream: &mut TokenStream,
     line: usize,
@@ -76,7 +42,7 @@ pub(super) fn parse(
         if take_keyword(stream).as_deref() != Some("LIST") {
             return Err(error(line, "expected LIN, DEC, OCT or LIST=(...)"));
         }
-        let values = list(stream, line, |s| number(s, line, params, "LIST"))?;
+        let values = card_list(stream, line, CARD, |s| number(s, line, params, "LIST"))?;
         if values.windows(2).any(|p| p[0] >= p[1]) {
             return Err(error(line, "LIST frequencies must be strictly increasing"));
         }
@@ -124,15 +90,15 @@ pub(super) fn parse(
                 let selected = if keyword == "SOURCE" {
                     QpxfCardSources::Named(vec![name(stream, line)?])
                 } else if matches!(stream.peek().kind, TokenKind::LParen) {
-                    QpxfCardSources::Named(list(stream, line, |s| name(s, line))?)
+                    QpxfCardSources::Named(card_list(stream, line, CARD, |s| name(s, line))?)
                 } else {
-                    choice(stream, line, "SOURCES", &["ALL"])?;
+                    card_choice(stream, line, CARD, "SOURCES", &["ALL"])?;
                     QpxfCardSources::AllIndependent
                 };
                 bind_once(&mut sources, selected, CARD, line, "SOURCES")?;
             }
             "OUT" => {
-                let kind = choice(stream, line, "OUT", &["V", "I"])?;
+                let kind = card_choice(stream, line, CARD, "OUT", &["V", "I"])?;
                 if !stream.consume(&TokenKind::LParen) {
                     return Err(error(line, "OUT requires V(node[,reference]) or I(branch)"));
                 }
@@ -157,13 +123,13 @@ pub(super) fn parse(
             }
             "INLATTICES" => {
                 let selected = if matches!(stream.peek().kind, TokenKind::LParen) {
-                    QpxfCardLattices::Explicit(list(stream, line, |s| {
-                        list(s, line, |s| {
+                    QpxfCardLattices::Explicit(card_list(stream, line, CARD, |s| {
+                        card_list(s, line, CARD, |s| {
                             card_signed(s, line, params, CARD, "INLATTICES", i32::MIN)
                         })
                     })?)
                 } else {
-                    choice(stream, line, "INLATTICES", &["ALL"])?;
+                    card_choice(stream, line, CARD, "INLATTICES", &["ALL"])?;
                     QpxfCardLattices::AllRetained
                 };
                 bind_once(
@@ -175,7 +141,7 @@ pub(super) fn parse(
                 )?;
             }
             "INLATTICE" => {
-                let tuple = list(stream, line, |s| {
+                let tuple = card_list(stream, line, CARD, |s| {
                     card_signed(s, line, params, CARD, "INLATTICE", i32::MIN)
                 })?;
                 bind_once(
@@ -187,7 +153,7 @@ pub(super) fn parse(
                 )?;
             }
             "MAXORDERS" => {
-                let orders = list(stream, line, |s| {
+                let orders = card_list(stream, line, CARD, |s| {
                     card_count(s, line, params, CARD, "MAXORDERS", 0)
                 })?;
                 bind_once(
@@ -199,21 +165,21 @@ pub(super) fn parse(
                 )?;
             }
             "OUTLATTICE" => {
-                let tuple = list(stream, line, |s| {
+                let tuple = card_list(stream, line, CARD, |s| {
                     card_signed(s, line, params, CARD, "OUTLATTICE", i32::MIN)
                 })?;
                 bind_once(&mut output_lattice, tuple, CARD, line, "OUTLATTICE")?;
             }
             "AXIS" => bind_once(
                 &mut card.frequency_axis,
-                choice(stream, line, "AXIS", &["OUTPUT", "OFFSET"])?,
+                card_choice(stream, line, CARD, "AXIS", &["OUTPUT", "OFFSET"])?,
                 CARD,
                 line,
                 "AXIS",
             )?,
             "SOLVER" => bind_once(
                 &mut card.linear_solver,
-                choice(stream, line, "SOLVER", &["AUTO", "DIRECT", "KRYLOV"])?,
+                card_choice(stream, line, CARD, "SOLVER", &["AUTO", "DIRECT", "KRYLOV"])?,
                 CARD,
                 line,
                 "SOLVER",
@@ -271,7 +237,7 @@ pub(super) fn parse(
             )?,
             "FROM" => bind_once(
                 &mut from,
-                choice(stream, line, "FROM", &["QPSS"])?,
+                card_choice(stream, line, CARD, "FROM", &["QPSS"])?,
                 CARD,
                 line,
                 "FROM",

@@ -245,6 +245,15 @@ pub(crate) fn element_origin_key(subcircuit: Option<&str>, name: &str) -> String
     )
 }
 
+/// Whether two optional names are both absent or equal ignoring ASCII case.
+pub(crate) fn optional_names_eq(left: Option<&str>, right: Option<&str>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+        _ => false,
+    }
+}
+
 /// Boundary that exposed an unterminated `.SUBCKT` definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingSubcircuitEndsBoundary {

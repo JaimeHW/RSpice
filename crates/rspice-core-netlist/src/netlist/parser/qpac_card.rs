@@ -1,6 +1,6 @@
 //! `.QPAC LIN|DEC|OCT np start stop` or `.QPAC LIST=(offset,...)`.
 use super::analysis_card_scan::{
-    at_card_end, at_keyword, bind_once, card_count, card_error, card_name, card_number,
+    at_card_end, at_keyword, bind_once, card_count, card_error, card_list, card_name, card_number,
     card_signed, take_keyword,
 };
 use super::*;
@@ -12,26 +12,6 @@ fn error(line: usize, message: impl Into<String>) -> ParseError {
     ParseError::Syntax {
         line,
         message: format!(".QPAC: {}", message.into()),
-    }
-}
-
-fn list<T>(
-    stream: &mut TokenStream,
-    line: usize,
-    mut item: impl FnMut(&mut TokenStream) -> Result<T, ParseError>,
-) -> Result<Vec<T>, ParseError> {
-    if !stream.consume(&TokenKind::LParen) {
-        return Err(error(line, "lists require parentheses"));
-    }
-    let mut values = Vec::new();
-    loop {
-        values.push(item(stream)?);
-        if stream.consume(&TokenKind::RParen) {
-            return Ok(values);
-        }
-        if !stream.consume(&TokenKind::Comma) {
-            return Err(error(line, "expected ',' or ')' in list"));
-        }
     }
 }
 
@@ -68,7 +48,7 @@ pub(super) fn parse(
         if take_keyword(stream).as_deref() != Some("LIST") {
             return Err(error(line, "expected LIN, DEC, OCT or LIST=(...)"));
         }
-        let values = list(stream, line, |s| number(s, line, params, "LIST"))?;
+        let values = card_list(stream, line, CARD, |s| number(s, line, params, "LIST"))?;
         if values.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err(error(line, "LIST offsets must be strictly increasing"));
         }
@@ -138,7 +118,7 @@ pub(super) fn parse(
                 } else {
                     "OUTLATTICE"
                 };
-                let values = list(stream, line, |s| {
+                let values = card_list(stream, line, CARD, |s| {
                     card_signed(s, line, params, CARD, field, i32::MIN)
                 })?;
                 bind_once(

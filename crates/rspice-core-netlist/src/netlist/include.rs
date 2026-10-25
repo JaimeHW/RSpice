@@ -1815,7 +1815,10 @@ fn is_portable_absolute_source_path(path: &Path) -> bool {
     portable.starts_with('/') || is_windows_source_path_literal(&portable)
 }
 
-fn is_windows_source_path_literal(path: &str) -> bool {
+/// Whether portable (`/`-separated) path text is a Windows absolute path: a
+/// drive path (`C:/...`) or a UNC share (`//server/share`), with or without a
+/// `//?/` or `//./` device prefix.
+pub fn is_windows_source_path_literal(path: &str) -> bool {
     let candidate = path
         .strip_prefix("//?/")
         .or_else(|| path.strip_prefix("//./"))

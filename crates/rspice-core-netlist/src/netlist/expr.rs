@@ -74,7 +74,7 @@ pub(crate) use behavioral::{
     prepare_behavioral_expression_preserving_spelling_with_abort,
     validate_prepared_behavioral_runtime_expression,
 };
-pub(crate) use context::{CapturedStatisticalParameter, MODEL_TEMPERATURE_PARAMETERS};
+pub(crate) use context::{CapturedStatisticalParameter, MODEL_TEMPERATURE_PARAMETERS, splitmix64};
 pub use context::{
     DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, ParameterRedefinitionDiagnosticPolicy,
     ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,

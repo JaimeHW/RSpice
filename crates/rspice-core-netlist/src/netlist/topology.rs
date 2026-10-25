@@ -4,6 +4,7 @@
 //! construction. They preserve simulator-level device invariants by removing
 //! ideal topological shorts before individual device builders validate values.
 
+use super::flattener::extract_parenthesized;
 use super::{Element, ElementKind, XspiceDigitalNode, XspicePort};
 use crate::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -1383,30 +1384,6 @@ fn is_ident_start(c: char) -> bool {
 
 fn is_ident_continue(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':'
-}
-
-fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, usize)> {
-    if chars.get(lparen_idx).copied() != Some('(') {
-        return None;
-    }
-
-    let mut depth = 0usize;
-    let mut i = lparen_idx;
-    while i < chars.len() {
-        match chars[i] {
-            '(' => depth += 1,
-            ')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    let inner: String = chars[lparen_idx + 1..i].iter().collect();
-                    return Some((inner, i));
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }
 
 #[cfg(test)]

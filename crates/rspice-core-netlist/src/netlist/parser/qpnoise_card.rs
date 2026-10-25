@@ -1,7 +1,7 @@
 //! Strict native `.QPNOISE` parsing with signed frequency and sideband lists.
 use super::analysis_card_scan::{
-    at_card_end, at_keyword, bind_once, card_bool, card_count, card_error, card_name, card_number,
-    card_signed, take_keyword,
+    at_card_end, at_keyword, bind_once, card_bool, card_choice, card_count, card_error, card_list,
+    card_number, card_signed, take_keyword,
 };
 use super::*;
 use crate::netlist::{
@@ -13,25 +13,6 @@ fn error(line: usize, message: impl Into<String>) -> ParseError {
     ParseError::Syntax {
         line,
         message: format!(".QPNOISE: {}", message.into()),
-    }
-}
-fn list<T>(
-    stream: &mut TokenStream,
-    line: usize,
-    mut item: impl FnMut(&mut TokenStream) -> Result<T, ParseError>,
-) -> Result<Vec<T>, ParseError> {
-    if !stream.consume(&TokenKind::LParen) {
-        return Err(error(line, "lists require parentheses"));
-    }
-    let mut values = Vec::new();
-    loop {
-        values.push(item(stream)?);
-        if stream.consume(&TokenKind::RParen) {
-            return Ok(values);
-        }
-        if !stream.consume(&TokenKind::Comma) {
-            return Err(error(line, "expected ',' or ')' in list"));
-        }
     }
 }
 fn number(
@@ -55,32 +36,17 @@ fn name(stream: &mut TokenStream, line: usize) -> Result<String, ParseError> {
     }
     Ok(expect_node_with_authored_spelling(stream, line)?.1)
 }
-fn choice(
-    stream: &mut TokenStream,
-    line: usize,
-    field: &'static str,
-    choices: &[&str],
-) -> Result<String, ParseError> {
-    let value = card_name(stream, line, CARD, field)?.to_ascii_uppercase();
-    if !choices.contains(&value.as_str()) {
-        return Err(error(
-            line,
-            format!("{field} must be {}", choices.join(" or ")),
-        ));
-    }
-    Ok(value)
-}
 fn tuple(
     stream: &mut TokenStream,
     line: usize,
     params: &ParamContext,
 ) -> Result<Vec<i32>, ParseError> {
-    list(stream, line, |s| {
+    card_list(stream, line, CARD, |s| {
         card_signed(s, line, params, CARD, "tone tuple", i32::MIN)
     })
 }
 fn observation(stream: &mut TokenStream, line: usize) -> Result<QpxfCardOutput, ParseError> {
-    let kind = choice(stream, line, "output", &["V", "I"])?;
+    let kind = card_choice(stream, line, CARD, "output", &["V", "I"])?;
     if !stream.consume(&TokenKind::LParen) {
         return Err(error(
             line,
@@ -114,7 +80,7 @@ pub(super) fn parse(
         if take_keyword(stream).as_deref() != Some("LIST") {
             return Err(error(line, "expected LIN, DEC, OCT or LIST=(...)"));
         }
-        let values = list(stream, line, |s| number(s, line, params, "LIST"))?;
+        let values = card_list(stream, line, CARD, |s| number(s, line, params, "LIST"))?;
         if values.windows(2).any(|p| p[0] >= p[1]) {
             return Err(error(line, "LIST frequencies must be strictly increasing"));
         }
@@ -172,7 +138,7 @@ pub(super) fn parse(
                 "OUTLATTICE",
             )?,
             "OUTS" => {
-                let selected = list(stream, line, |s| {
+                let selected = card_list(stream, line, CARD, |s| {
                     if !s.consume(&TokenKind::LParen) {
                         return Err(error(
                             line,
@@ -210,16 +176,18 @@ pub(super) fn parse(
             )?,
             "NOISELATTICES" => {
                 let value = if matches!(stream.peek().kind, TokenKind::LParen) {
-                    QpnoiseCardLattices::Explicit(list(stream, line, |s| tuple(s, line, params))?)
+                    QpnoiseCardLattices::Explicit(card_list(stream, line, CARD, |s| {
+                        tuple(s, line, params)
+                    })?)
                 } else {
-                    choice(stream, line, "NOISELATTICES", &["ALL"])?;
+                    card_choice(stream, line, CARD, "NOISELATTICES", &["ALL"])?;
                     QpnoiseCardLattices::AllRetained
                 };
                 bind_once(&mut lattices, value, CARD, line, "noise lattice selection")?;
             }
             "MAXORDERS" => bind_once(
                 &mut lattices,
-                QpnoiseCardLattices::MaxOrders(list(stream, line, |s| {
+                QpnoiseCardLattices::MaxOrders(card_list(stream, line, CARD, |s| {
                     card_count(s, line, params, CARD, "MAXORDERS", 0)
                 })?),
                 CARD,
@@ -242,30 +210,30 @@ pub(super) fn parse(
             )?,
             "NOISESOURCES" => {
                 let value = if matches!(stream.peek().kind, TokenKind::LParen) {
-                    QpnoiseCardSources::Only(list(stream, line, |s| name(s, line))?)
+                    QpnoiseCardSources::Only(card_list(stream, line, CARD, |s| name(s, line))?)
                 } else {
-                    choice(stream, line, "NOISESOURCES", &["ALL"])?;
+                    card_choice(stream, line, CARD, "NOISESOURCES", &["ALL"])?;
                     QpnoiseCardSources::All
                 };
                 bind_once(&mut sources, value, CARD, line, "noise source selection")?;
             }
             "EXCLUDESOURCES" => bind_once(
                 &mut sources,
-                QpnoiseCardSources::Except(list(stream, line, |s| name(s, line))?),
+                QpnoiseCardSources::Except(card_list(stream, line, CARD, |s| name(s, line))?),
                 CARD,
                 line,
                 "noise source selection",
             )?,
             "AXIS" => bind_once(
                 &mut card.frequency_axis,
-                choice(stream, line, "AXIS", &["OUTPUT", "OFFSET"])?,
+                card_choice(stream, line, CARD, "AXIS", &["OUTPUT", "OFFSET"])?,
                 CARD,
                 line,
                 "AXIS",
             )?,
             "SOLVER" => bind_once(
                 &mut card.linear_solver,
-                choice(stream, line, "SOLVER", &["AUTO", "DIRECT", "KRYLOV"])?,
+                card_choice(stream, line, CARD, "SOLVER", &["AUTO", "DIRECT", "KRYLOV"])?,
                 CARD,
                 line,
                 "SOLVER",
@@ -308,13 +276,13 @@ pub(super) fn parse(
             )?,
             "INTEGRATION" => bind_once(
                 &mut card.integration_method,
-                choice(stream, line, "INTEGRATION", &["LINEAR", "LOGLOG"])?,
+                card_choice(stream, line, CARD, "INTEGRATION", &["LINEAR", "LOGLOG"])?,
                 CARD,
                 line,
                 "INTEGRATION",
             )?,
             "BAND" => {
-                let values = list(stream, line, |s| number(s, line, params, "BAND"))?;
+                let values = card_list(stream, line, CARD, |s| number(s, line, params, "BAND"))?;
                 let band = values
                     .try_into()
                     .map_err(|_| error(line, "BAND requires exactly two frequencies"))?;
@@ -358,14 +326,14 @@ pub(super) fn parse(
             )?,
             "REFLATTICES" => bind_once(
                 &mut card.reference_lattices,
-                list(stream, line, |s| tuple(s, line, params))?,
+                card_list(stream, line, CARD, |s| tuple(s, line, params))?,
                 CARD,
                 line,
                 "REFLATTICES",
             )?,
             "FROM" => bind_once(
                 &mut from,
-                choice(stream, line, "FROM", &["QPSS"])?,
+                card_choice(stream, line, CARD, "FROM", &["QPSS"])?,
                 CARD,
                 line,
                 "FROM",

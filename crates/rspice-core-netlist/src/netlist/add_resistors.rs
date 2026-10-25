@@ -13,6 +13,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 
 use super::expr::eval_expression;
 use super::lexer::parse_spice_value_complete;
+use super::parser::strip_semicolon_comment;
 use super::{
     ConnectivityAnalysisError, Element, ElementKind, ElementProvenance, FlattenerConfig, Netlist,
     ParseError, ParseWithAbortError, XyceAddResistorMode, XyceAddResistorSpec,
@@ -455,7 +456,7 @@ fn classify_root_artifact_lines(
     // happens to spell a directive.
     for (index, line) in lines.iter().enumerate().skip(1) {
         poll(index, abort)?;
-        let without_comment = strip_artifact_inline_comment(line.content);
+        let without_comment = strip_semicolon_comment(line.content);
         let first_nonblank = without_comment.trim_start_matches([' ', '\t']);
         if first_nonblank.is_empty() || first_nonblank.starts_with('*') {
             continue;
@@ -485,26 +486,6 @@ fn classify_root_artifact_lines(
     commented.retain(|index| *index < cutoff);
     check_abort(abort)?;
     Ok((cutoff, commented))
-}
-
-fn strip_artifact_inline_comment(line: &str) -> &str {
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut escaped = false;
-    for (index, character) in line.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match character {
-            '\\' if in_single_quote || in_double_quote => escaped = true,
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            ';' if !in_single_quote && !in_double_quote => return &line[..index],
-            _ => {}
-        }
-    }
-    line
 }
 
 fn resolve_resistance(

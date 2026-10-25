@@ -1,5 +1,6 @@
 //! Portable identities for authenticated model-source paths.
 
+use rspice_core_netlist::netlist::include::is_windows_source_path_literal;
 use std::path::Path;
 
 /// Resolve a dependency against its owning portable source identity.
@@ -35,34 +36,14 @@ pub fn portable_path_key(path: &Path) -> String {
 
 fn portable_text_key(path: &str) -> String {
     let mut key = path.to_owned();
-    if is_windows_absolute_text(path) {
+    if is_windows_source_path_literal(path) {
         key.make_ascii_lowercase();
     }
     key
 }
 
 fn is_portable_absolute_text(path: &str) -> bool {
-    path.starts_with('/') || is_windows_absolute_text(path)
-}
-
-fn is_windows_absolute_text(path: &str) -> bool {
-    let candidate = path
-        .strip_prefix("//?/")
-        .or_else(|| path.strip_prefix("//./"))
-        .unwrap_or(path);
-    let candidate = candidate
-        .strip_prefix("UNC/")
-        .or_else(|| candidate.strip_prefix("unc/"))
-        .unwrap_or(candidate);
-    let bytes = candidate.as_bytes();
-    (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/')
-        || (path.starts_with("//")
-            && candidate
-                .split('/')
-                .filter(|component| !component.is_empty())
-                .take(2)
-                .count()
-                == 2)
+    path.starts_with('/') || is_windows_source_path_literal(path)
 }
 
 fn normalize_portable_path_text(path: &str) -> Result<String, String> {
@@ -82,7 +63,7 @@ fn normalize_portable_path_text(path: &str) -> Result<String, String> {
         2
     } else if path.starts_with('/') {
         1
-    } else if is_windows_absolute_text(&path) {
+    } else if is_windows_source_path_literal(&path) {
         3
     } else {
         0

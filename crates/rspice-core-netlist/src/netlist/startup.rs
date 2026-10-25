@@ -7,8 +7,8 @@ use super::{
     StartupDirectiveConflictError, StartupDirectiveDisposition, StartupDirectiveKind,
     StartupDirectiveRecord, StartupDirectiveScope,
     collect_output_node_namespace_from_elements_with_abort, ensure_parse_not_aborted,
-    finish_non_aborting_parse, flatten_netlist_with_models_with_abort, poll_parse_abort,
-    poll_parse_text,
+    finish_non_aborting_parse, flatten_netlist_with_models_with_abort, optional_names_eq,
+    poll_parse_abort, poll_parse_text,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -611,7 +611,7 @@ fn remove_matching_initial_condition(
 ) {
     if let Some(index) = entries.iter().position(|entry| {
         entry.node.eq_ignore_ascii_case(&owned.execution_node)
-            && optional_node_eq(
+            && optional_names_eq(
                 entry.reference.as_deref(),
                 owned.execution_reference.as_deref(),
             )
@@ -623,7 +623,7 @@ fn remove_matching_initial_condition(
 fn remove_matching_node_set(entries: &mut Vec<NodeSet>, owned: &super::StartupDirectiveEntry) {
     if let Some(index) = entries.iter().position(|entry| {
         entry.node.eq_ignore_ascii_case(&owned.execution_node)
-            && optional_node_eq(
+            && optional_names_eq(
                 entry.reference.as_deref(),
                 owned.execution_reference.as_deref(),
             )
@@ -1039,14 +1039,6 @@ fn constraint_path(
 fn startup_values_equivalent(left: Value, right: Value) -> bool {
     let scale = left.abs().max(right.abs()).max(1.0);
     (left - right).abs() <= 64.0 * Value::EPSILON * scale
-}
-
-fn optional_node_eq(left: Option<&str>, right: Option<&str>) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
-        _ => false,
-    }
 }
 
 fn sort_dedup_qualified_targets(nodes: &mut Vec<String>, references: &mut Vec<Option<String>>) {

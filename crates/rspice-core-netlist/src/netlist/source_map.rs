@@ -1,6 +1,7 @@
 // Lightweight source mapping for editor diagnostics.
 
 use super::expr::ParameterResolver;
+use super::optional_names_eq;
 use crate::abort_signal::NoAbort;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -154,7 +155,7 @@ impl NetlistSourceMap {
             let functions = self
                 .functions
                 .iter()
-                .filter(|function| same_scope(function.scope.as_deref(), level));
+                .filter(|function| optional_names_eq(function.scope.as_deref(), level));
             for function in binding_definitions(functions, |function| &function.name) {
                 context.define_function(&function.name, function.arguments.clone(), &function.body);
             }
@@ -220,7 +221,7 @@ impl NetlistSourceMap {
                 span.kind == NetlistValueKind::ParamDefinition
                     && span.unread.is_some()
                     && span.name.eq_ignore_ascii_case(name)
-                    && same_scope(span.scope.as_deref(), level)
+                    && optional_names_eq(span.scope.as_deref(), level)
             })
         })
     }
@@ -234,7 +235,7 @@ impl NetlistSourceMap {
         self.value_spans.iter().filter(move |span| {
             span.kind == NetlistValueKind::ParamDefinition
                 && span.unread.is_none()
-                && same_scope(span.scope.as_deref(), level)
+                && optional_names_eq(span.scope.as_deref(), level)
         })
     }
 }
@@ -274,16 +275,6 @@ fn scope_levels(scope: Option<&str>) -> Vec<Option<&str>> {
         levels.push(Some(scope));
     }
     levels
-}
-
-/// Whether a definition written in `definition_scope` is written directly in
-/// `level`. `None` is the top level.
-fn same_scope(definition_scope: Option<&str>, level: Option<&str>) -> bool {
-    match (definition_scope, level) {
-        (None, None) => true,
-        (Some(definition_scope), Some(level)) => definition_scope.eq_ignore_ascii_case(level),
-        _ => false,
-    }
 }
 
 /// The editor source map of `buffer` as a parse of it read it.

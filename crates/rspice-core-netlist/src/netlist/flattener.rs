@@ -5526,7 +5526,7 @@ fn is_ident_continue(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':'
 }
 
-fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, usize)> {
+pub(super) fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, usize)> {
     if chars.get(lparen_idx).copied() != Some('(') {
         return None;
     }

@@ -7,6 +7,59 @@
 
 use super::*;
 
+/// A syntax failure prefixed with the card's directive, e.g. `.QPAC: ...`.
+fn card_syntax_error(
+    card: AnalysisCard,
+    line: usize,
+    message: impl std::fmt::Display,
+) -> ParseError {
+    ParseError::Syntax {
+        line,
+        message: format!("{}: {message}", card.directive()),
+    }
+}
+
+/// Read a parenthesized, comma-separated list of `item`s.
+pub(super) fn card_list<T>(
+    stream: &mut TokenStream,
+    line: usize,
+    card: AnalysisCard,
+    mut item: impl FnMut(&mut TokenStream) -> Result<T, ParseError>,
+) -> Result<Vec<T>, ParseError> {
+    if !stream.consume(&TokenKind::LParen) {
+        return Err(card_syntax_error(card, line, "lists require parentheses"));
+    }
+    let mut values = Vec::new();
+    loop {
+        values.push(item(stream)?);
+        if stream.consume(&TokenKind::RParen) {
+            return Ok(values);
+        }
+        if !stream.consume(&TokenKind::Comma) {
+            return Err(card_syntax_error(card, line, "expected ',' or ')' in list"));
+        }
+    }
+}
+
+/// Read a name field that must be one of `choices` (compared uppercase).
+pub(super) fn card_choice(
+    stream: &mut TokenStream,
+    line: usize,
+    card: AnalysisCard,
+    field: &'static str,
+    choices: &[&str],
+) -> Result<String, ParseError> {
+    let value = card_name(stream, line, card, field)?.to_ascii_uppercase();
+    if !choices.contains(&value.as_str()) {
+        return Err(card_syntax_error(
+            card,
+            line,
+            format!("{field} must be {}", choices.join(" or ")),
+        ));
+    }
+    Ok(value)
+}
+
 /// Build the typed card failure for a card, line and issue.
 pub(super) fn card_error(card: AnalysisCard, line: usize, issue: AnalysisCardIssue) -> ParseError {
     ParseError::AnalysisCard(Box::new(AnalysisCardError::new(card, line, issue)))

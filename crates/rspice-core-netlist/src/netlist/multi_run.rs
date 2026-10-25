@@ -1099,7 +1099,7 @@ fn has_step_data_reference(lines: &[String]) -> bool {
     let mut logical_statement = String::new();
 
     for line in lines {
-        let trimmed = strip_multi_run_inline_comment(line).trim();
+        let trimmed = super::parser::strip_semicolon_comment(line).trim();
         if trimmed.is_empty()
             || trimmed.starts_with('*')
             || trimmed.starts_with('$')
@@ -1150,26 +1150,6 @@ fn logical_step_references_data(statement: &str) -> bool {
 /// Strip semicolon comments without treating markers inside authored strings
 /// as comments. Multi-run expansion precedes dialect selection, so full-line
 /// `*`, `$`, and `//` handling stays in the logical-line owner above.
-fn strip_multi_run_inline_comment(line: &str) -> &str {
-    let mut single_quoted = false;
-    let mut double_quoted = false;
-    let mut escaped = false;
-    for (index, character) in line.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match character {
-            '\\' if single_quoted || double_quoted => escaped = true,
-            '\'' if !double_quoted => single_quoted = !single_quoted,
-            '"' if !single_quoted => double_quoted = !double_quoted,
-            ';' if !single_quoted && !double_quoted => return &line[..index],
-            _ => {}
-        }
-    }
-    line
-}
-
 /// The table name referenced by `DATA=<name>` on this line, if any.
 fn data_reference_name(line: &str) -> Option<String> {
     scan_assignments(line)

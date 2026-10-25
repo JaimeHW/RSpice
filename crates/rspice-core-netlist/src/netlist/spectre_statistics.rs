@@ -24,7 +24,10 @@
 //! ordinary command dispatcher only consumes the line lexically — it never
 //! parses the payload a second time.
 
-use super::{ParamContext, expr::eval_expression};
+use super::{
+    ParamContext,
+    expr::{eval_expression, splitmix64},
+};
 use crate::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1104,12 +1107,6 @@ fn keyed_standard_normal(stream: u64, identity: u64) -> Value {
 
 fn uniform_from_bits(bits: u64) -> Value {
     (bits >> 11) as Value * (1.0 / 9_007_199_254_740_992.0)
-}
-
-fn splitmix64(mut value: u64) -> u64 {
-    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    value ^ (value >> 31)
 }
 
 fn hash_combine(state: u64, value: u64) -> u64 {

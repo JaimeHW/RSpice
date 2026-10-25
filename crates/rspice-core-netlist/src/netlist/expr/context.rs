@@ -38,7 +38,7 @@ const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// Finalizer from SplitMix64 (Steele, Lea, Flood 2014).
 #[inline]
-fn splitmix64_mix(mut z: u64) -> u64 {
+pub(crate) fn splitmix64(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
@@ -98,7 +98,7 @@ impl RandomState {
         // ordering across threads is never relied upon (parallel drivers
         // reseed per run instead of sharing one stream).
         let index = self.counter.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-        splitmix64_mix(self.seed.wrapping_add(index.wrapping_mul(GOLDEN_GAMMA)))
+        splitmix64(self.seed.wrapping_add(index.wrapping_mul(GOLDEN_GAMMA)))
     }
 
     /// Uniform draw in `[0, 1)` with 53-bit resolution.
