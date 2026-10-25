@@ -357,7 +357,12 @@ impl Bench {
 
     /// Make sheet `index` the one being edited, as its tab does.
     pub(super) fn activate_sheet(&mut self, index: usize) {
-        let _ = super::sheets::activate_sheet(&mut self.app.state, self.sheets[index]);
+        let state = &mut self.app.state;
+        let _ = super::sheets::activate_sheet(
+            &mut state.model,
+            &mut state.workbench,
+            self.sheets[index],
+        );
         self.end_frame();
     }
 

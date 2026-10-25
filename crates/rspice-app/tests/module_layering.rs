@@ -288,7 +288,12 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// application whole; they read and write only their dialog and the model,
 /// so they take those. The new feature dialog entry the shell's dialog order
 /// calls takes the application once, for all of them.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 718;
+///
+/// 718 -> 716 on 2026-10-25, when the sheets feature began drawing its sheet
+/// strip. The strip and the action it applies after its chips paint took the
+/// application whole; they read and write only the model, the session and
+/// the sheets feature's reveal request, so they take those.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 716;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

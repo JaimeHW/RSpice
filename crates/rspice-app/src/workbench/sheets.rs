@@ -27,6 +27,7 @@ use crate::workbench::app::{
     open_custom_sheet_size_library, open_drawing_sheet_defaults, open_sheet_format_manager,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::chrome::sheet_strip::{self, SheetStrip};
 use crate::workbench::docks::inspector::design::sheet::{
     SheetInspector, commit_pending_sheet_text, sheet_panel,
 };
@@ -36,6 +37,7 @@ use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureRegistry, Reads, Session,
 };
 use crate::workbench::framework::requests::PrintActiveView;
+use crate::workbench::layout::LayoutSpec;
 use crate::workbench::slots::SheetsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 
@@ -67,6 +69,26 @@ impl Feature for SheetsFeature {
             },
             commit_pending_edit: |cx, ctx| commit_pending_sheet_text(ctx, cx.model, cx.wb),
         });
+    }
+}
+
+impl SheetsFeature {
+    /// Draw the sheet strip beneath the document row: the shell's frame
+    /// calls this in the step that allocates the strip.
+    pub(in crate::workbench) fn show_sheet_strip(
+        cx: &mut Cx<'_, Self>,
+        root: &mut egui::Ui,
+        layout: LayoutSpec,
+    ) {
+        sheet_strip::show(
+            root,
+            SheetStrip {
+                model: cx.model,
+                workbench: cx.wb,
+                reveal_sheet_section: &mut cx.state.reveal_sheet_section,
+            },
+            layout,
+        );
     }
 }
 

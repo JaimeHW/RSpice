@@ -14,6 +14,8 @@ use super::*;
 use crate::state::{
     Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
 };
+use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
 const VIEWPORT: Vec2 = Vec2::new(1_440.0, 900.0);
@@ -70,7 +72,16 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
 fn chrome_rows(ui: &mut Ui, app: &mut RSpiceApp) {
     let layout = LayoutSpec::resolve(VIEWPORT.x, VIEWPORT.y, &app.state.workbench);
     super::super::document_bar::show(ui, app, layout);
-    show(ui, app, layout);
+    show(ui, strip(&mut app.state), layout);
+}
+
+/// The parts of `state` the sheets feature hands the strip.
+fn strip(state: &mut AppState) -> SheetStrip<'_> {
+    SheetStrip {
+        model: &mut state.model,
+        workbench: &mut state.workbench,
+        reveal_sheet_section: &mut state.sheets.reveal_sheet_section,
+    }
 }
 
 fn frame_input() -> RawInput {
@@ -82,8 +93,8 @@ fn frame_input() -> RawInput {
 
 #[test]
 fn one_sheet_is_a_drawing_rather_than_a_set_of_them() {
-    assert!(!is_visible(&app_with_sheets(1).state));
-    assert!(is_visible(&app_with_sheets(2).state));
+    assert!(!is_visible(&app_with_sheets(1).state.model));
+    assert!(is_visible(&app_with_sheets(2).state.model));
 }
 
 #[test]
@@ -378,7 +389,11 @@ fn a_strip_action_routes_straight_to_the_sheet_actions() {
         .selection
         .select_component(10);
 
-    apply(&mut app, StripAction::Activate(entries[1].id), &entries);
+    apply(
+        &mut strip(&mut app.state),
+        StripAction::Activate(entries[1].id),
+        &entries,
+    );
 
     assert_eq!(
         sheet_actions::active_sheet_id(&app.state),
@@ -395,7 +410,7 @@ fn a_strip_action_routes_straight_to_the_sheet_actions() {
     );
 
     apply(
-        &mut app,
+        &mut strip(&mut app.state),
         StripAction::Reorder {
             sheet: entries[1].id,
             to_index: 0,

@@ -44,11 +44,13 @@ pub(in crate::workbench) enum SheetDeletePlan {
     },
 }
 
-pub(in crate::workbench) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    state.model.active_sheet_catalog()
+pub(in crate::workbench) fn active_sheet_catalog(
+    state: &impl AsRef<Model>,
+) -> Option<&SheetCatalog> {
+    state.as_ref().active_sheet_catalog()
 }
 
-pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
+pub(in crate::workbench) fn sheet_entries(state: &impl AsRef<Model>) -> Vec<SheetEntry> {
     let Some(catalog) = active_sheet_catalog(state) else {
         return Vec::new();
     };
@@ -97,24 +99,25 @@ pub(crate) fn reveal_sheet_properties_on(
     *reveal_sheet_section = true;
 }
 
-pub(in crate::workbench) fn active_sheet_id(state: &AppState) -> Option<SheetId> {
-    state.model.active_sheet_id()
+pub(in crate::workbench) fn active_sheet_id(state: &impl AsRef<Model>) -> Option<SheetId> {
+    state.as_ref().active_sheet_id()
 }
 
-pub(in crate::workbench) fn sheet_count(state: &AppState) -> usize {
+/// How many sheets the open drawing has. A drawing with no sheet catalog is
+/// one sheet drawn without one, and counts none here.
+pub(in crate::workbench) fn sheet_count(state: &impl AsRef<Model>) -> usize {
     active_sheet_catalog(state).map_or(0, |catalog| catalog.sheets().len())
 }
 
 /// Make one sheet the canvas the session is editing: [`Model::activate_sheet`],
 /// stated on the status bar.
 pub(in crate::workbench) fn activate_sheet(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     id: SheetId,
 ) -> Result<String, String> {
-    let outcome = state
-        .model
-        .activate_sheet(id, state.workbench.interaction.drag.let_go());
-    state.workbench.report(outcome)
+    let outcome = model.activate_sheet(id, workbench.interaction.drag.let_go());
+    workbench.report(outcome)
 }
 
 pub(in crate::workbench) fn next_sheet(
@@ -183,13 +186,13 @@ fn settle_drawing(model: &mut Model, workbench: &mut WorkbenchSession) {
 }
 
 pub(in crate::workbench) fn rename_sheet(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     id: SheetId,
     name: String,
 ) -> Result<String, String> {
     let name = name.trim().to_owned();
-    let outcome = state
-        .model
+    let outcome = model
         .edit_sheet_catalog("rename sheet", |catalog| {
             let revision = catalog
                 .find(id)
@@ -200,7 +203,7 @@ pub(in crate::workbench) fn rename_sheet(
                 .map_err(|error| error.to_string())
         })
         .map(|_| format!("Renamed sheet to `{name}`."));
-    state.workbench.report(outcome)
+    workbench.report(outcome)
 }
 
 /// What [`delete_sheet`] would do, under the catalog's own delete policy.
@@ -308,13 +311,13 @@ pub(in crate::workbench) fn commit_delete_sheet(
 }
 
 pub(in crate::workbench) fn move_sheet(
-    state: &mut AppState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     id: SheetId,
     to_index: usize,
 ) -> Result<String, String> {
-    let name = state.model.sheet_name(id);
-    let outcome = state
-        .model
+    let name = model.sheet_name(id);
+    let outcome = model
         .edit_sheet_catalog("reorder sheets", |catalog| {
             catalog
                 .move_sheet(
@@ -326,7 +329,7 @@ pub(in crate::workbench) fn move_sheet(
                 .map_err(|error| error.to_string())
         })
         .map(|_| format!("Moved sheet `{name}` to position {}.", to_index + 1));
-    state.workbench.report(outcome)
+    workbench.report(outcome)
 }
 
 /// Move the retained instance selection onto `destination`, creating the typed

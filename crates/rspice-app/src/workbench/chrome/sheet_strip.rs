@@ -17,8 +17,9 @@ use egui::{Frame, Id, Layout, Panel, Sense, Ui, Vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app::sheets::{self as sheet_actions, SheetDeletePlan, SheetEntry};
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::session::shortcuts::request_engineering_canvas_focus_in_this_pass;
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::state::WorkbenchSession;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -34,20 +35,30 @@ const RENAME_WIDTH: f32 = 132.0;
 
 /// Whether the active cell view has enough sheets for the strip to mean
 /// anything. One sheet is a drawing, not a set of them.
-pub(in crate::workbench) fn is_visible(state: &AppState) -> bool {
-    sheet_actions::sheet_count(state) > 1
+pub(in crate::workbench) fn is_visible(model: &Model) -> bool {
+    sheet_actions::sheet_count(model) > 1
 }
 
-pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    if !is_visible(&app.state) {
+/// What the strip reads and writes: the model whose sheets it shows and
+/// edits, the session that states what an action did, and the sheets
+/// feature's request that the inspector bring its Sheet section into view.
+pub(in crate::workbench) struct SheetStrip<'a> {
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+    pub(in crate::workbench) reveal_sheet_section: &'a mut bool,
+}
+
+/// Draw the strip beneath the document row.
+pub(in crate::workbench) fn show(root: &mut Ui, mut strip: SheetStrip<'_>, layout: LayoutSpec) {
+    if !is_visible(strip.model) {
         clear_gestures(root.ctx());
         return;
     }
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
-    let entries = sheet_actions::sheet_entries(&app.state);
-    let active = sheet_actions::active_sheet_id(&app.state);
+    let entries = sheet_actions::sheet_entries(&*strip.model);
+    let active = sheet_actions::active_sheet_id(&*strip.model);
     let mut action = StripAction::None;
     // A context menu opens inside the chip's own pass, which no longer has the
     // application to ask what deleting that sheet would do. Resolve every
@@ -55,12 +66,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let plans = DeletePlans(
         entries
             .iter()
-            .map(|entry| {
-                (
-                    entry.id,
-                    sheet_actions::plan_delete(&app.state.model, entry.id),
-                )
-            })
+            .map(|entry| (entry.id, sheet_actions::plan_delete(strip.model, entry.id)))
             .collect(),
     );
     ctx.data_mut(|data| data.insert_temp(delete_plans_id(), plans));
@@ -106,7 +112,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             });
         });
 
-    apply(app, action, &entries);
+    apply(&mut strip, action, &entries);
 }
 
 /// What one frame of the strip asked for. The chips paint while the catalog is
@@ -129,44 +135,33 @@ enum StripAction {
     },
 }
 
-fn apply(app: &mut RSpiceApp, action: StripAction, entries: &[SheetEntry]) {
+fn apply(strip: &mut SheetStrip<'_>, action: StripAction, entries: &[SheetEntry]) {
+    let (model, workbench) = (&mut *strip.model, &mut *strip.workbench);
     match action {
         StripAction::None => {}
         StripAction::Activate(id) => {
-            let _ = sheet_actions::activate_sheet(&mut app.state, id);
+            let _ = sheet_actions::activate_sheet(model, workbench, id);
         }
         StripAction::NewSheetAfter(after) => {
-            let _ = sheet_actions::new_sheet_after(
-                &mut app.state.model,
-                &mut app.state.workbench,
-                after,
-            );
+            let _ = sheet_actions::new_sheet_after(model, workbench, after);
         }
         // The menu row the delete was chosen from named its outcome.
         StripAction::Delete(id) => {
-            let _ = sheet_actions::commit_delete_sheet(
-                &mut app.state.model,
-                &mut app.state.workbench,
-                id,
-            );
+            let _ = sheet_actions::commit_delete_sheet(model, workbench, id);
         }
         StripAction::MoveSelection(id) => {
-            let _ = sheet_actions::move_selection_to_sheet(
-                &mut app.state.model,
-                &mut app.state.workbench,
-                id,
-            );
+            let _ = sheet_actions::move_selection_to_sheet(model, workbench, id);
         }
         StripAction::SheetProperties(id) => {
-            let _ = sheet_actions::activate_sheet(&mut app.state, id);
-            sheet_actions::reveal_sheet_properties(&mut app.state);
+            let _ = sheet_actions::activate_sheet(model, workbench, id);
+            sheet_actions::reveal_sheet_properties_on(model, workbench, strip.reveal_sheet_section);
         }
         StripAction::Reorder { sheet, to_index } => {
             let to_index = to_index.min(entries.len().saturating_sub(1));
-            let _ = sheet_actions::move_sheet(&mut app.state, sheet, to_index);
+            let _ = sheet_actions::move_sheet(model, workbench, sheet, to_index);
         }
         StripAction::Rename { sheet, name } => {
-            let _ = sheet_actions::rename_sheet(&mut app.state, sheet, name);
+            let _ = sheet_actions::rename_sheet(model, workbench, sheet, name);
         }
     }
 }

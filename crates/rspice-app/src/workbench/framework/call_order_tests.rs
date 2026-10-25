@@ -226,7 +226,10 @@ const SHOW: &[Step] = &[
     ("11.17", &["docks::show_navigator(root, app, layout)"]),
     ("11.18", &["docks::show_inspector(root, app, layout)"]),
     ("11.19", &["chrome::document_bar::show(root, app, layout)"]),
-    ("11.20", &["chrome::sheet_strip::show(root, app, layout)"]),
+    (
+        "11.20",
+        &["SheetsFeature::show_sheet_strip(&mut SheetsFeature::cx(&mut app.state), root, layout)"],
+    ),
     ("11.21", &["docks::show_console(root, app, layout)"]),
     (
         "11.22",

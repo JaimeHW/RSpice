@@ -102,7 +102,7 @@ fn activating_a_sheet_retires_the_selection_and_frames_the_new_drawing() {
         .select_component(10);
     state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
 
-    activate_sheet(&mut state, second).expect("activation publishes");
+    activate_sheet(&mut state.model, &mut state.workbench, second).expect("activation publishes");
 
     assert_eq!(active_sheet_id(&state), Some(second));
     assert!(state.model.schematic.session.editor.selection.is_empty());
@@ -123,7 +123,8 @@ fn re_activating_the_current_sheet_publishes_nothing() {
         .selection
         .select_component(10);
 
-    activate_sheet(&mut state, first).expect("an inert activation still succeeds");
+    activate_sheet(&mut state.model, &mut state.workbench, first)
+        .expect("an inert activation still succeeds");
 
     assert_eq!(
         state.model.workspace.content.design_management.revision(),
@@ -237,7 +238,13 @@ fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
 fn renaming_a_sheet_moves_the_printed_title_with_it() {
     let (mut state, first, _) = two_sheet_state();
 
-    rename_sheet(&mut state, first, "  Input stage  ".to_owned()).expect("rename publishes");
+    rename_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        first,
+        "  Input stage  ".to_owned(),
+    )
+    .expect("rename publishes");
 
     let catalog = active_sheet_catalog(&state).expect("catalog");
     let sheet = catalog.find(first).expect("renamed sheet");
@@ -390,7 +397,7 @@ fn the_last_sheet_of_a_catalog_is_retained() {
 fn moving_a_sheet_publishes_the_whole_order() {
     let (mut state, first, second) = two_sheet_state();
 
-    move_sheet(&mut state, second, 0).expect("reorder publishes");
+    move_sheet(&mut state.model, &mut state.workbench, second, 0).expect("reorder publishes");
 
     let entries = sheet_entries(&state);
     assert_eq!(entries[0].id, second);

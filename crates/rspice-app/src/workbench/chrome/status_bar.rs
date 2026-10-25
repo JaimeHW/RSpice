@@ -1118,8 +1118,12 @@ mod tests {
             Some("p1/4".to_owned())
         );
 
-        crate::workbench::app::sheets::activate_sheet(&mut app.state, second)
-            .expect("the second sheet activates");
+        crate::workbench::app::sheets::activate_sheet(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            second,
+        )
+        .expect("the second sheet activates");
         assert_eq!(
             sheet_position_summary(&app.state.model),
             Some((
