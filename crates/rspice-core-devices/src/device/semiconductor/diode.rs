@@ -473,8 +473,6 @@ pub struct Diode {
     last_stamp_id: std::cell::Cell<Value>,
     /// Conductance used by the last nonlinear stamp, with junction gmin folded in.
     last_stamp_gd: std::cell::Cell<Value>,
-    /// Folded AREA * M multiplier applied to the bottom junction.
-    junction_scale: Value,
     /// `T − TNOM` of the last temperature update, retained so a later public
     /// dialect switch can reshift BV (TBV1's law is dialect-specific) and
     /// rematch the knee with the dialect's omitted-NBV default without
@@ -728,7 +726,6 @@ impl Diode {
             last_stamp_vd: std::cell::Cell::new(0.0),
             last_stamp_id: std::cell::Cell::new(0.0),
             last_stamp_gd: std::cell::Cell::new(0.0),
-            junction_scale: 1.0,
             breakdown_temperature_delta: None,
             temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
@@ -1754,7 +1751,6 @@ impl Diode {
         let scale = area * multiplicity;
         self.candidate_eval_valid = false;
         self.multiplicity *= multiplicity;
-        self.junction_scale *= scale;
         self.is *= scale;
         self.ibv *= if self.xyce_dialect {
             scale

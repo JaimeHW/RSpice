@@ -21,10 +21,6 @@ pub struct ThermalNetwork {
     pub t_ambient: Value,
     /// Current junction temperature (K)
     pub t_junction: Value,
-    /// Previous junction temperature for transient integration
-    prev_t_junction: Value,
-    /// Accumulated power for averaging (W·s)
-    power_integral: Value,
     /// Time of last thermal update (s)
     last_update_time: Value,
 }
@@ -36,8 +32,6 @@ impl Default for ThermalNetwork {
             cth: 0.01,          // 10 mJ/K - typical thermal mass
             t_ambient: 300.15,  // 27°C in Kelvin
             t_junction: 300.15, // Start at ambient
-            prev_t_junction: 300.15,
-            power_integral: 0.0,
             last_update_time: 0.0,
         }
     }
@@ -51,8 +45,6 @@ impl ThermalNetwork {
             cth,
             t_ambient,
             t_junction: t_ambient,
-            prev_t_junction: t_ambient,
-            power_integral: 0.0,
             last_update_time: 0.0,
         }
     }
@@ -80,8 +72,6 @@ impl ThermalNetwork {
             return;
         }
 
-        self.prev_t_junction = self.t_junction;
-
         // Backward Euler for thermal RC network
         let g_th = 1.0 / self.rth;
         let denominator = self.cth + dt * g_th;
@@ -99,8 +89,6 @@ impl ThermalNetwork {
     /// Reset thermal state to ambient
     pub fn reset(&mut self) {
         self.t_junction = self.t_ambient;
-        self.prev_t_junction = self.t_ambient;
-        self.power_integral = 0.0;
         self.last_update_time = 0.0;
     }
 }

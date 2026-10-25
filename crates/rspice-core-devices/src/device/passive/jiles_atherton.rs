@@ -242,8 +242,6 @@ struct JaState {
     m_prev: Value,
     /// Current magnetic field H (A/m)
     h: Value,
-    /// Previous H field
-    h_prev: Value,
     /// Current flux B (T)
     b: Value,
     /// Previous flux
@@ -266,7 +264,6 @@ impl Default for JaState {
             m: 0.0,
             m_prev: 0.0,
             h: 0.0,
-            h_prev: 0.0,
             b: 0.0,
             b_prev: 0.0,
             delta: 1.0,
@@ -311,15 +308,10 @@ pub struct JilesAthertonInductor {
     current_prev: Value,
     /// Flux linkage (Wb-turns)
     flux_linkage: Value,
-    /// Previous flux linkage
-    flux_linkage_prev: Value,
     /// Voltage across inductor
     voltage_prev: Value,
     /// Effective inductance at current operating point
     l_eff: Value,
-
-    /// Core loss accumulator (W)
-    core_loss: Value,
 
     /// Xyce MutIndNonLin's trial update carried between Newton evaluations.
     /// It is included in the nonlinear snapshot and rolled back with the
@@ -412,10 +404,8 @@ impl JilesAthertonInductor {
             current: 0.0,
             current_prev: 0.0,
             flux_linkage: 0.0,
-            flux_linkage_prev: 0.0,
             voltage_prev: 0.0,
             l_eff,
-            core_loss: 0.0,
             xyce_mag_update: 0.0,
             xyce_reported_magnetization: 0.0,
             xyce_old_branch_current_sum: 0.0,
@@ -483,7 +473,6 @@ impl JilesAthertonInductor {
         // Calculate initial H field and magnetization
         let h = current * self.params.n_turns / self.params.length;
         self.state.h = h;
-        self.state.h_prev = h;
         // Start on anhysteretic curve
         self.state.m = self.anhysteretic(h);
         self.xyce_reported_magnetization = self.state.m;
@@ -504,7 +493,6 @@ impl JilesAthertonInductor {
         self.state.b = Self::mu_0() * (output_h + self.state.m);
         self.state.b_prev = self.state.b;
         self.flux_linkage = self.state.b * self.params.area * self.params.n_turns;
-        self.flux_linkage_prev = self.flux_linkage;
     }
 
     /// Permeability of free space
@@ -633,7 +621,6 @@ impl JilesAthertonInductor {
         }
 
         // Update H
-        self.state.h_prev = self.state.h;
         self.state.h = h_new;
 
         // Calculate B = μ₀(H + M)
@@ -1855,7 +1842,6 @@ impl JilesAthertonInductor {
         }
         self.state.m_irr = self.state.m;
 
-        self.state.h_prev = self.state.h;
         self.state.h = happ - (self.params.gap / self.params.length) * self.state.m;
         if delta_happ != 0.0 {
             self.state.delta = delta_happ.signum();
@@ -2460,10 +2446,8 @@ impl JilesAthertonInductor {
         self.current = 0.0;
         self.current_prev = 0.0;
         self.flux_linkage = 0.0;
-        self.flux_linkage_prev = 0.0;
         self.voltage_prev = 0.0;
         self.l_eff = self.params.base_inductance() * 1000.0;
-        self.core_loss = 0.0;
         self.xyce_mag_update = 0.0;
         self.xyce_reported_magnetization = 0.0;
         self.xyce_old_branch_current_sum = 0.0;
@@ -2543,11 +2527,7 @@ impl DynamicDevice for JilesAthertonInductor {
         let v = v_pos - v_neg;
 
         // Update flux linkage: Ψ = ∫v dt
-        self.flux_linkage_prev = self.flux_linkage;
         self.flux_linkage += (dt / 2.0) * (v + self.voltage_prev);
-
-        // Calculate B from flux linkage: B = Ψ / (N * A)
-        let b_new = self.flux_linkage / (self.params.n_turns * self.params.area);
 
         // Calculate H from current and advance the canonical Core state only
         // at this accepted dynamic step.  Ordinary J-A devices retain their
@@ -2558,10 +2538,6 @@ impl DynamicDevice for JilesAthertonInductor {
         } else {
             self.integrate_magnetization(h_new);
         }
-
-        // Accumulate core loss (area of B-H loop segment)
-        let db = b_new - self.state.b_prev;
-        self.core_loss += (self.state.h * db).abs();
 
         // Update effective inductance
         self.l_eff = self.effective_inductance();

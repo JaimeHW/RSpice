@@ -143,8 +143,6 @@ pub struct CoupledInductorPair {
     current1_prev_prev: Value,
     current2_prev: Value,
     current2_prev_prev: Value,
-    voltage1_prev: Value,
-    voltage2_prev: Value,
 }
 
 impl CoupledInductorPair {
@@ -179,8 +177,6 @@ impl CoupledInductorPair {
             current1_prev_prev: 0.0,
             current2_prev: 0.0,
             current2_prev_prev: 0.0,
-            voltage1_prev: 0.0,
-            voltage2_prev: 0.0,
         }
     }
 
@@ -335,25 +331,6 @@ impl CoupledInductorPair {
 
     /// Update history from an accepted solution vector.
     pub fn update_state_from_solution(&mut self, solution: &[Value]) {
-        let v1 = if self.node1_pos == 0 {
-            0.0
-        } else {
-            solution.get(self.node1_pos - 1).copied().unwrap_or(0.0)
-        } - if self.node1_neg == 0 {
-            0.0
-        } else {
-            solution.get(self.node1_neg - 1).copied().unwrap_or(0.0)
-        };
-        let v2 = if self.node2_pos == 0 {
-            0.0
-        } else {
-            solution.get(self.node2_pos - 1).copied().unwrap_or(0.0)
-        } - if self.node2_neg == 0 {
-            0.0
-        } else {
-            solution.get(self.node2_neg - 1).copied().unwrap_or(0.0)
-        };
-
         let branch1 = self.branch1.expect("Branch1 index must be set");
         let branch2 = self.branch2.expect("Branch2 index must be set");
         let i1 = solution.get(branch1 - 1).copied().unwrap_or(0.0);
@@ -363,8 +340,6 @@ impl CoupledInductorPair {
         self.current1_prev = i1;
         self.current2_prev_prev = self.current2_prev;
         self.current2_prev = i2;
-        self.voltage1_prev = v1;
-        self.voltage2_prev = v2;
     }
 }
 

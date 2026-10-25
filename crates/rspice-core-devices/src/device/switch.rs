@@ -1444,10 +1444,6 @@ pub struct CurrentSwitch {
     /// Width of the smooth transition (`SMOOTH`, an RSpice extension); zero,
     /// the default, is the ideal SPICE3 switch.
     pub smooth: Value,
-    /// Xyce-style full-on current control value from ION/ON.
-    pub on_current: Option<Value>,
-    /// Xyce-style full-off current control value from IOFF/OFF.
-    pub off_current: Option<Value>,
     xyce_curve: Option<XyceSwitchCurve>,
 
     // State
@@ -1479,8 +1475,6 @@ impl CurrentSwitch {
             ron: 1.0,
             roff: 1e6,
             smooth: 0.0,
-            on_current: None,
-            off_current: None,
             xyce_curve: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
@@ -1553,8 +1547,6 @@ impl CurrentSwitch {
                 || params.contains_key("OFFH")
                 || params.contains_key("IHON")
                 || params.contains_key("IHOFF");
-            self.on_current = Some(on);
-            self.off_current = Some(off);
             self.xyce_curve = Some(XyceSwitchCurve::new(
                 on,
                 off,

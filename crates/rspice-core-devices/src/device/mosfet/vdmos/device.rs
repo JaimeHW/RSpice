@@ -7,9 +7,6 @@ use super::*;
 /// Pre-computed stamp indices for O(1) matrix access
 #[derive(Debug, Clone, Default)]
 pub struct VdmosIndices {
-    // Internal drain node (after Rd)
-    pub d_d: Option<CscIndex>,
-    pub d_di: Option<CscIndex>,
     // Internal source node (after Rs)
     pub s_s: Option<CscIndex>,
     pub s_si: Option<CscIndex>,
@@ -19,11 +16,8 @@ pub struct VdmosIndices {
     pub si_di: Option<CscIndex>,
     pub si_si: Option<CscIndex>,
     // Resistance stamps
-    pub di_d: Option<CscIndex>,
     pub si_s: Option<CscIndex>,
     // RHS indices
-    pub rhs_d: Option<usize>,
-    pub rhs_s: Option<usize>,
     pub rhs_di: Option<usize>,
     pub rhs_si: Option<usize>,
 }
@@ -156,8 +150,6 @@ pub struct Vdmos {
     pub rq: Value,
     /// Quasi-saturation onset voltage (V)
     pub vq: Value,
-    /// Velocity-saturation critical voltage derived from VMAX, UO, and L.
-    pub velocity_saturation_voltage: Value,
     /// Use Xyce's VDMOS LEVEL=18 UCCM current equations.
     pub xyce_level18: bool,
     /// Effective device width used by the Xyce/UCCM model (m), including instance M.
@@ -426,7 +418,6 @@ impl Vdmos {
             ngspice_tksubthres2: 0.0,
             rq: 0.0,
             vq: 5.0,
-            velocity_saturation_voltage: Value::INFINITY,
             xyce_level18: false,
             xyce_width: 1.0,
             xyce_length: 1.0,
@@ -699,9 +690,6 @@ impl Vdmos {
         }
         if let Some(&v) = params.get("VQ") {
             self.vq = v;
-        }
-        if let Some(&v) = params.get("VSATV") {
-            self.velocity_saturation_voltage = v;
         }
         if let Some(&v) = params.get("TOX")
             && v.is_finite()
@@ -1004,9 +992,6 @@ impl Vdmos {
         if let Some(&v) = params.get("TRR") {
             self.recovery.trr = v;
         }
-        if let Some(&v) = params.get("SOFTNESS") {
-            self.recovery.softness = v.clamp(0.0, 1.0);
-        }
 
         self.ngspice_qs_given = params.contains_key("RQ") && params.contains_key("VQ");
         self.capture_nominal_temperature_values();
@@ -1119,26 +1104,6 @@ impl Vdmos {
                 let mobility_m2 = mobility_cm2 * 1.0e-4;
                 self.kp = mobility_m2 * EPS_OX / tox * (width / effective_length);
             }
-        }
-
-        let mobility_cm2 = model_params
-            .get("UO")
-            .or_else(|| model_params.get("U0"))
-            .copied();
-        let max_drift_velocity = model_params
-            .get("VMAX")
-            .or_else(|| model_params.get("VSAT"))
-            .copied();
-        if let (Some(mobility_cm2), Some(max_drift_velocity)) = (mobility_cm2, max_drift_velocity)
-            && mobility_cm2.is_finite()
-            && mobility_cm2 > 0.0
-            && max_drift_velocity.is_finite()
-            && max_drift_velocity > 0.0
-            && effective_length.is_finite()
-            && effective_length > 0.0
-        {
-            let mobility_m2 = mobility_cm2 * 1.0e-4;
-            self.velocity_saturation_voltage = max_drift_velocity * effective_length / mobility_m2;
         }
 
         if multiplier > 0.0 {
@@ -2891,9 +2856,6 @@ impl Vdmos {
 
         // Drain resistance stamps
         if di != d {
-            self.indices.d_d = matrix.get_index(d, d);
-            self.indices.d_di = matrix.get_index(d, di);
-            self.indices.di_d = matrix.get_index(di, d);
             self.indices.di_di = matrix.get_index(di, di);
         }
 
@@ -2911,8 +2873,6 @@ impl Vdmos {
         self.indices.si_di = matrix.get_index(si, di);
         self.indices.si_si = matrix.get_index(si, si);
 
-        self.indices.rhs_d = Some(d);
-        self.indices.rhs_s = Some(s);
         self.indices.rhs_di = Some(di);
         self.indices.rhs_si = Some(si);
     }

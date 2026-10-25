@@ -11,23 +11,16 @@ use super::*;
 /// Key parameters:
 /// - Qrr: Total reverse recovery charge
 /// - trr: Reverse recovery time
-/// - Softness: Controls snap-off behavior (0=snappy, 1=soft)
-///
-/// The recovery current follows: Irr = Qrr * f(t/trr, softness)
 #[derive(Debug, Clone, Copy)]
 pub struct DiodeRecovery {
     /// Reverse recovery charge (C)
     pub qrr: Value,
     /// Reverse recovery time (s)
     pub trr: Value,
-    /// Softness factor (0.0 = snappy, 1.0 = soft)
-    pub softness: Value,
     /// Current stored charge (C)
     stored_charge: Value,
     /// Previous diode current for charge tracking
     prev_current: Value,
-    /// Time when recovery started
-    recovery_start_time: Value,
     /// Flag indicating active recovery
     in_recovery: bool,
 }
@@ -35,12 +28,10 @@ pub struct DiodeRecovery {
 impl Default for DiodeRecovery {
     fn default() -> Self {
         Self {
-            qrr: 0.0,      // Disabled by default
-            trr: 100e-9,   // 100ns typical
-            softness: 0.5, // Moderate softness
+            qrr: 0.0,    // Disabled by default
+            trr: 100e-9, // 100ns typical
             stored_charge: 0.0,
             prev_current: 0.0,
-            recovery_start_time: 0.0,
             in_recovery: false,
         }
     }
@@ -48,14 +39,12 @@ impl Default for DiodeRecovery {
 
 impl DiodeRecovery {
     /// Create a new recovery model with specified parameters
-    pub fn new(qrr: Value, trr: Value, softness: Value) -> Self {
+    pub fn new(qrr: Value, trr: Value) -> Self {
         Self {
             qrr,
             trr,
-            softness: softness.clamp(0.0, 1.0),
             stored_charge: 0.0,
             prev_current: 0.0,
-            recovery_start_time: 0.0,
             in_recovery: false,
         }
     }
@@ -70,7 +59,7 @@ impl DiodeRecovery {
     ///
     /// During forward conduction: charge builds up toward Qrr
     /// During reverse: charge depletes, causing recovery current
-    pub fn update(&mut self, diode_current: Value, time: Value, dt: Value) {
+    pub fn update(&mut self, diode_current: Value, dt: Value) {
         if !self.is_enabled() || dt <= 0.0 {
             self.prev_current = diode_current;
             return;
@@ -86,7 +75,6 @@ impl DiodeRecovery {
         } else if self.stored_charge > 1e-15 {
             // Reverse transition: start recovery
             if !self.in_recovery && self.prev_current > 0.0 {
-                self.recovery_start_time = time;
                 self.in_recovery = true;
             }
 
@@ -106,7 +94,6 @@ impl DiodeRecovery {
     pub fn reset(&mut self) {
         self.stored_charge = 0.0;
         self.prev_current = 0.0;
-        self.recovery_start_time = 0.0;
         self.in_recovery = false;
     }
 }
