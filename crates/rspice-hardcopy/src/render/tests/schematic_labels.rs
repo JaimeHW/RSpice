@@ -614,38 +614,3 @@ fn a_printed_sheet_draws_in_the_export_inks_and_weights() {
         .collect::<Vec<_>>();
     assert_eq!(dots, [(375, SceneFill::solid(wire))]);
 }
-
-/// The review sheet as a PNG, for a person to look at, through the print
-/// mapping a new hardcopy starts from.
-#[test]
-#[ignore = "writes a review PNG to RSPICE_RASTER_DIR"]
-fn render_schematic_label_review() {
-    let source = resolved_review_sheet();
-    let base = setup(OutputFormat::Png { dpi: 200 }, false);
-    let setup = HardcopySetup::try_new_with_schematic(
-        base.physical_page().clone(),
-        base.scale(),
-        base.tiling(),
-        base.render().clone(),
-        base.decorations().clone(),
-        SchematicHardcopySetup::default(),
-        source.default_print_mapping().clone(),
-    )
-    .unwrap();
-    let plan = HardcopyPlan::compile_with_id(
-        HardcopyPlanId::try_from_uuid(Uuid::from_u128(79)).unwrap(),
-        source.authority().clone(),
-        setup,
-        source.content_extent(),
-    )
-    .unwrap();
-    let publication =
-        HardcopyRenderer::render_resolved(&plan, &source, resolved_metadata()).unwrap();
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).unwrap();
-    let stage = std::env::var("RSPICE_REVIEW_STAGE").unwrap_or_else(|_| "now".to_owned());
-    let path = directory.join(format!("printed-schematic-{stage}.png"));
-    std::fs::write(&path, publication.single_part().unwrap().bytes()).unwrap();
-    eprintln!("wrote {}", path.display());
-}
