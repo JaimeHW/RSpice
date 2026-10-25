@@ -170,6 +170,8 @@ fn model_consts(m: &B3SoiPdModel) -> ModelConsts {
         mjswg: m.body_jct_gate_side_grading_coeff,
         phibswg: m.gate_sidewall_jct_potential.max(0.1),
         cjswg: m.unit_length_gate_sidewall_jct_cap,
+        tpbswg: m.tpbswg,
+        tcjswg: m.tcjswg,
         mtype: m.mtype,
     }
 }

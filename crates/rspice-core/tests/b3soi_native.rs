@@ -1924,6 +1924,65 @@ fn native_soi_pd_inverse_mode_terminal_currents_match_ngspice46_op() {
     }
 }
 
+/// B3SOIPD moves its gate-sidewall junction potential and capacitance with the
+/// device temperature through TPBSWG and TCJSWG (b3soipdld.c:3359-3373). The
+/// corpus N1 card with CJSWG = 1e-9, TCJSWG = 5e-3, TPBSWG = 2e-3 and the body
+/// tied, at 127 C against TNOM = 27 C: the body sits at -1 V behind 100 kOhm,
+/// so v(b) carries the body capacitance. ngspice-46, seven-node form
+/// `m1 d g s e b 0 b` (`.option gmin=1e-25 itl1=500`, `ac dec 1 1e6 1e9`,
+/// `set numdgt=12`); without the two coefficients it reads 0.398 - 0.490j at
+/// 100 MHz.
+#[test]
+fn native_soi_pd_gate_sidewall_junction_temperature_matches_ngspice46_ac() {
+    let card = pd_n1_model_card()
+        .replace("RBODY = 1e0 ", "RBODY = 0.0 ")
+        .replace("CJSWG = 1e-12", "CJSWG = 1e-9")
+        .replace("TCJSWG=1e-4", "TCJSWG=5e-3 TPBSWG=2e-3");
+    assert!(card.contains("RBODY = 0.0 ") && card.contains("CJSWG = 1e-9"));
+    assert!(card.contains("TPBSWG=2e-3"));
+    let deck = format!(
+        "* B3SOIPD gate-sidewall junction temperature\n\
+         vd d 0 dc 0\n\
+         vs s 0 dc 0\n\
+         vg g 0 dc 0\n\
+         ve e 0 dc 0\n\
+         vb bs 0 dc -1 ac 1\n\
+         rb bs b 100k\n\
+         m1 d g s e b n1 w=10u l=0.25u\n\
+         .option gmin=1e-25 itl1=500\n\
+         .temp 127\n\
+         {card}\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    // (frequency, re v(b), im v(b)) from ngspice-46.
+    let reference = [
+        (1.0e6, 9.996035490658e-01, -1.59583594080e-02),
+        (1.0e7, 9.750081612204e-01, -1.55657016995e-01),
+        (1.0e8, 2.817523895612e-01, -4.49808916834e-01),
+        (1.0e9, 3.907661337201e-03, -6.23845964954e-02),
+    ];
+    let freqs: Vec<Value> = reference.iter().map(|&(freq, _, _)| freq).collect();
+    let results = engine()
+        .run_ac(&netlist, &freqs)
+        .expect("PD sidewall AC runs");
+    for (result, (freq, re, im)) in results.iter().zip(reference) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("b"))
+            .expect("node b in AC result");
+        let v = result.voltages[idx];
+        let rel = (v.re - re).hypot(v.im - im) / re.hypot(im);
+        assert!(
+            rel < 1.0e-9,
+            "v(b) at {freq:.0e} Hz: rspice=({:.9e},{:.9e}) ngspice=({re:.9e},{im:.9e}) rel={rel:.3e}",
+            v.re,
+            v.im
+        );
+    }
+}
+
 /// A floating-body B3SOIDD gain stage at vin = 0.3 V. Its direct Newton
 /// fails in both simulators: the body node runs away below the source (to
 /// -9.7 kV in ngspice-46). ngspice restarts each operating-point aid from a
@@ -2054,6 +2113,8 @@ fn pd_model_consts(model: &B3SoiPdModel) -> ModelConsts {
         mjswg: model.body_jct_gate_side_grading_coeff,
         phibswg: model.gate_sidewall_jct_potential.max(0.1),
         cjswg: model.unit_length_gate_sidewall_jct_cap,
+        tpbswg: model.tpbswg,
+        tcjswg: model.tcjswg,
         mtype: model.mtype,
     }
 }

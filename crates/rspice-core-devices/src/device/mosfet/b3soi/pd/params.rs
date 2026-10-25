@@ -213,6 +213,10 @@ pub struct B3SoiPdModel {
     pub body_jct_gate_side_grading_coeff: Value,
     pub gate_sidewall_jct_potential: Value,
     pub unit_length_gate_sidewall_jct_cap: Value,
+    /// `TPBSWG`: temperature coefficient of the gate-sidewall potential.
+    pub tpbswg: Value,
+    /// `TCJSWG`: temperature coefficient of the gate-sidewall capacitance.
+    pub tcjswg: Value,
     pub csdesw: Value,
 
     // Geometry scaling.
@@ -532,6 +536,8 @@ impl B3SoiPdModel {
             body_jct_gate_side_grading_coeff: val(p, "MJSWG", 0.5),
             gate_sidewall_jct_potential: val(p, "PBSWG", 0.7),
             unit_length_gate_sidewall_jct_cap: val(p, "CJSWG", 1e-10),
+            tpbswg: val(p, "TPBSWG", 0.0),
+            tcjswg: val(p, "TCJSWG", 0.0),
             csdesw: val(p, "CSDESW", 0.0),
 
             lint,

@@ -237,6 +237,8 @@ impl B3SoiPd {
             // ngspice clamps PhiBSWG model-wide to >= 0.1 (b3soipdtemp.c).
             phibswg: model.gate_sidewall_jct_potential.max(0.1),
             cjswg: model.unit_length_gate_sidewall_jct_cap,
+            tpbswg: model.tpbswg,
+            tcjswg: model.tcjswg,
             mtype: model.mtype,
         };
         Ok(Self {

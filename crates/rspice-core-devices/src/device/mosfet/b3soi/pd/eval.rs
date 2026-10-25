@@ -1564,6 +1564,10 @@ pub struct ModelConsts {
     pub phibswg: Value,
     /// Unit-length gate-sidewall junction capacitance `CJSWG`.
     pub cjswg: Value,
+    /// Temperature coefficient of `PhiBSWG`, `TPBSWG`.
+    pub tpbswg: Value,
+    /// Temperature coefficient of `CJSWG`, `TCJSWG`.
+    pub tcjswg: Value,
     /// Device polarity (`+1` NMOS / `-1` PMOS) for the extrinsic charge sign.
     pub mtype: Value,
 }
@@ -1571,6 +1575,15 @@ pub struct ModelConsts {
 #[inline]
 fn temp_ratio_m1(p: &B3SoiPdSized) -> Value {
     p.temp / p.tnom - 1.0
+}
+
+/// The gate-sidewall junction potential `PhiBSWG` and capacitance `cjsbs` at
+/// the device temperature (b3soipdld.c:3359-3373).
+fn gate_sidewall_junction(p: &B3SoiPdSized, m: &ModelConsts) -> (Value, Value) {
+    let temp_delta = p.temp - p.tnom;
+    let phi_bswg = m.phibswg - m.tpbswg * temp_delta;
+    let cjsbs = m.cjswg * p.weff_cv * m.tsi / 1e-7;
+    (phi_bswg, cjsbs + cjsbs * m.tcjswg * temp_delta)
 }
 
 /// Smooth `dvt2`-type discontinuity guard (b3soipdld.c:1020-1031 pattern).
@@ -1886,9 +1899,8 @@ fn eval_charges_capmod2(
     // wdiosCV == wdiodCV == weffCV for the supported decks (nseg = 1,
     // psbcp = pdbcp = 0), so the source and drain sidewall capacitances
     // coincide.
-    let phi_bswg = m.phibswg;
+    let (phi_bswg, cjsbs) = gate_sidewall_junction(p, m);
     let mjswg = m.mjswg;
-    let cjsbs = m.cjswg * p.weff_cv * m.tsi / 1e-7;
     let cjdbs = cjsbs;
     let dio_max = 0.9 * phi_bswg;
 
@@ -2395,9 +2407,8 @@ fn eval_charges_capmod3_finish(
     let cdeb = 0.0;
     let mut cdsb = (cgg + cgd + cgb + cbg + cbd + cbb + csg + csd + csb) + ce1b;
 
-    let phi_bswg = m.phibswg;
+    let (phi_bswg, cjsbs) = gate_sidewall_junction(p, m);
     let mjswg = m.mjswg;
-    let cjsbs = m.cjswg * p.weff_cv * m.tsi / 1e-7;
     let cjdbs = cjsbs;
     let dio_max = 0.9 * phi_bswg;
 
