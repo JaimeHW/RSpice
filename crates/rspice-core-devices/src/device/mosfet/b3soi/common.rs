@@ -399,3 +399,89 @@ fn stamp_voltage_constraint(
     }
     matrix.stamp_rhs(branch, value);
 }
+
+#[inline]
+pub(crate) fn stamp(matrix: &mut impl MatrixStamper, row: NodeId, col: NodeId, value: Value) {
+    if row != 0 && col != 0 && value != 0.0 {
+        matrix.stamp(row, col, value);
+    }
+}
+
+#[inline]
+pub(crate) fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
+    if node != 0 && value != 0.0 {
+        matrix.stamp_rhs(node, value);
+    }
+}
+
+#[inline]
+pub(crate) fn stamp_conductance(matrix: &mut impl MatrixStamper, a: NodeId, b: NodeId, g: Value) {
+    if g <= 0.0 || a == b {
+        return;
+    }
+    stamp(matrix, a, a, g);
+    stamp(matrix, a, b, -g);
+    stamp(matrix, b, a, -g);
+    stamp(matrix, b, b, g);
+}
+
+/// Smooth `dvt2`-type discontinuity guard (b3soiddld.c:1020-1031 pattern).
+/// Returns `(T1, T2)` where `T1 = 1 + dvt2*Vb` (smoothed) and `T2 = dT1/dVb`.
+#[inline]
+pub(crate) fn smooth_dvt2(dvt2: Value, vb: Value) -> (Value, Value) {
+    let t0 = dvt2 * vb;
+    if t0 >= -0.5 {
+        (1.0 + t0, dvt2)
+    } else {
+        let t4 = 1.0 / (3.0 + 8.0 * t0);
+        ((1.0 + 3.0 * t0) * t4, dvt2 * t4 * t4)
+    }
+}
+
+/// Smooth `etab` guard (b3soiddld.c:1063-1074). Returns `(T3, dT3/dVb)`.
+#[inline]
+pub(crate) fn smooth_etab(eta0: Value, etab: Value, vb: Value) -> (Value, Value) {
+    let t3 = eta0 + etab * vb;
+    if t3 < 1.0e-4 {
+        let t9 = 1.0 / (3.0 - 2.0e4 * t3);
+        ((2.0e-4 - t3) * t9, t9 * t9 * etab)
+    } else {
+        (t3, etab)
+    }
+}
+
+/// DEXP: the BSIMSOI3 exponential with an upper linear extension and a
+/// constant lower tail. Returns the value and its derivative factor.
+#[inline]
+pub(crate) fn dexp(arg: Value) -> (Value, Value) {
+    if arg > EXPL_THRESHOLD {
+        (MAX_EXPL * (1.0 + arg - EXPL_THRESHOLD), MAX_EXPL)
+    } else if arg < -EXPL_THRESHOLD {
+        (MIN_EXPL, 0.0)
+    } else {
+        let e = arg.exp();
+        (e, e)
+    }
+}
+
+/// `T3(v)` and `dT3/dVb` of the gate-sidewall junction charge, extended
+/// linearly above `dio_max` (b3soipdld.c:3345-3370).
+#[inline]
+pub(crate) fn junction_t3(
+    v: Value,
+    dio_max: Value,
+    phi_bswg: Value,
+    mjswg: Value,
+) -> (Value, Value) {
+    let arg = 1.0 - v.min(dio_max) / phi_bswg;
+    let dt3_dvb = if mjswg == 0.5 {
+        1.0 / arg.sqrt()
+    } else {
+        (-mjswg * arg.ln()).exp()
+    };
+    let mut t3 = (1.0 - arg * dt3_dvb) * phi_bswg / (1.0 - mjswg);
+    if v > dio_max {
+        t3 += dt3_dvb * (v - dio_max);
+    }
+    (t3, dt3_dvb)
+}

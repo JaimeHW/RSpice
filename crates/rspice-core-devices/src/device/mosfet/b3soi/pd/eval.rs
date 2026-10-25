@@ -34,7 +34,9 @@
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path and read by
 // the charge models; ngspice keeps them here, so we retain the
 // assignments for faithful correspondence.
-use super::super::common::{EPSSI, EXPL_THRESHOLD, MAX_EXPL, MIN_EXPL};
+use super::super::common::{
+    EPSSI, EXPL_THRESHOLD, MAX_EXPL, MIN_EXPL, dexp, junction_t3, smooth_dvt2, smooth_etab,
+};
 use super::temp::B3SoiPdSized;
 use crate::Value;
 
@@ -1191,22 +1193,6 @@ pub fn eval(
     let vbd = vbs - vds; // device-frame Vbd
     let n_vtm1 = vtm * p.ndiode;
 
-    // DEXP: ngspice/Xyce BSIMSOI3 clamp with an upper linear extension and a
-    // constant lower tail (returns value and derivative factor).
-    let dexp = |arg: Value| -> (Value, Value) {
-        const MAX_EXPL: Value = 2.688_117_142e43;
-        const MIN_EXPL: Value = 3.720_075_976e-44;
-        const EXPL_THRESHOLD: Value = 100.0;
-        if arg > EXPL_THRESHOLD {
-            (MAX_EXPL * (1.0 + arg - EXPL_THRESHOLD), MAX_EXPL)
-        } else if arg < -EXPL_THRESHOLD {
-            (MIN_EXPL, 0.0)
-        } else {
-            let e = arg.exp();
-            (e, e)
-        }
-    };
-
     let (exp_vbs_n, dexp_vbs_n) = dexp(vbs / n_vtm1);
     let dexp_vbs_n_dvb = dexp_vbs_n / n_vtm1;
     let (exp_vbd_n, dexp_vbd_n) = dexp(vbd / n_vtm1);
@@ -1586,31 +1572,6 @@ fn gate_sidewall_junction(p: &B3SoiPdSized, m: &ModelConsts) -> (Value, Value) {
     (phi_bswg, cjsbs + cjsbs * m.tcjswg * temp_delta)
 }
 
-/// Smooth `dvt2`-type discontinuity guard (b3soipdld.c:1020-1031 pattern).
-/// Returns `(T1, T2)` where `T1 = 1 + dvt2*Vb` (smoothed) and `T2 = dT1/dVb`.
-#[inline]
-fn smooth_dvt2(dvt2: Value, vb: Value) -> (Value, Value) {
-    let t0 = dvt2 * vb;
-    if t0 >= -0.5 {
-        (1.0 + t0, dvt2)
-    } else {
-        let t4 = 1.0 / (3.0 + 8.0 * t0);
-        ((1.0 + 3.0 * t0) * t4, dvt2 * t4 * t4)
-    }
-}
-
-/// Smooth `etab` guard (b3soipdld.c:1063-1074). Returns `(T3, dT3/dVb)`.
-#[inline]
-fn smooth_etab(eta0: Value, etab: Value, vb: Value) -> (Value, Value) {
-    let t3 = eta0 + etab * vb;
-    if t3 < 1.0e-4 {
-        let t9 = 1.0 / (3.0 - 2.0e4 * t3);
-        ((2.0e-4 - t3) * t9, t9 * t9 * etab)
-    } else {
-        (t3, etab)
-    }
-}
-
 /// Intermediates from the DC path that the CAPMOD=2 charge model consumes.
 ///
 /// Every field maps 1:1 to the like-named ngspice local at the point the charge
@@ -1904,26 +1865,11 @@ fn eval_charges_capmod2(
     let cjdbs = cjsbs;
     let dio_max = 0.9 * phi_bswg;
 
-    // T3(v) and dT3/dVb with the DioMax linear extension (b3soipdld.c:3345-3370).
-    let junction_t3 = |v: Value| -> (Value, Value) {
-        let arg = 1.0 - v.min(dio_max) / phi_bswg;
-        let dt3_dvb = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        let mut t3 = (1.0 - arg * dt3_dvb) * phi_bswg / (1.0 - mjswg);
-        if v > dio_max {
-            t3 += dt3_dvb * (v - dio_max);
-        }
-        (t3, dt3_dvb)
-    };
-
-    let (t3s, dt3_dvb_s) = junction_t3(i.vbs);
+    let (t3s, dt3_dvb_s) = junction_t3(i.vbs, dio_max, phi_bswg, mjswg);
     let qjs = cjsbs * t3s + m.tt * i.ibsdif;
     let gcjsbs = cjsbs * dt3_dvb_s + m.tt * i.dibsdif_dvb;
 
-    let (t3d, dt3_dvb_d) = junction_t3(i.vbd);
+    let (t3d, dt3_dvb_d) = junction_t3(i.vbd, dio_max, phi_bswg, mjswg);
     let dt3_dvd_d = -dt3_dvb_d;
     let qjd = cjdbs * t3d + m.tt * i.ibddif;
     let gcjdbs = cjdbs * dt3_dvb_d + m.tt * i.dibddif_dvb;
@@ -2412,25 +2358,11 @@ fn eval_charges_capmod3_finish(
     let cjdbs = cjsbs;
     let dio_max = 0.9 * phi_bswg;
 
-    let junction_t3 = |v: Value| -> (Value, Value) {
-        let arg = 1.0 - v.min(dio_max) / phi_bswg;
-        let dt3_dvb = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        let mut t3 = (1.0 - arg * dt3_dvb) * phi_bswg / (1.0 - mjswg);
-        if v > dio_max {
-            t3 += dt3_dvb * (v - dio_max);
-        }
-        (t3, dt3_dvb)
-    };
-
-    let (t3s, dt3_dvb_s) = junction_t3(i.vbs);
+    let (t3s, dt3_dvb_s) = junction_t3(i.vbs, dio_max, phi_bswg, mjswg);
     let qjs = cjsbs * t3s + m.tt * i.ibsdif;
     let gcjsbs = cjsbs * dt3_dvb_s + m.tt * i.dibsdif_dvb;
 
-    let (t3d, dt3_dvb_d) = junction_t3(i.vbd);
+    let (t3d, dt3_dvb_d) = junction_t3(i.vbd, dio_max, phi_bswg, mjswg);
     let dt3_dvd_d = -dt3_dvb_d;
     let qjd = cjdbs * t3d + m.tt * i.ibddif;
     let gcjdbs = cjdbs * dt3_dvb_d + m.tt * i.dibddif_dvb;

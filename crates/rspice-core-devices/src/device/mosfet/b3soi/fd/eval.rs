@@ -37,7 +37,7 @@
 use super::super::common::{
     DELT_VBS0DIO, DELT_VBS0EFF, DELT_VBSDIO, DELT_VBSEFF, DELT_VBSMOS, DELT_XCSAT, OFF_VBSDIO,
 };
-use super::super::common::{EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP};
+use super::super::common::{EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP, smooth_dvt2, smooth_etab};
 use super::temp::B3SoiFdSized;
 use crate::Value;
 
@@ -1373,31 +1373,6 @@ pub struct ModelConsts {
 #[inline]
 fn temp_ratio_m1(p: &B3SoiFdSized) -> Value {
     p.temp / p.tnom - 1.0
-}
-
-/// Smooth `dvt2`-type discontinuity guard (b3soifdld.c:1020-1031 pattern).
-/// Returns `(T1, T2)` where `T1 = 1 + dvt2*Vb` (smoothed) and `T2 = dT1/dVb`.
-#[inline]
-fn smooth_dvt2(dvt2: Value, vb: Value) -> (Value, Value) {
-    let t0 = dvt2 * vb;
-    if t0 >= -0.5 {
-        (1.0 + t0, dvt2)
-    } else {
-        let t4 = 1.0 / (3.0 + 8.0 * t0);
-        ((1.0 + 3.0 * t0) * t4, dvt2 * t4 * t4)
-    }
-}
-
-/// Smooth `etab` guard (b3soifdld.c:1063-1074). Returns `(T3, dT3/dVb)`.
-#[inline]
-fn smooth_etab(eta0: Value, etab: Value, vb: Value) -> (Value, Value) {
-    let t3 = eta0 + etab * vb;
-    if t3 < 1.0e-4 {
-        let t9 = 1.0 / (3.0 - 2.0e4 * t3);
-        ((2.0e-4 - t3) * t9, t9 * t9 * etab)
-    } else {
-        (t3, etab)
-    }
 }
 
 /// Intermediates from the DC path that the CAPMOD=2/3 charge models consume.

@@ -38,7 +38,9 @@
 use super::super::common::{
     B3SoiDialect, DELT_VBS0DIO, DELT_VBS0EFF, DELT_VBSDIO, DELT_VBSEFF, DELT_VBSMOS, OFF_VBSDIO,
 };
-use super::super::common::{CONST_2OV3, EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP};
+use super::super::common::{
+    CONST_2OV3, EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP, dexp, junction_t3, smooth_dvt2, smooth_etab,
+};
 use super::temp::B3SoiDdSized;
 use crate::Value;
 
@@ -595,7 +597,7 @@ pub fn eval(
         B3SoiDialect::Xyce => {
             let t10 = m.nofffd * vtm;
             let vtgs_fd = vthfd - vgs_eff;
-            let (exp_vtgs_fd, mut t0) = cexp100((vtgs_fd - m.vofffd) / t10);
+            let (exp_vtgs_fd, mut t0) = dexp((vtgs_fd - m.vofffd) / t10);
             let vtgseff_fd = t10 * (1.0 + exp_vtgs_fd).ln();
             t0 /= 1.0 + exp_vtgs_fd;
             let dvtgseff_fd_dvd = t0 * dvthfd_dvd;
@@ -603,7 +605,7 @@ pub fn eval(
             let dvtgseff_fd_dve = t0 * dvthfd_dve;
 
             let vgst_fd = vgs_eff - vthfd;
-            let (exp_vgst_fd, mut t0) = cexp100((vgst_fd - m.vofffd) / t10);
+            let (exp_vgst_fd, mut t0) = dexp((vgst_fd - m.vofffd) / t10);
             let vgsteff_fd = t10 * (1.0 + exp_vgst_fd).ln();
             t0 /= 1.0 + exp_vgst_fd;
             let dvgsteff_fd_dvd = -t0 * dvthfd_dvd;
@@ -1721,19 +1723,6 @@ pub fn eval(
     let w_tsi = p.weff / p.nseg * m.tsi;
     let vbd = vbs - vds; // device-internal Vbd in evaluation frame
     let n_vtm1 = vtm * p.ndiode;
-    let dexp = |arg: Value| -> (Value, Value) {
-        const MAX_EXPL: Value = 2.688_117_142e43;
-        const MIN_EXPL: Value = 3.720_075_976e-44;
-        const EXPL_THRESHOLD: Value = 100.0;
-        if arg > EXPL_THRESHOLD {
-            (MAX_EXPL * (1.0 + arg - EXPL_THRESHOLD), MAX_EXPL)
-        } else if arg < -EXPL_THRESHOLD {
-            (MIN_EXPL, 0.0)
-        } else {
-            let e = arg.exp();
-            (e, e)
-        }
-    };
     let (exp_vbs_n, dexp_vbs_n) = dexp(vbs / n_vtm1);
     let dexp_vbs_n_dvb = dexp_vbs_n / n_vtm1;
     let (exp_vbd_n, dexp_vbd_n) = dexp(vbd / n_vtm1);
@@ -2361,47 +2350,6 @@ struct BodyCurrents {
     storage_ibd: Value,
     storage_dibd_dvb: Value,
     storage_dibd_dvd: Value,
-}
-
-#[inline]
-fn cexp100(arg: Value) -> (Value, Value) {
-    const MAX_EXPL: Value = 2.688_117_142e43;
-    const MIN_EXPL: Value = 3.720_075_976e-44;
-    const EXPL_THRESHOLD: Value = 100.0;
-
-    if arg > EXPL_THRESHOLD {
-        (MAX_EXPL * (1.0 + arg - EXPL_THRESHOLD), MAX_EXPL)
-    } else if arg < -EXPL_THRESHOLD {
-        (MIN_EXPL, 0.0)
-    } else {
-        let exp_arg = arg.exp();
-        (exp_arg, exp_arg)
-    }
-}
-
-/// Smooth `dvt2`-type discontinuity guard (b3soiddld.c:1020-1031 pattern).
-/// Returns `(T1, T2)` where `T1 = 1 + dvt2*Vb` (smoothed) and `T2 = dT1/dVb`.
-#[inline]
-fn smooth_dvt2(dvt2: Value, vb: Value) -> (Value, Value) {
-    let t0 = dvt2 * vb;
-    if t0 >= -0.5 {
-        (1.0 + t0, dvt2)
-    } else {
-        let t4 = 1.0 / (3.0 + 8.0 * t0);
-        ((1.0 + 3.0 * t0) * t4, dvt2 * t4 * t4)
-    }
-}
-
-/// Smooth `etab` guard (b3soiddld.c:1063-1074). Returns `(T3, dT3/dVb)`.
-#[inline]
-fn smooth_etab(eta0: Value, etab: Value, vb: Value) -> (Value, Value) {
-    let t3 = eta0 + etab * vb;
-    if t3 < 1.0e-4 {
-        let t9 = 1.0 / (3.0 - 2.0e4 * t3);
-        ((2.0e-4 - t3) * t9, t9 * t9 * etab)
-    } else {
-        (t3, etab)
-    }
 }
 
 /// A CAPMOD=3 charge-model shape and its partial derivatives with respect to
@@ -3669,25 +3617,12 @@ fn eval_charges_xyce(
     let mjswg = m.mjswg;
     let cjdbs = cjsbs;
     let dio_max = 0.9 * phi_bswg;
-    let junction_t3 = |v: Value| -> (Value, Value) {
-        let arg = 1.0 - v.min(dio_max) / phi_bswg;
-        let dt3_dvb = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        let mut t3 = (1.0 - arg * dt3_dvb) * phi_bswg / (1.0 - mjswg);
-        if v > dio_max {
-            t3 += dt3_dvb * (v - dio_max);
-        }
-        (t3, dt3_dvb)
-    };
 
-    let (t3s, dt3_dvb_s) = junction_t3(i.vbs);
+    let (t3s, dt3_dvb_s) = junction_t3(i.vbs, dio_max, phi_bswg, mjswg);
     let qjs = cjsbs * t3s + m.tt * i.ibsdif;
     let gcjsbs = cjsbs * dt3_dvb_s + m.tt * i.dibsdif_dvb;
 
-    let (t3d, dt3_dvb_d) = junction_t3(i.vbd);
+    let (t3d, dt3_dvb_d) = junction_t3(i.vbd, dio_max, phi_bswg, mjswg);
     let dt3_dvd_d = -dt3_dvb_d;
     let qjd = cjdbs * t3d + m.tt * i.ibddif;
     let gcjdbs = cjdbs * dt3_dvb_d + m.tt * i.dibddif_dvb;

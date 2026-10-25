@@ -53,7 +53,9 @@ pub mod eval;
 pub mod params;
 pub mod temp;
 
-use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
+use crate::device::mosfet::b3soi::common::{
+    SoiCompanionCurrents, stamp, stamp_conductance, stamp_rhs,
+};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
 use eval::{B3SoiFdBias, B3SoiFdOp, ModelConsts};
@@ -1176,31 +1178,6 @@ impl B3SoiFd {
         stamp(matrix, t, dp, gtemp_dp);
         stamp(matrix, t, sp, gtemp_sp);
     }
-}
-
-#[inline]
-fn stamp(matrix: &mut impl MatrixStamper, row: NodeId, col: NodeId, value: Value) {
-    if row != 0 && col != 0 && value != 0.0 {
-        matrix.stamp(row, col, value);
-    }
-}
-
-#[inline]
-fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
-    if node != 0 && value != 0.0 {
-        matrix.stamp_rhs(node, value);
-    }
-}
-
-#[inline]
-fn stamp_conductance(matrix: &mut impl MatrixStamper, a: NodeId, b: NodeId, g: Value) {
-    if g <= 0.0 || a == b {
-        return;
-    }
-    stamp(matrix, a, a, g);
-    stamp(matrix, a, b, -g);
-    stamp(matrix, b, a, -g);
-    stamp(matrix, b, b, g);
 }
 
 #[inline]
