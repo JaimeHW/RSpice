@@ -26,6 +26,7 @@ mod model_access;
 pub(in crate::workbench) mod problems_view;
 mod run_access;
 pub(crate) mod run_preflight;
+mod schematic_drag;
 pub(crate) use rspice_app_state::workbench::app_state::schematic_preferences;
 pub(crate) mod services_access;
 pub(crate) mod session;
