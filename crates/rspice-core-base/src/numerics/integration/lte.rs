@@ -1170,19 +1170,10 @@ impl LteEstimator {
         current: &[Value],
         window: LtePrefixWindow<'_>,
     ) -> (Value, bool) {
-        let LtePrefixWindow {
-            prefix_len,
-            dt,
-            excluded_indices,
-        } = window;
         self.estimate_prefix_excluding_with_coefficient(
             current,
             None,
-            LtePrefixWindow {
-                prefix_len,
-                dt,
-                excluded_indices,
-            },
+            window,
             1.0,
             self.method_order,
         )
@@ -1203,21 +1194,12 @@ impl LteEstimator {
         method: IntegrationMethod,
         trap_order: u8,
     ) -> (Value, bool) {
-        let LtePrefixWindow {
-            prefix_len,
-            dt,
-            excluded_indices,
-        } = window;
-        let coefficient = self.integration_error_coefficient(method, trap_order, dt);
+        let coefficient = self.integration_error_coefficient(method, trap_order, window.dt);
         let method_order = Self::integration_method_order(method, trap_order);
         self.estimate_prefix_excluding_with_coefficient(
             current,
             None,
-            LtePrefixWindow {
-                prefix_len,
-                dt,
-                excluded_indices,
-            },
+            window,
             coefficient,
             method_order,
         )
@@ -1233,21 +1215,12 @@ impl LteEstimator {
         method: IntegrationMethod,
         trap_order: u8,
     ) -> (Value, bool) {
-        let LtePrefixWindow {
-            prefix_len,
-            dt,
-            excluded_indices,
-        } = window;
-        let coefficient = self.integration_error_coefficient(method, trap_order, dt);
+        let coefficient = self.integration_error_coefficient(method, trap_order, window.dt);
         let method_order = Self::integration_method_order(method, trap_order);
         self.estimate_prefix_excluding_with_coefficient(
             current,
             Some(predicted),
-            LtePrefixWindow {
-                prefix_len,
-                dt,
-                excluded_indices,
-            },
+            window,
             coefficient,
             method_order,
         )
