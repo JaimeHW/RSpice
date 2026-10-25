@@ -1921,17 +1921,6 @@ impl VerilogACompiler {
         })
     }
 
-    /// Compile a source file from disk with preprocessing and dependency metadata.
-    ///
-    /// The file must contain exactly one module; multi-module files
-    /// require [`Self::compile_file_module_with_metadata`].
-    pub fn compile_file_with_metadata(
-        &self,
-        path: &std::path::Path,
-    ) -> CompileResult<CompiledFile> {
-        self.compile_file_module_with_metadata(path, None)
-    }
-
     /// Compile one module of a source file from disk with preprocessing
     /// and dependency metadata. See [`Self::compile_module`] for the
     /// module selection rules.

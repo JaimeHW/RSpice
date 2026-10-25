@@ -83,9 +83,8 @@ comes from.
   available backends. Nothing is written to disk.
 - `compile_canonical_ir` / `compile_canonical_ir_module`: the canonical
   artifact alone, for a caller that only drives a JIT or the offline emitter.
-- `compile_file_with_metadata` / `compile_file_runtime_with_metadata`: the
-  same products from a path, returning the include dependencies preprocessing
-  discovered.
+- `compile_file_runtime_with_metadata`: the same products from a path,
+  returning the include dependencies preprocessing discovered.
 - `compile_virtual_runtime`: the same products from a sealed
   `VirtualSourceBundle`, never touching the file system.
 - `VerilogADevice::try_new(name, model, nodes)`: the instance the simulator

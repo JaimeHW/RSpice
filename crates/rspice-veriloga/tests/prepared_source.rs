@@ -497,7 +497,9 @@ fn file_and_provider_compilation_retain_warnings_in_original_includes() {
         discard_output_tasks: true,
         ..CompilerOptions::default()
     });
-    let from_file = compiler.compile_file_with_metadata(&root).unwrap();
+    let from_file = compiler
+        .compile_file_module_with_metadata(&root, None)
+        .unwrap();
     let from_provider = compiler
         .compile_provider_module_with_metadata_and_control(
             &FileSystemSourceProvider,

@@ -199,29 +199,6 @@ pub fn common_kernel_coverage(reports: &[GeneratedKernelStructureReport]) -> Ker
     }
 }
 
-pub fn regenerate_generated_builtins(
-    model_root: &Path,
-    generated_root: &Path,
-    generator_root: &Path,
-) -> BuiltinResult<BuiltinGenerationReport> {
-    regenerate_generated_builtins_with_progress(model_root, generated_root, generator_root, false)
-}
-
-pub fn regenerate_generated_builtins_with_progress(
-    model_root: &Path,
-    generated_root: &Path,
-    generator_root: &Path,
-    progress: bool,
-) -> BuiltinResult<BuiltinGenerationReport> {
-    regenerate_generated_builtins_with_progress_and_jobs(
-        model_root,
-        generated_root,
-        generator_root,
-        progress,
-        None,
-    )
-}
-
 pub fn regenerate_generated_builtins_with_progress_and_jobs(
     model_root: &Path,
     generated_root: &Path,
@@ -268,21 +245,6 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     write_generated_manifest(generated_root, &manifest)?;
 
     Ok(BuiltinGenerationReport { manifest })
-}
-
-pub fn generate_generated_builtin_subset_with_progress(
-    model_root: &Path,
-    generated_root: &Path,
-    filter: &str,
-    progress: bool,
-) -> BuiltinResult<BuiltinSubsetGenerationReport> {
-    generate_generated_builtin_subset_with_progress_and_jobs(
-        model_root,
-        generated_root,
-        filter,
-        progress,
-        None,
-    )
 }
 
 pub fn generate_generated_builtin_subset_with_progress_and_jobs(

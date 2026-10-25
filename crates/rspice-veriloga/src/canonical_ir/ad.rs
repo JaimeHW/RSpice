@@ -10,7 +10,7 @@
 //! ## Sparsity is structural, and is the point
 //!
 //! A lane belongs to a value only if some chain of operations connects that
-//! value to that unknown. [`lane_liveness`] computes this as a fixed point over
+//! value to that unknown. [`lane_liveness_with_control`] computes this as a fixed point over
 //! the graph, so a wide model — ASM-HEMT has 23 nodes — does not pay 23 lanes on
 //! every intermediate. Measured over the corpus, values that carry any lane at
 //! all carry between two and five of them against thirty-odd unknowns; dense
@@ -155,17 +155,6 @@ impl AdFunction {
     }
 }
 
-/// Which lanes each value can depend on.
-///
-/// A fixed point rather than one pass, because a loop-carried block parameter
-/// depends on values computed from itself: the first visit of a header sees
-/// only the entry edge.
-pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<usize>> {
-    lane_liveness_with_control(function, lanes, &NoPipelineControl)
-        .expect("the no-op pipeline control cannot cancel")
-        .into_hash_sets()
-}
-
 /// Compact storage for the sparse lane sets used by the liveness fixed point.
 ///
 /// The old representation allocated one `HashSet` per value and another
@@ -176,7 +165,6 @@ pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<us
 /// fall back to sparse sets rather than being allowed to allocate an unbounded
 /// dense matrix from untrusted model input.
 struct LaneLiveness {
-    value_count: usize,
     lane_count: usize,
     words_per_value: usize,
     storage: LaneLivenessStorage,
@@ -201,7 +189,6 @@ impl LaneLiveness {
             _ => LaneLivenessStorage::Sparse(vec![HashSet::new(); value_count]),
         };
         Self {
-            value_count,
             lane_count,
             words_per_value,
             storage,
@@ -305,40 +292,13 @@ impl LaneLiveness {
             }
         }
     }
-
-    fn into_hash_sets(self) -> Vec<HashSet<usize>> {
-        match self.storage {
-            LaneLivenessStorage::Sparse(sets) => sets,
-            LaneLivenessStorage::Dense(bits) => {
-                let words_per_value = self.words_per_value;
-                let lane_count = self.lane_count;
-                (0..self.value_count)
-                    .map(|value| {
-                        let start = value * words_per_value;
-                        let mut lanes = HashSet::new();
-                        for (word_offset, word) in bits[start..start + words_per_value]
-                            .iter()
-                            .copied()
-                            .enumerate()
-                        {
-                            let mut word = word;
-                            while word != 0 {
-                                let bit = word.trailing_zeros() as usize;
-                                let lane = word_offset * u64::BITS as usize + bit;
-                                if lane < lane_count {
-                                    lanes.insert(lane);
-                                }
-                                word &= word - 1;
-                            }
-                        }
-                        lanes
-                    })
-                    .collect()
-            }
-        }
-    }
 }
 
+/// Which lanes each value can depend on.
+///
+/// A fixed point rather than one pass, because a loop-carried block parameter
+/// depends on values computed from itself: the first visit of a header sees
+/// only the entry edge.
 fn lane_liveness_with_control(
     function: &CfgFunction,
     lanes: &[AdSeed],
@@ -527,7 +487,7 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         ),
         CfgValueKind::Binary { op, .. } => !op.is_predicate(),
         CfgValueKind::SumProductsDiv { .. } => true,
-        // `$limit` is differentiable, but [`lane_liveness`] answers it ahead of
+        // `$limit` is differentiable, but [`lane_liveness_with_control`] answers it ahead of
         // this rather than through it: its lanes are `proposed`'s plus the
         // correction lane, not every operand's.
         CfgValueKind::Select { .. }
@@ -3473,7 +3433,6 @@ fn reverse_postorder(function: &CfgFunction) -> Vec<BlockId> {
 mod tests {
     use super::{LaneLiveness, LaneLivenessStorage};
     use crate::canonical_ir::ValueId;
-    use std::collections::HashSet;
 
     #[test]
     fn compact_lane_liveness_crosses_word_boundaries() {
@@ -3495,12 +3454,6 @@ mod tests {
 
         assert_eq!(live.lanes(first), [0, 63, 64, 65, 127, 129]);
         assert_eq!(live.lanes(third), [0, 1, 63, 64, 65, 127, 128, 129]);
-    }
-
-    #[test]
-    fn empty_lane_census_preserves_one_result_per_value() {
-        let live = LaneLiveness::new(3, 0).into_hash_sets();
-        assert_eq!(live, vec![HashSet::new(), HashSet::new(), HashSet::new()]);
     }
 
     #[test]

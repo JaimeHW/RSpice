@@ -44,9 +44,7 @@ mod state_file;
 pub use builtins::{
     BuiltinGenerationReport, BuiltinSubsetGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
     GeneratedKernelStructureReport, KernelFamilyCoverage, REGENERATE_BUILTINS_COMMAND,
-    common_kernel_coverage, generate_generated_builtin_subset_with_progress,
-    generate_generated_builtin_subset_with_progress_and_jobs, regenerate_generated_builtins,
-    regenerate_generated_builtins_with_progress,
+    common_kernel_coverage, generate_generated_builtin_subset_with_progress_and_jobs,
     regenerate_generated_builtins_with_progress_and_jobs, validate_generated_builtins,
 };
 pub use discover::{
