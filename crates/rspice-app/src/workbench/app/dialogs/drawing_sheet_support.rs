@@ -17,6 +17,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
+use crate::workbench::framework::feature::CanvasGesturePort;
 use crate::workbench::state::WorkbenchSession;
 
 use super::drawing_sheet_preview::{
@@ -78,6 +79,7 @@ pub(crate) fn open_sheet_format_manager(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
 ) -> Result<(), String> {
     crate::workbench::app::SchematicEditAuthority::capture(model)
         .validate(model, "Sheet Format Manager")?;
@@ -92,7 +94,7 @@ pub(crate) fn open_sheet_format_manager(
         .sheet_catalog(&model.workspace.content.active_key())
         .is_none()
     {
-        crate::workbench::app::sheets::ensure_sheet_catalog(model, workbench)?;
+        crate::workbench::app::sheets::ensure_sheet_catalog(model, workbench, gesture)?;
     }
     let model = &*model;
     let designs = &model.workspace.content.design_management;
@@ -910,6 +912,7 @@ mod tests {
             &mut state.model,
             &mut state.workbench,
             state.design.schematic_visibility.review_markers,
+            &mut *state.design,
         )
     }
 

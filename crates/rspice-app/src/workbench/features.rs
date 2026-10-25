@@ -60,7 +60,7 @@ macro_rules! features {
                         &mut *state.$slot,
                         &mut state.model,
                         &mut *state.workbench,
-                        Peers::new(&*state.design),
+                        Peers::new(&mut *state.design),
                     )
                 }
             }

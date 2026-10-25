@@ -13,7 +13,6 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
-use crate::workbench::state::WorkbenchSession;
 
 /// What the design feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -212,6 +211,9 @@ pub(crate) struct DesignState {
     pub(crate) tabbed_property_dialog: Box<crate::properties::TabbedPropertyDialogState>,
     /// Property registry (component property schemas)
     pub(crate) property_registry: crate::properties::PropertyEditorSchema,
+    /// The canvas's interaction state: its drag, hover, last click, context
+    /// menu target and keyboard focus. Runtime-only.
+    pub(crate) interaction: crate::workbench::app_state::interaction_state::InteractionState,
 }
 
 impl DesignState {
@@ -266,8 +268,8 @@ impl DesignState {
     }
 }
 
-/// The session still holds design's canvas gesture, its drag.
-impl CanvasGesturePort for WorkbenchSession {
+/// Design's canvas gesture is its drag.
+impl CanvasGesturePort for DesignState {
     fn let_go_of_canvas_gesture(&mut self, model: &mut Model) {
         self.interaction.drag.cancel_schematic_drag(model);
     }

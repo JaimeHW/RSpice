@@ -361,6 +361,7 @@ impl Bench {
         let _ = super::sheets::activate_sheet(
             &mut state.model,
             &mut state.workbench,
+            &mut *state.design,
             self.sheets[index],
         );
         self.end_frame();

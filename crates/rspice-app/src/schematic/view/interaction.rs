@@ -1527,7 +1527,7 @@ fn retain_probe_flag(
             .editor
             .selection
             .select_only_probe(id);
-        state.workbench.interaction.schematic_keyboard_focus = Some(
+        state.design.interaction.schematic_keyboard_focus = Some(
             crate::workbench::app_state::SchematicKeyboardFocus::Probe(id),
         );
         return Ok(id);
@@ -1537,7 +1537,7 @@ fn retain_probe_flag(
             .model
             .schematic
             .place_schematic_probe(position, label, source_expression, binding)?;
-    state.workbench.interaction.schematic_keyboard_focus = Some(
+    state.design.interaction.schematic_keyboard_focus = Some(
         crate::workbench::app_state::SchematicKeyboardFocus::Probe(probe_id),
     );
     state.sync_active_schematic_to_workspace();

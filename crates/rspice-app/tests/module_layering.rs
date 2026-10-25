@@ -841,11 +841,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // instead of the surface deriving it.
     ("state", "lifecycle/window_session", 2),
     // The framework dialogs the workbench holds: the window-session manager,
-    // the command palette, the confirmation and project-review dialogs, and
-    // pointer interaction. Their types still live with the application root
-    // and the session aggregate.
+    // the command palette, and the confirmation and project-review dialogs.
+    // Their types still live with the application root.
     ("state", "app", 4),
-    ("state", "app_state", 1),
     // The text locale the workbench holds: its type lives with the message
     // catalog.
     ("state", "localization", 1),

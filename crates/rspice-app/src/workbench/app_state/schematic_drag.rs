@@ -13,7 +13,7 @@ impl super::AppState {
         if self.model.schematic.has_pending_operation() || self.schematic_edit_read_only() {
             return;
         }
-        self.workbench.interaction.drag.prepared = Some(self.model.schematic.prepare_operation());
+        self.design.interaction.drag.prepared = Some(self.model.schematic.prepare_operation());
     }
 
     pub(crate) fn begin_schematic_drag(
@@ -30,7 +30,7 @@ impl super::AppState {
             DragType::WireVertex => "drag wire vertex",
             _ => return false,
         };
-        let prepared = self.workbench.interaction.drag.prepared.take();
+        let prepared = self.design.interaction.drag.prepared.take();
         // A new pointer edit cannot leave another window's transaction
         // orphaned when it takes over the shared gesture owner.
         self.cancel_schematic_drag();
@@ -50,12 +50,12 @@ impl super::AppState {
                 .pending_operation_id()
                 .expect("new drag operation"),
         };
-        self.workbench.interaction.drag.start(position, kind, owner);
+        self.design.interaction.drag.start(position, kind, owner);
         true
     }
 
     fn schematic_drag_operation_is_current(&self) -> bool {
-        self.workbench
+        self.design
             .interaction
             .drag
             .operation_is_current(&self.model)
@@ -82,7 +82,7 @@ impl super::AppState {
     pub(crate) fn schematic_drag_in_progress(&self) -> bool {
         self.schematic_drag_operation_is_current()
             && self
-                .workbench
+                .design
                 .interaction
                 .drag
                 .owner
@@ -100,7 +100,7 @@ impl super::AppState {
         if !self.schematic_drag_owned_by_context(ctx) {
             return None;
         }
-        let drag = &self.workbench.interaction.drag;
+        let drag = &self.design.interaction.drag;
         Some(
             rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag {
                 kind: drag.drag_type,
@@ -113,7 +113,7 @@ impl super::AppState {
     pub(crate) fn schematic_drag_owned_by_context(&self, ctx: &egui::Context) -> bool {
         self.schematic_drag_in_progress()
             && self
-                .workbench
+                .design
                 .interaction
                 .drag
                 .owner
@@ -127,7 +127,7 @@ impl super::AppState {
     /// Cancel only the transaction owned by this pointer gesture. A stale
     /// release must never modify a newly opened document or another operation.
     pub(crate) fn cancel_schematic_drag(&mut self) -> bool {
-        self.workbench
+        self.design
             .interaction
             .drag
             .cancel_schematic_drag(&mut self.model)
@@ -138,7 +138,7 @@ impl super::AppState {
         window: crate::workbench::lifecycle::window_session::ApplicationWindowId,
     ) {
         if self
-            .workbench
+            .design
             .interaction
             .drag
             .owner
@@ -158,9 +158,9 @@ impl super::AppState {
     ) -> bool {
         // A press let go without starting a drag lets its baseline go.
         if !ctx.input(|input| input.pointer.primary_down()) {
-            self.workbench.interaction.drag.prepared = None;
+            self.design.interaction.drag.prepared = None;
         }
-        let Some(owner) = &self.workbench.interaction.drag.owner else {
+        let Some(owner) = &self.design.interaction.drag.owner else {
             return false;
         };
         if owner.window != self.workbench.window_session.current()

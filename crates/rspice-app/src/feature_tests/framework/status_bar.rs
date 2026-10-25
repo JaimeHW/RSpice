@@ -525,6 +525,7 @@ fn the_page_segment_appears_only_above_one_sheet_and_follows_activation() {
     crate::workbench::app::sheets::activate_sheet(
         &mut app.state.model,
         &mut app.state.workbench,
+        &mut *app.state.design,
         second,
     )
     .expect("the second sheet activates");

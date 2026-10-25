@@ -91,6 +91,7 @@ impl SheetsFeature {
                 model: cx.model,
                 workbench: cx.wb,
                 reveal_sheet_section: &mut cx.state.reveal_sheet_section,
+                gesture: &mut cx.peers,
             },
             layout,
         );
@@ -304,6 +305,7 @@ impl CommandSet for SheetsCommand {
                     cx.model,
                     cx.wb,
                     review_markers,
+                    &mut cx.peers,
                 ) {
                     cx.wb.prompt(error);
                 }
@@ -320,13 +322,13 @@ impl CommandSet for SheetsCommand {
             // Each of these reports its own outcome, including the catalog's
             // refusal text, so the result is never discarded.
             Self::NextSheet => {
-                let _ = sheet_actions::next_sheet(cx.model, cx.wb);
+                let _ = sheet_actions::next_sheet(cx.model, cx.wb, &mut cx.peers);
             }
             Self::PreviousSheet => {
-                let _ = sheet_actions::previous_sheet(cx.model, cx.wb);
+                let _ = sheet_actions::previous_sheet(cx.model, cx.wb, &mut cx.peers);
             }
             Self::NewSheet => {
-                let _ = sheet_actions::new_sheet(cx.model, cx.wb);
+                let _ = sheet_actions::new_sheet(cx.model, cx.wb, &mut cx.peers);
             }
             Self::DeleteSheet => {
                 if let Some(id) = cx.model.active_sheet_id() {

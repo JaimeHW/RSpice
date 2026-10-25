@@ -19,6 +19,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app::sheets::{self as sheet_actions, SheetDeletePlan, SheetEntry};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::session::shortcuts::request_engineering_canvas_focus_in_this_pass;
+use crate::workbench::framework::feature::CanvasGesturePort;
 use crate::workbench::state::WorkbenchSession;
 
 use super::super::design_system::WorkbenchIcon;
@@ -46,6 +47,8 @@ pub(in crate::workbench) struct SheetStrip<'a> {
     pub(in crate::workbench) model: &'a mut Model,
     pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
     pub(in crate::workbench) reveal_sheet_section: &'a mut bool,
+    /// What a switch to another sheet lets go of first.
+    pub(in crate::workbench) gesture: &'a mut dyn CanvasGesturePort,
 }
 
 /// Draw the strip beneath the document row.
@@ -136,14 +139,18 @@ enum StripAction {
 }
 
 fn apply(strip: &mut SheetStrip<'_>, action: StripAction, entries: &[SheetEntry]) {
-    let (model, workbench) = (&mut *strip.model, &mut *strip.workbench);
+    let (model, workbench, gesture) = (
+        &mut *strip.model,
+        &mut *strip.workbench,
+        &mut *strip.gesture,
+    );
     match action {
         StripAction::None => {}
         StripAction::Activate(id) => {
-            let _ = sheet_actions::activate_sheet(model, workbench, id);
+            let _ = sheet_actions::activate_sheet(model, workbench, gesture, id);
         }
         StripAction::NewSheetAfter(after) => {
-            let _ = sheet_actions::new_sheet_after(model, workbench, after);
+            let _ = sheet_actions::new_sheet_after(model, workbench, gesture, after);
         }
         // The menu row the delete was chosen from named its outcome.
         StripAction::Delete(id) => {
@@ -153,7 +160,7 @@ fn apply(strip: &mut SheetStrip<'_>, action: StripAction, entries: &[SheetEntry]
             let _ = sheet_actions::move_selection_to_sheet(model, workbench, id);
         }
         StripAction::SheetProperties(id) => {
-            let _ = sheet_actions::activate_sheet(model, workbench, id);
+            let _ = sheet_actions::activate_sheet(model, workbench, gesture, id);
             sheet_actions::reveal_sheet_properties_on(model, workbench, strip.reveal_sheet_section);
         }
         StripAction::Reorder { sheet, to_index } => {

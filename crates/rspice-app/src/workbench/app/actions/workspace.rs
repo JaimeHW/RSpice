@@ -325,7 +325,7 @@ impl AppState {
                 {
                     let outcome = self
                         .model
-                        .activate_sheet(sheet, self.workbench.interaction.drag.let_go());
+                        .activate_sheet(sheet, self.design.interaction.drag.let_go());
                     if self.workbench.report(outcome).is_err() {
                         return;
                     }

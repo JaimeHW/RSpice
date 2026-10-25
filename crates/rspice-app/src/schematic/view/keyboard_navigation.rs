@@ -20,7 +20,7 @@ pub(super) fn handle_keyboard_object_navigation(
         &KeyboardNavigationView {
             design: super::schematic_design_view(state),
             editor: &state.model.schematic.session.editor,
-            keyboard_focus: state.workbench.interaction.schematic_keyboard_focus,
+            keyboard_focus: state.design.interaction.schematic_keyboard_focus,
             filter: state.design.schematic_selection_filter,
         },
         KeyboardCapabilities {
@@ -109,7 +109,7 @@ mod tests {
         assert!(!available);
         assert!(state.model.schematic.session.editor.selection.is_empty());
         assert_eq!(
-            state.workbench.interaction.schematic_keyboard_focus,
+            state.design.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::Probe(2))
         );
 
@@ -128,7 +128,7 @@ mod tests {
             Some(3)
         );
         assert_eq!(
-            state.workbench.interaction.schematic_keyboard_focus,
+            state.design.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::DesignNote(3))
         );
     }

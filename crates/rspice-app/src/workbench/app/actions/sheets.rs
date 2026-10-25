@@ -107,25 +107,28 @@ pub(in crate::workbench) fn sheet_count(state: &impl AsRef<Model>) -> usize {
 pub(crate) fn activate_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
     id: SheetId,
 ) -> Result<String, String> {
-    let outcome = model.activate_sheet(id, |model| workbench.let_go_of_canvas_gesture(model));
+    let outcome = model.activate_sheet(id, |model| gesture.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
 pub(in crate::workbench) fn next_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
 ) -> Result<String, String> {
-    let outcome = model.step_sheet(1, |model| workbench.let_go_of_canvas_gesture(model));
+    let outcome = model.step_sheet(1, |model| gesture.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
 pub(in crate::workbench) fn previous_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
 ) -> Result<String, String> {
-    let outcome = model.step_sheet(-1, |model| workbench.let_go_of_canvas_gesture(model));
+    let outcome = model.step_sheet(-1, |model| gesture.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
@@ -135,9 +138,10 @@ pub(in crate::workbench) fn previous_sheet(
 fn go_to_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
     index: usize,
 ) -> Result<String, String> {
-    let outcome = model.go_to_sheet(index, |model| workbench.let_go_of_canvas_gesture(model));
+    let outcome = model.go_to_sheet(index, |model| gesture.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
@@ -145,24 +149,27 @@ fn go_to_sheet(
 pub(in crate::workbench) fn new_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
 ) -> Result<String, String> {
     let after = model.active_sheet_id();
-    new_sheet_after(model, workbench, after)
+    new_sheet_after(model, workbench, gesture, after)
 }
 
 /// Create a sheet directly after `after` and enter it.
 pub(in crate::workbench) fn new_sheet_after(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
     after: Option<SheetId>,
 ) -> Result<String, String> {
     if model.active_sheet_catalog().is_none() {
-        let outcome = second_sheet(model, workbench).map(|name| format!("Created sheet `{name}`."));
+        let outcome =
+            second_sheet(model, workbench, gesture).map(|name| format!("Created sheet `{name}`."));
         return workbench.report(outcome);
     }
     match create(model, after) {
         Ok((id, name)) => {
-            let _ = model.activate_sheet(id, |model| workbench.let_go_of_canvas_gesture(model));
+            let _ = model.activate_sheet(id, |model| gesture.let_go_of_canvas_gesture(model));
             workbench.report(Ok(format!("Created sheet `{name}`.")))
         }
         Err(error) => workbench.report(Err(error)),
@@ -171,8 +178,12 @@ pub(in crate::workbench) fn new_sheet_after(
 
 /// Let go of any gesture under way and write the open drawing back to the
 /// project, before an edit of the catalog reads it.
-fn settle_drawing(model: &mut Model, workbench: &mut WorkbenchSession) {
-    workbench.let_go_of_canvas_gesture(model);
+fn settle_drawing(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
+) {
+    gesture.let_go_of_canvas_gesture(model);
     if let Some(prompt) = model.sync_active_schematic_to_workspace() {
         workbench.prompt(prompt);
     }
@@ -387,11 +398,12 @@ fn move_selection(model: &mut Model, destination: SheetId) -> Result<String, Str
 pub(in crate::workbench) fn ensure_sheet_catalog(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
 ) -> Result<(), String> {
     if model.active_sheet_catalog().is_some() {
         return Ok(());
     }
-    settle_drawing(model, workbench);
+    settle_drawing(model, workbench, gesture);
     let key = model.workspace.content.active_schematic_reference().key();
     let objects = live_object_ids(model);
     let before = (*model.workspace.content.design_management).clone();
@@ -406,8 +418,12 @@ pub(in crate::workbench) fn ensure_sheet_catalog(
 /// the catalog with everything already drawn as Sheet 1, adds Sheet 2 after
 /// it and enters it, as one transaction, so one undo gives back the single
 /// drawing.
-fn second_sheet(model: &mut Model, workbench: &mut WorkbenchSession) -> Result<String, String> {
-    settle_drawing(model, workbench);
+fn second_sheet(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
+) -> Result<String, String> {
+    settle_drawing(model, workbench, gesture);
     let key = model.workspace.content.active_schematic_reference().key();
     let objects = live_object_ids(model);
     let before = (*model.workspace.content.design_management).clone();

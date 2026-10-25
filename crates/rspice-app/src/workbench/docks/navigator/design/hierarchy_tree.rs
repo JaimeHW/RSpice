@@ -1018,7 +1018,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         let state = &mut app.state;
         let outcome = state
             .model
-            .activate_sheet(sheet, state.workbench.interaction.drag.let_go());
+            .activate_sheet(sheet, state.design.interaction.drag.let_go());
         let _ = state.workbench.report(outcome);
     } else if let Some(path) = descend {
         open_occurrence(&mut app.state, &path);

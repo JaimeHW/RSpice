@@ -841,12 +841,12 @@ impl RSpiceApp {
         if let Some(document) = window_state.active_document {
             // This is a temporary rendering projection, not user navigation.
             // The gesture remains owned by its original window and document.
-            let drag = std::mem::take(&mut self.state.workbench.interaction.drag);
+            let drag = std::mem::take(&mut self.state.design.interaction.drag);
             let _ = crate::workbench::chrome::document_bar::activate_document_by_id(
                 &mut self.state,
                 &document,
             );
-            self.state.workbench.interaction.drag = drag;
+            self.state.design.interaction.drag = drag;
         }
         self.state.workbench.drawer = window_state.drawer;
         self.state.workbench.console_maximized = window_state.console_maximized;

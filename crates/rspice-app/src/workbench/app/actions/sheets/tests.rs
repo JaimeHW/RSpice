@@ -103,7 +103,13 @@ fn activating_a_sheet_retires_the_selection_and_frames_the_new_drawing() {
         .select_component(10);
     state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
 
-    activate_sheet(&mut state.model, &mut state.workbench, second).expect("activation publishes");
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        second,
+    )
+    .expect("activation publishes");
 
     assert_eq!(active_sheet_id(&state), Some(second));
     assert!(state.model.schematic.session.editor.selection.is_empty());
@@ -124,8 +130,13 @@ fn re_activating_the_current_sheet_publishes_nothing() {
         .selection
         .select_component(10);
 
-    activate_sheet(&mut state.model, &mut state.workbench, first)
-        .expect("an inert activation still succeeds");
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        first,
+    )
+    .expect("an inert activation still succeeds");
 
     assert_eq!(
         state.model.workspace.content.design_management.revision(),
@@ -147,13 +158,20 @@ fn re_activating_the_current_sheet_publishes_nothing() {
 fn page_navigation_wraps_around_both_ends() {
     let (mut state, first, second) = two_sheet_state();
 
-    next_sheet(&mut state.model, &mut state.workbench).expect("forward");
+    next_sheet(&mut state.model, &mut state.workbench, &mut *state.design).expect("forward");
     assert_eq!(active_sheet_id(&state), Some(second));
-    next_sheet(&mut state.model, &mut state.workbench).expect("forward wraps");
+    next_sheet(&mut state.model, &mut state.workbench, &mut *state.design).expect("forward wraps");
     assert_eq!(active_sheet_id(&state), Some(first));
-    previous_sheet(&mut state.model, &mut state.workbench).expect("backward wraps");
+    previous_sheet(&mut state.model, &mut state.workbench, &mut *state.design)
+        .expect("backward wraps");
     assert_eq!(active_sheet_id(&state), Some(second));
-    go_to_sheet(&mut state.model, &mut state.workbench, 0).expect("indexed");
+    go_to_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        0,
+    )
+    .expect("indexed");
     assert_eq!(active_sheet_id(&state), Some(first));
 }
 
@@ -175,15 +193,16 @@ fn a_single_sheet_catalog_offers_no_navigation() {
         .expect("first sheet");
 
     assert_eq!(sheet_count(&state), 1);
-    assert!(next_sheet(&mut state.model, &mut state.workbench).is_err());
-    assert!(previous_sheet(&mut state.model, &mut state.workbench).is_err());
+    assert!(next_sheet(&mut state.model, &mut state.workbench, &mut *state.design).is_err());
+    assert!(previous_sheet(&mut state.model, &mut state.workbench, &mut *state.design).is_err());
 }
 
 #[test]
 fn a_new_sheet_lands_after_the_active_one_and_becomes_current() {
     let (mut state, first, second) = two_sheet_state();
 
-    new_sheet(&mut state.model, &mut state.workbench).expect("creation publishes");
+    new_sheet(&mut state.model, &mut state.workbench, &mut *state.design)
+        .expect("creation publishes");
 
     let entries = sheet_entries(&state);
     assert_eq!(entries.len(), 3);
@@ -206,7 +225,7 @@ fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
     ];
     assert!(active_sheet_catalog(&state).is_none());
 
-    new_sheet(&mut state.model, &mut state.workbench)
+    new_sheet(&mut state.model, &mut state.workbench, &mut *state.design)
         .expect("the first new sheet creates the catalog");
 
     let entries = sheet_entries(&state);

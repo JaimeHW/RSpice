@@ -303,10 +303,7 @@ impl Fixture {
             )],
             true,
         );
-        assert_eq!(
-            self.app.state.workbench.interaction.drag.drag_type,
-            expected
-        );
+        assert_eq!(self.app.state.design.interaction.drag.drag_type, expected);
         assert!(self.app.state.schematic_drag_in_progress());
     }
 
@@ -961,8 +958,13 @@ fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag()
     fixture.drag(DragType::MoveSelection);
 
     let state = &mut fixture.app.state;
-    crate::workbench::app::sheets::activate_sheet(&mut state.model, &mut state.workbench, second)
-        .expect("the switch publishes");
+    crate::workbench::app::sheets::activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        second,
+    )
+    .expect("the switch publishes");
 
     assert!(!state.schematic_drag_in_progress());
     assert!(!state.model.schematic.has_pending_operation());

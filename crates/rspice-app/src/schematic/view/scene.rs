@@ -137,7 +137,7 @@ pub(super) fn draw_scene(
             editor: &state.model.schematic.session.editor,
             net_highlighting: state.design.schematic_visibility.net_highlighting,
             parameter_labels: state.design.schematic_visibility.parameter_labels,
-            hover_wire_vertex: state.workbench.interaction.hover_wire_vertex,
+            hover_wire_vertex: state.design.interaction.hover_wire_vertex,
             selection_filter: state.design.schematic_selection_filter,
             hover: canvas_hover(painter.ctx(), available, viewport, state, symbol_context),
         },
@@ -190,7 +190,7 @@ pub(super) fn draw_scene(
         viewport,
         &super::schematic_design_view(state),
         &state.model.schematic.session.editor.selection,
-        state.workbench.interaction.schematic_keyboard_focus,
+        state.design.interaction.schematic_keyboard_focus,
         symbol_context,
     );
 }

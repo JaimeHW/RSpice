@@ -81,7 +81,9 @@ SLICE_RULES = [
     (W + r"app_state/model(\.rs$|/)", "model"),
     (W + r"app_state/(sim_setup|design_history|cell_usage|run_identity|symbol_contract)", "model"),
     (W + r"app_state/(design_checks|diagnostic_store|waivers|rule_deck|schematic_preferences)", "model"),
-    (W + r"app_state/(problems_view|active_viewer|interaction_state)", "framework"),
+    (W + r"app_state/(problems_view|active_viewer)", "framework"),
+    # The canvas's drag, hover and focus are design's; the design slot holds them.
+    (W + r"app_state/interaction_state", "design"),
     (W + r"app_state/viewer_capabilities", "results"),
     (W + r"app_state/run_preflight", "run"),
     (W + r"app_state/session/autosave", "services"),

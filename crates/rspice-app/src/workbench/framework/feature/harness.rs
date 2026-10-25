@@ -14,7 +14,9 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::CommandAvailability;
 
-use super::{Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry, Peers, Reads};
+use super::{
+    CanvasGesturePort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry, Peers, Reads,
+};
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
@@ -23,6 +25,11 @@ impl DesignPort for NullPorts {
     fn review_markers(&self) -> SchematicReviewMarkerVisibility {
         SchematicReviewMarkerVisibility::default()
     }
+}
+
+/// A fresh session holds no canvas gesture to let go of.
+impl CanvasGesturePort for NullPorts {
+    fn let_go_of_canvas_gesture(&mut self, _model: &mut Model) {}
 }
 
 /// A feature, its own state, and the model and session its commands run
@@ -63,7 +70,7 @@ where
             &mut self.state,
             &mut self.model,
             &mut self.wb,
-            Peers::new(&NullPorts),
+            Peers::new(&mut NullPorts),
         ));
     }
 }

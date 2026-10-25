@@ -533,7 +533,6 @@ impl<'a> WorkbenchWireRef<'a> {
             notification_unread_only: _,
             window_session_dialog: _,
             command_palette: _,
-            interaction: _,
             confirmation_dialog: _,
             project_review_dialog: _,
             // The UI session wire keeps the theme and the text locale; the
@@ -770,7 +769,6 @@ impl WorkbenchWire {
             notification_unread_only: _,
             window_session_dialog: _,
             command_palette: _,
-            interaction: _,
             confirmation_dialog: _,
             project_review_dialog: _,
             // The UI session wire restores the theme and the text locale; the

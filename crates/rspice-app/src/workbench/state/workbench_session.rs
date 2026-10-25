@@ -424,9 +424,6 @@ pub struct WorkbenchSession {
     /// Command palette state
     pub command_palette: crate::workbench::app::command_palette::CommandPaletteState,
 
-    /// Runtime interaction state for drag, hover, etc.
-    pub interaction: crate::workbench::app_state::interaction_state::InteractionState,
-
     /// State for save confirmation modal (unsaved changes warning)
     pub confirmation_dialog:
         crate::workbench::app::dialogs::confirmation_state::ConfirmationDialogState,
@@ -514,7 +511,6 @@ impl Default for WorkbenchSession {
             notification_unread_only: false,
             window_session_dialog: Default::default(),
             command_palette: Default::default(),
-            interaction: Default::default(),
             confirmation_dialog: Default::default(),
             project_review_dialog: Default::default(),
             theme: Default::default(),

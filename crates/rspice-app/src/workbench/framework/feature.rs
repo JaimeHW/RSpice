@@ -3,10 +3,11 @@
 //!
 //! A feature's code never holds the whole application. Each command it
 //! declares is answered and carried out in a [`Cx`]: its own state, the
-//! model every feature shares, the session, and narrow read-only views of
-//! the other features it reads. The shell builds that context from the
-//! application's parts for each call; it is three references and a view, so
-//! building one allocates nothing.
+//! model every feature shares, the session, and narrow views of the other
+//! features it reads, read-only but for letting go of design's canvas
+//! gesture. The shell builds that context from the application's parts for
+//! each call; it is three references and a view, so building one allocates
+//! nothing.
 //!
 //! The shell's dispatcher runs every command's prologue, whoever owns it;
 //! the feature answers only whether its command can run here and what it
@@ -62,20 +63,32 @@ pub(crate) trait CanvasGesturePort {
     fn let_go_of_canvas_gesture(&mut self, model: &mut Model);
 }
 
-/// Read-only views of the other features a feature reads: live references,
-/// never a copy taken earlier.
-#[derive(Clone, Copy)]
+/// Design as another feature reaches it: what it shows, and its canvas
+/// gesture to let go of.
+pub(crate) trait DesignPeer: DesignPort + CanvasGesturePort {}
+
+impl<T: DesignPort + CanvasGesturePort> DesignPeer for T {}
+
+/// The other features a feature reads, as live references, never a copy
+/// taken earlier; and the one thing it may ask of one, letting go of
+/// design's canvas gesture.
 pub(crate) struct Peers<'a> {
-    design: &'a dyn DesignPort,
+    design: &'a mut dyn DesignPeer,
 }
 
 impl<'a> Peers<'a> {
-    pub(crate) fn new(design: &'a dyn DesignPort) -> Self {
+    pub(crate) fn new(design: &'a mut dyn DesignPeer) -> Self {
         Self { design }
     }
 
-    pub(crate) fn design(&self) -> &'a dyn DesignPort {
-        self.design
+    pub(crate) fn design(&self) -> &dyn DesignPort {
+        &*self.design
+    }
+}
+
+impl CanvasGesturePort for Peers<'_> {
+    fn let_go_of_canvas_gesture(&mut self, model: &mut Model) {
+        self.design.let_go_of_canvas_gesture(model);
     }
 }
 

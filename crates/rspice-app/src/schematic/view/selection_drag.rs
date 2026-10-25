@@ -36,7 +36,7 @@ pub(super) fn handle_select_dragging(
     ) {
         return;
     }
-    state.workbench.interaction.hover_wire_vertex =
+    state.design.interaction.hover_wire_vertex =
         selection_drag::hover_wire_vertex(response, &view(state, ui.ctx()), viewport, symbols)
             .map(|point| (point.x, point.y));
     if response.is_pointer_button_down_on()
@@ -150,7 +150,7 @@ fn apply(
             position,
         } => {
             if !owns_operation(state, ctx, operation_id, Some(DragType::WireVertex))
-                || state.workbench.interaction.drag.last_pos != Some((from.x, from.y))
+                || state.design.interaction.drag.last_pos != Some((from.x, from.y))
             {
                 return;
             }
@@ -158,7 +158,7 @@ fn apply(
                 schematic.move_all_vertices_at(from, position, scope)
             }) {
                 state
-                    .workbench
+                    .design
                     .interaction
                     .drag
                     .update((position.x, position.y));
@@ -171,7 +171,7 @@ fn apply(
             position,
         } => {
             if !owns_operation(state, ctx, operation_id, Some(DragType::MoveSelection))
-                || state.workbench.interaction.drag.last_pos != Some((from.x, from.y))
+                || state.design.interaction.drag.last_pos != Some((from.x, from.y))
             {
                 return;
             }
@@ -199,7 +199,7 @@ fn apply(
                 )
             });
             state
-                .workbench
+                .design
                 .interaction
                 .drag
                 .update((position.x, position.y));
@@ -233,7 +233,7 @@ fn apply(
             if state.model.schematic.end_operation() {
                 state.sync_active_schematic_to_workspace();
             }
-            state.workbench.interaction.drag.cancel();
+            state.design.interaction.drag.cancel();
         }
         SelectionDragAction::FinishMarquee { additive } => {
             let rectangle = &mut state.model.schematic.session.editor.selection_rect;
@@ -318,7 +318,7 @@ mod tests {
                 "step {step} left the junction behind the pointer"
             );
             assert_eq!(
-                state.workbench.interaction.drag.last_pos,
+                state.design.interaction.drag.last_pos,
                 Some((position.x, position.y)),
                 "step {step} left the drag anchored where the junction no longer is"
             );

@@ -81,6 +81,7 @@ fn strip(state: &mut AppState) -> SheetStrip<'_> {
         model: &mut state.model,
         workbench: &mut state.workbench,
         reveal_sheet_section: &mut state.sheets.reveal_sheet_section,
+        gesture: &mut *state.design,
     }
 }
 

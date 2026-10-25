@@ -598,7 +598,7 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
             .editor
             .selection
             .select_only_component(7);
-        state.workbench.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
+        state.design.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
         let symbol_context = schematic_symbol_context(&state);
 
         let _ = ctx.run_ui(Default::default(), |ctx| {
@@ -1326,7 +1326,7 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
             .editor
             .selection
             .select_only_component(7);
-        state.workbench.interaction.context_target = Some((ContextTarget::Component(7), (70, 0)));
+        state.design.interaction.context_target = Some((ContextTarget::Component(7), (70, 0)));
         let request = ContextMenuRequest {
             binding: context_menu_binding(&state).unwrap(),
             action: ContextAction::Delete,
@@ -1341,7 +1341,7 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
                 .selection
                 .select_only_component(8),
             "target" => {
-                state.workbench.interaction.context_target =
+                state.design.interaction.context_target =
                     Some((ContextTarget::Component(8), (80, 0)))
             }
             "tool" => state.model.schematic.session.editor.tool = Tool::Wire,
