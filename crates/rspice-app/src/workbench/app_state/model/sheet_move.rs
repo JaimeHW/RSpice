@@ -28,7 +28,7 @@ impl Model {
     /// Whether the selection is one or more complete instances on a
     /// writable schematic, and nothing else: what hierarchy extraction and
     /// a sheet move both carry.
-    pub(crate) fn create_hierarchy_available(&self) -> bool {
+    pub fn create_hierarchy_available(&self) -> bool {
         let selection = &self.schematic.session.editor.selection;
         !self.schematic_edit_read_only()
             && !selection.components.is_empty()
@@ -45,7 +45,7 @@ impl Model {
     /// The selection's extraction plan: every terminal of the open drawing
     /// with its resolved contract, joined by the nets the hierarchical
     /// netlist finds.
-    pub(crate) fn hierarchy_source_plan(&self) -> Result<HierarchyExtractionPlan, String> {
+    pub fn hierarchy_source_plan(&self) -> Result<HierarchyExtractionPlan, String> {
         let symbols = self.schematic_symbol_context();
         let component_bounds = self
             .schematic
@@ -97,9 +97,7 @@ impl Model {
     /// extraction. Sheet management consumes this result to preserve
     /// internal conductors and create exact typed contracts for every
     /// source/destination boundary terminal.
-    pub(crate) fn selected_component_sheet_move_plan(
-        &self,
-    ) -> Result<SheetMoveConnectivityPlan, String> {
+    pub fn selected_component_sheet_move_plan(&self) -> Result<SheetMoveConnectivityPlan, String> {
         if !self.create_hierarchy_available() {
             return Err(
                 "A governed sheet move requires one or more complete, writable schematic instances and no partial or non-instance selections."
@@ -113,7 +111,7 @@ impl Model {
 
     /// The explicit boundary-port contract for one sheet move of `plan`
     /// from `source` to `destination`.
-    pub(crate) fn sheet_move_boundary_resolution(
+    pub fn sheet_move_boundary_resolution(
         plan: &SheetMoveConnectivityPlan,
         source: SheetId,
         destination: SheetId,
@@ -165,7 +163,7 @@ impl Model {
 
     /// The hierarchical netlist of `schematic` among `buffers` and
     /// `libraries`, which joins an extraction's terminals into nets.
-    pub(crate) fn hierarchy_netlist(
+    pub fn hierarchy_netlist(
         schematic: &SchematicState,
         buffers: &HashMap<String, Schematic>,
         libraries: &LibraryManager,

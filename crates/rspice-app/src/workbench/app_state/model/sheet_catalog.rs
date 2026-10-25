@@ -33,7 +33,7 @@ impl Model {
 
     /// The open cell view's sheet catalog while it has more than one sheet.
     /// One sheet is the drawing itself, so there is no sheet to tell apart.
-    pub(crate) fn multi_sheet_catalog(&self) -> Option<&SheetCatalog> {
+    pub fn multi_sheet_catalog(&self) -> Option<&SheetCatalog> {
         self.active_sheet_catalog()
             .filter(|catalog| catalog.sheets().len() > 1)
     }

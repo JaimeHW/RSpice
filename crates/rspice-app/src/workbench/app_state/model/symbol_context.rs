@@ -66,7 +66,7 @@ impl Model {
     /// The resolved symbols a frame paints and hit-tests with: the context
     /// the open document's session holds, while everything it was resolved
     /// from stands still, and one resolved afresh and held otherwise.
-    pub(crate) fn frame_symbol_context(&mut self) -> Arc<SchematicSymbolContext> {
+    pub fn frame_symbol_context(&mut self) -> Arc<SchematicSymbolContext> {
         let revision = self.symbol_context_revision();
         let topology_version = self.schematic.topology_version();
         let pending = self
