@@ -42,9 +42,10 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
         .show(root, |ui| {
-            if app.workbench().workspace == Workspace::Results {
-                app.state_mut().results.results_seen_version =
-                    app.model().simulation.view.data_version;
+            // The showing workspace's owner runs what showing it does, as on
+            // the activity rail: showing Results is seeing its results.
+            if let Some(on_visible) = app.rail_entry(app.workbench().workspace).on_visible {
+                on_visible(app);
             }
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal(|ui| {
@@ -67,13 +68,8 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 };
                 for workspace in workspaces.iter().copied() {
                     let active = app.workbench().workspace == workspace;
-                    let new_result_count = usize::from(
-                        workspace == Workspace::Results
-                            && !active
-                            && app.model().simulation.retained.has_results()
-                            && app.state().results.results_seen_version
-                                != app.model().simulation.view.data_version,
-                    );
+                    let entry = app.rail_entry(workspace);
+                    let new_result_count = entry.badge.map_or(0, |badge| badge(app, active));
                     let command = app.open_workspace(workspace);
                     let response = ui
                         .add_enabled_ui(app.is_enabled(command), |ui| {
@@ -89,9 +85,8 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                         })
                         .inner;
                     if response.clicked() {
-                        if workspace == Workspace::Results {
-                            app.state_mut().results.results_seen_version =
-                                app.model().simulation.view.data_version;
+                        if let Some(on_visible) = entry.on_visible {
+                            on_visible(app);
                         }
                         app.execute(command);
                     }
