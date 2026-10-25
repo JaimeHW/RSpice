@@ -64,7 +64,8 @@ class SliceRuleTests(unittest.TestCase):
             "hardcopy": ["workbench/hardcopy_adapters/sources.rs", "workbench/menu_bar/export_actions.rs"],
             "cloud": ["services/cloud_account.rs", "workbench/live_session.rs"],
             "settings": ["workbench/shortcuts/profile.rs", "workbench/app/dialogs/preferences.rs"],
-            "shell": ["lib.rs", "workbench/app.rs", "workbench/app/dialogs/help.rs"],
+            "shell": ["lib.rs", "workbench/app.rs", "workbench/app/dialogs/help.rs",
+                      "workbench/app_state/session/preference_runtime.rs"],
         }
         self.assertEqual(set(expected), set(SLICES))
         for slice_name, paths in expected.items():
