@@ -23,7 +23,6 @@ use super::super::shared::{
     checks_status, count_label, findings_problem, sheet_floating_net_findings,
     sheet_open_pin_findings,
 };
-use crate::schematic::view::drawing_sheet::ActiveDrawingSheet;
 use crate::state::policy_labels::grid_pitch_label;
 use crate::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY, DrawingSheetReleaseStatus,
@@ -43,6 +42,7 @@ use crate::workbench::design_system::{
 use crate::workbench::framework::requests::FollowSchematicGrid;
 use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+use rspice_schematic_editor::view::drawing_sheet::ActiveDrawingSheet;
 use rspice_ui_kit::panels::{section_header, section_header_explained};
 
 /// The sheet's inspector section over the parts it reads and writes: the

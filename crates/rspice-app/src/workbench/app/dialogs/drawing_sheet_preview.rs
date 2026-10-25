@@ -2,9 +2,11 @@
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 
-use crate::schematic::view::drawing_sheet::{
-    DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, drawing_sheet_printable_preview,
+use rspice_schematic_editor::view::drawing_sheet::{
+    DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetPrintablePreview,
+    DrawingSheetPrintablePreviewKind,
 };
+
 use crate::state::{
     DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetRect, SchematicSheetFormat,
 };
@@ -33,7 +35,7 @@ impl DrawingSheetPreviewContent {
         review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
     ) -> Self {
         Self {
-            objects: drawing_sheet_printable_preview(model, review_markers),
+            objects: model.drawing_sheet_printable_preview(review_markers),
             page_label: model.active_drawing_sheet().page_label,
         }
     }
@@ -44,8 +46,8 @@ impl DrawingSheetPreviewContent {
 
     fn outside_drawing_count(&self, drawing: DrawingSheetRect) -> usize {
         let in_drawing = |x: f64, y: f64| {
-            let (origin_x, origin_y) = crate::schematic::view::drawing_sheet::DRAWING_SHEET_ORIGIN;
-            let units_per_mm = crate::schematic::view::drawing_sheet::DRAWING_SHEET_UNITS_PER_MM;
+            let (origin_x, origin_y) = DRAWING_SHEET_ORIGIN;
+            let units_per_mm = DRAWING_SHEET_UNITS_PER_MM;
             let x_um = ((x - origin_x) / units_per_mm * 1_000.0).round();
             let y_um = ((y - origin_y) / units_per_mm * 1_000.0).round();
             x_um >= drawing.x_um as f64
@@ -275,8 +277,8 @@ fn paint_content_silhouette(
     palette: SheetPreviewPalette,
 ) {
     let map_world = |x: f64, y: f64| {
-        let (origin_x, origin_y) = crate::schematic::view::drawing_sheet::DRAWING_SHEET_ORIGIN;
-        let units_per_mm = crate::schematic::view::drawing_sheet::DRAWING_SHEET_UNITS_PER_MM;
+        let (origin_x, origin_y) = DRAWING_SHEET_ORIGIN;
+        let units_per_mm = DRAWING_SHEET_UNITS_PER_MM;
         let sheet_x_mm = (x - origin_x) / units_per_mm;
         let sheet_y_mm = (y - origin_y) / units_per_mm;
         map((sheet_x_mm * 1_000.0) as f32, (sheet_y_mm * 1_000.0) as f32)

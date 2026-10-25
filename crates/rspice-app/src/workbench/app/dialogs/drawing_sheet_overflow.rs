@@ -7,11 +7,10 @@
 use egui::{Align, Context, Frame, Label, Layout, RichText, Stroke, Ui, vec2};
 
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
-
-use crate::schematic::view::drawing_sheet::{
+use rspice_schematic_editor::view::drawing_sheet::{
     DrawingSheetOverflowItem, DrawingSheetOverflowSummary, DrawingSheetOverflowTarget,
-    overflow_summary, show_overflow_target,
 };
+
 use crate::state::{DrawingSheetDisplayUnit, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -73,7 +72,7 @@ pub(crate) fn render_drawing_sheet_overflow_dialog(
         let sheet = model.active_drawing_sheet();
         let format = sheet.format_label();
         (
-            overflow_summary(model, review_markers, &symbol_context, &sheet),
+            model.overflow_summary(review_markers, &symbol_context, &sheet),
             format,
             sheet.format.display_unit,
         )
@@ -99,7 +98,7 @@ pub(crate) fn render_drawing_sheet_overflow_dialog(
         OverflowReviewAction::None => None,
         OverflowReviewAction::Show(target) => {
             *open = false;
-            show_overflow_target(model, review_markers, target);
+            model.show_overflow_target(review_markers, target);
             None
         }
         OverflowReviewAction::FitContent => {

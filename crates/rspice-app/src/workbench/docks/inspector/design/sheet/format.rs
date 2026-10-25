@@ -6,10 +6,10 @@ use egui::Ui;
 
 use super::super::super::shared::{action_stack, count_label};
 use super::{PanelEdit, SheetIdentity, SheetInspector, SheetText, choice_row, text_row};
-use crate::schematic::view::drawing_sheet::{
-    ActiveDrawingSheet, DrawingSheetOverflowSummary, overflow_summary,
-    show_first_drawing_sheet_overflow,
+use rspice_schematic_editor::view::drawing_sheet::{
+    ActiveDrawingSheet, DrawingSheetOverflowSummary,
 };
+
 use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetFrameConvention, DrawingSheetInheritance, DrawingSheetPreset,
@@ -281,7 +281,9 @@ fn saved_sizes(ui: &Ui, model: &Model) -> Vec<DrawingSheetPreset> {
 fn overflow_rows(ui: &mut Ui, panel: &mut SheetInspector<'_>, sheet: &ActiveDrawingSheet) {
     // The canvas's own cached context: the inspector resolves nothing.
     let symbol_context = panel.model.frame_symbol_context();
-    let overflow = overflow_summary(panel.model, panel.review_markers, &symbol_context, sheet);
+    let overflow = panel
+        .model
+        .overflow_summary(panel.review_markers, &symbol_context, sheet);
     if overflow.is_clear() {
         return;
     }
@@ -296,7 +298,9 @@ fn overflow_rows(ui: &mut Ui, panel: &mut SheetInspector<'_>, sheet: &ActiveDraw
             .show(ui)
             .clicked()
         {
-            show_first_drawing_sheet_overflow(panel.model, panel.review_markers);
+            panel
+                .model
+                .show_first_drawing_sheet_overflow(panel.review_markers);
         }
         if Button::new("Review all\u{2026}").show(ui).clicked() {
             open_drawing_sheet_overflow_review(panel.overflow_review_open, panel.model);

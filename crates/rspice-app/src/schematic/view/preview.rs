@@ -5,11 +5,9 @@ use super::{
     SchematicShelfDragPayload, SchematicSymbolContext, array_interaction::array_placement,
     snap_resolution::resolve_grid_pointer, viewport::Viewport,
 };
-use crate::state::transform_preview_memo::{
-    DrawingInputs, TransformPreviewKey, TransformPreviewOutcome,
-};
+use crate::state::transform_preview_memo::{TransformPreviewKey, TransformPreviewOutcome};
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::AppState;
 use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
 use std::sync::Arc;
@@ -242,22 +240,6 @@ fn draw_stretch_selection_preview(
     preview::draw_transform_feedback(painter, response, true, detail);
 }
 
-/// What a canvas derivation reads from the open drawing besides its own
-/// inputs.
-pub(super) fn drawing_inputs(
-    model: &Model,
-    symbol_context: &SchematicSymbolContext,
-) -> DrawingInputs {
-    let catalog = model.active_sheet_catalog();
-    DrawingInputs {
-        topology_version: model.schematic.topology_version(),
-        content_version: model.schematic.content_version(),
-        symbol_revision: symbol_context.revision(),
-        active_sheet: catalog.and_then(crate::state::SheetCatalog::active_sheet_id),
-        sheet_catalog_revision: catalog.map(crate::state::SheetCatalog::revision),
-    }
-}
-
 /// The preview held for `key`, or the one `compute` finds, held from now on.
 fn held_transform_preview(
     state: &mut AppState,
@@ -295,7 +277,7 @@ pub(super) fn move_preview_diff(
         delta,
         mode,
         selection: Box::new(state.model.schematic.session.editor.selection.clone()),
-        drawing: drawing_inputs(&state.model, symbol_context),
+        drawing: state.model.drawing_inputs(symbol_context),
     };
     held_transform_preview(state, key, |state| {
         let (candidate, result) = move_preview_candidate(state, symbol_context, delta, mode);
@@ -323,7 +305,7 @@ pub(super) fn stretch_preview_diff(
         delta,
         target,
         policy,
-        drawing: drawing_inputs(&state.model, symbol_context),
+        drawing: state.model.drawing_inputs(symbol_context),
     };
     held_transform_preview(state, key, |state| {
         match stretch_preview_candidate(state, symbol_context, delta, target, policy) {

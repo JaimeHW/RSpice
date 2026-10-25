@@ -234,7 +234,9 @@ SLICE_RULES = [
     (r"^properties/model_browser", "models"),
     (r"^properties(\.rs$|/)", "design"),
     (r"^schematic/view/sheet_visibility\.rs$", "design"),
-    (r"^schematic/view/drawing_sheet", "sheets"),
+    # The sheet frame on the schematic canvas is design's painting: the
+    # schematic view paints the sheet every frame.
+    (r"^schematic/view/drawing_sheet", "design"),
     (r"^schematic(\.rs$|/)", "design"),
     (r"^services/(cloud_account|license|dpapi)", "cloud"),
     (r"^services/model_qualification", "models"),
