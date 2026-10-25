@@ -1,6 +1,7 @@
 //! Retained event tables, bus controls and source-aware selection readouts.
 
 use crate::{
+    optimization::table_header,
     presentation::{panel_note, stat_table, well_hint},
     strip::StripHeader,
 };
@@ -319,14 +320,6 @@ fn show_current_impulse_tables(
                 });
             })
         });
-}
-fn table_header(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(label)
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
 }
 fn mono(ui: &mut Ui, text: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());

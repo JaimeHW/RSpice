@@ -13,27 +13,6 @@ pub struct StretchCanvasSession {
     pub gesture: TransformCanvasSession,
 }
 
-pub fn has_live_selection(document: &SchematicDocument, selection: &Selection) -> bool {
-    document.wires.iter().any(|wire| {
-        selection.has_wire(wire.id) && wire.segment_count() != 0
-            || selection.wire_segments.iter().any(|selected| {
-                selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
-            })
-            || selection.wire_vertices.iter().any(|selected| {
-                selected.wire_id == wire.id
-                    && selected.vertex_index < wire.vertex_count()
-                    && wire.segment_count() != 0
-            })
-    }) || document
-        .buses
-        .iter()
-        .any(|bus| selection.has_bus(bus.id) && bus.points.len() >= 2)
-        || document.documentation_shapes.iter().any(|shape| {
-            selection.has_documentation_shape(shape.id)
-                && stretch::documentation_shape_point_count(&shape.geometry) != 0
-        })
-}
-
 pub fn default_target(
     document: &SchematicDocument,
     selection: &Selection,

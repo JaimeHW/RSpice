@@ -222,10 +222,6 @@ mod tests {
         );
 
         let state = selected_u_wire();
-        assert!(editor_stretch::has_live_selection(
-            state.design.document(),
-            &state.session.editor.selection
-        ));
         assert_eq!(state.default_stretch_target(), Some(wire_target(1, 1)));
         assert!(state.is_stretch_target_eligible(wire_target(1, 1)));
     }
