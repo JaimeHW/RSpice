@@ -4,7 +4,7 @@
 //! rides the deck of the transient it is bound to and no other, which is both
 //! why the transient's identity moves and why there is never a second solve.
 
-use super::tests::runnable_state;
+use super::fixtures::runnable_state;
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::controller::test_host::RunTestHost;

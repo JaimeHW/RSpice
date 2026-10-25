@@ -1120,7 +1120,7 @@ impl PreparedRunSetInputs {
     /// What a run set prepared from `state` would be retained with, for a
     /// test that builds a workflow's dispatch record and prepares no run. It
     /// holds no host file.
-    pub(crate) fn of_unprepared(state: &impl RunHost) -> Self {
+    pub fn of_unprepared(state: &impl RunHost) -> Self {
         Self {
             inputs: Arc::new(RetainedRunInputs {
                 identity: RunInputIdentity::of_run_set(state),

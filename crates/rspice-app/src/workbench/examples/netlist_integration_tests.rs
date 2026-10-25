@@ -3,7 +3,7 @@
 //! The workbench owns the authored example; its netlist assertions belong here
 //! rather than making the lower simulation module depend on the workbench.
 
-use crate::simulation::netlist_gen::generate_netlist;
+use crate::simulation::table_route::generate_netlist;
 use crate::state::{
     DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Point,
     SchematicState,

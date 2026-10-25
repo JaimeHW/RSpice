@@ -1,7 +1,7 @@
 //! Rectangular arithmetic and historical recipes through real AC execution.
 
-use super::binding_tests::{ac, check_value, close, execute};
-use super::fixtures::output;
+use super::binding_tests::{check_value, close, execute};
+use super::fixtures::{ac, output};
 use super::*;
 use crate::io::project_io::{PersistedField, ProjectSimulationResults};
 use crate::state::{ComplexExpressionPolicy, SimulationState};

@@ -24,6 +24,8 @@ use crate::state::CampaignMemberRefusal;
 use rspice_vocabulary::canonical::content_digest;
 
 #[cfg(test)]
+pub(crate) mod fixtures;
+#[cfg(test)]
 mod ground_expression_tests;
 #[cfg(test)]
 pub(crate) mod measurement_tests;
@@ -1234,7 +1236,7 @@ impl SimulationController {
     /// with the identity of `state`'s inputs, which its dispatch checks. The
     /// test prepared it with the plain data-file host, so no data-file answer
     /// is held for dispatch to ask again.
-    pub(in crate::simulation::controller) fn retain_prepared_from(
+    pub fn retain_prepared_from(
         &mut self,
         state: &impl RunHost,
         snapshot: PreparedRunSnapshot,
@@ -1275,7 +1277,7 @@ pub(crate) mod thread_preparations {
 
     /// The preparations this thread ran since the last call, which forgets
     /// them.
-    pub(crate) fn take() -> Vec<SimulationRunIntent> {
+    pub fn take() -> Vec<SimulationRunIntent> {
         PREPARED.with(|prepared| std::mem::take(&mut *prepared.borrow_mut()))
     }
 }

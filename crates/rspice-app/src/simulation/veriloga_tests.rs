@@ -4,13 +4,15 @@ use rspice_simulation::netlist_preparation::{
     append_project_veriloga_directive, project_veriloga_directive,
 };
 use rspice_simulation::project_veriloga::{build_profile, compile_model_library_source_runtimes};
-use rspice_simulation::veriloga::{
-    PreparedVerilogARuntime, PreparedVerilogARuntimeSet, compile_signed_pdk_source_runtime,
-};
+#[cfg(test)]
+use rspice_simulation::veriloga::compile_signed_pdk_source_runtime;
+use rspice_simulation::veriloga::{PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
 
-pub(crate) mod project_tests;
+#[cfg(test)]
+mod project_tests;
 pub(crate) mod test_support;
 
+#[cfg(test)]
 mod tests {
     use crate::state::model_library::ModelLibraryManager;
 

@@ -1,7 +1,7 @@
 //! Checked QPAC fixtures shared by application integration tests.
 use rspice_core::engine::*;
 
-pub(crate) fn qpac_retained_test_fixture() -> crate::state::AnalysisResult {
+pub fn qpac_retained_test_fixture() -> crate::state::AnalysisResult {
     let deck =
         "QPAC retained response\nV1 in 0 DC 1\nIprobe 0 out DC 0\nR1 in out 1k\nC1 out 0 100n\n";
     let carrier = QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]);

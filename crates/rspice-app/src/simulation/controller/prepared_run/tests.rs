@@ -4,20 +4,19 @@
 //! so these cases mutate files after prepare and assert the run fails closed
 //! rather than silently reopening the changed source.
 
+use super::fixtures::{
+    fixture_dir, manual_deck_state, runnable_state, technology_free_runnable_state,
+};
 use super::*;
 use std::fs;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::simulation::controller::test_host::RunTestHost;
 use rspice_app_state::workbench::examples::load_example;
 use rspice_app_state::workbench::preferences::FolderListPreference;
-use rspice_design::drc::DrcResult;
 
 pub(crate) mod campaign;
 #[cfg(not(target_arch = "wasm32"))]
 mod library_folders;
-
-static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
@@ -120,42 +119,6 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
     assert!(!executable.contains("va/device.va"));
     let parsed = rspice_core::Netlist::parse(&executable).expect("prepared directive parses");
     assert_eq!(parsed.veriloga_includes.len(), 1);
-}
-
-pub(crate) fn fixture_dir(label: &str) -> PathBuf {
-    let nonce = FIXTURE_NONCE.fetch_add(1, Ordering::Relaxed);
-    let directory = std::env::temp_dir().join(format!(
-        "rspice-prepared-run-{label}-{}-{nonce}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&directory).expect("create prepared-run fixture");
-    directory
-}
-
-/// A runnable design whose project owns no technology. The contract admits
-/// this: a technology is required only when the project has one or the plan
-/// demands one.
-fn technology_free_runnable_state() -> RunTestHost {
-    let mut state = RunTestHost::default();
-    for dimension in &mut state.model.sim_setup.run_set.dimensions {
-        if dimension.kind
-            == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
-        {
-            dimension.enabled = false;
-        }
-    }
-    load_example("Voltage Divider", &mut state.model.schematic);
-    let mut drc = DrcResult::new();
-    drc.completed = true;
-    state.model.design_checks.drc_results = Some(drc);
-    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
-    state
-}
-
-pub(crate) fn runnable_state() -> RunTestHost {
-    let mut state = technology_free_runnable_state();
-    state.provision_test_project_technology_contract();
-    state
 }
 
 #[test]
@@ -1632,13 +1595,6 @@ fn insert_enabled_draft(
     )
     .expect("an appended analysis has no prerequisites")
     .0
-}
-
-pub(crate) fn manual_deck_state(deck: &str) -> RunTestHost {
-    let mut state = RunTestHost::default();
-    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(deck.to_owned());
-    state
 }
 
 #[test]

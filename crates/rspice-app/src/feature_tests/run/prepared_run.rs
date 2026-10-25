@@ -10,8 +10,7 @@ use rspice_simulation::project_veriloga::preparation::project_veriloga_runtimes_
 use super::session_of;
 use crate::simulation::controller::SimulationController;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::controller::prepared_run::tests::fixture_dir;
-use crate::simulation::controller::prepared_run::tests::manual_deck_state;
+use crate::simulation::controller::prepared_run::fixtures::{fixture_dir, manual_deck_state};
 use crate::simulation::execution::PreparationStage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::compile_project_bundle_receipt;

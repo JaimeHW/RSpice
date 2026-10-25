@@ -1,13 +1,13 @@
 //! Application integration fixtures for runtime results and retained documents.
 
 mod qpac;
-pub(crate) use qpac::qpac_retained_test_fixture;
+pub use qpac::qpac_retained_test_fixture;
 mod qpnoise;
-pub(crate) use qpnoise::qpnoise_retained_test_fixture;
+pub use qpnoise::qpnoise_retained_test_fixture;
 mod qpxf;
-pub(crate) use qpxf::qpxf_retained_test_fixture;
+pub use qpxf::qpxf_retained_test_fixture;
 
-pub(crate) fn retained_manual_fixture(
+pub fn retained_manual_fixture(
     source: &str,
     kind: crate::state::AnalysisType,
 ) -> crate::state::AnalysisResult {

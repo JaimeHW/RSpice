@@ -394,7 +394,7 @@ impl SimulationController {
     /// The deck the next dispatch consumes, as preflight retained it, and the
     /// digest of the snapshot it seals: what a run started now executes.
     #[cfg(test)]
-    pub(crate) fn retained_run_deck(&self) -> Option<(&str, crate::product::ContentDigest)> {
+    pub fn retained_run_deck(&self) -> Option<(&str, crate::product::ContentDigest)> {
         self.run_authorization
             .retained_snapshot()
             .map(|snapshot| (snapshot.executable_netlist(), snapshot.digest()))

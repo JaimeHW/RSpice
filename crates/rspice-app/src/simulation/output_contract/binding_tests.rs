@@ -2,7 +2,7 @@
 //! These circuits use distinct internal voltages and branch currents, so a
 //! missing or incorrectly bound signal cannot pass as a physical zero.
 
-use super::fixtures::{output, run};
+use super::fixtures::{ac, output, run};
 use super::*;
 use crate::state::{OutputSelectionMode, SimulationRun};
 
@@ -20,15 +20,6 @@ pub(super) fn dc() -> AnalysisSpec {
         step2: Some(1.0),
         hysteresis: false,
         modes: Default::default(),
-    }
-}
-
-pub(crate) fn ac() -> AnalysisSpec {
-    AnalysisSpec::Ac {
-        start_freq: 1.0,
-        stop_freq: 10.0,
-        points_per_unit: 3,
-        sweep: FrequencySweep::Linear,
     }
 }
 

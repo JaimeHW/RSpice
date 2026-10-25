@@ -5,39 +5,8 @@
 //! shell the outcomes no frame can watch: a member that never became a run,
 //! and the campaign's own end.
 
+use super::super::fixtures::two_plan_campaign_state;
 use super::*;
-
-/// A runnable state holding two plans a campaign can freeze. The second,
-/// created last, is the active one.
-pub(crate) fn two_plan_campaign_state() -> (
-    RunTestHost,
-    crate::product::SimulationPlanId,
-    crate::product::SimulationPlanId,
-) {
-    let mut state = runnable_state();
-    let first_plan_id = state.model.sim_setup.stable_analysis_plan().unwrap().id();
-    state
-        .model
-        .workspace
-        .content
-        .migrate_active_plan_data(first_plan_id);
-    let second_plan_id = state
-        .model
-        .sim_setup
-        .create_plan("Second campaign plan")
-        .expect("create campaign plan");
-    state
-        .model
-        .workspace
-        .content
-        .migrate_inactive_plan_data(second_plan_id);
-    state
-        .model
-        .workspace
-        .content
-        .sync_legacy_specs_projection(second_plan_id);
-    (state, first_plan_id, second_plan_id)
-}
 
 /// A campaign member that cannot be started is filed as a finding about
 /// that member, where its failures would have been filed had it run, and the

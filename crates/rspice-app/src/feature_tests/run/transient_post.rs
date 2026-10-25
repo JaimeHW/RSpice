@@ -12,8 +12,7 @@ use rspice_results_ui::fft::{
 
 use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::tests::synthetic_result_provenance;
-use crate::simulation::controller::transient_post::tests::clock;
+use crate::simulation::controller::test_execution::{clock, synthetic_result_provenance};
 use crate::simulation::controller::transient_post::{
     DerivedViewAvailability, DerivedViewKind, DerivedViewResultPayload, DerivedViewTaskResult,
     DerivedViewerLoadState, LoadedDerivedView, PendingDerivedViewTask, build_eye_from_waveform,

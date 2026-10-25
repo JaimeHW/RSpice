@@ -1,7 +1,7 @@
 //! Real solver and project-boundary coverage for captured physical sources.
 
-use super::binding_tests::{HIERARCHY, ac, check_value, close, dc, execute};
-use super::fixtures::{output, run};
+use super::binding_tests::{HIERARCHY, check_value, close, dc, execute};
+use super::fixtures::{ac, output, run};
 use super::*;
 use crate::io::project_io::{PersistedField, ProjectSimulationResults};
 use crate::state::{OutputSelectionMode, SavedOutputBoundSource, SimulationRun, SimulationState};

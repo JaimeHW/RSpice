@@ -741,7 +741,7 @@ fn acceptance_sequence(
     );
 
     // 4. The netlist names the part as the instance master.
-    let deck = crate::simulation::netlist_gen::generate_netlist(&state.model.schematic).netlist;
+    let deck = crate::simulation::table_route::generate_netlist(&state.model.schematic).netlist;
     assert!(
         deck.contains(PART),
         "the emitted deck instantiates the pack part:\n{deck}"

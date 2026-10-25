@@ -1193,7 +1193,7 @@ fn csv_export_preserves_single_analysis_axis_shape() {
 
 #[test]
 fn dc_export_uses_the_retained_swept_quantity_and_every_nested_curve() {
-    use crate::simulation::controller::dc_history_tests::{nested_config, retain, solve};
+    use crate::simulation::controller::test_execution::dc_history::{nested_config, retain, solve};
     let nested = retain(solve(nested_config()));
     let current = retain(
         crate::simulation::controller::test_execution::run_manual_deck(

@@ -51,7 +51,7 @@ fn convergence_inspector_speaks_only_of_forced_acceptances() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn dc_inspector_names_its_sources_and_primary_traversal() {
-    use crate::simulation::controller::dc_history_tests::{nested_config, retain, solve};
+    use crate::simulation::controller::test_execution::dc_history::{nested_config, retain, solve};
     let mut config = nested_config();
     config.start = 1.0;
     config.stop = 0.0;

@@ -2,7 +2,7 @@
 
 use super::session_of;
 use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::prepared_run::tests::campaign::two_plan_campaign_state;
+use crate::simulation::controller::prepared_run::fixtures::two_plan_campaign_state;
 use crate::workbench::lifecycle::project_lifecycle;
 
 #[test]

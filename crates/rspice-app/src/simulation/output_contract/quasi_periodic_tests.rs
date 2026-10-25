@@ -31,7 +31,7 @@ fn reload(analysis: AnalysisResult) -> AnalysisResult {
             .unwrap();
         assert_eq!(operating_point.integral_names(), ["B:BMEMORY:sdt:0"]);
     }
-    let state = crate::simulation::controller::dc_history_tests::history(analysis);
+    let state = crate::simulation::controller::test_execution::dc_history::history(analysis);
     let persisted = crate::io::capture_simulation_results(&state);
     let loaded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();

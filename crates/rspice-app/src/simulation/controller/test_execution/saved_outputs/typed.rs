@@ -6,7 +6,7 @@ use crate::state::{ComponentType, Point};
 use rspice_core::netlist::{ElementKind, SourceSpec};
 use rspice_simulation_contract::drafts::{DcSetup, NoiseDraft};
 
-pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
+pub fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     let parsed = rspice_core::Netlist::parse(deck).unwrap();
     assert!(parsed.subcircuits.is_empty());
     let mut state = super::super::RunTestHost::default();

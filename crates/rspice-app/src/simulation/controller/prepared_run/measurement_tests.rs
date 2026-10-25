@@ -1,25 +1,11 @@
 //! Measurement references must survive preparation, dispatch, retention, and project saves.
 
+use super::fixtures::definition;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::config::AnalysisConfig;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-use crate::state::SpecificationDefinition;
-use crate::state::{SpecEntry, SpecPointScope};
 use rspice_simulation::netlist_preparation::measurements::materialize;
 use std::collections::HashMap;
-
-pub(crate) fn definition(name: &str, card: &str) -> SpecificationDefinition {
-    let mut definition = SpecificationDefinition::new_from_projection(&SpecEntry {
-        measurement: name.into(),
-        expression: card.into(),
-        min: None,
-        max: None,
-        unit: "V".into(),
-        scope: SpecPointScope::AllPoints,
-    });
-    definition.define_measurement = true;
-    definition
-}
 
 #[test]
 fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {

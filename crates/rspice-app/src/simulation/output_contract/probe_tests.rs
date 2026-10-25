@@ -166,7 +166,7 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
         },
         &contracts,
     );
-    let state = crate::simulation::controller::dc_history_tests::history(analysis);
+    let state = crate::simulation::controller::test_execution::dc_history::history(analysis);
     let stored = crate::io::capture_simulation_results(&state);
     stored.validate().unwrap();
     let loaded: crate::io::project_io::ProjectSimulationResults =

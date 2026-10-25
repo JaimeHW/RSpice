@@ -560,7 +560,7 @@ mod tests {
     fn a_failed_analysis_is_published_as_a_finding_about_its_run() {
         let mut state = RunTestHost::default();
         let mut controller = SimulationController::new();
-        let export_io = super::super::tests::MockExportWorkflowIo::default();
+        let export_io = super::super::test_execution::MockExportWorkflowIo::default();
         let run_sequence = state.model.simulation.start_run().id;
         let run = state
             .model
@@ -608,7 +608,7 @@ mod tests {
         use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
         let mut state = RunTestHost::default();
         let mut controller = SimulationController::new();
-        let export_io = super::super::tests::MockExportWorkflowIo::default();
+        let export_io = super::super::test_execution::MockExportWorkflowIo::default();
         let run_sequence = state.model.simulation.start_run().id;
         let run = state
             .model

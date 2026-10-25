@@ -25,9 +25,9 @@ use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 /// The shared model and the runs' slot, under the names `AppState` gives
 /// them.
 #[derive(Clone)]
-pub(crate) struct RunTestHost {
-    pub(crate) model: Model,
-    pub(crate) runs: Box<RunsState>,
+pub struct RunTestHost {
+    pub model: Model,
+    pub runs: Box<RunsState>,
 }
 
 impl Default for RunTestHost {
@@ -44,31 +44,31 @@ impl Default for RunTestHost {
 impl RunTestHost {
     /// [`Model::sync_active_schematic_to_workspace`]. What it has to say goes
     /// to the status bar, which is the workbench's.
-    pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
+    pub fn sync_active_schematic_to_workspace(&mut self) {
         let _prompt = self.model.sync_active_schematic_to_workspace();
     }
 
     /// Check the open cellview and every cellview its walk reaches, as the
     /// application's Check Hierarchy does.
-    pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
+    pub fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
         let subject = self.model.workspace.content.active_schematic_reference();
         self.run_design_check(subject, CheckScope::Hierarchy)
     }
 
     /// [`Model::provision_test_project_technology_contract`].
-    pub(crate) fn provision_test_project_technology_contract(&mut self) {
+    pub fn provision_test_project_technology_contract(&mut self) {
         self.model.provision_test_project_technology_contract();
     }
 
     /// [`Model::provision_test_project_veriloga_technology_contract`].
-    pub(crate) fn provision_test_project_veriloga_technology_contract(&mut self) {
+    pub fn provision_test_project_veriloga_technology_contract(&mut self) {
         self.model
             .provision_test_project_veriloga_technology_contract();
     }
 
     /// Whether the project's technology governs its runs, as the model's
     /// technology inputs answer it.
-    pub(crate) fn project_technology_in_effect(&self) -> bool {
+    pub fn project_technology_in_effect(&self) -> bool {
         self.model
             .technology_inputs()
             .project_technology_in_effect()

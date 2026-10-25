@@ -7,14 +7,13 @@
 use super::*;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
-use rspice_app_services::workbench::workflows::export_workflow::{
-    ExportWorkflowIo, SaveDialogConfig,
-};
 
-use super::test_execution::state_with_current_clean_drc;
+use super::test_execution::{
+    MockExportWorkflowIo, bind_test_run_running, state_with_current_clean_drc,
+    synthetic_result_provenance,
+};
 use super::test_host::RunTestHost;
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
-use std::cell::RefCell;
 use std::path::Path;
 
 #[test]
@@ -75,40 +74,6 @@ fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
     assert_eq!(all_result.saved_output_receipts.len(), 1);
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct MockExportWorkflowIo {
-    writes: RefCell<Vec<(PathBuf, String)>>,
-    create_only_writes: RefCell<Vec<(PathBuf, String)>>,
-}
-
-impl ExportWorkflowIo for MockExportWorkflowIo {
-    fn show_save_dialog(&self, _config: SaveDialogConfig<'_>) -> Result<Option<PathBuf>, String> {
-        Ok(None)
-    }
-
-    fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
-        self.writes
-            .borrow_mut()
-            .push((path.to_path_buf(), contents.to_string()));
-        Ok(())
-    }
-
-    fn write_new_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
-        self.create_only_writes
-            .borrow_mut()
-            .push((path.to_path_buf(), contents.to_string()));
-        Ok(())
-    }
-
-    fn write_waveform_csv(
-        &self,
-        _dataset: &crate::io::WaveformDataset,
-        _path: &Path,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-}
-
 fn state_with_current_drc_error() -> RunTestHost {
     let mut state = RunTestHost::default();
     state
@@ -127,23 +92,6 @@ fn state_with_current_drc_error() -> RunTestHost {
     state.model.design_checks.drc_results = Some(result);
     state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     state
-}
-
-pub(crate) fn bind_test_run_running(
-    state: &mut impl RunHost,
-    controller: &mut SimulationController,
-    run_sequence: u64,
-) {
-    let model = state.model_mut();
-    let run = model
-        .simulation
-        .retained
-        .run_by_sequence_mut(run_sequence)
-        .expect("test execution has a retained run");
-    run.mark_running().expect("test run enters running state");
-    let identity = run.execution_identity();
-    controller.current_run_id = Some(run_sequence);
-    model.simulation.execution.active_execution = identity;
 }
 
 fn bind_and_request_test_abort(state: &mut RunTestHost, controller: &mut SimulationController) {
@@ -195,16 +143,6 @@ fn synthetic_dc_op_result() -> crate::simulation::SimulationResult {
     let mut result = rspice_simulation::results::DcOpResult::default();
     result.node_voltages.insert("out".to_string(), 1.25);
     crate::simulation::SimulationResult::DcOp(Box::new(result))
-}
-
-pub(crate) fn synthetic_result_provenance() -> AnalysisResultProvenance {
-    AnalysisResultProvenance::new(
-        crate::product::AnalysisInstanceId::new(),
-        crate::product::ObjectRevision::INITIAL,
-        crate::product::ContentDigest::from_bytes([0x39; 32]),
-        Vec::new(),
-    )
-    .expect("synthetic prepared-task provenance is valid")
 }
 
 #[test]
@@ -897,7 +835,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
     use crate::simulation::plan::AnalysisDraft;
     use rspice_simulation_contract::fourier_draft::{FourierConfig, FourierDialogState};
 
-    let mut state = super::prepared_run::tests::runnable_state();
+    let mut state = super::prepared_run::fixtures::runnable_state();
     state.model.sim_setup.run_set =
         rspice_simulation_contract::run_set::RunSetState::reference_only();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();

@@ -261,7 +261,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
     let result = crate::simulation::controller::test_execution::run_manual_deck(
         "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.dc IBIAS 0 1m 0.5m\n.end\n",
     );
-    let analysis = crate::simulation::controller::dc_history_tests::retain(result);
+    let analysis = crate::simulation::controller::test_execution::dc_history::retain(result);
     assert!(analysis.success, "{:?}", analysis.error_message);
     assert_eq!(analysis.waveforms[0].unit.as_deref(), Some("V"));
     let voltage = analysis.waveforms[0].y[2];
@@ -270,7 +270,8 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
         "1 V within configured relative tolerance; got {voltage:.16e}"
     );
     let mut state = AppState::default();
-    state.model.simulation = crate::simulation::controller::dc_history_tests::history(analysis);
+    state.model.simulation =
+        crate::simulation::controller::test_execution::dc_history::history(analysis);
     state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
     let stored = crate::io::capture_simulation_results(&state.model.simulation);

@@ -582,50 +582,10 @@ fn build_fft_prepared_input(
     )
 }
 
-// Visible to the crate, because the shell's feature tests fold the same
-// clock.
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-
-    /// Trapezoidal 1010 clock at 1 ns, 20-80 % edge of 50 ps.
-    pub(crate) fn clock(bits: usize, t_start: f64) -> (Vec<f64>, Vec<f64>) {
-        const UI: f64 = 1e-9;
-        const DT: f64 = 10e-12;
-        const RAMP: f64 = 50e-12 / 0.6;
-
-        let events: Vec<(f64, f64)> = (0..bits)
-            .map(|n| {
-                (
-                    t_start + n as f64 * UI,
-                    if n.is_multiple_of(2) { 1.0 } else { 0.0 },
-                )
-            })
-            .collect();
-        let t_end = t_start + (bits as f64 + 1.0) * UI;
-        let count = (t_end / DT) as usize;
-        let mut time = Vec::with_capacity(count);
-        let mut signal = Vec::with_capacity(count);
-        let mut cursor = 0usize;
-        let mut held = 0.0;
-        for index in 0..count {
-            let t = index as f64 * DT;
-            while cursor < events.len() && t >= events[cursor].0 + 0.5 * RAMP {
-                held = events[cursor].1;
-                cursor += 1;
-            }
-            let value = match events.get(cursor) {
-                Some(&(edge, next)) if t > edge - 0.5 * RAMP => {
-                    let alpha = ((t - (edge - 0.5 * RAMP)) / RAMP).clamp(0.0, 1.0);
-                    held + alpha * (next - held)
-                }
-                _ => held,
-            };
-            time.push(t);
-            signal.push(value);
-        }
-        (time, signal)
-    }
+    use crate::simulation::controller::test_execution::clock;
 
     /// A stated rate is the rate. The builder must fold at it rather than at
     /// whatever it would have recovered, or the control is decorative.

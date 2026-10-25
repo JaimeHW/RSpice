@@ -1,7 +1,7 @@
 //! Checked QPNOISE fixtures shared by application integration tests.
 use rspice_core::engine::*;
 
-pub(crate) fn qpnoise_retained_test_fixture() -> crate::state::AnalysisResult {
+pub fn qpnoise_retained_test_fixture() -> crate::state::AnalysisResult {
     let deck = "Noise outputs\nV1 in 0 DC 1\nRs in out 1k\nRl out 0 2k\nL1 out sense 1m\nR3 sense 0 100\nC1 out 0 100n\n";
     let carrier = QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]);
     let request = rspice_core::engine::QpnoiseRequest::from_qpnoise_card(

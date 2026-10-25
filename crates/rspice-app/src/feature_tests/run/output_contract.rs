@@ -5,8 +5,7 @@ use rspice_simulation::output_contract::PreparedSavedOutput;
 
 use crate::analysis::calculator;
 use crate::product::AnalysisInstanceId;
-use crate::simulation::output_contract::binding_tests::ac;
-use crate::simulation::output_contract::fixtures::output;
+use crate::simulation::output_contract::fixtures::{ac, output};
 use crate::simulation::output_contract::materialize_live_saved_outputs;
 use crate::state::{
     AnalysisResult, ComplexExpressionPolicy, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace,

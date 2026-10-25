@@ -5,7 +5,7 @@ use rspice_simulation::project_veriloga::{
     build_profile, compile_project_source_bundle_runtime, prepare_project_runtime,
 };
 
-use crate::simulation::veriloga_tests::project_tests::{
+use crate::simulation::veriloga_tests::test_support::{
     assert_controlled_conductance, project_bundle,
 };
 

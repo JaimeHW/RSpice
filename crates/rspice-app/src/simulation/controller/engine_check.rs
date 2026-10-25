@@ -289,14 +289,14 @@ impl Drop for WorkerHooks {
 impl SimulationController {
     /// Hold the next pipeline's worker before it prepares anything, until the
     /// returned sender sends or is dropped.
-    pub(crate) fn hold_next_preflight_worker(&mut self) -> mpsc::Sender<()> {
+    pub fn hold_next_preflight_worker(&mut self) -> mpsc::Sender<()> {
         let (release, gate) = mpsc::channel();
         self.preflight_test_hooks.gate = Some(gate);
         release
     }
 
     /// Each stage the pipelines ran, with the thread it ran on.
-    pub(crate) fn preflight_worker_stages(&self) -> Vec<(&'static str, std::thread::ThreadId)> {
+    pub fn preflight_worker_stages(&self) -> Vec<(&'static str, std::thread::ThreadId)> {
         self.preflight_test_hooks
             .stages
             .lock()

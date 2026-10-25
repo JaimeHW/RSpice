@@ -6,7 +6,7 @@ use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
 mod typed;
 
-pub(crate) fn run(
+pub fn run(
     deck: &str,
     spec: AnalysisSpec,
     outputs: &[SavedOutput],

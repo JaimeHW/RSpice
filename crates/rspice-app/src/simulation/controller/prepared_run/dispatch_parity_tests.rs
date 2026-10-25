@@ -17,7 +17,7 @@ use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisKind, SimulationPlan};
 use crate::state::{CanonicalAnalysisKind, PreparedRunTaskReceipt};
 
-use super::tests::runnable_state as preflight_ready_state;
+use super::fixtures::runnable_state as preflight_ready_state;
 
 fn plan_mut(state: &mut RunTestHost) -> &mut SimulationPlan {
     state

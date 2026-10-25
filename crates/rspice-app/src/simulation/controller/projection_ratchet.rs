@@ -851,7 +851,7 @@ fn every_draft_field_moves_the_engine_facing_projection() {
 fn every_authored_advanced_option_moves_the_prepared_task_identity() {
     use crate::simulation::plan::{AnalysisInstance, AnalysisKind, NumericOverrideOption};
 
-    let mut state = super::prepared_run::tests::runnable_state();
+    let mut state = super::prepared_run::fixtures::runnable_state();
     let id = state
         .model
         .sim_setup
@@ -971,7 +971,7 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
 
     const CEILING: NumericOverrideOption = NumericOverrideOption::MaximumTimestep;
 
-    let mut state = super::prepared_run::tests::runnable_state();
+    let mut state = super::prepared_run::fixtures::runnable_state();
     // The premise, stated before it is worked around: the option is refused to
     // the kind the sweep above uses, and refused by name.
     let refusal = CEILING
@@ -1059,7 +1059,7 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
 
     const INITIAL_STATE: NumericOverrideOption = NumericOverrideOption::HbInitialState;
 
-    let mut state = super::prepared_run::tests::runnable_state();
+    let mut state = super::prepared_run::fixtures::runnable_state();
 
     // The premise, stated before it is worked around.
     let refusal = INITIAL_STATE
@@ -1168,7 +1168,7 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
     use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
     use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetPoint};
 
-    let mut state = super::prepared_run::tests::runnable_state();
+    let mut state = super::prepared_run::fixtures::runnable_state();
     // One axis, and a reference the axis actually declares, so all three
     // settings resolve rather than one of them refusing for its own reasons.
     for dimension in &mut state.model.sim_setup.run_set.dimensions {
