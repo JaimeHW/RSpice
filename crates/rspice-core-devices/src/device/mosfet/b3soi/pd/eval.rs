@@ -1446,6 +1446,16 @@ pub fn eval(
     op.gmbs = gmb + gcb;
     op.gme = gme;
 
+    // Thermal power row: the channel power `Ids * Vds`, so the channel
+    // conductances alone, without the parasitic BJT's (b3soipdld.c:2691-2699
+    // leave its power out for convergence). Its node derivatives carry the
+    // type sign, as B4SOI writes them (b4soild.c:6241-6247); ngspice-46 PD
+    // leaves the sign out, which flips the PMOS thermal-row Jacobian but not
+    // its residual.
+    op.gtemp_g = -mtype * gm * vds;
+    op.gtemp_b = -mtype * gmb * vds;
+    op.gtemp_d = -mtype * (gds * vds + ids);
+
     // Drain-side junction current into drain prime.
     op.gjdb = gjdb - giib;
     op.gjdd = gjdd - (giid + gdgidld);

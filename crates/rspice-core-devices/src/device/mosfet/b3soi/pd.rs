@@ -665,13 +665,6 @@ impl B3SoiPd {
         op.gjs_t = (plus.2 - minus.2) / denom;
         op.gb_t = (plus.3 - minus.3) / denom;
         let ids_t = (plus.4 - minus.4) / denom;
-        // The node derivatives of the power carry the type sign, as B4SOI
-        // writes them (b4soild.c:6241-6247); ngspice-46 PD leaves it out
-        // (b3soipdld.c:2696-2699), which flips the PMOS thermal-row Jacobian
-        // but not its residual.
-        op.gtemp_g = -self.mtype * op.gm * vds;
-        op.gtemp_b = -self.mtype * op.gmbs * vds;
-        op.gtemp_d = -self.mtype * (op.gds * vds + op.ids);
         op.gtemp_t = -ids_t * vds;
         op.thermal_eq_current = -op.ids * vds
             - self.mtype * (op.gtemp_g * vgs + op.gtemp_b * vbs + op.gtemp_d * vds)
