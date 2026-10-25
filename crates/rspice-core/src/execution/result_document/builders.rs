@@ -3278,17 +3278,13 @@ impl AnalysisResultDocument {
     /// Project one periodic-stability run: the complete Floquet spectrum of
     /// the carrier's monodromy, on the mode-index axis it lives on.
     ///
-    /// The card travels beside the result for the reason `from_pxf`'s does: a
-    /// `PeriodicStabilityResult` is the numbers, and how many of them the deck
-    /// asked a viewer to draw is the card's own statement. The projection
-    /// refuses a card that states a different classification boundary or
-    /// subharmonic policy than the spectrum was produced under, because then
-    /// the two are not the same run.
+    /// The card travels beside the result so the projection can refuse a card
+    /// that states a different classification boundary or subharmonic policy
+    /// than the spectrum was produced under, because then the two are not the
+    /// same run.
     ///
-    /// The six per-mode curves are published at the **complete** spectrum, not
-    /// at the card's `NMULTS`. A truncated spectrum cannot prove stability,
-    /// and a display limit is presentation rather than payload; the limit
-    /// itself is recorded so a viewer can honour it.
+    /// The six per-mode curves are published at the **complete** spectrum: a
+    /// truncated spectrum cannot prove stability.
     pub fn from_pstb(
         analysis: AnalysisInstanceId,
         card: &crate::netlist::PstbCard,
@@ -3491,7 +3487,6 @@ impl AnalysisResultDocument {
             probe_state_projection: stability.probe_state_projection.clone(),
             stability_threshold: result.stability_threshold,
             detect_subharmonics: result.detect_subharmonics,
-            num_multipliers: card.num_multipliers,
             floquet_evidence: FloquetEvidenceDocument::from(&result.floquet_evidence),
             floquet_orbit_kind: FloquetOrbitTag::from(result.orbit_kind),
             trivial_multiplier_index: result.trivial_multiplier_index,

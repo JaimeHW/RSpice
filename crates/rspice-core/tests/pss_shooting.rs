@@ -2696,7 +2696,6 @@ fn series_inductors_share_one_current_state_and_preserve_the_voltage_division() 
         let card = rspice_core::netlist::PstbCard {
             probe_instance: "L2".to_owned(),
             max_harmonics: 4,
-            num_multipliers: 1,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
         };
@@ -2894,7 +2893,6 @@ fn prescribed_diode_voltage_is_a_constraint_not_a_spurious_shooting_state() {
     let card = rspice_core::netlist::PstbCard {
         probe_instance: "Lmissing".to_owned(),
         max_harmonics: 4,
-        num_multipliers: 1,
         stability_threshold: 1.0 + 1e-6,
         detect_subharmonics: true,
     };
@@ -3599,7 +3597,6 @@ fn three_way_inductor_junction_uses_two_independent_currents() {
         let card = rspice_core::netlist::PstbCard {
             probe_instance: "L3".to_owned(),
             max_harmonics: 4,
-            num_multipliers: 2,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
         };

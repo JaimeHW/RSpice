@@ -759,7 +759,6 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         pss_tolerance: 9.0e-7,
         probe_instance: "LLOOP".to_string(),
         max_harmonics: 12,
-        num_multipliers: 6,
         stability_threshold: 1.0002,
         detect_subharmonics: false,
     };
@@ -1273,7 +1272,6 @@ fn assert_pstb_config_matches(
     assert_eq!(actual.pss_tolerance, expected.pss_tolerance);
     assert_eq!(actual.probe_instance, expected.probe_instance);
     assert_eq!(actual.max_harmonics, expected.max_harmonics);
-    assert_eq!(actual.num_multipliers, expected.num_multipliers);
     assert_eq!(actual.stability_threshold, expected.stability_threshold);
     assert_eq!(actual.detect_subharmonics, expected.detect_subharmonics);
 }

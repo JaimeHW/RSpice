@@ -238,7 +238,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 20;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 21;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -305,14 +305,17 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 20;
 /// variable was declared and which processes drive it. Earlier documents
 /// carry none, and a reader has nowhere to go from their HDL traces.
 ///
+/// Version 21 retires PSTB `numMultipliers`, a display limit no reader
+/// honoured. Earlier documents state it; it is read and dropped.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 20] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 21] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
 ];
 
 /// First version whose transient payload may declare a digital bus.

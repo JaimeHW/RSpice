@@ -1119,7 +1119,6 @@ fn pstb_measurement() -> (
     let card = crate::netlist::PstbCard {
         probe_instance: "L1".to_owned(),
         max_harmonics: 4,
-        num_multipliers: 1,
         stability_threshold: 1.0 + 1e-6,
         detect_subharmonics: true,
     };
@@ -2079,9 +2078,6 @@ fn monte_carlo_pss_pac_and_pnoise_documents_keep_their_typed_payloads() {
     assert_eq!(payload.probe_state_index, Some(1));
     assert_eq!(payload.stability_classification, PstbStabilityTag::Stable);
     assert_eq!(payload.num_unstable, 0);
-    // The card asked for one multiplier; the document publishes the whole
-    // spectrum anyway and records the limit rather than applying it.
-    assert_eq!(payload.num_multipliers, 1);
     assert_eq!(payload.modes.len(), 2);
     assert_eq!(pstb.point_count(), payload.modes.len());
     assert_eq!(pstb.axes()[0].unit(), &SignalUnit::Dimensionless);
@@ -2364,6 +2360,25 @@ fn legacy_pstb_documents_preserve_their_single_index_without_inventing_polarity(
                 ..
             })
         ));
+    }
+}
+
+/// Version 21 retired PSTB `numMultipliers`, a display limit no reader
+/// honoured. A document written before then still reads, to the payload it
+/// would carry without the key, and a fresh document never writes it.
+#[test]
+fn retired_pstb_nmults_in_an_older_document_reads_as_absent() {
+    let document = document_for(AnalysisResultKind::Pstb);
+    let fresh = serde_json::to_value(&document).unwrap();
+    assert!(fresh["payload"].get("numMultipliers").is_none(), "{fresh}");
+    for version in [3, 20] {
+        let mut wire = fresh.clone();
+        wire["schemaVersion"] = serde_json::json!(version);
+        wire["payload"]["numMultipliers"] = serde_json::json!(10);
+        let restored = AnalysisResultDocument::from_json(&wire.to_string())
+            .unwrap_or_else(|error| panic!("a version-{version} document reads: {error}"));
+        assert_eq!(restored.schema_version(), version);
+        assert_eq!(restored.payload(), document.payload());
     }
 }
 

@@ -2926,12 +2926,6 @@ pub struct PstbCard {
     /// below this cannot represent the motion the card asks about, and the run
     /// refuses rather than reporting a spectrum from an aliased orbit.
     pub max_harmonics: usize,
-    /// Floquet multipliers a presentation layer is asked to show.
-    ///
-    /// The published spectrum is always complete — a truncated spectrum cannot
-    /// prove stability — so this is a display limit, carried into the result
-    /// document so a viewer can honour the card without re-reading the deck.
-    pub num_multipliers: usize,
     /// Outer magnitude boundary above which a multiplier is called unstable.
     /// At least one, so the physical `|lambda| = 1` boundary is never inside it.
     pub stability_threshold: Value,
@@ -2944,9 +2938,6 @@ impl PstbCard {
     /// The Studio's `.PSTB` dialog writes this key on every line it emits and
     /// its manual-deck reader defaults it to the same 10.
     pub(crate) const DEFAULT_MAX_HARMONICS: usize = 10;
-    /// Multipliers a viewer shows when the card does not say; the Studio's
-    /// reader and dialog have both meant 10 since `.PSTB` became authorable.
-    pub(crate) const DEFAULT_NUM_MULTIPLIERS: usize = 10;
     /// Outer classification boundary when the card does not say. Slightly
     /// above unity so a marginally stable mode is not called a failure on
     /// rounding alone; the Studio's reader and dialog use the same number.

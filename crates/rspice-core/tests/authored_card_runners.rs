@@ -1007,7 +1007,6 @@ fn pstb_card(probe: &str) -> rspice_core::netlist::PstbCard {
     rspice_core::netlist::PstbCard {
         probe_instance: probe.to_owned(),
         max_harmonics: 4,
-        num_multipliers: 10,
         stability_threshold: 1.0 + 1.0e-6,
         detect_subharmonics: true,
     }
@@ -1044,7 +1043,6 @@ fn an_authored_pstb_card_reproduces_the_spectrum_its_configuration_asks_for() {
 
     let oracle = rspice_core::analysis::pstb::PstbAnalyzer::new(
         rspice_core::analysis::pstb::PstbConfig::new()
-            .with_num_eigenvalues(card.num_multipliers)
             .with_orbit_kind(carrier.analysis().result.floquet_orbit_kind)
             .with_eigenvectors(true)
             .with_stability_threshold(card.stability_threshold)

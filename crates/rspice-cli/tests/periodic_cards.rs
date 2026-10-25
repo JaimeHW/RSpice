@@ -722,7 +722,7 @@ fn the_pstb_line_the_studio_writes_runs_and_judges_the_orbit_stable() {
         // carry the form's own defaults, so this run is the same run it was;
         // what changed is that the line now says so.
         ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n\
-         .pstb probe=L1 maxharm=4 nmults=10 stabilitythreshold=1.000001 \
+         .pstb probe=L1 maxharm=4 stabilitythreshold=1.000001 \
          detectsubharmonics=yes\n",
         &[],
     );
@@ -738,10 +738,9 @@ fn the_pstb_line_the_studio_writes_runs_and_judges_the_orbit_stable() {
     assert_eq!(document["payload"]["probeInstance"], "L1");
     assert_eq!(document["payload"]["stabilityClassification"], "stable");
     assert_eq!(document["payload"]["numUnstable"], 0);
-    // The card asked for the default ten multipliers and the network has two
-    // reactive states: the document publishes the whole spectrum and records
-    // the display limit rather than padding or truncating to it.
-    assert_eq!(document["payload"]["numMultipliers"], 10);
+    // The network has two reactive states, and the document publishes the
+    // whole spectrum with no display limit beside it.
+    assert!(document["payload"].get("numMultipliers").is_none());
     let modes = document["payload"]["modes"]
         .as_array()
         .expect("the payload carries every retained mode");

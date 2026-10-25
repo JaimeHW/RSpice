@@ -443,7 +443,6 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     pstb.initialized = true;
     pstb.probe = "LPRB".to_owned();
     pstb.max_harmonics = "6".to_owned();
-    pstb.num_multipliers = "4".to_owned();
     pstb.stability_threshold = "1.25".to_owned();
     pstb.detect_subharmonics = false;
 
@@ -506,10 +505,6 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
         .unwrap_or_else(|| panic!("the deck carries one .PSTB card: {:?}", netlist.analyses));
     assert_eq!(pstb_card.probe_instance, "LPRB");
     assert_eq!(pstb_card.max_harmonics, 6);
-    assert_eq!(
-        pstb_card.num_multipliers, 4,
-        "the multiplier count is written whether or not it matches the card's default"
-    );
     assert_eq!(pstb_card.stability_threshold, 1.25);
     assert!(
         !pstb_card.detect_subharmonics,
@@ -538,7 +533,6 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
         .find_map(|queued| queued.spec_options.pstb.as_ref())
         .expect("the deck reader recovers the PSTB configuration");
     assert_eq!(pstb_run.max_harmonics, 6);
-    assert_eq!(pstb_run.num_multipliers, 4);
     assert!((pstb_run.stability_threshold - 1.25).abs() <= 1.0e-15);
     assert!(!pstb_run.detect_subharmonics);
 }

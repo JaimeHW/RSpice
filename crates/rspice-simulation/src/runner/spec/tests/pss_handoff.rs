@@ -167,7 +167,6 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
             pss_tolerance: 1e-6,
             probe_instance: "LPROBE".into(),
             max_harmonics: 2,
-            num_multipliers: 2,
             stability_threshold: 1.01,
             detect_subharmonics: false,
         }),

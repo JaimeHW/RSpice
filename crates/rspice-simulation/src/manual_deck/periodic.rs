@@ -926,13 +926,13 @@ fn parse_pstb(
         pss_tolerance: carrier.tolerance,
         probe_instance: required_text(card, "probe", ".PSTB")?,
         max_harmonics: optional_usize(card, "maxharm", 10, params)?,
-        num_multipliers: optional_usize(card, "nmults", 10, params)?,
         stability_threshold: optional_value(card, "stabilitythreshold", 1.0 + 1.0e-6, params)?,
         detect_subharmonics: optional_bool(card, "detectsubharmonics", true)?,
     };
     // Retired, as on the engine's card: read and checked so every line the
     // Studio wrote still reads the same way, then dropped.
     let retired_eigenvalue_tolerance = optional_value(card, "eigentol", 1.0e-10, params)?;
+    let retired_multiplier_count = optional_usize(card, "nmults", 10, params)?;
     // `rspice_core::Engine::run_pstb_card_from_pss_with_abort` validates its
     // card before it resolves a probe, and these are its three refusals in its
     // own words. One refusal per field, and the field's value in the sentence:
@@ -946,7 +946,7 @@ fn parse_pstb(
     // it would call a mode sitting exactly on the unit circle unstable. So the
     // Studio queued a run its own engine rejects, and the operator found out
     // after the solve had started rather than when the deck was read.
-    if config.max_harmonics == 0 || config.num_multipliers == 0 {
+    if config.max_harmonics == 0 || retired_multiplier_count == 0 {
         return Err(
             ".PSTB requires at least one carrier harmonic and one reported multiplier".to_owned(),
         );
@@ -1732,7 +1732,6 @@ endmodule
         assert_eq!(pxf.output_sideband, 2);
         let pstb = tasks[5].spec_options.pstb.as_ref().unwrap();
         assert_eq!(pstb.probe_instance, "LPROBE");
-        assert_eq!(pstb.num_multipliers, 6);
         assert!(!pstb.detect_subharmonics);
     }
 
@@ -1755,6 +1754,16 @@ endmodule
     fn retired_pstb_eigentol_in_a_deck_reads_as_absent() {
         assert_eq!(
             pstb_run_of(".pstb probe=L1 eigentol=1e-9"),
+            pstb_run_of(".pstb probe=L1")
+        );
+    }
+
+    /// Every line the Studio wrote states `nmults=`. It still reads, and it
+    /// builds the run the line would build without it.
+    #[test]
+    fn retired_pstb_nmults_in_a_deck_reads_as_absent() {
+        assert_eq!(
+            pstb_run_of(".pstb probe=L1 nmults=3"),
             pstb_run_of(".pstb probe=L1")
         );
     }

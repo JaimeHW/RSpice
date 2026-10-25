@@ -709,7 +709,6 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                 probe_state_projection: vec![(0, 1.0)],
                 stability_threshold: 1.0 + 1e-6,
                 detect_subharmonics: true,
-                num_multipliers: 10,
                 floquet_evidence: FloquetEvidenceDocument::NotComputed,
                 floquet_orbit_kind: FloquetOrbitTag::Driven,
                 trivial_multiplier_index: None,

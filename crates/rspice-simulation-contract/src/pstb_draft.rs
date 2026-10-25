@@ -12,7 +12,7 @@
 //! # Example SPICE Output
 //!
 //! ```text
-//! .pstb probe=LPROBE maxharm=10 nmults=10
+//! .pstb probe=LPROBE maxharm=10
 //! + stabilitythreshold=1.000001 detectsubharmonics=yes
 //! ```
 
@@ -34,8 +34,6 @@ pub struct PstbConfig {
     pub probe_reference: StbProbeReference,
     /// Maximum harmonics for analysis
     pub max_harmonics: u32,
-    /// Number of Floquet multipliers to compute
-    pub num_multipliers: u32,
     /// Magnitude above which a Floquet multiplier is called unstable. Slightly
     /// above unity so a marginally stable mode is not reported as a failure
     /// on rounding alone.
@@ -52,7 +50,6 @@ impl Default for PstbConfig {
             // claim to refer to anything placed on one.
             probe_reference: StbProbeReference::Entered,
             max_harmonics: 10,
-            num_multipliers: 10,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
         }
@@ -68,19 +65,13 @@ impl PstbConfig {
     /// the run — it is present at the card's constant. Controls were dropped
     /// that way: an operator who moved the stability threshold or turned
     /// subharmonic detection off got a line the engine ran at the default,
-    /// and nothing anywhere reported the difference.
-    ///
-    /// `nmults=` used to be written only when it differed from ten. That was
-    /// not wrong — the card's default is ten as well — but it made the line's
-    /// shape depend on a constant owned by another crate, which is exactly the
-    /// coupling that lost the other three. A card states what it runs.
+    /// and nothing anywhere reported the difference. A card states what it
+    /// runs.
     pub fn to_spice(&self) -> String {
         format!(
-            ".pstb probe={} maxharm={} nmults={} stabilitythreshold={} \
-             detectsubharmonics={}",
+            ".pstb probe={} maxharm={} stabilitythreshold={} detectsubharmonics={}",
             self.probe,
             self.max_harmonics,
-            self.num_multipliers,
             // The same spelling the dialog shows in its own box, so the line
             // and the form say one thing rather than two.
             format_tolerance(self.stability_threshold),
@@ -101,9 +92,6 @@ impl PstbConfig {
         }
         if self.max_harmonics == 0 {
             return Err("Maximum harmonics must be at least 1".to_string());
-        }
-        if self.num_multipliers == 0 {
-            return Err("Number of multipliers must be at least 1".to_string());
         }
         // The engine's bound, not a looser one of the editor's own. The
         // physical boundary is |lambda| = 1: the parser refuses
@@ -132,7 +120,6 @@ pub struct PstbDialogState {
     /// Where `probe` came from — chosen from the drawing, or typed.
     pub probe_reference: StbProbeReference,
     pub max_harmonics: String,
-    pub num_multipliers: String,
     pub stability_threshold: String,
     pub detect_subharmonics: bool,
     #[serde(skip)]
@@ -151,8 +138,11 @@ struct PersistedPstbDialogState {
     probe_reference: StbProbeReference,
     #[serde(default)]
     max_harmonics: String,
-    #[serde(default)]
-    num_multipliers: String,
+    /// Retired. The spectrum is always published whole, and a count only
+    /// ever trimmed the Studio's plots. Accepted so earlier projects and
+    /// sessions still open; never written back.
+    #[serde(default, rename = "num_multipliers")]
+    _num_multipliers: serde::de::IgnoredAny,
     #[serde(default)]
     stability_threshold: Option<String>,
     #[serde(default)]
@@ -185,7 +175,6 @@ impl<'de> Deserialize<'de> for PstbDialogState {
             probe: persisted.probe,
             probe_reference: persisted.probe_reference,
             max_harmonics: persisted.max_harmonics,
-            num_multipliers: persisted.num_multipliers,
             stability_threshold: persisted
                 .stability_threshold
                 .unwrap_or_else(|| format_tolerance(defaults.stability_threshold)),
@@ -204,7 +193,6 @@ impl PstbDialogState {
             probe: config.probe.clone(),
             probe_reference: config.probe_reference,
             max_harmonics: config.max_harmonics.to_string(),
-            num_multipliers: config.num_multipliers.to_string(),
             stability_threshold: format_tolerance(config.stability_threshold),
             detect_subharmonics: config.detect_subharmonics,
             initialized: true,
@@ -217,10 +205,6 @@ impl PstbDialogState {
             .max_harmonics
             .parse()
             .map_err(|_| "Invalid harmonics")?;
-        let num_mult: u32 = self
-            .num_multipliers
-            .parse()
-            .map_err(|_| "Invalid multipliers")?;
         let stability_threshold = parse_si_value(&self.stability_threshold)
             .map_err(|e| format!("Invalid stability threshold: {e}"))?;
 
@@ -228,7 +212,6 @@ impl PstbDialogState {
             probe: self.probe.clone(),
             probe_reference: self.probe_reference,
             max_harmonics: max_harm,
-            num_multipliers: num_mult,
             stability_threshold,
             detect_subharmonics: self.detect_subharmonics,
         };
@@ -297,7 +280,6 @@ mod tests {
         let config = PstbConfig {
             probe: "LP1".to_owned(),
             max_harmonics: 7,
-            num_multipliers: 4,
             stability_threshold: 1.25,
             detect_subharmonics: false,
             ..PstbConfig::default()
@@ -308,7 +290,6 @@ mod tests {
         for expected in [
             "probe=LP1",
             "maxharm=7",
-            "nmults=4",
             "stabilitythreshold=1.25",
             "detectsubharmonics=no",
         ] {
@@ -317,14 +298,6 @@ mod tests {
                 "`{expected}` is missing from `{directive}`"
             );
         }
-        // The default multiplier count is written too. It used to be omitted
-        // whenever it matched the card's constant, which made this line's
-        // shape depend on a number owned by another crate.
-        assert!(
-            PstbConfig::default().to_spice().contains("nmults=10"),
-            "the default draft states its multiplier count: {}",
-            PstbConfig::default().to_spice()
-        );
     }
 
     /// A threshold below unity is refused by the form, as the card, the engine

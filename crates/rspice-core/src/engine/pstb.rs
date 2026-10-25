@@ -133,7 +133,6 @@ impl Engine {
             ));
         }
         let config = PstbConfig::new()
-            .with_num_eigenvalues(card.num_multipliers)
             .with_orbit_kind(orbit_kind)
             .with_eigenvectors(true)
             .with_stability_threshold(card.stability_threshold)
@@ -301,9 +300,9 @@ fn validate_card(card: &PstbCard) -> Result<(), SimulationError> {
             "PSTB requires a loop-probe instance name".to_owned(),
         ));
     }
-    if card.max_harmonics == 0 || card.num_multipliers == 0 {
+    if card.max_harmonics == 0 {
         return Err(SimulationError::Circuit(
-            "PSTB requires at least one carrier harmonic and one reported multiplier".to_owned(),
+            "PSTB requires at least one carrier harmonic".to_owned(),
         ));
     }
     if !card.stability_threshold.is_finite() || card.stability_threshold < 1.0 {

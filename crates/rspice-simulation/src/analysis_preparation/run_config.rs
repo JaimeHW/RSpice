@@ -280,7 +280,6 @@ pub fn pstb_run_config_from_dialog(
         pss_tolerance: basis.tolerance,
         probe_instance: pstb_cfg.probe,
         max_harmonics: pstb_cfg.max_harmonics as usize,
-        num_multipliers: pstb_cfg.num_multipliers as usize,
         stability_threshold: pstb_cfg.stability_threshold,
         detect_subharmonics: pstb_cfg.detect_subharmonics,
     })

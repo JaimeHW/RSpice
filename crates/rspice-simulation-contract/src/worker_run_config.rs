@@ -195,7 +195,6 @@ pub struct WorkerPstbRunConfig {
     pub pss_tolerance: f64,
     pub probe_instance: String,
     pub max_harmonics: usize,
-    pub num_multipliers: usize,
     pub stability_threshold: f64,
     pub detect_subharmonics: bool,
 }

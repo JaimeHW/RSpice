@@ -225,13 +225,6 @@ impl PyPstbResult {
         self.inner.result.detect_subharmonics
     }
 
-    /// Multipliers the card asked a viewer to show. The arrays above are the
-    /// complete spectrum regardless.
-    #[getter]
-    fn num_multipliers(&self) -> usize {
-        self.card.num_multipliers
-    }
-
     /// The refined stability determination.
     #[getter]
     fn stability(&self) -> &'static str {

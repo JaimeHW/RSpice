@@ -10,7 +10,7 @@
 //! under the card's boundary, and establishes every invariant the result
 //! publishes before returning it. What is left here is the Studio's own share
 //! -- turning a dialog or a deck line into that card, and projecting the
-//! complete spectrum onto the modes the sheet is asked to display.
+//! complete spectrum onto the sheet.
 
 use super::{ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
@@ -71,7 +71,7 @@ pub struct PstbData {
     pub stability_margin_db: Vec<Value>,
 }
 
-/// One complete retained mode. Display limits never truncate this vector.
+/// One complete retained mode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PstbModeData {
     pub multiplier: (Value, Value),
@@ -89,12 +89,10 @@ pub struct PstbModeData {
 /// classification agreement, canonical sort order, monodromy squareness, the
 /// four aggregates and per-mode identity -- is established by
 /// `PstbResult::validate_contract` before the analyzer returns, on both of its
-/// return paths, so nothing here re-derives them. `modes` is always the
-/// complete spectrum; only the six plotted curves honour the card's display
-/// limit, because a truncated spectrum cannot prove stability.
+/// return paths, so nothing here re-derives them. `modes` and the six
+/// plotted curves both cover the complete spectrum.
 fn build_pstb_data(
     stability: rspice_core::engine::PeriodicStabilityResult,
-    max_display_modes: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
     let rspice_core::engine::PeriodicStabilityResult {
@@ -129,15 +127,14 @@ fn build_pstb_data(
         });
     }
 
-    let display_count = order.min(max_display_modes);
-    let mut mode_indices = Vec::with_capacity(display_count);
-    let mut probe_mode_participation = Vec::with_capacity(display_count);
-    let mut multiplier_magnitude = Vec::with_capacity(display_count);
-    let mut multiplier_phase_deg = Vec::with_capacity(display_count);
-    let mut mode_damping = Vec::with_capacity(display_count);
-    let mut mode_frequency_hz = Vec::with_capacity(display_count);
-    let mut stability_margin_db = Vec::with_capacity(display_count);
-    for (index, multiplier) in result.multipliers.iter().take(display_count).enumerate() {
+    let mut mode_indices = Vec::with_capacity(order);
+    let mut probe_mode_participation = Vec::with_capacity(order);
+    let mut multiplier_magnitude = Vec::with_capacity(order);
+    let mut multiplier_phase_deg = Vec::with_capacity(order);
+    let mut mode_damping = Vec::with_capacity(order);
+    let mut mode_frequency_hz = Vec::with_capacity(order);
+    let mut stability_margin_db = Vec::with_capacity(order);
+    for (index, multiplier) in result.multipliers.iter().enumerate() {
         poll_periodically(abort, index)?;
         mode_indices.push((index + 1) as Value);
         probe_mode_participation.push(modes[index].probe_participation);
@@ -225,7 +222,7 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_context(
     let order = stability.result.multipliers.len();
     let values = order
         .saturating_mul(5)
-        .saturating_add(order.min(config.num_multipliers).saturating_mul(13))
+        .saturating_add(order.saturating_mul(13))
         .saturating_add(16);
     if values > context.limits.max_result_values {
         return Err(ServiceRunError::resource_limit(
@@ -234,7 +231,7 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_context(
             context.limits.max_result_values,
         ));
     }
-    build_pstb_data(stability, config.num_multipliers, abort)
+    build_pstb_data(stability, abort)
 }
 
 #[cfg(test)]
@@ -294,11 +291,10 @@ mod tests {
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
 
-    /// The display limit is the card's, and it governs the plotted curves
-    /// only: `modes` is the complete authenticated spectrum whatever the sheet
-    /// is asked to show, because a truncated spectrum cannot prove stability.
+    /// The sheet plots every mode of the authenticated spectrum, the same
+    /// modes its table lists.
     #[test]
-    fn presentation_limit_does_not_truncate_authenticated_spectrum() {
+    fn the_sheet_plots_every_mode_of_the_spectrum() {
         let data = build_pstb_data(
             stability(
                 &[
@@ -308,14 +304,13 @@ mod tests {
                 ],
                 FloquetOrbitKind::Driven,
             ),
-            1,
             &NoAbort,
         )
         .expect("the projection publishes the spectrum it was handed");
 
         assert_eq!(data.modes.len(), 3);
-        assert_eq!(data.mode_indices, vec![1.0]);
-        assert_eq!(data.multiplier_magnitude, vec![0.5]);
+        assert_eq!(data.mode_indices, vec![1.0, 2.0, 3.0]);
+        assert_eq!(data.multiplier_magnitude, vec![0.5, 0.4, 0.3]);
         assert_eq!(data.stability_threshold, STABILITY_THRESHOLD);
         assert_eq!(data.probe_instance, "LPROBE");
         assert!(data.detect_subharmonics);
@@ -339,7 +334,7 @@ mod tests {
             FloquetOrbitKind::Driven,
         );
         let expected = engine_result.probe_participation.clone();
-        let data = build_pstb_data(engine_result, 2, &NoAbort).expect("the projection succeeds");
+        let data = build_pstb_data(engine_result, &NoAbort).expect("the projection succeeds");
 
         assert_eq!(expected, vec![1.0 / 16.0, 2.0 / 16.0, 3.0 / 16.0]);
         assert_eq!(
@@ -351,9 +346,8 @@ mod tests {
             "every retained mode carries the engine's own participation"
         );
         assert_eq!(
-            data.probe_mode_participation,
-            expected[..2].to_vec(),
-            "the plotted curve is the same numbers, cut to the display limit"
+            data.probe_mode_participation, expected,
+            "the plotted curve is the same numbers"
         );
     }
 
@@ -361,7 +355,7 @@ mod tests {
     /// authenticated answer -- and it has no curve to plot.
     #[test]
     fn driven_zero_order_spectrum_publishes_no_display_curves() {
-        let data = build_pstb_data(stability(&[], FloquetOrbitKind::Driven), 1, &NoAbort)
+        let data = build_pstb_data(stability(&[], FloquetOrbitKind::Driven), &NoAbort)
             .expect("a state-free driven map is representable");
 
         assert!(data.modes.is_empty());

@@ -9,7 +9,6 @@ pub struct PstbRunConfig {
     pub pss_tolerance: Value,
     pub probe_instance: String,
     pub max_harmonics: usize,
-    pub num_multipliers: usize,
     pub stability_threshold: Value,
     pub detect_subharmonics: bool,
 }
@@ -24,7 +23,10 @@ struct PersistedPstbRunConfig {
     pss_tolerance: Value,
     probe_instance: String,
     max_harmonics: usize,
-    num_multipliers: usize,
+    /// Retired. The spectrum is always published whole, and a count only
+    /// ever trimmed the Studio's plots.
+    #[serde(default, rename = "num_multipliers")]
+    _num_multipliers: serde::de::IgnoredAny,
     stability_threshold: Value,
     detect_subharmonics: bool,
     /// Retired. The Floquet solve is a direct Schur decomposition whose
@@ -42,7 +44,6 @@ impl From<PersistedPstbRunConfig> for PstbRunConfig {
             pss_tolerance: persisted.pss_tolerance,
             probe_instance: persisted.probe_instance,
             max_harmonics: persisted.max_harmonics,
-            num_multipliers: persisted.num_multipliers,
             stability_threshold: persisted.stability_threshold,
             detect_subharmonics: persisted.detect_subharmonics,
         }
@@ -57,7 +58,6 @@ impl Default for PstbRunConfig {
             pss_tolerance: 1e-3,
             probe_instance: "LPROBE".to_string(),
             max_harmonics: 10,
-            num_multipliers: 10,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
         }
@@ -67,8 +67,8 @@ impl Default for PstbRunConfig {
 impl PstbRunConfig {
     /// Check what the card cannot carry.
     ///
-    /// The probe name, the harmonic and multiplier counts and the stability
-    /// boundary are all fields of
+    /// The probe name, the harmonic count and the stability boundary are all
+    /// fields of
     /// [`PstbCard`](rspice_core::netlist::PstbCard), and the engine refuses each by name
     /// in `run_pstb_card_from_pss_with_abort`. Restating them here is how the
     /// Studio came to hold a threshold rule its own engine did not: only the
@@ -91,7 +91,6 @@ impl PstbRunConfig {
         rspice_core::netlist::PstbCard {
             probe_instance: self.probe_instance.trim().to_owned(),
             max_harmonics: self.max_harmonics,
-            num_multipliers: self.num_multipliers,
             stability_threshold: self.stability_threshold,
             detect_subharmonics: self.detect_subharmonics,
         }
@@ -120,5 +119,13 @@ mod tests {
         assert_eq!(stated, absent);
         let written = serde_json::to_value(&stated).unwrap();
         assert!(written.get("eigenvalue_tolerance").is_none(), "{written}");
+    }
+
+    #[test]
+    fn retired_pstb_nmults_in_a_study_file_reads_as_absent() {
+        let [stated, absent] = stated_and_absent("num_multipliers", serde_json::json!(3));
+        assert_eq!(stated, absent);
+        let written = serde_json::to_value(&stated).unwrap();
+        assert!(written.get("num_multipliers").is_none(), "{written}");
     }
 }

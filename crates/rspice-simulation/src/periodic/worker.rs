@@ -163,7 +163,6 @@ impl From<&PstbRunConfig> for WorkerPstbRunConfig {
             pss_tolerance: value.pss_tolerance,
             probe_instance: value.probe_instance.clone(),
             max_harmonics: value.max_harmonics,
-            num_multipliers: value.num_multipliers,
             stability_threshold: value.stability_threshold,
             detect_subharmonics: value.detect_subharmonics,
         }
@@ -178,7 +177,6 @@ impl From<WorkerPstbRunConfig> for PstbRunConfig {
             pss_tolerance: value.pss_tolerance,
             probe_instance: value.probe_instance,
             max_harmonics: value.max_harmonics,
-            num_multipliers: value.num_multipliers,
             stability_threshold: value.stability_threshold,
             detect_subharmonics: value.detect_subharmonics,
         }

@@ -657,8 +657,7 @@ fn export_pxf(
 /// Six real columns, one per curve the spectrum has: the multiplier's
 /// magnitude and phase, the margin it implies, the damping and natural
 /// frequency of the exponent behind it, and the loop probe's share of its mode
-/// shape. The complete spectrum is published; the card's `NMULTS` is a display
-/// limit and lives in the typed document's payload.
+/// shape. The complete spectrum is published.
 ///
 /// RAW and HDF5 keep the independent coordinate as a mode index.
 fn export_pstb(

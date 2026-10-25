@@ -48,10 +48,6 @@ pub struct PstbConfig {
     /// Explicit policy for driven versus autonomous periodic orbits.
     pub orbit_kind: FloquetOrbitKind,
 
-    /// Compatibility field. PSTB always retains the complete spectrum because
-    /// a truncated spectrum cannot prove stability.
-    pub num_eigenvalues: usize,
-
     /// Whether to compute eigenvectors (mode shapes)
     pub compute_eigenvectors: bool,
 
@@ -68,7 +64,6 @@ impl Default for PstbConfig {
     fn default() -> Self {
         Self {
             orbit_kind: FloquetOrbitKind::Driven,
-            num_eigenvalues: 0, // Compute all
             compute_eigenvectors: false,
             stability_threshold: 1.0 + 1e-6, // Allow small margin for numerical error
             detect_subharmonics: true,
@@ -80,12 +75,6 @@ impl PstbConfig {
     /// Create new PSTB configuration
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Set number of eigenvalues to compute
-    pub fn with_num_eigenvalues(mut self, n: usize) -> Self {
-        self.num_eigenvalues = n;
-        self
     }
 
     /// Set the periodic-orbit policy used for unity-mode classification.
@@ -1085,8 +1074,7 @@ mod tests {
             vec![1.0, 0.0, 0.0],
             vec![0.0, 0.0, 0.5],
         ];
-        let mut config = PstbConfig::default().with_eigenvectors(true);
-        config.num_eigenvalues = 1;
+        let config = PstbConfig::default().with_eigenvectors(true);
         let mut analyzer = PstbAnalyzer::new(config);
         let result = analyzer
             .analyze_monodromy_with_abort(&matrix, 1.0, &NoAbort)

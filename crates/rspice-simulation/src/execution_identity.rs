@@ -886,7 +886,6 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.pss_tolerance);
         writer.string(&config.probe_instance);
         writer.usize(config.max_harmonics);
-        writer.usize(config.num_multipliers);
         writer.f64(config.stability_threshold);
         writer.bool(config.detect_subharmonics);
     });

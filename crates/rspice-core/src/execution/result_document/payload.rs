@@ -2888,12 +2888,12 @@ impl PxfPayload {
 /// What a `.PSTB` run measured, beside the per-mode curves it publishes.
 ///
 /// Everything here is either the run's own statement of what it did — the loop
-/// probe, the classification boundary, the subharmonic policy, the display
-/// limit the card asked for — or a conclusion the mode curves cannot carry:
-/// the evidence backing the spectrum, the orbit policy it was judged under,
-/// the phase mode that was exempted, and the verdict.
+/// probe, the classification boundary, the subharmonic policy — or a
+/// conclusion the mode curves cannot carry: the evidence backing the
+/// spectrum, the orbit policy it was judged under, the phase mode that was
+/// exempted, and the verdict.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase", from = "PstbPayloadWire")]
 pub struct PstbPayload {
     /// Period of the analyzed orbit, in seconds.
     pub period: f64,
@@ -2913,13 +2913,6 @@ pub struct PstbPayload {
     /// Whether subharmonic orders were looked for. An empty
     /// [`Self::subharmonics`] means "none found" only when this is true.
     pub detect_subharmonics: bool,
-    /// Multipliers the card asked a viewer to show.
-    ///
-    /// The document publishes the **complete** spectrum regardless: a
-    /// truncated spectrum cannot prove stability, and a display limit is
-    /// presentation. It is recorded so a viewer can honour what the deck asked
-    /// for without re-reading the deck.
-    pub num_multipliers: usize,
     /// Completeness and residual qualification for the retained spectrum.
     pub floquet_evidence: FloquetEvidenceDocument,
     /// Driven/autonomous policy the classification was made under.
@@ -2946,6 +2939,54 @@ pub struct PstbPayload {
     /// Iterations the eigensolver reported. Zero means it is atomic and
     /// exposes no count.
     pub iterations: usize,
+}
+
+/// [`PstbPayload`] as a document spells it, with the key version 21 retired.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PstbPayloadWire {
+    period: f64,
+    fundamental_frequency: f64,
+    probe_instance: String,
+    probe_state_index: Option<usize>,
+    #[serde(default)]
+    probe_state_projection: Vec<(usize, f64)>,
+    stability_threshold: f64,
+    detect_subharmonics: bool,
+    /// Retired in version 21: a display limit no reader honoured. Earlier
+    /// documents state it; it is read and dropped.
+    #[serde(default, rename = "numMultipliers")]
+    _num_multipliers: serde::de::IgnoredAny,
+    floquet_evidence: FloquetEvidenceDocument,
+    floquet_orbit_kind: FloquetOrbitTag,
+    trivial_multiplier_index: Option<usize>,
+    stability_classification: PstbStabilityTag,
+    modes: Vec<PstbModeDocument>,
+    num_unstable: usize,
+    subharmonics: Vec<usize>,
+    iterations: usize,
+}
+
+impl From<PstbPayloadWire> for PstbPayload {
+    fn from(wire: PstbPayloadWire) -> Self {
+        Self {
+            period: wire.period,
+            fundamental_frequency: wire.fundamental_frequency,
+            probe_instance: wire.probe_instance,
+            probe_state_index: wire.probe_state_index,
+            probe_state_projection: wire.probe_state_projection,
+            stability_threshold: wire.stability_threshold,
+            detect_subharmonics: wire.detect_subharmonics,
+            floquet_evidence: wire.floquet_evidence,
+            floquet_orbit_kind: wire.floquet_orbit_kind,
+            trivial_multiplier_index: wire.trivial_multiplier_index,
+            stability_classification: wire.stability_classification,
+            modes: wire.modes,
+            num_unstable: wire.num_unstable,
+            subharmonics: wire.subharmonics,
+            iterations: wire.iterations,
+        }
+    }
 }
 
 /// One retained Floquet mode.

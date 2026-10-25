@@ -880,7 +880,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
                 "id": "pstb", "depends_on": [name], "analysis": "Pstb",
                 "periodic": {"kind": "pstb", "settings": PstbRunConfig {
                     pss_fundamental_freq: 1000.0, pss_num_harmonics: 3, pss_tolerance: 1e-6,
-                    max_harmonics: 2, num_multipliers: 1, ..Default::default()
+                    max_harmonics: 2, ..Default::default()
                 }}
             }));
             document["tasks"].as_array_mut().unwrap().push(json!({

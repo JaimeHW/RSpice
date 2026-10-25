@@ -1239,7 +1239,7 @@ pub(super) fn parse_pstb_command(
 
     let mut probe_instance = None;
     let mut max_harmonics = None;
-    let mut num_multipliers = None;
+    let mut retired_multiplier_count = None;
     let mut stability_threshold = None;
     let mut detect_subharmonics = None;
     let mut retired_eigenvalue_tolerance = None;
@@ -1273,8 +1273,11 @@ pub(super) fn parse_pstb_command(
                 line_num,
                 "MAXHARM",
             )?,
+            // Retired. The spectrum is always published whole, and a count
+            // only ever trimmed the Studio's plots. Every line the Studio
+            // wrote states it, so it is still read and checked, then dropped.
             "NMULTS" => bind_once(
-                &mut num_multipliers,
+                &mut retired_multiplier_count,
                 card_count(stream, line_num, params, CARD, "NMULTS", 1)?,
                 CARD,
                 line_num,
@@ -1345,7 +1348,6 @@ pub(super) fn parse_pstb_command(
     Ok(AnalysisCommand::Pstb(Box::new(PstbCard {
         probe_instance: probe_instance.to_ascii_uppercase(),
         max_harmonics: max_harmonics.unwrap_or(PstbCard::DEFAULT_MAX_HARMONICS),
-        num_multipliers: num_multipliers.unwrap_or(PstbCard::DEFAULT_NUM_MULTIPLIERS),
         stability_threshold: stability_threshold.unwrap_or(PstbCard::DEFAULT_STABILITY_THRESHOLD),
         detect_subharmonics: detect_subharmonics.unwrap_or(PstbCard::DEFAULT_DETECT_SUBHARMONICS),
     })))
@@ -2389,34 +2391,30 @@ mod tests {
         let card = pstb(".PSS FUND=1G\n.PSTB PROBE=lprobe");
         assert_eq!(card.probe_instance, "LPROBE");
         assert_eq!(card.max_harmonics, 10);
-        assert_eq!(card.num_multipliers, 10);
         assert_eq!(card.stability_threshold, 1.0 + 1e-6);
         assert!(card.detect_subharmonics);
     }
 
     #[test]
     fn pstb_accepts_the_line_the_studios_dialog_writes_today() {
-        // `PstbConfig::to_spice` emits `.pstb probe=<p> maxharm=<k>` always,
-        // and `nmults=` only when it is not the default.
-        let card = pstb(".PSS FUND=1G\n.pstb probe=LPROBE maxharm=10");
+        let card = pstb(
+            ".PSS FUND=1G\n.pstb probe=LPROBE maxharm=12 stabilitythreshold=1.000001 \
+             detectsubharmonics=yes",
+        );
         assert_eq!(card.probe_instance, "LPROBE");
-        assert_eq!(card.max_harmonics, 10);
-        assert_eq!(card.num_multipliers, 10);
-
-        let explicit = pstb(".PSS FUND=1G\n.pstb probe=LPROBE maxharm=12 nmults=4");
-        assert_eq!(explicit.max_harmonics, 12);
-        assert_eq!(explicit.num_multipliers, 4);
+        assert_eq!(card.max_harmonics, 12);
+        assert_eq!(card.stability_threshold, 1.000001);
+        assert!(card.detect_subharmonics);
     }
 
     #[test]
     fn pstb_binds_every_authored_field() {
         let card = pstb(
-            ".PSS FUND=1G\n.PSTB PROBE=l1 MAXHARM=6 NMULTS=3 STABILITYTHRESHOLD=1.5 \
+            ".PSS FUND=1G\n.PSTB PROBE=l1 MAXHARM=6 STABILITYTHRESHOLD=1.5 \
              DETECTSUBHARMONICS=no",
         );
         assert_eq!(card.probe_instance, "L1");
         assert_eq!(card.max_harmonics, 6);
-        assert_eq!(card.num_multipliers, 3);
         assert_eq!(card.stability_threshold, 1.5);
         assert!(!card.detect_subharmonics);
     }
@@ -2427,6 +2425,16 @@ mod tests {
     fn pstb_retired_pstb_eigentol_reads_as_absent() {
         assert_eq!(
             pstb(".PSS FUND=1G\n.PSTB PROBE=l1 EIGENTOL=1e-12"),
+            pstb(".PSS FUND=1G\n.PSTB PROBE=l1")
+        );
+    }
+
+    /// Every line the Studio wrote states `NMULTS=`. It still parses, and it
+    /// parses to the card the line would be without it.
+    #[test]
+    fn pstb_retired_pstb_nmults_reads_as_absent() {
+        assert_eq!(
+            pstb(".PSS FUND=1G\n.PSTB PROBE=l1 NMULTS=3"),
             pstb(".PSS FUND=1G\n.PSTB PROBE=l1")
         );
     }
