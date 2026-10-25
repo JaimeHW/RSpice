@@ -24,7 +24,6 @@ pub struct ComponentInfo {
     /// which only that resistor joins to the drawn `+` net, so it is not an
     /// ideal branch between the drawn nets and closes no loop of sources.
     pub series_resistance: bool,
-    pub is_current_source: bool,
     /// A drawn ground symbol. Its own terminal is what binds node 0, so it is
     /// not evidence that the circuit reaches ground.
     pub is_ground_symbol: bool,

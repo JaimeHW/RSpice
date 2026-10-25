@@ -807,7 +807,6 @@ fn extract_components(
         mark_optional_inputs(comp, &mut pins);
 
         let is_voltage_source = is_voltage_source(comp.kind);
-        let is_current_source = is_current_source(comp.kind);
         let reference_required = !comp.kind.spice_prefix().is_empty();
         // The reference is validated as written, surrounding blanks and all:
         // the netlister writes it as written.
@@ -824,7 +823,6 @@ fn extract_components(
             series_resistance: comp
                 .source_parasitics()
                 .is_some_and(|parasitics| parasitics.series_resistance.is_some()),
-            is_current_source,
             is_ground_symbol: comp.kind == ComponentType::Ground,
             reference_required,
             reference_error,
@@ -1192,16 +1190,14 @@ fn append_connectivity_diagnostics(
 /// Whether this type is an independent voltage source — one the rules count
 /// as driving the net it stands on.
 ///
-/// The two predicates are a pair, and they are written out here rather than
-/// asked of `ComponentType::is_source` because that one also admits the
-/// dependent sources and the behavioural one, which drive a net through an
-/// expression and are not what a source-to-source rule is about.
+/// The families are written out here rather than asked of
+/// `ComponentType::is_source` because that one also admits the dependent
+/// sources and the behavioural one, which drive a net through an expression
+/// and are not what a source-to-source rule is about.
 ///
-/// Being a pair is the thing that has to hold: `VoltageSourcePwlFile` was
-/// missing from this side while `CurrentSourcePwlFile` was present on the
-/// other, so a voltage source driven from a PWL file was invisible to every
-/// rule that asks whether a net has a driver — no comment claimed it, and no
-/// rule wants it. `every_independent_source_is_claimed_by_exactly_one_side`
+/// `VoltageSourcePwlFile` was once missing from this list, so a voltage source
+/// driven from a PWL file was invisible to every rule that asks whether a net
+/// has a driver. `exactly_the_independent_v_card_sources_are_voltage_sources`
 /// in `tests` is what keeps the next family from reopening it.
 const fn is_voltage_source(kind: ComponentType) -> bool {
     matches!(
@@ -1218,26 +1214,6 @@ const fn is_voltage_source(kind: ComponentType) -> bool {
             | ComponentType::VoltageSourceRandom
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourcePwlFile
-    )
-}
-
-/// Whether this type is an independent current source. See
-/// [`is_voltage_source`] for why the pair is written out.
-const fn is_current_source(kind: ComponentType) -> bool {
-    matches!(
-        kind,
-        ComponentType::CurrentSource
-            | ComponentType::CurrentSourceAc
-            | ComponentType::CurrentSourcePulse
-            | ComponentType::CurrentSourceSin
-            | ComponentType::CurrentSourceExp
-            | ComponentType::CurrentSourceSffm
-            | ComponentType::CurrentSourceAm
-            | ComponentType::CurrentSourcePat
-            | ComponentType::CurrentSourceNoise
-            | ComponentType::CurrentSourceRandom
-            | ComponentType::CurrentSourcePwl
-            | ComponentType::CurrentSourcePwlFile
     )
 }
 
