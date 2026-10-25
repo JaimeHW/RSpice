@@ -1380,34 +1380,9 @@ impl<'a> ExprConverter<'a> {
 
     /// Convert a function call
     fn convert_call(&self, arena: &mut ExprArena, call: &CallExpr) -> CompileResult<NodeId> {
-        let ir_func = match call.name.as_str() {
-            "abs" => IrFunction::Abs,
-            "sqrt" => IrFunction::Sqrt,
-            "exp" => IrFunction::Exp,
-            "__rspice_limited_exp" => IrFunction::LimitedExp,
-            // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
-            "ln" => IrFunction::Log,
-            "log" | "log10" => IrFunction::Log10,
-            "sin" => IrFunction::Sin,
-            "cos" => IrFunction::Cos,
-            "tan" => IrFunction::Tan,
-            "sinh" => IrFunction::Sinh,
-            "cosh" => IrFunction::Cosh,
-            "tanh" => IrFunction::Tanh,
-            "asin" => IrFunction::Asin,
-            "acos" => IrFunction::Acos,
-            "atan" => IrFunction::Atan,
-            "asinh" => IrFunction::Asinh,
-            "acosh" => IrFunction::Acosh,
-            "atanh" => IrFunction::Atanh,
-            "atan2" => IrFunction::Atan2,
-            "hypot" => IrFunction::Hypot,
-            "floor" => IrFunction::Floor,
-            "ceil" => IrFunction::Ceil,
-            "min" => IrFunction::Min,
-            "max" => IrFunction::Max,
-            "pow" => IrFunction::Pow,
-            "limexp" => {
+        let ir_func = match IrFunction::from_call_name(call.name.as_str()) {
+            Some(function) => function,
+            None if call.name == "limexp" => {
                 // limexp is a special analog operator
                 if call.args.is_empty() {
                     return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(

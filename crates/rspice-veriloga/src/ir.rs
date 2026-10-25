@@ -522,6 +522,42 @@ pub enum IrFunction {
     Pow,
 }
 
+impl IrFunction {
+    /// The function a plain call spells, by exact name. `limexp` is not one:
+    /// it lowers to its own node.
+    pub(crate) fn from_call_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "abs" => Self::Abs,
+            "sqrt" => Self::Sqrt,
+            "exp" => Self::Exp,
+            "__rspice_limited_exp" => Self::LimitedExp,
+            // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+            "ln" => Self::Log,
+            "log" | "log10" => Self::Log10,
+            "sin" => Self::Sin,
+            "cos" => Self::Cos,
+            "tan" => Self::Tan,
+            "sinh" => Self::Sinh,
+            "cosh" => Self::Cosh,
+            "tanh" => Self::Tanh,
+            "asin" => Self::Asin,
+            "acos" => Self::Acos,
+            "atan" => Self::Atan,
+            "asinh" => Self::Asinh,
+            "acosh" => Self::Acosh,
+            "atanh" => Self::Atanh,
+            "atan2" => Self::Atan2,
+            "hypot" => Self::Hypot,
+            "floor" => Self::Floor,
+            "ceil" => Self::Ceil,
+            "min" => Self::Min,
+            "max" => Self::Max,
+            "pow" => Self::Pow,
+            _ => return None,
+        })
+    }
+}
+
 /// Frequency-interpolated PSD table (noise_table / noise_table_log)
 #[derive(Debug, Clone)]
 pub struct NoiseTableData {

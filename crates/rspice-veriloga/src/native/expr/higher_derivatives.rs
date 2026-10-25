@@ -707,34 +707,11 @@ fn binary_operator(name: &str) -> Option<BinaryOp> {
     })
 }
 
+/// The bytecode converter's function table, read as the native lowerings
+/// spell names, which also take `fabs`.
 fn math_function(name: &str) -> Option<IrFunction> {
-    Some(match normalize_intrinsic_name(name).as_str() {
-        "abs" | "fabs" => IrFunction::Abs,
-        "sqrt" => IrFunction::Sqrt,
-        "exp" => IrFunction::Exp,
-        "__rspice_limited_exp" => IrFunction::LimitedExp,
-        // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
-        "ln" => IrFunction::Log,
-        "log" | "log10" => IrFunction::Log10,
-        "sin" => IrFunction::Sin,
-        "cos" => IrFunction::Cos,
-        "tan" => IrFunction::Tan,
-        "sinh" => IrFunction::Sinh,
-        "cosh" => IrFunction::Cosh,
-        "tanh" => IrFunction::Tanh,
-        "asin" => IrFunction::Asin,
-        "acos" => IrFunction::Acos,
-        "atan" => IrFunction::Atan,
-        "asinh" => IrFunction::Asinh,
-        "acosh" => IrFunction::Acosh,
-        "atanh" => IrFunction::Atanh,
-        "atan2" => IrFunction::Atan2,
-        "hypot" => IrFunction::Hypot,
-        "floor" => IrFunction::Floor,
-        "ceil" => IrFunction::Ceil,
-        "min" => IrFunction::Min,
-        "max" => IrFunction::Max,
-        "pow" => IrFunction::Pow,
-        _ => return None,
-    })
+    match normalize_intrinsic_name(name).as_str() {
+        "fabs" => Some(IrFunction::Abs),
+        name => IrFunction::from_call_name(name),
+    }
 }
