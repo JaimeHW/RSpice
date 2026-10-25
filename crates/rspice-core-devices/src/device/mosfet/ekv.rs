@@ -1139,50 +1139,14 @@ pub struct EkvMosfet {
 
 impl EkvMosfet {
     pub fn new_nmos(name: String, terminals: MosTerminals) -> Self {
-        let MosTerminals {
-            drain,
-            gate,
-            source,
-            bulk,
-        } = terminals;
-        Self::new(
-            name,
-            MosType::Nmos,
-            MosTerminals {
-                drain,
-                gate,
-                source,
-                bulk,
-            },
-        )
+        Self::new(name, MosType::Nmos, terminals)
     }
 
     pub fn new_pmos(name: String, terminals: MosTerminals) -> Self {
-        let MosTerminals {
-            drain,
-            gate,
-            source,
-            bulk,
-        } = terminals;
-        Self::new(
-            name,
-            MosType::Pmos,
-            MosTerminals {
-                drain,
-                gate,
-                source,
-                bulk,
-            },
-        )
+        Self::new(name, MosType::Pmos, terminals)
     }
 
     fn new(name: String, mos_type: MosType, terminals: MosTerminals) -> Self {
-        let MosTerminals {
-            drain,
-            gate,
-            source,
-            bulk,
-        } = terminals;
         let setup = Ekv26Setup {
             type_sign: match mos_type {
                 MosType::Nmos => 1.0,
@@ -1190,17 +1154,7 @@ impl EkvMosfet {
             },
             ..Ekv26Setup::default()
         };
-        Self::with_setup(
-            name,
-            MosTerminals {
-                drain,
-                gate,
-                source,
-                bulk,
-            },
-            setup,
-            300.15,
-        )
+        Self::with_setup(name, terminals, setup, 300.15)
     }
 
     pub fn from_params(
@@ -1211,24 +1165,8 @@ impl EkvMosfet {
         instance_params: &[(String, Value)],
         circuit_temp_k: Value,
     ) -> Result<Self, String> {
-        let MosTerminals {
-            drain,
-            gate,
-            source,
-            bulk,
-        } = terminals;
         let setup = Ekv26Setup::from_params(model_params, mos_type, instance_params)?;
-        Ok(Self::with_setup(
-            name,
-            MosTerminals {
-                drain,
-                gate,
-                source,
-                bulk,
-            },
-            setup,
-            circuit_temp_k,
-        ))
+        Ok(Self::with_setup(name, terminals, setup, circuit_temp_k))
     }
 
     fn with_setup(

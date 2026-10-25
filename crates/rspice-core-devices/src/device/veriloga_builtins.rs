@@ -763,26 +763,15 @@ impl BuiltinVerilogADevices {
         request: GeneratedEvaluationRequest,
         record_tasks: bool,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
-        let GeneratedEvaluationRequest {
-            analysis,
-            simparams,
-            evaluation_mode,
-        } = request;
-        let analysis = self.operating_point_analysis_override.unwrap_or(analysis);
+        let request = GeneratedEvaluationRequest {
+            analysis: self
+                .operating_point_analysis_override
+                .unwrap_or(request.analysis),
+            ..request
+        };
         for device in &mut self.devices {
             device
-                .stamp_with_task_recording(
-                    matrix,
-                    rhs,
-                    voltages,
-                    num_nodes,
-                    GeneratedEvaluationRequest {
-                        analysis,
-                        simparams,
-                        evaluation_mode,
-                    },
-                    record_tasks,
-                )
+                .stamp_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
                 .map_err(|source| GeneratedVerilogAEvaluationError {
                     instance_name: device.instance_name.clone(),
                     model_name: device.model_name,

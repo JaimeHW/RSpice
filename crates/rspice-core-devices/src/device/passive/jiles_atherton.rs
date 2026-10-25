@@ -1698,13 +1698,7 @@ impl JilesAthertonInductor {
                         {
                             let Some(trial) = self
                                 .xyce_core_level1_trial_at_magnetization_and_rate(
-                                    XyceCoreStep {
-                                        happ,
-                                        delta_happ,
-                                        voltage,
-                                        dt,
-                                        one_step_order2,
-                                    },
+                                    step,
                                     accepted_m,
                                     accepted_rate,
                                 )
@@ -1726,13 +1720,7 @@ impl JilesAthertonInductor {
                 let trial = if !self.params.xyce_core_level2 {
                     if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
                         let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
-                            XyceCoreStep {
-                                happ,
-                                delta_happ,
-                                voltage,
-                                dt,
-                                one_step_order2,
-                            },
+                            step,
                             accepted_m,
                             accepted_rate,
                         ) else {
@@ -1740,13 +1728,7 @@ impl JilesAthertonInductor {
                         };
                         trial
                     } else {
-                        let Some(trial) = self.xyce_core_level1_trial_from_happ(XyceCoreStep {
-                            happ,
-                            delta_happ,
-                            voltage,
-                            dt,
-                            one_step_order2,
-                        }) else {
+                        let Some(trial) = self.xyce_core_level1_trial_from_happ(step) else {
                             return;
                         };
                         trial
@@ -1780,13 +1762,7 @@ impl JilesAthertonInductor {
                 let trial = if !self.params.xyce_core_level2 {
                     if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
                         let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
-                            XyceCoreStep {
-                                happ,
-                                delta_happ,
-                                voltage,
-                                dt,
-                                one_step_order2,
-                            },
+                            step,
                             accepted_m,
                             accepted_rate,
                         ) else {
@@ -1794,13 +1770,7 @@ impl JilesAthertonInductor {
                         };
                         trial
                     } else {
-                        let Some(trial) = self.xyce_core_level1_trial_from_happ(XyceCoreStep {
-                            happ,
-                            delta_happ,
-                            voltage,
-                            dt,
-                            one_step_order2,
-                        }) else {
+                        let Some(trial) = self.xyce_core_level1_trial_from_happ(step) else {
                             return;
                         };
                         trial
@@ -2465,13 +2435,6 @@ impl JilesAthertonInductor {
         hidden_state: Option<(Value, Value)>,
         raw_ampere_turns: Option<(Value, Value)>,
     ) {
-        let XyceCoreStep {
-            happ,
-            delta_happ,
-            voltage,
-            dt,
-            one_step_order2,
-        } = step;
         if !self.params.xyce_core {
             return;
         }
@@ -2479,22 +2442,11 @@ impl JilesAthertonInductor {
             && self.params.n_turns.abs() > 1.0e-30
             && self.params.length.is_finite()
         {
-            happ * self.params.length / self.params.n_turns
+            step.happ * self.params.length / self.params.n_turns
         } else {
             self.current
         };
-        self.integrate_xyce_core_from_happ(
-            current,
-            XyceCoreStep {
-                happ,
-                delta_happ,
-                voltage,
-                dt,
-                one_step_order2,
-            },
-            raw_ampere_turns,
-            hidden_state,
-        );
+        self.integrate_xyce_core_from_happ(current, step, raw_ampere_turns, hidden_state);
     }
 
     /// Calculate equivalent resistance for trapezoidal integration
