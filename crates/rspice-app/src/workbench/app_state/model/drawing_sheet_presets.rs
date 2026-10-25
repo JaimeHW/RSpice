@@ -17,7 +17,7 @@ impl Model {
     /// Publish a project-owned copy of the personal preset `personal` into
     /// `candidate`, or return the project preset already drawing the same
     /// sheet.
-    pub(crate) fn capture_personal_preset_into_project(
+    pub fn capture_personal_preset_into_project(
         candidate: &mut DesignManagementCatalog,
         personal: &DrawingSheetPreset,
     ) -> Result<DrawingSheetPreset, String> {
@@ -68,7 +68,7 @@ impl Model {
 
     /// `base`, or the first `base 2`, `base 3`, ... that no preset in
     /// `visible` is named, ignoring case.
-    pub(crate) fn unique_preset_copy_name(base: &str, visible: &[DrawingSheetPreset]) -> String {
+    pub fn unique_preset_copy_name(base: &str, visible: &[DrawingSheetPreset]) -> String {
         if !visible
             .iter()
             .any(|preset| preset.name.eq_ignore_ascii_case(base))
