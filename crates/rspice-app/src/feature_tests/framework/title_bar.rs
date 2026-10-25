@@ -4,12 +4,24 @@
 //! workflow and carries its canonical icon - the title bar must not advertise
 //! capability the workbench does not have.
 
-use super::*;
+use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
+
 use crate::state::ModelsPage;
 use crate::state::command_catalog::CommandKey;
+use crate::ui::panels::WorkbenchIcon;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens;
 use crate::workbench::RSpiceApp;
+use crate::workbench::chrome::title_bar::application_menus::{
+    ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
+    shortcut_for_occurrence,
+};
+use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
+use crate::workbench::chrome::title_bar::*;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
-use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
+use crate::workbench::framework::host::Host;
+use crate::workbench::layout::LayoutSpec;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
 

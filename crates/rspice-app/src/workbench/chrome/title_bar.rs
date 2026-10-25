@@ -16,14 +16,12 @@ use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::ids;
 
-pub(in crate::workbench) mod application_menus;
+pub(crate) mod application_menus;
 pub(in crate::workbench) mod code;
 pub(in crate::workbench) mod design;
 mod keyboard;
-pub(in crate::workbench) mod menu_entries;
+pub(crate) mod menu_entries;
 mod menu_row;
-#[cfg(test)]
-use application_menus::menu_popup_height_for_viewport;
 pub(in crate::workbench) use application_menus::source_editor_context_menu;
 use application_menus::{
     ALL_MENUS, ApplicationMenu, configure_menu_popup, file_menu_shows_exit, menu_popup_max_height,
@@ -39,19 +37,21 @@ use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};
 
 /// The narrowest a menu popup is; it widens to fit its longest row up to
 /// [`MENU_MAX_OUTER_WIDTH`].
-const MENU_OUTER_WIDTH: f32 = 244.0;
+pub(crate) const MENU_OUTER_WIDTH: f32 = 244.0;
 const MENU_MAX_OUTER_WIDTH: f32 = 360.0;
-const MENU_MARGIN: f32 = 5.0;
-const MENU_BORDER_WIDTH: f32 = 1.0;
-const MENU_CONTENT_WIDTH: f32 = MENU_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
-const MENU_MAX_CONTENT_WIDTH: f32 = MENU_MAX_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
-const MENU_ROW_HEIGHT: f32 = 27.0;
-const MENU_TOUCH_ROW_HEIGHT: f32 = 44.0;
+pub(crate) const MENU_MARGIN: f32 = 5.0;
+pub(crate) const MENU_BORDER_WIDTH: f32 = 1.0;
+pub(crate) const MENU_CONTENT_WIDTH: f32 =
+    MENU_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
+pub(crate) const MENU_MAX_CONTENT_WIDTH: f32 =
+    MENU_MAX_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
+pub(crate) const MENU_ROW_HEIGHT: f32 = 27.0;
+pub(crate) const MENU_TOUCH_ROW_HEIGHT: f32 = 44.0;
 pub(super) const MENU_POPUP_GAP: f32 = 2.0;
 const SEARCH_KEYCAP_HEIGHT: f32 = 18.0;
-const SEARCH_KEYCAP_MIN_WIDTH: f32 = 19.0;
-const SEARCH_KEYCAP_INLINE_PADDING: f32 = 4.0;
-const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
+pub(crate) const SEARCH_KEYCAP_MIN_WIDTH: f32 = 19.0;
+pub(crate) const SEARCH_KEYCAP_INLINE_PADDING: f32 = 4.0;
+pub(crate) const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const BRAND_WORDMARK_WIDTH: f32 = 88.0;
 
 pub fn show(
@@ -157,20 +157,20 @@ pub fn show(
         });
 }
 
-fn title_bar_separator_positions(rect: egui::Rect) -> (f32, f32) {
+pub(crate) fn title_bar_separator_positions(rect: egui::Rect) -> (f32, f32) {
     (
         (rect.top() + 0.5).min(rect.bottom()),
         (rect.bottom() - 0.5).max(rect.top()),
     )
 }
 
-fn title_context_is_left_aligned(viewport_width: f32, compact_shell: bool) -> bool {
+pub(crate) fn title_context_is_left_aligned(viewport_width: f32, compact_shell: bool) -> bool {
     compact_shell && viewport_width > 820.0
 }
 
 /// How the bar offers the application menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MenuProjection {
+pub(crate) enum MenuProjection {
     /// One Menu button holding every menu as a submenu, with touch rows:
     /// phone widths and the compact shell.
     Compact,
@@ -180,7 +180,7 @@ enum MenuProjection {
 }
 
 impl MenuProjection {
-    const fn for_layout(viewport_width: f32, compact_shell: bool) -> Self {
+    pub(crate) const fn for_layout(viewport_width: f32, compact_shell: bool) -> Self {
         if compact_shell || viewport_width <= 820.0 {
             Self::Compact
         } else {
@@ -188,14 +188,14 @@ impl MenuProjection {
         }
     }
 
-    const fn visible_menus(self) -> &'static [ApplicationMenu] {
+    pub(crate) const fn visible_menus(self) -> &'static [ApplicationMenu] {
         match self {
             Self::Compact => &[],
             Self::All => &ALL_MENUS,
         }
     }
 
-    const fn shows_title_context(self) -> bool {
+    pub(crate) const fn shows_title_context(self) -> bool {
         matches!(self, Self::All)
     }
 }
@@ -259,7 +259,7 @@ fn brand(
     response.on_hover_text("RSpice project overview");
 }
 
-fn menus(
+pub(crate) fn menus(
     ui: &mut Ui,
     app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
     projection: MenuProjection,
@@ -296,7 +296,7 @@ fn menus(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum MenuTriggerKey {
+pub(crate) enum MenuTriggerKey {
     Application(ApplicationMenu),
     /// The compact layout's one button, holding every menu.
     Compact,
@@ -531,7 +531,7 @@ fn known_application_popup_ids() -> Vec<Id> {
         .collect()
 }
 
-fn paint_title_context(
+pub(crate) fn paint_title_context(
     ui: &mut Ui,
     app: &impl WorkbenchHost,
     bounds: egui::Rect,
@@ -621,7 +621,7 @@ const UNSAVED_TITLE_MARKER: &str = "*";
 /// project-name branch, so the closed-project rule was asserted by a test
 /// against a function the application never called and the shipped title read
 /// "Untitled Project" with nothing open.
-fn title_context_text(app: &impl WorkbenchHost, compact: bool) -> String {
+pub(crate) fn title_context_text(app: &impl WorkbenchHost, compact: bool) -> String {
     if !app.platform().project_lifecycle.is_open() {
         return if compact {
             "No project open"
@@ -646,7 +646,7 @@ fn title_context_text(app: &impl WorkbenchHost, compact: bool) -> String {
     }
 }
 
-fn ellipsize_to_width(
+pub(crate) fn ellipsize_to_width(
     painter: &egui::Painter,
     value: &str,
     font: &egui::FontId,
@@ -688,7 +688,7 @@ fn ellipsize_to_width(
         .collect()
 }
 
-fn active_title_cell(app: &impl WorkbenchHost) -> String {
+pub(crate) fn active_title_cell(app: &impl WorkbenchHost) -> String {
     if !app.platform().project_lifecycle.is_open() {
         return "No project open".to_owned();
     }
@@ -831,7 +831,7 @@ fn search_button(
     response.on_hover_text(tooltip).clicked()
 }
 
-fn search_keycap_width(ui: &Ui, shortcut: &str) -> f32 {
+pub(crate) fn search_keycap_width(ui: &Ui, shortcut: &str) -> f32 {
     let text_width = ui
         .painter()
         .layout_no_wrap(
@@ -845,7 +845,7 @@ fn search_keycap_width(ui: &Ui, shortcut: &str) -> f32 {
         .max(SEARCH_KEYCAP_MIN_WIDTH)
 }
 
-fn search_button_width(viewport_width: f32, large_target: bool) -> f32 {
+pub(crate) fn search_button_width(viewport_width: f32, large_target: bool) -> f32 {
     if large_target {
         44.0
     } else if viewport_width <= 1020.0 {
@@ -886,7 +886,7 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str, large_target: bool
 /// The initials the account button shows, or `None` when no one is signed
 /// in and no license names a holder: the button then shows a generic
 /// person, not letters that name no one.
-fn account_initials(app: &impl WorkbenchHost) -> Option<String> {
+pub(crate) fn account_initials(app: &impl WorkbenchHost) -> Option<String> {
     let name = app.account_holder()?;
     let words = name
         .split_whitespace()
@@ -899,7 +899,7 @@ fn account_initials(app: &impl WorkbenchHost) -> Option<String> {
     }
 }
 
-fn account_action(ui: &mut Ui, initials: Option<&str>, large_target: bool) -> bool {
+pub(crate) fn account_action(ui: &mut Ui, initials: Option<&str>, large_target: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let target_size = if large_target {
         Vec2::splat(44.0)
@@ -1088,6 +1088,3 @@ fn notification_action(
     }
     response.on_hover_text(accessible_label).clicked()
 }
-
-#[cfg(test)]
-mod tests;

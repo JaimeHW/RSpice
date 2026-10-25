@@ -21,7 +21,7 @@ pub(crate) enum ApplicationMenu {
 }
 
 impl ApplicationMenu {
-    pub(in crate::workbench) const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::File => "File",
             Self::Edit => "Edit",
@@ -38,7 +38,7 @@ impl ApplicationMenu {
     }
 }
 
-pub(in crate::workbench) const ALL_MENUS: [ApplicationMenu; 11] = [
+pub(crate) const ALL_MENUS: [ApplicationMenu; 11] = [
     ApplicationMenu::File,
     ApplicationMenu::Edit,
     ApplicationMenu::View,
@@ -95,7 +95,7 @@ pub(in crate::workbench) fn source_editor_context_menu(
     }
 }
 
-pub(super) fn shortcut_for_occurrence(
+pub(crate) fn shortcut_for_occurrence(
     host: &impl Host,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
@@ -112,13 +112,13 @@ pub(super) fn menu_popup_max_height(ui: &Ui) -> f32 {
     menu_popup_height_for_viewport(ui.ctx().content_rect().height())
 }
 
-pub(super) fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
+pub(crate) fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
     // Preserve room for the title bar and a small bottom escape margin while
     // guaranteeing enough space to navigate at least three standard rows.
     (viewport_height - 64.0).clamp(MENU_ROW_HEIGHT * 3.0, 560.0)
 }
 
-pub(super) const fn file_menu_shows_exit(
+pub(crate) const fn file_menu_shows_exit(
     platform: crate::state::command_catalog::CommandPlatform,
 ) -> bool {
     matches!(

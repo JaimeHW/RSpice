@@ -6,4 +6,5 @@ mod command_palette;
 mod inspector;
 mod measurement_rows;
 mod notification_center;
+mod title_bar;
 mod toolbar;

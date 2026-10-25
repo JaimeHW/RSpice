@@ -33,7 +33,7 @@ pub(crate) enum MenuEntry {
 /// which key.
 #[derive(Clone, Copy)]
 pub(crate) struct MenuCommand {
-    pub(super) command: CommandKey,
+    pub(crate) command: CommandKey,
     label: MenuLabel,
     /// `None` shows the command's own key; `Some(key)` shows `key`.
     shortcut: Option<&'static str>,
@@ -127,7 +127,7 @@ pub(in crate::workbench) fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<Comm
 
 /// A menu row as it reads for the application's state right now.
 #[derive(Debug, Clone)]
-pub(super) enum MenuRow {
+pub(crate) enum MenuRow {
     Command(CommandRow),
     Separator,
     Submenu {
@@ -137,22 +137,22 @@ pub(super) enum MenuRow {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct CommandRow {
-    pub(super) command: CommandKey,
-    pub(super) label: &'static str,
+pub(crate) struct CommandRow {
+    pub(crate) command: CommandKey,
+    pub(crate) label: &'static str,
     /// The key painted at the row's right edge, empty for none.
-    pub(super) shortcut: String,
-    pub(super) availability: CommandAvailability,
+    pub(crate) shortcut: String,
+    pub(crate) availability: CommandAvailability,
     /// Whether the state the command switches is on, for a command that
     /// switches one: the row shows a check mark while it is.
-    pub(super) checked: Option<bool>,
+    pub(crate) checked: Option<bool>,
     /// The icon the row wears where it shows no check mark.
     icon: Option<WorkbenchIcon>,
     palette_scope: Option<&'static str>,
 }
 
 /// The rows `entries` show in the window `ctx` draws.
-pub(super) fn menu_rows(
+pub(crate) fn menu_rows(
     entries: &[MenuEntry],
     app: &impl WorkbenchHost,
     ctx: &Context,
@@ -167,7 +167,7 @@ pub(super) fn menu_rows(
 
 /// The rows `entries` show for `app` on `platform`, hidden ones included so
 /// a test can see what a menu leaves out.
-pub(super) fn resolve_menu_rows(
+pub(crate) fn resolve_menu_rows(
     entries: &[MenuEntry],
     app: &impl WorkbenchHost,
     platform: CommandPlatform,
@@ -215,7 +215,7 @@ fn push_menu_rows(
 
 /// The row a reader chose from a menu, carried out once the menu is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct MenuChoice {
+pub(crate) struct MenuChoice {
     command: CommandKey,
     palette_scope: Option<&'static str>,
 }
@@ -234,7 +234,7 @@ impl MenuChoice {
 /// kept only between two groups that each show a row, so no rule leads or
 /// ends a menu and a group whose rows are all hidden leaves no second rule
 /// beside the first.
-pub(super) fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
+pub(crate) fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
     let mut visible = Vec::with_capacity(rows.len());
     let mut pending_rule = None;
     for row in rows {
@@ -287,7 +287,7 @@ pub(super) fn show_scrolled_menu_rows(
 
 /// Draw `rows` into an open menu and return the row the reader chose, if
 /// any. Hidden rows are not drawn.
-pub(super) fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice> {
+pub(crate) fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice> {
     let mut choice = None;
     for row in visible_rows(rows) {
         let chosen = match row {
@@ -395,7 +395,7 @@ fn menu_separator(ui: &mut Ui) {
 }
 
 /// The identity of the submenu row labelled `label`.
-pub(super) fn submenu_row_id(label: &str) -> Id {
+pub(crate) fn submenu_row_id(label: &str) -> Id {
     Id::new(("workbench.title_menu.submenu", label))
 }
 
@@ -493,7 +493,7 @@ pub(super) fn menu_rows_width(ui: &Ui, rows: &[MenuRow]) -> f32 {
 
 /// The content width the longest of `rows` needs for its label, with its
 /// key or chevron, to be painted whole.
-pub(super) fn menu_rows_fit(ui: &Ui, rows: &[MenuRow]) -> f32 {
+pub(crate) fn menu_rows_fit(ui: &Ui, rows: &[MenuRow]) -> f32 {
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let measure = |text: &str, font: &egui::FontId| {
