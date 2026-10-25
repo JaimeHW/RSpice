@@ -99,9 +99,6 @@ pub struct B3SoiFd {
     pub model: Arc<B3SoiFdModel>,
     /// Size/temperature-resolved parameters (one per instance geometry).
     pub sized: Arc<B3SoiFdSized>,
-    /// Instance geometry retained for self-heating re-evaluation at
-    /// `CKTtemp + delTemp`.
-    geometry: B3SoiFdGeometry,
     base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
@@ -214,7 +211,6 @@ impl B3SoiFd {
             body_mode,
             model,
             sized,
-            geometry: geom,
             base_temp_k: temp_k,
             consts,
             eval_gmin: 0.0,
@@ -653,14 +649,10 @@ impl B3SoiFd {
             return Cow::Borrowed(self.sized.as_ref());
         }
 
-        let temp = self.base_temp_k + bias.del_temp;
-        if (temp - self.sized.temp).abs() <= f64::EPSILON * self.sized.temp.abs().max(1.0) {
-            return Cow::Borrowed(self.sized.as_ref());
-        }
-
+        // Even at zero rise the load takes its self-heated forms.
         Cow::Owned(
-            B3SoiFdSized::new(&self.model, &self.geometry, temp)
-                .expect("self-heated B3SOIFD temperature evaluation"),
+            self.sized
+                .self_heated_at(&self.model, self.base_temp_k + bias.del_temp),
         )
     }
 
@@ -680,8 +672,9 @@ impl B3SoiFd {
 
         let sample = |del_temp: Value| {
             let sample_bias = B3SoiFdBias { del_temp, ..bias };
-            let sized = B3SoiFdSized::new(&self.model, &self.geometry, self.base_temp_k + del_temp)
-                .expect("self-heated B3SOIFD derivative temperature evaluation");
+            let sized = self
+                .sized
+                .self_heated_at(&self.model, self.base_temp_k + del_temp);
             let sample_op = eval::eval_dc(&sized, &self.consts, sample_bias, self.mtype);
             let drain_junction = sample_op.cjd
                 + sample_op.gjdb * sample_bias.vbs
@@ -741,8 +734,9 @@ impl B3SoiFd {
 
         let sample = |del_temp: Value| {
             let sample_bias = B3SoiFdBias { del_temp, ..bias };
-            let sized = B3SoiFdSized::new(&self.model, &self.geometry, self.base_temp_k + del_temp)
-                .expect("self-heated B3SOIFD charge derivative temperature evaluation");
+            let sized = self
+                .sized
+                .self_heated_at(&self.model, self.base_temp_k + del_temp);
             eval::eval(&sized, &self.consts, sample_bias, self.mtype, true)
                 .charge
                 .expect("compute_charges=true yields a charge state")

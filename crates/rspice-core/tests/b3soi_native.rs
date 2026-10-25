@@ -1149,12 +1149,6 @@ fn native_level57_pd_self_heating_inverse_mode_temp_rise_is_non_negative() {
     );
 }
 
-/// How far a self-heated FD operating point may sit from ngspice-46's. RSpice
-/// re-temps every FD parameter at the heated temperature, while ngspice-46's
-/// load keeps phi and what its temperature pass derives from it at ambient
-/// (b3soifdld.c:672-800), up to 5.7e-4 apart at the card RTH0.
-const SH_REL: Value = 1.0e-3;
-
 /// One SOI device with its four terminals driven at `[vd, vg, vs, ve]`, solved
 /// for its operating point with self-heating on or off:
 /// `(i(vd), i(vs), temperature rise)`, the rise 0 without self-heating.
@@ -1251,13 +1245,15 @@ fn native_soi_pd_self_heating_drain_current_matches_ngspice46_in_both_modes() {
 /// mirror does. ngspice-46, the corpus N1 card with SHMOD = 1, vd = 0,
 /// vg = vs = 1.5 V (`.option gmin=1e-25 itl1=500`, `op`, `set numdgt=12`,
 /// `print all`): the deck and its drain/source mirror agree to all twelve
-/// digits.
+/// digits. The self-heated load re-evaluates only part of the temperature
+/// pass and keeps `phi` ambient (b3soifdld.c:665-800); a full re-evaluation
+/// at the heated temperature sits 5.7e-4 away.
 #[test]
 fn native_soi_fd_self_heating_inverse_mode_matches_ngspice46_op() {
     let [id, is, temp] = soi_op(fd_n1_model_card(), "n1", true, [0.0, 1.5, 1.5, 0.0]);
-    assert_rel("FD inverse i(vs)", is, -2.45747014386e-03, SH_REL);
-    assert_rel("FD inverse i(vd)", id, 2.45747014386e-03, SH_REL);
-    assert_rel("FD inverse rise", temp, 2.797633057124, SH_REL);
+    assert_rel("FD inverse i(vs)", is, -2.45747014386e-03, 1.0e-9);
+    assert_rel("FD inverse i(vd)", id, 2.45747014386e-03, 1.0e-9);
+    assert_rel("FD inverse rise", temp, 2.797633057124, 1.0e-9);
 }
 
 /// A complementary pair of cards, `(n1, p1)`: the corpus N1 card with
@@ -1344,8 +1340,8 @@ fn native_soi_fd_pmos_self_heating_mirrors_its_nmos_complement() {
                 n[2]
             );
             if self_heating {
-                assert_rel(&format!("{at} NMOS i(vd)"), n[0], current, SH_REL);
-                assert_rel(&format!("{at} NMOS rise"), n[2], rise, SH_REL);
+                assert_rel(&format!("{at} NMOS i(vd)"), n[0], current, 1.0e-9);
+                assert_rel(&format!("{at} NMOS rise"), n[2], rise, 1.0e-9);
             }
         }
     }
