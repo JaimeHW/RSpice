@@ -84,7 +84,6 @@ mod ekv;
 mod ekv3;
 mod jfet;
 mod legacy_bsim;
-mod mos_models;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod oracle_cards;
@@ -112,6 +111,5 @@ pub use ekv3::{Ekv3Device, Ekv3Op};
 #[doc(hidden)]
 pub use jfet::{AcceptedJfetNonlinearCheckpoint, JFET_CHECKPOINT_RUNTIME_TAGS};
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
-pub use mos_models::MosParams;
 pub use smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
 pub use vdmos::{Vdmos, VdmosRegion, VdmosType};
