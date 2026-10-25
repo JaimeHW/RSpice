@@ -29,26 +29,8 @@
 //! into `rspice-core`. The first three are driven in-process through
 //! [`device::VerilogADevice`]; the last runs ahead of the build.
 //!
-//! ## Usage
-//!
-//! ```rust,ignore
-//! use rspice_veriloga::{VerilogACompiler, CompilerOptions};
-//!
-//! let source = r#"
-//!     `include "disciplines.vams"
-//!     module resistor(p, n);
-//!         inout p, n;
-//!         electrical p, n;
-//!         parameter real r = 1.0 from (0:inf);
-//!         analog I(p, n) <+ V(p, n) / r;
-//!     endmodule
-//! "#;
-//!
-//! let compiler = VerilogACompiler::new(CompilerOptions::default());
-//! let model = compiler.compile(source)?;
-//! ```
-//!
-//! [`VerilogACompiler`] has three further families of entry point:
+//! Besides `compile`, which returns the bytecode model, [`VerilogACompiler`]
+//! has three families of entry point:
 //! `compile_canonical_ir*` for the canonical artifact alone, `compile_runtime`
 //! / `compile_file_runtime_with_metadata` for both artifacts from a single
 //! parse, and `compile_virtual_runtime*` for sealed [`VirtualSourceBundle`]s
