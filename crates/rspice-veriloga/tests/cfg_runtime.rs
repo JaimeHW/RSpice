@@ -338,8 +338,11 @@ fn program(body: &str, names: &[String], bias: &Bias, staged: &[f64]) -> String 
 {RUNTIME_PRELUDE}
 
 fn analysis(_name: &str) -> bool {{ false }}
-fn simparam(_name: &str, fallback: f64) -> f64 {{ fallback }}
+fn simparam_required(name: &str) -> f64 {{ match name {{ "gmin" => 1e-12, "tnom" => 27.0, "simulatorVersion" => 1.0, "simulatorSubversion" => 0.0, _ => panic!("missing query") }} }}
+fn has_simparam(name: &str) -> bool {{ matches!(name,"gmin"|"tnom"|"simulatorVersion"|"simulatorSubversion") }}
+// The interpreter's `ddt` and `ddt_scale` inputs, both zero.
 fn ddt(_operator: usize, _input: f64) -> f64 {{ 0.0 }}
+fn ddt_derivative(_operator: usize, _primal: f64, input: f64) -> f64 {{ input * 0.0 }}
 fn limit(_operator: usize, _proposed: f64, candidate: f64) -> f64 {{ candidate }}
 fn limit_previous(_operator: usize, proposed: f64) -> f64 {{ proposed }}
 
