@@ -36,7 +36,6 @@ pub use crate::{capability::UnsupportedCapabilityError, notice::ContinuationAid}
 /// Display messages are intended for people and may gain additional context.
 /// Service and language-binding integrations should branch on this code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum SimulationErrorCode {
     /// Normal model completion reached an API that cannot return an absent result.
     ModelFinished,
@@ -117,7 +116,6 @@ impl std::fmt::Display for SimulationErrorCode {
 /// exception class, or a wire failure code. Two variants share a category
 /// exactly when a caller would take the same action for both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum SimulationErrorCategory {
     /// Normal model-requested termination, not a failure or user cancellation.
     ModelControl,
@@ -250,7 +248,6 @@ pub struct SimulationErrorDescriptor {
 /// to a net that cannot carry it are one [`Self::PortDiscipline`], because
 /// both are answered at the same terminal on the same symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum ElaborationErrorKind {
     /// The Verilog-A source, one of its dependencies, or a registered sealed
     /// runtime could not be read as a stable snapshot.
@@ -509,7 +506,6 @@ impl std::error::Error for ElaborationError {}
 /// error enum that wrapped [`SimulationError`] from the outside. Wrapping now
 /// runs one way: mismatches are `SimulationError`s.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[non_exhaustive]
 pub enum MaterializationMismatchError {
     #[error(
         "DeckPlan axes or ordered analysis identities do not match the supplied netlist's canonical plan"
@@ -618,7 +614,6 @@ impl std::error::Error for PersistenceIncompatibleError {}
 /// Mirrors the phases of [`rspice_output::AtomicArtifactError`] without
 /// re-exporting its writer-generic type through the engine's error surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum OutputCommitPhase {
     /// The staging file could not be created.
     Prepare,

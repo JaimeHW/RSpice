@@ -1132,7 +1132,6 @@ fn encode_floquet_evidence(
             writer.f64(certificate.qualification_tolerance);
         }
         rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown => writer.u8(3),
-        _ => writer.u8(u8::MAX),
     }
 }
 
@@ -1143,7 +1142,6 @@ fn encode_floquet_orbit_kind(
     writer.u8(match orbit_kind {
         rspice_core::analysis::FloquetOrbitKind::Driven => 0,
         rspice_core::analysis::FloquetOrbitKind::Autonomous => 1,
-        _ => u8::MAX,
     });
 }
 
@@ -1156,7 +1154,6 @@ fn encode_floquet_verdict(
         rspice_core::analysis::FloquetStabilityVerdict::Unstable => 1,
         rspice_core::analysis::FloquetStabilityVerdict::Marginal => 2,
         rspice_core::analysis::FloquetStabilityVerdict::Indeterminate => 3,
-        _ => u8::MAX,
     });
 }
 

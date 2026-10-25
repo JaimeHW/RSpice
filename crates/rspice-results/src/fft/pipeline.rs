@@ -60,7 +60,6 @@ impl FftInputAllocationStage {
 /// A transient record could not be prepared without altering or fabricating
 /// numerical evidence.
 #[derive(Debug, Clone, PartialEq, Error)]
-#[non_exhaustive]
 pub enum FftInputError {
     #[error("FFT input time/value lengths differ ({time_count} time points, {value_count} values)")]
     LengthMismatch {

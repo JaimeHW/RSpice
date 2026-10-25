@@ -9,7 +9,6 @@ pub const FLOQUET_UNIT_CIRCLE_BAND: Value = 1.0e-6;
 
 /// Provenance for a retained Floquet multiplier vector.
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 #[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "veriloga", serde(rename_all = "snake_case"))]
 pub enum FloquetSpectrumEvidence {
@@ -71,7 +70,6 @@ impl FloquetSpectrumEvidence {
 
 /// Periodic-orbit policy used when interpreting a unity multiplier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
 #[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "veriloga", serde(rename_all = "snake_case"))]
 pub enum FloquetOrbitKind {
@@ -85,7 +83,6 @@ pub enum FloquetOrbitKind {
 
 /// Evidence-aware stability verdict shared by PSS and PSTB.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 #[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "veriloga", serde(rename_all = "snake_case"))]
 pub enum FloquetStabilityVerdict {

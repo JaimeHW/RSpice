@@ -564,9 +564,6 @@ fn derive_floquet_verdict(
         rspice_core::analysis::FloquetStabilityVerdict::Indeterminate => {
             FloquetStabilityVerdictEvidence::Indeterminate
         }
-        // The durable schema must be deliberately revised before it can
-        // authenticate a future core semantic state.
-        _ => return Err("unsupported core Floquet stability verdict".to_owned()),
     };
     Ok(verdict)
 }

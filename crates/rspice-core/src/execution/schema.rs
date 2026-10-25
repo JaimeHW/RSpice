@@ -5,7 +5,6 @@ use super::plan::RunCoordinateId;
 pub use crate::signal_unit::SignalUnit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum SignalKind {
     Voltage,
     Current,
@@ -37,7 +36,6 @@ pub enum SignalKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum SignalValueType {
     Real,
     Complex,
@@ -52,7 +50,6 @@ pub enum SignalValueType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum SignalShape {
     Scalar,
     Vector,
@@ -60,7 +57,6 @@ pub enum SignalShape {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum SignalOwner {
     Node(String),
     Branch(String),
@@ -381,7 +377,6 @@ impl SchemaUnion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum SignalSchemaError {
     EmptyCanonicalName,
     EmptyDisplayName,

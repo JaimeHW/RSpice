@@ -197,7 +197,6 @@ pub enum ScalarValue {
 /// determination: the analysis ran, and the answer is not a number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum ScalarUnavailability {
     /// The quantity diverges upward, such as ideal-source input impedance.
     PositiveInfinity,
@@ -254,7 +253,6 @@ impl ScalarUnavailability {
 /// Each variant is the same finding as the result-document error of the same
 /// name, which it converts into with its message unchanged.
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 pub enum ResultScalarError {
     /// A required name was empty.
     EmptyName { location: &'static str },

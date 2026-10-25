@@ -26,7 +26,6 @@ pub(super) fn retain_floquet_evidence(
             },
         }),
         CoreEvidence::LegacyUnknown => Ok(FloquetSpectrumEvidence::LegacyUnknown),
-        _ => Err("unsupported Floquet evidence variant".to_owned()),
     }
 }
 
@@ -38,7 +37,6 @@ pub(super) fn retain_floquet_orbit_kind(
         rspice_core::analysis::FloquetOrbitKind::Autonomous => {
             Ok(FloquetOrbitKindEvidence::Autonomous)
         }
-        _ => Err("unsupported Floquet orbit policy".to_owned()),
     }
 }
 
@@ -58,7 +56,6 @@ pub(super) fn retain_floquet_verdict(
         rspice_core::analysis::FloquetStabilityVerdict::Indeterminate => {
             Ok(FloquetStabilityVerdictEvidence::Indeterminate)
         }
-        _ => Err("unsupported Floquet stability verdict".to_owned()),
     }
 }
 
@@ -80,7 +77,6 @@ pub(super) fn retain_pstb_classification(
         CoreClassification::SaddleNode => Ok(PstbStabilityClassificationEvidence::SaddleNode),
         CoreClassification::Marginal => Ok(PstbStabilityClassificationEvidence::Marginal),
         CoreClassification::Indeterminate => Ok(PstbStabilityClassificationEvidence::Indeterminate),
-        _ => Err("unsupported PSTB stability classification".to_owned()),
     }
 }
 

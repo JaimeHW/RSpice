@@ -167,9 +167,6 @@ fn pss_stability_verdict_label(
         FloquetStabilityVerdict::Unstable => Ok("unstable"),
         FloquetStabilityVerdict::Marginal => Ok("marginal"),
         FloquetStabilityVerdict::Indeterminate => Ok("indeterminate"),
-        _ => Err(crate::errors::value_error(
-            "unsupported Floquet stability verdict".to_string(),
-        )),
     }
 }
 
@@ -421,9 +418,6 @@ impl PyPssResult {
             FloquetStabilityVerdict::Stable => Ok(Some(true)),
             FloquetStabilityVerdict::Unstable => Ok(Some(false)),
             FloquetStabilityVerdict::Marginal | FloquetStabilityVerdict::Indeterminate => Ok(None),
-            _ => Err(crate::errors::value_error(
-                "unsupported Floquet stability verdict".to_string(),
-            )),
         }
     }
 

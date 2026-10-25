@@ -1425,7 +1425,6 @@ fn encode_stb_response(
                     R::Qualified { .. } => 2,
                     R::Approximate { .. } => 3,
                     R::LegacyUnknown => 4,
-                    _ => 255,
                 };
                 let certificate = spectrum.evidence.certificate();
                 writer.u8(

@@ -31,7 +31,6 @@ use crate::FaultPoint;
 /// The variants correspond one-to-one with the points the publication code
 /// consults, so a test names a phase rather than guessing at a syscall.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum ArtifactFaultPoint {
     /// Immediately after a staging file exists, before anything is written.
     AfterStagingCreated,
@@ -92,7 +91,6 @@ impl ArtifactFaultPoint {
 /// allocation refusal is reported by the host as `OutOfMemory`, which a caller
 /// must not confuse with a corrupt or missing file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum ArtifactFaultKind {
     /// A device or filesystem error.
     Io,

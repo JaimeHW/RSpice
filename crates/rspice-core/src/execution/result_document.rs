@@ -2041,7 +2041,6 @@ fn finite_slice(location: &'static str, values: &[f64]) -> Result<(), ResultDocu
 
 /// Why a result document could not be built, validated, encoded, or decoded.
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 pub enum ResultDocumentError {
     /// The abort source fired before the operation completed.
     Aborted,

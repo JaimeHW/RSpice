@@ -1373,7 +1373,6 @@ impl DcSweepSpec {
 
 /// Failure while materializing a bounded sweep grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
 pub enum SweepPointGenerationError {
     /// The caller's cooperative cancellation signal fired.
     #[error("sweep point generation was aborted")]

@@ -69,7 +69,6 @@ impl TryFrom<rspice_core::analysis::pstb::StabilityType> for WorkerPstbStability
             StabilityType::SaddleNode => Ok(Self::SaddleNode),
             StabilityType::Marginal => Ok(Self::Marginal),
             StabilityType::Indeterminate => Ok(Self::Indeterminate),
-            _ => Err("PSTB returned an unsupported stability classification".to_owned()),
         }
     }
 }

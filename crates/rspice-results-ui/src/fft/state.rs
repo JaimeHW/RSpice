@@ -18,7 +18,6 @@ const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
 
 /// Typed failure from either FFT input preparation or spectrum construction.
 #[derive(Debug, Clone, PartialEq, Error)]
-#[non_exhaustive]
 pub enum FftFailure {
     /// Raw transient evidence could not be prepared without alteration.
     #[error("{0}")]

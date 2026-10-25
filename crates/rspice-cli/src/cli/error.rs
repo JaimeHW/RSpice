@@ -254,10 +254,9 @@ pub const fn exit_code_for(category: FailureCategory) -> ExitCode {
         }
         FailureCategory::Engine(SimulationErrorCategory::Cancellation) => ExitCode::Interrupted,
         FailureCategory::Engine(SimulationErrorCategory::Timeout) => ExitCode::TimedOut,
-        // `SimulationErrorCategory` is `#[non_exhaustive]`, so the compiler
-        // cannot prove this match total. An engine category this build does
-        // not know is a defect in this table, and reporting it as an internal
-        // error is more honest than guessing a domain code.
+        // An engine category this table does not map is a defect in the
+        // table, and reporting it as an internal error is more honest than
+        // guessing a domain code.
         FailureCategory::Engine(_) => ExitCode::InternalError,
         FailureCategory::InputNotFound => ExitCode::InputNotFound,
         FailureCategory::Io => ExitCode::IoError,

@@ -252,7 +252,6 @@ impl PyRunAxisAssignment {
             rspice_core::execution::AxisKind::Data => "data",
             rspice_core::execution::AxisKind::Step => "step",
             rspice_core::execution::AxisKind::Temperature => "temperature",
-            _ => "unknown",
         };
         let value = match assignment.value() {
             rspice_core::execution::RunAxisValue::Numeric(value) => Some(*value),

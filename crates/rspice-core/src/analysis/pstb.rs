@@ -247,7 +247,6 @@ impl FloquetMultiplier {
 
 /// Classification of periodic orbit stability
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StabilityType {
     /// All multipliers are strictly inside the configured inner band.
     Stable,

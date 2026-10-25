@@ -2998,11 +2998,7 @@ impl From<StabilityType> for PstbStabilityTag {
             StabilityType::NeimarkSacker => Self::NeimarkSacker,
             StabilityType::SaddleNode => Self::SaddleNode,
             StabilityType::Marginal => Self::Marginal,
-            // `StabilityType` is `#[non_exhaustive]`, so a label added later
-            // arrives here rather than failing to compile. "We could not
-            // establish it" is the only honest reading of a determination this
-            // build has no word for.
-            _ => Self::Indeterminate,
+            StabilityType::Indeterminate => Self::Indeterminate,
         }
     }
 }

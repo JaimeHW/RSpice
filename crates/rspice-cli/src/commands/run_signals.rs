@@ -27,11 +27,7 @@ pub(crate) fn raw_variable_type(kind: SignalKind) -> &'static str {
 /// The unit a projected column is published under, when its kind states one.
 ///
 /// `None` is *unstated*, not dimensionless: a format with a unit field leaves
-/// it out rather than claiming a quantity nothing declared. Every kind the
-/// projection produces states one today, so the `None` arm exists for the
-/// kinds a later core revision may add — [`SignalKind`] is `non_exhaustive`
-/// and a column whose unit this build does not know must say nothing rather
-/// than guess.
+/// it out rather than claiming a quantity nothing declared.
 pub(crate) fn unit_symbol(kind: SignalKind) -> Option<String> {
     match rspice_core::execution::signal_unit(kind) {
         rspice_core::execution::SignalUnit::Unspecified => None,

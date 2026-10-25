@@ -15,7 +15,6 @@ use crate::Value;
 /// mark the offending conductors instead of asking the author to read node
 /// names out of a paragraph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum ConvergenceFailureClass {
     /// Nothing in the circuit conducts at DC to the named nodes, so no
     /// operating-point voltage is defined for them.

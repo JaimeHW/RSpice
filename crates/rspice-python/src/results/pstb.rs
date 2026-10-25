@@ -245,10 +245,7 @@ impl PyPstbResult {
             StabilityType::NeimarkSacker => "neimark-sacker",
             StabilityType::SaddleNode => "saddle-node",
             StabilityType::Marginal => "marginal",
-            // `StabilityType` is `#[non_exhaustive]`: a label this build has no
-            // word for is reported as an unestablished determination rather
-            // than as one of the labels it is not.
-            _ => "indeterminate",
+            StabilityType::Indeterminate => "indeterminate",
         }
     }
 

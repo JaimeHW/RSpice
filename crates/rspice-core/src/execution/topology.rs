@@ -286,7 +286,6 @@ fn append_layout(bytes: &mut Vec<u8>, tag: &[u8], layout: &[String]) {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum TopologyFingerprintError {
     EmptyNode,
     DuplicateNode {

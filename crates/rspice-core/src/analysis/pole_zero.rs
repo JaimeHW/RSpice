@@ -35,7 +35,6 @@ use thiserror::Error;
 /// A pole-zero extraction failure that must not be represented as an empty
 /// or estimated root set.
 #[derive(Debug, Error)]
-#[non_exhaustive]
 pub enum PoleZeroAnalysisError {
     /// The caller cancelled the analysis.
     #[error("pole-zero analysis was aborted")]
@@ -206,7 +205,6 @@ impl SpectrumCertificate {
 /// complete root set.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-#[non_exhaustive]
 pub enum RootSetEvidence {
     /// This root quantity was not requested by the analysis configuration.
     NotRequested,

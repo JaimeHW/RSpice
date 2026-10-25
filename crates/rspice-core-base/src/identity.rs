@@ -15,7 +15,6 @@ use std::fmt;
 
 /// Physical or post-processing analysis identity used by every frontend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum AnalysisKind {
     ImplicitOp,
     Op,

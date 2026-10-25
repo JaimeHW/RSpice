@@ -13,7 +13,6 @@ const MAX_QUALIFIED_BLUESTEIN_INNER_LENGTH: usize = 524_288;
 
 /// A forward RustFFT plan cannot be constructed within the qualified bounds.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[non_exhaustive]
 pub enum RustfftQualificationError {
     /// The authored transform length exceeds the qualified record bound.
     #[error("rustfft forward length {length} exceeds the qualified limit {limit}")]

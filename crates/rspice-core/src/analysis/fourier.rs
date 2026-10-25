@@ -149,7 +149,6 @@ impl TryFrom<&AnalysisCommand> for FourierConfig {
 /// numerical result for some waveforms and therefore cannot also represent
 /// missing or invalid evidence.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[non_exhaustive]
 pub enum FourierError {
     /// A requested current lacks coverage or has undefined impulse algebra.
     #[error("Fourier current observation: {detail}")]

@@ -201,7 +201,6 @@ fn step_target_manifest(target: &StepAxisTarget) -> Result<StepTargetDocument, S
             parameter: parameter.clone(),
         },
         StepAxisTarget::Temperature => StepTargetDocument::Temperature,
-        _ => return Err("Coordinate contains an unsupported STEP target.".to_owned()),
     })
 }
 

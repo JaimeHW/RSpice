@@ -90,7 +90,6 @@ pub enum StbSweepType {
 /// The variants are structured so callers can classify configuration
 /// failures without parsing display strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StbConfigError {
     /// The sweep start was not finite and strictly positive.
     InvalidStartFrequency,
@@ -727,7 +726,6 @@ pub struct StbAnalyzer {
 /// Failure while projecting an already-computed loop-gain sweep into Bode,
 /// Nyquist, and stability-margin results.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StbAnalysisError {
     /// The authored sweep or margin configuration is invalid.
     InvalidConfiguration(StbConfigError),

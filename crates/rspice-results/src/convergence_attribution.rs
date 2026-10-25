@@ -155,10 +155,9 @@ pub fn from_core(
             core::ConvergenceFailureClass::SingularSystem => {
                 ConvergenceFailureClass::SingularSystem
             }
-            // The engine's class list is non-exhaustive. A class this
-            // build does not know is still a solve that gave up, so it
-            // reports as one rather than dropping the named objects.
-            _ => ConvergenceFailureClass::NewtonNonConvergence,
+            core::ConvergenceFailureClass::NewtonNonConvergence => {
+                ConvergenceFailureClass::NewtonNonConvergence
+            }
         },
         sites: diagnostic
             .sites

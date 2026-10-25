@@ -58,9 +58,6 @@ pub(crate) fn floquet_spectrum_evidence_state(
             Some(floquet_spectrum_certificate_state(certificate)),
         )),
         FloquetSpectrumEvidence::LegacyUnknown => Ok(("legacy_unknown".to_string(), None)),
-        _ => Err(crate::errors::value_error(
-            "unsupported Floquet spectrum evidence variant".to_string(),
-        )),
     }
 }
 
@@ -104,9 +101,6 @@ pub(crate) fn floquet_orbit_kind_state(
     match orbit_kind {
         FloquetOrbitKind::Driven => Ok("driven".to_string()),
         FloquetOrbitKind::Autonomous => Ok("autonomous".to_string()),
-        _ => Err(crate::errors::value_error(
-            "unsupported Floquet orbit kind".to_string(),
-        )),
     }
 }
 

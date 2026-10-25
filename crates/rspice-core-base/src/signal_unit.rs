@@ -1,7 +1,6 @@
 //! Physical-unit vocabulary shared by result producers and consumers.
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum SignalUnit {
     Volt,
     Ampere,
@@ -35,10 +34,6 @@ impl SignalUnit {
     /// publish two files a reader cannot compare: the engine adapter's
     /// measurement manifest and the command line's HDF5 columns both come
     /// through here.
-    ///
-    /// `SignalUnit` is `#[non_exhaustive]`, so a future core unit renders as
-    /// its own lower-case tag rather than being folded onto an existing
-    /// symbol: an unrecognized unit must never be reported as a different one.
     #[must_use]
     pub fn symbol(&self) -> String {
         match self {
@@ -55,7 +50,7 @@ impl SignalUnit {
             Self::Dimensionless => "1".to_owned(),
             Self::Logic => "logic".to_owned(),
             Self::Custom(symbol) => symbol.clone(),
-            other => format!("{other:?}").to_ascii_lowercase(),
+            Self::Unspecified => "unspecified".to_owned(),
         }
     }
 

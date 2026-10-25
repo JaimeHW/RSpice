@@ -371,10 +371,6 @@ fn unit_tag(unit: &SignalUnit) -> (String, Option<String>) {
         SignalUnit::Logic => ("logic".to_owned(), None),
         SignalUnit::Unspecified => ("unspecified".to_owned(), None),
         SignalUnit::Custom(symbol) => ("custom".to_owned(), Some(symbol.clone())),
-        // `SignalUnit` is `#[non_exhaustive]`: a unit this build does not know
-        // is reported as unknown rather than silently folded onto a unit it is
-        // not.
-        other => (format!("unknown:{other:?}"), None),
     }
 }
 
@@ -385,7 +381,6 @@ fn signal_kind_tag(kind: SignalKind) -> String {
         SignalKind::DeviceObservable => "device_observable",
         SignalKind::Scalar => "scalar",
         SignalKind::Digital => "digital",
-        _ => "unknown",
     }
     .to_owned()
 }
@@ -395,7 +390,6 @@ fn value_type_tag(value_type: SignalValueType) -> String {
         SignalValueType::Real => "real",
         SignalValueType::Complex => "complex",
         SignalValueType::Logic => "logic",
-        _ => "unknown",
     }
     .to_owned()
 }
@@ -405,7 +399,6 @@ fn shape_tag(shape: SignalShape) -> String {
         SignalShape::Scalar => "scalar",
         SignalShape::Vector => "vector",
         SignalShape::Matrix => "matrix",
-        _ => "unknown",
     }
     .to_owned()
 }
@@ -416,7 +409,6 @@ fn owner_tags(owner: &SignalOwner) -> (String, Option<String>) {
         SignalOwner::Branch(name) => ("branch".to_owned(), Some(name.clone())),
         SignalOwner::Device(name) => ("device".to_owned(), Some(name.clone())),
         SignalOwner::Analysis => ("analysis".to_owned(), None),
-        _ => ("unknown".to_owned(), None),
     }
 }
 

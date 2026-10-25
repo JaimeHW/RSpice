@@ -25,12 +25,7 @@ pub const MAX_EXPRESSION_TREE_DEPTH: usize = 128;
 pub const MAX_POLYNOMIAL_EXPANSION_BYTES: usize = 8 * 1024 * 1024;
 
 /// A resource whose configured or implementation limit can be enforced.
-///
-/// This enum is non-exhaustive so new analysis and frontend resource classes
-/// can be added without forcing downstream callers to update exhaustive
-/// matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum ResourceKind {
     /// Bytes in one root netlist and its retained typed parameter overrides.
     NetlistBytes,

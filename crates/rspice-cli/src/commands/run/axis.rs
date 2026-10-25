@@ -87,10 +87,6 @@ pub(super) fn canonical_coordinate_description(coordinate: &RunCoordinate) -> St
                     .join(", ")
             ),
             RunAxisValue::AlterVariant { label, .. } => format!("ALTER {label}"),
-            unsupported => format!(
-                "{} = {unsupported:?}",
-                canonical_assignment_target(assignment)
-            ),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -247,9 +243,6 @@ fn implicit_axis_value(assignment: &AxisAssignment) -> Result<f64, CliError> {
         RunAxisValue::AlterVariant { .. } => Err(CliError::InvalidArgument {
             message: "textual .ALTER cannot drive an implicit operating-point table".to_string(),
             suggestion: Some("expand each .ALTER variant before execution".to_string()),
-        }),
-        value => Err(CliError::InternalError {
-            message: format!("unsupported implicit run-axis value {value:?}"),
         }),
     }
 }
@@ -887,7 +880,6 @@ fn execution_signal_kind_name(kind: rspice_core::execution::SignalKind) -> &'sta
         SignalKind::DeviceObservable => "device_observable",
         SignalKind::Scalar => "scalar",
         SignalKind::Digital => "digital",
-        _ => "unknown",
     }
 }
 
@@ -908,7 +900,6 @@ fn execution_signal_unit_name(unit: &rspice_core::execution::SignalUnit) -> Stri
         SignalUnit::Unspecified => "unspecified".to_string(),
         SignalUnit::Logic => "logic".to_string(),
         SignalUnit::Custom(name) => format!("custom:{name}"),
-        _ => "unknown".to_string(),
     }
 }
 
@@ -920,7 +911,6 @@ fn execution_signal_value_type_name(
         SignalValueType::Real => "real",
         SignalValueType::Complex => "complex",
         SignalValueType::Logic => "logic",
-        _ => "unknown",
     }
 }
 
@@ -930,7 +920,6 @@ fn execution_signal_shape_name(shape: rspice_core::execution::SignalShape) -> &'
         SignalShape::Scalar => "scalar",
         SignalShape::Vector => "vector",
         SignalShape::Matrix => "matrix",
-        _ => "unknown",
     }
 }
 
@@ -941,7 +930,6 @@ fn execution_signal_owner_json(owner: &rspice_core::execution::SignalOwner) -> s
         SignalOwner::Branch(name) => serde_json::json!({"kind": "branch", "name": name}),
         SignalOwner::Device(name) => serde_json::json!({"kind": "device", "name": name}),
         SignalOwner::Analysis => serde_json::json!({"kind": "analysis"}),
-        _ => serde_json::json!({"kind": "unknown"}),
     }
 }
 

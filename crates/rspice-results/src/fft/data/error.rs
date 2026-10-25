@@ -61,7 +61,6 @@ impl fmt::Display for SpectrumAnalysisAllocationStage {
 /// A transformed record could not be analyzed without fabricating or
 /// silently truncating a spectral metric.
 #[derive(Debug, Clone, PartialEq, Error)]
-#[non_exhaustive]
 pub enum SpectrumAnalysisError {
     /// The requested harmonic order is outside the qualified synchronous
     /// analysis contract.
@@ -130,7 +129,6 @@ impl fmt::Display for FftAllocationStage {
 
 /// A time-domain record could not be converted into a trustworthy spectrum.
 #[derive(Debug, Clone, PartialEq, Error)]
-#[non_exhaustive]
 pub enum FftBuildError {
     /// The direct builder received too few samples for a useful spectrum.
     #[error("FFT requires at least {minimum} samples; received {length}")]

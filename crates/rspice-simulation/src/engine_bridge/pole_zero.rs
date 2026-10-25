@@ -163,9 +163,6 @@ fn retained_root_evidence(
             certificate: retained_certificate(*certificate)?,
         }),
         RootSetEvidence::LegacyUnknown => Ok(PoleZeroRootSetEvidence::LegacyUnknown),
-        _ => Err(SimulationError::SolverError(
-            "pole-zero engine returned an unsupported root evidence classification".to_owned(),
-        )),
     }
 }
 

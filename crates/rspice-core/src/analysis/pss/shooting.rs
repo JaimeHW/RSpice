@@ -10,7 +10,6 @@ use crate::numerics::eigenspectrum::{OrdinarySpectrumError, qualified_real_eigen
 
 /// Failure to extract and strictly qualify a complete Floquet spectrum.
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
-#[non_exhaustive]
 pub enum FloquetSpectrumError {
     /// Cooperative cancellation was requested.
     #[error("Floquet spectrum computation was aborted")]

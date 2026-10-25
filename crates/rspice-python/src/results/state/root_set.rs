@@ -77,9 +77,6 @@ pub(crate) fn root_set_evidence_state(
             Some(spectrum_certificate_state(certificate)),
         )),
         RootSetEvidence::LegacyUnknown => Ok(("legacy_unknown".to_string(), None)),
-        _ => Err(crate::errors::value_error(
-            "unsupported root-set evidence variant".to_string(),
-        )),
     }
 }
 

@@ -214,7 +214,6 @@ pub(super) fn run_axis_plan(
                 out.step_result = Some(result)
             }
             rspice_core::execution::AxisKind::Alter => {}
-            _ => {}
         }
     }
     Ok(measurements)
@@ -237,7 +236,6 @@ fn single_legacy_axis(
             format!("{name}:{parameter}")
         }
         Some(rspice_core::execution::StepAxisTarget::Temperature) => "TEMP".to_string(),
-        Some(_) => axis.name().to_string(),
         None if axis.kind() == rspice_core::execution::AxisKind::Temperature => "TEMP".to_string(),
         None => axis.name().to_string(),
     };
@@ -250,7 +248,6 @@ fn legacy_coordinate_value(coordinate: &rspice_core::execution::RunCoordinate) -
         rspice_core::execution::RunAxisValue::Numeric(value) => Some(*value),
         rspice_core::execution::RunAxisValue::DataRow(_) => Some(assignment.value_index() as f64),
         rspice_core::execution::RunAxisValue::AlterVariant { .. } => None,
-        _ => None,
     }
 }
 

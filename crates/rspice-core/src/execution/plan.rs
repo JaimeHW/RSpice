@@ -11,7 +11,6 @@ use std::fmt;
 use std::mem::size_of;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum AxisKind {
     Alter,
     Data,
@@ -25,7 +24,6 @@ pub enum AxisKind {
 /// [`RunAxisValue::DataRow`] values instead because one row can bind several
 /// global parameters at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StepAxisTarget {
     /// Global parameter changed by `.STEP PARAM name ...`.
     Parameter {
@@ -132,7 +130,6 @@ impl AxisKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 pub enum RunAxisValue {
     Numeric(Value),
     DataRow(Vec<DataBinding>),
@@ -556,7 +553,6 @@ impl PlannedAnalysis {
 /// spectrum, so the identity is per operand: two spectra published under one
 /// name would collide in every artifact namespace derived from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum PostProcessSource {
     /// Operand `operand` of the `card_index`-th authored `.FOUR` card.
     FourierOperand {
@@ -1205,7 +1201,6 @@ impl DeckPlan {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 pub enum DeckPlanError {
     EmptyAxisName,
     UnrepresentableSweep {

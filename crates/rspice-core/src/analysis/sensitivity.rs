@@ -630,7 +630,6 @@ pub struct SensitivityAnalyzer {
 
 /// Failure while solving or projecting an adjoint sensitivity result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum SensitivityAnalysisError {
     /// The caller cancelled the operation.
     Aborted,

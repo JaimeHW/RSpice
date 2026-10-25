@@ -957,7 +957,6 @@ fn validate_worker_pstb_result(result: &WorkerSimulationResult) -> Result<(), St
                 }
             })
             .unwrap_or(WorkerPstbStabilityClassification::Marginal),
-        _ => return Err("PSTB stability verdict is unsupported".to_owned()),
     };
     if *stability_classification != expected_classification {
         return Err("PSTB rich stability classification is inconsistent".to_owned());

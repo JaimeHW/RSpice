@@ -203,7 +203,6 @@ pub struct TransientSample<'a> {
 /// `SimulationError` variant a stop becomes, and that error's code
 /// and category are what every surface reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum AbortReason {
     /// A caller asked the run to stop.
     Cancelled,

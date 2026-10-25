@@ -122,9 +122,6 @@ fn execution_support(kind: AnalysisKind) -> Support {
         | AnalysisKind::HbNoise => Support::partial(
             "Available through typed study run requests and retained study result JSON; declarative run and flat-format adapters are not exposed.",
         ),
-        _ => Support::unsupported(
-            "This CLI build has no declared execution route for this identity.",
-        ),
     }
 }
 

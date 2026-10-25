@@ -16,7 +16,6 @@ pub(crate) enum FrequencyGridScale {
 
 /// Failure while validating or retaining a physical-analysis frequency grid.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum FrequencyGridError {
     /// The start frequency was not finite or did not satisfy the sweep's sign rule.
     InvalidStartFrequency,

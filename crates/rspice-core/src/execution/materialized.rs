@@ -667,7 +667,6 @@ fn materialization_simulation_error(error: SimulationError) -> MaterializedRunEr
 /// and plan/materializer mismatches alike — is a [`SimulationError`], so the
 /// mismatch typing lives in exactly one place.
 #[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
 pub enum MaterializedRunError {
     #[error("deck materialization aborted")]
     Aborted,

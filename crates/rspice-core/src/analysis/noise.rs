@@ -278,7 +278,6 @@ pub struct CorrelatedNoiseDensities {
 
 /// Failure to evaluate a device-noise source into physical PSD evidence.
 #[derive(Debug, Clone, Copy, thiserror::Error, PartialEq)]
-#[non_exhaustive]
 pub(crate) enum NoiseEvaluationError {
     /// Source parameters or analysis conditions cannot describe a physical
     /// noise density.
