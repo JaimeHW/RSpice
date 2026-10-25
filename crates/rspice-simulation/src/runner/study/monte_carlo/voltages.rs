@@ -1,7 +1,5 @@
 //! All-node OP observations share the configured-study continuation machinery.
 use super::*;
-#[cfg(test)]
-use crate::study::monte_carlo::prepare_voltages;
 use crate::study::monte_carlo::prepare_voltages_with_context;
 
 pub(crate) fn run(

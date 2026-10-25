@@ -1,11 +1,9 @@
 //! Default OP study preparation and frozen voltage observation semantics.
 use super::*;
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::MonteCarloEnvironment;
 use rspice_results::family_measurements::FamilyMeasurementEvidence;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashSet;
-use std::path::Path;
 
 /// Frozen analog observation roster used by preparation and trial conversion.
 pub struct VoltageBasis {
@@ -121,27 +119,6 @@ impl PreparedVoltages {
     ) {
         (self.circuit, self.engine, self.study, self.basis)
     }
-}
-
-pub fn prepare_voltages(
-    source: &str,
-    source_path: Option<&Path>,
-    variation_source: McVariationSource,
-    histogram_bins: usize,
-    environment: Option<AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
-) -> Result<PreparedVoltages, SimulationError> {
-    prepare_voltages_with_context(
-        source,
-        variation_source,
-        histogram_bins,
-        environment,
-        ServiceContext {
-            source_path,
-            limits: rspice_core::ResourceLimits::default(),
-            abort,
-        },
-    )
 }
 
 pub(crate) fn prepare_voltages_with_context(

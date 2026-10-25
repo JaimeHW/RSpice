@@ -15,7 +15,7 @@ use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
 mod voltages;
 pub(crate) use voltages::prepare_voltages_with_context;
-pub use voltages::{PreparedVoltages, VoltageBasis, prepare_voltages};
+pub use voltages::{PreparedVoltages, VoltageBasis};
 
 /// Prepared study inputs; preparing them does not authorize dispatch.
 pub struct PreparedStudy {

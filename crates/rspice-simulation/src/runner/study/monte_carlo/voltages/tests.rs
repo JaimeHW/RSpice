@@ -162,13 +162,12 @@ fn all_node_monte_carlo_roster_does_not_require_a_nominal_operating_point() {
     // x=x^2+0.3 has no real solution. Elaboration still defines its voltage
     // roster, so drawing parameters can proceed without solving this circuit.
     let source = "Unsolvable nominal\n.param offset=0.3\nB1 out 0 V=V(out)^2+{offset}\nR1 out 0 1k\n.mc 2 uniform 1 seed 7 params offset\n.end\n";
-    let (_, _, study, basis) = prepare_voltages(
+    let (_, _, study, basis) = prepare_voltages_with_context(
         source,
-        None,
         McVariationSource::ParameterTolerance,
         5,
         None,
-        &NoAbort,
+        crate::engine_services::ServiceContext::with_defaults(None, &NoAbort),
     )
     .unwrap()
     .into_parts();
