@@ -154,36 +154,13 @@ mod feature_tests;
 /// points.
 pub use workbench::RSpiceApp;
 
-/// Native logging environment for the desktop binary, and the logger it
-/// installs: stderr as before, plus the running analysis's own Console log.
+/// The desktop binary's logger: stderr as before, plus the running analysis's
+/// own Console log.
 #[cfg(not(target_arch = "wasm32"))]
-pub use workbench::logging::{install_studio_logger, native_log_env};
+pub use workbench::logging::install_studio_logger;
 
 /// Typed identities, for `tests/simulation_configuration_contract.rs`.
-pub use product::{AnalysisInstanceId, ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
-
-pub use state::workspace::ProjectLibraryPublicationReceipt;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use services::cloud_account::model_hub_transport::CloudModelHubTransport;
-#[cfg(not(target_arch = "wasm32"))]
-pub use state::model_hub::FilesystemModelHubStore;
-/// The Model Hub client runtime: signed catalog, verified installation, and
-/// the unified part shelf over foundation, installed, catalog, and retained
-/// parts. This is the crate's model-distribution boundary — the surfaces that
-/// present it are consumers of exactly these items, not of the module's
-/// interior.
-pub use state::model_hub::{
-    InstalledPack, ModelHub, ModelHubError, ModelHubPartRow, ModelHubStore, ModelHubTransport,
-    PartProvenance, PartState, TrustAnchor, missing_capabilities,
-};
-pub use state::model_hub::{MemoryModelHubStore, OfflineTransport};
-
-/// The one hierarchical path grammar.
-pub use state::{
-    HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
-    MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
-};
+pub use product::{AnalysisInstanceId, SimulationPlanId};
 
 /// The persisted project model the configuration contract exercises.
 pub use state::{
@@ -192,6 +169,9 @@ pub use state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
+
+use product::{ContentDigest, ObjectRevision};
+use state::workspace::ProjectLibraryPublicationReceipt;
 
 pub struct ProjectLibraryPublicationCandidate {
     draft: crate::state::workspace::ProjectLibraryPublicationDraft,
