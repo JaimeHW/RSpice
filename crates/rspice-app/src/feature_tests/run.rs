@@ -5,6 +5,7 @@ mod completion_paths;
 mod controller;
 mod measurement;
 mod output_contract;
+mod preflight;
 mod prepared_run;
 mod results_post;
 mod transient_post;

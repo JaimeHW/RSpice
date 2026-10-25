@@ -1,7 +1,7 @@
 //! Where following a finding lands.
 //!
 //! The destinations a dispatch finding names are covered beside the report
-//! that produces them, in `preflight::tests`. What is here is the hop itself:
+//! that produces them, in `feature_tests::run::preflight`. What is here is the hop itself:
 //! a request recorded by a page is served once, by the frame boundary, and
 //! the two routes whose destination has to be resolved rather than named — a
 //! netlist record, and a source document in whichever editor owns its bundle.

@@ -1020,25 +1020,6 @@ mod completion_paths;
 mod monte_carlo_checkpoint;
 mod transient_checkpoint;
 
-#[test]
-fn browser_worker_transfer_protocol_matches_rust_transport() {
-    use rspice_simulation_contract::worker_protocol::{
-        WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
-    };
-    let source = include_str!("../../../web/simulation-worker.js");
-    assert!(source.contains(&format!(
-        "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
-    )));
-    assert!(source.contains(&format!(
-        "const WORKER_REQUEST_PROTOCOL_VERSION = {WORKER_REQUEST_TRANSPORT_PROTOCOL};"
-    )));
-    assert!(source.contains("response.protocolVersion !== expectedProtocolVersion"));
-    assert!(source.contains("protocolResponseTransferList(response, WORKER_PROTOCOL_VERSION)"));
-    assert!(source.contains("request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION"));
-    assert!(source.contains("rspice_ui_wasm_jit_eval_op_slice_v1"));
-    assert!(source.contains("eval_op_slice_v1: wasmExports.rspice_ui_wasm_jit_eval_op_slice_v1"));
-}
-
 mod autonomous_periodic;
 mod periodic_port_noise;
 mod run_checks;

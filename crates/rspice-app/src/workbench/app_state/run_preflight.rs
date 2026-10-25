@@ -119,7 +119,7 @@ pub struct PreflightDialogState {
     pub(in crate::workbench) run_and_queue_requested: bool,
     /// A pass whose run is still being prepared and checked, off the UI
     /// thread.
-    pub(in crate::workbench) checking: Option<PreflightCheck>,
+    pub(crate) checking: Option<PreflightCheck>,
     /// The reader stopped that pass. The frame loop cancels it before it
     /// looks for the pass's verdict, so a verdict that lands in between
     /// authorizes nothing.
@@ -129,7 +129,7 @@ pub struct PreflightDialogState {
 /// What a pass decided in the frame that took the press, held until the
 /// worker has prepared the run and the engine has built its decks.
 #[derive(Debug, Clone)]
-pub(in crate::workbench) struct PreflightCheck {
+pub(crate) struct PreflightCheck {
     /// The report as far as the press took it: the revisions it inspected,
     /// and its advisories. What preparing the run and building its decks
     /// finds joins it.
@@ -178,7 +178,7 @@ impl PreflightDialogState {
 
     /// Whether a press asked for a run that the pass in flight will queue
     /// once it authorizes one.
-    pub(in crate::workbench) fn run_awaits_check(&self) -> bool {
+    pub(crate) fn run_awaits_check(&self) -> bool {
         self.checking.as_ref().is_some_and(|check| check.queue)
     }
 

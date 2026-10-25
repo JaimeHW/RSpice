@@ -152,10 +152,7 @@ fn open_code_document(
 }
 
 /// Open the destination a dispatch finding named for itself.
-pub(in crate::workbench) fn apply_remediation(
-    app: &mut RSpiceApp,
-    remediation: PreflightRemediation,
-) {
+pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
     match remediation {
         // What the design checks found about the configured design, where it
         // is drawn: the configured root opens, the Problems page lists its

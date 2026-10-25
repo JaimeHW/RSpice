@@ -4,11 +4,17 @@
 //! Split from `preflight.rs`: the workflow and the evidence that it holds are
 //! separate concerns, and the file was at its line budget.
 
-use super::*;
+use crate::state::{
+    ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
+use crate::workbench::preflight::{
+    collect_report, poll, preparation_remediation, queue_retained_run, start,
+    temperature_validity_advisories,
+};
 use crate::workbench::state::{ConsolePage, Workspace};
 
 mod engine;

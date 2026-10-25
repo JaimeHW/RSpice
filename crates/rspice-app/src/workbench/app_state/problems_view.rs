@@ -123,9 +123,9 @@ pub(crate) struct ProblemsView {
     pub(in crate::workbench) severities: SeverityFilter,
     /// The producer the grid is narrowed to, by its exact identity. A partial
     /// identity is one a reader cannot check, so this is never a prefix.
-    pub(in crate::workbench) producer: Option<String>,
+    pub(crate) producer: Option<String>,
     /// Text matched against the rule code, the subject and the message.
-    pub(in crate::workbench) text: String,
+    pub(crate) text: String,
     /// Whether findings a waiver covers are listed. On by default: a waiver is
     /// a decision somebody recorded, and a page that hides those decisions by
     /// default is a page that cannot be audited.
@@ -243,7 +243,7 @@ impl ProblemsView {
     }
 
     /// Whether anything is narrowing the list.
-    pub(in crate::workbench) fn is_filtered(&self) -> bool {
+    pub(crate) fn is_filtered(&self) -> bool {
         !self.text.is_empty()
             || self.producer.is_some()
             || !self.waived

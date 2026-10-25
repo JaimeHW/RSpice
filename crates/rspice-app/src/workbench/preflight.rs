@@ -409,7 +409,7 @@ fn conclude(
 
 /// Queue a retained authorized report only while every revision it names is
 /// still current.
-fn queue_retained_run(state: &mut impl RunHost) -> bool {
+pub(crate) fn queue_retained_run(state: &mut impl RunHost) -> bool {
     let project_revision = state.model().workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
         state.model().configured_topology_revision();
@@ -449,7 +449,7 @@ fn ensure_configured_design_check(state: &mut impl RunHost) -> Result<(), String
 /// The report a pass over `state` collects, the configured design checked
 /// first as the pass checks it.
 #[cfg(test)]
-fn collect_report(state: &impl RunHost) -> PreflightReport {
+pub(crate) fn collect_report(state: &impl RunHost) -> PreflightReport {
     let mut state = state.clone();
     let _ = ensure_configured_design_check(&mut state);
     collect(&state)
@@ -778,7 +778,7 @@ fn collect(state: &impl RunHost) -> PreflightReport {
 /// Only the corner each library has *active* is checked here: that is the one
 /// a run expands. Every corner the project is authoring is checked on the
 /// Corners page, where authoring one is what a reader is doing.
-fn temperature_validity_advisories(model: &Model) -> Vec<PreflightAdvisory> {
+pub(crate) fn temperature_validity_advisories(model: &Model) -> Vec<PreflightAdvisory> {
     let requested = model.sim_setup.requested_temperatures_celsius();
     model
         .model_library_manager
@@ -846,7 +846,7 @@ fn preparation_requirement(stage: crate::simulation::execution::PreparationStage
 /// stage that reports no line yields a destination with none, so the row
 /// that offers it can tell a located finding from an unlocated one instead
 /// of promising a jump it cannot make.
-fn preparation_remediation(
+pub(crate) fn preparation_remediation(
     stage: crate::simulation::execution::PreparationStage,
     line: Option<usize>,
 ) -> PreflightRemediation {
@@ -913,6 +913,3 @@ fn issue_analysis(
         | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => None,
     }
 }
-
-#[cfg(test)]
-mod tests;
