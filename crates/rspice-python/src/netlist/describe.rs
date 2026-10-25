@@ -234,12 +234,11 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
         }
         AnalysisCommand::Pstb(card) => {
             format!(
-                ".pstb probe={} maxharm={} nmults={} stabilitythreshold={} eigentol={}",
+                ".pstb probe={} maxharm={} nmults={} stabilitythreshold={}",
                 card.probe_instance,
                 card.max_harmonics,
                 card.num_multipliers,
-                card.stability_threshold,
-                card.eigenvalue_tolerance
+                card.stability_threshold
             )
         }
         AnalysisCommand::Pnoise(card) => {

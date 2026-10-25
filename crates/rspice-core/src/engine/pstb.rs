@@ -54,8 +54,8 @@ impl Engine {
     /// carrier.
     ///
     /// The carrier supplies the period and the monodromy matrix; the card
-    /// supplies the loop probe, the classification boundary and the numerical
-    /// contract the spectrum is judged under. Every invariant the result
+    /// supplies the loop probe and the classification boundary the spectrum
+    /// is judged under. Every invariant the result
     /// publishes is established by
     /// [`PstbAnalyzer`](crate::analysis::pstb::PstbAnalyzer) before it is
     /// returned, so a caller has nothing left to re-derive.
@@ -136,7 +136,6 @@ impl Engine {
             .with_num_eigenvalues(card.num_multipliers)
             .with_orbit_kind(orbit_kind)
             .with_eigenvectors(true)
-            .with_tolerance(card.eigenvalue_tolerance)
             .with_stability_threshold(card.stability_threshold)
             .with_subharmonic_detection(card.detect_subharmonics);
         let result = PstbAnalyzer::new(config).analyze_monodromy_with_abort(
@@ -311,12 +310,6 @@ fn validate_card(card: &PstbCard) -> Result<(), SimulationError> {
         return Err(SimulationError::Circuit(format!(
             "PSTB requires a finite stability threshold of at least one, got {}",
             card.stability_threshold
-        )));
-    }
-    if !card.eigenvalue_tolerance.is_finite() || card.eigenvalue_tolerance <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "PSTB requires a positive eigenvalue tolerance, got {}",
-            card.eigenvalue_tolerance
         )));
     }
     Ok(())

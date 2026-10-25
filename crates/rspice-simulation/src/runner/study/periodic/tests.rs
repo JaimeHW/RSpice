@@ -117,7 +117,6 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
                 num_multipliers: 2,
                 stability_threshold: 1.01,
                 detect_subharmonics: false,
-                eigenvalue_tolerance: 3e-10,
             })),
             vec![
                 "scalar:pstb.max_multiplier_magnitude",

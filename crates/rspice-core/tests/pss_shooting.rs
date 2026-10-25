@@ -2699,7 +2699,6 @@ fn series_inductors_share_one_current_state_and_preserve_the_voltage_division() 
             num_multipliers: 1,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
-            eigenvalue_tolerance: 1e-10,
         };
         let stability = Engine::default()
             .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
@@ -2898,7 +2897,6 @@ fn prescribed_diode_voltage_is_a_constraint_not_a_spurious_shooting_state() {
         num_multipliers: 1,
         stability_threshold: 1.0 + 1e-6,
         detect_subharmonics: true,
-        eigenvalue_tolerance: 1e-10,
     };
     let error = Engine::default()
         .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
@@ -3604,7 +3602,6 @@ fn three_way_inductor_junction_uses_two_independent_currents() {
             num_multipliers: 2,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
-            eigenvalue_tolerance: 1e-10,
         };
         let stability = engine
             .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)

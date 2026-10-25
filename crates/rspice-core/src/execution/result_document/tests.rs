@@ -1122,7 +1122,6 @@ fn pstb_measurement() -> (
         num_multipliers: 1,
         stability_threshold: 1.0 + 1e-6,
         detect_subharmonics: true,
-        eigenvalue_tolerance: 1e-10,
     };
     let result = PstbAnalyzer::new(
         PstbConfig::new()

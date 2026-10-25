@@ -130,7 +130,7 @@ with a source-located error rather than parsed and dropped.
 | `.PAC` | `INPUT` and `OUT` (required), `MAXSIDEBAND`, `SIDEBANDMIN`, `SIDEBANDMAX`, `RELTOL`, `ABSTOL`, `PACMAG`, `INCLUDEDC`, `FROM` |
 | `.PXF` | `INPUT` and `OUT` (required), `INPUTSIDEBAND`, `OUTSIDEBAND`, `MAXSIDEBAND`, `RELTOL`, `ABSTOL`, `FROM` |
 | `.PNOISE` | `OUT` (required), `INPUT`, `MAXSIDEBAND`, `INPUTSIDEBAND`, `OUTSIDEBAND`, `NOISEREF`, `INTEGRATEDNOISE`, `NOISESUMMARY`, `FROM`; sampling controls `SAMPLING`, `SAMPLEPHASE`, `REFOUT`, `PERIODS`, `THRESHOLD`, `DIRECTION`, `OCCURRENCE`, `PHASETOL`, `MINSLEW`, and the `REF`-prefixed forms of the last five |
-| `.PSTB` | `PROBE` (required), `MAXHARM`, `NMULTS`, `STABILITYTHRESHOLD`, `DETECTSUBHARMONICS`, `EIGENTOL` |
+| `.PSTB` | `PROBE` (required), `MAXHARM`, `NMULTS`, `STABILITYTHRESHOLD`, `DETECTSUBHARMONICS` |
 | `.ENVELOPE` | `TSTOP` (required), `MAXSTEP`, `FREEZE` |
 
 The positional `.PSS` form is ngspice's oscillator card. Its fields bind

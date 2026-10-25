@@ -198,7 +198,6 @@ pub struct WorkerPstbRunConfig {
     pub num_multipliers: usize,
     pub stability_threshold: f64,
     pub detect_subharmonics: bool,
-    pub eigenvalue_tolerance: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

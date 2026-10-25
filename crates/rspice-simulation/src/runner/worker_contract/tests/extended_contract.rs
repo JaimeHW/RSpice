@@ -762,7 +762,6 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         num_multipliers: 6,
         stability_threshold: 1.0002,
         detect_subharmonics: false,
-        eigenvalue_tolerance: 5.0e-11,
     };
 
     let pnoise_request = SimulationRequest::Spec {
@@ -1277,7 +1276,6 @@ fn assert_pstb_config_matches(
     assert_eq!(actual.num_multipliers, expected.num_multipliers);
     assert_eq!(actual.stability_threshold, expected.stability_threshold);
     assert_eq!(actual.detect_subharmonics, expected.detect_subharmonics);
-    assert_eq!(actual.eigenvalue_tolerance, expected.eigenvalue_tolerance);
 }
 
 fn assert_temp_config_matches(

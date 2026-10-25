@@ -283,7 +283,6 @@ pub fn pstb_run_config_from_dialog(
         num_multipliers: pstb_cfg.num_multipliers as usize,
         stability_threshold: pstb_cfg.stability_threshold,
         detect_subharmonics: pstb_cfg.detect_subharmonics,
-        eigenvalue_tolerance: pstb_cfg.eigenvalue_tolerance,
     })
 }
 

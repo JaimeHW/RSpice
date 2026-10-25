@@ -170,7 +170,6 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
             num_multipliers: 2,
             stability_threshold: 1.01,
             detect_subharmonics: false,
-            ..Default::default()
         }),
         ..Default::default()
     };

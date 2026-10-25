@@ -1242,7 +1242,7 @@ pub(super) fn parse_pstb_command(
     let mut num_multipliers = None;
     let mut stability_threshold = None;
     let mut detect_subharmonics = None;
-    let mut eigenvalue_tolerance = None;
+    let mut retired_eigenvalue_tolerance = None;
 
     loop {
         skip_commas(stream);
@@ -1305,8 +1305,12 @@ pub(super) fn parse_pstb_command(
                 line_num,
                 "DETECTSUBHARMONICS",
             )?,
+            // Retired. The Floquet spectrum comes from a direct Schur solve
+            // whose residual bound is derived from the matrix order, so a
+            // tolerance has nothing to set. Every line the Studio wrote
+            // states it, so it is still read and checked, then dropped.
             "EIGENTOL" => bind_once(
-                &mut eigenvalue_tolerance,
+                &mut retired_eigenvalue_tolerance,
                 card_number(
                     stream,
                     line_num,
@@ -1344,8 +1348,6 @@ pub(super) fn parse_pstb_command(
         num_multipliers: num_multipliers.unwrap_or(PstbCard::DEFAULT_NUM_MULTIPLIERS),
         stability_threshold: stability_threshold.unwrap_or(PstbCard::DEFAULT_STABILITY_THRESHOLD),
         detect_subharmonics: detect_subharmonics.unwrap_or(PstbCard::DEFAULT_DETECT_SUBHARMONICS),
-        eigenvalue_tolerance: eigenvalue_tolerance
-            .unwrap_or(PstbCard::DEFAULT_EIGENVALUE_TOLERANCE),
     })))
 }
 
@@ -2390,7 +2392,6 @@ mod tests {
         assert_eq!(card.num_multipliers, 10);
         assert_eq!(card.stability_threshold, 1.0 + 1e-6);
         assert!(card.detect_subharmonics);
-        assert_eq!(card.eigenvalue_tolerance, 1e-10);
     }
 
     #[test]
@@ -2411,14 +2412,23 @@ mod tests {
     fn pstb_binds_every_authored_field() {
         let card = pstb(
             ".PSS FUND=1G\n.PSTB PROBE=l1 MAXHARM=6 NMULTS=3 STABILITYTHRESHOLD=1.5 \
-             DETECTSUBHARMONICS=no EIGENTOL=1e-12",
+             DETECTSUBHARMONICS=no",
         );
         assert_eq!(card.probe_instance, "L1");
         assert_eq!(card.max_harmonics, 6);
         assert_eq!(card.num_multipliers, 3);
         assert_eq!(card.stability_threshold, 1.5);
         assert!(!card.detect_subharmonics);
-        assert_eq!(card.eigenvalue_tolerance, 1e-12);
+    }
+
+    /// Every line the Studio wrote states `EIGENTOL=`. It still parses, and
+    /// it parses to the card the line would be without it.
+    #[test]
+    fn pstb_retired_pstb_eigentol_reads_as_absent() {
+        assert_eq!(
+            pstb(".PSS FUND=1G\n.PSTB PROBE=l1 EIGENTOL=1e-12"),
+            pstb(".PSS FUND=1G\n.PSTB PROBE=l1")
+        );
     }
 
     #[test]

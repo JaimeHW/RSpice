@@ -1552,4 +1552,62 @@ mod tests {
         check(parsed, card);
         card.to_owned()
     }
+
+    use rspice_simulation_contract::pstb_draft::PstbDialogState;
+
+    /// A saved `.PSTB` dialog as a build that still carried `key` wrote it,
+    /// beside the same dialog without it: once as a project stores it (JSON)
+    /// and once as the eframe session does (RON, read the way the session
+    /// reader reads it).
+    fn saved_pstb_dialogs(key: &str, value: &str) -> [[PstbDialogState; 2]; 2] {
+        let fields = [
+            ("probe", r#""LP""#),
+            ("max_harmonics", r#""8""#),
+            ("num_multipliers", r#""6""#),
+            ("stability_threshold", r#""1.5""#),
+            ("detect_subharmonics", "false"),
+        ];
+        let absent: Vec<(&str, &str)> = fields
+            .into_iter()
+            .filter(|(name, _)| *name != key)
+            .collect();
+        let mut stated = absent.clone();
+        stated.push((key, value));
+        let json = |fields: &[(&str, &str)]| {
+            let body: Vec<String> = fields
+                .iter()
+                .map(|(name, value)| format!("\"{name}\":{value}"))
+                .collect();
+            serde_json::from_str::<PstbDialogState>(&format!("{{{}}}", body.join(",")))
+                .expect("a saved project dialog reads")
+        };
+        let ron = |fields: &[(&str, &str)]| {
+            let body: Vec<String> = fields
+                .iter()
+                .map(|(name, value)| format!("{name}:{value}"))
+                .collect();
+            ron::Options::default()
+                .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+                .from_str::<PstbDialogState>(&format!("({})", body.join(",")))
+                .expect("a saved session dialog reads")
+        };
+        [[json(&stated), json(&absent)], [ron(&stated), ron(&absent)]]
+    }
+
+    /// The line a saved dialog writes, and what it saves again.
+    fn written(state: &PstbDialogState) -> (String, String) {
+        let line = state
+            .to_config()
+            .expect("the saved dialog converts")
+            .to_spice();
+        (line, serde_json::to_string(state).unwrap())
+    }
+
+    #[test]
+    fn retired_pstb_eigentol_in_a_saved_dialog_reads_as_absent() {
+        for [stated, absent] in saved_pstb_dialogs("eigenvalue_tolerance", r#""1e-9""#) {
+            assert_eq!(written(&stated), written(&absent));
+            assert!(!written(&stated).1.contains("eigenvalue_tolerance"));
+        }
+    }
 }

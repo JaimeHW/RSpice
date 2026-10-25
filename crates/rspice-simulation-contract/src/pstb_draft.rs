@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! .pstb probe=LPROBE maxharm=10 nmults=10
-//! + stabilitythreshold=1.000001 detectsubharmonics=yes eigentol=0.0000000001
+//! + stabilitythreshold=1.000001 detectsubharmonics=yes
 //! ```
 
 use crate::options::parse_si_value;
@@ -42,8 +42,6 @@ pub struct PstbConfig {
     pub stability_threshold: f64,
     /// Report period-doubling and other subharmonic modes.
     pub detect_subharmonics: bool,
-    /// Convergence tolerance of the eigenvalue decomposition.
-    pub eigenvalue_tolerance: f64,
 }
 
 impl Default for PstbConfig {
@@ -57,7 +55,6 @@ impl Default for PstbConfig {
             num_multipliers: 10,
             stability_threshold: 1.0 + 1e-6,
             detect_subharmonics: true,
-            eigenvalue_tolerance: 1e-10,
         }
     }
 }
@@ -68,11 +65,10 @@ impl PstbConfig {
     /// Every field this struct holds is written, at the value it holds, on
     /// every line. The engine's `.PSTB` card defaults each of these keys
     /// (`PstbCard::DEFAULT_*`), so a key this writer omits is not absent from
-    /// the run — it is present at the card's constant. Three of the six
-    /// controls were dropped that way: an operator who moved the stability
-    /// threshold, turned subharmonic detection off, or tightened the
-    /// eigenvalue tolerance got a line the engine ran at the default, and
-    /// nothing anywhere reported the difference.
+    /// the run — it is present at the card's constant. Controls were dropped
+    /// that way: an operator who moved the stability threshold or turned
+    /// subharmonic detection off got a line the engine ran at the default,
+    /// and nothing anywhere reported the difference.
     ///
     /// `nmults=` used to be written only when it differed from ten. That was
     /// not wrong — the card's default is ten as well — but it made the line's
@@ -81,7 +77,7 @@ impl PstbConfig {
     pub fn to_spice(&self) -> String {
         format!(
             ".pstb probe={} maxharm={} nmults={} stabilitythreshold={} \
-             detectsubharmonics={} eigentol={}",
+             detectsubharmonics={}",
             self.probe,
             self.max_harmonics,
             self.num_multipliers,
@@ -89,7 +85,6 @@ impl PstbConfig {
             // and the form say one thing rather than two.
             format_tolerance(self.stability_threshold),
             format_switch(self.detect_subharmonics),
-            format_tolerance(self.eigenvalue_tolerance),
         )
     }
 
@@ -122,9 +117,6 @@ impl PstbConfig {
                 "Stability threshold must be a finite magnitude of at least one".to_string(),
             );
         }
-        if !self.eigenvalue_tolerance.is_finite() || self.eigenvalue_tolerance <= 0.0 {
-            return Err("Eigenvalue tolerance must be positive".to_string());
-        }
         Ok(())
     }
 }
@@ -143,7 +135,6 @@ pub struct PstbDialogState {
     pub num_multipliers: String,
     pub stability_threshold: String,
     pub detect_subharmonics: bool,
-    pub eigenvalue_tolerance: String,
     #[serde(skip)]
     pub initialized: bool,
 }
@@ -166,8 +157,12 @@ struct PersistedPstbDialogState {
     stability_threshold: Option<String>,
     #[serde(default)]
     detect_subharmonics: Option<bool>,
-    #[serde(default)]
-    eigenvalue_tolerance: Option<String>,
+    /// Retired. The Floquet solve is a direct Schur decomposition whose
+    /// residual bound is derived from the matrix order, so there is no
+    /// tolerance for this to set. Accepted so earlier projects and sessions
+    /// still open; never written back.
+    #[serde(default, rename = "eigenvalue_tolerance")]
+    _eigenvalue_tolerance: serde::de::IgnoredAny,
     /// Retired. Floquet extraction always yields both margins and there is no
     /// schematic annotation channel for PSTB, so none of these three selected
     /// anything. Accepted so earlier projects still open; never written back.
@@ -197,9 +192,6 @@ impl<'de> Deserialize<'de> for PstbDialogState {
             detect_subharmonics: persisted
                 .detect_subharmonics
                 .unwrap_or(defaults.detect_subharmonics),
-            eigenvalue_tolerance: persisted
-                .eigenvalue_tolerance
-                .unwrap_or_else(|| format_tolerance(defaults.eigenvalue_tolerance)),
             initialized: false,
         })
     }
@@ -215,7 +207,6 @@ impl PstbDialogState {
             num_multipliers: config.num_multipliers.to_string(),
             stability_threshold: format_tolerance(config.stability_threshold),
             detect_subharmonics: config.detect_subharmonics,
-            eigenvalue_tolerance: format_tolerance(config.eigenvalue_tolerance),
             initialized: true,
         }
     }
@@ -232,8 +223,6 @@ impl PstbDialogState {
             .map_err(|_| "Invalid multipliers")?;
         let stability_threshold = parse_si_value(&self.stability_threshold)
             .map_err(|e| format!("Invalid stability threshold: {e}"))?;
-        let eigenvalue_tolerance = parse_si_value(&self.eigenvalue_tolerance)
-            .map_err(|e| format!("Invalid eigenvalue tolerance: {e}"))?;
 
         let config = PstbConfig {
             probe: self.probe.clone(),
@@ -242,7 +231,6 @@ impl PstbDialogState {
             num_multipliers: num_mult,
             stability_threshold,
             detect_subharmonics: self.detect_subharmonics,
-            eigenvalue_tolerance,
         };
 
         config.validate()?;
@@ -263,8 +251,8 @@ fn format_switch(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
-/// Round-trippable spelling for the two numeric contracts, which sit far
-/// enough from unity that a plain `{}` would print a long decimal tail.
+/// Round-trippable spelling for the stability threshold, which sits close
+/// enough to unity that a plain `{}` can print a long decimal tail.
 fn format_tolerance(value: f64) -> String {
     let rendered = format!("{value}");
     if rendered.len() > 12 {
@@ -286,7 +274,6 @@ mod tests {
     fn numeric_contracts_round_trip_through_the_editor() {
         let config = PstbConfig {
             stability_threshold: 1.05,
-            eigenvalue_tolerance: 1e-12,
             detect_subharmonics: false,
             ..PstbConfig::default()
         };
@@ -296,7 +283,6 @@ mod tests {
             .expect("editor state converts back");
 
         assert!((restored.stability_threshold - 1.05).abs() < 1e-15);
-        assert!((restored.eigenvalue_tolerance - 1e-12).abs() < 1e-24);
         assert!(!restored.detect_subharmonics);
     }
 
@@ -314,7 +300,6 @@ mod tests {
             num_multipliers: 4,
             stability_threshold: 1.25,
             detect_subharmonics: false,
-            eigenvalue_tolerance: 1e-12,
             ..PstbConfig::default()
         };
 
@@ -326,7 +311,6 @@ mod tests {
             "nmults=4",
             "stabilitythreshold=1.25",
             "detectsubharmonics=no",
-            "eigentol=",
         ] {
             assert!(
                 directive.contains(expected),

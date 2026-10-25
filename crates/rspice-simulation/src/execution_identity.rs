@@ -889,7 +889,6 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.usize(config.num_multipliers);
         writer.f64(config.stability_threshold);
         writer.bool(config.detect_subharmonics);
-        writer.f64(config.eigenvalue_tolerance);
     });
     if let Some(statistics) = &options.mc_statistics {
         writer.domain("monte-carlo-custom-statistics/v1");

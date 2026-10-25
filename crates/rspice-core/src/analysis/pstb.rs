@@ -52,14 +52,6 @@ pub struct PstbConfig {
     /// a truncated spectrum cannot prove stability.
     pub num_eigenvalues: usize,
 
-    /// Compatibility field. Strict qualification always uses the canonical
-    /// `128 * n * EPSILON` backward-error bound.
-    pub eigenvalue_tolerance: Value,
-
-    /// Compatibility field. The faer eigensolve is atomic and does not expose
-    /// an iteration limit.
-    pub max_iterations: usize,
-
     /// Whether to compute eigenvectors (mode shapes)
     pub compute_eigenvectors: bool,
 
@@ -77,8 +69,6 @@ impl Default for PstbConfig {
         Self {
             orbit_kind: FloquetOrbitKind::Driven,
             num_eigenvalues: 0, // Compute all
-            eigenvalue_tolerance: 1e-10,
-            max_iterations: 1000,
             compute_eigenvectors: false,
             stability_threshold: 1.0 + 1e-6, // Allow small margin for numerical error
             detect_subharmonics: true,
@@ -119,12 +109,6 @@ impl PstbConfig {
     /// Enable/disable subharmonic detection
     pub fn with_subharmonic_detection(mut self, detect: bool) -> Self {
         self.detect_subharmonics = detect;
-        self
-    }
-
-    /// Set convergence tolerance
-    pub fn with_tolerance(mut self, tol: Value) -> Self {
-        self.eigenvalue_tolerance = tol;
         self
     }
 }

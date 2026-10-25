@@ -166,7 +166,6 @@ impl From<&PstbRunConfig> for WorkerPstbRunConfig {
             num_multipliers: value.num_multipliers,
             stability_threshold: value.stability_threshold,
             detect_subharmonics: value.detect_subharmonics,
-            eigenvalue_tolerance: value.eigenvalue_tolerance,
         }
     }
 }
@@ -182,7 +181,6 @@ impl From<WorkerPstbRunConfig> for PstbRunConfig {
             num_multipliers: value.num_multipliers,
             stability_threshold: value.stability_threshold,
             detect_subharmonics: value.detect_subharmonics,
-            eigenvalue_tolerance: value.eigenvalue_tolerance,
         }
     }
 }

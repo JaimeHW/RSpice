@@ -446,7 +446,6 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     pstb.num_multipliers = "4".to_owned();
     pstb.stability_threshold = "1.25".to_owned();
     pstb.detect_subharmonics = false;
-    pstb.eigenvalue_tolerance = "1e-12".to_owned();
 
     let controller = SimulationController::new();
     let pxf_state = engine_facing_state(&pxf_draft);
@@ -516,7 +515,6 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
         !pstb_card.detect_subharmonics,
         "subharmonic detection was switched off and the card must say so"
     );
-    assert_eq!(pstb_card.eigenvalue_tolerance, 1.0e-12);
 
     // The same deck through the Studio's own reader, which is the route a
     // hand-written deck takes and the one that builds the typed run.
@@ -543,7 +541,6 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     assert_eq!(pstb_run.num_multipliers, 4);
     assert!((pstb_run.stability_threshold - 1.25).abs() <= 1.0e-15);
     assert!(!pstb_run.detect_subharmonics);
-    assert!((pstb_run.eigenvalue_tolerance - 1.0e-12).abs() <= 1.0e-27);
 }
 
 /// A periodic small-signal card names the carrier it linearizes around, and

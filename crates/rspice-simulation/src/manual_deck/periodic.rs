@@ -929,8 +929,10 @@ fn parse_pstb(
         num_multipliers: optional_usize(card, "nmults", 10, params)?,
         stability_threshold: optional_value(card, "stabilitythreshold", 1.0 + 1.0e-6, params)?,
         detect_subharmonics: optional_bool(card, "detectsubharmonics", true)?,
-        eigenvalue_tolerance: optional_value(card, "eigentol", 1.0e-10, params)?,
     };
+    // Retired, as on the engine's card: read and checked so every line the
+    // Studio wrote still reads the same way, then dropped.
+    let retired_eigenvalue_tolerance = optional_value(card, "eigentol", 1.0e-10, params)?;
     // `rspice_core::Engine::run_pstb_card_from_pss_with_abort` validates its
     // card before it resolves a probe, and these are its three refusals in its
     // own words. One refusal per field, and the field's value in the sentence:
@@ -955,10 +957,9 @@ fn parse_pstb(
             config.stability_threshold
         ));
     }
-    if !config.eigenvalue_tolerance.is_finite() || config.eigenvalue_tolerance <= 0.0 {
+    if !retired_eigenvalue_tolerance.is_finite() || retired_eigenvalue_tolerance <= 0.0 {
         return Err(format!(
-            ".PSTB requires a positive eigenvalue tolerance, got {}",
-            config.eigenvalue_tolerance
+            ".PSTB requires a positive eigenvalue tolerance, got {retired_eigenvalue_tolerance}"
         ));
     }
     Ok(config)
@@ -1733,6 +1734,29 @@ endmodule
         assert_eq!(pstb.probe_instance, "LPROBE");
         assert_eq!(pstb.num_multipliers, 6);
         assert!(!pstb.detect_subharmonics);
+    }
+
+    /// The run a hand-written `.PSTB` line builds, read through this reader.
+    fn pstb_run_of(card: &str) -> PstbRunConfig {
+        let source = format!(
+            "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nL1 out 0 1u\n.pss fund=1Meg\n{card}\n.end\n"
+        );
+        let netlist = Netlist::parse(&source).unwrap();
+        parse_periodic_tasks(&netlist, &source)
+            .unwrap()
+            .into_iter()
+            .find_map(|task| task.spec_options.pstb)
+            .expect("the deck carries a .PSTB task")
+    }
+
+    /// Every line the Studio wrote states `eigentol=`. It still reads, and it
+    /// builds the run the line would build without it.
+    #[test]
+    fn retired_pstb_eigentol_in_a_deck_reads_as_absent() {
+        assert_eq!(
+            pstb_run_of(".pstb probe=L1 eigentol=1e-9"),
+            pstb_run_of(".pstb probe=L1")
+        );
     }
 
     /// The five options that used to reach a run only through the Studio's
