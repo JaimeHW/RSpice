@@ -143,8 +143,6 @@ pub enum HbError {
     InvalidCircuit(String),
     /// Invalid numerical solver configuration.
     InvalidConfig(HbConfigError),
-    /// FFT operation failed
-    FftError(String),
 }
 
 impl std::fmt::Display for HbError {
@@ -166,7 +164,6 @@ impl std::fmt::Display for HbError {
             Self::LinearSolveFailed(msg) => write!(f, "Linear solve failed: {msg}"),
             Self::InvalidCircuit(msg) => write!(f, "Invalid circuit: {}", msg),
             Self::InvalidConfig(error) => write!(f, "Invalid HB config: {error}"),
-            Self::FftError(msg) => write!(f, "FFT error: {}", msg),
         }
     }
 }

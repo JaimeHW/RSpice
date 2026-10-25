@@ -21,8 +21,6 @@ pub enum FrequencyGridError {
     InvalidStartFrequency,
     /// The stop frequency was not finite or preceded the start frequency.
     InvalidStopFrequency,
-    /// The analysis requires a non-degenerate range but stop equaled start.
-    NonIncreasingSweep,
     /// The requested grid cannot retain distinct finite values within its endpoints.
     UnrepresentableSpacing,
     /// No frequency points were requested.
@@ -55,9 +53,6 @@ impl std::fmt::Display for FrequencyGridError {
             }
             Self::InvalidStopFrequency => {
                 formatter.write_str("stop frequency must be finite and >= start frequency")
-            }
-            Self::NonIncreasingSweep => {
-                formatter.write_str("stop frequency must be greater than start frequency")
             }
             Self::UnrepresentableSpacing => {
                 formatter.write_str("frequency spacing cannot be represented as distinct finite values within the requested range")

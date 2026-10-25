@@ -362,9 +362,7 @@ fn pxf_grid_keeps_the_frequency_error_and_its_allocator_source_chain() {
         .downcast_ref::<FrequencyGridError>()
         .unwrap();
     assert!(grid.source().unwrap().is::<TryReserveError>());
-    let PxfError::FrequencyGrid(grid) = error else {
-        panic!("grid cause lost");
-    };
+    let PxfError::FrequencyGrid(grid) = error;
     assert_allocator_cause(grid, usize::MAX);
 }
 

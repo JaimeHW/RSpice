@@ -193,26 +193,11 @@ fn project_two_terminal_voltage(
 /// Errors in circuit construction
 #[derive(Debug, Error)]
 pub enum CircuitError {
-    #[error("Node not found: {0}")]
-    NodeNotFound(String),
-
-    #[error("Duplicate node name: {0}")]
-    DuplicateNode(String),
-
     #[error("Invalid component: {0}")]
     InvalidComponent(String),
 
     #[error(transparent)]
     BehavioralReference(Box<crate::device::BehavioralReferenceError>),
-
-    #[error("No ground node in circuit")]
-    NoGround,
-
-    #[error("Floating node detected: {0}")]
-    FloatingNode(String),
-
-    #[error("Singular matrix - circuit may have issues")]
-    SingularMatrix,
 }
 
 impl From<crate::device::BehavioralReferenceError> for CircuitError {

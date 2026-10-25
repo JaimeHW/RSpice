@@ -14,27 +14,6 @@
 /// Errors that can occur during PAC analysis
 #[derive(Debug, Clone)]
 pub enum PacError {
-    /// No PSS solution provided
-    NoPssSolution,
-
-    /// PSS solution has no period information
-    InvalidPssSolution(String),
-
-    /// Invalid configuration
-    InvalidConfig(String),
-
-    /// Frequency sweep is invalid
-    InvalidSweep(String),
-
-    /// Matrix solution failed
-    MatrixSolverFailed(String),
-
-    /// No input source specified
-    NoInputSource,
-
-    /// Input source not found in circuit
-    InputSourceNotFound(String),
-
     /// Result axes or derived metadata are invalid
     InvalidResult(String),
 
@@ -45,13 +24,6 @@ pub enum PacError {
 impl std::fmt::Display for PacError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PacError::NoPssSolution => write!(f, "No PSS solution provided for PAC analysis"),
-            PacError::InvalidPssSolution(s) => write!(f, "Invalid PSS solution: {}", s),
-            PacError::InvalidConfig(s) => write!(f, "Invalid PAC configuration: {}", s),
-            PacError::InvalidSweep(s) => write!(f, "Invalid frequency sweep: {}", s),
-            PacError::MatrixSolverFailed(s) => write!(f, "Matrix solver failed: {}", s),
-            PacError::NoInputSource => write!(f, "No input source specified for PAC analysis"),
-            PacError::InputSourceNotFound(s) => write!(f, "Input source not found: {}", s),
             PacError::InvalidResult(s) => write!(f, "Invalid PAC result: {s}"),
             PacError::AllocationFailed(s) => write!(f, "PAC result allocation failed: {s}"),
         }

@@ -225,24 +225,12 @@ impl PxfConfig {
 pub enum PxfError {
     /// Frequency-grid validation, capacity, allocation, or cancellation failure.
     FrequencyGrid(FrequencyGridError),
-    /// Invalid frequency specification
-    InvalidFrequency(String),
-    /// Invalid configuration
-    InvalidConfiguration(String),
-    /// Missing PSS solution
-    MissingPssSolution(String),
-    /// Computation error
-    ComputationError(String),
 }
 
 impl std::fmt::Display for PxfError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PxfError::FrequencyGrid(error) => write!(f, "PXF frequency grid: {error}"),
-            PxfError::InvalidFrequency(s) => write!(f, "Invalid frequency: {}", s),
-            PxfError::InvalidConfiguration(s) => write!(f, "Invalid configuration: {}", s),
-            PxfError::MissingPssSolution(s) => write!(f, "Missing PSS solution: {}", s),
-            PxfError::ComputationError(s) => write!(f, "Computation error: {}", s),
         }
     }
 }
@@ -251,7 +239,6 @@ impl std::error::Error for PxfError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::FrequencyGrid(source) => Some(source),
-            _ => None,
         }
     }
 }

@@ -1209,9 +1209,6 @@ pub enum DeckPlanError {
     EmptyAxis {
         axis: String,
     },
-    EmptyAxisValue {
-        axis: String,
-    },
     EmptyBindingName,
     EmptyDataRow {
         axis: String,
@@ -1301,9 +1298,6 @@ impl fmt::Display for DeckPlanError {
                 "run axis '{axis}' spacing cannot be represented as distinct finite values within the requested range"
             ),
             Self::EmptyAxis { axis } => write!(formatter, "run axis '{axis}' has no values"),
-            Self::EmptyAxisValue { axis } => {
-                write!(formatter, "run axis '{axis}' contains an empty value")
-            }
             Self::EmptyBindingName => formatter.write_str("data binding name must not be empty"),
             Self::EmptyDataRow { axis } => write!(formatter, "DATA axis '{axis}' has an empty row"),
             Self::DuplicateDataBinding { axis, binding } => write!(
