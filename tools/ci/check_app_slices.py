@@ -713,6 +713,7 @@ def measure(source_root: Path, lower_crates: dict[str, Path] | None = None):
         name: next(iter(found)) for name, found in public_in.items()
         if len(name) >= 4 and len(defined_in[name]) == 1
         and name not in ("Cell", "Align", "Request", "ResultRun", "Point", "Command", "Field",
+                         "Identity", "Action", "DataTable", "GeneratedNetlist",
                          "WithoutRuns", "record", "consume_keys", "elide_text", "segmented", "page")
     }
 
