@@ -134,7 +134,11 @@ pub struct B3SoiFd {
     /// Last accepted/limited self-heating temperature rise used by
     /// `B3SOIFDlimit(delTemp, oldDelTemp, 5.0)`.
     del_temp_limit_anchor: Value,
-    /// Whether the temperature limiter anchor has been seeded.
+    /// The previous iterate's limited `[vg, vd, vs, ve]` node voltages, which
+    /// `B3SOIFDlimit(v, vold, 3.0)` holds each terminal within 3 V of
+    /// (b3soifdld.c:454-462).
+    terminal_limit_anchor: [Value; 4],
+    /// Whether the limiter anchors have been seeded.
     limit_anchor_valid: std::cell::Cell<bool>,
     /// The deck marked this instance `OFF`, so the first DC load is
     /// b3soifdld.c's zero-junction MODEINITJCT arm. FD has no startup seed for
@@ -145,8 +149,8 @@ pub struct B3SoiFd {
     /// `stamp_nonlinear` would re-evaluate from the raw node seed and discard
     /// the startup branch before it reached the matrix.
     startup_seed_pending: std::cell::Cell<bool>,
-    /// The previous full evaluation engaged the temperature limiter
-    /// (ngspice `Check != 0`), which disqualifies the next iterate from bypassing.
+    /// The previous full evaluation engaged a limiter (ngspice `Check != 0`),
+    /// which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
     /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
     /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
@@ -224,6 +228,7 @@ impl B3SoiFd {
             bypass_hits: std::cell::Cell::new(0),
             force_full_eval: std::cell::Cell::new(true),
             del_temp_limit_anchor: 0.0,
+            terminal_limit_anchor: [0.0; 4],
             limit_anchor_valid: std::cell::Cell::new(false),
             initial_off: false,
             startup_seed_pending: std::cell::Cell::new(false),
@@ -344,6 +349,7 @@ impl B3SoiFd {
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
         self.del_temp_limit_anchor = bias.del_temp;
+        self.terminal_limit_anchor = self.raw_terminals(voltages);
         self.limit_anchor_valid.set(true);
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
@@ -409,11 +415,11 @@ impl B3SoiFd {
     }
 
     /// The bias the transient charge evaluation and its companion stamp use:
-    /// the frozen iterate under bypass, otherwise the branch voltages. The
-    /// companion's `ceqq*` linearization corrections must be formed from this
-    /// same bias.
+    /// the frozen iterate under bypass or the limited iterate `update`
+    /// evaluated, otherwise the branch voltages. The companion's `ceqq*`
+    /// linearization corrections must be formed from this same bias.
     fn charge_bias(&self, voltages: &[Value]) -> B3SoiFdBias {
-        if self.bypass_active.get() {
+        if self.bypass_active.get() || self.last_limited.get() {
             self.bias
         } else {
             self.branch_voltages(voltages)
@@ -795,6 +801,8 @@ impl NonlinearDevice for B3SoiFd {
             self.op = self.eval_op_for_bias(bias);
             self.has_history = true;
             self.del_temp_limit_anchor = bias.del_temp;
+            // b3soifdld.c:380 stores `vg = vd = vs = vp = ve = 0` for this arm.
+            self.terminal_limit_anchor = [0.0; 4];
             self.limit_anchor_valid.set(true);
             self.startup_seed_pending.set(true);
             self.bypass_active.set(false);
@@ -803,6 +811,7 @@ impl NonlinearDevice for B3SoiFd {
             return;
         }
         self.converged_ref = self.bias;
+        let (bias, terminals, limited) = self.limited_branch_voltages(voltages);
         // ngspice transient bypass (b3soifdld.c:560-618): when the new branch
         // voltages plus predicted currents are stationary within tolerances,
         // freeze the evaluation (bias, op, mode) and restamp it. ngspice keeps
@@ -814,23 +823,20 @@ impl NonlinearDevice for B3SoiFd {
             && !self.force_full_eval.get()
             && !self.last_limited.get()
             && self.has_history
+            && self.bypass_check(bias, reltol, abstol, vntol)
         {
-            let raw = self.raw_branch_voltages(voltages);
-            if self.bypass_check(raw, reltol, abstol, vntol) {
-                self.bypass_active.set(true);
-                self.bypass_hits.set(self.bypass_hits.get() + 1);
-                return;
-            }
+            self.bypass_active.set(true);
+            self.bypass_hits.set(self.bypass_hits.get() + 1);
+            return;
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
-        let mut bias = self.raw_branch_voltages(voltages);
-        let limited = self.apply_temp_limiting(&mut bias);
         self.last_limited.set(limited);
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
         self.del_temp_limit_anchor = bias.del_temp;
+        self.terminal_limit_anchor = terminals;
         self.limit_anchor_valid.set(true);
     }
 
@@ -851,11 +857,17 @@ impl NonlinearDevice for B3SoiFd {
             self.stamp_instance_ic(matrix);
             return;
         }
-        let bias = self.branch_voltages(voltages);
-        let op = if biases_match(bias, self.bias) {
-            self.op.clone()
+        // A limited iterate is stamped where `update` evaluated it, not at the
+        // raw node voltages.
+        let (op, bias) = if self.last_limited.get() {
+            (self.op.clone(), self.bias)
         } else {
-            self.eval_op_for_bias(bias)
+            let bias = self.branch_voltages(voltages);
+            if biases_match(bias, self.bias) {
+                (self.op.clone(), bias)
+            } else {
+                (self.eval_op_for_bias(bias), bias)
+            }
         };
         self.stamp_op(&op, bias, matrix);
         self.stamp_instance_ic(matrix);
@@ -879,6 +891,41 @@ impl NonlinearDevice for B3SoiFd {
 }
 
 impl B3SoiFd {
+    /// The `[vg, vd, vs, ve]` node voltages of a solution vector.
+    fn raw_terminals(&self, v: &[Value]) -> [Value; 4] {
+        let node = |n: NodeId| if n == 0 { 0.0 } else { v[n - 1] };
+        [
+            node(self.node_gate),
+            node(self.node_drain),
+            node(self.node_source),
+            node(self.node_e),
+        ]
+    }
+
+    /// A Newton iterate's branch voltages: each terminal held within 3 V of the
+    /// previous iterate (b3soifdld.c:454-462), then the temperature limiter.
+    /// Returns the bias, its terminals, and whether a limiter moved it. `vbs`
+    /// stays the raw body-node difference ngspice reads (b3soifdld.c:466);
+    /// FD pins its body internally.
+    fn limited_branch_voltages(&self, v: &[Value]) -> (B3SoiFdBias, [Value; 4], bool) {
+        let mut terminals = self.raw_terminals(v);
+        let mut check = false;
+        if self.limit_anchor_valid.get() {
+            for (t, old) in terminals.iter_mut().zip(self.terminal_limit_anchor) {
+                *t = common::soi_limit(*t, old, 3.0, &mut check);
+            }
+        }
+        let [vg, vd, vs, ve] = terminals;
+        let mut bias = B3SoiFdBias {
+            vgs: self.mtype * (vg - vs),
+            vds: self.mtype * (vd - vs),
+            ves: self.mtype * (ve - vs),
+            ..self.raw_branch_voltages(v)
+        };
+        let temp_limited = self.apply_temp_limiting(&mut bias);
+        (bias, terminals, check || temp_limited)
+    }
+
     fn stamp_instance_ic(&self, matrix: &mut impl MatrixStamper) {
         self.instance_ic.stamp(self.dc_mode.get(), matrix);
     }

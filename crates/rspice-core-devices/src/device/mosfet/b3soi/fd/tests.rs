@@ -600,3 +600,42 @@ fn capmod3_charge_matrix_is_consistent_with_charges() {
 fn capmod2_charge_matrix_is_consistent_with_charges() {
     assert_charge_matrix_is_consistent_with_charges_for_capmod(2);
 }
+
+/// Every matrix and right-hand-side entry of two stamps over nodes 1..=n agrees.
+fn assert_same_stamps(got: &RecordingStamper, want: &RecordingStamper, n: NodeId) {
+    let close = |a: Value, b: Value| (a - b).abs() <= 1e-12 * a.abs().max(b.abs()) + 1e-18;
+    for row in 1..=n {
+        let (a, b) = (got.rhs_at(row), want.rhs_at(row));
+        assert!(close(a, b), "rhs[{row}]: {a:.9e} vs {b:.9e}");
+        for col in 1..=n {
+            let (a, b) = (got.matrix_at(row, col), want.matrix_at(row, col));
+            assert!(close(a, b), "A[{row},{col}]: {a:.9e} vs {b:.9e}");
+        }
+    }
+}
+
+/// ngspice FD holds each terminal within 3 V of the previous iterate
+/// (b3soifdld.c:454-462). The limited iterate does not converge and is the
+/// one stamped.
+#[test]
+fn update_limits_each_terminal_to_three_volts_like_ngspice() {
+    let mut dev = device_for_stamp_test(false);
+    dev.update(&[0.0, 0.0, 0.0, 0.0]);
+    let far = [5.0, 4.0, -4.5, 0.5];
+    dev.update(&far);
+    // vd, vg and vs each move 3 V; ve moves 0.5 V.
+    assert_eq!((dev.bias.vds, dev.bias.vgs, dev.bias.ves), (6.0, 6.0, 3.5));
+    assert!(
+        !dev.is_converged(NonlinearConvergenceCriteria::default()),
+        "a limited iterate must not report convergence"
+    );
+
+    let mut limited = RecordingStamper::default();
+    dev.stamp_nonlinear(&far, &mut limited, &mut []);
+    let near = [3.0, 3.0, -3.0, 0.5];
+    let mut at_limit = device_for_stamp_test(false);
+    at_limit.update_static_linearization(&near);
+    let mut expected = RecordingStamper::default();
+    at_limit.stamp_nonlinear(&near, &mut expected, &mut []);
+    assert_same_stamps(&limited, &expected, 4);
+}
