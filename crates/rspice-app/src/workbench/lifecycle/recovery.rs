@@ -24,7 +24,8 @@ use crate::state::{
     Cell, CellViewRef, Library, LibraryManager, OpenCellView, ProjectWorkspace, SchematicState,
     View, ViewType,
 };
-use crate::workbench::app_state::{Model, PlatformState, SimSetupState};
+use crate::workbench::app_state::{Model, SimSetupState};
+use crate::workbench::lifecycle::project_lifecycle::PlatformState;
 
 use crate::state::write_policy::LocalSafeModeOptions;
 

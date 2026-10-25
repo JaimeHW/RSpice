@@ -51,7 +51,8 @@ use crate::product::ContentDigest;
 use crate::state::project_snapshot::SnapshotSessionCapture;
 use crate::state::{CellViewRef, ProjectOpenFact};
 // The lower-tier state the lifecycle and its sibling services work on.
-pub(in crate::workbench) use crate::workbench::app_state::{Model, PlatformState, SimSetupState};
+pub(in crate::workbench) use crate::workbench::app_state::{Model, SimSetupState};
+pub(in crate::workbench) use crate::workbench::slots::platform::PlatformState;
 use rspice_project::{ProjectWorkingSet, SnapshotContent};
 
 #[cfg(target_arch = "wasm32")]

@@ -82,7 +82,7 @@ SLICE_RULES = [
     (W + r"app_state/(problems_view|full_screen|active_viewer|interaction_state)", "framework"),
     (W + r"app_state/viewer_capabilities", "results"),
     (W + r"app_state/run_preflight", "run"),
-    (W + r"app_state/session/(autosave|session_store)", "services"),
+    (W + r"app_state/session/autosave", "services"),
     (W + r"app_state/session/calculator", "results"),
     (W + r"app_state/session/pdk_settings", "models"),
     (W + r"app_state/session/(preference_runtime|preferences_file|shortcut_library)", "settings"),

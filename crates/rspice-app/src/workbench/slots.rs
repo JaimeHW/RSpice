@@ -13,7 +13,7 @@ mod code;
 mod design;
 mod hardcopy;
 mod models;
-mod platform;
+pub(in crate::workbench) mod platform;
 mod project;
 mod results;
 mod runs;

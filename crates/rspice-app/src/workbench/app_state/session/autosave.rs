@@ -11,13 +11,14 @@
 use std::path::PathBuf;
 
 use egui::Context;
+use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::{Dialog, DialogChoice, DialogSize};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::SchematicState;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
-use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::app_state::Model;
+use crate::workbench::lifecycle::project_lifecycle::PlatformState;
 
 /// Write a checkpoint when the interval has elapsed on a dirty,
 /// path-bearing schematic. Called once per frame; cheap when idle. `last` is
@@ -258,7 +259,7 @@ mod tests {
             let activity = app.state.workbench.toasts.activity();
             assert_eq!(activity.len(), 1);
             assert_eq!(activity[0].title(), "Autosave failed");
-            assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+            assert_eq!(activity[0].kind(), rspice_ui_kit::widgets::ToastKind::Error);
         }
 
         // The failure persists through the next interval: it was said when

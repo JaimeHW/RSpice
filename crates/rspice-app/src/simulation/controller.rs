@@ -42,7 +42,7 @@ use crate::state::{
 #[cfg(test)]
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
-use crate::workbench::spawn_or_inline;
+use crate::workbench::platform::spawn_or_inline;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;

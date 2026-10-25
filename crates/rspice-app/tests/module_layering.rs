@@ -901,6 +901,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
     ("lifecycle/recovery", "workflows/project_workflow", 1),
+    // The platform slot holds the lifecycle's state, and the lifecycle and
+    // its sibling services work on that slot: one cycle inside the platform
+    // services. The lifecycle names the slot where it is defined, once, and
+    // its siblings take it from the lifecycle, rather than every one of them
+    // reaching it through the session aggregate's re-export.
+    ("lifecycle/project_lifecycle", "slots", 1),
     // The live-session engine closes the project through the project
     // workflow, which ranks above the application that owns the engine.
     ("live_session", "workflows/project_workflow", 5),
