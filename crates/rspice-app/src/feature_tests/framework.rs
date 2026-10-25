@@ -1,7 +1,9 @@
 //! The workbench's own containers, observed through a whole application: the
 //! chrome, the docks, the palette and the framework's dialogs, drawn for the
-//! shell's host or handed its session.
+//! shell's host or handed its session; and the order the shell's frame runs
+//! them in, read from its source.
 
+mod call_order;
 mod command_palette;
 mod confirmation;
 mod console;

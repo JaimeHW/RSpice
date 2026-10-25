@@ -10,9 +10,9 @@
 
 // Refactor scaffolding: deleted when the split completes.
 
-const APP: &str = include_str!("../app.rs");
-const FRAME: &str = include_str!("../frame.rs");
-const DIALOG_ORDER: &str = include_str!("../frame/dialog_order.rs");
+const APP: &str = include_str!("../../workbench/app.rs");
+const FRAME: &str = include_str!("../../workbench/frame.rs");
+const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
