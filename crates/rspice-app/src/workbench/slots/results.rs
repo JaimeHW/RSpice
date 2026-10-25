@@ -54,4 +54,37 @@ impl ResultsState {
     ) {
         self.results.session.ac_display = preferences.ac_display();
     }
+
+    /// Give a cleared waveform view the minor grid Results ▸ Waveform
+    /// defaults asks for; clearing alone would always start it without.
+    pub(crate) fn start_waveform_view_from_preferences(
+        &mut self,
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) {
+        self.results.session.show_minor_grid =
+            preferences.toggle(crate::workbench::TogglePreference::WaveMinorGrid);
+    }
+
+    /// The results feature's part of replacing the design the session
+    /// executes against: nothing seen, viewed or routed to under the previous
+    /// design survives it.
+    pub(crate) fn clear_design_scoped(
+        &mut self,
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) {
+        self.results_seen_version = 0;
+        self.results.clear_design_scoped_state();
+        self.start_waveform_view_from_preferences(preferences);
+        self.specification_editor_route_pending = false;
+    }
+
+    /// The results feature's part of replacing the project: its
+    /// project-owned presentation goes as well.
+    pub(crate) fn clear_project_scoped(
+        &mut self,
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) {
+        self.results.clear_project_scoped_state();
+        self.start_waveform_view_from_preferences(preferences);
+    }
 }

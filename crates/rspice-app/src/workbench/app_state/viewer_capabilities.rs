@@ -69,90 +69,13 @@ impl ViewerCapability {
 }
 
 impl AppState {
-    /// Replace all execution context, including project-owned marker identity,
-    /// and state the replacement in the Console.
-    ///
-    /// The Console carries on across a project switch: it is the session's
-    /// log, not the project's. So `announcement`, "Opened project amp (…)",
-    /// is where one project's history ends and the next one's begins, and
-    /// every replacement passes through here so that each states itself
-    /// exactly once however it was reached.
-    pub(crate) fn replace_project_execution_context(&mut self, announcement: impl Into<String>) {
-        self.clear_design_execution_context();
-        self.results.results.clear_project_scoped_state();
-        self.start_waveform_view_from_preferences();
-        self.record(
-            crate::diagnostics::LogSeverity::Info,
-            crate::diagnostics::LogSource::Studio,
-            announcement,
-        );
-    }
-
     /// Start the session's waveform viewer from Results ▸ Waveform defaults:
     /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
     /// both afterwards.
     pub(crate) fn start_waveform_viewer_session(&mut self) {
         self.results.results.session.phase_continuous = self.model.preferences.unwrapped_phase();
-        self.start_waveform_view_from_preferences();
-    }
-
-    /// Give a cleared waveform view the minor grid Results ▸ Waveform
-    /// defaults asks for; clearing alone would always start it without.
-    pub(crate) fn start_waveform_view_from_preferences(&mut self) {
-        self.results.results.session.show_minor_grid = self
-            .model
-            .preferences
-            .toggle(crate::workbench::TogglePreference::WaveMinorGrid);
-    }
-
-    /// Clear execution and viewer state tied to the previous design document.
-    ///
-    /// Use when replacing the active schematic with unrelated design
-    /// content. File identity and dirty state are intentionally left to the
-    /// caller because open/import/new workflows each own those semantics.
-    pub(crate) fn clear_design_execution_context(&mut self) {
-        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
-        self.model.workspace.content.netlist_source = None;
-        self.model.workspace.content.netlist_document = None;
-        self.model.workspace.content.netlist_descriptor = None;
-        self.model.workspace.content.retained_netlist_decks.clear();
-        self.model.workspace.content.netlist_source_path = None;
-        self.model.workspace.content.netlist_source_dirty = false;
-        self.model.simulation = crate::state::SimulationState::default();
-        // A notice's "Open in Results" names its run by number, and the new
-        // history numbers its runs from one again: kept, the offer would
-        // open this design's run of the same number. The notices stay, as
-        // does "Show in Console": the session's log outlives the design.
-        self.workbench.toasts.retire_offers(|action| {
-            matches!(
-                action,
-                crate::ui::widgets::NotificationAction::OpenRunInResults { .. }
-            )
-        });
-        self.code.netlist = Default::default();
-        *self.model.netlist_artifacts = Default::default();
-        *self.runs.manual_run = Default::default();
-        self.code.code_workspace = Default::default();
-        self.code.netlist_open_documents.clear();
-        self.results.results_seen_version = 0;
-        self.results.results.clear_design_scoped_state();
-        self.start_waveform_view_from_preferences();
-        self.results.specification_editor_route_pending = false;
-        self.model.design_checks.drc_results = None;
-        self.model.design_checks.drc_checked_version = 0;
-        self.model.clear_all_design_checks();
-        // Problems and debugger evidence are project-scoped under the
-        // source-workspace contract. Clear them in the same transaction as
-        // documents and results so a replacement can never render one frame
-        // containing two designs' findings. The Console is not cleared: it
-        // is the session's chronological record, and keeps the history from
-        // before the replacement.
-        self.model.diagnostics.clear();
-        // The reading position goes with the findings it was read over: a
-        // filter carried into another design hides conditions nobody there
-        // chose to hide.
-        self.problems_view = Default::default();
-        self.clear_specialized_viewer_data();
+        self.results
+            .start_waveform_view_from_preferences(&self.model.preferences);
     }
 
     /// Clear user-visible simulation result history and derived result viewers.

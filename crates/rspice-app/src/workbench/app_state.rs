@@ -17,6 +17,7 @@ pub(crate) use rspice_app_state::workbench::app_state::cell_usage;
 pub(crate) use rspice_app_state::workbench::app_state::design_checks;
 pub(crate) use rspice_app_state::workbench::app_state::design_history;
 pub(crate) use rspice_app_state::workbench::app_state::diagnostic_store;
+mod execution_context;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 #[cfg(test)]
