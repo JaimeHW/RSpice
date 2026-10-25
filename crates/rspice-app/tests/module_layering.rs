@@ -185,9 +185,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("io", "workbench", 6),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
-    // Project I/O now imports the lower-owned analysis kind directly; its
-    // remaining references are to app-owned plan and execution fixtures.
-    ("io", "simulation", 6),
     // Result aggregation, optimization execution, netlisting and materialized
     // OP dispatch remain app-owned until R04/R11 finish their extraction.
     ("services", "simulation", 7),
@@ -841,9 +838,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
     ("documents/result_document", "app_state", 36),
-    ("lifecycle/recovery", "app_state", 3),
     ("documents/netlist_document", "app_state", 2),
-    ("lifecycle/project_lifecycle", "app_state", 2),
     ("hardcopy_adapters/sources", "app_state", 2),
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above; `-> app` also counts the
