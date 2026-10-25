@@ -1674,6 +1674,44 @@ fn vbic_noise_switch_removes_device_noise_without_changing_the_operating_point()
 }
 
 #[test]
+fn vbic13_extrinsic_flicker_noise_matches_xyce710() {
+    // Xyce 7.10 output noise densities at 1 Hz.
+    for (level, expected) in [(11, 3.929629740476495e-10), (12, 3.929629740665435e-10)] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        let deck = format!(
+            "VBIC extrinsic flicker\nVcc vcc 0 3\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1k\nVth th 0 0\nQ1 c b 0{substrate} th vm SW_ET=0 M=3\n\
+             .model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 IBEIP=0 ISP=0 TNOM=27 WBE=0 KFN=1e-8 AFN=1.5 BFN=0.8)\n.temp 27\n.options gmin=0\n.end\n"
+        );
+        let points = Engine::default()
+            .run_noise_named_with_input_source(
+                &Netlist::parse(&deck).unwrap(),
+                "c",
+                None,
+                "Vb",
+                &[1.0],
+                300.15,
+            )
+            .unwrap();
+        assert_rel_close(
+            &format!("LEVEL={level} output noise"),
+            points[0].output_noise_density,
+            expected,
+            2e-7,
+        );
+        let source = points[0]
+            .contributions
+            .iter()
+            .find(|entry| entry.identity.mechanism.as_deref() == Some("FN_BEX"))
+            .unwrap_or_else(|| panic!("LEVEL={level}: no FN_BEX contribution"));
+        assert!(source.identity.device.eq_ignore_ascii_case("Q1"));
+        assert_eq!(
+            source.noise_type,
+            rspice_core::analysis::NoiseSourceType::Flicker
+        );
+    }
+}
+
+#[test]
 fn three_terminal_vbic_fourth_pin_is_thermal_in_every_native_dialect() {
     let deck = "VBIC three-terminal external temperature\n\
         Vc c 0 1.2\nVb b 0 0.7\nVdt dt 0 20\nQ1 c b 0 dt vm SW_ET=0\n\
@@ -2291,6 +2329,47 @@ fn vbic13_resistance_floor_preserves_small_current_precision() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn vbic13_resistance_floor_gear2_transient_matches_xyce710() {
+    // Xyce 7.10 Gear2 endpoint, also checked with the reference maximum
+    // step halved; the first sample is the operating point above.
+    for (level, kind, p) in [(11, "NPN", 1.0), (12, "PNP", -1.0)] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        let deck = format!(
+            "VBIC resistance floor current precision\nVc c 0 {}\nVb b 0 SIN({} {} 50Meg)\nVth th 0 SIN(20 5 50Meg)\nQ1 c b 0{substrate} th vm SW_ET=1 M=3 TRISE=20\n\
+             .model vm {kind}(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 PNJMAXI=1n XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)\n.temp 27\n.options gmin=0\n.options reltol=1e-8 abstol=1e-14\n.end\n",
+            1.8 * p,
+            0.65 * p,
+            0.04 * p,
+        );
+        let engine = Engine::new(SimulationConfig {
+            integration_method: rspice_core::numerics::integration::IntegrationMethod::Gear2,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let transient = engine
+            .run_tran(&Netlist::parse(&deck).unwrap(), 2e-8, 2e-12)
+            .unwrap();
+        let collector = transient.try_branch_current_waveform_named("Vc").unwrap();
+        let base = transient.try_branch_current_waveform_named("Vb").unwrap();
+        assert_rel_close(
+            &format!("LEVEL={level} {kind} I(Vc) at 0"),
+            collector[0],
+            -p * 7.045_220_149_350_812e-8,
+            1e-7,
+        );
+        assert_rel_close(
+            &format!("LEVEL={level} {kind} I(Vb) at 20 ns"),
+            *base.last().unwrap(),
+            -p * 9.760116458338403e-8,
+            1e-5,
+        );
     }
 }
 

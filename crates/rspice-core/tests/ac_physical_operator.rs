@@ -668,6 +668,44 @@ fn vbic13_early_voltage_cutoff_and_thermal_derivatives_match_xyce710() {
 }
 
 #[test]
+fn vbic13_near_early_cutoff_with_transit_current_scaling_matches_xyce710() {
+    // Xyce 7.10 references, including the physically generated heat. TCVEF
+    // and TCVER sit just short of the Early-voltage cutoff at 20 K rise.
+    let expected = [
+        Complex64::new(3.786701877360067e-5, -2.7352104484429096e-5),
+        Complex64::new(-7.534236549061291e-7, 4.65210834241494e-5),
+        Complex64::new(-0.0030220360332668655, -0.0018688434659563766),
+    ];
+    for level in [11, 12] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let netlist = parse(&format!(
+                "VBIC Early slopes and scaled transit current\nVc c 0 {}\nVb b 0 {}\nVth th 0 DC 20 AC 1\nQ1 c b 0{substrate} th vm SW_ET=1 M=3\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=5 VER=3 TCVEF=-0.049999995000000005 TCVER=-0.049999995000000005 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 TMAXCLIP=100 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 XTF=2 VTF=2 ITF=1e-4 TD=1n QBM=1 NKF=0.4 IKF=1e-4 IKR=2e-4 AVC1=0.05 AVC2=0.3 TAVC=0.01)\n.temp 27\n.options gmin=0\n.end\n",
+                p * 0.6,
+                p * 0.7
+            ));
+            let point = Engine::default()
+                .run_ac(&netlist, &[1e8])
+                .unwrap()
+                .pop()
+                .unwrap();
+            for ((branch, polarity), expected) in [("Vc", p), ("Vb", p), ("Vth", 1.0)]
+                .into_iter()
+                .zip(expected)
+            {
+                let actual = branch_current(&point, branch);
+                let expected = polarity * expected;
+                assert!(
+                    (actual - expected).norm() <= (2e-6 * expected.norm()).max(1e-15),
+                    "LEVEL={level} {kind} {branch}: {actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic13_delayed_avalanche_heat_and_clipped_temperature_match_xyce710() {
     for (level, kind, polarity, rise, drive_base, multiplier, expected) in [
         (
