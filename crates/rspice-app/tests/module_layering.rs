@@ -182,12 +182,12 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // 19 -> 15: result presentation now has one durable owner in state;
     // project I/O no longer imports its keys, markers, or expression types
     // from the Results renderer. Simulation-plan ownership remains open.
-    ("io", "workbench", 15),
+    ("io", "workbench", 6),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Project I/O now imports the lower-owned analysis kind directly; its
     // remaining references are to app-owned plan and execution fixtures.
-    ("io", "simulation", 9),
+    ("io", "simulation", 6),
     // Result aggregation, optimization execution, netlisting and materialized
     // OP dispatch remain app-owned until R04/R11 finish their extraction.
     ("services", "simulation", 7),

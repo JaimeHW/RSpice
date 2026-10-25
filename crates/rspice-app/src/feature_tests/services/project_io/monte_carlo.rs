@@ -1,0 +1,241 @@
+//! Monte Carlo evidence in the project file, from a checkpoint a run completed.
+
+use super::*;
+
+#[test]
+fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_absence() {
+    use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
+    use crate::state::MonteCarloCheckpointEvidence;
+
+    let (_, bytes, _) = completed_checkpoint_fixture();
+    let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
+    let provenance = AnalysisResultProvenance::new_with_source_domain(
+        AnalysisResultSourceDomain::ManualDeck,
+        rspice_vocabulary::product::manual_deck_analysis_instance_id_from_tag(
+            ContentDigest::from_bytes([82; 32]),
+            crate::state::CanonicalAnalysisKind::MonteCarlo.tag(),
+            0,
+        ),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([81; 32]),
+        vec![],
+    )
+    .unwrap();
+    let mut analysis = AnalysisResult::failed(1, AnalysisType::MonteCarlo, "MC", "Aborted")
+        .with_provenance(provenance);
+    analysis.monte_carlo_checkpoint = Some(checkpoint.clone());
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(analysis);
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::ManualDeck,
+        None,
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([82; 32]),
+        PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([83; 32])),
+        &[crate::state::CanonicalAnalysisKind::MonteCarlo.tag()],
+    );
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Aborted)
+        .unwrap();
+    let mut state = SimulationState::default();
+    state.retained.runs = vec![run].into();
+    state.retained.next_run_id = 1;
+    state.view.active_run_idx = Some(0);
+    state.view.active_analysis_idx = Some(0);
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut project = ProjectSnapshot::new_with_simulation_results(
+        workspace,
+        libraries,
+        crate::io::capture_simulation_results(&state),
+    );
+    let json = serialize_project_file(&project).unwrap();
+    let loaded = load_project_text(&json, None).unwrap();
+    assert!(
+        loaded.file.simulation_results_warning.is_none(),
+        "{:?}",
+        loaded.file.simulation_results_warning
+    );
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
+    let analysis = restored.active_analysis().unwrap();
+    assert!(!analysis.success);
+    assert_eq!(analysis.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
+    assert_eq!(
+        analysis.monte_carlo_checkpoint.as_ref().unwrap().bytes(),
+        &*bytes
+    );
+    assert_eq!(
+        analysis.result_data_digest(),
+        state.retained.runs[0].analyses[0].result_data_digest()
+    );
+
+    for mutation in 0..5 {
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let analysis = &mut value["simulation_results"]["runs"][0]["analyses"][0];
+        match mutation {
+            0 => analysis["monte_carlo_checkpoint"] = serde_json::Value::Null,
+            1 => analysis["monte_carlo_checkpoint"]["data"] = serde_json::json!("AAAA"),
+            2 => {
+                analysis
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("monte_carlo_checkpoint");
+            }
+            3 => {
+                analysis["monte_carlo_checkpoint"]["digest"] =
+                    serde_json::to_value(ContentDigest::from_bytes([84; 32])).unwrap()
+            }
+            _ => value["simulation_results"]["schema_version"] = serde_json::json!(34),
+        }
+        let loaded = load_project_text(&value.to_string(), None);
+        if matches!(mutation, 1 | 3) {
+            // Structural corruption is refused by the bounded checkpoint
+            // decoder; semantic result errors are quarantined below.
+            assert!(loaded.is_err(), "corrupt checkpoint {mutation} decoded");
+            continue;
+        }
+        let loaded = loaded.unwrap();
+        assert!(
+            loaded.file.simulation_results.runs.is_empty(),
+            "mutation {mutation} survived"
+        );
+        assert!(loaded.file.simulation_results_warning.is_some());
+    }
+
+    let mut wrong_type = state.retained.runs[0].analyses[0].clone();
+    wrong_type.analysis_type = AnalysisType::Transient;
+    assert!(wrong_type.validate_retained_evidence().is_err());
+    wrong_type.analysis_type = AnalysisType::MonteCarlo;
+    wrong_type.provenance = None;
+    assert!(wrong_type.validate_retained_evidence().is_err());
+
+    // Autosave may capture a still-running task. Authenticate its original
+    // bytes first, then restore an interrupted outcome with the same journal.
+    let mut active = state.clone();
+    active.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
+    active.retained.runs[0].analyses[0] =
+        AnalysisResult::live_monte_carlo_partial("MC", checkpoint.clone()).with_provenance(
+            state.retained.runs[0].analyses[0]
+                .provenance
+                .clone()
+                .unwrap(),
+        );
+    project.file.simulation_results = crate::io::capture_simulation_results(&active);
+    let live_json = serialize_project_file(&project).unwrap();
+    let loaded = load_project_text(&live_json, None).unwrap();
+    assert!(
+        loaded.file.simulation_results_warning.is_none(),
+        "{:?}",
+        loaded.file.simulation_results_warning
+    );
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
+    assert_eq!(
+        restored.retained.runs[0].lifecycle,
+        SimulationRunLifecycle::Interrupted
+    );
+    let partial = &restored.retained.runs[0].analyses[0];
+    assert!(!partial.success);
+    assert!(!partial.is_live_partial());
+    assert!(
+        partial
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("committed trials")
+    );
+    assert_eq!(partial.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
+
+    // Pre-checkpoint projects preserve both absence and the old digest.
+    state.retained.runs[0].analyses[0].monte_carlo_checkpoint = None;
+    let mut legacy = crate::io::capture_simulation_results(&state);
+    let digest = state.retained.runs[0].dataset_content_digest();
+    legacy.schema_version = 34;
+    legacy
+        .migrate_to_current(project.file.workspace.project.id())
+        .unwrap();
+    let restored = crate::io::simulation_state_from_results(legacy).unwrap();
+    assert!(
+        restored.retained.runs[0].analyses[0]
+            .monte_carlo_checkpoint
+            .is_none()
+    );
+    assert_eq!(restored.retained.runs[0].dataset_content_digest(), digest);
+}
+
+#[test]
+fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
+    use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
+    use rspice_formats::monte_carlo_checkpoint::{self as checkpoint_file, CheckpointFileError};
+    use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence;
+    use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary;
+    use rspice_vocabulary::product::ContentDigest;
+
+    let (_, bytes, _) = completed_checkpoint_fixture();
+    let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
+    let source = String::from_utf8(checkpoint_file::encode(&checkpoint).unwrap()).unwrap();
+    let restored = checkpoint_file::decode(&source).unwrap();
+    assert_eq!(restored.bytes(), &*bytes);
+    assert_eq!(restored, checkpoint);
+    for change in 0..4 {
+        let mut document: serde_json::Value = serde_json::from_str(&source).unwrap();
+        match change {
+            0 => document["version"] = serde_json::json!(2),
+            1 => document["checkpoint"]["data"] = serde_json::json!("AAAA"),
+            2 => {
+                document["checkpoint"]["digest"] =
+                    serde_json::to_value(ContentDigest::from_bytes([5; 32])).unwrap()
+            }
+            _ => document["unknown"] = serde_json::json!(true),
+        }
+        let error = checkpoint_file::decode(&document.to_string()).unwrap_err();
+        assert!(match change {
+            0 => matches!(error, CheckpointFileError::UnsupportedFormat),
+            _ => matches!(error, CheckpointFileError::InvalidDocument(_)),
+        });
+    }
+    let mut library = MonteCarloCheckpointLibrary::default();
+    assert!(
+        library
+            .insert_bounded("a".into(), checkpoint.clone(), bytes.len())
+            .is_err()
+    );
+    assert!(library.is_empty());
+    assert!(
+        library
+            .insert("import.rspice-mc".into(), checkpoint.clone())
+            .unwrap()
+    );
+    assert!(
+        !library
+            .insert("duplicate.rspice-mc".into(), checkpoint.clone())
+            .unwrap()
+    );
+    let mut entries = serde_json::to_value(&library).unwrap();
+    let duplicate = entries[0].clone();
+    entries.as_array_mut().unwrap().push(duplicate);
+    assert!(serde_json::from_value::<MonteCarloCheckpointLibrary>(entries).is_err());
+    let frozen = library.clone();
+    assert!(library.remove(checkpoint.digest()));
+    assert!(library.is_empty());
+    assert_eq!(frozen.get(checkpoint.digest()), Some(&checkpoint));
+
+    // Imported inputs survive project result persistence without native runs.
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.retained.imported_monte_carlo_checkpoints = frozen;
+    let results = crate::io::capture_simulation_results(&simulation);
+    assert!(!results.is_empty());
+    let restored: crate::io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&results).unwrap()).unwrap();
+    let restored = crate::io::simulation_state_from_results(restored).unwrap();
+    assert!(restored.retained.runs.is_empty());
+    assert_eq!(
+        restored
+            .retained
+            .imported_monte_carlo_checkpoints
+            .get(checkpoint.digest()),
+        Some(&checkpoint)
+    );
+}
