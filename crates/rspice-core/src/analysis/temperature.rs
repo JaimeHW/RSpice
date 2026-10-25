@@ -54,8 +54,6 @@ pub struct TemperatureContext {
     pub delta_t: Value,
     /// Thermal voltage at current temperature
     pub vt: Value,
-    /// Thermal voltage at nominal temperature
-    pub vt_nom: Value,
 }
 
 impl TemperatureContext {
@@ -73,7 +71,6 @@ impl TemperatureContext {
             ratio: temperature_k / tnom_k,
             delta_t: temperature_k - tnom_k,
             vt: thermal_voltage(temperature_k),
-            vt_nom: thermal_voltage(tnom_k),
         }
     }
 

@@ -60,10 +60,6 @@ pub struct PstbConfig {
     /// an iteration limit.
     pub max_iterations: usize,
 
-    /// Compatibility field. Exponents remain populated to preserve the public
-    /// result schema; callers may ignore them when this is false.
-    pub compute_exponents: bool,
-
     /// Whether to compute eigenvectors (mode shapes)
     pub compute_eigenvectors: bool,
 
@@ -74,9 +70,6 @@ pub struct PstbConfig {
 
     /// Enable subharmonic detection (multipliers at roots of unity).
     pub detect_subharmonics: bool,
-
-    /// Numerical perturbation for finite difference Monodromy computation
-    pub fd_perturbation: Value,
 }
 
 impl Default for PstbConfig {
@@ -86,11 +79,9 @@ impl Default for PstbConfig {
             num_eigenvalues: 0, // Compute all
             eigenvalue_tolerance: 1e-10,
             max_iterations: 1000,
-            compute_exponents: true,
             compute_eigenvectors: false,
             stability_threshold: 1.0 + 1e-6, // Allow small margin for numerical error
             detect_subharmonics: true,
-            fd_perturbation: 1e-8,
         }
     }
 }

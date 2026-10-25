@@ -63,23 +63,14 @@ pub struct PxfConfig {
     /// Output sideband index (relative to LO)
     pub output_sideband: i32,
 
-    /// Maximum number of sidebands to include in computation
-    pub max_sidebands: usize,
-
     /// Input source name
     pub input_source: Option<String>,
 
     /// Output node name
     pub output_node: Option<String>,
 
-    /// Reference node (usually ground)
-    pub ref_node: String,
-
     /// Fundamental (LO) frequency from PSS
     pub fundamental_freq: Value,
-
-    /// Include noise transfer (for noise figure computation)
-    pub include_noise: bool,
 }
 
 /// Sweep type for PXF frequency sweep
@@ -103,12 +94,9 @@ impl Default for PxfConfig {
             sweep_type: PxfSweepType::Decade,
             input_sideband: 1,  // Default: RF input (LO + IF)
             output_sideband: 0, // Default: IF output (baseband)
-            max_sidebands: 5,
             input_source: None,
             output_node: None,
-            ref_node: "0".to_string(),
             fundamental_freq: 0.0,
-            include_noise: false,
         }
     }
 }

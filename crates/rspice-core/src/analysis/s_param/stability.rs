@@ -34,9 +34,6 @@ pub struct StabilityAnalysis {
     /// Whether device is unconditionally stable
     pub unconditionally_stable: bool,
 
-    /// Whether device is potentially unstable (K < 1 or |Δ| > 1)
-    pub potentially_unstable: bool,
-
     /// Input stability circle center (Γ-plane)
     pub input_stability_center: Complex64,
 
@@ -132,7 +129,6 @@ impl StabilityAnalysis {
         let output_stable_inside = denom_output < 0.0;
 
         let unconditionally_stable = k_factor > 1.0 && delta_mag < 1.0;
-        let potentially_unstable = !unconditionally_stable;
 
         Self {
             k_factor,
@@ -141,7 +137,6 @@ impl StabilityAnalysis {
             mu_factor,
             mu_prime,
             unconditionally_stable,
-            potentially_unstable,
             input_stability_center: input_center,
             input_stability_radius: input_radius,
             output_stability_center: output_center,
@@ -172,7 +167,6 @@ mod tests {
         assert!(analysis.k_factor.is_finite());
         assert!(analysis.k_factor < 0.0, "K={}", analysis.k_factor);
         assert!(!analysis.unconditionally_stable);
-        assert!(analysis.potentially_unstable);
     }
 
     #[test]
@@ -205,7 +199,6 @@ mod tests {
         assert!((gain.msg_db - 10.0 * 20.0_f64.log10()).abs() < 1e-12);
         assert!((gain.mag_db - 10.0 * 4.0_f64.log10()).abs() < 1e-12);
         assert!((gain.mason_u_db - 10.0 * (3.61_f64 / 0.64).log10()).abs() < 1e-12);
-        assert!(gain.mag_valid);
     }
 
     #[test]
@@ -213,7 +206,6 @@ mod tests {
         let expected = 10.0 * (4.0_f64 / ((1.0 - 0.04) * (1.0 - 0.09))).log10();
         for reverse in [0.0, 1e-200, 1e-100, 1e-20] {
             let gain = GainAnalysis::from_s_matrix(&two_port(0.2, reverse, 2.0, 0.3));
-            assert!(gain.mag_valid);
             assert!((gain.mag_db - expected).abs() < 1e-10, "{gain:?}");
             assert!((gain.mason_u_db - expected).abs() < 1e-10, "{gain:?}");
             if reverse > 0.0 {
@@ -224,20 +216,15 @@ mod tests {
     }
 
     #[test]
-    fn undefined_gain_is_distinct_from_a_zero_gain_or_perfect_unilaterality() {
+    fn undefined_gain_is_distinct_from_a_zero_gain() {
         let unstable = GainAnalysis::from_s_matrix(&two_port(1.2, 0.0, 2.0, 0.5));
-        assert!(!unstable.mag_valid);
         assert!(unstable.mag_db.is_nan());
-        assert!(unstable.gtu_max_db.is_nan());
-        assert!(unstable.unilateral_fom.is_nan());
         assert!(unstable.mason_u_db.is_nan());
-        assert!(!GainAnalysis::from_s_matrix(&SMatrix::new(1e9, 1)).mag_valid);
+        let one_port = GainAnalysis::from_s_matrix(&SMatrix::new(1e9, 1));
+        assert!(one_port.mag_db.is_nan());
         let zero = GainAnalysis::from_s_matrix(&two_port(0.2, 0.0, 0.0, 0.3));
         assert_eq!(zero.mag_db, Value::NEG_INFINITY);
-        assert!(zero.mag_valid);
         assert!(zero.msg_db.is_nan());
-        let finite = GainAnalysis::from_s_matrix(&two_port(0.2, 0.1, 2.0, 0.3));
-        assert!((finite.unilateral_fom - 0.012 / 0.8736).abs() < 1e-14);
     }
 
     #[test]
@@ -293,16 +280,6 @@ pub struct GainAnalysis {
 
     /// Reverse isolation |S12|² in dB
     pub s12_isolation_db: Value,
-
-    /// Whether MAG is valid (device is unconditionally stable)
-    pub mag_valid: bool,
-
-    /// Maximum unilateral transducer gain (Gtu_max) in dB
-    pub gtu_max_db: Value,
-
-    /// Unilateral figure of merit |S11 S12 S21 S22| /
-    /// ((1 - |S11|²)(1 - |S22|²)), defined for both reflections below unity.
-    pub unilateral_fom: Value,
 }
 
 impl GainAnalysis {
@@ -313,9 +290,6 @@ impl GainAnalysis {
             mason_u_db: Value::NAN,
             s21_gain_db: Value::NAN,
             s12_isolation_db: Value::NAN,
-            mag_valid: false,
-            gtu_max_db: Value::NAN,
-            unilateral_fom: Value::NAN,
         }
     }
 
@@ -354,7 +328,6 @@ impl GainAnalysis {
         let s12_isolation_db = 20.0 * reverse_log;
 
         // The unilateral limit is also the finite limit of MAG as S12 -> 0.
-        let match_denominator = (1.0 - s11_mag_sq) * (1.0 - s22_mag_sq);
         let gtu_max_db = if s11_mag_sq < 1.0 && s22_mag_sq < 1.0 {
             s21_gain_db
                 - 10.0 * ((-s11_mag_sq).ln_1p() + (-s22_mag_sq).ln_1p()) / std::f64::consts::LN_10
@@ -388,11 +361,6 @@ impl GainAnalysis {
         } else {
             Value::NAN
         };
-        let unilateral_fom = if s11_mag_sq < 1.0 && s22_mag_sq < 1.0 {
-            s11.norm() * s12.norm() * s21.norm() * s22.norm() / match_denominator
-        } else {
-            Value::NAN
-        };
 
         Self {
             mag_db,
@@ -400,9 +368,6 @@ impl GainAnalysis {
             mason_u_db,
             s21_gain_db,
             s12_isolation_db,
-            mag_valid: stability.unconditionally_stable && !mag_db.is_nan(),
-            gtu_max_db,
-            unilateral_fom,
         }
     }
 }

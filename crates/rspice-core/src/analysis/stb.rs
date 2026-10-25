@@ -66,9 +66,6 @@ pub struct StbConfig {
     /// Break point node name (where loop is probed)
     pub probe_node: Option<String>,
 
-    /// Reference node
-    pub ref_node: String,
-
     /// Whether to compute Nyquist data
     pub compute_nyquist: bool,
 }
@@ -170,7 +167,6 @@ impl Default for StbConfig {
             num_points: 50,   // Points per decade
             sweep_type: StbSweepType::Decade,
             probe_node: None,
-            ref_node: "0".to_string(),
             compute_nyquist: true,
         }
     }

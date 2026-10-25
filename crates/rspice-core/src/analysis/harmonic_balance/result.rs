@@ -92,7 +92,6 @@ pub struct HbReactivePhaseState {
 /// frozen for the carrier solve and are reactivated at slow-time origin zero.
 #[derive(Debug, Clone)]
 pub struct HbPhaseState {
-    pub phase_radians: Value,
     pub node_voltages: Vec<(String, Value)>,
     pub mna_branch_currents: Vec<(String, Value)>,
     pub reactive_states: Vec<HbReactivePhaseState>,
@@ -327,7 +326,6 @@ impl HbResult {
             .collect();
 
         Ok(HbPhaseState {
-            phase_radians,
             node_voltages,
             mna_branch_currents,
             reactive_states,
