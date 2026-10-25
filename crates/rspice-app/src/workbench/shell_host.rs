@@ -374,6 +374,12 @@ impl Host for RSpiceApp {
             // that is showing — a search above the tabs would read as
             // filtering all three at once.
             container_draws_search: !matches!(workspace, Workspace::Design | Workspace::Results),
+            pins_scroll_bar: match workspace {
+                Workspace::Verify => Some(
+                    crate::workbench::docks::navigator::verify::verification_navigator_requires_scroll,
+                ),
+                _ => None,
+            },
         }
     }
 

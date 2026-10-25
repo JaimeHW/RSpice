@@ -93,7 +93,7 @@ pub(crate) enum ToolbarScope<W, S> {
 }
 
 /// What the navigator container draws around a workspace's navigator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct NavigatorSection {
     /// The panel heading.
     pub(crate) title: &'static str,
@@ -102,6 +102,9 @@ pub(crate) struct NavigatorSection {
     /// Whether the container draws the filter field above the navigator. A
     /// navigator that filters by facets of its own draws its own.
     pub(crate) container_draws_search: bool,
+    /// Set when the container scrolls the section: given the panel's height,
+    /// whether the section needs more, so the scroll bar stays showing.
+    pub(crate) pins_scroll_bar: Option<fn(f32) -> bool>,
 }
 
 /// What a workspace's owner furnishes its activity-rail button with.

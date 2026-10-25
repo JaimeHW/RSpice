@@ -11,6 +11,14 @@ use super::super::super::design_system::{property_row, section_header};
 use super::super::super::state::VerificationPage;
 use super::flow_row;
 
+/// Whether a navigator `available_height` tall keeps its scroll bar showing:
+/// the verification flows and the coverage history under them need more.
+pub(in crate::workbench) fn verification_navigator_requires_scroll(available_height: f32) -> bool {
+    const HISTORY_COVERAGE_HEIGHT: f32 = 126.0;
+    let flow_height = VerificationPage::NAVIGATION.len() as f32 * super::FLOW_ROW_HEIGHT;
+    available_height < flow_height + HISTORY_COVERAGE_HEIGHT
+}
+
 pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state

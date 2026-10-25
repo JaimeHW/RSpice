@@ -13,11 +13,12 @@ use super::super::results_rows::{
     responsive_result_control_height,
 };
 use super::super::simulate::{NAV_PROPERTY_COLUMN_GAP, NAV_PROPERTY_PADDING_X, simulate_nav_meta};
-use super::super::verify::{verification_coverage, verification_flow_label};
+use super::super::verify::{
+    verification_coverage, verification_flow_label, verification_navigator_requires_scroll,
+};
 use super::{
     FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, active_mc_sample_trail,
     flow_row_geometry, header, panel_search, panel_search_field_width,
-    verification_navigator_requires_scroll,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{

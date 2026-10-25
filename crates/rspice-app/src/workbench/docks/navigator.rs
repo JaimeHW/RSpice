@@ -27,7 +27,7 @@ use crate::workbench::framework::host::Point;
 use crate::workbench::framework::requests::{FocusNavigatorSearch, Outbox, Request};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::state::{VerificationPage, Workspace};
+use super::super::state::Workspace;
 use crate::state::ModelsPage;
 use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon, section_header};
 use crate::ui::widgets::paint_problem_mark;
@@ -76,9 +76,10 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     if section.container_draws_search {
         workspace_search(ui, app, workspace, section.placeholder);
     }
-    if workspace == Workspace::Verify {
-        let scroll_bar_visibility = if verification_navigator_requires_scroll(ui.available_height())
-        {
+    if let Some(requires_scroll) = section.pins_scroll_bar {
+        // The salt the verification flows, the one section that scrolls,
+        // have always been scrolled under.
+        let scroll_bar_visibility = if requires_scroll(ui.available_height()) {
             egui::scroll_area::ScrollBarVisibility::AlwaysVisible
         } else {
             egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
@@ -330,12 +331,6 @@ fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
         popup = popup.anchor(response);
     }
     (popup, keyboard_open)
-}
-
-fn verification_navigator_requires_scroll(available_height: f32) -> bool {
-    const HISTORY_COVERAGE_HEIGHT: f32 = 126.0;
-    let flow_height = VerificationPage::NAVIGATION.len() as f32 * FLOW_ROW_HEIGHT;
-    available_height < flow_height + HISTORY_COVERAGE_HEIGHT
 }
 
 mod verification_footer;
