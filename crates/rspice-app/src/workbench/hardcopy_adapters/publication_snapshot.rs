@@ -25,7 +25,7 @@ use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::PublicationDraft;
 use crate::workbench::hardcopy_adapters::sources::{
-    HardcopySemanticDocument, enumerate_retained_hardcopy_sources,
+    HardcopySemanticDocument, SourceReads, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
 };
 use rspice_design::connectivity::summary::{
@@ -551,7 +551,7 @@ fn collect_scenes(
 ) -> Result<(Vec<SheetScene>, Vec<PlotSceneSource>), PublicationBuildError> {
     let mut sheets = Vec::new();
     let mut plots = Vec::new();
-    for descriptor in enumerate_retained_hardcopy_sources(state) {
+    for descriptor in enumerate_retained_hardcopy_sources(SourceReads::of(state)) {
         let scope = if descriptor.supports_scope(&HardcopyScope::CurrentSheet) {
             // A cell view that offers "All sheets" lists each of its sheets
             // as a source of its own; publishing the cell view as well would
@@ -568,16 +568,19 @@ fn collect_scenes(
         } else {
             continue;
         };
-        let prepared =
-            match prepare_retained_hardcopy_resolution(state, &descriptor.source_key, scope) {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    return Err(PublicationBuildError::SourceResolution {
-                        source: descriptor.display_name.clone(),
-                        reason: error.to_string(),
-                    });
-                }
-            };
+        let prepared = match prepare_retained_hardcopy_resolution(
+            SourceReads::of(state),
+            &descriptor.source_key,
+            scope,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return Err(PublicationBuildError::SourceResolution {
+                    source: descriptor.display_name.clone(),
+                    reason: error.to_string(),
+                });
+            }
+        };
         let resolved =
             prepared
                 .resolve_owned()

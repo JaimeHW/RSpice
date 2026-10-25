@@ -7,7 +7,7 @@ use crate::state::{
 };
 use crate::workbench::ResultViewer;
 use crate::workbench::hardcopy_adapters::sources::{
-    HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
+    HardcopySemanticDocument, SourceReads, prepare_retained_hardcopy_resolution,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_adapters::sources::{
@@ -123,9 +123,12 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
             .session
             .plot_view_mut(ResultViewer::Hist, 0)
             .x = Some((-1.5, 1.5));
-        let prepared =
-            prepare_retained_hardcopy_resolution(&state, &key, HardcopyScope::ActivePlotDocument)
-                .unwrap();
+        let prepared = prepare_retained_hardcopy_resolution(
+            SourceReads::of(&state),
+            &key,
+            HardcopyScope::ActivePlotDocument,
+        )
+        .unwrap();
         let bytes = prepared.into_worker_snapshot_json().unwrap();
         let restored =
             PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes).unwrap();
@@ -200,9 +203,12 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
         unreachable!()
     };
     variables.reverse();
-    let prepared =
-        prepare_retained_hardcopy_resolution(&state, &key, HardcopyScope::ActivePlotDocument)
-            .unwrap();
+    let prepared = prepare_retained_hardcopy_resolution(
+        SourceReads::of(&state),
+        &key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .unwrap();
     let source = prepared.resolve_owned().unwrap();
     let HardcopySemanticDocument::Plot(plot) = source.semantic_document() else {
         unreachable!()
@@ -221,7 +227,11 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
     variables.remove(0);
     assert!(crate::workbench::documents::result_document::active_histogram(&state).is_none());
     assert!(
-        prepare_retained_hardcopy_resolution(&state, &key, HardcopyScope::ActivePlotDocument)
-            .is_err()
+        prepare_retained_hardcopy_resolution(
+            SourceReads::of(&state),
+            &key,
+            HardcopyScope::ActivePlotDocument
+        )
+        .is_err()
     );
 }

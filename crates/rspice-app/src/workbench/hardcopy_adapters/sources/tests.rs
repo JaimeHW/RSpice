@@ -453,8 +453,12 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
         .report_documents
         .push(report.clone());
     app.hardcopy.report_authoring.selected_document = Some(report_id);
-    let app_resolved = report_inventory::resolve(&app, &report, HardcopyScope::CompleteReport)
-        .expect("the retained dataset must authenticate the linked report table");
+    let app_resolved = report_inventory::resolve(
+        SourceReads::of(&app),
+        &report,
+        HardcopyScope::CompleteReport,
+    )
+    .expect("the retained dataset must authenticate the linked report table");
     let HardcopySemanticDocument::Report(app_semantic) = app_resolved.semantic_document() else {
         panic!("expected semantic report")
     };
@@ -696,9 +700,12 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
             .starts_with(b"\x89PNG\r\n\x1a\n")
     );
 
-    let prepared =
-        prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::CompleteReport)
-            .unwrap();
+    let prepared = prepare_retained_hardcopy_resolution(
+        SourceReads::of(&state),
+        &source_key,
+        HardcopyScope::CompleteReport,
+    )
+    .unwrap();
     let worker_bytes = prepared.into_worker_snapshot_json().unwrap();
     let restored =
         PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes).unwrap();
@@ -1185,13 +1192,13 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
         state.model.workspace.content.project.id().as_uuid(),
         displayed_dataset
     );
-    let descriptors = enumerate_retained_hardcopy_sources(&state);
+    let descriptors = enumerate_retained_hardcopy_sources(SourceReads::of(&state));
     assert!(descriptors.iter().any(|descriptor| {
         descriptor.source_key == source_key && descriptor.availability.is_available()
     }));
 
     let resolved = prepare_retained_hardcopy_resolution(
-        &state,
+        SourceReads::of(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -1252,7 +1259,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
         displayed_dataset
     );
     let prepared = prepare_retained_hardcopy_resolution(
-        &state,
+        SourceReads::of(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -1306,7 +1313,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     );
 
     let worker_bytes = prepare_retained_hardcopy_resolution(
-        &state,
+        SourceReads::of(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -1395,7 +1402,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
     );
 
     let worker_bytes = prepare_retained_hardcopy_resolution(
-        &state,
+        SourceReads::of(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -1505,14 +1512,17 @@ fn printed_specification_bounds(
     state: &AppState,
     source_key: &str,
 ) -> (String, HardcopyDocumentId) {
-    let resolved =
-        prepare_retained_hardcopy_resolution(state, source_key, HardcopyScope::ActivePlotDocument)
-            .expect("Specs prepares")
-            .into_worker_snapshot_json()
-            .and_then(|bytes| PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes))
-            .expect("Specs round-trips through the worker snapshot")
-            .resolve_owned()
-            .expect("Specs resolves");
+    let resolved = prepare_retained_hardcopy_resolution(
+        SourceReads::of(state),
+        source_key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .expect("Specs prepares")
+    .into_worker_snapshot_json()
+    .and_then(|bytes| PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes))
+    .expect("Specs round-trips through the worker snapshot")
+    .resolve_owned()
+    .expect("Specs resolves");
     let HardcopySemanticDocument::ResultSummary(summary) = resolved.semantic_document() else {
         panic!("expected Specs result summary")
     };

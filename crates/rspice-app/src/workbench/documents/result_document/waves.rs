@@ -200,7 +200,7 @@ fn matching_spec_limits(
     // run had never been measured against straight across its curve — beside
     // the verdict the run had actually earned. This is the same resolver the
     // specifications sheet reads.
-    let specifications = super::run_specifications(state);
+    let specifications = super::run_specifications(&state.model);
     let mut seen = HashSet::new();
     let mut limits = Vec::new();
     for trace in pane

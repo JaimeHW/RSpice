@@ -16,7 +16,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
     source_key: &str,
     scope: HardcopyScope,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    prepare_retained_hardcopy_resolution(state, source_key, scope)?.resolve_owned()
+    prepare_retained_hardcopy_resolution(SourceReads::of(state), source_key, scope)?.resolve_owned()
 }
 
 /// A resolved schematic sheet with nothing authored on it, for tests that

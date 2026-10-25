@@ -9,9 +9,18 @@
 //! A command the feature raises waits in the session's outbox; nothing runs
 //! it here.
 
-use rspice_results::result_presentation::ResultViewer;
+use std::sync::LazyLock;
+
+use rspice_results::result_presentation::{
+    AnalysisPresentationKey, ResultViewer, SourceWaveformPresentationKey,
+};
 use rspice_results::visualization_document::{PageId, PaneId};
+use rspice_results_ui::fft::FftState;
+use rspice_results_ui::histogram::HistogramState;
+use rspice_results_ui::presentation::PlotView;
+use rspice_results_ui::session::MarkerView;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
 
 use crate::state::command_catalog::CommandKey;
@@ -22,7 +31,7 @@ use super::{
     CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry, Peers,
     Reads,
 };
-use crate::workbench::framework::ports::ResultsPort;
+use crate::workbench::framework::ports::{DisplayedDatasetView, ResultsPort};
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
@@ -44,8 +53,13 @@ impl CloudPort for NullPorts {
     }
 }
 
-/// A fresh session shows the first viewer, and has chosen no histogram
-/// measurement and no result document's pane or page.
+/// The FFT and histogram viewers as a fresh session sets them up.
+static FRESH_FFT: LazyLock<FftState> = LazyLock::new(FftState::default);
+static FRESH_HISTOGRAM: LazyLock<HistogramState> = LazyLock::new(HistogramState::default);
+
+/// A fresh session shows the first viewer, unzoomed, with every waveform as
+/// its dataset shows it, no markers or cursors placed, and has chosen no
+/// histogram measurement and no result document's pane or page.
 impl ResultsPort for NullPorts {
     fn result_viewer(&self) -> ResultViewer {
         ResultViewer::default()
@@ -60,6 +74,51 @@ impl ResultsPort for NullPorts {
     }
 
     fn persistent_document_page(&self, _document: ResultDocumentId) -> Option<PageId> {
+        None
+    }
+
+    fn plot_view(&self, _viewer: ResultViewer, _index: usize) -> PlotView {
+        PlotView::default()
+    }
+
+    fn analysis_plot_view_pane(
+        &self,
+        _viewer: ResultViewer,
+        _analysis: AnalysisPresentationKey,
+        _pane: usize,
+    ) -> PlotView {
+        PlotView::default()
+    }
+
+    fn waveform_visibility(
+        &self,
+        _key: &SourceWaveformPresentationKey,
+        dataset_default: bool,
+    ) -> bool {
+        dataset_default
+    }
+
+    fn strip_markers(&self, _analysis: AnalysisPresentationKey) -> Vec<MarkerView<'_>> {
+        Vec::new()
+    }
+
+    fn cursors(&self) -> CursorPair {
+        CursorPair::default()
+    }
+
+    fn fft_settings(&self) -> &FftState {
+        &FRESH_FFT
+    }
+
+    fn histogram_settings(&self) -> &HistogramState {
+        &FRESH_HISTOGRAM
+    }
+
+    fn displayed_dataset_view(
+        &self,
+        _model: &Model,
+        _workbench: &crate::workbench::state::WorkbenchSession,
+    ) -> Option<DisplayedDatasetView> {
         None
     }
 }

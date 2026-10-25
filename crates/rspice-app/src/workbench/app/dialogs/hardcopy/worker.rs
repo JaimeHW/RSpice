@@ -457,7 +457,7 @@ mod tests {
     use crate::state::{Point, Wire};
     use crate::workbench::AppState;
     use crate::workbench::hardcopy_adapters::sources::{
-        PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
+        PreparedRetainedHardcopyResolution, SourceReads, prepare_retained_hardcopy_resolution,
         resolve_retained_hardcopy_source,
     };
     use crate::workbench::state::WorkspaceDocumentId;
@@ -513,8 +513,12 @@ mod tests {
         let scope = HardcopyScope::ActiveDocument;
         let source = resolve_retained_hardcopy_source(&state, &source_key, scope.clone())
             .expect("fixture source resolves");
-        let prepared = prepare_retained_hardcopy_resolution(&state, &source_key, scope.clone())
-            .expect("fixture source prepares");
+        let prepared = prepare_retained_hardcopy_resolution(
+            SourceReads::of(&state),
+            &source_key,
+            scope.clone(),
+        )
+        .expect("fixture source prepares");
         WorkerFixture {
             prepared,
             source,

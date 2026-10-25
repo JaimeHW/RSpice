@@ -226,7 +226,7 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
     };
     let prepared =
         match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
             &source_key,
             scope.clone(),
         ) {
@@ -239,7 +239,7 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
         };
     let candidates =
         crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
         );
     app.state.hardcopy.hardcopy.begin_open(workflow, candidates);
     let generation = app
@@ -267,7 +267,7 @@ pub(super) fn select_retained_source(
 ) {
     let prepared =
         match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
             source_key,
             scope.clone(),
         ) {
@@ -412,7 +412,7 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
         Ok(resolved) if expected.is_none() => {
             let prepared =
                 match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-                    &app.state,
+                    crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
                     &source_key,
                     scope.clone(),
                 ) {
@@ -539,7 +539,7 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
         Ok(resolved) if expected.is_none() => {
             let prepared =
                 match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-                    &app.state,
+                    crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
                     &source_key,
                     scope.clone(),
                 ) {
@@ -970,7 +970,7 @@ fn active_retained_source_selection(
 
     let candidates =
         crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
         );
     let selected = match app.state.workbench.current_route().surface_id() {
         SurfaceId::Design => {
@@ -1575,7 +1575,7 @@ fn begin_publication_authentication(
     }
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
             pending.opened_source.source_key(),
             pending.opened_source.authority().scope().clone(),
         )
@@ -1607,7 +1607,7 @@ fn begin_publication_authentication(
     }
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
             pending.opened_source.source_key(),
             pending.opened_source.authority().scope().clone(),
         )
@@ -1722,7 +1722,7 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
     let staged_mapping = stage_print_mapping_persistence(app, setup.print_mapping())?;
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            &app.state,
+            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
             source.source_key(),
             source.authority().scope().clone(),
         )

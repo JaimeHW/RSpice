@@ -130,9 +130,12 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
         Some("RSpice Engineering")
     );
 
-    let prepared =
-        prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::CurrentSheet)
-            .unwrap();
+    let prepared = prepare_retained_hardcopy_resolution(
+        SourceReads::of(&state),
+        &source_key,
+        HardcopyScope::CurrentSheet,
+    )
+    .unwrap();
     let bytes = prepared.into_worker_snapshot_json().unwrap();
     let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes).unwrap();
     assert_eq!(restored.resolve_owned().unwrap(), synchronous);
@@ -163,9 +166,12 @@ fn prepared_resolution_is_send_owned_and_snapshot_isolated() {
     let synchronous =
         resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::ActiveDocument)
             .unwrap();
-    let prepared =
-        prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::ActiveDocument)
-            .unwrap();
+    let prepared = prepare_retained_hardcopy_resolution(
+        SourceReads::of(&state),
+        &source_key,
+        HardcopyScope::ActiveDocument,
+    )
+    .unwrap();
     state.model.schematic.document_mut_for_test().wires[0].points[1].x = 9_999;
     let worker_resolved = prepared.resolve_owned().unwrap();
     assert_eq!(worker_resolved, synchronous);
@@ -227,7 +233,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
         .save_hardcopy_source_set(source_set)
         .unwrap();
 
-    let descriptors = enumerate_retained_hardcopy_sources(&state);
+    let descriptors = enumerate_retained_hardcopy_sources(SourceReads::of(&state));
     let base = descriptors
         .iter()
         .find(|descriptor| descriptor.source_key == base_key)
@@ -315,7 +321,7 @@ fn printed_wire_ids(resolved: &ResolvedHardcopyDocument) -> Vec<Vec<u64>> {
 #[test]
 fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
     let (mut state, base_key, [first, second]) = two_sheets_drawn_at_the_same_place();
-    let base = enumerate_retained_hardcopy_sources(&state)
+    let base = enumerate_retained_hardcopy_sources(SourceReads::of(&state))
         .into_iter()
         .find(|descriptor| descriptor.source_key == base_key)
         .unwrap();

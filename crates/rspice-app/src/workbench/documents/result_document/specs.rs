@@ -20,6 +20,7 @@ use rspice_results::specification::report::{
 
 use crate::state::{SimulationRun, SpecEntry, SpecPointScope, SpecificationDefinition};
 use crate::workbench::AppState;
+use crate::workbench::app_state::Model;
 use rspice_results_ui::specs::editor::{self, SpecDraft};
 
 use super::{ResultViewer, ResultsParts};
@@ -56,17 +57,17 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
 /// The requirements the workspace's active retained dataset was judged
 /// against, owned.
 ///
-/// The whole-state spelling of [`resolved_specifications`], for the hardcopy
+/// The model's spelling of [`resolved_specifications`], for the hardcopy
 /// capture, which takes a presentation of the Results workspace rather than
 /// drawing one. It captured `workspace.specs` directly, and both the printed
 /// table and the printed document's identity derive from what it captured —
 /// so a limit edited after a completed run restated itself on the page beside
 /// the verdict the run had actually earned, and moved the identity of an
 /// immutable result.
-pub(crate) fn active_run_specifications(state: &AppState) -> Vec<SpecEntry> {
-    state.model.simulation.active_run().map_or_else(
-        || state.model.workspace.content.specs.clone(),
-        |run| resolved_specifications(run, &state.model.workspace.content.specs).into_owned(),
+pub(crate) fn active_run_specifications(model: &Model) -> Vec<SpecEntry> {
+    model.simulation.active_run().map_or_else(
+        || model.workspace.content.specs.clone(),
+        |run| resolved_specifications(run, &model.workspace.content.specs).into_owned(),
     )
 }
 

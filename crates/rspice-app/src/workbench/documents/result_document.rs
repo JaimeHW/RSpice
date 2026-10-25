@@ -190,6 +190,7 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::{
     Model, PlatformState, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
 };
+use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;
@@ -1319,19 +1320,15 @@ pub(crate) type CapturedViewport = (Option<(f64, f64)>, Option<(f64, f64)>);
 /// The abscissa always travels. The ordinate travels only from a sheet whose
 /// page is the same plot the reader was reading — see [`captured_ordinate`].
 pub(crate) fn captured_viewport(
-    state: &AppState,
+    results: &dyn ResultsPort,
     analysis: AnalysisPresentationKey,
 ) -> Option<CapturedViewport> {
-    let viewer = state.results.results.session.viewer;
-    let analysis_pane = state
-        .results
-        .results
-        .session
-        .analysis_plot_view_pane(viewer, analysis, 0);
+    let viewer = results.result_viewer();
+    let analysis_pane = results.analysis_plot_view_pane(viewer, analysis, 0);
     let view = if analysis_pane.is_zoomed() {
         analysis_pane
     } else {
-        state.results.results.session.plot_view(viewer, 0)
+        results.plot_view(viewer, 0)
     };
     let y = captured_ordinate(viewer, view);
     (view.x.is_some() || y.is_some()).then_some((view.x, y))

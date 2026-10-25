@@ -6,14 +6,14 @@ use crate::workbench::preferences::CursorInterpolation;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
 pub(super) fn capture_quick_view_overlays(
-    state: &AppState,
+    reads: SourceReads<'_>,
     run: &SimulationRun,
 ) -> Result<RetainedQuickViewOverlays, HardcopySourceError> {
     let strips = run
         .analyses
         .iter()
         .map(|analysis| {
-            capture_quick_view_overlay(state, run, analysis).map(|overlay| (analysis.id, overlay))
+            capture_quick_view_overlay(reads, run, analysis).map(|overlay| (analysis.id, overlay))
         })
         .collect::<Result<Vec<_>, _>>()?;
     RetainedQuickViewOverlays::try_new(strips)
@@ -21,17 +21,16 @@ pub(super) fn capture_quick_view_overlays(
 
 /// Freeze the reading state of the strip a quick-view page will show.
 fn capture_quick_view_overlay(
-    state: &AppState,
+    reads: SourceReads<'_>,
     run: &SimulationRun,
     analysis: &AnalysisResult,
 ) -> Result<RetainedQuickViewOverlay, HardcopySourceError> {
-    let results = &state.results.results;
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let visible_traces = analysis
         .waveforms
         .iter()
         .filter(|waveform| {
-            results.session.waveform_visibility(
+            reads.results.waveform_visibility(
                 &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
                 waveform.visible,
             )
@@ -42,9 +41,10 @@ fn capture_quick_view_overlay(
     // document stores and verifies the overlay against the live pane
     // context, so a stale projection cannot put another document's
     // markers on this page.
-    let markers = results
-        .session
+    let markers = reads
+        .results
         .strip_markers(analysis_key)
+        .into_iter()
         .map(|marker| RetainedQuickMarker {
             label: rspice_results_ui::waves::dock::marker_label(marker),
             kind: marker.kind(),
@@ -52,12 +52,13 @@ fn capture_quick_view_overlay(
             trace_name: (marker.kind() != MarkerKind::Spec).then(|| marker.trace_name().to_owned()),
         })
         .collect();
+    let cursors = reads.results.cursors();
     RetainedQuickViewOverlay::try_new(
         Some(visible_traces),
-        results.session.cursors.a,
-        results.session.cursors.b,
+        cursors.a,
+        cursors.b,
         markers,
-        match state
+        match reads
             .model
             .preferences
             .result_presentation_policy()
@@ -69,7 +70,10 @@ fn capture_quick_view_overlay(
             CursorInterpolation::Linear => RetainedCursorInterpolation::Linear,
             CursorInterpolation::NearestAcceptedPoint => RetainedCursorInterpolation::Nearest,
         },
-        crate::workbench::documents::result_document::captured_viewport(state, analysis_key)
-            .map(|(x, y)| RetainedQuickViewport { x, y }),
+        crate::workbench::documents::result_document::captured_viewport(
+            reads.results,
+            analysis_key,
+        )
+        .map(|(x, y)| RetainedQuickViewport { x, y }),
     )
 }

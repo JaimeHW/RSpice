@@ -151,4 +151,79 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
     ) -> Option<rspice_results::visualization_document::PageId> {
         self.results.session.persistent_document_page(document)
     }
+
+    fn plot_view(
+        &self,
+        viewer: rspice_results::result_presentation::ResultViewer,
+        index: usize,
+    ) -> rspice_results_ui::presentation::PlotView {
+        self.results.session.plot_view(viewer, index)
+    }
+
+    fn analysis_plot_view_pane(
+        &self,
+        viewer: rspice_results::result_presentation::ResultViewer,
+        analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+        pane: usize,
+    ) -> rspice_results_ui::presentation::PlotView {
+        self.results
+            .session
+            .analysis_plot_view_pane(viewer, analysis, pane)
+    }
+
+    fn waveform_visibility(
+        &self,
+        key: &rspice_results::result_presentation::SourceWaveformPresentationKey,
+        dataset_default: bool,
+    ) -> bool {
+        self.results
+            .session
+            .waveform_visibility(key, dataset_default)
+    }
+
+    fn strip_markers(
+        &self,
+        analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    ) -> Vec<rspice_results_ui::session::MarkerView<'_>> {
+        self.results.session.strip_markers(analysis).collect()
+    }
+
+    fn cursors(&self) -> rspice_ui_kit::plot::CursorPair {
+        self.results.session.cursors
+    }
+
+    fn fft_settings(&self) -> &rspice_results_ui::fft::FftState {
+        &self.analysis.fft_state
+    }
+
+    fn histogram_settings(&self) -> &rspice_results_ui::histogram::HistogramState {
+        &self.analysis.histogram_state
+    }
+
+    fn displayed_dataset_view(
+        &self,
+        model: &crate::workbench::app_state::Model,
+        workbench: &crate::workbench::state::WorkbenchSession,
+    ) -> Option<crate::workbench::framework::ports::DisplayedDatasetView> {
+        use crate::workbench::documents::result_document::view_context::{
+            ResultViewOwner, resolve_displayed_result_view,
+        };
+        let reads = crate::workbench::documents::result_document::ResultsReads {
+            results: &self.results,
+            analysis: &self.analysis,
+            model,
+            workbench,
+        };
+        let displayed = resolve_displayed_result_view(reads).ok()?;
+        if displayed.owner != ResultViewOwner::Dataset {
+            return None;
+        }
+        displayed.run(reads)?;
+        Some(crate::workbench::framework::ports::DisplayedDatasetView {
+            run_index: displayed.run_index,
+            viewer: displayed.viewer,
+            analysis_indices: displayed.analysis_indices,
+            primary_analysis_index: displayed.primary_analysis_index,
+        })
+    }
 }

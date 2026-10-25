@@ -6,6 +6,7 @@
 //! the report captured. This module deliberately contains no fallback to an
 //! active viewer, latest run, or display cache.
 
+use super::SourceReads;
 use super::{
     ReportHardcopySource, ResolvedHardcopyDocument, RetainedHardcopySourceAvailability,
     resolve_report_source,
@@ -19,12 +20,11 @@ use crate::results::report_document::{
 use crate::results::visualization_raster::{
     VisualizationRasterProfile, render_visualization_report_figure,
 };
-use crate::workbench::AppState;
 use rspice_hardcopy_contract::HardcopyScope;
 use rspice_hardcopy_contract::sources::HardcopySourceError;
 
 pub(super) fn availability(
-    state: &AppState,
+    reads: SourceReads<'_>,
     document: &ReportDocument,
 ) -> RetainedHardcopySourceAvailability {
     if document.pages().is_empty() {
@@ -32,7 +32,7 @@ pub(super) fn availability(
             reason: "report has no authored pages".to_owned(),
         };
     }
-    match resolve(state, document, HardcopyScope::CompleteReport) {
+    match resolve(reads, document, HardcopyScope::CompleteReport) {
         Ok(_) => RetainedHardcopySourceAvailability::Available,
         Err(error) => RetainedHardcopySourceAvailability::Unavailable {
             reason: error.to_string(),
@@ -41,15 +41,15 @@ pub(super) fn availability(
 }
 
 pub(super) fn resolve(
-    state: &AppState,
+    reads: SourceReads<'_>,
     document: &ReportDocument,
     scope: HardcopyScope,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let inventory = reference_inventory(state, document)?;
+    let inventory = reference_inventory(reads, document)?;
     resolve_report_source(ReportHardcopySource {
         source_key: format!(
             "project:{}:report:{}",
-            state.model.workspace.content.project.id().as_uuid(),
+            reads.model.workspace.content.project.id().as_uuid(),
             document.id()
         ),
         document,
@@ -59,11 +59,11 @@ pub(super) fn resolve(
 }
 
 pub(super) fn reference_inventory(
-    state: &AppState,
+    reads: SourceReads<'_>,
     document: &ReportDocument,
 ) -> Result<ReportReferenceInventory, HardcopySourceError> {
     let mut available_datasets = Vec::new();
-    for run in &state.model.simulation.retained.runs {
+    for run in &reads.model.simulation.retained.runs {
         let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
         retain_available_dataset(&mut available_datasets, binding)?;
     }
@@ -87,7 +87,7 @@ pub(super) fn reference_inventory(
             .iter()
             .any(|candidate: &ReportReferenceInventoryEntry| candidate.source == captured.source)
         {
-            let entry = resolve_inventory_entry(state, captured)?;
+            let entry = resolve_inventory_entry(reads, captured)?;
             for binding in &entry.dataset_bindings {
                 retain_available_dataset(&mut available_datasets, *binding)?;
             }
@@ -95,7 +95,7 @@ pub(super) fn reference_inventory(
         }
         if let ReportBlockKind::PlotFigure(figure) = block.kind() {
             figure_artifacts.push(resolve_linked_figure_artifact(
-                state,
+                reads,
                 block.id(),
                 figure,
                 captured,
@@ -135,12 +135,12 @@ fn retain_available_dataset(
 }
 
 fn resolve_inventory_entry(
-    state: &AppState,
+    reads: SourceReads<'_>,
     captured: &ReportReferenceSnapshot,
 ) -> Result<ReportReferenceInventoryEntry, HardcopySourceError> {
     let entry = match &captured.source {
         ReportSourceId::VisualizationDocument { document_id } => {
-            let matches = state
+            let matches = reads
                 .model
                 .workspace
                 .content
@@ -179,7 +179,7 @@ fn resolve_inventory_entry(
             )
         }
         ReportSourceId::Dataset { dataset_id } => {
-            let run = unique_run_for_dataset(state, *dataset_id, "linked report dataset")?;
+            let run = unique_run_for_dataset(reads, *dataset_id, "linked report dataset")?;
             let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
             ReportReferenceInventoryEntry::new(
                 captured.source.clone(),
@@ -195,7 +195,7 @@ fn resolve_inventory_entry(
                 ));
             }
             let run = unique_run_for_dataset(
-                state,
+                reads,
                 captured.dataset_bindings[0].dataset_id,
                 "verification results dataset",
             )?;
@@ -218,7 +218,7 @@ fn resolve_inventory_entry(
 }
 
 fn resolve_linked_figure_artifact(
-    state: &AppState,
+    reads: SourceReads<'_>,
     block_id: ReportBlockId,
     figure: &PlotFigureBlock,
     captured: &ReportReferenceSnapshot,
@@ -233,7 +233,7 @@ fn resolve_linked_figure_artifact(
             "linked plot block {block_id} does not name its page and pane"
         ))
     })?;
-    let matches = state
+    let matches = reads
         .model
         .workspace
         .content
@@ -288,11 +288,11 @@ fn resolve_linked_figure_artifact(
 }
 
 fn unique_run_for_dataset<'a>(
-    state: &'a AppState,
+    reads: SourceReads<'a>,
     dataset_id: crate::product::DatasetId,
     label: &str,
 ) -> Result<&'a crate::state::SimulationRun, HardcopySourceError> {
-    let mut matching = state
+    let mut matching = reads
         .model
         .simulation
         .retained

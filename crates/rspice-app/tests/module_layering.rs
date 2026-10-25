@@ -585,9 +585,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // frame points that take them. It names nothing of the shell's, so every
     // part can raise or take one.
     "framework",
-    // What one feature shows that another reads, where every answer is a
-    // value of a lower crate, so the code that answers it sits anywhere.
-    "framework/ports",
     // What the sheets feature's commands declare: keys, labels and bindings,
     // values the command vocabulary lists in the shell's order.
     "sheets/commands",
@@ -608,6 +605,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // holds the route and its history, so it sits above routing; the routes
     // name a workspace, which is the model's.
     "state",
+    // What one feature shows that another reads, where every answer is a
+    // value of a lower crate or names the session, so the code that answers
+    // it sits anywhere above the session.
+    "framework/ports",
     "logging",
     "layout",
     // The interface text catalog and its locales. It names nothing of the
