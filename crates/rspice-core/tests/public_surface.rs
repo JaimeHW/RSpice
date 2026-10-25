@@ -367,7 +367,9 @@ use rspice_core::analysis::harmonic_balance::{
 // 5,296, with no slack. Sharing one method set across the voltage and
 // current source stores brings it to 5,292, with no slack.
 // Deleting the test-only `SpiceLibraryIndex::search_parts` brings it to 5,291.
-const MAX_PUBLIC_ITEMS: usize = 5291;
+// Deleting the undriven VDMOS recovery and thermal models brings it to
+// 5,278, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5278;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
