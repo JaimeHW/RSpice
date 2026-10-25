@@ -9,7 +9,10 @@
 //! A command the feature raises waits in the session's outbox; nothing runs
 //! it here.
 
+use rspice_results::result_presentation::ResultViewer;
+use rspice_results::visualization_document::{PageId, PaneId};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+use rspice_vocabulary::product::ResultDocumentId;
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
@@ -19,6 +22,7 @@ use super::{
     CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry, Peers,
     Reads,
 };
+use crate::workbench::framework::ports::ResultsPort;
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
@@ -37,6 +41,26 @@ impl CanvasGesturePort for NullPorts {
 impl CloudPort for NullPorts {
     fn license_dialog_open(&self) -> bool {
         false
+    }
+}
+
+/// A fresh session shows the first viewer, and has chosen no histogram
+/// measurement and no result document's pane or page.
+impl ResultsPort for NullPorts {
+    fn result_viewer(&self) -> ResultViewer {
+        ResultViewer::default()
+    }
+
+    fn histogram_selection(&self) -> Option<&str> {
+        None
+    }
+
+    fn persistent_document_pane(&self, _document: ResultDocumentId) -> Option<PaneId> {
+        None
+    }
+
+    fn persistent_document_page(&self, _document: ResultDocumentId) -> Option<PageId> {
+        None
     }
 }
 
@@ -70,6 +94,8 @@ where
             &self.state,
             &self.model,
             &self.wb,
+            &self.platform,
+            &NullPorts,
         ))
     }
 

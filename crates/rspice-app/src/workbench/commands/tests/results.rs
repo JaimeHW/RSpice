@@ -7,6 +7,8 @@
 //! from automation rather than only clicked.
 
 use super::*;
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 
 #[test]
 fn edit_specifications_opens_the_real_results_editor() {
@@ -95,7 +97,6 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
         (Command::VisualizationDocumentProperties, "plot-properties"),
         (Command::ImportResultDataset, "import-dataset"),
         (Command::ExportWaveformsCsv, "export-results"),
-        (Command::ReportAuthoring, "report-page-editor"),
     ] {
         assert_eq!(command.stable_id(), stable_id);
         assert_eq!(Command::from_stable_id(stable_id), Some(command));
@@ -103,12 +104,16 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
         assert!(command_catalog().any(|candidate| candidate == command));
     }
 
-    for unavailable in [
-        Command::SaveReportDocument,
-        Command::AddReportPage,
-        Command::ReportPageProperties,
-    ] {
-        assert!(!command_catalog().any(|candidate| candidate == unavailable));
+    let registry = command_registry();
+    let report = HardcopyCommand::ReportAuthoring.key();
+    assert_eq!(report.as_str(), "report-page-editor");
+    assert_eq!(registry.resolve("report-page-editor"), Some(report));
+    assert!(registry.order().contains(&report));
+
+    for unavailable in HardcopyCommand::REPORT_TOOLBAR {
+        let key = unavailable.key();
+        assert!(!registry.order().contains(&key), "{unavailable:?}");
+        assert_eq!(registry.resolve(key.as_str()), None, "{unavailable:?}");
     }
 }
 

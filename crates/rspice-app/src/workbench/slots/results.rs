@@ -88,3 +88,27 @@ impl ResultsState {
         self.start_waveform_view_from_preferences(preferences);
     }
 }
+
+impl crate::workbench::framework::ports::ResultsPort for ResultsState {
+    fn result_viewer(&self) -> rspice_results::result_presentation::ResultViewer {
+        self.results.session.viewer
+    }
+
+    fn histogram_selection(&self) -> Option<&str> {
+        self.analysis.histogram_state.selected.as_deref()
+    }
+
+    fn persistent_document_pane(
+        &self,
+        document: rspice_vocabulary::product::ResultDocumentId,
+    ) -> Option<rspice_results::visualization_document::PaneId> {
+        self.results.session.persistent_document_pane(document)
+    }
+
+    fn persistent_document_page(
+        &self,
+        document: rspice_vocabulary::product::ResultDocumentId,
+    ) -> Option<rspice_results::visualization_document::PageId> {
+        self.results.session.persistent_document_page(document)
+    }
+}

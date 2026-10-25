@@ -1,8 +1,10 @@
 //! The glyphs the command palette gives commands of its own, before it falls
 //! back to the glyph of a command's scope.
 
+use crate::state::command_catalog::CommandKey;
 use crate::ui::icons::Icon;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
 /// scope's.
@@ -41,10 +43,18 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         | Command::SaveAll
         | Command::ImportNetlist
         | Command::ImportVerilogA
-        | Command::ExportSchematicSvg
         | Command::ExportWaveformsCsv
         | Command::ExportNetlist(_) => Icon::File,
         _ => return None,
     };
     Some(icon)
+}
+
+/// The glyph the palette gives a feature's command; `None` for one that
+/// wears its scope's.
+pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
+    match HardcopyCommand::from_key(key)? {
+        HardcopyCommand::ExportSchematicSvg => Some(Icon::File),
+        _ => None,
+    }
 }

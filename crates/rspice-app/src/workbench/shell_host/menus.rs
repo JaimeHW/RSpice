@@ -3,11 +3,13 @@
 //! is written the same way.
 
 use crate::state::ModelsPage;
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry, palette_scope};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
@@ -29,6 +31,11 @@ const fn sheets(command: SheetsCommand) -> MenuEntry {
 
 /// The settings feature's command's row under the label it declares.
 const fn settings(command: SettingsCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The hardcopy feature's command's row under the label it declares.
+const fn hardcopy(command: HardcopyCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -70,9 +77,9 @@ const FILE_MENU: &[MenuEntry] = &[
     command(Command::ImportNetlist),
     command(Command::ImportVerilogA),
     Separator,
-    command(Command::ExportSchematicSvg),
+    hardcopy(HardcopyCommand::ExportSchematicSvg),
     command(Command::ExportWaveformsCsv),
-    command(Command::ExportPublicationSnapshot),
+    hardcopy(HardcopyCommand::ExportPublicationSnapshot),
     command(Command::ExportNetlist(crate::io::NetlistFormat::Spice)),
     Separator,
     command(Command::LiveSession),
@@ -86,8 +93,8 @@ const FILE_MENU: &[MenuEntry] = &[
     sheets(SheetsCommand::SheetFormatManager),
     sheets(SheetsCommand::CustomSheetSizes),
     sheets(SheetsCommand::SheetDefaults),
-    command(Command::PrintHardcopy),
-    command(Command::ExportActiveView),
+    hardcopy(HardcopyCommand::PrintHardcopy),
+    hardcopy(HardcopyCommand::ExportActiveView),
     MenuEntry::Only(
         MenuContext::DesktopApplication,
         &[Separator, command(Command::Exit)],
@@ -279,7 +286,7 @@ const RESULTS_MENU: &[MenuEntry] = &[
     command(Command::DatasetManifestBrowser),
     command(Command::CreateResultDocument),
     command(Command::CompareResultDatasets),
-    command(Command::ReportAuthoring),
+    hardcopy(HardcopyCommand::ReportAuthoring),
     Separator,
     command_as(Command::ToggleLinkedCursors, "Link A/B cursors"),
     command(Command::WaveformCalculator),
@@ -432,11 +439,8 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ProjectLauncher | Command::ImportResultDataset | Command::ManageSourceDocument => {
             WorkbenchIcon::Folder
         }
-        Command::NewProject | Command::NewCell | Command::AddReportPage => WorkbenchIcon::Add,
-        Command::Save
-        | Command::SymbolSave
-        | Command::ModelSaveRevision
-        | Command::SaveReportDocument => WorkbenchIcon::Save,
+        Command::NewProject | Command::NewCell => WorkbenchIcon::Add,
+        Command::Save | Command::SymbolSave | Command::ModelSaveRevision => WorkbenchIcon::Save,
         Command::RescanModelLibraries => WorkbenchIcon::Refresh,
         // The Models toolbar's button; the Verilog-A view's wears Run.
         Command::CompileVerilogA => WorkbenchIcon::Netlist,
@@ -461,8 +465,7 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         | Command::ValidateCodeDocument => WorkbenchIcon::Check,
         Command::VerilogABuildSettings
         | Command::SimulationOptions
-        | Command::WaveformCalculator
-        | Command::ReportPageProperties => WorkbenchIcon::Sliders,
+        | Command::WaveformCalculator => WorkbenchIcon::Sliders,
         Command::FindCodeDocument => WorkbenchIcon::Search,
         Command::SourceLanguageTools | Command::EditSpecifications => WorkbenchIcon::Target,
         Command::CompareResultDatasets
@@ -471,11 +474,22 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ExportWaveformsCsv | Command::ExportNetlist(crate::io::NetlistFormat::Spice) => {
             WorkbenchIcon::Export
         }
-        Command::PrintHardcopy => WorkbenchIcon::File,
         Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         _ => return None,
     };
     Some(icon)
+}
+
+/// The icon a feature command's menu row shows, by the rule
+/// [`command_icon`] follows.
+pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<WorkbenchIcon> {
+    match HardcopyCommand::from_key(key)? {
+        HardcopyCommand::AddReportPage => Some(WorkbenchIcon::Add),
+        HardcopyCommand::SaveReportDocument => Some(WorkbenchIcon::Save),
+        HardcopyCommand::ReportPageProperties => Some(WorkbenchIcon::Sliders),
+        HardcopyCommand::PrintHardcopy => Some(WorkbenchIcon::File),
+        _ => None,
+    }
 }

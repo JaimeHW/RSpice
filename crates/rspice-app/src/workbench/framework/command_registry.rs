@@ -106,6 +106,10 @@ pub(crate) struct Registry {
     by_key: HashMap<&'static str, usize>,
     /// Retired ids, each with the key it names now.
     aliases: &'static [(&'static str, CommandKey)],
+    /// Commands an owner declares that the registry leaves out: a container
+    /// holds each by key, and no menu, shortcut profile, palette or Repeat
+    /// reaches it.
+    unlisted: Vec<CommandSpec>,
 }
 
 impl Registry {
@@ -126,7 +130,16 @@ impl Registry {
             specs,
             by_key,
             aliases,
+            unlisted: Vec::new(),
         }
+    }
+
+    /// This registry, knowing the commands `unlisted` declares that it leaves
+    /// out, so [`Self::validate`] checks them too.
+    #[must_use]
+    pub(crate) fn with_unlisted(mut self, unlisted: Vec<CommandSpec>) -> Self {
+        self.unlisted = unlisted;
+        self
     }
 
     /// Every command, in the order menus list them and the shortcut resolver
@@ -169,10 +182,11 @@ impl Registry {
 
     /// Whether the registry holds together: every key is declared by exactly
     /// one owner, the order lists each declared key once and nothing else,
-    /// every alias names a declared key without being one, and every key in
-    /// `named` names a declared command. `named` pairs each key a menu or
-    /// framework code names a command by with what names it. The error lists
-    /// every problem, one per line.
+    /// every alias names a declared key without being one, every key in
+    /// `named` names a declared command, and every command an owner leaves
+    /// out is declared once, by no listed command's key, and not ordered.
+    /// `named` pairs each key a menu or framework code names a command by
+    /// with what names it. The error lists every problem, one per line.
     pub(crate) fn validate(
         &self,
         named: impl IntoIterator<Item = (&'static str, CommandKey)>,
@@ -227,6 +241,20 @@ impl Registry {
                 ));
             }
         }
+        let mut left_out: HashMap<&'static str, CommandOwner> = HashMap::new();
+        for spec in &self.unlisted {
+            let key = spec.key.as_str();
+            if let Some(first) = owners.get(key).or_else(|| left_out.get(key)) {
+                problems.push(format!(
+                    "`{key}` is declared by {first:?} and left out by {:?}",
+                    spec.owner
+                ));
+            }
+            if ordered.contains(key) {
+                problems.push(format!("`{key}` is left out but ordered"));
+            }
+            left_out.insert(key, spec.owner);
+        }
         if problems.is_empty() {
             Ok(())
         } else {
@@ -267,6 +295,7 @@ pub(crate) mod ids {
         OPEN_CONSOLE = "open-console";
         OPEN_NOTIFICATIONS = "open-notifications";
         PREFERENCES = "preferences";
+        PRINT_HARDCOPY = "print-hardcopy";
         PROJECT_LAUNCHER = "project-launcher";
         PROJECT_RECOVERY = "project-recovery";
         PROJECT_WORKSPACE = "project";
@@ -425,5 +454,30 @@ mod tests {
                  framework code names `retired`, which no owner declares"
                 .to_owned())
         );
+    }
+
+    #[test]
+    fn a_command_left_out_is_declared_once_and_never_ordered() {
+        static ORDER: [CommandKey; 2] = [CommandKey::new("open"), CommandKey::new("add-page")];
+        let registry = Registry::new(&ORDER, vec![spec("open", CommandOwner::Project)], &[])
+            .with_unlisted(vec![
+                spec("save-page", CommandOwner::Hardcopy),
+                spec("open", CommandOwner::Hardcopy),
+                spec("save-page", CommandOwner::Design),
+                spec("add-page", CommandOwner::Hardcopy),
+            ]);
+        assert_eq!(
+            problems(&registry),
+            [
+                "`add-page` is ordered but no owner declares it",
+                "`open` is declared by Project and left out by Hardcopy",
+                "`open` is left out but ordered",
+                "`save-page` is declared by Hardcopy and left out by Design",
+                "`add-page` is left out but ordered",
+            ]
+        );
+        // A command left out is never answered by key or id.
+        assert!(registry.spec(CommandKey::new("save-page")).is_none());
+        assert_eq!(registry.resolve("save-page"), None);
     }
 }

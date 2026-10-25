@@ -17,6 +17,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, Peers, Reads, Session};
 use crate::workbench::framework::requests::Outbox;
+use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::WorkbenchSession;
@@ -53,7 +54,13 @@ macro_rules! features {
                 }
 
                 fn reads(state: &AppState) -> Reads<'_, Self> {
-                    Reads::new(&*state.$slot, &state.model, &*state.workbench)
+                    Reads::new(
+                        &*state.$slot,
+                        &state.model,
+                        &*state.workbench,
+                        &*state.platform,
+                        &*state.results,
+                    )
                 }
 
                 fn cx(state: &mut AppState) -> Cx<'_, Self> {
@@ -141,6 +148,7 @@ macro_rules! features {
 features! {
     sheets: SheetsFeature,
     settings: SettingsFeature,
+    hardcopy: HardcopyFeature,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers
@@ -171,14 +179,21 @@ mod tests {
         let registry = command_registry();
         let sheets = <SheetsFeature as Registered>::registry();
         let settings = <SettingsFeature as Registered>::registry();
+        let hardcopy = <HardcopyFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
             assert_eq!(
                 format!("{spec:?}"),
                 format!("{:?}", registry.spec(*key).expect("ordered")),
             );
-            assert!(
-                sheets.command(*key).is_some() != settings.command(*key).is_some(),
+            let declaring = [
+                sheets.command(*key).is_some(),
+                settings.command(*key).is_some(),
+                hardcopy.command(*key).is_some(),
+            ];
+            assert_eq!(
+                declaring.iter().filter(|declares| **declares).count(),
+                1,
                 "{key:?}"
             );
         }
@@ -190,7 +205,27 @@ mod tests {
                 .count(),
             crate::workbench::sheets::commands::SheetsCommand::ALL.len()
                 + crate::workbench::settings::commands::SettingsCommand::ALL.len()
+                + crate::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
         );
+    }
+
+    /// A command a feature leaves out of the registry is not ordered, and the
+    /// key a container holds still reaches it.
+    #[test]
+    fn a_command_left_out_of_the_registry_is_reached_by_its_key() {
+        use crate::workbench::hardcopy::commands::HardcopyCommand;
+
+        let registry = command_registry();
+        for command in HardcopyCommand::REPORT_TOOLBAR {
+            let key = command.key();
+            assert!(!registry.order().contains(&key), "{key:?}");
+            assert!(registry.spec(key).is_none(), "{key:?}");
+            assert_eq!(
+                spec(key).map(|spec| spec.key),
+                Some(key),
+                "the container's key reaches {key:?}"
+            );
+        }
     }
 
     /// A feature that showed the sheet's properties from its own surface

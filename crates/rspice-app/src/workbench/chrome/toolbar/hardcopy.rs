@@ -1,8 +1,8 @@
 //! The toolbar of the report authoring route.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::layout::LayoutSpec;
 
 use super::toolbar_text_command;
@@ -15,7 +15,7 @@ pub(in crate::workbench) fn report_authoring_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::SaveReportDocument.key(),
+        HardcopyCommand::SaveReportDocument.key(),
         WorkbenchIcon::Save,
         "Save report document",
         layout,
@@ -23,7 +23,7 @@ pub(in crate::workbench) fn report_authoring_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::AddReportPage.key(),
+        HardcopyCommand::AddReportPage.key(),
         WorkbenchIcon::Add,
         "Add report page",
         layout,
@@ -31,7 +31,7 @@ pub(in crate::workbench) fn report_authoring_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ReportPageProperties.key(),
+        HardcopyCommand::ReportPageProperties.key(),
         WorkbenchIcon::Sliders,
         "Page properties",
         layout,

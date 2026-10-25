@@ -59,21 +59,6 @@ pub(crate) enum SurfaceOwner {
     ModelEditor,
 }
 
-/// The commands the registry leaves out that a container still holds by key:
-/// the report route's own toolbar actions. No menu, shortcut profile or
-/// Repeat reaches them.
-const UNLISTED: [Command; 3] = [
-    Command::SaveReportDocument,
-    Command::AddReportPage,
-    Command::ReportPageProperties,
-];
-
-/// The command a container's `key` names: a registered one, found by key, or
-/// one of the few the registry leaves out.
-fn command(key: CommandKey) -> Option<Command> {
-    legacy_command(key).or_else(|| UNLISTED.into_iter().find(|command| command.key() == key))
-}
-
 impl Host for RSpiceApp {
     type WorkspaceKey = Workspace;
     type SurfaceKey = SurfaceOwner;
@@ -517,26 +502,26 @@ impl Host for RSpiceApp {
     // A key no legacy command answers to is a feature's, or nobody's: the
     // dispatcher by key answers both.
     fn availability(&self, key: CommandKey) -> CommandAvailability {
-        command(key).map_or_else(
+        legacy_command(key).map_or_else(
             || self.command_availability(key),
             |command| command.availability(self),
         )
     }
 
     fn is_enabled(&self, key: CommandKey) -> bool {
-        command(key).map_or_else(
+        legacy_command(key).map_or_else(
             || self.command_key_enabled(key),
             |command| command.is_enabled(self),
         )
     }
 
     fn checked(&self, key: CommandKey) -> Option<bool> {
-        command(key).and_then(|command| command.checked(self))
+        legacy_command(key).and_then(|command| command.checked(self))
     }
 
     fn label(&self, key: CommandKey) -> &'static str {
-        command(key).map_or_else(
-            || command_registry().label(key),
+        legacy_command(key).map_or_else(
+            || features::spec(key).map_or_else(|| command_registry().label(key), |spec| spec.label),
             |command| command.spec().label,
         )
     }
@@ -555,18 +540,21 @@ impl Host for RSpiceApp {
     }
 
     fn execute(&mut self, key: CommandKey) {
-        match command(key) {
+        match legacy_command(key) {
             Some(command) => command.execute(self),
             None => self.execute_command_key(key),
         }
     }
 
     fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon> {
-        command(key).and_then(menus::command_icon)
+        legacy_command(key).map_or_else(|| menus::feature_command_icon(key), menus::command_icon)
     }
 
     fn palette_icon(&self, key: CommandKey) -> Option<Icon> {
-        command(key).and_then(palette_icons::palette_icon)
+        legacy_command(key).map_or_else(
+            || palette_icons::feature_palette_icon(key),
+            palette_icons::palette_icon,
+        )
     }
 
     fn open_workspace(&self, workspace: Workspace) -> CommandKey {
@@ -991,19 +979,28 @@ mod tests {
         }
     }
 
-    /// The commands the registry leaves out answer by key exactly as they
-    /// answer by value, and nothing else answers to their keys.
+    /// The commands a feature leaves out of the registry answer by the key
+    /// the toolbar holds, under the label they declare, and no id names them.
     #[test]
     fn a_left_out_command_answers_by_key() {
+        use crate::workbench::hardcopy::commands::HardcopyCommand;
+
         let app = RSpiceApp::test_instance();
-        for left_out in UNLISTED {
-            assert_eq!(legacy_command(left_out.key()), None, "{left_out:?}");
-            assert_eq!(command(left_out.key()), Some(left_out));
+        for left_out in HardcopyCommand::REPORT_TOOLBAR {
+            let key = left_out.key();
+            assert_eq!(legacy_command(key), None, "{left_out:?}");
             assert_eq!(
-                app.availability(left_out.key()),
-                left_out.availability(&app)
+                command_registry().resolve(key.as_str()),
+                None,
+                "{left_out:?}"
             );
-            assert_eq!(app.label(left_out.key()), left_out.spec().label);
+            assert_eq!(
+                app.availability(key),
+                CommandAvailability::Disabled("command is unavailable in this context"),
+                "off the report route, {left_out:?} is the feature's to refuse"
+            );
+            assert!(!app.is_enabled(key), "{left_out:?}");
+            assert_eq!(app.label(key), left_out.declared_spec().label);
         }
         assert_eq!(
             app.availability(CommandKey::new("no-such-command")),

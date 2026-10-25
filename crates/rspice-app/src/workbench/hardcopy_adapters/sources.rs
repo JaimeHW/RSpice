@@ -51,13 +51,16 @@ use rspice_results::renderability::{
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
 use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+use crate::workbench::framework::ports::ResultsPort;
+use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
+use rspice_app_state::workbench::app_state::model::Model;
 #[cfg(test)]
 use rspice_hardcopy_contract::sources::canonical_digest;
 use rspice_hardcopy_contract::sources::{
     HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
     MAX_HARDCOPY_SOURCE_SET_MEMBERS,
 };
+use rspice_results_ui::report::session::ReportAuthoringState;
 
 /// Cheap, semantic-free descriptor used by command enablement and the
 /// hardcopy dialog's document/scope selectors. Building this value never
@@ -250,7 +253,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
             .retained
             .run_by_dataset_id(*dataset_id)
     {
-        let availability = quick_result_availability(state, run);
+        let availability = quick_result_availability(&state.model, &*state.results, run);
         descriptors.push(RetainedHardcopySourceDescriptor {
             source_key: format!(
                 "project:{}:result-dataset:{}",
@@ -274,7 +277,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
     if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
         state.workbench.documents.active(Workspace::Results)
         && let Some((document, page, pane)) =
-            active_visualization_document_pane(state, *document_id)
+            active_visualization_document_pane(&state.model, &*state.results, *document_id)
     {
         descriptors.push(RetainedHardcopySourceDescriptor {
             source_key: visualization_document_pane_source_key(project_id, document.id(), pane.id),
@@ -535,7 +538,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
     if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
         state.workbench.documents.active(Workspace::Results)
         && let Some((document, page, pane)) =
-            active_visualization_document_pane(state, *document_id)
+            active_visualization_document_pane(&state.model, &*state.results, *document_id)
         && source_key == visualization_document_pane_source_key(project_id, document.id(), pane.id)
     {
         let all_panes = matches!(scope, HardcopyScope::AllSheetsOrPanes);
@@ -705,27 +708,31 @@ fn capture_hardcopy_run(run: SimulationRun) -> HardcopyRun {
 /// evidence-shape checks only; full digesting and semantic resolution occur
 /// when the dialog opens or commits.
 #[must_use]
-pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
-    match state.workbench.current_route().surface_id() {
+pub(crate) fn active_app_hardcopy_source_available(
+    report_authoring: &ReportAuthoringState,
+    model: &Model,
+    workbench: &WorkbenchSession,
+    results: &dyn ResultsPort,
+) -> bool {
+    match workbench.current_route().surface_id() {
         SurfaceId::Design => {
             matches!(
-                state.workbench.documents.active(Workspace::Design),
+                workbench.documents.active(Workspace::Design),
                 Some(WorkspaceDocumentId::CellView(reference))
-                    if reference == &state.model.workspace.content.active_view
+                    if reference == &model.workspace.content.active_view
             ) && matches!(
-                state.model.workspace.content.active_view_type(),
+                model.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
             )
         }
-        SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
-            Some(WorkspaceDocumentId::ResultDataset(dataset)) => state
-                .model
+        SurfaceId::Results => match workbench.documents.active(Workspace::Results) {
+            Some(WorkspaceDocumentId::ResultDataset(dataset)) => model
                 .simulation
                 .retained
                 .run_by_dataset_id(*dataset)
-                .is_some_and(|run| quick_result_availability(state, run).is_available()),
+                .is_some_and(|run| quick_result_availability(model, results, run).is_available()),
             Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
-                active_visualization_document_pane(state, *document_id).is_some_and(
+                active_visualization_document_pane(model, results, *document_id).is_some_and(
                     |(document, _, pane)| {
                         visualization_document_pane_availability(document, pane).is_available()
                     },
@@ -733,13 +740,10 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             }
             _ => false,
         },
-        SurfaceId::ReportAuthoring => state
-            .hardcopy
-            .report_authoring
+        SurfaceId::ReportAuthoring => report_authoring
             .selected_document
             .and_then(|document_id| {
-                state
-                    .model
+                model
                     .workspace
                     .content
                     .report_documents
@@ -760,15 +764,16 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
 /// dispatched run carries the requirements it froze, and only a legacy
 /// dataset from before prepared-run receipts falls back to the workspace's
 /// live contract.
-fn resolved_run_specifications_are_empty(state: &AppState, run: &SimulationRun) -> bool {
+fn resolved_run_specifications_are_empty(model: &Model, run: &SimulationRun) -> bool {
     run.prepared_receipt().map_or_else(
-        || state.model.workspace.content.specs.is_empty(),
+        || model.workspace.content.specs.is_empty(),
         |receipt| receipt.specifications().is_empty(),
     )
 }
 
 fn quick_result_availability(
-    state: &AppState,
+    model: &Model,
+    results: &dyn ResultsPort,
     run: &SimulationRun,
 ) -> RetainedHardcopySourceAvailability {
     let unavailable = |reason: String| RetainedHardcopySourceAvailability::Unavailable { reason };
@@ -778,7 +783,7 @@ fn quick_result_availability(
             run.dataset_id
         ));
     }
-    let viewer = state.results.results.session.viewer;
+    let viewer = results.result_viewer();
     if viewer == ResultViewer::Manifest {
         // Manifest hardcopy is bound to the terminal dataset as a whole and
         // must not require an arbitrarily selected analysis.
@@ -794,7 +799,7 @@ fn quick_result_availability(
         // been deleted from the workspace was refused a page it could fill,
         // and a run prepared with no requirements at all was offered one that
         // resolves to an empty table the moment a limit is authored.
-        let has_evidence = !resolved_run_specifications_are_empty(state, run)
+        let has_evidence = !resolved_run_specifications_are_empty(model, run)
             || run
                 .analyses
                 .iter()
@@ -805,7 +810,7 @@ fn quick_result_availability(
             unavailable("the dataset has no specifications or retained measurements".to_owned())
         };
     }
-    let Some(index) = quick_result_analysis_index(state, run, viewer) else {
+    let Some(index) = quick_result_analysis_index(model, run, viewer) else {
         return unavailable(format!(
             "no saved analysis has results for {}",
             viewer.label()
@@ -844,7 +849,7 @@ fn quick_result_availability(
             analysis.family_metadata.as_ref(),
             Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. })
                 if rspice_results_ui::histogram::state::measurement_index(
-                    state.results.analysis.histogram_state.selected.as_deref(), 0,
+                    results.histogram_selection(), 0,
                     &variables.iter().map(|variable| variable.name.as_str()).collect::<Vec<_>>(),
                 ).and_then(|index| variables.get(index))
                     .is_some_and(|variable| !variable.samples.is_empty())
@@ -953,19 +958,18 @@ fn quick_result_availability(
 }
 
 fn quick_result_analysis_index(
-    state: &AppState,
+    model: &Model,
     run: &SimulationRun,
     viewer: ResultViewer,
 ) -> Option<usize> {
-    let globally_selected = (state.model.simulation.view.active_run_idx
-        == state
-            .model
+    let globally_selected = (model.simulation.view.active_run_idx
+        == model
             .simulation
             .retained
             .runs
             .iter()
             .position(|candidate| candidate.dataset_id == run.dataset_id))
-    .then_some(state.model.simulation.view.active_analysis_idx)
+    .then_some(model.simulation.view.active_analysis_idx)
     .flatten();
     match viewer {
         ResultViewer::Waves => globally_selected
@@ -1045,29 +1049,23 @@ fn quick_result_analysis_index(
     }
 }
 
-fn active_visualization_document_pane(
-    state: &AppState,
+fn active_visualization_document_pane<'m>(
+    model: &'m Model,
+    results: &dyn ResultsPort,
     document_id: crate::product::ResultDocumentId,
-) -> Option<(&VisualizationDocument, &Page, &Pane)> {
-    let document = state
-        .model
+) -> Option<(&'m VisualizationDocument, &'m Page, &'m Pane)> {
+    let document = model
         .workspace
         .content
         .visualization_document(document_id)?;
-    if let Some(pane) = state
-        .results
-        .results
-        .session
+    if let Some(pane) = results
         .persistent_document_pane(document_id)
         .and_then(|pane_id| document.panes().iter().find(|pane| pane.id == pane_id))
         && let Some(page) = document.pages().iter().find(|page| page.id == pane.page_id)
     {
         return Some((document, page, pane));
     }
-    let selected_page_id = state
-        .results
-        .results
-        .session
+    let selected_page_id = results
         .persistent_document_page(document_id)
         .filter(|selected| document.pages().iter().any(|page| page.id == *selected))
         .or_else(|| document.pages().first().map(|page| page.id))?;

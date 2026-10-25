@@ -418,7 +418,12 @@ fn a_results_document_that_is_no_longer_retained_is_not_printed() {
         state.model.simulation.active_run().unwrap().dataset_id
     );
 
-    assert!(!active_app_hardcopy_source_available(&state));
+    assert!(!active_app_hardcopy_source_available(
+        &state.hardcopy.report_authoring,
+        &state.model,
+        &state.workbench,
+        &*state.results,
+    ));
     let error = resolve_retained_hardcopy_source(
         &state,
         &active_run_key,
@@ -444,5 +449,10 @@ fn print_does_not_guess_a_background_design_document() {
             .active(Workspace::Design)
             .is_none()
     );
-    assert!(!active_app_hardcopy_source_available(&state));
+    assert!(!active_app_hardcopy_source_available(
+        &state.hardcopy.report_authoring,
+        &state.model,
+        &state.workbench,
+        &*state.results,
+    ));
 }

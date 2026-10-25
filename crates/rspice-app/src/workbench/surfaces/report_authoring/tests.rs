@@ -14,6 +14,15 @@ use rspice_results::report_document::{
 };
 use rspice_results_ui::report::page_marker;
 
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
+
+/// Whether the shell would carry out `command` now, as the menus and the
+/// report toolbar ask it.
+fn enabled(app: &RSpiceApp, command: HardcopyCommand) -> bool {
+    app.command_key_enabled(command.key())
+}
+
 #[test]
 fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     let mut app = RSpiceApp::test_instance();
@@ -21,31 +30,20 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
         crate::workbench::routing::availability::surface_availability(SurfaceId::ReportAuthoring)
             .can_open()
     );
-    assert!(
-        crate::workbench::commands::vocabulary::command_catalog()
-            .any(|command| command == Command::ReportAuthoring)
-    );
-    assert_eq!(Command::ReportAuthoring.stable_id(), "report-page-editor");
-    assert_eq!(
-        Command::ReportAuthoring.spec().label,
-        "Report page and datasheet editor…"
-    );
-    for contextual_command in [
-        Command::SaveReportDocument,
-        Command::AddReportPage,
-        Command::ReportPageProperties,
-    ] {
-        assert!(
-            !crate::workbench::commands::vocabulary::command_catalog()
-                .any(|command| command == contextual_command)
-        );
+    let registry = command_registry();
+    let report = HardcopyCommand::ReportAuthoring.key();
+    assert!(registry.order().contains(&report));
+    assert_eq!(report.as_str(), "report-page-editor");
+    assert_eq!(registry.label(report), "Report page and datasheet editor…");
+    for contextual_command in HardcopyCommand::REPORT_TOOLBAR {
+        assert!(!registry.order().contains(&contextual_command.key()));
     }
-    assert!(Command::ReportAuthoring.is_enabled(&app));
-    assert!(!Command::SaveReportDocument.is_enabled(&app));
-    assert!(!Command::AddReportPage.is_enabled(&app));
-    assert!(!Command::ReportPageProperties.is_enabled(&app));
+    assert!(enabled(&app, HardcopyCommand::ReportAuthoring));
+    assert!(!enabled(&app, HardcopyCommand::SaveReportDocument));
+    assert!(!enabled(&app, HardcopyCommand::AddReportPage));
+    assert!(!enabled(&app, HardcopyCommand::ReportPageProperties));
 
-    Command::ReportAuthoring.execute(&mut app);
+    app.execute_command_key(report);
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
         SurfaceId::ReportAuthoring
@@ -53,9 +51,9 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
 
     app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
-    assert!(Command::SaveReportDocument.is_enabled(&app));
-    assert!(Command::AddReportPage.is_enabled(&app));
-    assert!(Command::ReportPageProperties.is_enabled(&app));
+    assert!(enabled(&app, HardcopyCommand::SaveReportDocument));
+    assert!(enabled(&app, HardcopyCommand::AddReportPage));
+    assert!(enabled(&app, HardcopyCommand::ReportPageProperties));
 
     app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
@@ -64,27 +62,30 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
         },
         "report command authority test".to_owned(),
     );
-    assert!(Command::ReportAuthoring.is_enabled(&app));
-    assert!(!Command::SaveReportDocument.is_enabled(&app));
-    assert!(!Command::AddReportPage.is_enabled(&app));
-    assert!(!Command::ReportPageProperties.is_enabled(&app));
+    assert!(enabled(&app, HardcopyCommand::ReportAuthoring));
+    assert!(!enabled(&app, HardcopyCommand::SaveReportDocument));
+    assert!(!enabled(&app, HardcopyCommand::AddReportPage));
+    assert!(!enabled(&app, HardcopyCommand::ReportPageProperties));
 }
 
 #[test]
 fn contextual_report_commands_stay_out_of_the_searchable_registry() {
+    let registry = command_registry();
     assert!(
-        crate::workbench::commands::vocabulary::COMMAND_REGISTRY
-            .contains(&Command::ReportAuthoring)
+        registry
+            .order()
+            .contains(&HardcopyCommand::ReportAuthoring.key())
     );
     // The three mutating commands act on the active document and page, so
     // they stay bound to the surface's own affordances rather than the
     // palette, where they would have no exact subject to resolve against.
-    for command in [
-        Command::SaveReportDocument,
-        Command::AddReportPage,
-        Command::ReportPageProperties,
-    ] {
-        assert!(!crate::workbench::commands::vocabulary::COMMAND_REGISTRY.contains(&command));
+    for command in HardcopyCommand::REPORT_TOOLBAR {
+        assert!(!registry.order().contains(&command.key()), "{command:?}");
+        assert_eq!(
+            registry.resolve(command.key().as_str()),
+            None,
+            "{command:?}"
+        );
     }
 }
 

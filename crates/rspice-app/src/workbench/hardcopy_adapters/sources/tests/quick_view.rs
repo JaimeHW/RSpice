@@ -29,7 +29,7 @@ fn noise_quick_view_exports_retained_psd_as_amplitude_density_without_summary() 
     let run = state.model.simulation.active_run().unwrap();
 
     assert_eq!(
-        quick_result_availability(&state, run),
+        quick_result_availability(&state.model, &*state.results, run),
         RetainedHardcopySourceAvailability::Available
     );
     let resolved = resolve_quick_view(&state).unwrap();
@@ -143,7 +143,7 @@ fn noise_quick_view_rejects_contributor_only_evidence() {
     let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
     let run = state.model.simulation.active_run().unwrap();
 
-    assert!(!quick_result_availability(&state, run).is_available());
+    assert!(!quick_result_availability(&state.model, &*state.results, run).is_available());
     assert!(matches!(
         resolve_quick_view(&state),
         Err(HardcopySourceError::UnavailableRetainedSource { reason, .. })
@@ -197,7 +197,7 @@ fn noise_quick_view_falls_back_to_the_first_renderable_noise_analysis() {
     let run = state.model.simulation.active_run().unwrap();
 
     assert_eq!(
-        quick_result_availability(&state, run),
+        quick_result_availability(&state.model, &*state.results, run),
         RetainedHardcopySourceAvailability::Available
     );
     let resolved = resolve_quick_view(&state).unwrap();
@@ -745,7 +745,7 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     let mut state = quick_view_state(analysis, ResultViewer::NoiseContrib);
     let run = state.model.simulation.active_run().unwrap();
 
-    assert!(!quick_result_availability(&state, run).is_available());
+    assert!(!quick_result_availability(&state.model, &*state.results, run).is_available());
     assert!(resolve_quick_view(&state).is_err());
 
     // And it does not shadow one that did converge. The run-wide fallback
@@ -763,11 +763,11 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     state.model.simulation.view.active_analysis_idx = Some(2);
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
-        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        quick_result_analysis_index(&state.model, run, ResultViewer::NoiseContrib),
         Some(1)
     );
     assert_eq!(
-        quick_result_availability(&state, run),
+        quick_result_availability(&state.model, &*state.results, run),
         RetainedHardcopySourceAvailability::Available
     );
 }
@@ -808,16 +808,16 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     state.model.simulation.view.active_analysis_idx = Some(0);
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
-        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        quick_result_analysis_index(&state.model, run, ResultViewer::NoiseContrib),
         None
     );
-    assert!(!quick_result_availability(&state, run).is_available());
+    assert!(!quick_result_availability(&state.model, &*state.results, run).is_available());
 
     // The selection is the ordinary-noise result itself.
     state.model.simulation.view.active_analysis_idx = Some(1);
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
-        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        quick_result_analysis_index(&state.model, run, ResultViewer::NoiseContrib),
         Some(1)
     );
 
@@ -826,7 +826,7 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     state.model.simulation.view.active_analysis_idx = Some(2);
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
-        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        quick_result_analysis_index(&state.model, run, ResultViewer::NoiseContrib),
         Some(1)
     );
 }
@@ -921,7 +921,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
     assert!(state.model.workspace.content.specs.is_empty());
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
-        quick_result_availability(&state, run),
+        quick_result_availability(&state.model, &*state.results, run),
         RetainedHardcopySourceAvailability::Available
     );
 
@@ -936,7 +936,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
         .specs
         .push(workspace_only.clone());
     let run = state.model.simulation.active_run().unwrap();
-    assert!(!quick_result_availability(&state, run).is_available());
+    assert!(!quick_result_availability(&state.model, &*state.results, run).is_available());
 
     // A legacy dataset with no receipt still reads the workspace contract.
     let mut legacy = SimulationRun::new(1);
@@ -948,7 +948,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
     state.model.workspace.content.specs.push(workspace_only);
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
-        quick_result_availability(&state, run),
+        quick_result_availability(&state.model, &*state.results, run),
         RetainedHardcopySourceAvailability::Available
     );
 }

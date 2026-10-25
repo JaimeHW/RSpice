@@ -12,19 +12,19 @@
 //! soon as that one returns, behind the same prologue.
 //!
 //! The dispatcher is handed a command value or a key. A key names a command
-//! only when the registry lists it, so a dispatch by key reaches exactly the
-//! listed commands; the few the registry leaves out are raised only by a
-//! route that holds the value. Placing a kind the registry does not list
-//! answers the shared id `place-component`, which names no command, so Repeat
-//! after it does nothing. Placing a port answers the pin command's id and
-//! runs that command.
+//! when the registry lists it, or when a feature declares it and leaves it
+//! out of the registry for the one container that holds its key; no menu,
+//! shortcut profile or Repeat reaches one of those. Placing a kind the
+//! registry does not list answers the shared id `place-component`, which
+//! names no command, so Repeat after it does nothing. Placing a port answers
+//! the pin command's id and runs that command.
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::PlatformState;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
-use crate::workbench::commands::{active_schematic_editor, command_edits_schematic};
+use crate::workbench::commands::{active_schematic_editor, command_edits_schematic, file_action};
 use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -32,8 +32,10 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, FollowSchematicGrid, PrintActiveView,
+    self, ApplyWaveformDefaults, ExportActiveView, ExportPublicationSnapshot, ExportSchematicSvg,
+    FollowSchematicGrid, PrintActiveView,
 };
+use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
 /// The dispatcher by key: where a key becomes the command it names, a
@@ -109,10 +111,11 @@ impl RSpiceApp {
     }
 
     /// Answer what a feature's call raised for straight after it: the
-    /// commands it ran next, the print workflow it opened, the snap that
-    /// follows a new schematic grid, the shortcut resolver's reset when a
-    /// shortcut library was put in use, and the open waveform view starting
-    /// again from changed defaults.
+    /// commands it ran next, the print or export workflow it opened, the
+    /// schematic or publication snapshot it exported, the snap that follows a
+    /// new schematic grid, the shortcut resolver's reset when a shortcut
+    /// library was put in use, and the open waveform view starting again from
+    /// changed defaults.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -127,6 +130,28 @@ impl RSpiceApp {
                     app,
                     crate::workbench::app::HardcopyWorkflow::Print,
                 );
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ExportActiveView| {
+                crate::workbench::app::open_hardcopy_workflow(
+                    app,
+                    crate::workbench::app::HardcopyWorkflow::Export,
+                );
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ExportSchematicSvg| file_action(app, FileMenuAction::ExportSvg),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ExportPublicationSnapshot| {
+                file_action(app, FileMenuAction::ExportPublicationSnapshot);
             },
         );
         requests::drain(
@@ -229,14 +254,6 @@ mod tests {
     use crate::state::ComponentType;
     use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 
-    /// The commands the registry leaves out. No key names one, so a menu, a
-    /// shortcut profile or Repeat never reaches it.
-    const UNREGISTERED: &[Command] = &[
-        Command::SaveReportDocument,
-        Command::AddReportPage,
-        Command::ReportPageProperties,
-    ];
-
     /// The kinds whose placement the registry lists, each under its own id.
     const REGISTERED_PLACEMENTS: &[ComponentType] = &[
         ComponentType::Resistor,
@@ -270,8 +287,10 @@ mod tests {
             .collect()
     }
 
+    /// A command the registry leaves out is a feature's, declared in its
+    /// command set; the legacy enum lists every command it declares.
     #[test]
-    fn the_registry_lists_every_command_but_the_unregistered_ones() {
+    fn the_registry_lists_every_command_the_enum_declares() {
         let declared = declared_variants();
         assert!(
             declared.len() > 200,
@@ -282,23 +301,10 @@ mod tests {
             .iter()
             .map(|command| variant(*command))
             .collect();
-        assert!(registered.is_subset(&declared), "{registered:?}");
-        let unlisted: BTreeSet<String> = declared.difference(&registered).cloned().collect();
-        let expected: BTreeSet<String> = UNREGISTERED
-            .iter()
-            .map(|command| variant(*command))
-            .collect();
         assert_eq!(
-            unlisted, expected,
-            "a new command goes in COMMAND_REGISTRY; one only a value may name goes in UNREGISTERED"
+            registered, declared,
+            "a new command goes in COMMAND_REGISTRY"
         );
-        for command in UNREGISTERED {
-            assert_eq!(
-                Command::from_stable_id(command.stable_id()),
-                None,
-                "{command:?}"
-            );
-        }
     }
 
     #[test]

@@ -19,6 +19,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 use super::command_registry::{CommandAvailability, CommandSpec};
 use super::dialogs::DialogKey;
+use super::ports::ResultsPort;
 use super::requests::{Drain, Outbox, Request};
 
 #[cfg(test)]
@@ -178,11 +179,28 @@ pub(crate) struct Reads<'a, F: Feature> {
     pub(crate) state: &'a F::State,
     pub(crate) model: &'a Model,
     pub(crate) wb: &'a F::Session,
+    /// Whether a project is open, and whether an operation on it is still
+    /// in progress.
+    pub(crate) platform: &'a PlatformState,
+    /// What the results workspace shows.
+    pub(crate) results: &'a dyn ResultsPort,
 }
 
 impl<'a, F: Feature> Reads<'a, F> {
-    pub(crate) fn new(state: &'a F::State, model: &'a Model, wb: &'a F::Session) -> Self {
-        Self { state, model, wb }
+    pub(crate) fn new(
+        state: &'a F::State,
+        model: &'a Model,
+        wb: &'a F::Session,
+        platform: &'a PlatformState,
+        results: &'a dyn ResultsPort,
+    ) -> Self {
+        Self {
+            state,
+            model,
+            wb,
+            platform,
+            results,
+        }
     }
 }
 
@@ -200,6 +218,10 @@ pub(crate) trait CommandSet: Copy + 'static {
     type Feature: Feature;
     /// Every command of the set the registry lists.
     const REGISTERED: &'static [Self];
+    /// The commands of the set the registry leaves out: a container holds
+    /// each by key, and no menu, shortcut profile, palette or Repeat reaches
+    /// it.
+    const UNLISTED: &'static [Self] = &[];
 
     /// What the command declares about itself.
     fn spec(self) -> CommandSpec;
@@ -299,7 +321,8 @@ impl<F: Feature> FeatureRegistry<F> {
         self.dialogs
     }
 
-    /// Register every command of `C`.
+    /// Register every command of `C`, the ones the registry leaves out too,
+    /// so the key a container holds reaches its command.
     pub(crate) fn commands<C: CommandSet<Feature = F>>(&mut self) {
         for (index, command) in C::REGISTERED.iter().enumerate() {
             self.commands.push(FeatureCommand {
@@ -307,6 +330,14 @@ impl<F: Feature> FeatureRegistry<F> {
                 index,
                 availability: |index, reads| C::REGISTERED[index].availability(reads),
                 execute: |index, cx| C::REGISTERED[index].execute(cx),
+            });
+        }
+        for (index, command) in C::UNLISTED.iter().enumerate() {
+            self.commands.push(FeatureCommand {
+                spec: command.spec(),
+                index,
+                availability: |index, reads| C::UNLISTED[index].availability(reads),
+                execute: |index, cx| C::UNLISTED[index].execute(cx),
             });
         }
     }

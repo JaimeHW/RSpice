@@ -80,6 +80,7 @@ pub(crate) mod examples {
 mod features;
 pub(crate) mod frame;
 pub(crate) mod framework;
+pub(crate) mod hardcopy;
 pub(crate) mod hardcopy_adapters;
 pub(crate) mod layout;
 pub(crate) mod lifecycle {

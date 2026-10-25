@@ -13,6 +13,7 @@
 const APP: &str = include_str!("../../workbench/app.rs");
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
+const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -405,6 +406,65 @@ const ROUTE_OVERLAYS: &[(&str, &str)] = &[
     ("surfaces::show_simulation_workflow_dialogs", "simulate"),
 ];
 
+/// `RSpiceApp::dispatch_feature_command`: a feature's command runs behind
+/// the shared prologue, and what it raised is answered straight after it, in
+/// the same dispatch.
+const DISPATCH_FEATURE_COMMAND: &[Step] = &[
+    (
+        "1",
+        &["held_by_project_operation(flags, &self.state.platform)"],
+    ),
+    ("2", &["lacks_open_project(flags, &self.state.platform)"]),
+    ("3", &["self.state.deny_read_only_edit()"]),
+    ("4", &["self.state.commit_pending_inspector_edit()"]),
+    ("5", &["features::execute(&mut self.state, spec.key)"]),
+    ("6", &["self.after_contribution()"]),
+];
+
+/// `RSpiceApp::after_contribution`, in the order a feature's call has what
+/// it raised answered. The commands it ran next go first, so a report's
+/// Save is carried out before anything else the call raised.
+const AFTER_CONTRIBUTION: &[Step] = &[
+    ("1", &["|app, Execute(key)| app.execute_command_key(key)"]),
+    (
+        "2",
+        &[
+            "|app, PrintActiveView|",
+            "crate::workbench::app::HardcopyWorkflow::Print",
+        ],
+    ),
+    (
+        "3",
+        &[
+            "|app, ExportActiveView|",
+            "crate::workbench::app::HardcopyWorkflow::Export",
+        ],
+    ),
+    (
+        "4",
+        &["|app, ExportSchematicSvg| file_action(app, FileMenuAction::ExportSvg)"],
+    ),
+    (
+        "5",
+        &[
+            "|app, ExportPublicationSnapshot|",
+            "file_action(app, FileMenuAction::ExportPublicationSnapshot)",
+        ],
+    ),
+    (
+        "6",
+        &[
+            "|app, FollowSchematicGrid|",
+            "state.design.follow_schematic_grid(&state.model)",
+        ],
+    ),
+    ("7", &["self.state.take_shortcut_resolver_reset()"]),
+    (
+        "8",
+        &["|app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session()"],
+    ),
+];
+
 /// The body of the one function `signature` opens in `source`'s shipped half,
 /// without its comment lines.
 fn body(source: &str, signature: &str) -> String {
@@ -701,5 +761,27 @@ fn the_frame_dialogs_draw_in_todays_order() {
         DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len(),
         67,
         "the frame draws 67 dialog steps beside its synthetic ones"
+    );
+}
+
+#[test]
+fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
+    let dispatch = body(DISPATCH, "fn dispatch_feature_command(");
+    assert_runs_in_order(
+        "RSpiceApp::dispatch_feature_command",
+        &dispatch,
+        DISPATCH_FEATURE_COMMAND,
+    );
+    assert!(
+        without_whitespace(&dispatch).ends_with(&without_whitespace("self.after_contribution();")),
+        "nothing runs after a feature's command has what it raised answered"
+    );
+
+    let after = body(DISPATCH, "pub(crate) fn after_contribution(");
+    assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
+    assert_eq!(
+        after.matches("requests::drain(").count(),
+        7,
+        "`after_contribution` answers exactly the seven requests it lists"
     );
 }

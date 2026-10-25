@@ -593,11 +593,16 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // frame points that take them. It names nothing of the shell's, so every
     // part can raise or take one.
     "framework",
+    // What one feature shows that another reads, where every answer is a
+    // value of a lower crate, so the code that answers it sits anywhere.
+    "framework/ports",
     // What the sheets feature's commands declare: keys, labels and bindings,
     // values the command vocabulary lists in the shell's order.
     "sheets/commands",
     // What the settings feature's commands declare, the same way.
     "settings/commands",
+    // What the hardcopy feature's commands declare, the same way.
+    "hardcopy/commands",
     // The documents module's own vocabulary: which Code page is showing and
     // what a source-file action is. Each document engine has its own entry;
     // a document file without one is owned here, where its first reach into
@@ -706,6 +711,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The settings feature: its commands' answers over its own slot, the
     // model and the session, and the keys its shortcut tables name.
     "settings",
+    // The hardcopy feature: its commands' answers over its own slot, the
+    // model, the session and what the results workspace shows.
+    "hardcopy",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",
@@ -829,7 +837,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
     ("commands", "menu_bar", 5),
-    ("commands", "surfaces", 8),
     ("commands", "account_organization", 1),
     ("commands", "preflight", 1),
     ("commands", "tools/jobs_manager", 1),

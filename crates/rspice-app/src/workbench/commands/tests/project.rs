@@ -7,7 +7,9 @@
 //! that skips the gate is invisible to a single aggregate check.
 
 use super::*;
+use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::framework::requests::FocusProjectLauncherSearch;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -114,7 +116,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::ImportNetlist,
         Command::ImportVerilogA,
         Command::ImportResultDataset,
-        Command::ExportSchematicSvg,
         Command::ExportWaveformsCsv,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
         Command::FindInDesign,
@@ -143,7 +144,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::RescanModelLibraries,
         Command::CompileVerilogA,
         Command::AutomationConsole,
-        Command::ReportAuthoring,
     ] {
         assert!(
             command.requires_open_project(),
@@ -185,6 +185,54 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
 
         let before = app.state.model.log_buffer.revision();
         command.execute(&mut app);
+
+        assert_eq!(
+            app.state.workbench.workspace,
+            Workspace::Project,
+            "closed-project command changed workspace: {command:?}"
+        );
+        assert_eq!(
+            app.state.model.log_buffer.revision(),
+            before,
+            "a disabled command is silent: {command:?}"
+        );
+        assert_eq!(
+            app.state.prompt_text(),
+            None,
+            "a disabled command is silent: {command:?}"
+        );
+    }
+
+    // The hardcopy feature's commands hold the same boundary, every one of
+    // them, through the dispatcher by key.
+    for command in HardcopyCommand::LISTED
+        .into_iter()
+        .chain(HardcopyCommand::REPORT_TOOLBAR)
+    {
+        let key = command.key();
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+            "missing closed-project boundary: {command:?}"
+        );
+        let mut app = RSpiceApp::test_instance();
+        app.state.close_project_session();
+        app.state.workbench.workspace = Workspace::Project;
+
+        assert!(
+            !app.command_key_enabled(key),
+            "enabled without project: {command:?}"
+        );
+        assert_eq!(
+            app.command_availability(key),
+            CommandAvailability::Disabled("no project is open"),
+            "wrong closed-project reason for {command:?}"
+        );
+
+        let before = app.state.model.log_buffer.revision();
+        app.execute_command_key(key);
 
         assert_eq!(
             app.state.workbench.workspace,

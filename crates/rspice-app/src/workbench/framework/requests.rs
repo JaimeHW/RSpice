@@ -189,6 +189,39 @@ impl Request for PrintActiveView {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Open the export workflow on the active view. Raised by the hardcopy
+/// feature's Export active view, and answered straight after it, in the same
+/// dispatch. It goes once the command's body reads its handles from the
+/// context.
+#[derive(Clone, Debug)]
+pub(crate) struct ExportActiveView;
+
+impl Request for ExportActiveView {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Export the open schematic as SVG through the export IO. Raised by the
+/// hardcopy feature's Export schematic SVG, and answered straight after it,
+/// in the same dispatch. It goes once the command's body reads its handles
+/// from the context.
+#[derive(Clone, Debug)]
+pub(crate) struct ExportSchematicSvg;
+
+impl Request for ExportSchematicSvg {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Export the sealed publication snapshot through the export IO. Raised by
+/// the hardcopy feature's Export publication snapshot, and answered straight
+/// after it, in the same dispatch. It goes once the command's body reads its
+/// handles from the context.
+#[derive(Clone, Debug)]
+pub(crate) struct ExportPublicationSnapshot;
+
+impl Request for ExportPublicationSnapshot {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Move design's snap onto the open schematic's grid. Raised by a feature
 /// that changes the grid the schematic is drawn on, so the snap follows the
 /// grid in the same frame, as it does when design changes the grid itself.

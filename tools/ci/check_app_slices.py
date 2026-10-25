@@ -180,6 +180,7 @@ SLICE_RULES = [
     (W + r"features\.rs$", "shell"),
     (W + r"sheets(\.rs$|/)", "sheets"),
     (W + r"settings(\.rs$|/)", "settings"),
+    (W + r"hardcopy(\.rs$|/)", "hardcopy"),
     (W + r"shell_host(\.rs$|/)", "shell"),
     (W + r"menu_bar/export_actions", "hardcopy"),
     (W + r"menu_bar/waveform_export", "results"),

@@ -699,14 +699,6 @@ impl Command {
             | Self::CompileVerilogA
             | Self::VerilogABuildSettings
             | Self::AutomationConsole => CommandOwner::Code,
-            Self::ExportSchematicSvg
-            | Self::PrintHardcopy
-            | Self::ExportActiveView
-            | Self::ReportAuthoring
-            | Self::SaveReportDocument
-            | Self::AddReportPage
-            | Self::ReportPageProperties
-            | Self::ExportPublicationSnapshot => CommandOwner::Hardcopy,
             Self::LiveSession | Self::PublishToWeb | Self::AccountOrganization | Self::License => {
                 CommandOwner::Cloud
             }
@@ -762,13 +754,9 @@ impl Command {
                     &mut app.state.results_parts(),
                 );
             }
-            Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
             Self::ExportWaveformsCsv => file_action(app, FileMenuAction::ExportCsvWaveforms),
             Self::LiveSession => app.open_live_session_dialog(),
             Self::PublishToWeb => app.open_publish_web_dialog(),
-            Self::ExportPublicationSnapshot => {
-                file_action(app, FileMenuAction::ExportPublicationSnapshot)
-            }
             Self::ExportNetlist(format) => {
                 if netlist_page_is_visible(&app.state) {
                     app.state.code.netlist.export_dialog.open = true;
@@ -782,14 +770,6 @@ impl Command {
                     );
                 }
             }
-            Self::PrintHardcopy => crate::workbench::app::open_hardcopy_workflow(
-                app,
-                crate::workbench::app::HardcopyWorkflow::Print,
-            ),
-            Self::ExportActiveView => crate::workbench::app::open_hardcopy_workflow(
-                app,
-                crate::workbench::app::HardcopyWorkflow::Export,
-            ),
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => app.action_edit_undo(),
             Self::Redo => app.action_edit_redo(),
@@ -1761,12 +1741,6 @@ impl Command {
             Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
                 crate::workbench::tools::specialist_tool_browser::open(app);
             }
-            Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
-            Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),
-            Self::AddReportPage => super::surfaces::report_authoring::open_add_page(app),
-            Self::ReportPageProperties => {
-                super::surfaces::report_authoring::open_page_properties(app);
-            }
             Self::AddVisualizationPane => {
                 crate::workbench::documents::result_document::open_add_pane(
                     &mut app.state.results_parts(),
@@ -1869,9 +1843,9 @@ impl Command {
 
 mod command_helpers;
 
-pub(in crate::workbench) use command_helpers::active_schematic_editor;
 pub(crate) use command_helpers::reset_active_view;
 use command_helpers::*;
+pub(in crate::workbench) use command_helpers::{active_schematic_editor, file_action};
 
 #[cfg(test)]
 mod tests;

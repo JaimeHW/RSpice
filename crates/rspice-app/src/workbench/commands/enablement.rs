@@ -71,15 +71,6 @@ impl Command {
                     crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
                 )
             }
-            Self::ExportActiveView => {
-                crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(state)
-            }
-            Self::PrintHardcopy => {
-                cfg!(any(target_os = "windows", target_arch = "wasm32"))
-                    && crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
-                        state,
-                    )
-            }
             Self::Undo => {
                 if state.model.safe_mode.project_read_only()
                     || state.schematic_edit_in_progress()
@@ -668,14 +659,6 @@ impl Command {
                                 .qualification_execution
                                 .is_none()
                     })
-            }
-            Self::ReportAuthoring => crate::workbench::surfaces::report_authoring::can_open(state),
-            Self::SaveReportDocument => {
-                crate::workbench::surfaces::report_authoring::can_save_document(state)
-            }
-            Self::AddReportPage => crate::workbench::surfaces::report_authoring::can_add_page(state),
-            Self::ReportPageProperties => {
-                crate::workbench::surfaces::report_authoring::can_edit_page_properties(state)
             }
             Self::AddVisualizationPane => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results

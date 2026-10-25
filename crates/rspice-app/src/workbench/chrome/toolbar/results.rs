@@ -5,6 +5,7 @@ use crate::product::{ContentDigest, ObjectRevision};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 
@@ -60,13 +61,7 @@ pub(in crate::workbench) fn results_tools(
         WorkbenchIcon::Export,
         layout,
     );
-    toolbar_icon_command(
-        ui,
-        app,
-        Command::PrintHardcopy.key(),
-        WorkbenchIcon::File,
-        layout,
-    );
+    toolbar_icon_command(ui, app, ids::PRINT_HARDCOPY, WorkbenchIcon::File, layout);
 }
 
 fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) -> bool {

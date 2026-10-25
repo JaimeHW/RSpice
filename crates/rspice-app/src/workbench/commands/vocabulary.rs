@@ -18,6 +18,7 @@ use crate::state::command_catalog::{
 };
 use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::localization::OPEN_TASK_DECK;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
@@ -51,14 +52,10 @@ pub enum Command {
     ImportNetlist,
     ImportVerilogA,
     ImportResultDataset,
-    ExportSchematicSvg,
     ExportWaveformsCsv,
-    ExportPublicationSnapshot,
     LiveSession,
     PublishToWeb,
     ExportNetlist(crate::io::NetlistFormat),
-    PrintHardcopy,
-    ExportActiveView,
     Exit,
     Undo,
     Redo,
@@ -300,10 +297,6 @@ pub enum Command {
     AccountOrganization,
     License,
     SpecialistToolBrowser,
-    ReportAuthoring,
-    SaveReportDocument,
-    AddReportPage,
-    ReportPageProperties,
     AddVisualizationPane,
     VisualizationDocumentProperties,
     HelpCenter,
@@ -390,15 +383,7 @@ impl Command {
             Self::ImportResultDataset => {
                 spec("import-dataset", "Import result dataset…", "Results")
             }
-            Self::ExportSchematicSvg => {
-                spec("export-schematic-svg", "Export schematic SVG…", "File")
-            }
             Self::ExportWaveformsCsv => spec("export-results", "Export dataset…", "Results"),
-            Self::ExportPublicationSnapshot => spec(
-                "export-publication-snapshot",
-                "Export publication snapshot…",
-                "File",
-            ),
             Self::LiveSession => spec("live-session", "Live session…", "File"),
             Self::PublishToWeb => spec("publish-web", "Publish to web…", "File"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
@@ -413,8 +398,6 @@ impl Command {
             Self::ExportNetlist(crate::io::NetlistFormat::Xyce) => {
                 spec("export-netlist-xyce", "Export Xyce netlist…", "File")
             }
-            Self::PrintHardcopy => spec("print-hardcopy", "Print / hardcopy…", "File"),
-            Self::ExportActiveView => spec("export-active-view", "Export active view…", "File"),
             Self::Exit => spec("exit-rspice", "Exit RSpice…", "File"),
             Self::Undo => spec("undo", "Undo", "Edit"),
             Self::Redo => spec("redo", "Redo", "Edit"),
@@ -1025,18 +1008,6 @@ impl Command {
                 "Specialist tool browser…",
                 "Navigate",
             ),
-            Self::ReportAuthoring => spec(
-                "report-page-editor",
-                "Report page and datasheet editor\u{2026}",
-                "Results",
-            ),
-            Self::SaveReportDocument => {
-                spec("report-save-document", "Save report document", "Results")
-            }
-            Self::AddReportPage => spec("report-add-page", "Add report page", "Results"),
-            Self::ReportPageProperties => {
-                spec("report-page-properties", "Page properties", "Results")
-            }
             Self::AddVisualizationPane => spec("visualization-add-pane", "Add pane…", "Results"),
             Self::VisualizationDocumentProperties => {
                 spec("plot-properties", "Plot document properties…", "Results")
@@ -1114,16 +1085,12 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ImportNetlist,
     Command::ImportVerilogA,
     Command::ImportResultDataset,
-    Command::ExportSchematicSvg,
-    Command::ExportPublicationSnapshot,
     Command::LiveSession,
     Command::PublishToWeb,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
     Command::ExportNetlist(crate::io::NetlistFormat::Xyce),
-    Command::PrintHardcopy,
-    Command::ExportActiveView,
     Command::Exit,
     Command::Undo,
     Command::Redo,
@@ -1372,7 +1339,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AccountOrganization,
     Command::License,
     Command::SpecialistToolBrowser,
-    Command::ReportAuthoring,
     Command::AddVisualizationPane,
     Command::VisualizationDocumentProperties,
     Command::HelpCenter,
@@ -1407,8 +1373,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ImportNetlist.key(),
     Command::ImportVerilogA.key(),
     Command::ImportResultDataset.key(),
-    Command::ExportSchematicSvg.key(),
-    Command::ExportPublicationSnapshot.key(),
+    HardcopyCommand::ExportSchematicSvg.key(),
+    HardcopyCommand::ExportPublicationSnapshot.key(),
     Command::LiveSession.key(),
     Command::PublishToWeb.key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
@@ -1419,8 +1385,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SheetsCommand::SheetFormatManager.key(),
     SheetsCommand::CustomSheetSizes.key(),
     SheetsCommand::SheetDefaults.key(),
-    Command::PrintHardcopy.key(),
-    Command::ExportActiveView.key(),
+    HardcopyCommand::PrintHardcopy.key(),
+    HardcopyCommand::ExportActiveView.key(),
     Command::Exit.key(),
     Command::Undo.key(),
     Command::Redo.key(),
@@ -1676,7 +1642,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::AccountOrganization.key(),
     Command::License.key(),
     Command::SpecialistToolBrowser.key(),
-    Command::ReportAuthoring.key(),
+    HardcopyCommand::ReportAuthoring.key(),
     Command::AddVisualizationPane.key(),
     Command::VisualizationDocumentProperties.key(),
     Command::HelpCenter.key(),
@@ -1730,8 +1696,14 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .map(|command| command.registry_spec())
                 .chain(SheetsCommand::ALL.map(SheetsCommand::declared_spec))
                 .chain(SettingsCommand::ALL.map(SettingsCommand::declared_spec))
+                .chain(HardcopyCommand::LISTED.map(HardcopyCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
+        )
+        .with_unlisted(
+            HardcopyCommand::REPORT_TOOLBAR
+                .map(HardcopyCommand::declared_spec)
+                .to_vec(),
         );
         debug_assert_eq!(registry.validate(command_registry::ids::named()), Ok(()));
         registry

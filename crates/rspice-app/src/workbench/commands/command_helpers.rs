@@ -356,7 +356,7 @@ pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
     dialogs.new_cell_dialog = true;
 }
 
-pub(super) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
+pub(in crate::workbench) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
     dispatch_file_menu_action(
         &mut app.state,
         action,

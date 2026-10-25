@@ -89,14 +89,6 @@ const CLOSE_PROJECT: &[ShortcutBinding] = &[primary(
     chord(Key::W, true, false, true, "Ctrl+Shift+W"),
     DESKTOP,
 )];
-const PRINT_HARDCOPY: &[ShortcutBinding] = &[
-    primary(chord(Key::P, true, false, false, "Ctrl+P"), DESKTOP),
-    alternate(chord(Key::P, true, true, false, "Ctrl+Alt+P"), HOST),
-];
-const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[
-    primary(chord(Key::P, true, false, true, "Ctrl+Shift+P"), DESKTOP),
-    alternate(chord(Key::E, true, true, true, "Ctrl+Alt+Shift+E"), HOST),
-];
 const EXIT: &[ShortcutBinding] = &[primary(
     chord(Key::F4, false, true, false, "Alt+F4"),
     DESKTOP,
@@ -403,13 +395,9 @@ impl Command {
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::ImportResultDataset
-                | Self::ExportSchematicSvg
                 | Self::ExportWaveformsCsv
-                | Self::ExportPublicationSnapshot
                 | Self::PublishToWeb
                 | Self::ExportNetlist(_)
-                | Self::PrintHardcopy
-                | Self::ExportActiveView
                 | Self::FindInDesign
                 | Self::ToggleResultsSplit
                 | Self::CheckDesign
@@ -464,10 +452,6 @@ impl Command {
                 | Self::CompileVerilogA
                 | Self::VerilogABuildSettings
                 | Self::AutomationConsole
-                | Self::ReportAuthoring
-                | Self::SaveReportDocument
-                | Self::AddReportPage
-                | Self::ReportPageProperties
                 | Self::DescendHierarchyDirect
                 | Self::ShowInNetlist
                 | Self::AddVisualizationPane
@@ -485,7 +469,6 @@ impl Command {
                 | Self::Save
                 | Self::SaveAs
                 | Self::SaveAll
-                | Self::SaveReportDocument
                 | Self::RevertActiveDocument
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
@@ -501,8 +484,6 @@ impl Command {
                 | Self::ImportResultDataset
                 | Self::CreateResultDocument
                 | Self::RescanModelLibraries
-                | Self::PrintHardcopy
-                | Self::ExportActiveView
                 | Self::CheckAndSave
                 | Self::ConnectivityManager
                 | Self::DesignManagement
@@ -539,9 +520,6 @@ impl Command {
                 | Self::Cancel
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
-                | Self::SaveReportDocument
-                | Self::AddReportPage
-                | Self::ReportPageProperties
                 | Self::DescendHierarchyDirect
         )
     }
@@ -636,9 +614,6 @@ impl Command {
             | Self::ResultViewer(_)
             | Self::AddVisualizationPane
             | Self::VisualizationDocumentProperties => ShortcutContext::ResultsWorkspace,
-            Self::SaveReportDocument | Self::AddReportPage | Self::ReportPageProperties => {
-                ShortcutContext::ResultsWorkspace
-            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -718,8 +693,6 @@ impl Command {
             Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::CloseProject => CLOSE_PROJECT,
-            Self::PrintHardcopy => PRINT_HARDCOPY,
-            Self::ExportActiveView => EXPORT_ACTIVE_VIEW,
             Self::Exit => EXIT,
             Self::Undo => UNDO,
             Self::Redo => REDO,

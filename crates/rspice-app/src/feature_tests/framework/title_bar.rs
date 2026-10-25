@@ -1038,7 +1038,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::RunSimulation, WorkbenchIcon::Run),
         (Command::AutomationConsole, WorkbenchIcon::Terminal),
         (Command::ModelCompareRelease, WorkbenchIcon::Compare),
-        (Command::PrintHardcopy, WorkbenchIcon::File),
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1047,6 +1046,10 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
             command.spec().id
         );
     }
+    assert_eq!(
+        app.command_icon(ids::PRINT_HARDCOPY),
+        Some(WorkbenchIcon::File)
+    );
     for command in [
         Command::LegalPrivacy,
         Command::About,

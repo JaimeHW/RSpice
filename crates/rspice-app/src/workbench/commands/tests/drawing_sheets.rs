@@ -64,7 +64,10 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
     assert!(active_symbol_editor(&app));
     assert!(
         crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
-            &app.state
+            &app.state.hardcopy.report_authoring,
+            &app.state.model,
+            &app.state.workbench,
+            &*app.state.results,
         ),
         "the symbol is a valid print/export source"
     );

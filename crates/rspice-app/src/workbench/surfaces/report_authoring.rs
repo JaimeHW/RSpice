@@ -9,8 +9,7 @@ mod result_insert;
 use rspice_results_ui::report::composer::{PageMoveDirection, PageSettingEdit};
 use rspice_results_ui::report::inspector::DocumentPublicationEdit;
 use rspice_results_ui::report::session::{
-    page_update_policy_from_index, page_update_policy_index, report_template_from_index,
-    report_template_index, valid_title,
+    page_update_policy_from_index, report_template_from_index, report_template_index, valid_title,
 };
 use rspice_results_ui::report::{self, INITIAL_PAGES, report_template_label};
 
@@ -24,9 +23,9 @@ use crate::results::report_document::{
     ReviewNoteBlock, ReviewNoteStatus, SpecificationDisposition, SpecificationEntry,
     SpecificationsBlock, TableCell, TableColumn,
 };
+use crate::workbench::hardcopy::report as report_editor;
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::super::commands::vocabulary::Command;
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 #[cfg(test)]
@@ -34,99 +33,6 @@ use crate::results::report_document::ReportFigureSourceLocator;
 use result_insert::{
     commit_insert_result_document, open_insert_result_document, report_figure_options,
 };
-
-pub(crate) fn open(app: &mut RSpiceApp) {
-    let route = SurfaceRoute::surface(SurfaceId::ReportAuthoring);
-    if let Err(error) = app
-        .state
-        .workbench
-        .navigate(route, RouteTransitionSource::User)
-    {
-        app.state.prompt(error.to_string());
-    }
-}
-
-pub(crate) fn can_open(state: &AppState) -> bool {
-    state.platform.project_lifecycle.is_open()
-}
-
-pub(crate) fn can_save_document(state: &AppState) -> bool {
-    state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
-        && report_mutation_allowed(state)
-        && active_document(state).is_some()
-        && state.model.workspace.content.report_documents_dirty
-}
-
-pub(crate) fn can_add_page(state: &AppState) -> bool {
-    state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
-        && report_mutation_allowed(state)
-        && active_document(state).is_some()
-}
-
-pub(crate) fn can_edit_page_properties(state: &AppState) -> bool {
-    if state.workbench.current_route().surface_id() != SurfaceId::ReportAuthoring
-        || !report_mutation_allowed(state)
-    {
-        return false;
-    }
-    active_document(state).is_some_and(|document| selected_page_id(state, document).is_some())
-}
-
-pub(crate) fn save_document(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        app.state.prompt(report_mutation_block_reason(&app.state));
-        return;
-    }
-    let invalid = app
-        .state
-        .model
-        .workspace
-        .content
-        .report_documents
-        .iter()
-        .find_map(|document| document.validate().err());
-    if let Some(error) = invalid {
-        app.state
-            .prompt(format!("The report was not saved: {error}"));
-        return;
-    }
-    Command::Save.execute(app);
-}
-
-pub(crate) fn open_add_page(app: &mut RSpiceApp) {
-    if active_document(&app.state).is_none() || !report_mutation_allowed(&app.state) {
-        return;
-    }
-    let next =
-        active_document(&app.state).map_or(1, |document| document.pages().len().saturating_add(1));
-    let editor = &mut app.state.hardcopy.report_authoring;
-    editor.add_page_title = format!("Report page {next}");
-    editor.transaction_error = None;
-    editor.add_page_open = true;
-}
-
-pub(crate) fn open_page_properties(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        return;
-    }
-    let Some(document) = active_document(&app.state) else {
-        return;
-    };
-    let Some(page) = selected_page_id(&app.state, document).and_then(|id| document.page(id)) else {
-        return;
-    };
-    let page_id = page.id();
-    let title = page.title().to_owned();
-    let template = report_template_index(document.template());
-    let update_policy = page_update_policy_index(page.update_policy());
-    let editor = &mut app.state.hardcopy.report_authoring;
-    editor.page_properties_page = Some(page_id);
-    editor.page_title_draft = title;
-    editor.report_template_draft = template;
-    editor.page_update_policy_draft = update_policy;
-    editor.transaction_error = None;
-    editor.page_properties_open = true;
-}
 
 fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> bool {
     if !report_mutation_allowed(state) {
@@ -1232,9 +1138,7 @@ fn synchronize_report_selection(state: &mut AppState) {
 }
 
 fn active_document(state: &AppState) -> Option<&ReportDocument> {
-    let documents = &state.model.workspace.content.report_documents;
-    let id = state.hardcopy.report_authoring.selected_document?;
-    documents.iter().find(|document| document.id() == id)
+    report_editor::active_document(&state.hardcopy.report_authoring, &state.model)
 }
 
 fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, String> {
@@ -1251,31 +1155,33 @@ fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, Stri
 }
 
 fn selected_page_id(state: &AppState, document: &ReportDocument) -> Option<ReportPageId> {
-    state
-        .hardcopy
-        .report_authoring
-        .selected_page
-        .filter(|id| document.page(*id).is_some())
-        .or_else(|| document.pages().first().map(|page| page.id()))
+    report_editor::selected_page_id(&state.hardcopy.report_authoring, document)
+}
+
+fn open_add_page(app: &mut RSpiceApp) {
+    let state = &mut app.state;
+    report_editor::open_add_page(
+        &mut state.hardcopy.report_authoring,
+        &state.model,
+        &state.platform,
+    );
+}
+
+fn open_page_properties(app: &mut RSpiceApp) {
+    let state = &mut app.state;
+    report_editor::open_page_properties(
+        &mut state.hardcopy.report_authoring,
+        &state.model,
+        &state.platform,
+    );
 }
 
 fn report_mutation_allowed(state: &AppState) -> bool {
-    state.platform.project_lifecycle.is_open()
-        && !state.model.safe_mode.project_read_only()
-        && !crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
+    report_editor::mutation_allowed(&state.model, &state.platform)
 }
 
 fn report_mutation_block_reason(state: &AppState) -> &'static str {
-    if !state.platform.project_lifecycle.is_open() {
-        "Open a project before changing its report document."
-    } else if state.model.safe_mode.project_read_only() {
-        "Report changes are unavailable because the active project is read-only."
-    } else if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
-    {
-        "Wait for the current project operation to finish before changing the report."
-    } else {
-        "Report changes are unavailable in the current application state."
-    }
+    report_editor::mutation_block_reason(&state.model, &state.platform)
 }
 
 fn timestamp_unix_ms() -> u64 {
