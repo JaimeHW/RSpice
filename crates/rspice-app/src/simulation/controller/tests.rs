@@ -7,11 +7,9 @@
 use super::*;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-
-// The application the controller's tests build. The controller itself never
-// names it; its test modules import it from here.
-pub(in crate::simulation::controller) use crate::workbench::app_state::AppState;
+use rspice_app_services::workbench::workflows::export_workflow::{
+    ExportWorkflowIo, SaveDialogConfig,
+};
 
 use super::test_execution::state_with_current_clean_drc;
 use super::test_host::RunTestHost;

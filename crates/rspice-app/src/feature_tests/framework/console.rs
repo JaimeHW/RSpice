@@ -209,10 +209,11 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
 fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
     use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
 
-    let mut state = crate::simulation::controller::test_execution::run_manual_batch_session(
-        "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
+    let mut state: AppState =
+        crate::simulation::controller::test_execution::run_manual_batch_session(
+            "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
          .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
-    );
+        );
     state.open_project_session();
 
     let batch = state

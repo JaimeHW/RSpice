@@ -3,7 +3,6 @@
 use super::test_host::RunTestHost;
 use super::{SimulationController, SimulationRunIntent, SimulationRunner};
 use crate::simulation::RunHost;
-use crate::simulation::controller::tests::AppState;
 use rspice_design::drc::DrcResult;
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_simulation::results::SimulationResult;
@@ -125,11 +124,13 @@ pub(crate) fn run_generated_batch(
 }
 
 /// Run `source` as a manual deck through the real controller and hand back
-/// the session it ran in, for a test that reads what the run published.
-pub(crate) fn run_manual_batch_session(source: &str) -> AppState {
-    let mut state = AppState::default();
-    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(source.to_owned());
+/// the host it ran in, a new one of `H`, for a test that reads what the run
+/// published.
+pub(crate) fn run_manual_batch_session<H: RunHost + Default>(source: &str) -> H {
+    let mut state = H::default();
+    let model = state.model_mut();
+    model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
