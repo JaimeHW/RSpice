@@ -40,7 +40,7 @@ use crate::workbench::lifecycle::recovery_checkpoint::{
 // no native filesystem candidates.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RecoveryIntegrity {
+pub enum RecoveryIntegrity {
     Verified {
         baseline_available: bool,
         components: usize,
@@ -52,25 +52,25 @@ pub(crate) enum RecoveryIntegrity {
 }
 
 impl RecoveryIntegrity {
-    pub(crate) fn is_recoverable(&self) -> bool {
+    pub fn is_recoverable(&self) -> bool {
         matches!(self, Self::Verified { .. })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RecoveryCandidate {
-    pub(crate) original: PathBuf,
-    pub(crate) checkpoint: PathBuf,
-    pub(crate) display_name: String,
+pub struct RecoveryCandidate {
+    pub original: PathBuf,
+    pub checkpoint: PathBuf,
+    pub display_name: String,
     pub(crate) modified_unix_ms: u64,
-    pub(crate) age: String,
-    pub(crate) integrity: RecoveryIntegrity,
+    pub age: String,
+    pub integrity: RecoveryIntegrity,
     #[cfg(not(target_arch = "wasm32"))]
     binding: Option<CheckpointBinding>,
 }
 
 impl RecoveryCandidate {
-    pub(crate) fn can_discard(&self) -> bool {
+    pub fn can_discard(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.binding.as_ref().is_some_and(|binding| {
@@ -81,7 +81,7 @@ impl RecoveryCandidate {
         false
     }
 
-    pub(crate) fn is_legacy_checkpoint(&self) -> bool {
+    pub fn is_legacy_checkpoint(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.binding
@@ -94,23 +94,23 @@ impl RecoveryCandidate {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RecoveryNoticeTone {
+pub enum RecoveryNoticeTone {
     Info,
     Warning,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RecoveryNotice {
-    pub(crate) message: String,
-    pub(crate) tone: RecoveryNoticeTone,
+pub struct RecoveryNotice {
+    pub message: String,
+    pub tone: RecoveryNoticeTone,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RecoveryCatalog {
-    pub(crate) candidates: Vec<RecoveryCandidate>,
-    pub(crate) selected_checkpoint: Option<PathBuf>,
-    pub(crate) pending_discard: Option<RecoveryCandidate>,
-    pub(crate) notice: Option<RecoveryNotice>,
+pub struct RecoveryCatalog {
+    pub candidates: Vec<RecoveryCandidate>,
+    pub selected_checkpoint: Option<PathBuf>,
+    pub pending_discard: Option<RecoveryCandidate>,
+    pub notice: Option<RecoveryNotice>,
     refresh_requested: bool,
 }
 
@@ -127,18 +127,18 @@ impl Default for RecoveryCatalog {
 }
 
 impl RecoveryCatalog {
-    pub(crate) fn request_refresh(&mut self) {
+    pub fn request_refresh(&mut self) {
         self.refresh_requested = true;
     }
 
-    pub(crate) fn selected(&self) -> Option<&RecoveryCandidate> {
+    pub fn selected(&self) -> Option<&RecoveryCandidate> {
         let selected = self.selected_checkpoint.as_ref()?;
         self.candidates
             .iter()
             .find(|candidate| &candidate.checkpoint == selected)
     }
 
-    pub(crate) fn select(&mut self, checkpoint: PathBuf) {
+    pub fn select(&mut self, checkpoint: PathBuf) {
         if self
             .candidates
             .iter()
@@ -148,14 +148,14 @@ impl RecoveryCatalog {
         }
     }
 
-    pub(crate) fn info(&mut self, message: impl Into<String>) {
+    pub fn info(&mut self, message: impl Into<String>) {
         self.notice = Some(RecoveryNotice {
             message: message.into(),
             tone: RecoveryNoticeTone::Info,
         });
     }
 
-    pub(crate) fn warning(&mut self, message: impl Into<String>) {
+    pub fn warning(&mut self, message: impl Into<String>) {
         self.notice = Some(RecoveryNotice {
             message: message.into(),
             tone: RecoveryNoticeTone::Warning,
@@ -165,7 +165,7 @@ impl RecoveryCatalog {
 
 /// Refresh once when the launcher opens, enters Recovery, or completes a
 /// destructive checkpoint action. Parsing never occurs in every paint frame.
-pub(crate) fn refresh_catalog_if_requested(
+pub fn refresh_catalog_if_requested(
     platform: &mut PlatformState,
     model: &Model,
     io: &(impl FileWorkflowIo + ?Sized),
@@ -590,7 +590,7 @@ fn project_owned_differences(model: &Model) -> Result<ProjectOwnedDifferences, S
 /// Explain why replacing the active project with a recovery comparison would
 /// destroy state that cannot be reconstructed from its saved project (or from
 /// the documented pristine state of an unsaved project).
-pub(crate) fn recovery_replacement_block_reason(model: &Model) -> Option<String> {
+pub fn recovery_replacement_block_reason(model: &Model) -> Option<String> {
     if model.schematic.session.is_dirty || model.workspace.any_dirty() {
         return Some(
             "Recovery comparison is blocked because the current design has unsaved changes. Save or close the current project before opening recovery work."
@@ -637,7 +637,7 @@ pub(crate) fn recovery_replacement_block_reason(model: &Model) -> Option<String>
 /// A recovery comparison read and built, ready to replace the open work, with
 /// the note about its baseline to log once it has.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) struct PreparedComparison {
+pub struct PreparedComparison {
     workspace: ComparisonWorkspace,
     baseline_notice: Option<String>,
 }
@@ -645,7 +645,7 @@ pub(crate) struct PreparedComparison {
 /// Read a recovery checkpoint and build the comparison it opens as, refusing
 /// when opening it would destroy work the open project cannot rebuild.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn prepare_comparison(
+pub fn prepare_comparison(
     model: &Model,
     candidate: &RecoveryCandidate,
 ) -> Result<PreparedComparison, String> {
@@ -686,7 +686,7 @@ pub(crate) fn prepare_comparison(
 /// Put the comparison's libraries, workspace and design in place of the open
 /// ones, and hand back the note about its baseline.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_comparison_design(
+pub fn install_comparison_design(
     model: &mut Model,
     comparison: PreparedComparison,
 ) -> Option<String> {
@@ -698,7 +698,7 @@ pub(crate) fn install_comparison_design(
 
 /// A comparison runs on the pristine simulation plan and model libraries.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn reset_comparison_execution(model: &mut Model) {
+pub fn reset_comparison_execution(model: &mut Model) {
     model.sim_setup = SimSetupState::new();
     model.model_library_manager =
         rspice_app_state::workbench::workspace::default_model_library_manager();
@@ -706,7 +706,7 @@ pub(crate) fn reset_comparison_execution(model: &mut Model) {
 
 /// Why a recovery comparison cannot open here.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn comparison_unavailable() -> String {
+pub fn comparison_unavailable() -> String {
     "Native recovery checkpoints are unavailable in this browser".to_owned()
 }
 
@@ -816,7 +816,7 @@ fn build_comparison_workspace(
     })
 }
 
-pub(crate) fn discard_checkpoint(candidate: &RecoveryCandidate) -> Result<String, String> {
+pub fn discard_checkpoint(candidate: &RecoveryCandidate) -> Result<String, String> {
     validate_candidate_path(candidate)?;
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -840,10 +840,7 @@ pub(crate) fn discard_checkpoint(candidate: &RecoveryCandidate) -> Result<String
 
 /// Refuse a safe-mode start this launch cannot honour: one already started,
 /// one isolating nothing, or one asking for a renderer that cannot change now.
-pub(crate) fn check_safe_mode_start(
-    model: &Model,
-    options: LocalSafeModeOptions,
-) -> Result<(), String> {
+pub fn check_safe_mode_start(model: &Model, options: LocalSafeModeOptions) -> Result<(), String> {
     if model.safe_mode.active {
         return Err("Safe mode is already active for this launch".to_owned());
     }
@@ -861,7 +858,7 @@ pub(crate) fn check_safe_mode_start(
 
 /// Hold the session kept from before safe mode, which persistence uses until
 /// this process exits, and block project writes when asked.
-pub(crate) fn activate_safe_mode(
+pub fn activate_safe_mode(
     model: &mut Model,
     options: LocalSafeModeOptions,
     preserved_session: String,
@@ -873,7 +870,7 @@ pub(crate) fn activate_safe_mode(
 }
 
 /// Say which isolations safe mode enforces for this launch.
-pub(crate) fn record_safe_mode_started(model: &mut Model, options: LocalSafeModeOptions) {
+pub fn record_safe_mode_started(model: &mut Model, options: LocalSafeModeOptions) {
     let mut enforced = Vec::new();
     if options.disable_third_party_extensions {
         enforced.push("third-party extensions disabled");
@@ -903,11 +900,11 @@ pub(crate) fn record_safe_mode_started(model: &mut Model, options: LocalSafeMode
 /// eframe chooses its adapter before the application and launcher are created.
 /// A live switch is therefore unavailable until the native relaunch path can
 /// select and verify a CPU adapter before constructing `RSpiceApp`.
-pub(crate) const fn software_rendering_supported() -> bool {
+pub const fn software_rendering_supported() -> bool {
     false
 }
 
-pub(crate) const fn diagnostics_folder_supported() -> bool {
+pub const fn diagnostics_folder_supported() -> bool {
     cfg!(all(
         not(target_arch = "wasm32"),
         any(
@@ -920,12 +917,12 @@ pub(crate) const fn diagnostics_folder_supported() -> bool {
 
 /// The file the diagnostic folder keeps the session log in.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) const SESSION_LOG_FILE: &str = "current-session.log";
+pub const SESSION_LOG_FILE: &str = "current-session.log";
 
 /// Where the diagnostic snapshot and its session log are written: the
 /// application-data directory's `rspice/diagnostics`.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn diagnostics_directory() -> Option<PathBuf> {
+pub fn diagnostics_directory() -> Option<PathBuf> {
     dirs::data_local_dir()
         .or_else(dirs::config_dir)
         .map(|directory| directory.join("rspice").join("diagnostics"))
@@ -957,10 +954,7 @@ fn session_log_text(model: &Model, home: Option<&str>) -> String {
 
 /// Write an explicit, privacy-reviewable diagnostic snapshot and reveal its
 /// directory using the host desktop's file-manager API.
-pub(crate) fn open_diagnostics_folder(
-    model: &Model,
-    platform: &PlatformState,
-) -> Result<PathBuf, String> {
+pub fn open_diagnostics_folder(model: &Model, platform: &PlatformState) -> Result<PathBuf, String> {
     #[cfg(all(
         not(target_arch = "wasm32"),
         any(target_os = "windows", target_os = "macos", target_os = "linux")
@@ -1033,7 +1027,7 @@ pub(crate) fn open_diagnostics_folder(
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
+pub fn reveal_directory(directory: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;

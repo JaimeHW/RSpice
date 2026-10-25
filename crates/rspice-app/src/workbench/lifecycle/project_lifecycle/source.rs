@@ -16,45 +16,45 @@ use rspice_app_state::workbench::workspace::Workspace;
 
 /// The result presentation a project file saves: the reader's markers, panes
 /// and expression groups about the datasets the project still holds.
-pub(crate) trait ResultPresentationSource {
+pub trait ResultPresentationSource {
     fn project_presentation(&self, simulation: &SimulationState) -> ResultPresentation;
 }
 
 /// What the lifecycle reads.
 #[derive(Clone, Copy)]
-pub(crate) struct LifecycleView<'a> {
-    pub(crate) model: &'a Model,
-    pub(crate) platform: &'a PlatformState,
+pub struct LifecycleView<'a> {
+    pub model: &'a Model,
+    pub platform: &'a PlatformState,
     /// The workspace in front; it names the active document.
-    pub(crate) workspace: Workspace,
+    pub workspace: Workspace,
     /// Asked only when a snapshot is captured, after the project's inputs.
-    pub(crate) presentation: &'a dyn ResultPresentationSource,
+    pub presentation: &'a dyn ResultPresentationSource,
 }
 
 /// What the lifecycle writes, with the values it reads beside them.
-pub(crate) struct LifecycleParts<'a> {
-    pub(crate) model: &'a mut Model,
-    pub(crate) platform: &'a mut PlatformState,
+pub struct LifecycleParts<'a> {
+    pub model: &'a mut Model,
+    pub platform: &'a mut PlatformState,
     /// The workspace in front; it names the active document.
-    pub(crate) workspace: Workspace,
+    pub workspace: Workspace,
     /// Asked only when a snapshot is captured, after the project's inputs.
-    pub(crate) presentation: &'a dyn ResultPresentationSource,
+    pub presentation: &'a dyn ResultPresentationSource,
 }
 
 /// Where the lifecycle reads the project from.
-pub(crate) trait LifecycleSource {
+pub trait LifecycleSource {
     fn lifecycle_view(&self) -> LifecycleView<'_>;
 }
 
 /// Where the lifecycle changes the project.
-pub(crate) trait LifecycleSourceMut: LifecycleSource {
+pub trait LifecycleSourceMut: LifecycleSource {
     fn lifecycle_parts(&mut self) -> LifecycleParts<'_>;
 }
 
 /// The application a save completes in. A save the preference asks to be
 /// checked runs the design checks there, after the save is adopted and before
 /// its transaction ends.
-pub(crate) trait LifecycleHost: LifecycleSourceMut {
+pub trait LifecycleHost: LifecycleSourceMut {
     fn run_active_design_checks(&mut self) -> Result<DrcResult, String>;
 }
 

@@ -63,52 +63,52 @@ use std::path::Path;
 use egui::{Context, Id};
 
 mod binary;
-pub(crate) use binary::{open_binary_file, take_opened_binary};
+pub use binary::{open_binary_file, take_opened_binary};
 
 /// Largest result dataset an import reads. The result importers bound their
 /// decoding by it, and the browser picker refuses a larger file before it
 /// reads one.
-pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Maximum UTF-8 source accepted by the symbol-definition importer.
 ///
 /// Symbol definitions are compact vector documents. A four MiB ceiling is
 /// deliberately independent from the much larger project/deck limit and is
 /// applied before parsing on both native and browser builds.
-pub(crate) const MAX_SYMBOL_DEFINITION_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
+pub const MAX_SYMBOL_DEFINITION_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Largest shortcut profile, or shortcut artifact source, that an import reads
 /// or an export writes. The browser picker refuses a larger file before it
 /// reads one.
-pub(crate) const MAX_SHORTCUT_PROFILE_BYTES: u64 = 512 * 1024;
+pub const MAX_SHORTCUT_PROFILE_BYTES: u64 = 512 * 1024;
 
 /// What a picker offers, and how its refusals name the file.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FileKind {
+pub struct FileKind {
     /// The filter's label in the picker, e.g. `"Design variable spec sheet"`.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The extensions the filter accepts, without a leading dot. The first
     /// also names the encoding a decode failure asks for.
-    pub(crate) extensions: &'static [&'static str],
+    pub extensions: &'static [&'static str],
     /// How a message names the file, e.g. `"the spec sheet"`. Every message
     /// this module produces leads with it, so a caller whose surface writes
     /// sentence case can capitalize it here and get sentence case back.
-    pub(crate) subject: &'static str,
+    pub subject: &'static str,
     /// What to call the file when the chosen path's own name is not UTF-8.
-    pub(crate) fallback_name: &'static str,
+    pub fallback_name: &'static str,
 }
 
 /// A file the reader chose to open, already decoded.
 #[derive(Debug, Clone)]
-pub(crate) struct OpenedFile {
-    pub(crate) name: String,
-    pub(crate) text: String,
+pub struct OpenedFile {
+    pub name: String,
+    pub text: String,
 }
 
 /// A destination the reader chose, already written.
 #[derive(Debug, Clone)]
-pub(crate) struct SavedFile {
-    pub(crate) name: String,
+pub struct SavedFile {
+    pub name: String,
 }
 
 /// What one exchange produced: the file, or `None` where the reader cancelled.
@@ -116,9 +116,9 @@ pub(crate) struct SavedFile {
 /// Cancellation is a choice rather than a failure, so it is a variant of the
 /// success case. A caller that treats it as an error has to recognise its own
 /// cancellation message to keep from reporting one.
-pub(crate) type Outcome<T> = Result<Option<T>, String>;
+pub type Outcome<T> = Result<Option<T>, String>;
 
-pub(crate) fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {
+pub fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {
     path.extension()
         .and_then(std::ffi::OsStr::to_str)
         .is_some_and(|ext| ext.eq_ignore_ascii_case(expected_ext))
@@ -127,7 +127,7 @@ pub(crate) fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> 
 /// Give a chosen destination its expected extension. Every save path goes
 /// through this one rule, because a document saved without its expected
 /// extension is a document the next open will not find.
-pub(crate) fn ensure_file_extension(path: &mut std::path::PathBuf, expected_ext: &str) {
+pub fn ensure_file_extension(path: &mut std::path::PathBuf, expected_ext: &str) {
     if !has_file_extension(path, expected_ext) {
         path.set_extension(expected_ext);
     }
@@ -141,12 +141,7 @@ type Mailbox<T> = Arc<Mutex<Option<Outcome<T>>>>;
 /// The `Err` here means the exchange never started — an `id` already has a
 /// picker open. Whatever the picker itself produces arrives through the
 /// mailbox.
-pub(crate) fn open_file(
-    ctx: &Context,
-    id: Id,
-    kind: FileKind,
-    max_bytes: usize,
-) -> Result<(), String> {
+pub fn open_file(ctx: &Context, id: Id, kind: FileKind, max_bytes: usize) -> Result<(), String> {
     let mailbox = claim::<OpenedFile>(ctx, id, kind)?;
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -191,7 +186,7 @@ pub(crate) fn open_file(
 ///
 /// `file_name` is what the picker opens with, not where the file lands: the
 /// reader chooses that.
-pub(crate) fn save_file(
+pub fn save_file(
     ctx: &Context,
     id: Id,
     kind: FileKind,
@@ -235,18 +230,18 @@ pub(crate) fn save_file(
 }
 
 /// Take the result of an [`open_file`] started under `id`, if one has arrived.
-pub(crate) fn take_opened(ctx: &Context, id: Id) -> Option<Outcome<OpenedFile>> {
+pub fn take_opened(ctx: &Context, id: Id) -> Option<Outcome<OpenedFile>> {
     take(ctx, id)
 }
 
 /// Take the result of a [`save_file`] started under `id`, if one has arrived.
-pub(crate) fn take_saved(ctx: &Context, id: Id) -> Option<Outcome<SavedFile>> {
+pub fn take_saved(ctx: &Context, id: Id) -> Option<Outcome<SavedFile>> {
     take(ctx, id)
 }
 
 /// Drop delivery when the owning editor closes. An in-flight picker may still
 /// finish, but its detached mailbox can no longer deliver to a different editor.
-pub(crate) fn discard_exchange(ctx: &Context, id: Id) {
+pub fn discard_exchange(ctx: &Context, id: Id) {
     ctx.data_mut(|data| {
         data.remove::<Mailbox<OpenedFile>>(id);
         data.remove::<Mailbox<binary::OpenedBinaryFile>>(id);
@@ -325,7 +320,7 @@ fn chosen_destination(kind: FileKind, file_name: &str) -> Option<std::path::Path
 /// reader actually reaches.
 #[cfg(all(not(target_arch = "wasm32"), test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ScriptedChoice {
+pub enum ScriptedChoice {
     /// The reader chose this path.
     Chose(std::path::PathBuf),
     /// The reader cancelled.
@@ -351,7 +346,7 @@ thread_local! {
 
 /// Answer the next picker this thread opens with `choice`.
 #[cfg(all(not(target_arch = "wasm32"), test))]
-pub(crate) fn script_next_choice(choice: ScriptedChoice) {
+pub fn script_next_choice(choice: ScriptedChoice) {
     SCRIPTED_CHOICES.with_borrow_mut(|queue| queue.push_back(choice));
 }
 
@@ -360,14 +355,14 @@ pub(crate) fn script_next_choice(choice: ScriptedChoice) {
 /// A test that scripted a pick and finds one still queued pressed something
 /// that never opened a picker at all.
 #[cfg(all(not(target_arch = "wasm32"), test))]
-pub(crate) fn scripted_choices_remaining() -> usize {
+pub fn scripted_choices_remaining() -> usize {
     SCRIPTED_CHOICES.with_borrow(std::collections::VecDeque::len)
 }
 
 /// The pickers this thread has opened since this was last called, by the label
 /// their filter announces, and clear the record.
 #[cfg(all(not(target_arch = "wasm32"), test))]
-pub(crate) fn take_pickers_opened() -> Vec<&'static str> {
+pub fn take_pickers_opened() -> Vec<&'static str> {
     PICKERS_OPENED.with_borrow_mut(std::mem::take)
 }
 

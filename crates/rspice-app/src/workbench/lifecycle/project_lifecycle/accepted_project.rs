@@ -7,7 +7,7 @@ use crate::io::ProjectSnapshot;
 use crate::state::SchematicState;
 
 impl ProjectLifecycleState {
-    pub(crate) fn accept_project(
+    pub fn accept_project(
         &mut self,
         baseline: ProjectSnapshot,
         binding: Option<PersistenceBinding>,
@@ -22,11 +22,7 @@ impl ProjectLifecycleState {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn restore_project(
-        &mut self,
-        baseline: ProjectSnapshot,
-        binding: PersistenceBinding,
-    ) {
+    pub fn restore_project(&mut self, baseline: ProjectSnapshot, binding: PersistenceBinding) {
         let ProjectSnapshot {
             file,
             workspace_session,
@@ -36,7 +32,7 @@ impl ProjectLifecycleState {
         self.accepted_binding = Some(binding);
     }
 
-    pub(super) fn accepted_snapshot(&self) -> Result<ProjectSnapshot, ProjectLifecycleError> {
+    pub fn accepted_snapshot(&self) -> Result<ProjectSnapshot, ProjectLifecycleError> {
         let accepted = self
             .authority
             .accepted()
@@ -47,13 +43,13 @@ impl ProjectLifecycleState {
         })
     }
 
-    pub(super) fn accepted_schematic_editor(&self, key: &str) -> Option<SchematicState> {
+    pub fn accepted_schematic_editor(&self, key: &str) -> Option<SchematicState> {
         let accepted = self.authority.accepted()?;
         self.accepted_session
             .clone_schematic_editor(&accepted.baseline().workspace, key)
     }
 
-    pub(super) fn accepted_document_candidate(
+    pub fn accepted_document_candidate(
         &self,
         working: &ProjectSnapshot,
         id: &ProjectDocumentId,

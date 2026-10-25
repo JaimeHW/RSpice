@@ -13,7 +13,7 @@
 //! - `waveform_io` - Waveform export (CSV, TSV, Touchstone)
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rspice_output::durable_file;
+pub use rspice_output::durable_file;
 pub(crate) mod file_exchange;
 pub(crate) mod generated_bundle;
 pub(crate) mod netlist_export;
@@ -27,11 +27,11 @@ pub(crate) mod waveform_io;
 // Re-exports
 pub use generated_bundle::build_generated_bundle;
 pub use netlist_export::NetlistFormat;
-pub(crate) use project_execution::{capture_execution_context, restore_execution_context};
+pub use project_execution::{capture_execution_context, restore_execution_context};
 pub use project_io::{ProjectSimulationResults, ProjectSnapshot, load_project_file};
 #[cfg(test)]
-pub(crate) use project_results::simulation_state_from_results;
-pub(crate) use project_results::{
+pub use project_results::simulation_state_from_results;
+pub use project_results::{
     capture_simulation_results, capture_simulation_results_without_runs, restore_simulation_results,
 };
 pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext};
@@ -39,8 +39,8 @@ pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecut
 // assert that the page and the run reach the same verdict rather than that
 // they read alike. Nothing outside a test may reach past the context type.
 #[cfg(test)]
-pub(crate) use rspice_project::{ProjectModelLibrary, persisted_active_model_section_names};
-pub(crate) use schematic_io::{FileWorkflowIo, NativeFileWorkflowIo};
+pub use rspice_project::{ProjectModelLibrary, persisted_active_model_section_names};
+pub use schematic_io::{FileWorkflowIo, NativeFileWorkflowIo};
 pub use schematic_io::{load_schematic, save_schematic, show_save_dialog};
 // Native file pickers. The browser reaches its own import path instead.
 #[cfg(not(target_arch = "wasm32"))]

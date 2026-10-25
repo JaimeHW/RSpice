@@ -27,7 +27,7 @@ const RSPICE_API_VERSION: &str = "1.0.0";
 /// browser cannot leave an Automation request pending forever.
 const RUNTIME_STARTUP_LIMIT_MS: f64 = 120_000.0;
 
-pub(crate) struct BrowserAutomationRuntime {
+pub struct BrowserAutomationRuntime {
     worker: Option<ActiveWorker>,
     events: Rc<RefCell<VecDeque<Result<EventEnvelope, String>>>>,
     next_request_id: u64,
@@ -65,7 +65,7 @@ impl Drop for ActiveWorker {
 }
 
 impl BrowserAutomationRuntime {
-    pub(crate) fn discover() -> Self {
+    pub fn discover() -> Self {
         Self {
             worker: None,
             events: Rc::new(RefCell::new(VecDeque::new())),
@@ -76,11 +76,11 @@ impl BrowserAutomationRuntime {
         }
     }
 
-    pub(crate) fn availability_reason(&self) -> Option<String> {
+    pub fn availability_reason(&self) -> Option<String> {
         worker_url().err()
     }
 
-    pub(crate) fn ensure_worker(&mut self) -> Result<(), String> {
+    pub fn ensure_worker(&mut self) -> Result<(), String> {
         if self.worker.is_some() {
             return Ok(());
         }
@@ -144,7 +144,7 @@ impl BrowserAutomationRuntime {
         Ok(())
     }
 
-    pub(crate) fn send_request(&mut self, request: RuntimeRequest) -> Result<u64, String> {
+    pub fn send_request(&mut self, request: RuntimeRequest) -> Result<u64, String> {
         if let RuntimeRequest::Launch { snapshot, .. } = &request {
             validate_launch_snapshot(snapshot)?;
             if self.active_limits.is_some() {
@@ -211,7 +211,7 @@ impl BrowserAutomationRuntime {
         Ok(request_id)
     }
 
-    pub(crate) fn poll_events(&mut self) -> Vec<Result<EventEnvelope, String>> {
+    pub fn poll_events(&mut self) -> Vec<Result<EventEnvelope, String>> {
         if let Some(limits) = self.active_limits {
             match browser_now_ms() {
                 Ok(now) if now >= limits.deadline_ms => {
@@ -325,7 +325,7 @@ impl BrowserAutomationRuntime {
         output
     }
 
-    pub(crate) fn terminate(&mut self) -> Result<(), String> {
+    pub fn terminate(&mut self) -> Result<(), String> {
         self.worker = None;
         self.runtime_ready = false;
         self.active_limits = None;

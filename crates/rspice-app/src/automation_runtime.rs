@@ -23,7 +23,7 @@ use crate::build_identity::BuildIdentity;
 
 const RUNTIME_RELATIVE_PATH: &str = "runtimes/python";
 
-pub(crate) struct NativeAutomationRuntime {
+pub struct NativeAutomationRuntime {
     discovery: RuntimeDiscovery,
     worker: Option<NativeWorker>,
     next_request_id: u64,
@@ -47,7 +47,7 @@ enum RuntimeDiscovery {
 }
 
 impl NativeAutomationRuntime {
-    pub(crate) fn discover() -> Self {
+    pub fn discover() -> Self {
         let key_id = env!("RSPICE_AUTOMATION_RUNTIME_KEY_ID");
         let key_hex = env!("RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX");
         if key_id.is_empty() || key_hex.is_empty() {
@@ -116,7 +116,7 @@ impl NativeAutomationRuntime {
         }
     }
 
-    pub(crate) fn poll_discovery(&mut self) {
+    pub fn poll_discovery(&mut self) {
         let RuntimeDiscovery::Pending(receiver) = &self.discovery else {
             return;
         };
@@ -133,7 +133,7 @@ impl NativeAutomationRuntime {
         }
     }
 
-    pub(crate) fn availability_reason(&self) -> Option<&str> {
+    pub fn availability_reason(&self) -> Option<&str> {
         match &self.discovery {
             RuntimeDiscovery::Pending(_) => {
                 Some("managed Python runtime verification is in progress")
@@ -143,7 +143,7 @@ impl NativeAutomationRuntime {
         }
     }
 
-    pub(crate) fn ensure_worker(&mut self, scratch: PathBuf) -> Result<(), String> {
+    pub fn ensure_worker(&mut self, scratch: PathBuf) -> Result<(), String> {
         self.poll_discovery();
         if self.worker.is_some() {
             return Ok(());
@@ -159,7 +159,7 @@ impl NativeAutomationRuntime {
         Ok(())
     }
 
-    pub(crate) fn send(&mut self, request: &RequestEnvelope) -> Result<(), String> {
+    pub fn send(&mut self, request: &RequestEnvelope) -> Result<(), String> {
         let worker = self
             .worker
             .as_mut()
@@ -167,7 +167,7 @@ impl NativeAutomationRuntime {
         worker.send(request).map_err(|error| error.to_string())
     }
 
-    pub(crate) fn send_request(
+    pub fn send_request(
         &mut self,
         request: rspice_automation_protocol::RuntimeRequest,
     ) -> Result<u64, String> {
@@ -258,7 +258,7 @@ impl NativeAutomationRuntime {
         Ok(())
     }
 
-    pub(crate) fn poll_events(&mut self) -> Vec<Result<EventEnvelope, String>> {
+    pub fn poll_events(&mut self) -> Vec<Result<EventEnvelope, String>> {
         let mut events = Vec::new();
         let Some(worker) = self.worker.as_mut() else {
             return events;
@@ -370,7 +370,7 @@ impl NativeAutomationRuntime {
         events
     }
 
-    pub(crate) fn terminate(&mut self) -> Result<(), String> {
+    pub fn terminate(&mut self) -> Result<(), String> {
         let result = self.worker.take().map_or(Ok(()), |mut worker| {
             worker.terminate().map_err(|error| error.to_string())
         });

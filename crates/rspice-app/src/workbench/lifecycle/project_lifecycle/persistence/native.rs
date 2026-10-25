@@ -11,7 +11,7 @@ use rspice_project::persistence::{
 };
 use std::path::{Path, PathBuf};
 
-pub(crate) struct NativeStorage;
+pub struct NativeStorage;
 
 fn native_storage_error(error: CompareExchangeError) -> PersistenceError {
     match error {
@@ -105,7 +105,7 @@ impl NativeProjectStorage for NativeStorage {
     }
 }
 
-pub(crate) fn read_native_binding(
+pub fn read_native_binding(
     path: &Path,
 ) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
     let (project, binding) = PersistenceBinding::open(
@@ -116,7 +116,7 @@ pub(crate) fn read_native_binding(
     Ok((ProjectSnapshot::from_decoded(project), binding))
 }
 
-pub(crate) fn restore_native_binding(
+pub fn restore_native_binding(
     path: &Path,
     session_project_id: &str,
     receipt: &NativeBindingReceipt,
@@ -131,7 +131,7 @@ pub(crate) fn restore_native_binding(
     Ok((ProjectSnapshot::from_decoded(project), binding))
 }
 
-pub(crate) fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {
+pub fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {
     if path.exists() {
         return std::fs::canonicalize(path).map_err(PersistenceError::Io);
     }

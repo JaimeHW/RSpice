@@ -7,7 +7,7 @@
 //! image is for functional qualification, not idle-work or performance budgets.
 
 #[derive(Default)]
-pub(crate) struct ControlObserver {
+pub struct ControlObserver {
     last_request: Option<String>,
 }
 

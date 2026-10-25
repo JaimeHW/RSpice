@@ -12,13 +12,13 @@ use std::sync::OnceLock;
 
 /// What the shell's build script stamped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct BuildIdentity {
+pub struct BuildIdentity {
     /// The source commit, or `"unknown"` for a build made outside a checkout.
-    pub(crate) hash: &'static str,
+    pub hash: &'static str,
     /// The Rust target triple the build was compiled for.
-    pub(crate) target: &'static str,
+    pub target: &'static str,
     /// The architecture of that target.
-    pub(crate) arch: &'static str,
+    pub arch: &'static str,
 }
 
 static INSTALLED: OnceLock<BuildIdentity> = OnceLock::new();
@@ -27,19 +27,19 @@ impl BuildIdentity {
     /// Install the identity of this process. The shell does this once at
     /// startup, before anything reads it; a process has one build, so a later
     /// call keeps the first identity.
-    pub(crate) fn install(identity: Self) {
+    pub fn install(identity: Self) {
         let installed = INSTALLED.get_or_init(|| identity);
         debug_assert_eq!(*installed, identity, "a process has one build identity");
     }
 
     /// The installed identity, or `None` before the shell installed one.
-    pub(crate) fn installed() -> Option<&'static Self> {
+    pub fn installed() -> Option<&'static Self> {
         INSTALLED.get()
     }
 
     /// The source commit, or `"unknown"` when no identity is installed: the
     /// same answer a build made outside a checkout gives.
-    pub(crate) fn source_hash() -> &'static str {
+    pub fn source_hash() -> &'static str {
         Self::installed().map_or("unknown", |identity| identity.hash)
     }
 }

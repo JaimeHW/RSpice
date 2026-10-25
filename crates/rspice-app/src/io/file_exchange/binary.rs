@@ -2,12 +2,12 @@
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(crate) struct OpenedBinaryFile {
-    pub(crate) name: String,
-    pub(crate) bytes: Vec<u8>,
+pub struct OpenedBinaryFile {
+    pub name: String,
+    pub bytes: Vec<u8>,
 }
 
-pub(crate) fn open_binary_file(
+pub fn open_binary_file(
     ctx: &Context,
     id: Id,
     kind: FileKind,
@@ -76,6 +76,6 @@ async fn read_browser_file(
     })
 }
 
-pub(crate) fn take_opened_binary(ctx: &Context, id: Id) -> Option<Outcome<OpenedBinaryFile>> {
+pub fn take_opened_binary(ctx: &Context, id: Id) -> Option<Outcome<OpenedBinaryFile>> {
     take(ctx, id)
 }

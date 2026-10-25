@@ -31,7 +31,7 @@ use crate::state::model_hub::{
 };
 
 /// How long a cached catalog may go unrefreshed before a workspace says so.
-pub(crate) const CATALOG_STALE_AFTER_DAYS: u64 = 7;
+pub const CATALOG_STALE_AFTER_DAYS: u64 = 7;
 
 const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 
@@ -41,7 +41,7 @@ const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 /// handle is a path, and a memory handle is a reference to the one allocation
 /// this session's packs live in.
 #[derive(Debug, Clone)]
-pub(crate) enum ModelHubStoreHandle {
+pub enum ModelHubStoreHandle {
     #[cfg(not(target_arch = "wasm32"))]
     Filesystem {
         store: crate::state::model_hub::FilesystemModelHubStore,
@@ -66,7 +66,7 @@ pub(crate) enum ModelHubStoreHandle {
 
 impl ModelHubStoreHandle {
     /// The handle a shipped build uses on this platform.
-    pub(crate) fn production() -> Result<Self, ModelHubError> {
+    pub fn production() -> Result<Self, ModelHubError> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let store = crate::state::model_hub::FilesystemModelHubStore::production()?;
@@ -121,7 +121,7 @@ impl ModelHubStoreHandle {
     ///
     /// [`PackStorageStanding::NotApplicable`]:
     ///     crate::state::model_hub::durable::PackStorageStanding::NotApplicable
-    pub(crate) fn standing(&self) -> crate::state::model_hub::durable::PackStorageStanding {
+    pub fn standing(&self) -> crate::state::model_hub::durable::PackStorageStanding {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::Filesystem { .. } => {
@@ -135,7 +135,7 @@ impl ModelHubStoreHandle {
     }
 
     /// Opens a hub over this store under the shipped trust anchor.
-    pub(crate) fn open(&self) -> Result<ModelHub, ModelHubError> {
+    pub fn open(&self) -> Result<ModelHub, ModelHubError> {
         ModelHub::open(TrustAnchor::release()?, self.boxed(), self.pack_root())
     }
 
@@ -160,7 +160,7 @@ impl ModelHubStoreHandle {
 
 /// The session's hub, or the reason there isn't one.
 #[derive(Debug)]
-pub(crate) struct ModelHubService {
+pub struct ModelHubService {
     store: Option<ModelHubStoreHandle>,
     hub: Option<ModelHub>,
     unavailable: Option<String>,
@@ -173,7 +173,7 @@ pub(crate) struct ModelHubService {
 impl ModelHubService {
     /// Opens the session hub, sweeping any interrupted install, with the
     /// transport provider the shell installs.
-    pub(crate) fn open(transport_provider: &'static dyn ModelHubTransportProvider) -> Self {
+    pub fn open(transport_provider: &'static dyn ModelHubTransportProvider) -> Self {
         let (store, hub, unavailable) = match ModelHubStoreHandle::production().and_then(|store| {
             let hub = store.open()?;
             Ok((store, hub))
@@ -191,7 +191,7 @@ impl ModelHubService {
 
     /// A service with no hub at all, for tests.
     #[cfg(test)]
-    pub(crate) fn unavailable(reason: impl Into<String>) -> Self {
+    pub fn unavailable(reason: impl Into<String>) -> Self {
         Self {
             store: None,
             hub: None,
@@ -203,7 +203,7 @@ impl ModelHubService {
     /// A service over an explicit store. Tests use this to drive the real
     /// pipeline against fixture bytes; nothing about verification changes.
     #[cfg(test)]
-    pub(crate) fn with_store(store: ModelHubStoreHandle, hub: ModelHub) -> Self {
+    pub fn with_store(store: ModelHubStoreHandle, hub: ModelHub) -> Self {
         Self {
             store: Some(store),
             hub: Some(hub),
@@ -212,7 +212,7 @@ impl ModelHubService {
         }
     }
 
-    pub(crate) fn hub(&self) -> Option<&ModelHub> {
+    pub fn hub(&self) -> Option<&ModelHub> {
         self.hub.as_ref()
     }
 
@@ -220,7 +220,7 @@ impl ModelHubService {
     ///
     /// A worker takes it with the store when the operation starts, so the
     /// lookup is a copied reference and never an allocation.
-    pub(crate) fn transport_provider(&self) -> &'static dyn ModelHubTransportProvider {
+    pub fn transport_provider(&self) -> &'static dyn ModelHubTransportProvider {
         self.transport_provider
     }
 
@@ -231,7 +231,7 @@ impl ModelHubService {
     /// rows come from the same provider over zero installed packs and no
     /// catalog, so a browser with storage denied still places what the
     /// project holds.
-    pub(crate) fn part_index(
+    pub fn part_index(
         &self,
         libraries: &[&crate::state::model_library::ModelLibrary],
     ) -> Vec<crate::state::model_hub::ModelHubPartRow> {
@@ -247,7 +247,7 @@ impl ModelHubService {
         }
     }
 
-    pub(crate) fn store(&self) -> Option<&ModelHubStoreHandle> {
+    pub fn store(&self) -> Option<&ModelHubStoreHandle> {
         self.store.as_ref()
     }
 
@@ -256,7 +256,7 @@ impl ModelHubService {
     /// A session with no store promises nothing and says so, which is not the
     /// same as a store that promises nothing: the first has no packs to have
     /// an opinion about.
-    pub(crate) fn storage_standing(&self) -> crate::state::model_hub::durable::PackStorageStanding {
+    pub fn storage_standing(&self) -> crate::state::model_hub::durable::PackStorageStanding {
         self.store.as_ref().map_or(
             crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
             ModelHubStoreHandle::standing,
@@ -275,7 +275,7 @@ impl ModelHubService {
     /// Beside the report, why the store could not be re-read, when it could
     /// not: the caller states it in the Console.
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn restore_persisted_packs(
+    pub fn restore_persisted_packs(
         &mut self,
         persisted: crate::state::model_hub::durable::PersistedHubState,
     ) -> Option<(
@@ -292,7 +292,7 @@ impl ModelHubService {
     }
 
     /// Why there is no hub, in words a user can act on.
-    pub(crate) fn unavailable_reason(&self) -> Option<&str> {
+    pub fn unavailable_reason(&self) -> Option<&str> {
         self.unavailable.as_deref()
     }
 
@@ -302,7 +302,7 @@ impl ModelHubService {
     /// the previous view is still a true description of bytes on this machine,
     /// and replacing it with nothing would turn a transient read error into a
     /// workspace that claims nothing is installed.
-    pub(crate) fn reload(&mut self) -> Result<(), String> {
+    pub fn reload(&mut self) -> Result<(), String> {
         let Some(store) = self.store.as_ref() else {
             return Err(self
                 .unavailable
@@ -323,7 +323,7 @@ impl ModelHubService {
     /// The instant comes from the *signed* snapshot, not from when the
     /// download happened, so a client cannot make a stale catalog look fresh
     /// by re-fetching the same generation.
-    pub(crate) fn catalog_age_days(&self) -> Option<u64> {
+    pub fn catalog_age_days(&self) -> Option<u64> {
         let generated = self.hub.as_ref()?.catalog_identity()?.generated_at_epoch?;
         let now =
             std::time::Duration::from_millis(crate::time_compat::checked_unix_time_ms().ok()?);
@@ -336,12 +336,12 @@ impl ModelHubService {
     /// fortnight old is worth refreshing and is still perfectly usable — while
     /// an expiry is the publisher naming the moment it stops standing, and
     /// past it this client offers nothing from the hub until it refreshes.
-    pub(crate) fn catalog_expired(&self) -> Option<&str> {
+    pub fn catalog_expired(&self) -> Option<&str> {
         self.hub.as_ref()?.catalog_expired()
     }
 
     /// An offer-specific failure must not hide installed packs or their actions.
-    pub(crate) fn catalog_time_issue(&self) -> Option<String> {
+    pub fn catalog_time_issue(&self) -> Option<String> {
         match self.hub.as_ref()?.require_current_catalog() {
             Ok(()) | Err(ModelHubError::NoCatalog | ModelHubError::CatalogExpired { .. }) => None,
             Err(error) => Some(error.to_string()),
@@ -353,7 +353,7 @@ impl ModelHubService {
     /// A hub with no cache and a hub whose cache was discarded look identical
     /// from every other accessor, and they are not the same situation: one has
     /// never asked, the other was lied to or corrupted.
-    pub(crate) fn catalog_cache_discarded(&self) -> bool {
+    pub fn catalog_cache_discarded(&self) -> bool {
         self.hub
             .as_ref()
             .is_some_and(ModelHub::catalog_cache_discarded)
@@ -370,7 +370,7 @@ impl ModelHubService {
     /// a publisher may sign a catalog that stands for a day, and a client that
     /// only ever noticed the seven-day threshold would keep offering from it
     /// for six days after it was told not to.
-    pub(crate) fn catalog_is_stale(&self) -> bool {
+    pub fn catalog_is_stale(&self) -> bool {
         if self.catalog_expired().is_some() {
             return true;
         }
@@ -404,7 +404,7 @@ fn unavailable_reason(error: &ModelHubError) -> String {
 /// application can hold.
 #[cfg(test)]
 #[derive(Debug)]
-pub(crate) struct OfflineTransportProvider;
+pub struct OfflineTransportProvider;
 
 #[cfg(test)]
 impl ModelHubTransportProvider for OfflineTransportProvider {

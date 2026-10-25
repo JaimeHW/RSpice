@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 /// Save dialog configuration for export workflows.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SaveDialogConfig<'a> {
+pub struct SaveDialogConfig<'a> {
     pub title: &'a str,
     pub default_name: &'a str,
     pub filter_name: &'a str,
@@ -22,7 +22,7 @@ pub(crate) struct SaveDialogConfig<'a> {
 /// `BackendManaged`, because their destination is either a browser download or
 /// an in-memory test sink rather than a reopenable local pathname.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ObservedExportDestination {
+pub struct ObservedExportDestination {
     path: PathBuf,
     #[cfg(not(target_arch = "wasm32"))]
     expectation: ExportDestinationExpectation,
@@ -37,7 +37,7 @@ impl ObservedExportDestination {
         }
     }
 
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -54,7 +54,7 @@ enum ExportDestinationExpectation {
 ///
 /// This allows export behavior to be fully unit tested without invoking
 /// native dialogs or filesystem writes.
-pub(crate) trait ExportWorkflowIo {
+pub trait ExportWorkflowIo {
     fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Result<Option<PathBuf>, String>;
     fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String>;
 
@@ -132,7 +132,7 @@ pub(crate) trait ExportWorkflowIo {
 
 /// Production IO backend using native dialogs and filesystem operations.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct NativeExportWorkflowIo;
+pub struct NativeExportWorkflowIo;
 
 impl ExportWorkflowIo for NativeExportWorkflowIo {
     #[cfg(not(target_arch = "wasm32"))]
@@ -295,7 +295,7 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
 /// Publish a derived, read-only project manifest through the same observed
 /// destination contract as every other production export. Cancellation is not
 /// an error; successful publication returns a receipt for the activity log.
-pub(crate) fn publish_project_manifest(
+pub fn publish_project_manifest(
     suggested_name: &str,
     contents: &[u8],
 ) -> Result<Option<String>, String> {
@@ -328,7 +328,7 @@ pub(crate) fn publish_project_manifest(
 /// authoritative export workflow. Native builds use the guarded destination
 /// observed after the picker returns; browser builds hand the same bytes to
 /// the browser download backend.
-pub(crate) fn publish_generated_bytes(
+pub fn publish_generated_bytes(
     label: &str,
     config: SaveDialogConfig<'_>,
     contents: &[u8],
@@ -343,9 +343,9 @@ pub(crate) fn publish_generated_bytes(
     Ok(Some(export_completion_message(label, &path, None, &io)))
 }
 
-pub(crate) use rspice_formats::zip::deterministic_stored_zip;
+pub use rspice_formats::zip::deterministic_stored_zip;
 
-pub(crate) fn export_completion_message(
+pub fn export_completion_message(
     label: &str,
     path: &Path,
     detail: Option<String>,

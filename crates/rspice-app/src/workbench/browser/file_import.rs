@@ -5,7 +5,7 @@
 //! open now.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PickedTextFile {
+pub struct PickedTextFile {
     pub name: String,
     pub contents: String,
     /// Exact bytes are retained only for source kinds whose import contract
@@ -15,7 +15,7 @@ pub(crate) struct PickedTextFile {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BrowserTextImportKind {
+pub enum BrowserTextImportKind {
     Netlist,
     Project,
     ResultDataset,
@@ -33,7 +33,7 @@ pub(crate) enum BrowserTextImportKind {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 impl BrowserTextImportKind {
-    pub(crate) fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Netlist => "SPICE deck",
             Self::Project => "project",
@@ -66,7 +66,7 @@ impl BrowserTextImportKind {
 /// lease before it can mutate application state or release the shared gate.
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TextImportToken {
+pub struct TextImportToken {
     generation: u64,
     kind: BrowserTextImportKind,
 }
@@ -89,9 +89,7 @@ thread_local! {
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) fn try_begin_text_import(
-    kind: BrowserTextImportKind,
-) -> Result<TextImportToken, String> {
+pub fn try_begin_text_import(kind: BrowserTextImportKind) -> Result<TextImportToken, String> {
     ACTIVE_TEXT_IMPORT.with(|active| match active.get() {
         Some(current) if current.kind == kind => Err(format!(
             "A {} import is already in progress",
@@ -112,7 +110,7 @@ pub(crate) fn try_begin_text_import(
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) fn finish_text_import(token: TextImportToken) -> bool {
+pub fn finish_text_import(token: TextImportToken) -> bool {
     ACTIVE_TEXT_IMPORT.with(|active| {
         if active.get() == Some(token) {
             active.set(None);
@@ -124,22 +122,22 @@ pub(crate) fn finish_text_import(token: TextImportToken) -> bool {
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) fn text_import_is_current(token: TextImportToken) -> bool {
+pub fn text_import_is_current(token: TextImportToken) -> bool {
     ACTIVE_TEXT_IMPORT.with(|active| active.get() == Some(token))
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) fn cancel_active_text_import() -> Option<TextImportToken> {
+pub fn cancel_active_text_import() -> Option<TextImportToken> {
     ACTIVE_TEXT_IMPORT.with(std::cell::Cell::take)
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn active_text_import_kind() -> Option<BrowserTextImportKind> {
+pub fn active_text_import_kind() -> Option<BrowserTextImportKind> {
     ACTIVE_TEXT_IMPORT.with(|active| active.get().map(TextImportToken::kind))
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) fn register_text_import_repaint_context(ctx: &egui::Context) {
+pub fn register_text_import_repaint_context(ctx: &egui::Context) {
     TEXT_IMPORT_REPAINT_CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ctx.clone());
     });
@@ -209,7 +207,7 @@ fn decode_picked_file(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn pick_text_file(
+pub fn pick_text_file(
     filter_name: &'static str,
     filter_extensions: &'static [&'static str],
     on_complete: impl FnOnce(Result<Option<PickedTextFile>, String>) + 'static,
@@ -256,7 +254,7 @@ pub(crate) fn pick_text_file(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn request_browser_import_repaint() {
+pub fn request_browser_import_repaint() {
     if request_registered_import_repaint() {
         return;
     }

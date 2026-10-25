@@ -24,7 +24,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 /// path-bearing schematic. Called once per frame; cheap when idle. `last` is
 /// when the timer was armed or the last checkpoint written.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn autosave_tick(
+pub fn autosave_tick(
     platform: &mut PlatformState,
     model: &mut Model,
     last: &mut Option<std::time::Instant>,
@@ -84,7 +84,7 @@ pub(crate) fn autosave_tick(
 /// choice needed already done. Loading it, and then dropping the pending
 /// restore, is the caller's.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) enum AutosaveRestore {
+pub enum AutosaveRestore {
     /// The verified checkpoint, as unsaved changes over the file's identity,
     /// and the line to record once it is loaded.
     Checkpoint {
@@ -100,7 +100,7 @@ pub(crate) enum AutosaveRestore {
 /// Discard deletes it, Esc keeps it. A checkpoint that could not be read or
 /// deleted is recorded here and the decision stays pending.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn restore_dialog(
+pub fn restore_dialog(
     model: &mut Model,
     platform: &PlatformState,
     ctx: &Context,

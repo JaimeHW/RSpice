@@ -6,7 +6,7 @@ const CONTEXT_MENU_REQUEST_ATTRIBUTE: &str = "data-rspice-context-menu-request";
 /// Read the DOM-owned spoken-feedback preference, if the host page has
 /// published it. The semantic DOM bootstrap control owns this attribute so a
 /// screen-reader user can enable feedback before entering egui's canvas.
-pub(crate) fn spoken_feedback_override() -> Option<bool> {
+pub fn spoken_feedback_override() -> Option<bool> {
     let root = web_sys::window()?.document()?.document_element()?;
     match root.get_attribute(SPOKEN_FEEDBACK_ATTRIBUTE)?.as_str() {
         "true" => Some(true),
@@ -17,7 +17,7 @@ pub(crate) fn spoken_feedback_override() -> Option<bool> {
 
 /// Push an in-canvas preference change back to the semantic DOM bootstrap
 /// control. Its MutationObserver updates the button state and browser storage.
-pub(crate) fn set_spoken_feedback(enabled: bool) {
+pub fn set_spoken_feedback(enabled: bool) {
     let Some(root) = web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.document_element())
@@ -40,7 +40,7 @@ pub(crate) fn set_spoken_feedback(enabled: bool) {
 /// document root; the schematic menu consumes it here so target resolution
 /// still follows the selected/focused engineering object rather than an
 /// arbitrary pointer coordinate.
-pub(crate) fn take_schematic_context_menu_request() -> bool {
+pub fn take_schematic_context_menu_request() -> bool {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return false;
     };
@@ -72,7 +72,7 @@ pub(crate) fn take_schematic_context_menu_request() -> bool {
 /// region. Egui still owns widget interaction, while this bridge gives browser
 /// assistive technology a stable landmark and announces only genuine context
 /// changes instead of every paint frame.
-pub(crate) fn publish_workspace_context(workspace: &str, document: &str, running: bool) {
+pub fn publish_workspace_context(workspace: &str, document: &str, running: bool) {
     let Some(document_object) = web_sys::window().and_then(|window| window.document()) else {
         return;
     };

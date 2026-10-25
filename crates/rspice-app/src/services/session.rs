@@ -3,7 +3,7 @@
 
 /// What the last save of the session kept for the next start. Transient.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) enum SessionKept {
+pub enum SessionKept {
     /// All of it, or nothing has been saved yet.
     #[default]
     Whole,
@@ -16,4 +16,4 @@ pub(crate) enum SessionKept {
 }
 
 /// The autosave interval a session starts with when nothing chose one.
-pub(crate) const DEFAULT_AUTOSAVE_MINUTES: u8 = 5;
+pub const DEFAULT_AUTOSAVE_MINUTES: u8 = 5;

@@ -10,7 +10,7 @@ use std::path::Path;
 // consume it, then release it to bound memory use.
 const DOWNLOAD_OBJECT_URL_REVOKE_DELAY_MS: i32 = 60_000;
 
-pub(crate) fn download_text_file(path: &Path, contents: &str) -> Result<(), String> {
+pub fn download_text_file(path: &Path, contents: &str) -> Result<(), String> {
     use wasm_bindgen::JsCast as _;
 
     let filename = path
@@ -63,11 +63,7 @@ pub(crate) fn download_text_file(path: &Path, contents: &str) -> Result<(), Stri
 /// Hand arbitrary bytes to the browser download manager with exact file-type
 /// metadata. A successful return means the user agent accepted the synthetic
 /// click; it does not claim that the user kept or finished the download.
-pub(crate) fn download_bytes_file(
-    path: &Path,
-    contents: &[u8],
-    mime_type: &str,
-) -> Result<(), String> {
+pub fn download_bytes_file(path: &Path, contents: &[u8], mime_type: &str) -> Result<(), String> {
     use wasm_bindgen::JsCast as _;
 
     let filename = path

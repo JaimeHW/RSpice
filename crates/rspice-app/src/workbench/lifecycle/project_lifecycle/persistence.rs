@@ -5,7 +5,7 @@ mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use native::*;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rspice_project::persistence::native::{
+pub use rspice_project::persistence::native::{
     NativeBinding as PersistenceBinding, UnreadableNativeBinding,
 };
 
@@ -16,8 +16,8 @@ pub(crate) use rspice_project::persistence::native::{
 pub(crate) use browser::*;
 
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) use rspice_project::persistence::BrowserBindingBackend;
-pub(crate) use rspice_project::persistence::{BrowserBindingReceipt, NativeBindingReceipt};
+pub use rspice_project::persistence::BrowserBindingBackend;
+pub use rspice_project::persistence::{BrowserBindingReceipt, NativeBindingReceipt};
 
 #[cfg(target_arch = "wasm32")]
 use rspice_project::persistence::browser::{
@@ -43,7 +43,7 @@ const BROWSER_BINDING_STORE: &str = "canonical-file-handles";
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PersistenceBinding {
+pub enum PersistenceBinding {
     Browser {
         handle_id: u64,
         binding: BrowserBinding,
@@ -67,7 +67,7 @@ impl PersistenceBinding {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
-pub(crate) enum BrowserWriteResult {
+pub enum BrowserWriteResult {
     Saved {
         handle_id: u64,
         binding_id: uuid::Uuid,
@@ -96,14 +96,14 @@ pub(crate) enum BrowserWriteResult {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone)]
-pub(crate) struct BrowserWriteTarget {
-    pub(crate) handle_id: Option<u64>,
-    pub(crate) intent: BrowserWriteIntent,
+pub struct BrowserWriteTarget {
+    pub handle_id: Option<u64>,
+    pub intent: BrowserWriteIntent,
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
-pub(crate) enum BrowserOpenResult {
+pub enum BrowserOpenResult {
     Opened {
         handle_id: u64,
         display_name: String,

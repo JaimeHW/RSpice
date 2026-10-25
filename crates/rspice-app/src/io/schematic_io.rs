@@ -370,7 +370,7 @@ pub(crate) fn serialize_schematic_file(file: &SchematicFile) -> Result<String, S
 /// live-session wire. The output is the `SchematicFile` shape (metadata
 /// defaulted), so `load_schematic_text` reads it unchanged; saves keep
 /// their pretty-printed form via `save_schematic_file`.
-pub(crate) fn serialize_schematic_for_wire(
+pub fn serialize_schematic_for_wire(
     schematic: &rspice_design::schematic::owned::Schematic,
 ) -> Result<Vec<u8>, SchematicIoError> {
     #[derive(Serialize)]
@@ -396,7 +396,7 @@ pub fn load_schematic(path: &Path) -> Result<SchematicState, SchematicIoError> {
     Ok(schematic)
 }
 
-pub(crate) fn load_schematic_text(
+pub fn load_schematic_text(
     contents: &str,
     source_path: Option<&Path>,
 ) -> Result<SchematicState, SchematicIoError> {
@@ -516,7 +516,7 @@ fn read_schematic_text_with_limit(
 ///
 /// This allows open/save behavior to be fully unit tested without invoking
 /// native dialogs.
-pub(crate) trait FileWorkflowIo {
+pub trait FileWorkflowIo {
     #[cfg(not(target_arch = "wasm32"))]
     fn show_open_dialog(&self) -> Result<PathBuf, SchematicIoError>;
     fn show_save_dialog(&self, default_name: Option<&str>) -> Result<PathBuf, SchematicIoError>;
@@ -536,7 +536,7 @@ pub(crate) trait FileWorkflowIo {
 
 /// Production IO backend using native dialogs and filesystem operations.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct NativeFileWorkflowIo;
+pub struct NativeFileWorkflowIo;
 
 impl FileWorkflowIo for NativeFileWorkflowIo {
     #[cfg(not(target_arch = "wasm32"))]

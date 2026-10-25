@@ -4,14 +4,14 @@
 /// extension for both schematics and projects, so the kind is recorded at
 /// open/save time instead of being inferred from the path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) enum RecentKind {
+pub enum RecentKind {
     Schematic,
     Project,
 }
 
 /// One entry in the File ▸ Open recent list.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RecentFile {
+pub struct RecentFile {
     pub kind: RecentKind,
     pub path: std::path::PathBuf,
     /// Milliseconds since the Unix epoch when this entry most recently

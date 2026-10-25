@@ -31,7 +31,7 @@ use sha2::{Digest, Sha256};
 /// cursor frames, editors add document and run-request frames, and run-status
 /// frames are host-only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LiveFrameClass {
+pub enum LiveFrameClass {
     Presence,
     Cursor,
     Document,
@@ -40,7 +40,7 @@ pub(crate) enum LiveFrameClass {
 }
 
 impl LiveFrameClass {
-    pub(crate) const fn as_byte(self) -> u8 {
+    pub const fn as_byte(self) -> u8 {
         match self {
             Self::Presence => 0,
             Self::Cursor => 1,
@@ -50,7 +50,7 @@ impl LiveFrameClass {
         }
     }
 
-    pub(crate) const fn from_byte(value: u8) -> Option<Self> {
+    pub const fn from_byte(value: u8) -> Option<Self> {
         match value {
             0 => Some(Self::Presence),
             1 => Some(Self::Cursor),
@@ -64,15 +64,15 @@ impl LiveFrameClass {
 
 /// Hard per-frame bound: the relay closes the connection over anything
 /// larger, so senders must chunk beneath it.
-pub(crate) const MAX_LIVE_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_LIVE_FRAME_BYTES: usize = 1024 * 1024;
 /// Relay-delivered v2 frames add two authenticated UUIDs after the class
 /// byte. This overhead is outside the peer-controlled frame-size allowance.
-pub(crate) const LIVE_RELAY_AUTHENTICATED_SENDER_BYTES: usize = 32;
+pub const LIVE_RELAY_AUTHENTICATED_SENDER_BYTES: usize = 32;
 
 /// Identity stamped by the relay from the consumed one-time ticket. Payload
 /// identity fields are compatibility data only and never authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct LiveRelayIdentity {
+pub struct LiveRelayIdentity {
     pub principal_id: uuid::Uuid,
     pub client_instance_id: uuid::Uuid,
 }
@@ -80,14 +80,14 @@ pub(crate) struct LiveRelayIdentity {
 /// One live-relay frame. Outbound bytes contain class + payload; inbound v2
 /// bytes contain class + the relay-authenticated sender + payload.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LiveFrame {
+pub struct LiveFrame {
     pub class: LiveFrameClass,
     pub authenticated_sender: Option<LiveRelayIdentity>,
     pub payload: Vec<u8>,
 }
 
 impl LiveFrame {
-    pub(crate) fn encode(&self) -> Vec<u8> {
+    pub fn encode(&self) -> Vec<u8> {
         debug_assert!(
             self.authenticated_sender.is_none(),
             "relay-delivered frames must never be sent back as local authority"
@@ -98,7 +98,7 @@ impl LiveFrame {
         bytes
     }
 
-    pub(crate) fn decode_authenticated(bytes: &[u8]) -> Option<Self> {
+    pub fn decode_authenticated(bytes: &[u8]) -> Option<Self> {
         let (class_byte, stamped) = bytes.split_first()?;
         if stamped.len() < LIVE_RELAY_AUTHENTICATED_SENDER_BYTES {
             return None;
@@ -117,14 +117,14 @@ impl LiveFrame {
 }
 
 /// Wire version of every payload this build produces and accepts.
-pub(crate) const LIVE_PROTOCOL_VERSION: u8 = 1;
+pub const LIVE_PROTOCOL_VERSION: u8 = 1;
 
 /// Body bytes per document chunk, comfortably under the relay's frame cap
 /// with headroom for the envelope and header.
-pub(crate) const DOCUMENT_CHUNK_BYTES: usize = 512 * 1024;
+pub const DOCUMENT_CHUNK_BYTES: usize = 512 * 1024;
 
 /// Largest complete document a peer will send or reassemble.
-pub(crate) const MAX_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
 
 /// Total bytes of partial documents a reassembler holds before it refuses
 /// more, bounding what a misbehaving peer can make this client buffer.
@@ -136,7 +136,7 @@ const MAX_PARTIAL_DOCUMENTS: usize = 32;
 /// The two identifiers a peer asserts on every message. Display names
 /// resolve through the authenticated roster, never through frames.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub(crate) struct PeerIdentity {
+pub struct PeerIdentity {
     pub principal_id: uuid::Uuid,
     pub client_instance_id: uuid::Uuid,
 }
@@ -144,7 +144,7 @@ pub(crate) struct PeerIdentity {
 /// One decoded live message, classified exactly as the relay classified the
 /// frame that carried it.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum LiveMessage {
+pub enum LiveMessage {
     Presence(PresencePayload),
     Cursor(CursorPayload),
     Document(DocumentMessage),
@@ -155,7 +155,7 @@ pub(crate) enum LiveMessage {
 /// Liveness plus focus. Presence doubles as the connection keepalive, so
 /// hosts and guests send it on a fixed cadence as well as on focus changes.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct PresencePayload {
+pub struct PresencePayload {
     pub sender: PeerIdentity,
     /// The document the participant is looking at, when any.
     pub focused_doc: Option<String>,
@@ -164,7 +164,7 @@ pub(crate) struct PresencePayload {
 /// A pointer or caret position inside one document.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "surface")]
-pub(crate) enum CursorLocus {
+pub enum CursorLocus {
     /// Schematic canvas position in sheet coordinates.
     Canvas { doc: String, x: f32, y: f32 },
     /// Netlist caret line (one-based, as rendered).
@@ -172,7 +172,7 @@ pub(crate) enum CursorLocus {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub(crate) struct CursorPayload {
+pub struct CursorPayload {
     pub sender: PeerIdentity,
     /// `None` announces the cursor left every shared surface.
     pub locus: Option<CursorLocus>,
@@ -182,13 +182,13 @@ pub(crate) struct CursorPayload {
 /// from newer builds fail decoding instead of doing something unintended.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "intent")]
-pub(crate) enum RunIntent {
+pub enum RunIntent {
     /// Run the host's active simulation set on the host's working copy.
     Simulate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct RunRequestPayload {
+pub struct RunRequestPayload {
     pub sender: PeerIdentity,
     pub run: RunIntent,
 }
@@ -197,7 +197,7 @@ pub(crate) struct RunRequestPayload {
 /// runner's own serializable delta, opaque to the protocol.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "phase")]
-pub(crate) enum RunPhase {
+pub enum RunPhase {
     Started,
     Progress,
     Finished,
@@ -205,7 +205,7 @@ pub(crate) enum RunPhase {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub(crate) struct RunStatusPayload {
+pub struct RunStatusPayload {
     pub sender: PeerIdentity,
     /// Host-scoped monotonic run identity, so late guests can discard
     /// status for runs they never saw start.
@@ -221,7 +221,7 @@ pub(crate) struct RunStatusPayload {
 /// deliberately ignored until an artifact contract can preserve dataset
 /// provenance, precision, licensing, and bounded storage end to end.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RunStatusMessage {
+pub enum RunStatusMessage {
     Status(RunStatusPayload),
     /// Reserved future result artifact chunk. Current clients never send or
     /// retain it.
@@ -235,7 +235,7 @@ pub(crate) enum RunStatusMessage {
 /// sender and document: the host's revisions are authoritative document
 /// states, a leaseholder's are proposals the host applies and rebroadcasts.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct ChunkHeader {
+pub struct ChunkHeader {
     pub sender: PeerIdentity,
     pub doc: String,
     pub revision: u64,
@@ -249,7 +249,7 @@ pub(crate) struct ChunkHeader {
 
 /// One document the host announces in its manifest.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct ManifestEntry {
+pub struct ManifestEntry {
     pub doc: String,
     /// App-defined content contract of the document bytes, e.g.
     /// `rspice.schematic-sheet.v1`; guests skip entries they cannot render.
@@ -261,7 +261,7 @@ pub(crate) struct ManifestEntry {
 /// Messages on the document class: whole-document replaces plus the
 /// host-arbitrated write-lease conversation.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum DocumentMessage {
+pub enum DocumentMessage {
     /// One chunk of a complete document state.
     Replace { header: ChunkHeader, chunk: Vec<u8> },
     /// An editor asks the host for the write lease on one document.
@@ -294,7 +294,7 @@ pub(crate) enum DocumentMessage {
 
 /// Why a payload was refused.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LiveProtocolError {
+pub enum LiveProtocolError {
     /// The peer runs an incompatible build; surface it, don't guess.
     UnsupportedVersion(u8),
     /// Truncated, unknown kind, or a header that does not parse.
@@ -407,7 +407,7 @@ struct ManifestHeader {
 
 impl LiveMessage {
     /// Encode onto the relay frame whose class carries this message.
-    pub(crate) fn encode(&self) -> LiveFrame {
+    pub fn encode(&self) -> LiveFrame {
         match self {
             Self::Presence(payload) => json_frame(LiveFrameClass::Presence, KIND_ONLY, payload),
             Self::Cursor(payload) => json_frame(LiveFrameClass::Cursor, KIND_ONLY, payload),
@@ -427,7 +427,7 @@ impl LiveMessage {
 
     /// Decode one relay frame. The frame's class is trusted (the relay
     /// enforced it); everything inside is validated here.
-    pub(crate) fn decode(frame: &LiveFrame) -> Result<Self, LiveProtocolError> {
+    pub fn decode(frame: &LiveFrame) -> Result<Self, LiveProtocolError> {
         let (kind, header, body) = decode_envelope(&frame.payload)?;
         match frame.class {
             LiveFrameClass::Presence if kind == KIND_ONLY => {
@@ -578,7 +578,7 @@ impl DocumentMessage {
 
 /// Lowercase hex SHA-256 of complete content, the digest form every chunk
 /// header carries.
-pub(crate) fn content_digest(bytes: &[u8]) -> String {
+pub fn content_digest(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut text = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -622,7 +622,7 @@ fn chunk_parts(
 }
 
 /// A complete document state as document-class replace messages.
-pub(crate) fn replace_messages(
+pub fn replace_messages(
     sender: PeerIdentity,
     doc: &str,
     revision: u64,
@@ -638,7 +638,7 @@ pub(crate) fn replace_messages(
 
 /// Why a chunk was refused.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ReassemblyError {
+pub enum ReassemblyError {
     /// The header claims more than [`MAX_DOCUMENT_BYTES`] or an impossible
     /// chunk layout.
     Inconsistent,
@@ -650,7 +650,7 @@ pub(crate) enum ReassemblyError {
 
 /// One finished reassembly.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct CompletedContent {
+pub struct CompletedContent {
     pub sender: PeerIdentity,
     pub doc: String,
     pub revision: u64,
@@ -671,7 +671,7 @@ struct PartialContent {
 /// from the same sender evicts its predecessor mid-flight, so an
 /// interrupted broadcast never wedges a document.
 #[derive(Default)]
-pub(crate) struct ContentReassembler {
+pub struct ContentReassembler {
     partials: HashMap<(uuid::Uuid, String), PartialContent>,
     buffered_bytes: usize,
 }
@@ -679,7 +679,7 @@ pub(crate) struct ContentReassembler {
 impl ContentReassembler {
     /// Feed one chunk; a completed, digest-verified content comes back on
     /// the chunk that finishes it.
-    pub(crate) fn accept(
+    pub fn accept(
         &mut self,
         header: &ChunkHeader,
         chunk: &[u8],
@@ -762,7 +762,7 @@ impl ContentReassembler {
     }
 
     /// Drop every partial from one client instance (it left or reconnected).
-    pub(crate) fn forget_instance(&mut self, client_instance_id: uuid::Uuid) {
+    pub fn forget_instance(&mut self, client_instance_id: uuid::Uuid) {
         let keys: Vec<_> = self
             .partials
             .keys()
@@ -785,7 +785,7 @@ impl ContentReassembler {
 
 /// The host's ruling on a lease request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LeaseDecision {
+pub enum LeaseDecision {
     /// The requester holds the lease now (or already did).
     Granted,
     /// Another participant holds it; the request is refused.
@@ -796,17 +796,17 @@ pub(crate) enum LeaseDecision {
 /// arbitrates requests; guests mirror it from grant and release messages.
 /// Documents without a holder are the host's to edit.
 #[derive(Default)]
-pub(crate) struct LeaseTable {
+pub struct LeaseTable {
     held: HashMap<String, PeerIdentity>,
 }
 
 impl LeaseTable {
-    pub(crate) fn holder(&self, doc: &str) -> Option<PeerIdentity> {
+    pub fn holder(&self, doc: &str) -> Option<PeerIdentity> {
         self.held.get(doc).copied()
     }
 
     /// Every held lease, for projecting write locks onto the UI.
-    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, PeerIdentity)> {
+    pub fn entries(&self) -> impl Iterator<Item = (&str, PeerIdentity)> {
         self.held
             .iter()
             .map(|(doc, holder)| (doc.as_str(), *holder))
@@ -814,7 +814,7 @@ impl LeaseTable {
 
     /// Host-side arbitration: first holder wins, re-requests by the current
     /// holder stay granted.
-    pub(crate) fn arbitrate(&mut self, doc: &str, requester: PeerIdentity) -> LeaseDecision {
+    pub fn arbitrate(&mut self, doc: &str, requester: PeerIdentity) -> LeaseDecision {
         match self.held.get(doc) {
             Some(holder) if holder.client_instance_id != requester.client_instance_id => {
                 LeaseDecision::Held(*holder)
@@ -828,7 +828,7 @@ impl LeaseTable {
 
     /// Release by its holder. Anyone else's release is ignored, so a stale
     /// or malicious release cannot free someone else's lease.
-    pub(crate) fn release(&mut self, doc: &str, holder: PeerIdentity) -> bool {
+    pub fn release(&mut self, doc: &str, holder: PeerIdentity) -> bool {
         match self.held.get(doc) {
             Some(current) if current.client_instance_id == holder.client_instance_id => {
                 self.held.remove(doc);
@@ -840,7 +840,7 @@ impl LeaseTable {
 
     /// Free every lease a participant held (removed, left, or dropped).
     /// Returns the freed documents so the host can announce the releases.
-    pub(crate) fn revoke_principal(&mut self, principal_id: uuid::Uuid) -> Vec<String> {
+    pub fn revoke_principal(&mut self, principal_id: uuid::Uuid) -> Vec<String> {
         let mut freed: Vec<String> = self
             .held
             .iter()
@@ -855,12 +855,12 @@ impl LeaseTable {
     }
 
     /// Guest-side mirror of the host's announcements.
-    pub(crate) fn apply_grant(&mut self, doc: &str, holder: PeerIdentity) {
+    pub fn apply_grant(&mut self, doc: &str, holder: PeerIdentity) {
         self.held.insert(doc.to_owned(), holder);
     }
 
     /// Guest-side mirror of a release announcement.
-    pub(crate) fn apply_release(&mut self, doc: &str) {
+    pub fn apply_release(&mut self, doc: &str) {
         self.held.remove(doc);
     }
 }

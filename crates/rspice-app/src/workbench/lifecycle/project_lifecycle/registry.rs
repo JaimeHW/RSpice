@@ -5,14 +5,11 @@ use rspice_app_state::workbench::workspace::Workspace;
 #[cfg(test)]
 pub(super) use rspice_project::registry::FINGERPRINT_PASSES;
 pub(super) use rspice_project::registry::content_digest;
-pub(crate) use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
+pub use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
 #[cfg(test)]
 use rspice_project::registry::{digest, document_digests, document_fingerprints};
 
-pub(crate) fn active_document(
-    workspace: Workspace,
-    active_view: &CellViewRef,
-) -> ProjectDocumentId {
+pub fn active_document(workspace: Workspace, active_view: &CellViewRef) -> ProjectDocumentId {
     match workspace {
         Workspace::Project => ProjectDocumentId::ProjectConfiguration,
         Workspace::Design => ProjectDocumentId::CellView(active_view.clone()),

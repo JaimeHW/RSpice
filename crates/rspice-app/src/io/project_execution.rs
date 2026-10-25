@@ -12,7 +12,7 @@ use rspice_app_state::workbench::app_state::sim_setup::SimSetupState;
 use rspice_project::{ProjectExecutionContext, ProjectModelLibrary};
 
 /// Capture persisted execution inputs without storing editor or catalog-browser state.
-pub(crate) fn capture_execution_context(
+pub fn capture_execution_context(
     simulation_plan: &SimSetupState,
     model_libraries: &ModelLibraryManager,
 ) -> Result<ProjectExecutionContext, String> {
@@ -29,7 +29,7 @@ pub(crate) fn capture_execution_context(
 }
 
 /// Restore editor/catalog state after portable migration and validation succeed.
-pub(crate) fn restore_execution_context(
+pub fn restore_execution_context(
     mut context: ProjectExecutionContext,
     project_id: ProjectId,
 ) -> Result<(SimSetupState, ModelLibraryManager, Vec<String>), String> {

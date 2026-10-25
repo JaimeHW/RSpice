@@ -3,7 +3,7 @@ use crate::state::{AnalysisResult, RetainedTrace, SimulationRun, SimulationState
 use rspice_formats::project_results::*;
 use std::collections::HashSet;
 
-pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationResults {
+pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationResults {
     if state.retained.runs.is_empty() {
         // Clearing datasets preserves both their allocation history and
         // the project's retention decision across save and session restore.
@@ -41,7 +41,7 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
 /// The results with every run left out: the imported resume inputs, the
 /// retention limit, and the run counter, so the next run is not numbered as
 /// one of the runs that were left out.
-pub(crate) fn capture_simulation_results_without_runs(
+pub fn capture_simulation_results_without_runs(
     state: &SimulationState,
 ) -> ProjectSimulationResults {
     ProjectSimulationResultsData {
@@ -65,14 +65,14 @@ fn next_run_id(state: &SimulationState) -> u64 {
     state.retained.next_run_id.max(max_run_id)
 }
 #[cfg(test)]
-pub(crate) fn simulation_state_from_results(
+pub fn simulation_state_from_results(
     results: ProjectSimulationResults,
 ) -> Result<SimulationState, String> {
     let mut state = SimulationState::default();
     restore_simulation_results(results, &mut state)?;
     Ok(state)
 }
-pub(crate) fn restore_simulation_results(
+pub fn restore_simulation_results(
     results: ProjectSimulationResults,
     state: &mut SimulationState,
 ) -> Result<(), String> {

@@ -27,7 +27,7 @@ const CHECKPOINT_DIRECTORY: &str = ".rspice-recovery";
 const MANIFEST_SUFFIX: &str = ".checkpoint.json";
 const SNAPSHOT_SUFFIX: &str = ".rspiceproj";
 /// How many checkpoints a project keeps; creating one more removes the oldest.
-pub(crate) const MAX_RETAINED_CHECKPOINTS: usize = 8;
+pub const MAX_RETAINED_CHECKPOINTS: usize = 8;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_RETAINED_QUARANTINE_RECORDS: usize = 8;
 #[cfg(target_arch = "wasm32")]
@@ -35,13 +35,13 @@ const BROWSER_KEY_PREFIX: &str = "rspice.project-recovery.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ProjectCheckpointReason {
+pub enum ProjectCheckpointReason {
     Manual,
     TechnologyAttachment,
 }
 
 impl ProjectCheckpointReason {
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Manual => "Manual checkpoint",
             Self::TechnologyAttachment => "Before technology attachment",
@@ -79,7 +79,7 @@ enum ProjectCheckpointLocator {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProjectCheckpointSummary {
+pub struct ProjectCheckpointSummary {
     checkpoint_id: Uuid,
     project_id: String,
     project_name: String,
@@ -92,7 +92,7 @@ pub(crate) struct ProjectCheckpointSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProjectCheckpointQuarantine {
+pub struct ProjectCheckpointQuarantine {
     label: String,
     reason: String,
     #[cfg(not(target_arch = "wasm32"))]
@@ -104,47 +104,47 @@ pub(crate) struct ProjectCheckpointQuarantine {
 impl ProjectCheckpointQuarantine {
     /// The artifact that failed verification: its checkpoint identity when its
     /// manifest could be read, otherwise the file or key it was found under.
-    pub(crate) fn label(&self) -> &str {
+    pub fn label(&self) -> &str {
         &self.label
     }
 
-    pub(crate) fn reason(&self) -> &str {
+    pub fn reason(&self) -> &str {
         &self.reason
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectCheckpointCatalog {
-    pub(crate) checkpoints: Vec<ProjectCheckpointSummary>,
-    pub(crate) quarantined: Vec<ProjectCheckpointQuarantine>,
+pub struct ProjectCheckpointCatalog {
+    pub checkpoints: Vec<ProjectCheckpointSummary>,
+    pub quarantined: Vec<ProjectCheckpointQuarantine>,
 }
 
 impl ProjectCheckpointSummary {
-    pub(crate) const fn checkpoint_id(&self) -> Uuid {
+    pub const fn checkpoint_id(&self) -> Uuid {
         self.checkpoint_id
     }
 
-    pub(crate) fn project_name(&self) -> &str {
+    pub fn project_name(&self) -> &str {
         &self.project_name
     }
 
-    pub(crate) const fn project_revision(&self) -> u64 {
+    pub const fn project_revision(&self) -> u64 {
         self.project_revision
     }
 
-    pub(crate) const fn reason(&self) -> ProjectCheckpointReason {
+    pub const fn reason(&self) -> ProjectCheckpointReason {
         self.reason
     }
 
-    pub(crate) const fn snapshot_byte_len(&self) -> u64 {
+    pub const fn snapshot_byte_len(&self) -> u64 {
         self.snapshot_byte_len
     }
 
-    pub(crate) const fn created_unix_ms(&self) -> u64 {
+    pub const fn created_unix_ms(&self) -> u64 {
         self.created_unix_ms
     }
 
-    pub(crate) const fn snapshot_digest(&self) -> ContentDigest {
+    pub const fn snapshot_digest(&self) -> ContentDigest {
         self.snapshot_digest
     }
 }
@@ -152,7 +152,7 @@ impl ProjectCheckpointSummary {
 /// A catalog entry for a checkpoint that exists only in a test, so a surface
 /// can be drawn over a populated catalog without publishing one.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) fn fixture_summary(
+pub fn fixture_summary(
     project_name: &str,
     project_revision: u64,
     reason: ProjectCheckpointReason,
@@ -177,7 +177,7 @@ pub(crate) fn fixture_summary(
 
 /// A set-aside artifact that exists only in a test.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpointQuarantine {
+pub fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpointQuarantine {
     ProjectCheckpointQuarantine {
         label: label.to_owned(),
         reason: reason.to_owned(),
@@ -185,7 +185,7 @@ pub(crate) fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpoint
     }
 }
 
-pub(crate) fn matches_current_state(
+pub fn matches_current_state(
     summary: &ProjectCheckpointSummary,
     state: &dyn LifecycleSource,
 ) -> Result<bool, String> {
@@ -237,7 +237,7 @@ fn prepare_checkpoint(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn create(
+pub fn create(
     state: &mut dyn LifecycleSourceMut,
     reason: ProjectCheckpointReason,
 ) -> Result<ProjectCheckpointSummary, String> {
@@ -257,7 +257,7 @@ pub(crate) fn create(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_create(
+pub fn start_create(
     state: &dyn LifecycleSource,
     reason: ProjectCheckpointReason,
     complete: impl FnOnce(Result<ProjectCheckpointSummary, String>) + 'static,
@@ -293,19 +293,19 @@ pub(crate) fn start_create(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
+pub fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
     let project_id = model.workspace.content.project.id().to_string();
     list_native(model, &project_id)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, String> {
+pub fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, String> {
     let bytes = read_snapshot_bytes(summary)?;
     validate_snapshot_bytes(summary, &bytes)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn recovery_copy_bytes(
+pub fn recovery_copy_bytes(
     summary: &ProjectCheckpointSummary,
     destination: &Path,
 ) -> Result<Vec<u8>, String> {
@@ -321,7 +321,7 @@ pub(crate) fn recovery_copy_bytes(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn publish_recovery_copy(
+pub fn publish_recovery_copy(
     summary: &ProjectCheckpointSummary,
     destination: &Path,
 ) -> Result<(), String> {
@@ -429,7 +429,7 @@ fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
 
 /// Where this project's checkpoints are kept, as the reader would look for them.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn storage_location(model: &Model) -> Result<PathBuf, String> {
+pub fn storage_location(model: &Model) -> Result<PathBuf, String> {
     checkpoint_directory(model, &model.workspace.content.project.id().to_string())
 }
 
@@ -787,7 +787,7 @@ fn visit_browser_checkpoint_record(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_list(
+pub fn start_list(
     model: &Model,
     complete: impl FnOnce(Result<ProjectCheckpointCatalog, String>) + 'static,
 ) {
@@ -834,7 +834,7 @@ pub(crate) fn start_list(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_recovery_copy_bytes(
+pub fn start_recovery_copy_bytes(
     summary: ProjectCheckpointSummary,
     destination: PathBuf,
     complete: impl FnOnce(Result<Vec<u8>, String>) + 'static,

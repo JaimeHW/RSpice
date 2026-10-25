@@ -40,11 +40,11 @@ pub fn show_save_project_dialog(default_name: Option<&str>) -> Result<PathBuf, P
     Ok(path)
 }
 
-pub(crate) fn serialize_project_file(project: &ProjectSnapshot) -> Result<String, ProjectIoError> {
+pub fn serialize_project_file(project: &ProjectSnapshot) -> Result<String, ProjectIoError> {
     rspice_project::serialize_project_file(&project.file)
 }
 
-pub(crate) fn load_project_text(
+pub fn load_project_text(
     contents: &str,
     source_path: Option<&Path>,
 ) -> Result<ProjectSnapshot, ProjectIoError> {

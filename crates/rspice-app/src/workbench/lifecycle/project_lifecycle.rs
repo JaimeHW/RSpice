@@ -14,7 +14,7 @@ pub(crate) use persistence::{
     start_browser_checkpoint_list, start_browser_checkpoint_publish, start_browser_checkpoint_read,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rspice_project::persistence::native::DestinationAuthority;
+pub use rspice_project::persistence::native::DestinationAuthority;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::native::{NativeCopyDestination, NativeSaveDestination};
 use std::rc::Rc;
@@ -28,18 +28,18 @@ use std::path::PathBuf;
 
 pub(crate) use crate::product::TransactionId;
 #[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) use persistence::BrowserBindingBackend;
+pub use persistence::BrowserBindingBackend;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use persistence::BrowserWriteTarget;
-pub(crate) use persistence::{BrowserBindingReceipt, NativeBindingReceipt, PersistenceBinding};
-pub(crate) use registry::ProjectDocumentId;
+pub use persistence::BrowserWriteTarget;
+pub use persistence::{BrowserBindingReceipt, NativeBindingReceipt, PersistenceBinding};
+pub use registry::ProjectDocumentId;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use rspice_project::lifecycle::BrowserOperationContext;
+pub use rspice_project::lifecycle::BrowserOperationContext;
 use rspice_project::lifecycle::ProjectLifecycle;
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
-pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
-pub(crate) use source::{
+pub use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
+pub use source::{
     LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView,
     ResultPresentationSource,
 };
@@ -83,7 +83,7 @@ struct BrowserConflict {
 /// close completes the exact originally requested transition without
 /// inferring intent from whichever surface is visible later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectCloseDestination {
+pub enum ProjectCloseDestination {
     /// The no-project landing: `Workspace::Project` with nothing open.
     EmptyWorkbench,
     /// Joining a live session: the same landing, where this install then
@@ -92,13 +92,13 @@ pub(crate) enum ProjectCloseDestination {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectLifecycleState {
-    pub(crate) authority: ProjectLifecycle,
+pub struct ProjectLifecycleState {
+    pub authority: ProjectLifecycle,
     accepted_session: Rc<crate::state::workspace::WorkspaceSession>,
     accepted_binding: Option<PersistenceBinding>,
     #[cfg(not(target_arch = "wasm32"))]
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
-    pub(crate) result_cache: result_cache::ResultCache,
+    pub result_cache: result_cache::ResultCache,
     #[cfg(target_arch = "wasm32")]
     browser_reconnect_binding: Option<PersistenceBinding>,
     #[cfg(target_arch = "wasm32")]
@@ -106,7 +106,7 @@ pub(crate) struct ProjectLifecycleState {
 }
 
 impl ProjectLifecycleState {
-    pub(crate) const fn is_open(&self) -> bool {
+    pub const fn is_open(&self) -> bool {
         self.authority.is_open()
     }
 
@@ -122,25 +122,25 @@ impl ProjectLifecycleState {
     /// A restored session that recorded no open project starts with its
     /// project closed. A restore builds a fresh lifecycle, so there is nothing
     /// else to clear.
-    pub(crate) fn close_restored_session(&mut self, fact: &mut ProjectOpenFact) {
+    pub fn close_restored_session(&mut self, fact: &mut ProjectOpenFact) {
         self.authority.close_project();
         self.publish_open(fact);
     }
 
-    pub(crate) fn operation_in_progress(&self) -> bool {
+    pub fn operation_in_progress(&self) -> bool {
         self.authority.operation_in_progress()
     }
 
-    pub(crate) fn accepted(&self) -> Option<&rspice_project::AcceptedProject> {
+    pub fn accepted(&self) -> Option<&rspice_project::AcceptedProject> {
         self.authority.accepted()
     }
 
-    pub(crate) fn binding(&self) -> Option<&PersistenceBinding> {
+    pub fn binding(&self) -> Option<&PersistenceBinding> {
         self.accepted_binding.as_ref()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn canonical_native_path(&self) -> Option<&Path> {
+    pub fn canonical_native_path(&self) -> Option<&Path> {
         self.binding()
             .map(|binding| binding.canonical_path.as_path())
     }
@@ -151,7 +151,7 @@ impl ProjectLifecycleState {
 /// document-only overlay, so it necessarily publishes the complete project.
 /// Workflows such as Check and save use this same decision before presenting
 /// their document scope and before freezing validation evidence.
-pub(crate) fn effective_save_scope(platform: &PlatformState, requested: SaveScope) -> SaveScope {
+pub fn effective_save_scope(platform: &PlatformState, requested: SaveScope) -> SaveScope {
     platform
         .project_lifecycle
         .authority
@@ -162,7 +162,7 @@ pub(crate) fn effective_save_scope(platform: &PlatformState, requested: SaveScop
 /// This is used only to seed the validated-save journal when an older project
 /// predates that journal. A missing canonical binding or a newly created view
 /// has no predecessor and therefore returns `None`.
-pub(crate) fn accepted_active_schematic(
+pub fn accepted_active_schematic(
     model: &Model,
     platform: &PlatformState,
 ) -> Option<crate::state::SchematicState> {
@@ -175,17 +175,15 @@ pub(crate) fn accepted_active_schematic(
 /// Monotonic identity of the accepted canonical baseline. Validation receipts
 /// bind this value so a save opened against one baseline cannot publish after
 /// a different save, import, or binding restoration has completed.
-pub(crate) const fn accepted_generation(platform: &PlatformState) -> u64 {
+pub const fn accepted_generation(platform: &PlatformState) -> u64 {
     platform.project_lifecycle.authority.accepted_generation()
 }
 
-pub(crate) fn snapshot(
-    state: &dyn LifecycleSource,
-) -> Result<ProjectSnapshot, ProjectLifecycleError> {
+pub fn snapshot(state: &dyn LifecycleSource) -> Result<ProjectSnapshot, ProjectLifecycleError> {
     capture_snapshot(state, SnapshotContent::Committed)
 }
 
-pub(crate) fn capture_snapshot(
+pub fn capture_snapshot(
     state: &dyn LifecycleSource,
     content: SnapshotContent,
 ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
@@ -235,7 +233,7 @@ pub(crate) fn capture_snapshot(
 /// model bindings, and libraries remain covered by the ordinary document
 /// digests. Project sources must stay authenticated because their virtual
 /// directive identities and exact bytes affect generated output and execution.
-pub(crate) fn generated_netlist_input_digest(
+pub fn generated_netlist_input_digest(
     state: &dyn LifecycleSource,
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
     // Execution provenance must describe the exact live input consumed by
@@ -245,7 +243,7 @@ pub(crate) fn generated_netlist_input_digest(
         .generated_netlist_input_digest()
 }
 
-pub(crate) fn has_unsaved_changes(state: &dyn LifecycleSource) -> bool {
+pub fn has_unsaved_changes(state: &dyn LifecycleSource) -> bool {
     let state = &state.lifecycle_view();
     state
         .platform
@@ -256,16 +254,16 @@ pub(crate) fn has_unsaved_changes(state: &dyn LifecycleSource) -> bool {
         })
 }
 
-pub(crate) fn operation_in_progress(platform: &PlatformState) -> bool {
+pub fn operation_in_progress(platform: &PlatformState) -> bool {
     platform.project_lifecycle.operation_in_progress()
 }
 
-pub(crate) fn active_document(state: &dyn LifecycleSource) -> ProjectDocumentId {
+pub fn active_document(state: &dyn LifecycleSource) -> ProjectDocumentId {
     let state = state.lifecycle_view();
     registry::active_document(state.workspace, &state.model.workspace.content.active_view)
 }
 
-pub(crate) fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
+pub fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
     let state = &state.lifecycle_view();
     state
         .platform
@@ -277,9 +275,7 @@ pub(crate) fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
         )
 }
 
-pub(crate) fn refresh_registry(
-    state: &mut dyn LifecycleSourceMut,
-) -> Result<(), ProjectLifecycleError> {
+pub fn refresh_registry(state: &mut dyn LifecycleSourceMut) -> Result<(), ProjectLifecycleError> {
     let state = &mut state.lifecycle_parts();
     let comparison = state
         .platform
@@ -386,7 +382,7 @@ fn apply_registry_dirty_flags(state: &mut LifecycleParts<'_>) {
 /// Bind the open project the restored session holds to its file. A session
 /// saved with no project open is never bound or opened; whoever restores it
 /// lands it on the no-project landing instead of calling this.
-pub(crate) fn bind_restored_project(state: &mut dyn LifecycleSourceMut) {
+pub fn bind_restored_project(state: &mut dyn LifecycleSourceMut) {
     let state = &mut state.lifecycle_parts();
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -483,7 +479,7 @@ pub(crate) fn bind_restored_project(state: &mut dyn LifecycleSourceMut) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_binding_restore(state: &mut dyn LifecycleSourceMut) {
+pub fn poll_browser_binding_restore(state: &mut dyn LifecycleSourceMut) {
     let state = &mut state.lifecycle_parts();
     let Some(completion) =
         BROWSER_BINDING_RESTORE_RESULTS.with(|queue| queue.borrow_mut().pop_front())
@@ -581,7 +577,7 @@ pub(crate) fn poll_browser_binding_restore(state: &mut dyn LifecycleSourceMut) {
 
 /// Accept a loaded project as the open project. The features' own state for
 /// the project being replaced is reset first, by whoever holds them.
-pub(crate) fn accept_loaded_project(
+pub fn accept_loaded_project(
     state: &mut dyn LifecycleSourceMut,
     baseline: ProjectSnapshot,
     binding: Option<PersistenceBinding>,
@@ -637,7 +633,7 @@ pub(crate) fn accept_loaded_project(
 
 /// Reset the lifecycle for a new, unsaved project. The features' own state
 /// for the project being replaced is reset first, by whoever holds them.
-pub(crate) fn reset_for_new_project(state: &mut dyn LifecycleSourceMut) {
+pub fn reset_for_new_project(state: &mut dyn LifecycleSourceMut) {
     let state = &mut state.lifecycle_parts();
     state.platform.native_project_binding_receipt = None;
     state.platform.browser_project_binding_receipt = None;
@@ -660,7 +656,7 @@ pub(crate) fn reset_for_new_project(state: &mut dyn LifecycleSourceMut) {
 
 /// Close the open project's lifecycle. The features' own state for the
 /// project going away is reset first, by whoever holds them.
-pub(crate) fn mark_project_closed(state: &mut dyn LifecycleSourceMut) {
+pub fn mark_project_closed(state: &mut dyn LifecycleSourceMut) {
     let state = &mut state.lifecycle_parts();
     state.platform.native_project_binding_receipt = None;
     state.platform.browser_project_binding_receipt = None;
@@ -731,7 +727,7 @@ fn release_restore_result_handle(result: persistence::BrowserRestoreResult) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_operation_context(
+pub fn browser_operation_context(
     model: &Model,
     platform: &PlatformState,
 ) -> BrowserOperationContext {
@@ -745,7 +741,7 @@ pub(crate) fn browser_operation_context(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_operation_context_is_current(
+pub fn browser_operation_context_is_current(
     model: &Model,
     platform: &PlatformState,
     context: &BrowserOperationContext,
@@ -764,7 +760,7 @@ pub(crate) fn browser_operation_context_is_current(
 /// not be able to abort. The operation generation makes every eventual late
 /// completion stale, while accepted project/file authority remains intact.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn cancel_pending_browser_operation(platform: &mut PlatformState) -> bool {
+pub fn cancel_pending_browser_operation(platform: &mut PlatformState) -> bool {
     let Some(restore_was_pending) = platform
         .project_lifecycle
         .authority
@@ -780,7 +776,7 @@ pub(crate) fn cancel_pending_browser_operation(platform: &mut PlatformState) -> 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn canonical_native_path(platform: &PlatformState) -> Option<PathBuf> {
+pub fn canonical_native_path(platform: &PlatformState) -> Option<PathBuf> {
     platform
         .project_lifecycle
         .canonical_native_path()
@@ -788,19 +784,19 @@ pub(crate) fn canonical_native_path(platform: &PlatformState) -> Option<PathBuf>
 }
 
 #[cfg(all(not(target_arch = "wasm32"), test))]
-pub(crate) fn normalize_native_path(path: &Path) -> Result<PathBuf, ProjectLifecycleError> {
+pub fn normalize_native_path(path: &Path) -> Result<PathBuf, ProjectLifecycleError> {
     persistence::normalize_native_path(path).map_err(ProjectLifecycleError::from)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn read_native_binding(
+pub fn read_native_binding(
     path: &Path,
 ) -> Result<(ProjectSnapshot, PersistenceBinding), ProjectLifecycleError> {
     persistence::read_native_binding(path).map_err(ProjectLifecycleError::from)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn save_native(
+pub fn save_native(
     state: &mut dyn LifecycleHost,
     requested_scope: SaveScope,
     path: &Path,
@@ -866,7 +862,7 @@ pub(crate) fn save_native(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn save_project_copy_native(
+pub fn save_project_copy_native(
     state: &mut dyn LifecycleSourceMut,
     path: &Path,
 ) -> Result<(), ProjectLifecycleError> {
@@ -897,16 +893,16 @@ pub(crate) fn save_project_copy_native(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserPreparedSave {
-    pub(crate) save: PreparedBrowserSave,
+pub struct BrowserPreparedSave {
+    pub save: PreparedBrowserSave,
     workspace_session: crate::state::workspace::WorkspaceSession,
-    pub(crate) suggested_name: String,
-    pub(crate) handle_id: Option<u64>,
-    pub(crate) source_handle_id: Option<u64>,
+    pub suggested_name: String,
+    pub handle_id: Option<u64>,
+    pub source_handle_id: Option<u64>,
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn prepare_browser_save(
+pub fn prepare_browser_save(
     state: &mut dyn LifecycleSourceMut,
     requested_scope: SaveScope,
     project_copy: bool,
@@ -1018,7 +1014,7 @@ pub(crate) fn prepare_browser_save(
 /// edits made while a browser surface is pending remain dirty and force a new
 /// review instead of being discarded.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn saved_snapshot_authorizes_continuation(
+pub fn saved_snapshot_authorizes_continuation(
     state: &dyn LifecycleSource,
     scope: SaveScope,
     saved_document: &ProjectDocumentId,
@@ -1032,12 +1028,12 @@ pub(crate) fn saved_snapshot_authorizes_continuation(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_file_picker_supported() -> bool {
+pub fn browser_file_picker_supported() -> bool {
     persistence::browser_file_picker_supported()
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_canonical_save_supported() -> bool {
+pub fn browser_canonical_save_supported() -> bool {
     // IndexedDB restoration is a durable convenience, not a prerequisite for
     // a verified live-session canonical binding. A storage failure is reported
     // explicitly as session-only after the file bytes themselves are saved.
@@ -1045,12 +1041,12 @@ pub(crate) fn browser_canonical_save_supported() -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_open_file_picker_supported() -> bool {
+pub fn browser_open_file_picker_supported() -> bool {
     persistence::browser_open_file_picker_supported()
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_write(
+pub fn start_browser_write(
     target: BrowserWriteTarget,
     persist_binding: bool,
     suggested_name: &str,
@@ -1061,20 +1057,20 @@ pub(crate) fn start_browser_write(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use persistence::BrowserWriteResult;
+pub use persistence::BrowserWriteResult;
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use persistence::BrowserOpenResult;
+pub use persistence::BrowserOpenResult;
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_open(
+pub fn start_browser_open(
     complete: impl FnOnce(persistence::BrowserOpenResult) + 'static,
 ) -> Result<(), String> {
     persistence::start_browser_open(complete)
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_binding_persist(
+pub fn start_browser_binding_persist(
     binding: PersistenceBinding,
     complete: impl FnOnce(Result<(), String>) + 'static,
 ) {
@@ -1082,12 +1078,12 @@ pub(crate) fn start_browser_binding_persist(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn release_browser_handle(handle_id: u64) {
+pub fn release_browser_handle(handle_id: u64) {
     persistence::release_browser_handle(handle_id);
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn release_browser_handle_if_unowned(platform: &PlatformState, handle_id: u64) {
+pub fn release_browser_handle_if_unowned(platform: &PlatformState, handle_id: u64) {
     if !browser_handle_is_current(platform, handle_id) {
         persistence::release_browser_handle(handle_id);
     }
@@ -1099,7 +1095,7 @@ fn clear_browser_handles() {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn complete_browser_save(
+pub fn complete_browser_save(
     state: &mut dyn LifecycleHost,
     prepared: BrowserPreparedSave,
     handle_id: u64,
@@ -1182,7 +1178,7 @@ fn finish_successful_save(
     adopt_successful_save(state, candidate, binding, scope, post_save_registry);
 }
 
-pub(crate) fn prepare_post_save_registry(
+pub fn prepare_post_save_registry(
     state: &dyn LifecycleSource,
     candidate: &rspice_project::ProjectFile,
     scope: SaveScope,
@@ -1380,7 +1376,7 @@ fn report_design_checks_after_save(state: &mut dyn LifecycleHost) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn record_browser_save_conflict(
+pub fn record_browser_save_conflict(
     model: &Model,
     platform: &mut PlatformState,
     prepared: &BrowserPreparedSave,
@@ -1403,7 +1399,7 @@ pub(crate) fn record_browser_save_conflict(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn complete_browser_binding_promotion(
+pub fn complete_browser_binding_promotion(
     model: &Model,
     platform: &mut PlatformState,
     context: &BrowserOperationContext,
@@ -1453,7 +1449,7 @@ fn browser_handle_is_current(platform: &PlatformState, handle_id: u64) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn begin_browser_binding_promotion(
+pub fn begin_browser_binding_promotion(
     model: &Model,
     platform: &mut PlatformState,
 ) -> BrowserOperationContext {
@@ -1498,7 +1494,7 @@ fn mark_active_document_clean(state: &mut LifecycleParts<'_>) {
     }
 }
 
-pub(crate) fn prepare_revert_active_document(
+pub fn prepare_revert_active_document(
     state: &dyn LifecycleSource,
 ) -> Result<RevertReviewToken, ProjectLifecycleError> {
     let state = &state.lifecycle_view();
@@ -1524,7 +1520,7 @@ pub(crate) fn prepare_revert_active_document(
 /// Check a confirmed revert review against the project as it stands: the
 /// review must name the active document, and still be the review the project
 /// would give now.
-pub(crate) fn validate_revert_review(
+pub fn validate_revert_review(
     state: &dyn LifecycleSource,
     token: &RevertReviewToken,
 ) -> Result<(), ProjectLifecycleError> {
@@ -1543,7 +1539,7 @@ pub(crate) fn validate_revert_review(
 
 /// What reverting one document leaves to the features above the lifecycle,
 /// to be done before the reverted project is checked and committed.
-pub(crate) enum RevertFollowUp {
+pub enum RevertFollowUp {
     /// Nothing above the model holds the reverted document.
     None,
     /// The accepted configuration's libraries replace the project structure;
@@ -1564,7 +1560,7 @@ pub(crate) enum RevertFollowUp {
 }
 
 /// Put the model's part of one document back to the accepted project.
-pub(crate) fn revert_document_model(
+pub fn revert_document_model(
     state: &mut LifecycleParts<'_>,
     id: ProjectDocumentId,
 ) -> Result<RevertFollowUp, ProjectLifecycleError> {
@@ -1688,7 +1684,7 @@ pub(crate) fn revert_document_model(
 /// The model's part of a netlist-source revert that follows the features'
 /// reset: the deck the run reads is the reverted source, no run is pending
 /// on the old one, and execution sees a new design.
-pub(crate) fn finish_netlist_source_revert(model: &mut Model) {
+pub fn finish_netlist_source_revert(model: &mut Model) {
     model.simulation.source.netlist_content = model
         .workspace
         .content
@@ -1704,7 +1700,7 @@ pub(crate) fn finish_netlist_source_revert(model: &mut Model) {
 /// A project with no accepted baseline, or one whose comparison fails, has
 /// nothing to diff against: its configuration stands for the whole unsaved
 /// project, as one document.
-pub(crate) fn dirty_documents(state: &dyn LifecycleSource) -> Vec<ProjectDocumentId> {
+pub fn dirty_documents(state: &dyn LifecycleSource) -> Vec<ProjectDocumentId> {
     let state = &state.lifecycle_view();
     state
         .platform
@@ -1715,18 +1711,18 @@ pub(crate) fn dirty_documents(state: &dyn LifecycleSource) -> Vec<ProjectDocumen
         })
 }
 
-pub(crate) fn dirty_document_count(state: &dyn LifecycleSource) -> usize {
+pub fn dirty_document_count(state: &dyn LifecycleSource) -> usize {
     dirty_documents(state).len()
 }
 
-pub(crate) fn can_close_active_document(state: &dyn LifecycleSource) -> bool {
+pub fn can_close_active_document(state: &dyn LifecycleSource) -> bool {
     let state = state.lifecycle_view();
     state.platform.project_lifecycle.is_open()
         && state.workspace == rspice_app_state::workbench::workspace::Workspace::Design
         && state.model.workspace.content.open_views.len() > 1
 }
 
-pub(crate) fn begin_project_replacement(
+pub fn begin_project_replacement(
     state: &mut dyn LifecycleSourceMut,
 ) -> Result<TransactionId, ProjectLifecycleError> {
     let state = &mut state.lifecycle_parts();
@@ -1748,19 +1744,19 @@ pub(crate) fn begin_project_replacement(
         .begin_replacement(content)
 }
 
-pub(crate) fn cancel_transaction(platform: &mut PlatformState) {
+pub fn cancel_transaction(platform: &mut PlatformState) {
     platform.project_lifecycle.authority.cancel_transaction();
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn cancel_transaction_if(platform: &mut PlatformState, id: TransactionId) -> bool {
+pub fn cancel_transaction_if(platform: &mut PlatformState, id: TransactionId) -> bool {
     platform
         .project_lifecycle
         .authority
         .cancel_transaction_if(id)
 }
 
-pub(crate) fn validate_project_replacement(
+pub fn validate_project_replacement(
     state: &dyn LifecycleSource,
     id: TransactionId,
 ) -> Result<(), ProjectLifecycleError> {
@@ -1778,7 +1774,7 @@ pub(crate) fn validate_project_replacement(
         })
 }
 
-pub(crate) fn require_open_project(platform: &PlatformState) -> Result<(), ProjectLifecycleError> {
+pub fn require_open_project(platform: &PlatformState) -> Result<(), ProjectLifecycleError> {
     platform.project_lifecycle.authority.require_open_project()
 }
 
@@ -1789,7 +1785,7 @@ fn require_project_writable(model: &Model) -> Result<(), ProjectLifecycleError> 
 }
 
 /// How the model's part of a cell-view revert left the view.
-pub(crate) enum CellViewRevert {
+pub enum CellViewRevert {
     /// The accepted project has no such view, so it was removed; the
     /// workspace still names it until it is pruned.
     Removed {
@@ -1805,7 +1801,7 @@ pub(crate) enum CellViewRevert {
 }
 
 /// Put one cell view's design back to the accepted project.
-pub(crate) fn revert_cell_view(
+pub fn revert_cell_view(
     model: &mut Model,
     baseline: &ProjectSnapshot,
     reference: &CellViewRef,
@@ -1857,7 +1853,7 @@ pub(crate) fn revert_cell_view(
 
 /// Put one cell view's source bundle back to the accepted project, and say
 /// whether that changed it.
-pub(crate) fn revert_cell_view_sources(
+pub fn revert_cell_view_sources(
     model: &mut Model,
     baseline: &ProjectSnapshot,
     reference: &CellViewRef,
@@ -1873,7 +1869,7 @@ pub(crate) fn revert_cell_view_sources(
 /// Replace the project's library structure with the accepted one, keeping
 /// each retained view's document content, and return the views it removed:
 /// the workspace still names them until they are pruned.
-pub(crate) fn replace_project_structure(
+pub fn replace_project_structure(
     model: &mut Model,
     baseline: crate::state::LibraryManager,
 ) -> Vec<CellViewRef> {
@@ -1894,7 +1890,7 @@ pub(crate) fn replace_project_structure(
 
 /// Keep only the source bundles of views the project still holds, and return
 /// the bundles dropped.
-pub(crate) fn retain_project_view_sources(model: &mut Model) -> Vec<crate::state::ProjectSourceId> {
+pub fn retain_project_view_sources(model: &mut Model) -> Vec<crate::state::ProjectSourceId> {
     let retained = library_view_references(&model.library_manager);
     model
         .workspace
@@ -1925,7 +1921,7 @@ fn mark_all_library_views_clean(libraries: &mut crate::state::LibraryManager) {
 /// They move the lifecycle's authority exactly as a test needs it, with no
 /// baseline or binding, and publish the answer the way every transition does.
 #[cfg(test)]
-pub(crate) fn open_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
+pub fn open_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
     let parts = state.lifecycle_parts();
     parts.platform.project_lifecycle.authority.open_session();
     parts
@@ -1935,7 +1931,7 @@ pub(crate) fn open_project_session_for_test(state: &mut dyn LifecycleSourceMut) 
 }
 
 #[cfg(test)]
-pub(crate) fn close_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
+pub fn close_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
     let parts = state.lifecycle_parts();
     parts.platform.project_lifecycle.authority.close_project();
     parts

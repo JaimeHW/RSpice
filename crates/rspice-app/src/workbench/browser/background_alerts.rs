@@ -11,11 +11,11 @@
 
 /// Work shorter than this was watched rather than waited for, so its end
 /// reaches for the reader outside the window on neither host.
-pub(crate) const AWAY_AFTER_SECONDS: f64 = 5.0;
+pub const AWAY_AFTER_SECONDS: f64 = 5.0;
 
 /// Whether a run that ends out of sight raises the browser's notification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BackgroundAlerts {
+pub enum BackgroundAlerts {
     /// There is no browser notification to raise: a desktop build, a
     /// browser without the API, or a phone's Chromium, which shows a page's
     /// notification only through a service worker.
@@ -31,7 +31,7 @@ pub(crate) enum BackgroundAlerts {
 
 impl BackgroundAlerts {
     /// What the panel's switch shows: the reader's choice, granted or not.
-    pub(crate) const fn is_chosen(self) -> bool {
+    pub const fn is_chosen(self) -> bool {
         matches!(self, Self::Asking | Self::On)
     }
 
@@ -50,7 +50,7 @@ impl BackgroundAlerts {
 
 /// Where this browser stands.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn background_alerts() -> BackgroundAlerts {
+pub fn background_alerts() -> BackgroundAlerts {
     let reachable = web::notifications_reach_the_reader();
     BackgroundAlerts::resolve(
         reachable,
@@ -60,7 +60,7 @@ pub(crate) fn background_alerts() -> BackgroundAlerts {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) const fn background_alerts() -> BackgroundAlerts {
+pub const fn background_alerts() -> BackgroundAlerts {
     BackgroundAlerts::resolve(false, None, false)
 }
 
@@ -68,7 +68,7 @@ pub(crate) const fn background_alerts() -> BackgroundAlerts {
 /// permission they need. Called from the press that made the choice, which
 /// is what lets the browser show its prompt.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn set_background_alerts(ctx: &egui::Context, on: bool) {
+pub fn set_background_alerts(ctx: &egui::Context, on: bool) {
     web::choose(on);
     if on && background_alerts() == BackgroundAlerts::Asking {
         web::ask(ctx);
@@ -76,32 +76,32 @@ pub(crate) fn set_background_alerts(ctx: &egui::Context, on: bool) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn set_background_alerts(_ctx: &egui::Context, _on: bool) {}
+pub fn set_background_alerts(_ctx: &egui::Context, _on: bool) {}
 
 /// Raise the browser's notification for an outcome, if the reader turned
 /// alerts on and the browser allows them. Choosing it brings the tab back.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn alert(title: &str, body: &str) {
+pub fn alert(title: &str, body: &str) {
     if background_alerts() == BackgroundAlerts::On {
         web::notify(title, body);
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn alert(_title: &str, _body: &str) {}
+pub fn alert(_title: &str, _body: &str) {}
 
 /// Whether the reader is at the page: its tab is in front and the browser
 /// window has the keyboard. The browser's frame loop says neither in the
 /// window focus a desktop window reports, so the page is asked directly.
 /// `None` off the browser, where the window reports its own focus.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn reader_present() -> Option<bool> {
+pub fn reader_present() -> Option<bool> {
     let document = web_sys::window()?.document()?;
     Some(!document.hidden() && document.has_focus().unwrap_or(true))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) const fn reader_present() -> Option<bool> {
+pub const fn reader_present() -> Option<bool> {
     None
 }
 

@@ -24,14 +24,14 @@ const CHECKPOINT_GENERATION_MARKER: &str = ".generation-";
 const GENERATION_RESERVATION_ATTEMPTS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct CheckpointIdentity {
-    pub(crate) content_digest: ContentDigest,
-    pub(crate) byte_len: u64,
-    pub(crate) modified_unix_ms: u64,
+pub struct CheckpointIdentity {
+    pub content_digest: ContentDigest,
+    pub byte_len: u64,
+    pub modified_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CheckpointOwnership {
+pub enum CheckpointOwnership {
     Managed {
         session_id: Uuid,
         process_id: u32,
@@ -43,34 +43,34 @@ pub(crate) enum CheckpointOwnership {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CheckpointBinding {
-    pub(crate) identity: CheckpointIdentity,
-    pub(crate) ownership: CheckpointOwnership,
-    pub(crate) source_snapshot: Option<CheckpointIdentity>,
+pub struct CheckpointBinding {
+    pub identity: CheckpointIdentity,
+    pub ownership: CheckpointOwnership,
+    pub source_snapshot: Option<CheckpointIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SourceSnapshotRelation {
+pub enum SourceSnapshotRelation {
     Exact,
     Changed,
     Unrecorded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AutosaveRestoreCandidate {
-    pub(crate) source: PathBuf,
-    pub(crate) checkpoint: PathBuf,
-    pub(crate) binding: CheckpointBinding,
+pub struct AutosaveRestoreCandidate {
+    pub source: PathBuf,
+    pub checkpoint: PathBuf,
+    pub binding: CheckpointBinding,
 }
 
 impl AutosaveRestoreCandidate {
-    pub(crate) fn can_discard(&self) -> bool {
+    pub fn can_discard(&self) -> bool {
         matches!(self.binding.ownership, CheckpointOwnership::Managed { .. })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CheckpointInspection {
+pub enum CheckpointInspection {
     /// Owned by this process or another process whose lease is still held.
     ActiveOwner,
     Candidate(CheckpointBinding),
@@ -116,7 +116,7 @@ fn writer_lease_key(checkpoint: &Path) -> Result<PathBuf, String> {
 
 /// Sibling checkpoint path for a schematic file: `design.rsp` →
 /// `design.rsp.autosave`. Native only — the web build has no checkpoints.
-pub(crate) fn autosave_checkpoint_path(path: &Path) -> PathBuf {
+pub fn autosave_checkpoint_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(".autosave");
     PathBuf::from(name)
@@ -146,7 +146,7 @@ fn checkpoint_generation_path(source: &Path, generation_id: Uuid) -> PathBuf {
 /// Return every exact recovery generation associated with a source. The
 /// unsuffixed path remains readable for checkpoints written by older builds;
 /// current writers publish immutable UUID-named generations beside it.
-pub(crate) fn checkpoint_paths_for_source(source: &Path) -> Vec<PathBuf> {
+pub fn checkpoint_paths_for_source(source: &Path) -> Vec<PathBuf> {
     let legacy = autosave_checkpoint_path(source);
     let mut checkpoints = Vec::new();
     if legacy.exists() {
@@ -517,10 +517,7 @@ fn validate_manifest_paths(
     Ok(())
 }
 
-pub(crate) fn write_checkpoint(
-    source: &Path,
-    schematic: &SchematicState,
-) -> Result<PathBuf, String> {
+pub fn write_checkpoint(source: &Path, schematic: &SchematicState) -> Result<PathBuf, String> {
     let bytes = serialize_checkpoint(source, schematic)?;
     let source_snapshot = read_exact_bytes(source).ok().map(|(_, identity)| identity);
     let checkpoint = reserve_writer_generation(source)?;
@@ -577,7 +574,7 @@ fn retire_prior_owned_generations(source: &Path, current: &Path) -> Vec<String> 
         .collect()
 }
 
-pub(crate) fn inspect_checkpoint(source: &Path, checkpoint: &Path) -> CheckpointInspection {
+pub fn inspect_checkpoint(source: &Path, checkpoint: &Path) -> CheckpointInspection {
     let snapshot = read_exact_bytes(checkpoint);
     let (identity, read_error) = match snapshot {
         Ok((_, identity)) => (Some(identity), None),
@@ -645,7 +642,7 @@ pub(crate) fn inspect_checkpoint(source: &Path, checkpoint: &Path) -> Checkpoint
     })
 }
 
-pub(crate) fn autosave_restore_candidate(
+pub fn autosave_restore_candidate(
     source: &Path,
 ) -> Result<Option<AutosaveRestoreCandidate>, String> {
     let mut candidates = Vec::new();
@@ -721,7 +718,7 @@ fn should_offer_checkpoint_on_source_open(
     }
 }
 
-pub(crate) fn read_source_snapshot(
+pub fn read_source_snapshot(
     source: &Path,
     binding: &CheckpointBinding,
 ) -> Result<(Vec<u8>, SourceSnapshotRelation), String> {
@@ -762,7 +759,7 @@ fn validate_binding(
     Ok(lease)
 }
 
-pub(crate) fn read_bound_checkpoint(
+pub fn read_bound_checkpoint(
     source: &Path,
     checkpoint: &Path,
     binding: &CheckpointBinding,
@@ -777,7 +774,7 @@ pub(crate) fn read_bound_checkpoint(
     Ok(bytes)
 }
 
-pub(crate) fn discard_bound_checkpoint(
+pub fn discard_bound_checkpoint(
     source: &Path,
     checkpoint: &Path,
     binding: &CheckpointBinding,
@@ -832,7 +829,7 @@ pub(crate) fn discard_bound_checkpoint(
     Ok(())
 }
 
-pub(crate) fn cleanup_checkpoint(source: &Path) -> Result<(), String> {
+pub fn cleanup_checkpoint(source: &Path) -> Result<(), String> {
     let checkpoints = checkpoint_paths_for_source(source);
     let mut foreign_retained = false;
     let mut cleanup_errors = Vec::new();
