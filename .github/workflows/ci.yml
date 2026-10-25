@@ -800,6 +800,13 @@ jobs:
           --test sensitivity_probe_contract --test sensitivity_linear_devices
           --test analysis_numeric_fields --test forward_analyses
           --test frequency_grid_errors
+      - name: Test engine numerics in a WebAssembly worker
+        env:
+          WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
+          WASM_BINDGEN_TEST_TIMEOUT: '900'
+        run: >-
+          cargo test --locked -p rspice-core --target wasm32-unknown-unknown
+          --release --no-default-features --features wasm,veriloga-wasm-jit
           --test wasm_engine_numerics
       - name: Test UI clocks in a browser window
         env:
