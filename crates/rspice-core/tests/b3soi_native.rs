@@ -1145,6 +1145,97 @@ fn native_level57_pd_self_heating_inverse_mode_temp_rise_is_non_negative() {
     );
 }
 
+/// How far a self-heated operating point may sit from ngspice-46's. RSpice
+/// re-temps every parameter at the heated temperature, while ngspice-46's load
+/// keeps phi and what its temperature pass derives from it at ambient
+/// (b3soipdld.c:590-726, b3soifdld.c:672-800), up to 5.9e-4 apart at the card RTH0.
+const SH_REL: Value = 1.0e-3;
+
+/// One SOI device with its four terminals driven at `[vd, vg, vs, ve]`, solved
+/// for its operating point with self-heating on or off:
+/// `(i(vd), i(vs), temperature rise)`, the rise 0 without self-heating.
+fn soi_op(card: &str, model: &str, self_heating: bool, v: [Value; 4]) -> [Value; 3] {
+    let card = if self_heating {
+        card.replacen("SHMOD = 0", "SHMOD = 1", 1)
+            .replacen("SHMOD =0", "SHMOD = 1", 1)
+    } else {
+        card.to_string()
+    };
+    let [vd, vg, vs, ve] = v;
+    let deck = format!(
+        "* SOI device operating point\n\
+         vd d 0 dc {vd}\n\
+         vs s 0 dc {vs}\n\
+         vg g 0 dc {vg}\n\
+         ve e 0 dc {ve}\n\
+         m1 d g s e {model} w=10u l=0.25u\n\
+         .option gmin=1e-25 itl1=500\n\
+         .op\n\
+         {card}\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let op = engine().run_dc_op(&netlist).expect("SOI OP converges");
+    let rise = op.try_voltage_named("m1.__temp.internal");
+    assert_eq!(
+        rise.is_some(),
+        self_heating,
+        "self-heating temperature node"
+    );
+    [
+        op.branch_current_named("vd").expect("VD branch current"),
+        op.branch_current_named("vs").expect("VS branch current"),
+        rise.unwrap_or(0.0),
+    ]
+}
+
+/// The equivalent drain current of a self-heated device must be formed with
+/// the same temperature derivative its matrix column carries, for either
+/// polarity and in either mode. The corpus cards with SHMOD = 1, floating body,
+/// `|vd| = |vg| = 1.5 V` against ngspice-46 (`.option gmin=1e-25 itl1=500`,
+/// `op`, `set numdgt=12`, `print all`).
+///
+/// ngspice-46 PD forms the forward-mode current consistently
+/// (b3soipdld.c:3872-3874) but adds the term in inverse mode
+/// (b3soipdld.c:3931-3932), which BSIMSOI 3.1 corrected
+/// (b4soild.c:10104-10107). Its inverse-mode decks therefore report terminal
+/// currents that are not the device's: the mirror deck (drain and source
+/// swapped) holds the same body voltage and temperature rise to all twelve
+/// digits, yet NMOS i(vs) reads -3.11758526375e-3 against the forward
+/// i(vd) -3.18032170901e-3, and PMOS 1.356080474777e-3 against
+/// 1.367179065670e-3. The inverse-mode decks here are held to the forward
+/// references, mirrored.
+#[test]
+fn native_soi_pd_self_heating_drain_current_matches_ngspice46_in_both_modes() {
+    // (card, model, sign, i(vd) forward, temperature rise) from ngspice-46.
+    for (card, model, sign, current, rise) in [
+        (
+            pd_n1_model_card(),
+            "n1",
+            1.0,
+            -3.18032170901e-03,
+            2.385234849796,
+        ),
+        (
+            pd_p1_model_card(),
+            "p1",
+            -1.0,
+            1.367179065670e-03,
+            1.025384316365,
+        ),
+    ] {
+        let v = sign * 1.5;
+        let [id, is, temp] = soi_op(card, model, true, [v, v, 0.0, 0.0]);
+        assert_rel(&format!("PD {model} forward i(vd)"), id, current, SH_REL);
+        assert_rel(&format!("PD {model} forward i(vs)"), is, -current, SH_REL);
+        assert_rel(&format!("PD {model} forward rise"), temp, rise, SH_REL);
+        let [id, is, temp] = soi_op(card, model, true, [0.0, v, v, 0.0]);
+        assert_rel(&format!("PD {model} inverse i(vs)"), is, current, SH_REL);
+        assert_rel(&format!("PD {model} inverse i(vd)"), id, -current, SH_REL);
+        assert_rel(&format!("PD {model} inverse rise"), temp, rise, SH_REL);
+    }
+}
+
 /// The gain stage's AC against Xyce 7.10's regression gold. RSpice stamps
 /// the derivatives of Xyce's charges (`device_engine_roundtrip` holds every
 /// entry to a difference quotient); Xyce's CAPMOD 2 capacitances leave terms out of

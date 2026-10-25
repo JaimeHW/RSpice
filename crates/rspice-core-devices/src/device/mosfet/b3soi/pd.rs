@@ -1148,13 +1148,15 @@ impl B3SoiPd {
             gm_t = mt * op.gm_t;
             fwd_sum = gm + gmbs + gme;
             rev_sum = 0.0;
+            // `gm_t` already carries the type sign, so its term stays outside
+            // the type factor (b3soipdld.c:3872-3874, "v2.2.2 bug fix").
             cdreq = mt
                 * (op.cdrain
                     - op.gds * bias.vds
                     - gm * bias.vgs
                     - gmbs * bias.vbs
-                    - gme * bias.ves
-                    - gm_t * bias.del_temp);
+                    - gme * bias.ves)
+                - gm_t * bias.del_temp;
             ceqbs = op.cjs - op.gjs_t * bias.del_temp;
             ceqbd = op.cjd - op.gjd_t * bias.del_temp;
 
@@ -1188,13 +1190,18 @@ impl B3SoiPd {
             rev_sum = -(gm + gmbs + gme);
             let vgd = bias.vgs - bias.vds;
             let vbd = bias.vbs - bias.vds;
+            // The `gm_t` column is stamped as `+gm_t` on the drain-prime row,
+            // so the equivalent current subtracts `gm_t * delTemp`. ngspice-46
+            // PD adds it (b3soipdld.c:3931-3932), which leaves the stamped
+            // drain current off the device's by 2*gm_t*delTemp; BSIMSOI 3.1
+            // corrected the sign (b4soild.c:10104-10107, "v3.1 bug fix").
             cdreq = -mt
                 * (op.cdrain
                     + op.gds * bias.vds
                     + gm * vgd
                     + gmbs * vbd
-                    + gme * (bias.ves - bias.vds)
-                    + gm_t * bias.del_temp);
+                    + gme * (bias.ves - bias.vds))
+                - gm_t * bias.del_temp;
             ceqbs = op.cjd - op.gjd_t * bias.del_temp;
             ceqbd = op.cjs - op.gjs_t * bias.del_temp;
 
