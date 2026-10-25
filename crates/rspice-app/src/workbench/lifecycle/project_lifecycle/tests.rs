@@ -6,9 +6,9 @@
 
 use super::test_host::ServicesHost;
 use super::*;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, ViewType};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_state::simulation::plan::AnalysisKind;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::native::NativeProjectStorage;
 
@@ -250,7 +250,7 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
     let mut state = ServicesHost::default();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -313,7 +313,7 @@ fn newer_edits_after_saved_snapshot_revoke_destructive_continuation() {
     let mut state = ServicesHost::default();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -355,7 +355,7 @@ fn newer_edits_after_saved_snapshot_revoke_destructive_continuation() {
     ));
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Project);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Project);
     assert!(
         !saved_snapshot_authorizes_continuation(&state, SaveScope::ActiveDocument, &saved_document),
         "an active-tab change cannot redirect an old continuation"

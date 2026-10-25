@@ -10,10 +10,6 @@ use crate::product::{
     AnalysisInstanceId, DatasetId, ModelSourceId, ObjectRevision, ProjectId, RunId,
     SimulationPlanId,
 };
-use crate::simulation::{
-    dialog::{DampingStrategy, IntegrationMethod, MatrixSolver},
-    plan::AnalysisDraft,
-};
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, Cell, CellViewRef, OpenCellView,
     OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
@@ -25,8 +21,10 @@ use crate::state::{
     NoiseSummary, PreparedModelSourceIdentity, RunRetention, SpecificationPolicy,
 };
 use crate::state::{LibraryManager, ProjectWorkspace};
+use rspice_app_state::simulation::plan::AnalysisDraft;
 use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
+use rspice_simulation_contract::options::{DampingStrategy, IntegrationMethod, MatrixSolver};
 
 fn downgrade_result_digests_to_v6(results: &mut ProjectSimulationResults) {
     for persisted_run in &mut results.runs {
@@ -402,7 +400,7 @@ pub(crate) fn project_with_execution_context() -> ProjectSnapshot {
     let mut design_libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut design_libraries);
 
-    let mut setup = crate::workbench::app_state::SimSetupState::new();
+    let mut setup = rspice_app_state::workbench::app_state::sim_setup::SimSetupState::new();
     setup.enabled.extend([ac, noise]);
     setup.analysis_order = vec![noise, transient, ac];
     setup.listed.extend([ac, noise]);
@@ -1063,7 +1061,7 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
         .iter()
         .find(|instance| instance.kind() == AnalysisKind::Transient)
         .expect("transient instance");
-    let crate::simulation::plan::AnalysisDraft::Transient(transient) = transient.draft() else {
+    let AnalysisDraft::Transient(transient) = transient.draft() else {
         panic!("transient instance owns transient draft");
     };
     assert_eq!(transient.stop, "unfinished(");
@@ -1072,21 +1070,16 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
         .iter()
         .find(|instance| instance.kind() == AnalysisKind::MonteCarlo)
         .expect("Monte Carlo instance");
-    let crate::simulation::plan::AnalysisDraft::MonteCarlo(monte_carlo) = monte_carlo.draft()
-    else {
+    let AnalysisDraft::MonteCarlo(monte_carlo) = monte_carlo.draft() else {
         panic!("Monte Carlo instance owns Monte Carlo draft");
     };
     assert_eq!(monte_carlo.seed, "not-an-integer-yet");
     assert!(
-        plan.analysis_draft_validation_error(&crate::simulation::plan::AnalysisDraft::Transient(
-            transient.clone(),
-        ))
-        .is_some()
+        plan.analysis_draft_validation_error(&AnalysisDraft::Transient(transient.clone(),))
+            .is_some()
     );
     assert!(
-        plan.analysis_draft_validation_error(&crate::simulation::plan::AnalysisDraft::MonteCarlo(
-            monte_carlo.clone()
-        ),)
+        plan.analysis_draft_validation_error(&AnalysisDraft::MonteCarlo(monte_carlo.clone()),)
             .is_some()
     );
 }

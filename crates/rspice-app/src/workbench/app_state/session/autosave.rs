@@ -17,8 +17,8 @@ use rspice_ui_kit::widgets::{Dialog, DialogChoice, DialogSize};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::SchematicState;
-use crate::workbench::app_state::Model;
 use crate::workbench::lifecycle::project_lifecycle::PlatformState;
+use rspice_app_state::workbench::app_state::model::Model;
 
 /// Write a checkpoint when the interval has elapsed on a dirty,
 /// path-bearing schematic. Called once per frame; cheap when idle. `last` is

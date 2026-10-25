@@ -7,8 +7,8 @@ use crate::product::ProjectId;
 use crate::state::model_library::{ModelLibraryManager, ModelSourceAuthority};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::{first_unreachable_source, is_foreign_platform_absolute_path};
-use crate::workbench::app_state::SimSetupState;
 
+use rspice_app_state::workbench::app_state::sim_setup::SimSetupState;
 use rspice_project::{ProjectExecutionContext, ProjectModelLibrary};
 
 /// Capture persisted execution inputs without storing editor or catalog-browser state.

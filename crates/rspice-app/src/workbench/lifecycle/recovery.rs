@@ -24,8 +24,8 @@ use crate::state::{
     Cell, CellViewRef, Library, LibraryManager, OpenCellView, ProjectWorkspace, SchematicState,
     View, ViewType,
 };
-use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::lifecycle::project_lifecycle::PlatformState;
+use rspice_app_state::workbench::app_state::{model::Model, sim_setup::SimSetupState};
 
 use crate::state::write_policy::LocalSafeModeOptions;
 
@@ -494,8 +494,8 @@ fn canonical_execution_context(
 }
 
 fn matches_documented_pristine_plan(
-    candidate: &crate::simulation::plan::SimulationPlan,
-    documented: &crate::simulation::plan::SimulationPlan,
+    candidate: &rspice_app_state::simulation::plan::SimulationPlan,
+    documented: &rspice_app_state::simulation::plan::SimulationPlan,
 ) -> bool {
     if candidate.revision() != documented.revision()
         || !candidate.receipts().is_empty()
@@ -539,7 +539,7 @@ fn pristine_execution_context(
     }
     crate::io::capture_execution_context(
         &pristine,
-        &crate::workbench::app_state::default_model_library_manager(),
+        &rspice_app_state::workbench::workspace::default_model_library_manager(),
     )
     .map_err(|error| format!("pristine simulation/model state is invalid: {error}"))
 }
@@ -700,7 +700,8 @@ pub(crate) fn install_comparison_design(
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn reset_comparison_execution(model: &mut Model) {
     model.sim_setup = SimSetupState::new();
-    model.model_library_manager = crate::workbench::app_state::default_model_library_manager();
+    model.model_library_manager =
+        rspice_app_state::workbench::workspace::default_model_library_manager();
 }
 
 /// Why a recovery comparison cannot open here.
@@ -1238,7 +1239,8 @@ pub(crate) mod tests {
             .stable_analysis_plan_mut()
             .expect("default stable plan")
             .edit(transient, |draft| {
-                let crate::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
+                let rspice_app_state::simulation::plan::AnalysisDraft::Transient(draft) = draft
+                else {
                     panic!("default instance is transient");
                 };
                 draft.stop = "25u".to_owned();

@@ -1,7 +1,7 @@
 //! Map the selected application surface to its canonical project document.
 
 use crate::state::CellViewRef;
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 #[cfg(test)]
 pub(super) use rspice_project::registry::FINGERPRINT_PASSES;
 pub(super) use rspice_project::registry::content_digest;

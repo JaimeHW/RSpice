@@ -27,7 +27,7 @@ fn retained_results() -> (ServicesHost, AnalysisPresentationKey) {
     assert!(state.model.simulation.select_run(0));
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     (state, key)
 }
 

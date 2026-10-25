@@ -51,8 +51,10 @@ use crate::product::ContentDigest;
 use crate::state::project_snapshot::SnapshotSessionCapture;
 use crate::state::{CellViewRef, ProjectOpenFact};
 // The lower-tier state the lifecycle and its sibling services work on.
-pub(in crate::workbench) use crate::workbench::app_state::{Model, SimSetupState};
 pub(in crate::workbench) use crate::workbench::slots::platform::PlatformState;
+pub(in crate::workbench) use rspice_app_state::workbench::app_state::{
+    model::Model, sim_setup::SimSetupState,
+};
 use rspice_project::{ProjectWorkingSet, SnapshotContent};
 
 #[cfg(target_arch = "wasm32")]
@@ -1344,7 +1346,7 @@ fn report_design_checks_after_save(state: &mut dyn LifecycleHost) {
         .lifecycle_view()
         .model
         .preferences
-        .toggle(crate::workbench::TogglePreference::RunDesignChecksOnSave)
+        .toggle(rspice_app_state::workbench::preferences::TogglePreference::RunDesignChecksOnSave)
     {
         return;
     }
@@ -1606,7 +1608,7 @@ pub(crate) fn revert_document_model(
                 .sim_setup
                 .analysis_plan
                 .as_ref()
-                .map(crate::simulation::plan::SimulationPlan::id)
+                .map(rspice_app_state::simulation::plan::SimulationPlan::id)
             {
                 state
                     .model
@@ -1720,7 +1722,7 @@ pub(crate) fn dirty_document_count(state: &dyn LifecycleSource) -> usize {
 pub(crate) fn can_close_active_document(state: &dyn LifecycleSource) -> bool {
     let state = state.lifecycle_view();
     state.platform.project_lifecycle.is_open()
-        && state.workspace == crate::workbench::state::Workspace::Design
+        && state.workspace == rspice_app_state::workbench::workspace::Workspace::Design
         && state.model.workspace.content.open_views.len() > 1
 }
 

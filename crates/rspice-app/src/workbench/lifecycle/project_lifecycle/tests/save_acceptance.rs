@@ -11,7 +11,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
             let mut state = ServicesHost::default();
             state
                 .workbench
-                .activate(crate::workbench::state::Workspace::Design);
+                .activate(rspice_app_state::workbench::workspace::Workspace::Design);
             state
                 .model
                 .schematic
@@ -102,7 +102,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         let mut state = ServicesHost::default();
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         save_native(
             &mut state,
             SaveScope::AllDocuments,

@@ -7,7 +7,6 @@
 use super::*;
 use crate::product::ContentDigest;
 use crate::product::ObjectRevision;
-use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
 use crate::state::model_library::{
     CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
     CorrelationSuite,
@@ -17,6 +16,7 @@ use crate::state::model_library::{
     ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin,
     ProjectModelDefinition, ProjectModelRevisionDefinition, is_portable_absolute_path,
 };
+use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use rspice_project::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
 use sha2::{Digest as _, Sha256};
@@ -413,8 +413,10 @@ fn schema_three_still_accepts_singletons_only_for_load_time_migration() {
     persisted_plan.insert("listed".to_owned(), serde_json::json!([1]));
     persisted_plan.insert(
         "tran".to_owned(),
-        serde_json::to_value(crate::workbench::app_state::TranSetup::default())
-            .expect("legacy draft serializes"),
+        serde_json::to_value(
+            rspice_app_state::workbench::app_state::sim_setup::TranSetup::default(),
+        )
+        .expect("legacy draft serializes"),
     );
 
     let mut restored: ProjectExecutionContext =
@@ -465,7 +467,7 @@ fn schema_four_promotes_the_single_stable_plan_into_the_named_catalog() {
     assert_eq!(restored.simulation_plan.plan_count(), 1);
     assert_eq!(
         restored.simulation_plan.active_plan_lineage(),
-        crate::workbench::app_state::SimulationPlanLineage::default()
+        rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanLineage::default()
     );
     restored.validate().expect("promoted context validates");
 }
@@ -484,7 +486,7 @@ fn schema_sixteen_migrates_global_model_selection_into_every_plan() {
     let mut plan = SimSetupState::new();
     plan.clone_active_plan(
         "Legacy second plan",
-        crate::workbench::app_state::SimulationPlanCloneOptions::default(),
+        rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanCloneOptions::default(),
     )
     .expect("second plan exists");
     let context = context_from_state(&plan, &manager).expect("current context validates");

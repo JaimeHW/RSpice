@@ -16,7 +16,7 @@ use super::{
 use crate::state::SimulationState;
 use crate::state::pdk_config::PdkConfig;
 use crate::state::result_presentation::ResultPresentation;
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 
 #[derive(Clone)]
 pub(crate) struct ServicesHost {

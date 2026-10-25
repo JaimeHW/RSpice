@@ -12,7 +12,7 @@ use rspice_design::drc::DrcResult;
 use super::{Model, PlatformState};
 use crate::state::SimulationState;
 use crate::state::result_presentation::ResultPresentation;
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// The result presentation a project file saves: the reader's markers, panes
 /// and expression groups about the datasets the project still holds.
