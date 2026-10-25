@@ -704,13 +704,23 @@ impl B3SoiFd {
         op.gjd_t = (plus.1 - minus.1) / denom;
         op.gjs_t = (plus.2 - minus.2) / denom;
         let ids_t = (plus.3 - minus.3) / denom;
-        op.gtemp_t = -ids_t * bias.vds;
-        op.thermal_eq_current = -op.ids * bias.vds
+        // The power row is formed against the mode-selected voltages
+        // (b3soifdld.c:2163-2172 read `Vds`/`Vgs`/`Vbs`/`Ves` as swapped at
+        // b3soifdld.c:810-829), as the load's own `gtemp*` are.
+        let (vds, vgs, vbs, ves) = if op.mode >= 0 {
+            (bias.vds, bias.vgs, bias.vbs, bias.ves)
+        } else {
+            (
+                -bias.vds,
+                bias.vgs - bias.vds,
+                bias.vbs - bias.vds,
+                bias.ves - bias.vds,
+            )
+        };
+        op.gtemp_t = -ids_t * vds;
+        op.thermal_eq_current = -op.ids * vds
             - self.mtype
-                * (op.gtemp_g * bias.vgs
-                    + op.gtemp_b * bias.vbs
-                    + op.gtemp_e * bias.ves
-                    + op.gtemp_d * bias.vds)
+                * (op.gtemp_g * vgs + op.gtemp_b * vbs + op.gtemp_e * ves + op.gtemp_d * vds)
             - op.gtemp_t * bias.del_temp;
     }
 

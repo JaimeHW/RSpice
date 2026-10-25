@@ -1240,6 +1240,20 @@ fn native_soi_pd_self_heating_drain_current_matches_ngspice46_in_both_modes() {
     }
 }
 
+/// B3SOIFD's power row is formed against the mode-selected `Vds`/`Vgs`/`Ves`
+/// (b3soifdld.c:2163-2172), so an inverse-mode device heats exactly as its
+/// mirror does. ngspice-46, the corpus N1 card with SHMOD = 1, vd = 0,
+/// vg = vs = 1.5 V (`.option gmin=1e-25 itl1=500`, `op`, `set numdgt=12`,
+/// `print all`): the deck and its drain/source mirror agree to all twelve
+/// digits.
+#[test]
+fn native_soi_fd_self_heating_inverse_mode_matches_ngspice46_op() {
+    let [id, is, temp] = soi_op(fd_n1_model_card(), "n1", true, [0.0, 1.5, 1.5, 0.0]);
+    assert_rel("FD inverse i(vs)", is, -2.45747014386e-03, SH_REL);
+    assert_rel("FD inverse i(vd)", id, 2.45747014386e-03, SH_REL);
+    assert_rel("FD inverse rise", temp, 2.797633057124, SH_REL);
+}
+
 /// A complementary pair of cards, `(n1, p1)`: the corpus N1 card with
 /// `nsub` replaced so that NSUB = NCH, which zeroes the type-signed back-gate
 /// flatband `vfbb`, and its twin with the type flipped and `vth0` replaced
