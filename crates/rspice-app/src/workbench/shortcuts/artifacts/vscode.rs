@@ -22,7 +22,7 @@ use crate::state::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,
     ShortcutSequence, ShortcutStroke, shortcut_context_precedence_rank, shortcut_contexts_overlap,
 };
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::CommandRegistry;
 
 /// Version of the audited VS Code-to-RSpice command identity table.
 pub const VSCODE_MAPPING_VERSION: u16 = 1;
@@ -35,74 +35,75 @@ pub struct VscodeCommandMapping {
 }
 
 /// Supported VS Code command identities. Unknown identities are never guessed.
+/// Each names the RSpice command by its key, which the registry checks is live.
 pub const VSCODE_COMMAND_MAPPINGS: &[VscodeCommandMapping] = &[
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.files.save",
-        rspice_command: Command::Save.key(),
+        rspice_command: CommandKey::new("save-project"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.files.saveAs",
-        rspice_command: Command::SaveAs.key(),
+        rspice_command: CommandKey::new("save-project-as"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.files.saveAll",
-        rspice_command: Command::SaveAll.key(),
+        rspice_command: CommandKey::new("save-all"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.closeActiveEditor",
-        rspice_command: Command::CloseActiveDocument.key(),
+        rspice_command: CommandKey::new("close-document"),
     },
     VscodeCommandMapping {
         vscode_command_id: "undo",
-        rspice_command: Command::Undo.key(),
+        rspice_command: CommandKey::new("undo"),
     },
     VscodeCommandMapping {
         vscode_command_id: "redo",
-        rspice_command: Command::Redo.key(),
+        rspice_command: CommandKey::new("redo"),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.clipboardCutAction",
-        rspice_command: Command::Cut.key(),
+        rspice_command: CommandKey::new("cut-selection"),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.clipboardCopyAction",
-        rspice_command: Command::Copy.key(),
+        rspice_command: CommandKey::new("copy-selection"),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.clipboardPasteAction",
-        rspice_command: Command::Paste.key(),
+        rspice_command: CommandKey::new("paste-selection"),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.selectAll",
-        rspice_command: Command::SelectAll.key(),
+        rspice_command: CommandKey::new("select-all"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.openSettings",
-        rspice_command: Command::Preferences.key(),
+        rspice_command: CommandKey::new("preferences"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.showCommands",
-        rspice_command: Command::CommandPalette.key(),
+        rspice_command: CommandKey::new("command-palette"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.openGlobalKeybindings",
-        rspice_command: Command::KeyboardShortcuts.key(),
+        rspice_command: CommandKey::new("command-reference"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.toggleFullScreen",
-        rspice_command: Command::ToggleFullScreen.key(),
+        rspice_command: CommandKey::new("full-screen"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.toggleSidebarVisibility",
-        rspice_command: Command::ToggleNavigator.key(),
+        rspice_command: CommandKey::new("toggle-navigator"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.togglePanel",
-        rspice_command: Command::ToggleConsole.key(),
+        rspice_command: CommandKey::new("console"),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.toggleZenMode",
-        rspice_command: Command::ToggleFocusMode.key(),
+        rspice_command: CommandKey::new("toggle-focus-mode"),
     },
 ];
 
@@ -1248,7 +1249,7 @@ fn build_native_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::vocabulary::command_registry;
+    use crate::workbench::commands::vocabulary::{Command, command_registry};
 
     fn vscode(source: &str, platform: VscodeHostPlatform) -> VscodeShortcutAdaptation {
         adapt_vscode_keybindings(r"C:\private\keybindings.json", source.as_bytes(), platform)

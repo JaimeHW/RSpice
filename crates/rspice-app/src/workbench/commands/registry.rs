@@ -103,10 +103,6 @@ const EXIT: &[ShortcutBinding] = &[primary(
 )];
 const COMMAND_PALETTE: &[ShortcutBinding] =
     &[primary(chord(Key::K, true, false, false, "Ctrl+K"), ALL)];
-const PREFERENCES: &[ShortcutBinding] = &[primary(
-    chord(Key::Comma, true, false, false, "Ctrl+,"),
-    ALL,
-)];
 const UNDO: &[ShortcutBinding] = &[primary(chord(Key::Z, true, false, false, "Ctrl+Z"), ALL)];
 const REDO: &[ShortcutBinding] = &[
     primary(chord(Key::Z, true, false, true, "Ctrl+Shift+Z"), ALL),
@@ -738,7 +734,6 @@ impl Command {
             Self::FindInDesign => FIND_DESIGN,
             Self::FindReplace => FIND_REPLACE,
             Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
-            Self::Preferences => PREFERENCES,
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
             Self::ZoomFit => ZOOM_FIT,

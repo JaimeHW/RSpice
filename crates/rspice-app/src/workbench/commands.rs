@@ -711,7 +711,6 @@ impl Command {
             | Self::PublishToWeb
             | Self::AccountOrganization
             | Self::License => CommandOwner::Cloud,
-            Self::Preferences | Self::WorkspaceLayouts => CommandOwner::Settings,
         }
     }
 
@@ -880,16 +879,6 @@ impl Command {
                     // shelf that Place instance brings forward has none.
                     app.state.design.design_panel = super::state::DesignPanel::Navigator;
                     app.state.workbench.outbox.push(FocusNavigatorSearch);
-                }
-            }
-            Self::Preferences => {
-                let route = super::SurfaceRoute::surface(super::SurfaceId::Preferences);
-                if let Err(error) = app
-                    .state
-                    .workbench
-                    .navigate(route, super::RouteTransitionSource::User)
-                {
-                    app.state.prompt(error.to_string());
                 }
             }
             Self::ZoomIn => {
@@ -1133,16 +1122,6 @@ impl Command {
                 app.state.prompt(format!(
                     "Closed {count} document tab(s); the project data is kept."
                 ));
-            }
-            Self::WorkspaceLayouts => {
-                let preset = app
-                    .state
-                    .model
-                    .preferences
-                    .workspace()
-                    .map(|workspace| workspace.preset())
-                    .unwrap_or_default();
-                app.state.settings.workspace_layout_manager.open(preset);
             }
             Self::WindowManager => app
                 .state

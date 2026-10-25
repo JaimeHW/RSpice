@@ -122,6 +122,12 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                     .into_iter()
                     .find(|command| command.key() == key)
                     .map(SheetsCommand::declared_spec)
+                    .or_else(|| {
+                        SettingsCommand::ALL
+                            .into_iter()
+                            .find(|command| command.key() == key)
+                            .map(SettingsCommand::declared_spec)
+                    })
                     .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
                 return feature_row(index, &spec, apps);
             };

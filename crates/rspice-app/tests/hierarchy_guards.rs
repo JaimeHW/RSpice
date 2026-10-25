@@ -722,7 +722,10 @@ const COMMAND_IDS_FILE: &str = "workbench/framework/command_registry.rs";
 
 /// Where each registered feature declares its commands. A framework id may
 /// name one of them rather than a `Command` variant.
-const FEATURE_COMMAND_FILES: &[&str] = &["workbench/sheets/commands.rs"];
+const FEATURE_COMMAND_FILES: &[&str] = &[
+    "workbench/sheets/commands.rs",
+    "workbench/settings/commands.rs",
+];
 
 /// Registered commands with no route, and why.
 ///

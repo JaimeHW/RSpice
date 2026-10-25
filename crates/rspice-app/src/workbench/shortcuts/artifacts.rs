@@ -39,8 +39,8 @@ pub use projection::serialize_shortcut_reference_json;
 #[cfg(test)]
 pub use schema::decode_shortcut_artifact_json;
 pub use vscode::{
-    DetectedShortcutArtifact, VscodeAdapterError, VscodeHostPlatform, VscodeImportReport,
-    detect_shortcut_artifact,
+    DetectedShortcutArtifact, VSCODE_COMMAND_MAPPINGS, VscodeAdapterError, VscodeHostPlatform,
+    VscodeImportReport, detect_shortcut_artifact,
 };
 
 use std::collections::BTreeMap;

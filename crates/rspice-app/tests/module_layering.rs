@@ -613,6 +613,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // What the sheets feature's commands declare: keys, labels and bindings,
     // values the command vocabulary lists in the shell's order.
     "sheets/commands",
+    // What the settings feature's commands declare, the same way.
+    "settings/commands",
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
     "platform",
@@ -733,6 +735,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The sheets feature: its commands' answers over its own slot, the model
     // and the session.
     "sheets",
+    // The settings feature: its commands' answers over its own slot, the
+    // model and the session, and the keys its shortcut tables name.
+    "settings",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",

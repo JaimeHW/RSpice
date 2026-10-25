@@ -730,16 +730,17 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn menu_and_shortcut_entries_open_the_canonical_preferences_route() {
-        use crate::workbench::commands::vocabulary::Command;
+        use crate::workbench::framework::command_registry::ids;
+        use crate::workbench::framework::host::Host;
         let mut menu_app = test_app();
-        Command::Preferences.execute(&mut menu_app);
+        Host::execute(&mut menu_app, ids::PREFERENCES);
         assert_eq!(
             menu_app.state.workbench.current_route(),
             preferences_route()
         );
 
         let mut shortcut_app = test_app();
-        shortcut_app.execute_shortcut_command(Command::Preferences);
+        shortcut_app.execute_command_key(ids::PREFERENCES);
         assert_eq!(
             shortcut_app.state.workbench.current_route(),
             preferences_route()
@@ -879,9 +880,10 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_layout_manager_stays_reachable_without_a_preferences_row() {
-        use crate::workbench::commands::vocabulary::Command;
+        use crate::workbench::framework::command_registry::ids;
+        use crate::workbench::framework::host::Host;
         let mut layout_app = test_app();
-        Command::WorkspaceLayouts.execute(&mut layout_app);
+        Host::execute(&mut layout_app, ids::WORKSPACE_LAYOUTS);
         assert!(layout_app.state.settings.workspace_layout_manager.open);
         assert!(layout_app.state.dialog_modal_open());
     }

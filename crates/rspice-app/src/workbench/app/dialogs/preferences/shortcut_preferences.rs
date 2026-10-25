@@ -21,7 +21,7 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 
 use super::preferences_shell::{
     action_buttons, control_width, preference_row, searchable_row, section_heading, value_column,
@@ -868,6 +868,10 @@ fn synchronize_editor_validation(editor: &mut ShortcutEditorState) {
     }
 }
 
+/// The command the editor leaves out: Command reference, which lists the
+/// bindings the editor edits.
+pub(crate) const COMMAND_REFERENCE: CommandKey = CommandKey::new("command-reference");
+
 fn filtered_commands(
     editor: &ShortcutEditorState,
     operating_system: egui::os::OperatingSystem,
@@ -877,7 +881,7 @@ fn filtered_commands(
         .commands()
         .iter()
         .copied()
-        .filter(|command| *command != Command::KeyboardShortcuts.key())
+        .filter(|command| *command != COMMAND_REFERENCE)
         .filter(|command| context_matches(*command, editor.context))
         .filter(|command| {
             if query.is_empty() {
@@ -1306,6 +1310,7 @@ fn request_editor_cancel(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::commands::vocabulary::Command;
 
     fn input(width: f32, height: f32) -> egui::RawInput {
         egui::RawInput {

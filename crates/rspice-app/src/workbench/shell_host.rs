@@ -592,7 +592,11 @@ impl Host for RSpiceApp {
         }
         menu_keys(COMPACT_MENU, &mut keys);
         menu_keys(SOURCE_EDITOR_MENU, &mut keys);
-        command_registry().validate(ids::named().chain(keys.into_iter().map(|key| ("a menu", key))))
+        command_registry().validate(
+            ids::named()
+                .chain(keys.into_iter().map(|key| ("a menu", key)))
+                .chain(crate::workbench::settings::named_command_keys()),
+        )
     }
 
     fn perform_notification_action(&mut self, action: NotificationAction) {
@@ -943,7 +947,6 @@ mod tests {
             ),
             (ids::OPEN_CONSOLE, Command::OpenConsole),
             (ids::OPEN_NOTIFICATIONS, Command::OpenNotifications),
-            (ids::PREFERENCES, Command::Preferences),
             (ids::PROJECT_LAUNCHER, Command::ProjectLauncher),
             (
                 ids::PROJECT_RECOVERY,
@@ -978,7 +981,6 @@ mod tests {
                 ids::VERIFY_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Verify),
             ),
-            (ids::WORKSPACE_LAYOUTS, Command::WorkspaceLayouts),
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(legacy_command(id), Some(command), "{command:?}");

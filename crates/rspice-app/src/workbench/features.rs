@@ -16,6 +16,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, Peers, Reads, Session};
 use crate::workbench::framework::requests::Outbox;
+use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::WorkbenchSession;
 
@@ -137,6 +138,7 @@ macro_rules! features {
 
 features! {
     sheets: SheetsFeature,
+    settings: SettingsFeature,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers
@@ -161,18 +163,22 @@ mod tests {
     use crate::workbench::commands::vocabulary::command_registry;
 
     /// The registry the shell orders commands by declares each feature
-    /// command exactly as its feature does.
+    /// command exactly as its feature does, and one feature declares it.
     #[test]
     fn every_feature_command_is_ordered_as_its_feature_declares_it() {
         let registry = command_registry();
-        let declared = <SheetsFeature as Registered>::registry();
+        let sheets = <SheetsFeature as Registered>::registry();
+        let settings = <SettingsFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
             assert_eq!(
                 format!("{spec:?}"),
                 format!("{:?}", registry.spec(*key).expect("ordered")),
             );
-            assert!(declared.command(*key).is_some(), "{key:?}");
+            assert!(
+                sheets.command(*key).is_some() != settings.command(*key).is_some(),
+                "{key:?}"
+            );
         }
         assert_eq!(
             registry
@@ -181,6 +187,7 @@ mod tests {
                 .filter(|key| spec(**key).is_some())
                 .count(),
             crate::workbench::sheets::commands::SheetsCommand::ALL.len()
+                + crate::workbench::settings::commands::SettingsCommand::ALL.len()
         );
     }
 

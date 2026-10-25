@@ -174,6 +174,7 @@ SLICE_RULES = [
     # The shell's list of registered features, and each feature's own home.
     (W + r"features\.rs$", "shell"),
     (W + r"sheets(\.rs$|/)", "sheets"),
+    (W + r"settings(\.rs$|/)", "settings"),
     (W + r"shell_host(\.rs$|/)", "shell"),
     (W + r"menu_bar/export_actions", "hardcopy"),
     (W + r"menu_bar/waveform_export", "results"),

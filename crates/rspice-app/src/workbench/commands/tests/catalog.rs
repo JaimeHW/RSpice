@@ -129,7 +129,10 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "close-other-documents"
     );
     assert_eq!(Command::CloseAllDocuments.spec().id, "close-all-documents");
-    assert_eq!(Command::WorkspaceLayouts.spec().id, "workspace-layouts");
+    assert_eq!(
+        SettingsCommand::WorkspaceLayouts.key().as_str(),
+        "workspace-layouts"
+    );
     assert_eq!(Command::WindowManager.spec().id, "window-manager");
     assert_eq!(Command::HelpCenter.spec().id, "help-center");
     assert_eq!(Command::ReleaseNotes.spec().id, "release-notes");

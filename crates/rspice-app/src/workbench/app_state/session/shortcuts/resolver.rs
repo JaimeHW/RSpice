@@ -528,6 +528,7 @@ mod tests {
     use super::*;
     use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
     use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+    use crate::workbench::framework::command_registry::ids;
 
     fn primary() -> Modifiers {
         Modifiers {
@@ -598,10 +599,18 @@ mod tests {
     }
 
     fn bind(profile: &mut ShortcutPreferences, command: Command, strokes: Vec<ShortcutStroke>) {
+        bind_key(profile, command.key(), strokes);
+    }
+
+    fn bind_key(
+        profile: &mut ShortcutPreferences,
+        command: CommandKey,
+        strokes: Vec<ShortcutStroke>,
+    ) {
         profile
             .set_binding(
                 &CommandRegistry,
-                command.key(),
+                command,
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::new(strokes).unwrap()),
@@ -665,9 +674,9 @@ mod tests {
     #[test]
     fn exact_prefix_dispatches_on_injected_timeout_and_clock_never_rewinds() {
         let mut profile = ShortcutPreferences::default();
-        bind(
+        bind_key(
             &mut profile,
-            Command::Preferences,
+            ids::PREFERENCES,
             vec![ShortcutStroke::new(Key::Q, true, false, false)],
         );
         bind(
@@ -708,7 +717,7 @@ mod tests {
             Duration::from_millis(6_500),
             |_| true,
         );
-        assert_eq!(expired.command, Some(Command::Preferences.key()));
+        assert_eq!(expired.command, Some(ids::PREFERENCES));
     }
 
     #[test]
@@ -717,9 +726,9 @@ mod tests {
         profile
             .policies_mut()
             .set_chord_timeout(ChordTimeoutPolicy::NoTimeout);
-        bind(
+        bind_key(
             &mut profile,
-            Command::Preferences,
+            ids::PREFERENCES,
             vec![ShortcutStroke::new(Key::Q, true, false, false)],
         );
         bind(
@@ -760,7 +769,7 @@ mod tests {
             Duration::from_secs(61),
             |_| true,
         );
-        assert_eq!(mismatch.command, Some(Command::Preferences.key()));
+        assert_eq!(mismatch.command, Some(ids::PREFERENCES));
         assert_eq!(mismatch.consume.len(), 1);
         assert_eq!(mismatch.deferred_start, 0);
         let deferred = state.resolve(
@@ -1231,9 +1240,9 @@ mod tests {
         profile
             .policies_mut()
             .set_chord_timeout(ChordTimeoutPolicy::ThreeSeconds);
-        bind(
+        bind_key(
             &mut profile,
-            Command::Preferences,
+            ids::PREFERENCES,
             vec![ShortcutStroke::new(Key::Q, true, false, false)],
         );
         bind(
@@ -1280,16 +1289,16 @@ mod tests {
                     |_| true,
                 )
                 .command,
-            Some(Command::Preferences.key())
+            Some(ids::PREFERENCES)
         );
     }
 
     #[test]
     fn four_stroke_sequence_is_supported_without_dispatching_twice() {
         let mut profile = ShortcutPreferences::default();
-        bind(
+        bind_key(
             &mut profile,
-            Command::Preferences,
+            ids::PREFERENCES,
             vec![
                 ShortcutStroke::new(Key::Q, true, false, false),
                 ShortcutStroke::new(Key::W, true, false, false),
@@ -1313,7 +1322,7 @@ mod tests {
             Duration::ZERO,
             |_| true,
         );
-        assert_eq!(resolution.command, Some(Command::Preferences.key()));
+        assert_eq!(resolution.command, Some(ids::PREFERENCES));
         assert_eq!(resolution.consume.len(), 4);
     }
 

@@ -8,6 +8,7 @@ use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry, palette_scope};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
 
@@ -23,6 +24,11 @@ const fn command_as(command: Command, label: &'static str) -> MenuEntry {
 
 /// The sheets feature's command's row under the label it declares.
 const fn sheets(command: SheetsCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The settings feature's command's row under the label it declares.
+const fn settings(command: SettingsCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -124,7 +130,7 @@ const EDIT_MENU: &[MenuEntry] = &[
         ],
     ),
     Separator,
-    command(Command::Preferences),
+    settings(SettingsCommand::Preferences),
 ];
 
 const VIEW_MENU: &[MenuEntry] = &[
@@ -344,7 +350,7 @@ const WINDOW_MENU: &[MenuEntry] = &[
     command(Command::CloseOtherDocuments),
     command(Command::CloseAllDocuments),
     Separator,
-    command(Command::WorkspaceLayouts),
+    settings(SettingsCommand::WorkspaceLayouts),
     command(Command::WindowManager),
     command(Command::ResetLayout),
 ];

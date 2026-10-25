@@ -19,6 +19,7 @@ use crate::state::command_catalog::{
 use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::localization::OPEN_TASK_DECK;
+use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
 
@@ -73,7 +74,6 @@ pub enum Command {
     FindReplace,
     /// Run the last placement or editing command again, as it last ran.
     RepeatLastCommand,
-    Preferences,
     ZoomIn,
     ZoomOut,
     ZoomFit,
@@ -110,7 +110,6 @@ pub enum Command {
     NextDocument,
     CloseOtherDocuments,
     CloseAllDocuments,
-    WorkspaceLayouts,
     WindowManager,
     SelectTool,
     PlaceInstance,
@@ -430,7 +429,6 @@ impl Command {
             Self::FindInDesign => spec("find-design", "Find in design…", "Edit"),
             Self::FindReplace => spec("find-replace", "Find and replace…", "Edit"),
             Self::RepeatLastCommand => spec("repeat-last-command", "Repeat last command", "Edit"),
-            Self::Preferences => spec("preferences", "Preferences…", "Edit"),
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
             Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
             Self::ZoomFit => spec("canvas-fit-sheet", "Fit drawing sheet", "View"),
@@ -507,9 +505,6 @@ impl Command {
                 spec("close-other-documents", "Close other documents", "Window")
             }
             Self::CloseAllDocuments => spec("close-all-documents", "Close all documents", "Window"),
-            Self::WorkspaceLayouts => {
-                spec("workspace-layouts", "Workspace layouts\u{2026}", "Window")
-            }
             Self::WindowManager => spec(
                 "window-manager",
                 "Windows, documents and session\u{2026}",
@@ -1143,7 +1138,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::FindInDesign,
     Command::FindReplace,
     Command::RepeatLastCommand,
-    Command::Preferences,
     Command::OpenWorkspace(Workspace::Project),
     Command::OpenWorkspace(Workspace::Design),
     Command::OpenWorkspace(Workspace::Simulate),
@@ -1209,7 +1203,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::NextDocument,
     Command::CloseOtherDocuments,
     Command::CloseAllDocuments,
-    Command::WorkspaceLayouts,
     Command::WindowManager,
     Command::ResetLayout,
     Command::SelectTool,
@@ -1442,7 +1435,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::FindInDesign.key(),
     Command::FindReplace.key(),
     Command::RepeatLastCommand.key(),
-    Command::Preferences.key(),
+    SettingsCommand::Preferences.key(),
     Command::OpenWorkspace(Workspace::Project).key(),
     Command::OpenWorkspace(Workspace::Design).key(),
     Command::OpenWorkspace(Workspace::Simulate).key(),
@@ -1509,7 +1502,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::NextDocument.key(),
     Command::CloseOtherDocuments.key(),
     Command::CloseAllDocuments.key(),
-    Command::WorkspaceLayouts.key(),
+    SettingsCommand::WorkspaceLayouts.key(),
     Command::WindowManager.key(),
     Command::ResetLayout.key(),
     Command::SelectTool.key(),
@@ -1736,6 +1729,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .iter()
                 .map(|command| command.registry_spec())
                 .chain(SheetsCommand::ALL.map(SheetsCommand::declared_spec))
+                .chain(SettingsCommand::ALL.map(SettingsCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         );

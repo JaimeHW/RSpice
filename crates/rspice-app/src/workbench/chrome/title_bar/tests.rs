@@ -426,7 +426,6 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         Command::VerificationPage(VerificationPage::Yield),
         Command::ModelsPage(ModelsPage::Models),
         Command::AutomationConsole,
-        Command::WorkspaceLayouts,
         Command::WindowManager,
         Command::JobsManager,
         Command::ToggleFocusMode,
@@ -435,6 +434,10 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
     ] {
         assert!(listed.contains(&command.key()), "no menu lists {command:?}");
     }
+    assert!(
+        listed.contains(&ids::WORKSPACE_LAYOUTS),
+        "no menu lists workspace layouts"
+    );
     assert!(
         listed_commands(application_menu_entries(ApplicationMenu::Simulate))
             .contains(&Command::JobsManager.key())
