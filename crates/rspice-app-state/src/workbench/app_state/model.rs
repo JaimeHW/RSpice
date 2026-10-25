@@ -16,6 +16,8 @@ mod session_start;
 mod sheet_catalog;
 mod sheet_move;
 mod symbol_context;
+#[cfg(any(test, feature = "test-support"))]
+mod test_technology;
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};

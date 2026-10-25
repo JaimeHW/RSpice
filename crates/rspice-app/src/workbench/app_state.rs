@@ -639,109 +639,31 @@ impl AppState {
         Ok(receipt)
     }
 
-    /// Provision one fully authenticated model-source and signed-PDK contract
-    /// for tests whose subject requires a successful governed simulation.
-    ///
-    /// Tests for missing, stale, revoked, or tampered authority must not call
-    /// this helper. Keeping it opt-in preserves the production fail-closed
-    /// default while avoiding hand-built partial authority in unrelated
-    /// simulation fixtures.
+    /// [`Model::provision_test_project_technology_contract`].
     #[cfg(test)]
     pub(crate) fn provision_test_project_technology_contract(&mut self) {
-        self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_technology_test_fixture(),
-        );
+        self.model.provision_test_project_technology_contract();
     }
 
-    /// The same contract, with `models` as the signed package's model library.
+    /// [`Model::provision_test_project_technology_with_models`].
     #[cfg(test)]
     pub(crate) fn provision_test_project_technology_with_models(&mut self, models: Vec<u8>) {
-        self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_technology_test_fixture_with_models(models),
-        );
+        self.model
+            .provision_test_project_technology_with_models(models);
     }
 
+    /// [`Model::provision_test_project_veriloga_technology_contract`].
     #[cfg(test)]
     pub(crate) fn provision_test_project_veriloga_technology_contract(&mut self) {
-        self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_veriloga_technology_test_fixture(),
-        );
+        self.model
+            .provision_test_project_veriloga_technology_contract();
     }
 
+    /// [`Model::provision_test_project_symbol_technology_contract`].
     #[cfg(test)]
     pub(crate) fn provision_test_project_symbol_technology_contract(&mut self) {
-        self.provision_test_project_technology_fixture(
-            crate::state::pdk_config::signed_symbol_technology_test_fixture(),
-        );
-    }
-
-    #[cfg(test)]
-    fn provision_test_project_technology_fixture(
-        &mut self,
-        (archive, trust, administrative_authority): (
-            Vec<u8>,
-            crate::state::pdk_config::PdkPublisherTrustStore,
-            crate::state::pdk_config::PdkAdministrativeAuthority,
-        ),
-    ) {
-        self.model.pdk_config.publisher_trust_store = trust.clone();
         self.model
-            .pdk_config
-            .technology_registry
-            .install_archive_bytes(
-                &archive,
-                &trust,
-                &administrative_authority,
-                "Install deterministic test technology",
-            )
-            .expect("signed test technology installs");
-        let package = self
-            .model
-            .pdk_config
-            .technology_registry
-            .validated_packages()[0]
-            .clone();
-
-        let library_name = self
-            .model
-            .model_library_manager
-            .load_library_bytes(
-                "demo180-test.lib",
-                b".model nmos_project_demo nmos level=1 vto=0.55".to_vec(),
-                None,
-            )
-            .expect("authenticated retained test model imports");
-        let library = self
-            .model
-            .model_library_manager
-            .get_library(&library_name)
-            .expect("imported test model remains in the catalog");
-        let binding = crate::state::ProjectTechnologyBinding::from_model_library(library)
-            .and_then(|binding| binding.with_signed_package_metadata(package.metadata()))
-            .expect("model and signed package form one exact test binding");
-        let authority = crate::state::ProjectTechnologyChangeAuthority::new(
-            "simulation-test@rspice.invalid",
-            "test:governed-simulation",
-            "Provision deterministic signed simulation authority",
-        )
-        .expect("test authority is valid");
-        let context = crate::state::ProjectTechnologyChangeContext::new(
-            authority,
-            uuid::Uuid::new_v4(),
-            self.model.workspace.content.project.revision(),
-            1,
-            crate::product::ContentDigest::from_bytes([0x7a; 32]),
-            1,
-        )
-        .expect("test checkpoint evidence is valid");
-        self.model
-            .workspace
-            .content
-            .project
-            .attach_technology_audited(binding, context)
-            .expect("test technology attachment commits with an audit receipt");
-        self.validate_project_technology_contract()
-            .expect("provisioned test technology resolves exactly");
+            .provision_test_project_symbol_technology_contract();
     }
 
     /// Whether any retained application workflow owns exclusive keyboard and
