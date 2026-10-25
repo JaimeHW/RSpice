@@ -46,7 +46,7 @@ use crate::workbench::state::{
     ProjectPage, VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId,
 };
 use crate::workbench::{AppState, MessageId, RSpiceApp};
-use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU};
+use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
 
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
@@ -565,7 +565,7 @@ impl Host for RSpiceApp {
     }
 
     fn menu_entries(&self, menu: ApplicationMenu) -> &'static [MenuEntry] {
-        menu.entries()
+        application_menu_entries(menu)
     }
 
     fn compact_menu(&self) -> &'static [MenuEntry] {
@@ -579,7 +579,7 @@ impl Host for RSpiceApp {
     fn validate_commands(&self) -> Result<(), String> {
         let mut keys = Vec::new();
         for menu in application_menus::ALL_MENUS {
-            menu_keys(menu.entries(), &mut keys);
+            menu_keys(application_menu_entries(menu), &mut keys);
         }
         menu_keys(COMPACT_MENU, &mut keys);
         menu_keys(SOURCE_EDITOR_MENU, &mut keys);

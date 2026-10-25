@@ -18,6 +18,11 @@ fn title_test_app() -> RSpiceApp {
     RSpiceApp::test_instance()
 }
 
+/// What `menu` holds, as the shell hands it to the title bar.
+fn application_menu_entries(menu: ApplicationMenu) -> &'static [MenuEntry] {
+    RSpiceApp::test_instance().menu_entries(menu)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn desktop_and_compact_title_contexts_have_distinct_mockup_ownership() {
@@ -194,7 +199,7 @@ fn keys<const N: usize>(commands: [Command; N]) -> [CommandKey; N] {
 
 /// `menu` lists `run` as consecutive rows.
 fn assert_menu_lists(menu: ApplicationMenu, run: &[CommandKey]) {
-    let listed = listed_commands(menu.entries());
+    let listed = listed_commands(application_menu_entries(menu));
     assert!(
         listed.windows(run.len()).any(|window| window == run),
         "{} does not list {run:?} in order: {listed:?}",
@@ -220,7 +225,7 @@ fn rendered_results_menu_labels() -> Vec<String> {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ctx, |ui| {
-                    draw_menu_entries(ui, &app, ApplicationMenu::Results.entries())
+                    draw_menu_entries(ui, &app, application_menu_entries(ApplicationMenu::Results))
                 });
         },
     );
@@ -289,7 +294,11 @@ fn rendered_simulate_menu_rows(
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ctx, |ui| {
-                    draw_menu_entries(ui, &app, ApplicationMenu::Simulate.entries())
+                    draw_menu_entries(
+                        ui,
+                        &app,
+                        application_menu_entries(ApplicationMenu::Simulate),
+                    )
                 });
         },
     );
@@ -410,7 +419,7 @@ fn the_compact_bar_drops_the_title_and_the_search_field_narrows() {
 fn every_row_the_overflow_held_has_a_home_in_a_menu() {
     let listed = ALL_MENUS
         .into_iter()
-        .flat_map(|menu| listed_commands(menu.entries()))
+        .flat_map(|menu| listed_commands(application_menu_entries(menu)))
         .collect::<Vec<_>>();
     for command in [
         Command::ResultViewer(crate::workbench::ResultViewer::Waves),
@@ -427,7 +436,8 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         assert!(listed.contains(&command.key()), "no menu lists {command:?}");
     }
     assert!(
-        listed_commands(ApplicationMenu::Simulate.entries()).contains(&Command::JobsManager.key())
+        listed_commands(application_menu_entries(ApplicationMenu::Simulate))
+            .contains(&Command::JobsManager.key())
     );
     assert_eq!(Command::JobsManager.spec().label, "Run history\u{2026}");
 }
@@ -644,7 +654,7 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
 #[test]
 fn the_view_menu_lists_each_viewport_row_exactly_once() {
     let mut seen = std::collections::BTreeSet::new();
-    let listed = listed_commands(ApplicationMenu::View.entries());
+    let listed = listed_commands(application_menu_entries(ApplicationMenu::View));
     for command in &listed {
         assert!(
             seen.insert(command.as_str()),
@@ -784,8 +794,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         MenuTriggerKey::Application(ApplicationMenu::Design),
     ))
     .with("popup");
-    let arrange_labels: Vec<&str> = ApplicationMenu::Design
-        .entries()
+    let arrange_labels: Vec<&str> = application_menu_entries(ApplicationMenu::Design)
         .iter()
         .find_map(|entry| match entry {
             MenuEntry::Submenu {
@@ -1117,14 +1126,14 @@ fn every_menu_shows_exactly_its_pinned_rows() {
     for (menu, expected) in PINNED_MENUS {
         check(
             menu.label(),
-            menu_pin(menu.entries(), &title_test_app()),
+            menu_pin(application_menu_entries(menu), &title_test_app()),
             expected,
         );
     }
     for (menu, expected) in PINNED_SOURCE_EDITOR_MENUS {
         check(
             &format!("{} with a source editor", menu.label()),
-            menu_pin(menu.entries(), &source_editor_app()),
+            menu_pin(application_menu_entries(menu), &source_editor_app()),
             expected,
         );
     }
@@ -1148,7 +1157,7 @@ fn a_grey_run_row_says_a_run_is_already_in_progress() {
         Command::RunSimulation.availability(&app),
         CommandAvailability::Disabled("a run is already in progress")
     );
-    let rows = menu_pin(ApplicationMenu::Simulate.entries(), &app);
+    let rows = menu_pin(application_menu_entries(ApplicationMenu::Simulate), &app);
     assert!(
         rows.iter().any(
             |row| row == "Run active plan | start-run | F5 | off: a run is already in progress"
@@ -1173,7 +1182,7 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
         assert_eq!(command.availability(&app), CommandAvailability::Hidden);
     }
     let rows = menu_entries::resolve_menu_rows(
-        ApplicationMenu::File.entries(),
+        application_menu_entries(ApplicationMenu::File),
         &app,
         crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
@@ -1279,7 +1288,7 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ctx, |ui| {
-                    draw_menu_entries(ui, &app, ApplicationMenu::Window.entries())
+                    draw_menu_entries(ui, &app, application_menu_entries(ApplicationMenu::Window))
                 });
         },
     );
@@ -1367,7 +1376,7 @@ fn the_account_button_shows_a_person_until_an_identity_names_someone() {
 #[cfg(not(target_arch = "wasm32"))]
 fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
     let rows = menu_entries::resolve_menu_rows(
-        menu.entries(),
+        application_menu_entries(menu),
         app,
         crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
@@ -1759,7 +1768,7 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 for menu in ALL_MENUS {
-                    let rows = menu_rows(menu.entries(), &app, ui.ctx());
+                    let rows = menu_rows(application_menu_entries(menu), &app, ui.ctx());
                     fits(ui, menu.label(), &rows, &mut needed);
                 }
             });
@@ -1807,7 +1816,7 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
                     },
                     |ctx| {
                         egui::CentralPanel::default().show(ctx, |ui| {
-                            let rows = menu_rows(menu.entries(), &app, ui.ctx());
+                            let rows = menu_rows(application_menu_entries(menu), &app, ui.ctx());
                             fit = menu_entries::menu_rows_fit(ui, &rows);
                             rows_height = menu_entries::visible_rows(&rows)
                                 .into_iter()
@@ -1901,7 +1910,7 @@ fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
     for app in [title_test_app(), source_editor_app()] {
         for menu in ALL_MENUS {
             let rows = menu_entries::resolve_menu_rows(
-                menu.entries(),
+                application_menu_entries(menu),
                 &app,
                 crate::state::command_catalog::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,

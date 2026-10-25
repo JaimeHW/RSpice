@@ -26,21 +26,22 @@ const fn sheets(command: SheetsCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
-impl ApplicationMenu {
-    pub(in crate::workbench) const fn entries(self) -> &'static [MenuEntry] {
-        match self {
-            Self::File => FILE_MENU,
-            Self::Edit => EDIT_MENU,
-            Self::View => VIEW_MENU,
-            Self::Design => DESIGN_MENU,
-            Self::Simulate => SIMULATE_MENU,
-            Self::Results => RESULTS_MENU,
-            Self::Verify => VERIFY_MENU,
-            Self::Models => MODELS_MENU,
-            Self::Automation => AUTOMATION_MENU,
-            Self::Window => WINDOW_MENU,
-            Self::Help => HELP_MENU,
-        }
+/// What the application menu `menu` holds.
+pub(in crate::workbench) const fn application_menu_entries(
+    menu: ApplicationMenu,
+) -> &'static [MenuEntry] {
+    match menu {
+        ApplicationMenu::File => FILE_MENU,
+        ApplicationMenu::Edit => EDIT_MENU,
+        ApplicationMenu::View => VIEW_MENU,
+        ApplicationMenu::Design => DESIGN_MENU,
+        ApplicationMenu::Simulate => SIMULATE_MENU,
+        ApplicationMenu::Results => RESULTS_MENU,
+        ApplicationMenu::Verify => VERIFY_MENU,
+        ApplicationMenu::Models => MODELS_MENU,
+        ApplicationMenu::Automation => AUTOMATION_MENU,
+        ApplicationMenu::Window => WINDOW_MENU,
+        ApplicationMenu::Help => HELP_MENU,
     }
 }
 
@@ -379,7 +380,7 @@ pub(in crate::workbench) const COMPACT_MENU: &[MenuEntry] = &[
 const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
     MenuEntry::Submenu {
         label: menu.label(),
-        entries: menu.entries(),
+        entries: application_menu_entries(menu),
     }
 }
 
