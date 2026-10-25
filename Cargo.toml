@@ -46,7 +46,6 @@ members = [
     "crates/rspice-worker",
     "crates/rspice-veriloga",
     "crates/rspice-python",
-    "crates/rspice-wasm",
     "tools/rspice-conformance",
     "tools/rspice-bench",
     "tools/xspice-catalog-dump",
