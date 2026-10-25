@@ -311,12 +311,12 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("run_details", |dialogs| {
         let run = crate::state::SimulationRun::new(1);
-        dialogs.results.run_details = Some(RunDetailsDialogState {
+        dialogs.results.run_details = Some(Box::new(RunDetailsDialogState {
             run_id: run.id,
             manifest: crate::workbench::documents::result_document::manifest::manifest_for_run(
                 &run,
             ),
-        });
+        }));
     }),
     ("command_palette", |dialogs| {
         dialogs.workbench.command_palette.open = true

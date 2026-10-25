@@ -8,8 +8,9 @@
 pub(crate) struct ResultsState {
     /// The format question "Export dataset…" asks, while it is open.
     pub(crate) dataset_export: Option<crate::workbench::menu_bar::DatasetExportPicker>,
-    /// Run details…: the provenance of one retained run.
-    pub(crate) run_details: Option<crate::workbench::docks::RunDetailsDialogState>,
+    /// Run details…: the provenance of one retained run. Boxed: the
+    /// manifest it carries would otherwise outgrow the slot's stack budget.
+    pub(crate) run_details: Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
 
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,

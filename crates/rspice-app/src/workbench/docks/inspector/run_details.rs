@@ -47,7 +47,7 @@ pub(in crate::workbench::docks) fn open(state: &mut AppState, run_id: u64) {
         return;
     };
     let manifest = crate::workbench::documents::result_document::manifest::manifest_for_run(run);
-    state.results.run_details = Some(RunDetailsDialogState { run_id, manifest });
+    state.results.run_details = Some(Box::new(RunDetailsDialogState { run_id, manifest }));
 }
 
 /// Draw Run details… while it is open, and act on its two routes once the
