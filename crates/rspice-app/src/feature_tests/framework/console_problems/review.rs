@@ -153,7 +153,7 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
         for clipped in &output.expect("the dock was drawn").shapes {
             walk(&clipped.shape, clipped.clip_rect, &mut drawn);
         }
-        let inset = height - super::super::super::CONSOLE_BODY_PADDING_BOTTOM;
+        let inset = height - crate::workbench::docks::console::CONSOLE_BODY_PADDING_BOTTOM;
         let mut remedy_shown = false;
         let mut whole: Vec<&str> = Vec::new();
         for (what, rect, clip) in &drawn {

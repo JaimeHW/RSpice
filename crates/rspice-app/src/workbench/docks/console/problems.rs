@@ -37,12 +37,10 @@
 //! the drawing gives it to the canvas, so the canvas's own keys act on what
 //! the finding named without a second click to reach it.
 
-mod arrange;
-mod detail;
-mod grid;
+pub(crate) mod arrange;
+pub(crate) mod detail;
+pub(crate) mod grid;
 mod strip;
-#[cfg(test)]
-mod tests;
 
 use std::borrow::Cow;
 
@@ -73,13 +71,13 @@ use grid::{Columns, RowMark};
 /// every other current finding, and a stale finding is neither — it is a
 /// finding about a design that no longer exists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(in crate::workbench) struct ProblemCount {
-    pub(in crate::workbench) errors: usize,
-    pub(in crate::workbench) advisories: usize,
+pub(crate) struct ProblemCount {
+    pub(crate) errors: usize,
+    pub(crate) advisories: usize,
 }
 
 impl ProblemCount {
-    pub(in crate::workbench) const fn total(self) -> usize {
+    pub(crate) const fn total(self) -> usize {
         self.errors + self.advisories
     }
 
@@ -87,7 +85,7 @@ impl ProblemCount {
     /// The badge itself has room for one number; this is where the number is
     /// broken down, so the strip never implies that twelve advisories are
     /// twelve errors.
-    pub(in crate::workbench) fn announcement(self) -> String {
+    pub(crate) fn announcement(self) -> String {
         format!(
             "{} error{}, {} advisor{}",
             self.errors,
@@ -101,10 +99,7 @@ impl ProblemCount {
 /// The counts behind the tab strip's badge. Derived from exactly the rows the
 /// page lists, read once for the pass the page reads them in, so the badge can
 /// never disagree with the body under it.
-pub(in crate::workbench) fn active_problem_count(
-    state: &impl ListingSource,
-    pass: u64,
-) -> ProblemCount {
+pub(crate) fn active_problem_count(state: &impl ListingSource, pass: u64) -> ProblemCount {
     let counts = listing_in_pass(state, pass).counts();
     ProblemCount {
         errors: counts.errors,
@@ -189,7 +184,7 @@ impl BodyMemory {
 /// Draw the page. Returns whether the reader recorded or took away a waiver:
 /// that changes what refuses a run, so the caller drops whatever run was
 /// prepared or checked under the waivers as they stood.
-pub(super) fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
+pub(crate) fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
     let mut view = state.problems_view().clone();
     let mut selection = Selection {
         listed: None,
@@ -986,7 +981,7 @@ fn empty_state(reason: &EmptyReason) -> String {
 ///
 /// A finding whose inputs moved is stale; one whose inputs cannot be read at
 /// all is not known to be stale, and says that instead.
-fn severity_cell(row: &DiagnosticRow<'_>) -> String {
+pub(crate) fn severity_cell(row: &DiagnosticRow<'_>) -> String {
     let severity = row.level.display_name();
     match (&row.standing, row.waived()) {
         (RowStanding::Current, false) => severity.to_owned(),
@@ -1037,7 +1032,7 @@ fn hover(row: &DiagnosticRow<'_>) -> String {
 /// The waiver covering the finding follows, as the last column: a waived
 /// finding pasted into a review without who accepted it and why is a finding
 /// the review cannot audit.
-fn copy_of(row: &DiagnosticRow<'_>) -> String {
+pub(crate) fn copy_of(row: &DiagnosticRow<'_>) -> String {
     let severity = severity_cell(row);
     let waiver = row.suppression.map(detail::waiver_text).unwrap_or_default();
     [
@@ -1072,7 +1067,7 @@ fn tsv_field(text: &str) -> Cow<'_, str> {
 /// Every listed row, with the heading the columns carry. Listed means what
 /// the filters admit, so a collapsed group's findings are copied too: the
 /// count on the button that copies them says so.
-fn copy_of_listed(listed: &DiagnosticListing<'_>, arrangement: &Arrangement) -> String {
+pub(crate) fn copy_of_listed(listed: &DiagnosticListing<'_>, arrangement: &Arrangement) -> String {
     use crate::workbench::app_state::problems_view::ProblemColumn;
 
     let mut text = ProblemColumn::ALL

@@ -28,7 +28,7 @@ const CONSOLE_PANEL_ID: &str = "workbench.console";
 /// constructed. A genuinely dragged splitter is copied back to
 /// [`WorkbenchSession`](super::state::WorkbenchSession) after painting and will
 /// match the cache on the next frame.
-pub(super) fn synchronize_panel_memory(
+pub(crate) fn synchronize_panel_memory(
     ctx: &Context,
     app: &impl WorkbenchHost,
     layout: LayoutSpec,

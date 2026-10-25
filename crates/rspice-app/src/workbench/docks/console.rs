@@ -1,8 +1,8 @@
 //! Unified console, problems, measurements, and task history.
 
 mod log_anchor;
-mod problems;
-mod transcript;
+pub(crate) mod problems;
+pub(crate) mod transcript;
 
 use problems::{ProblemCount, active_problem_count, problems};
 
@@ -22,26 +22,26 @@ use super::super::state::{ConsoleChannel, ConsolePage};
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::framework::command_registry::ids;
 
-const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
+pub(crate) const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
 const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
 /// The open page's mark along the foot of its tab, over the strip's rule.
 const CONSOLE_TAB_UNDERLINE: f32 = 2.0;
 const CONSOLE_ACTION_SIZE: f32 = 27.0;
 const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
-const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
-const CONSOLE_BODY_PADDING_BOTTOM: f32 = 7.0;
+pub(crate) const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
+pub(crate) const CONSOLE_BODY_PADDING_BOTTOM: f32 = 7.0;
 /// Where a page's text stands from the dock's sides. A table's bands and
 /// row fills run edge to edge; only what is written in them is inset.
-const CONSOLE_BODY_PADDING_X: f32 = 10.0;
-const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
+pub(crate) const CONSOLE_BODY_PADDING_X: f32 = 10.0;
+pub(crate) const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
 /// A table's header band: one line, like every row under it, with a little
 /// air so the headings read as headings.
 const CONSOLE_TABLE_HEADER_HEIGHT: f32 = CONSOLE_ROW_MIN_HEIGHT + 4.0;
-const CONSOLE_COLUMN_GAP: f32 = 9.0;
+pub(crate) const CONSOLE_COLUMN_GAP: f32 = 9.0;
 /// How far a table cell's text stands inside the cell, and how far the cell
 /// runs past its widest text. Two of them are the gutter between one
 /// column's widest text and the next column's, the same between every pair.
-const CONSOLE_CELL_INSET: f32 = 6.0;
+pub(crate) const CONSOLE_CELL_INSET: f32 = 6.0;
 /// A select's frame around its text: the inset before it and the chevron's
 /// well after it. A select is sized to its longest choice plus this.
 const CONSOLE_SELECT_CHROME: f32 = 32.0;
@@ -239,11 +239,11 @@ fn console_toolbar(
 
 /// Whether the Console page offers Clear. A run's log is a record, so it has
 /// no Clear at all, and a compact shell has no room for it.
-fn clear_is_offered(layout: LayoutSpec, channel: ConsoleChannel) -> bool {
+pub(crate) fn clear_is_offered(layout: LayoutSpec, channel: ConsoleChannel) -> bool {
     !(layout.compact_shell || matches!(channel, ConsoleChannel::Run(_)))
 }
 
-fn console_trailing_actions_width(layout: LayoutSpec, touch_targets: bool) -> f32 {
+pub(crate) fn console_trailing_actions_width(layout: LayoutSpec, touch_targets: bool) -> f32 {
     let control_size = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
     } else {
@@ -256,7 +256,7 @@ fn console_trailing_actions_width(layout: LayoutSpec, touch_targets: bool) -> f3
 /// The page tabs. `open` says whether the dock shows a page under them: a
 /// collapsed dock marks no tab as the one open, and a press on any tab opens
 /// the dock on that page.
-fn console_tabs(
+pub(crate) fn console_tabs(
     ui: &mut Ui,
     app: &mut impl WorkbenchHost,
     problems: ProblemCount,
@@ -489,7 +489,7 @@ fn console_action(
     response.on_hover_text(label)
 }
 
-fn active_measurement_count(simulation: &SimulationState) -> usize {
+pub(crate) fn active_measurement_count(simulation: &SimulationState) -> usize {
     simulation.active_run().map_or(0, |run| {
         run.analyses
             .iter()
@@ -679,14 +679,14 @@ fn task_log(ui: &mut Ui, app: &mut impl WorkbenchHost) {
 pub(crate) struct MeasurementTableRow {
     pub(crate) name: String,
     expression: String,
-    value: String,
-    specification: String,
-    margin: String,
-    worst_point: String,
-    status: &'static str,
+    pub(crate) value: String,
+    pub(crate) specification: String,
+    pub(crate) margin: String,
+    pub(crate) worst_point: String,
+    pub(crate) status: &'static str,
     /// The measurement failed its contract or could not be evaluated. Only
     /// the status cell of a failed row is coloured; a pass is neutral.
-    failed: bool,
+    pub(crate) failed: bool,
 }
 
 fn active_specifications(app: &impl WorkbenchHost) -> Vec<crate::state::SpecEntry> {
@@ -781,7 +781,7 @@ pub(crate) fn active_measurement_rows(
     rows
 }
 
-fn measurement_table_row(
+pub(crate) fn measurement_table_row(
     measurement: &rspice_core::MeasureResult,
     analysis_label: &str,
     specification: Option<&crate::state::SpecEntry>,
@@ -1243,7 +1243,7 @@ fn paint_row_fill(ui: &Ui, row: egui::Rect, right: f32, fill: egui::Color32) {
 
 /// A run's lifecycle word, and the mark it earns. Lifecycle words are states,
 /// not severities: only a failed run is a problem.
-fn run_lifecycle_presentation(
+pub(crate) fn run_lifecycle_presentation(
     lifecycle: crate::state::SimulationRunLifecycle,
 ) -> (&'static str, Option<Problem>) {
     use crate::state::SimulationRunLifecycle as Lifecycle;
@@ -1292,7 +1292,7 @@ struct TaskColumns {
 }
 
 /// The width of the widest status a run can show.
-fn widest_status_width(ui: &Ui) -> f32 {
+pub(crate) fn widest_status_width(ui: &Ui) -> f32 {
     use crate::state::SimulationRunLifecycle as Lifecycle;
     [
         Lifecycle::LegacyUnknown,
@@ -1315,7 +1315,7 @@ fn widest_status_width(ui: &Ui) -> f32 {
     .fold(0.0, f32::max)
 }
 
-fn task_text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
+pub(crate) fn task_text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
     ui.painter()
         .layout_no_wrap(
             text.to_owned(),
@@ -1326,7 +1326,7 @@ fn task_text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
         .x
 }
 
-fn log_problem(severity: LogSeverity) -> Option<Problem> {
+pub(crate) fn log_problem(severity: LogSeverity) -> Option<Problem> {
     match severity {
         LogSeverity::Error => Some(Problem::Failure),
         LogSeverity::Warning => Some(Problem::Warning),
@@ -1336,7 +1336,7 @@ fn log_problem(severity: LogSeverity) -> Option<Problem> {
 
 /// The neutral ink a log line's message is painted in: primary for the lines
 /// a reader acts on, quieter for notes, faintest for tracing.
-fn log_message_color(tokens: &Tokens, severity: LogSeverity) -> egui::Color32 {
+pub(crate) fn log_message_color(tokens: &Tokens, severity: LogSeverity) -> egui::Color32 {
     match severity {
         LogSeverity::Error | LogSeverity::Warning => tokens.color.text,
         LogSeverity::Info | LogSeverity::Debug => tokens.color.text_dim,
@@ -1358,16 +1358,16 @@ fn format_signed_measure_value(value: f64) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ConsoleClearAction {
-    enabled: bool,
-    label: &'static str,
+pub(crate) struct ConsoleClearAction {
+    pub(crate) enabled: bool,
+    pub(crate) label: &'static str,
 }
 
 /// The Console page's Clear, which clears the session's log. Only that page
 /// offers it: a finding leaves Problems when the check that made it no longer
 /// does, measurements belong to a run's results, and the task history and a
 /// run's log are records.
-fn console_clear_action(session_has_output: bool) -> ConsoleClearAction {
+pub(crate) fn console_clear_action(session_has_output: bool) -> ConsoleClearAction {
     ConsoleClearAction {
         enabled: session_has_output,
         label: if session_has_output {
@@ -1543,5 +1543,3 @@ fn muted(ui: &mut Ui, text: &str) {
         .wrap(),
     );
 }
-#[cfg(test)]
-mod tests;

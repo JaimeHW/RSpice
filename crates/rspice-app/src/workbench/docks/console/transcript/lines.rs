@@ -30,7 +30,7 @@ pub(super) struct Line<'a> {
 
 /// The log a channel reads.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum Source<'a> {
+pub(crate) enum Source<'a> {
     Session(&'a LogBuffer),
     Run(&'a RunLog),
 }
@@ -196,7 +196,7 @@ impl Metrics {
 
 /// The shown rows of one channel, and where each one starts.
 #[derive(Debug, Clone, Default)]
-pub(super) struct Rows {
+pub(crate) struct Rows {
     filter: Option<Filter>,
     /// The source's first key and length when its lines were last read.
     front: Option<u64>,
@@ -237,7 +237,7 @@ impl Rows {
     /// Bring the rows up to date with `source` under `view`'s filters. Lines
     /// that only arrived since the last frame are read on their own; anything
     /// else reads the channel again.
-    pub(super) fn sync(&mut self, source: Source<'_>, view: &ConsoleView) {
+    pub(crate) fn sync(&mut self, source: Source<'_>, view: &ConsoleView) {
         let filter = Filter::of(view);
         let front = source.first_key();
         let len = source.len();

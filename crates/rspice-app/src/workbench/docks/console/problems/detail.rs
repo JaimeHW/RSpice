@@ -522,7 +522,7 @@ fn waiver_reason(ui: &mut Ui, draft: &mut WaiverDraft) -> Option<WaiverStep> {
 /// The waiver covering a finding: why it was accepted, by whom and when. The
 /// time is UTC, so a library mailed across a border states one time for one
 /// decision.
-pub(super) fn waiver_text(
+pub(crate) fn waiver_text(
     waiver: &rspice_vocabulary::diagnostics::DiagnosticSuppression,
 ) -> String {
     format!(

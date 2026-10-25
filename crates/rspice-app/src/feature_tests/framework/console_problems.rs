@@ -10,16 +10,18 @@ use std::sync::Arc;
 
 use egui::accesskit::Role;
 
-use super::super::{CONSOLE_CELL_INSET, CONSOLE_MARK_GUTTER};
-use super::*;
 use crate::state::netlist_diagnostics::{Diagnostic, DiagnosticFix, NetlistDiagnosticCollection};
 use crate::state::{ComponentType, Point};
+use crate::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
 use crate::workbench::AppState;
-use crate::workbench::app_state::diagnostic_store::listing::listing;
+use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowStanding, listing};
 use crate::workbench::app_state::diagnostic_store::{
-    DiagnosticInputs, DiagnosticRecord, DiagnosticSubject,
+    DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
 };
-use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemGrouping};
+use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemGrouping, ProblemsView};
+use crate::workbench::docks::console::problems::arrange::{Arrangement, Line};
+use crate::workbench::docks::console::problems::*;
+use crate::workbench::docks::console::{CONSOLE_CELL_INSET, CONSOLE_ROW_MIN_HEIGHT};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
 mod detail_region;

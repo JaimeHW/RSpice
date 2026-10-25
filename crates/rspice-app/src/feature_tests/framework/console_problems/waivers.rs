@@ -319,7 +319,7 @@ fn console_frame(
     collect(harness.ctx.run_ui(input, |ui| {
         let layout =
             crate::workbench::layout::LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
-        super::super::super::show(ui, app, layout);
+        crate::workbench::docks::console::show(ui, app, layout);
     }))
 }
 

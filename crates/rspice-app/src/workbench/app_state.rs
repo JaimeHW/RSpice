@@ -23,7 +23,7 @@ pub(in crate::workbench) mod interaction_state;
 mod modal_gate_tests;
 pub(in crate::workbench) use rspice_app_state::workbench::app_state::model;
 mod model_access;
-pub(in crate::workbench) mod problems_view;
+pub(crate) mod problems_view;
 mod run_access;
 pub(crate) mod run_preflight;
 mod schematic_drag;
