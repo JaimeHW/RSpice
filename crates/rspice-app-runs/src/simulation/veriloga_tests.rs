@@ -10,7 +10,7 @@ use rspice_simulation::veriloga::{PreparedVerilogARuntime, PreparedVerilogARunti
 
 #[cfg(test)]
 mod project_tests;
-pub(crate) mod test_support;
+pub mod test_support;
 
 #[cfg(test)]
 mod tests {

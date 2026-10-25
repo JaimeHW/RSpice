@@ -88,8 +88,8 @@ mod complex_tests;
 mod dc_family_tests;
 #[cfg(test)]
 mod durable_binding_tests;
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 #[cfg(test)]
 mod probe_tests;
 #[cfg(test)]

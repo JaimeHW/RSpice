@@ -26,9 +26,15 @@ def measure_tree(
     files: dict[str, str],
     lower_model: dict[str, str] | None = None,
     lower_services: dict[str, str] | None = None,
+    lower_runs: dict[str, str] | None = None,
 ):
     with tempfile.TemporaryDirectory() as directory:
-        trees = {"app": files, "state": lower_model or {}, "services": lower_services or {}}
+        trees = {
+            "app": files,
+            "state": lower_model or {},
+            "services": lower_services or {},
+            "runs": lower_runs or {},
+        }
         for tree, contents in trees.items():
             for path, text in contents.items():
                 target = Path(directory) / tree / path
@@ -39,6 +45,7 @@ def measure_tree(
             for slice_name, tree, contents in (
                 ("model", "state", lower_model),
                 ("services", "services", lower_services),
+                ("run", "runs", lower_runs),
             )
             if contents
         }
@@ -232,6 +239,33 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(measure_tree(app, state)[0]["feature->feature"], {"simulate->results": 2})
         values, _, stats = measure_tree(app, state, services)
         # Each crate's definition takes its name from results; the glob import remains.
+        self.assertEqual(values["feature->feature"], {"simulate->results": 1})
+        self.assertEqual(stats["files"], 3)
+
+    def test_the_run_crate_lends_its_names_to_the_run_slice(self) -> None:
+        app = {
+            "lib.rs": (
+                "pub use rspice_app_state::state;\npub use rspice_app_runs::simulation;\n"
+                "mod analysis;\nmod workbench;\n"
+            ),
+            "analysis.rs": "pub fn run_label() {}\npub fn status_label() {}\n",
+            "workbench/surfaces/verify.rs": (
+                "use crate::analysis::*;\n"
+                "pub fn show() {\n"
+                "    run_label();\n"
+                "    status_label();\n"
+                "}\n"
+            ),
+        }
+        state = {"lib.rs": "pub mod state;\n", "state.rs": "pub fn run_label() {}\n"}
+        runs = {
+            "lib.rs": "pub mod simulation;\n",
+            "simulation.rs": "pub mod status;\n",
+            "simulation/status.rs": "pub fn status_label() {}\n",
+        }
+        self.assertEqual(measure_tree(app, state)[0]["feature->feature"], {"simulate->results": 2})
+        values, _, stats = measure_tree(app, state, lower_runs=runs)
+        # The run crate's definition takes its name from results; the glob import remains.
         self.assertEqual(values["feature->feature"], {"simulate->results": 1})
         self.assertEqual(stats["files"], 3)
 

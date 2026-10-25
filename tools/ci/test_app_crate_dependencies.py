@@ -141,6 +141,24 @@ class DependencyPolicyTests(unittest.TestCase):
                 "rspice-worker reaches application package rspice-app-services",
             ],
         )
+        self.assertEqual(
+            violations(
+                {"rspice-app-runs": {"rspice-app-services", "rspice-app"}},
+                {
+                    "rspice-app-runs": {
+                        "rspice-app-runs", "rspice-app-services", "egui", "rfd", "eframe",
+                    },
+                    "rspice-results-ui": {"rspice-results-ui", "rspice-app-runs"},
+                    "rspice-worker": {"rspice-worker", "rspice-app-runs"},
+                },
+            ),
+            [
+                "rspice-app-runs has forbidden application dependency rspice-app",
+                "rspice-app-runs reaches application or host package eframe",
+                "rspice-results-ui reaches application service or host package rspice-app-runs",
+                "rspice-worker reaches application package rspice-app-runs",
+            ],
+        )
 
         issues = violations(
             {

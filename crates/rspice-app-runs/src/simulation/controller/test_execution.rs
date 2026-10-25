@@ -14,10 +14,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub(crate) mod dc_history;
-pub(crate) mod monte_carlo;
-pub(crate) mod pvt;
-pub(crate) mod saved_outputs;
+pub mod dc_history;
+pub mod monte_carlo;
+pub mod pvt;
+pub mod saved_outputs;
 
 /// The divider on the signed test technology, its design check current and
 /// clean.

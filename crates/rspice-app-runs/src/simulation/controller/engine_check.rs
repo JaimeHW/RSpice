@@ -114,10 +114,10 @@ impl SimulationController {
             generation: self.retained_run_generation,
             identity: RunInputIdentity::of_run_set(state),
         };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let hooks = self.preflight_test_hooks.take_for_worker();
         spawn_or_inline(move || {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             hooks.enter("preparing");
             let prepared = frozen.prepare(&cancel, &|progress| {
                 set_stage(&stage, PreflightStage::Preparing(progress));
@@ -132,7 +132,7 @@ impl SimulationController {
                         &stage,
                         PreflightStage::EngineChecking(DeckBuildProgress::default()),
                     );
-                    #[cfg(test)]
+                    #[cfg(any(test, feature = "test-support"))]
                     hooks.enter("engine checking");
                     let refusals = snapshot.engine_refusals_reporting(&cancel, &|progress| {
                         set_stage(&stage, PreflightStage::EngineChecking(progress));
@@ -236,20 +236,20 @@ impl SimulationController {
 
 /// Test-only control of the pipeline's worker: hold it before it prepares,
 /// and record which thread ran each stage.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
 pub(super) struct PreflightTestHooks {
     gate: Option<mpsc::Receiver<()>>,
     stages: Arc<Mutex<Vec<(&'static str, std::thread::ThreadId)>>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(super) struct WorkerHooks {
     gate: Option<mpsc::Receiver<()>>,
     stages: Arc<Mutex<Vec<(&'static str, std::thread::ThreadId)>>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl PreflightTestHooks {
     fn take_for_worker(&mut self) -> WorkerHooks {
         WorkerHooks {
@@ -259,7 +259,7 @@ impl PreflightTestHooks {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl WorkerHooks {
     /// Record the stage beginning on this thread. The first stage waits until
     /// the test releases the worker, when it holds it.
@@ -276,7 +276,7 @@ impl WorkerHooks {
 }
 
 /// The worker owns its hooks, so they drop when it ends, however it ends.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for WorkerHooks {
     fn drop(&mut self) {
         if let Ok(mut stages) = self.stages.lock() {
@@ -285,7 +285,7 @@ impl Drop for WorkerHooks {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl SimulationController {
     /// Hold the next pipeline's worker before it prepares anything, until the
     /// returned sender sends or is dropped.

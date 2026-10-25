@@ -65,6 +65,15 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-hardcopy-contract", "rspice-model-library", "rspice-formats",
         "rspice-simulation-contract", "rspice-simulation",
     },
+    # The run tier: the persisted model, the platform services, and the engine
+    # and result crates a run is prepared, dispatched and published with; no
+    # feature, window or shell crate. The schematic editor is a test-support
+    # dependency only (the run test host's review-marker visibility).
+    "rspice-app-runs": {
+        "rspice-app-state", "rspice-app-services", "rspice-vocabulary", "rspice-design",
+        "rspice-results", "rspice-results-ui", "rspice-model-library", "rspice-formats",
+        "rspice-simulation-contract", "rspice-simulation", "rspice-schematic-editor",
+    },
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -73,7 +82,7 @@ ALLOWED: dict[str, set[str]] = {
 }
 HEADLESS = set(ALLOWED) - {
     "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
-    "rspice-app-services",
+    "rspice-app-services", "rspice-app-runs",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {
@@ -100,7 +109,9 @@ def violations(
             issues.append(f"{name} has forbidden application dependency {dep}")
     for name, closure in sorted(closures.items()):
         if name == "rspice-worker":
-            for dep in sorted(closure & {"rspice-app", "rspice-app-state", "rspice-app-services"}):
+            for dep in sorted(
+                closure & {"rspice-app", "rspice-app-state", "rspice-app-services", "rspice-app-runs"}
+            ):
                 issues.append(f"rspice-worker reaches application package {dep}")
         if name == "rspice-app-state":
             for dep in sorted(closure & ({"rspice-app", "rspice-worker"} | GUI_PACKAGES)):
@@ -109,6 +120,10 @@ def violations(
             # The native file pickers are a platform service; the window is not.
             for dep in sorted(closure & ({"rspice-app", "rspice-worker"} | (GUI_PACKAGES - {"rfd"}))):
                 issues.append(f"rspice-app-services reaches application or host package {dep}")
+        if name == "rspice-app-runs":
+            # The services' file pickers come with them; the window does not.
+            for dep in sorted(closure & ({"rspice-app", "rspice-worker"} | (GUI_PACKAGES - {"rfd"}))):
+                issues.append(f"rspice-app-runs reaches application or host package {dep}")
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")
@@ -122,8 +137,8 @@ def violations(
                 issues.append(f"{name} reaches simulator package {dep}")
         if name in {"rspice-schematic-editor", "rspice-results-ui"}:
             forbidden = {
-                "rspice-app", "rspice-app-state", "rspice-app-services", "rspice-project",
-                "rspice-project-contract", "rspice-worker", "rspice-simulation",
+                "rspice-app", "rspice-app-state", "rspice-app-services", "rspice-app-runs",
+                "rspice-project", "rspice-project-contract", "rspice-worker", "rspice-simulation",
             } | GUI_PACKAGES
             for dep in sorted(closure & forbidden):
                 issues.append(f"{name} reaches application service or host package {dep}")

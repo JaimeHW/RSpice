@@ -23,8 +23,8 @@ use crate::simulation::execution::preparation::reject_deferred_corner_model_sour
 use crate::state::CampaignMemberRefusal;
 use rspice_vocabulary::canonical::content_digest;
 
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 #[cfg(test)]
 mod ground_expression_tests;
 #[cfg(test)]
@@ -1090,7 +1090,7 @@ impl SimulationController {
         state: &impl RunHost,
         files: &dyn rspice_simulation::netlist_gen::NetlistSourceHost,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         thread_preparations::record(SimulationRunIntent::SimulateRunSet);
         let model = state.model();
         let execution_projection = model
@@ -1112,7 +1112,7 @@ impl SimulationController {
     fn build_prepared_manual_deck(
         state: &impl RunHost,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         thread_preparations::record(SimulationRunIntent::ManualDeck);
         crate::simulation::execution::preparation::build_prepared_manual_deck(
             &run_preparation_inputs(state),
@@ -1230,7 +1230,7 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
     validated_executable_hierarchy(netlist).map(|_| ())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl SimulationController {
     /// Retain a snapshot a test prepared from `state` as a preparation does:
     /// with the identity of `state`'s inputs, which its dispatch checks. The
@@ -1261,8 +1261,8 @@ impl SimulationController {
 
 /// Test-only record of every preparation run on the calling thread, so a test
 /// can state that a frame prepared nothing.
-#[cfg(test)]
-pub(crate) mod thread_preparations {
+#[cfg(any(test, feature = "test-support"))]
+pub mod thread_preparations {
     use std::cell::RefCell;
 
     use crate::simulation::execution::SimulationRunIntent;

@@ -5299,6 +5299,7 @@ dependencies = [
  "rfd",
  "ron",
  "ropey",
+ "rspice-app-runs",
  "rspice-app-services",
  "rspice-app-state",
  "rspice-automation-protocol",
@@ -5351,6 +5352,34 @@ dependencies = [
  "winit",
  "winresource",
  "zip",
+]
+
+[[package]]
+name = "rspice-app-runs"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "num-complex",
+ "ron",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-core",
+ "rspice-design",
+ "rspice-design-model",
+ "rspice-formats",
+ "rspice-model-library",
+ "rspice-project",
+ "rspice-results",
+ "rspice-results-ui",
+ "rspice-schematic-editor",
+ "rspice-simulation",
+ "rspice-simulation-contract",
+ "rspice-veriloga",
+ "rspice-vocabulary",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+ "web-sys",
 ]
 
 [[package]]

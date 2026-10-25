@@ -58,7 +58,9 @@ const LAYERS: &[(&str, u32)] = &[
     // The persisted model, its contracts and its diagnostics live in
     // `rspice-app-state`, and the platform services (project I/O, the
     // lifecycle, recovery, the managed runtime and the build identity) in
-    // `rspice-app-services`, below every module here; each may reference them.
+    // `rspice-app-services`, and the run tier (the controller, its prepared
+    // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
+    // every module here; each may reference them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -147,15 +149,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // the console/log models moved to `crate::diagnostics` (schematic
     // 102 -> 98, simulation 87 -> 60).
     //
-    // What is left in `simulation -> workbench` is one entangled type, not a
-    // misfiled one. `PreparedVerilogARuntime` is engine state, but its only
-    // constructors validate against `VerilogACompileReceipt`, which also
-    // carries `CodeEditorDiagnostic` — an egui type. Moving the runtime down
-    // means first narrowing those constructors to the three fields they
-    // actually read (`token`, `module_name`, `report`) so the receipt can
-    // stay in the editor where it belongs. That is a design change, not a
-    // relocation, so it is not folded in here.
-    //
     // `schematic -> workbench` 104 -> 108 and `io -> workbench` 14 -> 19 are
     // the unobserved growth described above. Both are the same shape as the
     // retired `state -> workbench` edge: types the project *persists* still
@@ -165,7 +158,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // AnalysisPresentationKey}`. They retire the way `state -> workbench` did
     // — by moving the persisted contract down, not by narrowing a signature.
     ("schematic", "workbench", 108),
-    ("simulation", "workbench", 25),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Result aggregation, optimization execution, netlisting and materialized
@@ -1848,6 +1840,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app/src",
     "rspice-app-state/src",
     "rspice-app-services/src",
+    "rspice-app-runs/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",

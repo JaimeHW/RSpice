@@ -45,6 +45,7 @@ CEILINGS = Path(__file__).resolve().with_name("app_slice_ceilings.json")
 LOWER_CRATES = {
     "model": ROOT / "crates" / "rspice-app-state" / "src",
     "services": ROOT / "crates" / "rspice-app-services" / "src",
+    "run": ROOT / "crates" / "rspice-app-runs" / "src",
 }
 
 LOWER = ("model", "services", "run", "framework")

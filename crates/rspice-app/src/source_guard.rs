@@ -438,6 +438,11 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-services/src")
     }
 
+    /// The run tier's sources, read by the same scans for the same reason.
+    fn runs_source_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-runs/src")
+    }
+
     /// Every authored `.rs` file in the workspace, sorted, with the floors the
     /// whole-workspace scans rest on.
     ///
@@ -525,6 +530,7 @@ mod tests {
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
         rust_sources(&services_source_root(), &mut paths);
+        rust_sources(&runs_source_root(), &mut paths);
         paths.push(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results/src/executed_deck.rs"),
         );
@@ -595,6 +601,7 @@ mod tests {
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
         rust_sources(&services_source_root(), &mut paths);
+        rust_sources(&runs_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -668,6 +675,7 @@ mod tests {
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
         rust_sources(&services_source_root(), &mut paths);
+        rust_sources(&runs_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -945,10 +953,18 @@ mod tests {
         const PALETTE_RECEIVERS: [&str; 4] = ["color", "colors", "c", "palette"];
         const BANNED_ROLES: [&str; 2] = ["ok", "info"];
 
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // A file the run tier compiles keeps its path under that crate's `src`.
+        let roots = [
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            runs_source_root(),
+        ];
         let mut found = Vec::new();
         for file in FILES {
-            let path = root.join(file);
+            let path = roots
+                .iter()
+                .map(|root| root.join(file))
+                .find(|path| path.is_file())
+                .unwrap_or_else(|| roots[0].join(file));
             let source = std::fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
             for (index, line) in without_test_items(&source).lines().enumerate() {
@@ -1071,6 +1087,7 @@ mod tests {
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
         rust_sources(&services_source_root(), &mut paths);
+        rust_sources(&runs_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1257,6 +1274,7 @@ mod tests {
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
         rust_sources(&services_source_root(), &mut paths);
+        rust_sources(&runs_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1337,6 +1355,7 @@ mod tests {
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
         rust_sources(&services_source_root(), &mut paths);
+        rust_sources(&runs_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()

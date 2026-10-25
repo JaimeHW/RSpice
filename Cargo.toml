@@ -28,6 +28,7 @@ members = [
     "tools/rspice-sheet-publisher",
     "crates/rspice-viewer",
     "crates/rspice-app",
+    "crates/rspice-app-runs",
     "crates/rspice-app-services",
     "crates/rspice-app-state",
     "crates/rspice-ui-kit",
@@ -165,6 +166,7 @@ web-sys = { version = "0.3", features = [
 ] }
 
 # Internal crates
+rspice-app-runs = { path = "crates/rspice-app-runs", version = "0.1.0" }
 rspice-app-services = { path = "crates/rspice-app-services", version = "0.1.0" }
 rspice-app-state = { path = "crates/rspice-app-state", version = "0.1.0" }
 rspice-ui-kit = { path = "crates/rspice-ui-kit", version = "0.1.0" }

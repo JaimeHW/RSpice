@@ -440,6 +440,7 @@ use faer.
 | [`rspice-vocabulary`](crates/rspice-vocabulary) | Portable value types every application crate shares |
 | [`rspice-app-state`](crates/rspice-app-state) | The application's persisted model: schematic, workspace, simulation plans, design checks and preferences |
 | [`rspice-app-services`](crates/rspice-app-services) | The application's platform services: project lifecycle, persistence, recovery and file I/O |
+| [`rspice-app-runs`](crates/rspice-app-runs) | The application's run tier: preparing, dispatching, watching and publishing simulation runs |
 | [`rspice-design`](crates/rspice-design) | Schematic documents, connectivity, hierarchy, rule checks and symbols |
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |

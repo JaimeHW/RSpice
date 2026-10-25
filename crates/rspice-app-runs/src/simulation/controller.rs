@@ -75,23 +75,23 @@ mod live_transient;
 #[cfg(test)]
 mod manual_deck_tests;
 mod monte_carlo_checkpoint;
-pub(crate) mod prepared_run;
+pub mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
 mod results_convert;
-pub(crate) mod results_post;
+pub mod results_post;
 mod results_update;
 mod run_inputs;
 pub use run_inputs::PreparedRunSetInputs;
 mod run_lines;
 use run_lines::write_run_line;
-#[cfg(test)]
-pub(crate) mod test_execution;
-#[cfg(test)]
-pub(crate) mod test_host;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_execution;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_host;
 mod touchstone;
 mod transient_checkpoint;
-pub(crate) mod transient_post;
+pub mod transient_post;
 pub use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;
@@ -235,7 +235,7 @@ pub struct SimulationController {
     retained_run_generation: u64,
     /// Preflight's preparation and engine pass, while they run.
     preflight: Option<engine_check::PendingPreflight>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     preflight_test_hooks: engine_check::PreflightTestHooks,
     /// Run-bound automatic export policy captured by immutable preflight.
     touchstone_export_policy: TouchstoneExportPolicy,
@@ -289,7 +289,7 @@ impl SimulationController {
             retained_run_inputs: None,
             retained_run_generation: 0,
             preflight: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             preflight_test_hooks: engine_check::PreflightTestHooks::default(),
             touchstone_export_policy: TouchstoneExportPolicy::disabled(),
             active_campaign: None,
@@ -393,7 +393,7 @@ impl SimulationController {
 
     /// The deck the next dispatch consumes, as preflight retained it, and the
     /// digest of the snapshot it seals: what a run started now executes.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn retained_run_deck(&self) -> Option<(&str, crate::product::ContentDigest)> {
         self.run_authorization
             .retained_snapshot()
@@ -1945,7 +1945,7 @@ impl SimulationController {
     }
 
     /// Check if a simulation is currently running
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn is_running(&self) -> bool {
         self.runner.is_running()
     }
@@ -1957,7 +1957,7 @@ impl SimulationController {
     }
 
     /// Abort current simulation
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn abort(&self) {
         self.runner.abort();
     }

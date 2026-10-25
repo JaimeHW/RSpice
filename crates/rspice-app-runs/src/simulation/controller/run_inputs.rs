@@ -1115,7 +1115,7 @@ impl std::fmt::Debug for PreparedRunSetInputs {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl PreparedRunSetInputs {
     /// What a run set prepared from `state` would be retained with, for a
     /// test that builds a workflow's dispatch record and prepares no run. It

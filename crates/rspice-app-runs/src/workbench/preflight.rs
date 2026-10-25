@@ -448,7 +448,7 @@ fn ensure_configured_design_check(state: &mut impl RunHost) -> Result<(), String
 
 /// The report a pass over `state` collects, the configured design checked
 /// first as the pass checks it.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn collect_report(state: &impl RunHost) -> PreflightReport {
     let mut state = state.clone();
     let _ = ensure_configured_design_check(&mut state);
