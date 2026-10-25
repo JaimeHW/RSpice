@@ -1243,6 +1243,20 @@ impl CircuitData {
         &self.b3soi.devices
     }
 
+    /// The native B3SOIFD instances in build order, for the device models'
+    /// checks against the built circuit.
+    #[doc(hidden)]
+    pub fn b3soi_fd_devices(&self) -> &[crate::device::B3SoiFd] {
+        &self.b3soi_fd.devices
+    }
+
+    /// The native B3SOIPD instances in build order, for the device models'
+    /// checks against the built circuit.
+    #[doc(hidden)]
+    pub fn b3soi_pd_devices(&self) -> &[crate::device::B3SoiPd] {
+        &self.b3soi_pd.devices
+    }
+
     /// Native diode terminal nodes by instance name, if present.
     pub fn diode_terminal_nodes(&self, name: &str) -> Option<(NodeId, NodeId)> {
         self.diodes

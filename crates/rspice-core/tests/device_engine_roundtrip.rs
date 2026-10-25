@@ -437,25 +437,33 @@ mod bsim4v8_charge {
     }
 }
 
-// ===================== B3SOIDD stamp derivatives =====================
+// ===================== B3SOI stamp derivatives =====================
 
-mod b3soi_dd_derivatives {
-    //! The B3SOIDD stamps must be the derivative of the residual they stamp.
+mod b3soi_derivatives {
+    //! The B3SOI stamps must be the derivative of the residual they stamp.
     //!
     //! The residual of one instance is its share of the assembled transient
     //! system, `r(x) = A(x)·x - b(x)`: the static stamp plus the charge companion
     //! with backward-Euler gain `ag0` against a frozen history,
     //! `cq = ag0·(q(x) - q_ref)`. Newton contracts quadratically only when the
     //! stamped `A(x)` is `dr/dx`, so every stamped entry is compared against a
-    //! difference quotient of `r` itself.
+    //! difference quotient of `r` itself. DD, FD and PD are separate ports, so
+    //! each is checked in both conduction modes, for both polarities, with and
+    //! without its self-heating node.
 
     use rspice_core::device::mosfet::b3soi::common::SoiCompanionCurrents;
     use rspice_core::device::mosfet::b3soi::dd::eval::B3SoiDdCharge;
-    use rspice_core::device::{B3SoiDd, MatrixStamper, NonlinearDevice};
-    use rspice_core::{Engine, Netlist, NodeId, Value};
+    use rspice_core::device::mosfet::b3soi::fd::eval::B3SoiFdCharge;
+    use rspice_core::device::mosfet::b3soi::pd::eval::B3SoiPdCharge;
+    use rspice_core::device::{B3SoiDd, B3SoiFd, B3SoiPd, MatrixStamper, NonlinearDevice};
+    use rspice_core::{CircuitData, Engine, Netlist, NodeId, Value};
 
     const N1_CARD: &str = include_str!("../../../tests/ngspice/bsim3soidd/nmosdd.mod");
     const P1_CARD: &str = include_str!("../../../tests/ngspice/bsim3soidd/pmosdd.mod");
+    const FD_N1_CARD: &str = include_str!("../../../tests/ngspice/bsim3soifd/nmosfd.mod");
+    const FD_P1_CARD: &str = include_str!("../../../tests/ngspice/bsim3soifd/pmosfd.mod");
+    const PD_N1_CARD: &str = include_str!("../../../tests/ngspice/bsim3soipd/nmospd.mod");
+    const PD_P1_CARD: &str = include_str!("../../../tests/ngspice/bsim3soipd/pmospd.mod");
 
     /// Dense capture of one instance's stamps over every circuit node.
     struct Assembly {
@@ -502,24 +510,124 @@ mod b3soi_dd_derivatives {
         }
     }
 
+    /// The nodes one instance stamps, `0` where it has none.
+    struct SoiNodes {
+        drain: NodeId,
+        gate: NodeId,
+        source: NodeId,
+        e: NodeId,
+        body: NodeId,
+        p: NodeId,
+        temp: NodeId,
+    }
+
+    /// What the check drives on each SOI port.
+    trait SoiDevice {
+        type Charge;
+        fn first_in(circuit: &CircuitData) -> Self;
+        fn nodes(&self) -> SoiNodes;
+        fn polarity(&self) -> Value;
+        fn set_transient(&self);
+        /// Linearize exactly at `x`, with no Newton limiting.
+        fn linearize_at(&mut self, x: &[Value]);
+        fn stamp_static(&self, x: &[Value], matrix: &mut Assembly);
+        fn charge(&self, x: &[Value]) -> Self::Charge;
+        /// `[qg, qb, qd, qe, qth]`.
+        fn node_charges(q: &Self::Charge) -> [Value; 5];
+        fn stamp_companion(
+            &self,
+            q: &Self::Charge,
+            ag0: Value,
+            currents: SoiCompanionCurrents,
+            x: &[Value],
+            matrix: &mut Assembly,
+        );
+    }
+
+    macro_rules! soi_device {
+        ($device:ty, $charge:ty, $instances:ident, $p:ident) => {
+            impl SoiDevice for $device {
+                type Charge = $charge;
+
+                fn first_in(circuit: &CircuitData) -> Self {
+                    circuit.$instances()[0].clone()
+                }
+
+                fn nodes(&self) -> SoiNodes {
+                    SoiNodes {
+                        drain: self.node_drain,
+                        gate: self.node_gate,
+                        source: self.node_source,
+                        e: self.node_e,
+                        body: self.node_body,
+                        p: self.$p,
+                        temp: self.node_temp,
+                    }
+                }
+
+                fn polarity(&self) -> Value {
+                    self.mtype
+                }
+
+                fn set_transient(&self) {
+                    self.set_dc_mode(false);
+                }
+
+                fn linearize_at(&mut self, x: &[Value]) {
+                    self.update_static_linearization(x);
+                }
+
+                fn stamp_static(&self, x: &[Value], matrix: &mut Assembly) {
+                    self.stamp_nonlinear(x, matrix, &mut []);
+                }
+
+                fn charge(&self, x: &[Value]) -> Self::Charge {
+                    self.charge_at(x)
+                }
+
+                fn node_charges(q: &Self::Charge) -> [Value; 5] {
+                    [q.qg, q.qb, q.qd, q.qe, q.qth]
+                }
+
+                fn stamp_companion(
+                    &self,
+                    q: &Self::Charge,
+                    ag0: Value,
+                    currents: SoiCompanionCurrents,
+                    x: &[Value],
+                    matrix: &mut Assembly,
+                ) {
+                    self.stamp_charge_companion(q, ag0, currents, x, matrix);
+                }
+            }
+        };
+    }
+
+    soi_device!(B3SoiDd, B3SoiDdCharge, b3soi_dd_devices, node_p);
+    // FD reads a body contact for its initial guess only and has no tie node.
+    soi_device!(B3SoiFd, B3SoiFdCharge, b3soi_fd_devices, node_body);
+    soi_device!(B3SoiPd, B3SoiPdCharge, b3soi_pd_devices, node_p);
+
     /// Linearize the instance exactly at `x` (no Newton limiting) and capture its
     /// static and charge-companion stamps.
-    fn assemble(dev: &mut B3SoiDd, x: &[Value], ag0: Value, q_ref: &B3SoiDdCharge) -> Assembly {
-        dev.update_static_linearization(x);
+    fn assemble<D: SoiDevice>(dev: &mut D, x: &[Value], ag0: Value, q_ref: &D::Charge) -> Assembly {
+        dev.linearize_at(x);
         let mut assembly = Assembly::new(x.len());
-        dev.stamp_nonlinear(x, &mut assembly, &mut []);
+        dev.stamp_static(x, &mut assembly);
         if ag0 > 0.0 {
-            let q = dev.charge_at(x);
-            let cq = |now: Value, then: Value| ag0 * (now - then);
-            dev.stamp_charge_companion(
+            let q = dev.charge(x);
+            let now = D::node_charges(&q);
+            let then = D::node_charges(q_ref);
+            let cq = |k: usize| ag0 * (now[k] - then[k]);
+            dev.stamp_companion(
                 &q,
                 ag0,
                 SoiCompanionCurrents {
-                    cqg: cq(q.qg, q_ref.qg),
-                    cqb: cq(q.qb, q_ref.qb),
-                    cqd: cq(q.qd, q_ref.qd),
-                    cqe: cq(q.qe, q_ref.qe),
-                    cqth: cq(q.qth, q_ref.qth),
+                    cqg: cq(0),
+                    cqb: cq(1),
+                    cqd: cq(2),
+                    cqe: cq(3),
+                    cqth: cq(4),
                 },
                 x,
                 &mut assembly,
@@ -532,59 +640,88 @@ mod b3soi_dd_derivatives {
     /// contact sits at the body voltage, so no current flows in a tie resistor.
     struct BiasPoint(&'static str, [Value; 5]);
 
-    struct Instance {
-        dev: B3SoiDd,
+    struct Instance<D> {
+        dev: D,
         n: usize,
         /// Device nodes (row/column labels) in stamp order.
         nodes: Vec<(&'static str, NodeId)>,
     }
 
-    /// Build one instance from a model card: a floating body (`d g s e`), an
-    /// ideal body tie (`d g s e p`), or a tie through `RBODY`.
-    fn instance(card: &str, polarity: &str, body: &str) -> Instance {
+    /// Build the first SOI instance of `deck`, whose sources hold every node at
+    /// 0 V; the check sets the node voltages itself.
+    fn build<D: SoiDevice>(deck: &str) -> Instance<D> {
+        let netlist = Netlist::parse(deck).expect("derivative-check deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("derivative-check circuit builds");
+        let n = circuit.num_nodes();
+        let dev = D::first_in(&circuit);
+        dev.set_transient();
+        let SoiNodes {
+            drain,
+            gate,
+            source,
+            e,
+            body,
+            p,
+            temp,
+        } = dev.nodes();
+        let mut nodes = vec![
+            ("D", drain),
+            ("G", gate),
+            ("S", source),
+            ("E", e),
+            ("B", body),
+        ];
+        if p != body {
+            nodes.push(("P", p));
+        }
+        if temp != 0 {
+            nodes.push(("T", temp));
+        }
+        Instance { dev, n, nodes }
+    }
+
+    /// A deck holding one instance of `card` with its terminals at 0 V.
+    fn deck(family: &str, card: &str, polarity: &str, terminals: &str) -> String {
+        let model = if polarity == "n" { "n1" } else { "p1" };
+        format!(
+            "* {family} derivative check\n\
+             vd d 0 0\nvg g 0 0\nvs s 0 0\nve e 0 0\nvp p 0 0\n\
+             m1 {terminals} {model} w=10u l=0.25u\n{card}\n.end\n"
+        )
+    }
+
+    /// Build one B3SOIDD instance from a model card: a floating body
+    /// (`d g s e`), an ideal body tie (`d g s e p`), or a tie through `RBODY`.
+    fn instance(card: &str, polarity: &str, body: &str) -> Instance<B3SoiDd> {
         let (terminals, card) = match body {
             "floating" => ("d g s e", card.to_string()),
             "tied" => ("d g s e p", card.to_string()),
             "resistive" => ("d g s e p", card.replace("RBODY = 0.0", "RBODY = 200.0")),
             other => panic!("unknown body case {other}"),
         };
-        let model = if polarity == "n" { "n1" } else { "p1" };
-        let deck = format!(
-            "* B3SOIDD derivative check\n\
-             vd d 0 0\nvg g 0 0\nvs s 0 0\nve e 0 0\nvp p 0 0\n\
-             m1 {terminals} {model} w=10u l=0.25u\n{card}\n.end\n"
-        );
-        let netlist = Netlist::parse(&deck).expect("derivative-check deck parses");
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("derivative-check circuit builds");
-        let n = circuit.num_nodes();
-        let dev = circuit.b3soi_dd_devices()[0].clone();
-        dev.set_dc_mode(false);
-        let mut nodes = vec![
-            ("D", dev.node_drain),
-            ("G", dev.node_gate),
-            ("S", dev.node_source),
-            ("E", dev.node_e),
-            ("B", dev.node_body),
-        ];
-        if body == "resistive" {
-            nodes.push(("P", dev.node_p));
-        }
-        Instance { dev, n, nodes }
+        build(&deck("B3SOIDD", &card, polarity, terminals))
     }
 
-    fn solution(inst: &Instance, point: &BiasPoint) -> Vec<Value> {
+    /// The solution vector at `point`, with the self-heating node, if any, at
+    /// `del_temp`.
+    fn solution<D: SoiDevice>(
+        inst: &Instance<D>,
+        point: &BiasPoint,
+        del_temp: Value,
+    ) -> Vec<Value> {
         let [vd, vg, vs, ve, vb] = point.1;
-        let dev = &inst.dev;
+        let nodes = inst.dev.nodes();
         let mut x = vec![0.0; inst.n];
         for (node, volts) in [
-            (dev.node_drain, vd),
-            (dev.node_gate, vg),
-            (dev.node_source, vs),
-            (dev.node_e, ve),
-            (dev.node_p, vb),
-            (dev.node_body, vb),
+            (nodes.drain, vd),
+            (nodes.gate, vg),
+            (nodes.source, vs),
+            (nodes.e, ve),
+            (nodes.p, vb),
+            (nodes.body, vb),
+            (nodes.temp, del_temp),
         ] {
             if node != 0 {
                 x[node - 1] = volts;
@@ -606,6 +743,24 @@ mod b3soi_dd_derivatives {
     /// Floor on the relative rounding of one evaluation of a residual row,
     /// against the magnitude of the terms it sums: 2^-46, 64 ulps.
     const EPS_EVAL: Value = 1.421_085_471_520_200_4e-14;
+    /// Offsets, in steps, of two extra samples off the step's grid.
+    ///
+    /// The FD drain current is quantized along vd: below threshold `Ids` jumps
+    /// about 2e-12 of itself every 1 uV of vd (2.2 uV for NMOS), as ngspice-46's
+    /// B3SOIFD does to 17 digits. Samples spaced by that period all read one
+    /// phase of the sawtooth, so the fourth difference misses it while the
+    /// quotient carries its slope; these two samples sit at other phases.
+    const OFF_GRID: [Value; 2] = [0.37, 0.61];
+
+    /// Weights of the quartic through samples at `steps`, evaluated at `t`.
+    fn quartic_weights(steps: [Value; 5], t: Value) -> [Value; 5] {
+        std::array::from_fn(|k| {
+            (0..5)
+                .filter(|&j| j != k)
+                .map(|j| (t - steps[j]) / (steps[k] - steps[j]))
+                .product()
+        })
+    }
 
     thread_local! {
         /// `tol / |stamped|` of every non-negligible entry checked on this thread,
@@ -632,19 +787,22 @@ mod b3soi_dd_derivatives {
     /// - truncation `|D(h) - D(2h)|`, three times the leading `h^2` term;
     /// - rounding: the evaluation noise of the residual, measured as the fourth
     ///   difference `|r(-2h) - 4r(-h) + 6r(0) - 4r(h) + r(2h)|` of the five
-    ///   samples (whose own `h^4 r''''` is far below it), floored at
+    ///   samples (whose own `h^4 r''''` is far below it), or, when larger, 16
+    ///   times (the fourth difference's total weight) the departure of the
+    ///   `OFF_GRID` samples from the quartic through the five; floored at
     ///   `EPS_EVAL * S_i`, `S_i` the summed term magnitude of row `i`; divided by
     ///   `h`, and by `h/4` for the larger one-sided weights;
     /// - the stamped entry's own rounding, `EPS_EVAL` times its row's largest entry.
-    fn check(inst: &mut Instance, x: &[Value], ag0: Value) -> Vec<Mismatch> {
+    fn check<D: SoiDevice>(inst: &mut Instance<D>, x: &[Value], ag0: Value) -> Vec<Mismatch> {
         let base_q = {
-            inst.dev.update_static_linearization(x);
-            inst.dev.charge_at(x)
+            inst.dev.linearize_at(x);
+            inst.dev.charge(x)
         };
         let base = assemble(&mut inst.dev, x, ag0, &base_q);
         let base_static = assemble(&mut inst.dev, x, 0.0, &base_q);
-        let mtype = inst.dev.mtype;
-        let vds = mtype * (x[inst.dev.node_drain - 1] - x[inst.dev.node_source - 1]);
+        let mtype = inst.dev.polarity();
+        let SoiNodes { drain, source, .. } = inst.dev.nodes();
+        let vds = mtype * (x[drain - 1] - x[source - 1]);
         // The terminal step that keeps the device in its selected mode.
         let into_mode = if vds >= 0.0 { mtype } else { -mtype };
         let nodes = inst.nodes.clone();
@@ -653,14 +811,14 @@ mod b3soi_dd_derivatives {
             if col == 0 {
                 continue;
             }
-            let drain_or_source = col == inst.dev.node_drain || col == inst.dev.node_source;
+            let drain_or_source = col == drain || col == source;
             let dynamic_only = vds == 0.0 && drain_or_source;
             if dynamic_only && ag0 == 0.0 {
                 continue;
             }
             let side = if vds.abs() > 4.0 * H || !drain_or_source {
                 None
-            } else if col == inst.dev.node_drain {
+            } else if col == drain {
                 Some(into_mode)
             } else {
                 Some(-into_mode)
@@ -688,11 +846,13 @@ mod b3soi_dd_derivatives {
                     .collect::<Vec<_>>()
             };
             // Five samples per column: centred on x, or stepping into the mode.
-            let (offsets, one_sided) = match side {
-                None => ([-2.0, -1.0, 0.0, 1.0, 2.0].map(|k| k * H), false),
-                Some(s) => ([0.0, 1.0, 2.0, 3.0, 4.0].map(|k| k * s * H), true),
+            let (steps, sign, one_sided) = match side {
+                None => ([-2.0, -1.0, 0.0, 1.0, 2.0], 1.0, false),
+                Some(s) => ([0.0, 1.0, 2.0, 3.0, 4.0], s, true),
             };
+            let offsets = steps.map(|k| k * sign * H);
             let samples = offsets.map(&mut probe);
+            let off_grid = OFF_GRID.map(|t| (quartic_weights(steps, t), probe(t * sign * H)));
             for (r, &(row_label, row)) in nodes.iter().enumerate() {
                 if row == 0 {
                     continue;
@@ -702,14 +862,21 @@ mod b3soi_dd_derivatives {
                     .iter()
                     .map(|sample| sample[r].1)
                     .fold(0.0, Value::max);
+                let departure = off_grid
+                    .iter()
+                    .map(|(w, sample)| {
+                        let fit: Value = w.iter().zip(&f).map(|(w, f)| w * f).sum();
+                        (sample[r].0 - fit).abs()
+                    })
+                    .fold(0.0, Value::max);
                 let noise = (f[0] - 4.0 * f[1] + 6.0 * f[2] - 4.0 * f[3] + f[4])
                     .abs()
+                    .max(16.0 * departure)
                     .max(EPS_EVAL * scale);
                 let (d1, d2, rounding) = if one_sided {
-                    let s = offsets[1] / H;
                     (
-                        s * (-3.0 * f[0] + 4.0 * f[1] - f[2]) / (2.0 * H),
-                        s * (-3.0 * f[0] + 4.0 * f[2] - f[4]) / (4.0 * H),
+                        sign * (-3.0 * f[0] + 4.0 * f[1] - f[2]) / (2.0 * H),
+                        sign * (-3.0 * f[0] + 4.0 * f[2] - f[4]) / (4.0 * H),
                         4.0 * noise / H,
                     )
                 } else {
@@ -745,7 +912,7 @@ mod b3soi_dd_derivatives {
             }
         }
         // Leave the instance linearized at the base point.
-        inst.dev.update_static_linearization(x);
+        inst.dev.linearize_at(x);
         out
     }
 
@@ -803,6 +970,19 @@ mod b3soi_dd_derivatives {
         xyce_card
     }
 
+    /// One line per mismatched entry.
+    fn mismatch_line(case: &str, m: &Mismatch) -> String {
+        format!(
+            "{case} dF[{}]/dx[{}]: stamped {:>13.6e} FD {:>13.6e} (err {:.2e}, tol {:.2e})",
+            m.row,
+            m.col,
+            m.stamped,
+            m.fd,
+            (m.stamped - m.fd).abs(),
+            m.tol,
+        )
+    }
+
     fn sweep(
         family: &str,
         card: &str,
@@ -818,20 +998,16 @@ mod b3soi_dd_derivatives {
             for body in ["floating", "tied", "resistive"] {
                 let mut inst = instance(&card, polarity, body);
                 for point in points {
-                    let x = solution(&inst, point);
+                    let x = solution(&inst, point, 0.0);
                     for &(dt_label, ag0) in AG0 {
                         checked += 1;
                         for m in check(&mut inst, &x, ag0) {
-                            lines.push(format!(
-                                "{family} capmod{capmod} {body:<9} {:<26} {dt_label:<10} dF[{}]/dx[{}]: \
-                                 stamped {:>13.6e} FD {:>13.6e} (err {:.2e}, tol {:.2e})",
-                                point.0,
-                                m.row,
-                                m.col,
-                                m.stamped,
-                                m.fd,
-                                (m.stamped - m.fd).abs(),
-                                m.tol,
+                            lines.push(mismatch_line(
+                                &format!(
+                                    "{family} capmod{capmod} {body:<9} {:<26} {dt_label:<10}",
+                                    point.0
+                                ),
+                                &m,
                             ));
                         }
                     }
@@ -841,11 +1017,8 @@ mod b3soi_dd_derivatives {
         (checked, lines)
     }
 
-    fn check_dialect(xyce: bool) {
-        let sweeps = [
-            sweep("nmos", N1_CARD, "n", N_POINTS, xyce),
-            sweep("pmos", P1_CARD, "p", P_POINTS, xyce),
-        ];
+    /// Print the mismatches and the tolerance spread, then fail on any mismatch.
+    fn report(sweeps: &[(usize, Vec<String>)]) {
         let checked: usize = sweeps.iter().map(|(n, _)| n).sum();
         let lines: Vec<&str> = sweeps
             .iter()
@@ -875,6 +1048,13 @@ mod b3soi_dd_derivatives {
         );
     }
 
+    fn check_dialect(xyce: bool) {
+        report(&[
+            sweep("nmos", N1_CARD, "n", N_POINTS, xyce),
+            sweep("pmos", P1_CARD, "p", P_POINTS, xyce),
+        ]);
+    }
+
     #[test]
     fn stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
         check_dialect(false);
@@ -888,6 +1068,132 @@ mod b3soi_dd_derivatives {
         check_dialect(true);
     }
 
+    /// `[d, g, s, e, body]` for an N-channel FD or PD card, in both modes; a
+    /// P-channel card takes every voltage negated. The reverse points put the
+    /// source above the drain, and one forward-biases the body against the mode
+    /// drain so its junction carries current.
+    const SOI_POINTS: &[BiasPoint] = &[
+        BiasPoint("forward subthreshold", [1.5, 0.0, 0.0, 0.0, 0.09]),
+        BiasPoint("forward moderate", [1.5, 0.6, 0.0, 0.0, 0.2]),
+        BiasPoint("forward strong saturation", [1.5, 2.5, 0.0, 0.0, 0.4]),
+        BiasPoint("forward strong linear", [0.1, 2.5, 0.0, 0.0, 0.05]),
+        BiasPoint("forward back gate", [1.5, 1.0, 0.0, 1.0, 0.2]),
+        BiasPoint("reverse subthreshold", [0.0, 0.0, 1.5, 0.0, 0.09]),
+        BiasPoint("reverse moderate", [0.0, 0.8, 1.0, 0.0, 0.3]),
+        BiasPoint("reverse strong saturation", [0.0, 2.5, 1.5, 0.0, 0.4]),
+        BiasPoint("reverse forward-biased body", [0.0, 0.0, 0.4, 0.0, 0.8]),
+        BiasPoint("reverse back gate", [0.0, 1.0, 1.5, 1.0, 0.2]),
+    ];
+
+    /// The temperature rise the self-heating cases are linearized at, in kelvin.
+    const DEL_TEMP: Value = 2.0;
+
+    /// The card with its self-heating node switched on (the corpus cards carry
+    /// `RTH0` and `SHMOD = 0`).
+    fn self_heating(card: &str) -> String {
+        let on = card
+            .replacen("SHMOD = 0", "SHMOD = 1", 1)
+            .replacen("SHMOD =0", "SHMOD = 1", 1);
+        assert_ne!(on, card, "the card names SHMOD 0");
+        on
+    }
+
+    /// One body connection: its label, the instance terminals, and whether the
+    /// card's `RBODY` is zeroed to make a contact an ideal tie.
+    struct Body(&'static str, &'static str, bool);
+
+    /// Sweep one FD or PD card over `SOI_POINTS`, both CAPMODs, the body cases,
+    /// self-heating off and on, and the integration `gains`.
+    fn sweep_soi<D: SoiDevice>(
+        family: &str,
+        card: &str,
+        polarity: &str,
+        bodies: &[Body],
+        gains: &[(&str, Value)],
+    ) -> (usize, Vec<String>) {
+        let mut checked = 0;
+        let mut lines = Vec::new();
+        let sign = if polarity == "n" { 1.0 } else { -1.0 };
+        for capmod in ["2", "3"] {
+            let card = card
+                .replace("CAPMOD = 3", &format!("CAPMOD = {capmod}"))
+                .replace("CAPMOD = 2", &format!("CAPMOD = {capmod}"));
+            for heated in [false, true] {
+                let card = if heated {
+                    self_heating(&card)
+                } else {
+                    card.clone()
+                };
+                let del_temp = if heated { DEL_TEMP } else { 0.0 };
+                for &Body(body, terminals, ideal) in bodies {
+                    let card = if ideal {
+                        ideal_tie(&card)
+                    } else {
+                        card.clone()
+                    };
+                    let mut inst: Instance<D> = build(&deck(family, &card, polarity, terminals));
+                    assert_eq!(
+                        inst.dev.nodes().temp != 0,
+                        heated,
+                        "{family} {polarity} {body}: self-heating node"
+                    );
+                    for point in SOI_POINTS {
+                        let point = BiasPoint(point.0, point.1.map(|v| sign * v));
+                        let x = solution(&inst, &point, del_temp);
+                        for &(dt_label, ag0) in gains {
+                            checked += 1;
+                            for m in check(&mut inst, &x, ag0) {
+                                lines.push(mismatch_line(
+                                    &format!(
+                                        "{family} {polarity}mos capmod{capmod} sh{} {body:<9} {:<28} {dt_label:<10}",
+                                        u8::from(heated),
+                                        point.0
+                                    ),
+                                    &m,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (checked, lines)
+    }
+
+    fn ideal_tie(card: &str) -> String {
+        let tied = card.replace("RBODY = 1e0 ", "RBODY = 0.0 ");
+        assert_ne!(tied, card, "the card names RBODY 1");
+        tied
+    }
+
+    /// FD's static stamp. Its charge companion is not yet the derivative of its
+    /// charges, so the integration gains are not swept here.
+    #[test]
+    fn fd_static_stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
+        let bodies = [
+            Body("floating", "d g s e", false),
+            Body("contact", "d g s e p", false),
+        ];
+        let gains = &AG0[..1];
+        report(&[
+            sweep_soi::<B3SoiFd>("B3SOIFD", FD_N1_CARD, "n", &bodies, gains),
+            sweep_soi::<B3SoiFd>("B3SOIFD", FD_P1_CARD, "p", &bodies, gains),
+        ]);
+    }
+
+    #[test]
+    fn pd_stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
+        let bodies = [
+            Body("floating", "d g s e", false),
+            Body("tied", "d g s e p", true),
+            Body("resistive", "d g s e p", false),
+        ];
+        report(&[
+            sweep_soi::<B3SoiPd>("B3SOIPD", PD_N1_CARD, "n", &bodies, AG0),
+            sweep_soi::<B3SoiPd>("B3SOIPD", PD_P1_CARD, "p", &bodies, AG0),
+        ]);
+    }
+
     /// The boundary deck's transient stalled because its CAPMOD=3 charges carried
     /// ~1e-8 relative rounding noise below threshold, which the integration gain
     /// turns into nA of residual. Along every direction the charges must now be
@@ -896,7 +1202,7 @@ mod b3soi_dd_derivatives {
     #[test]
     fn boundary_deck_charges_are_smooth_to_rounding() {
         let mut inst = instance(N1_CARD, "n", "floating");
-        let x = solution(&inst, &BOUNDARY_DECK_OP);
+        let x = solution(&inst, &BOUNDARY_DECK_OP, 0.0);
         for (label, node) in [
             ("body", inst.dev.node_body),
             ("back gate", inst.dev.node_e),

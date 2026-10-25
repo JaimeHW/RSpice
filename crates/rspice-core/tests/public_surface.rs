@@ -366,7 +366,8 @@ use rspice_core::analysis::harmonic_balance::{
 // Deleting dead device, netlist and parameter-scope types brings it to
 // 5,296, with no slack. Sharing one method set across the voltage and
 // current source stores brings it to 5,292, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5292;
+// Deleting the test-only `SpiceLibraryIndex::search_parts` brings it to 5,291.
+const MAX_PUBLIC_ITEMS: usize = 5291;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
@@ -477,8 +478,12 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // checkpoint plumbing through hidden items for the same move, with each type
 // their signatures name. The event scheduler's `schedule`, `len` and
 // `is_empty` compile under `test-support` as well as `cfg(test)`, for the
-// engine's event tests. The census is 1,598, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1598;
+// engine's event tests. The census was 1,598, with no slack.
+// `CircuitData::b3soi_fd_devices` and `CircuitData::b3soi_pd_devices` add two:
+// the stamp-derivative check reads the built B3SOIFD and B3SOIPD instances
+// back through them, as it reads B3SOIDD's. The census is 1,600, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1600;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
