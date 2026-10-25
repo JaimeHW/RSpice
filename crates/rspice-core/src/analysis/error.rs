@@ -171,7 +171,8 @@ impl SimulationErrorCategory {
         }
     }
 
-    /// Every category, in declaration order.
+    /// Every failure category, in declaration order. `ModelControl` is a
+    /// normal model-requested termination, not a failure, so it is left out.
     ///
     /// Frontends use this to prove their category-keyed tables are total
     /// rather than discovering a gap when a new category first fires.

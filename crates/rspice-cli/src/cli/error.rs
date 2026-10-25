@@ -254,10 +254,9 @@ pub const fn exit_code_for(category: FailureCategory) -> ExitCode {
         }
         FailureCategory::Engine(SimulationErrorCategory::Cancellation) => ExitCode::Interrupted,
         FailureCategory::Engine(SimulationErrorCategory::Timeout) => ExitCode::TimedOut,
-        // An engine category this table does not map is a defect in the
-        // table, and reporting it as an internal error is more honest than
-        // guessing a domain code.
-        FailureCategory::Engine(_) => ExitCode::InternalError,
+        // A model's `$finish` ends the run successfully before any failure is
+        // reported, so this category reaching the failure table is a defect.
+        FailureCategory::Engine(SimulationErrorCategory::ModelControl) => ExitCode::InternalError,
         FailureCategory::InputNotFound => ExitCode::InputNotFound,
         FailureCategory::Io => ExitCode::IoError,
         FailureCategory::Usage => ExitCode::MisuseOfCommand,
