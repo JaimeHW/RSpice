@@ -981,6 +981,20 @@ impl B3SoiDd {
         let temp = self.base_temp_k + bias.del_temp;
         let h = (temp.abs().max(1.0) * 1.0e-5).clamp(1.0e-3, 5.0e-2);
         let lower_h = if temp - h > 1.0 { h } else { 0.0 };
+        // The load linearizes the junction and body currents against the
+        // mode-selected voltages (b3soiddld.c:841-862), so they are rebuilt
+        // from that frame here; the raw voltages would add each conductance's
+        // own temperature slope to the inverse-mode derivatives.
+        let (vds, vgs, vbs, ves) = if op.mode >= 0 {
+            (bias.vds, bias.vgs, bias.vbs, bias.ves)
+        } else {
+            (
+                -bias.vds,
+                bias.vgs - bias.vds,
+                bias.vbs - bias.vds,
+                bias.ves - bias.vds,
+            )
+        };
 
         let sample = |del_temp: Value| {
             let sample_bias = B3SoiDdBias { del_temp, ..bias };
@@ -989,22 +1003,21 @@ impl B3SoiDd {
                 .self_heated_at(&self.model, self.base_temp_k + del_temp);
             let sample_op = eval::eval_dc(&sized, &self.consts, sample_bias, self.mtype);
             let drain_junction = sample_op.cjd
-                + sample_op.gjdb * sample_bias.vbs
-                + sample_op.gjdd * sample_bias.vds
-                + sample_op.gjdg * sample_bias.vgs
-                + sample_op.gjde * sample_bias.ves
+                + sample_op.gjdb * vbs
+                + sample_op.gjdd * vds
+                + sample_op.gjdg * vgs
+                + sample_op.gjde * ves
                 + 0.5 * sized.min_isub;
             let source_junction = sample_op.cjs
-                + sample_op.gjsb * sample_bias.vbs
-                + sample_op.gjsd * sample_bias.vds
-                + sample_op.gjsg * sample_bias.vgs
+                + sample_op.gjsb * vbs
+                + sample_op.gjsd * vds
+                + sample_op.gjsg * vgs
                 + 0.5 * sized.min_isub;
             let body_current = sample_op.cbody
-                + sample_op.gbbs * sample_bias.vbs
-                + sample_op.gbgs * sample_bias.vgs
-                + sample_op.gbds * sample_bias.vds
-                + sample_op.gbes * sample_bias.ves
-                + sample_op.gbps * sample_bias.vps
+                + sample_op.gbbs * vbs
+                + sample_op.gbgs * vgs
+                + sample_op.gbds * vds
+                + sample_op.gbes * ves
                 - sized.min_isub;
             (
                 sample_op.cdrain,
@@ -1028,17 +1041,6 @@ impl B3SoiDd {
         op.gjs_t = (plus.2 - minus.2) / denom;
         op.gb_t = (plus.3 - minus.3) / denom;
         let ids_t = (plus.4 - minus.4) / denom;
-
-        let (vds, vgs, vbs, ves) = if op.mode >= 0 {
-            (bias.vds, bias.vgs, bias.vbs, bias.ves)
-        } else {
-            (
-                -bias.vds,
-                bias.vgs - bias.vds,
-                bias.vbs - bias.vds,
-                bias.ves - bias.vds,
-            )
-        };
         op.gtemp_t = -ids_t * vds;
         op.thermal_eq_current = -op.ids * vds
             - self.mtype
