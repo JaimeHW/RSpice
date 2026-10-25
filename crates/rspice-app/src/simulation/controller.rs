@@ -135,7 +135,7 @@ pub(crate) struct SimulationCampaignDispatchReceipt {
 /// stored under a single simulation run.
 pub struct SimulationController {
     /// The background simulation runner
-    runner: SimulationRunner,
+    pub(crate) runner: SimulationRunner,
     /// Manager for yield analysis (Monte Carlo)
     yield_manager: YieldAnalysisManager,
     /// Current analysis config (stored for result processing when polling completes)
@@ -215,9 +215,9 @@ pub struct SimulationController {
     /// results when its own turn in the queue comes.
     point_families: crate::simulation::point_family::PointFamilyRegistry,
     /// Current analysis index (1-based for display: "Analysis 2/4")
-    current_analysis_idx: usize,
+    pub(crate) current_analysis_idx: usize,
     /// Total number of analyses in current batch
-    total_analyses: usize,
+    pub(crate) total_analyses: usize,
     /// Cached netlist for multi-analysis runs (avoids regeneration)
     cached_netlist: Option<String>,
     /// Runtime coordinator for transient-derived viewer data (eye/FFT).
@@ -1580,7 +1580,7 @@ impl SimulationController {
     /// which stands until the inputs it was measured against move, tied to
     /// the objects the engine named for it so the Problems page can go to
     /// them. A log line is a record of the event, not a place to jump from.
-    fn report_failed_analysis(
+    pub(crate) fn report_failed_analysis(
         state: &mut impl RunHost,
         analysis: &str,
         message: &str,

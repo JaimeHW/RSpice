@@ -78,7 +78,7 @@ fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct MockExportWorkflowIo {
+pub(crate) struct MockExportWorkflowIo {
     writes: RefCell<Vec<(PathBuf, String)>>,
     create_only_writes: RefCell<Vec<(PathBuf, String)>>,
 }
@@ -131,7 +131,7 @@ fn state_with_current_drc_error() -> RunTestHost {
     state
 }
 
-fn bind_test_run_running(
+pub(crate) fn bind_test_run_running(
     state: &mut impl RunHost,
     controller: &mut SimulationController,
     run_sequence: u64,
@@ -553,32 +553,6 @@ fn controller_plan_run_is_sealed_with_exact_prepared_receipt_before_results() {
 }
 
 #[test]
-fn design_context_reset_discards_pending_controller_result() {
-    let mut state = AppState::default();
-    let mut controller = SimulationController::new();
-    let export_io = MockExportWorkflowIo::default();
-    state.model.simulation.start_run();
-    controller.current_spec = Some(AnalysisSpec::dc_op());
-    controller.current_analysis_idx = 1;
-    controller.total_analyses = 1;
-    controller.runner = super::test_execution::start_manual_deck(
-        "Old design\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
-    );
-    super::test_execution::wait_until_finished_unpolled(&controller.runner);
-
-    state.clear_design_execution_context();
-    controller.update(&mut state, &export_io);
-
-    assert!(
-        !state.model.simulation.retained.has_results(),
-        "stale result from previous design should be discarded"
-    );
-    assert_eq!(state.model.log_buffer.len(), 0);
-    assert_eq!(state.model.simulation.execution.status, "");
-    assert!(!controller.is_running());
-}
-
-#[test]
 fn design_epoch_reset_terminalizes_executor_owned_history() {
     let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
@@ -599,43 +573,6 @@ fn design_epoch_reset_terminalizes_executor_owned_history() {
     assert!(!run.success);
     assert!(state.model.simulation.execution.active_execution.is_none());
     assert!(state.model.simulation.execution.abort_request.is_none());
-}
-
-#[test]
-fn stale_cancellation_request_never_mutates_run_lifecycle() {
-    let mut state = AppState::default();
-    let mut controller = SimulationController::new();
-    let export_io = MockExportWorkflowIo::default();
-    let run_sequence = state.model.simulation.start_run().id;
-    bind_test_run_running(&mut state, &mut controller, run_sequence);
-    state
-        .model
-        .simulation
-        .request_abort_active_run()
-        .expect("request is initially bound");
-    state.model.simulation.execution.active_execution = None;
-
-    controller.update(&mut state, &export_io);
-
-    assert_eq!(
-        state
-            .model
-            .simulation
-            .retained
-            .run_by_sequence(run_sequence)
-            .unwrap()
-            .lifecycle,
-        SimulationRunLifecycle::Running
-    );
-    assert!(state.model.simulation.execution.abort_request.is_none());
-    assert!(
-        state
-            .workbench
-            .prompt
-            .as_ref()
-            .is_some_and(|prompt| prompt.text.starts_with("Nothing to cancel")),
-        "a stale request is answered on the status bar, not logged"
-    );
 }
 
 #[test]

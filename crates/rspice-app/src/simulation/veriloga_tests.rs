@@ -3,15 +3,12 @@
 use rspice_simulation::netlist_preparation::{
     append_project_veriloga_directive, project_veriloga_directive,
 };
-use rspice_simulation::project_veriloga::{
-    build_profile, compile_model_library_source_runtimes, compile_project_source_bundle_runtime,
-    prepare_project_runtime,
-};
+use rspice_simulation::project_veriloga::{build_profile, compile_model_library_source_runtimes};
 use rspice_simulation::veriloga::{
     PreparedVerilogARuntime, PreparedVerilogARuntimeSet, compile_signed_pdk_source_runtime,
 };
 
-mod project_tests;
+pub(crate) mod project_tests;
 pub(crate) mod test_support;
 
 mod tests {

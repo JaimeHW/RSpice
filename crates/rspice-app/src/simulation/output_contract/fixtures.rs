@@ -3,7 +3,7 @@
 use super::*;
 pub(super) use crate::simulation::controller::test_execution::saved_outputs::run;
 
-pub(super) fn output(kind: SavedOutputKind, name: &str, expression: &str) -> SavedOutput {
+pub(crate) fn output(kind: SavedOutputKind, name: &str, expression: &str) -> SavedOutput {
     SavedOutput::new(
         kind,
         name,

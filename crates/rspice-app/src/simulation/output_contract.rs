@@ -38,7 +38,7 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
     materialization::retain_plan_saved_outputs(&mut analysis.data, contracts);
 }
 
-pub(in crate::simulation) fn materialize_live_saved_outputs(
+pub(crate) fn materialize_live_saved_outputs(
     analysis: &AnalysisResult,
     contracts: &[PreparedSavedOutput],
 ) -> Vec<RetainedTrace> {
@@ -81,7 +81,7 @@ fn resample_selected_and_final(
 }
 
 #[cfg(test)]
-mod binding_tests;
+pub(crate) mod binding_tests;
 #[cfg(test)]
 mod complex_tests;
 #[cfg(test)]
@@ -89,7 +89,7 @@ mod dc_family_tests;
 #[cfg(test)]
 mod durable_binding_tests;
 #[cfg(test)]
-mod fixtures;
+pub(crate) mod fixtures;
 #[cfg(test)]
 mod probe_tests;
 #[cfg(test)]

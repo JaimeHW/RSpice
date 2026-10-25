@@ -1,11 +1,14 @@
 //! The run tier's behaviour, observed through a whole session.
 
 mod campaign;
+mod completion_paths;
 mod controller;
 mod measurement;
+mod output_contract;
 mod prepared_run;
 mod results_post;
 mod transient_post;
+mod veriloga_project;
 
 use crate::simulation::controller::test_host::RunTestHost;
 use crate::workbench::app_state::AppState;

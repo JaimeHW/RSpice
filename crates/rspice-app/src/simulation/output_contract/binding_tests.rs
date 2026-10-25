@@ -23,7 +23,7 @@ pub(super) fn dc() -> AnalysisSpec {
     }
 }
 
-pub(super) fn ac() -> AnalysisSpec {
+pub(crate) fn ac() -> AnalysisSpec {
     AnalysisSpec::Ac {
         start_freq: 1.0,
         stop_freq: 10.0,
