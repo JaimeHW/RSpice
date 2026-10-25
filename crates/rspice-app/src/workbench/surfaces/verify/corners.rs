@@ -15,6 +15,7 @@
 use super::table::{Cell, Column, DataTable, Verdict};
 use super::toolbar::{PageToolbar, Summary, ToolbarAction, empty_line};
 use super::*;
+use crate::workbench::framework::command_registry::ids;
 
 /// A value within this fraction of its limit is near it: of the limit's own
 /// magnitude for a one-sided limit, of the span for a range.
@@ -663,7 +664,7 @@ pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
     });
     if let Some(index) = analysis_index {
         app.state.model.simulation.select_analysis(index);
-        Command::ExportWaveformsCsv.execute(app);
+        app.execute_command_key(ids::EXPORT_RESULTS);
         app.state.simulate.verification.action_problem = None;
     } else {
         app.state.simulate.verification.action_problem =

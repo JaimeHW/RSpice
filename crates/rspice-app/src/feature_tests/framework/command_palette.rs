@@ -7,6 +7,7 @@ use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::command_palette::*;
 use crate::workbench::framework::command_registry::CommandSpec;
+use crate::workbench::results::commands::ResultsCommand;
 
 #[test]
 fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
@@ -191,7 +192,11 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         PaletteScope::Design
     );
     assert_eq!(
-        PaletteScope::for_command(spec(Command::ExportWaveformsCsv)),
+        PaletteScope::for_command(
+            command_registry()
+                .spec(ResultsCommand::ExportWaveformsCsv.key())
+                .expect("the registry declares the command")
+        ),
         PaletteScope::Results
     );
 

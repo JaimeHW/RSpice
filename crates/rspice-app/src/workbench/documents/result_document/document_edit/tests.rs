@@ -869,7 +869,9 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
 
 /// Open Plot properties through its command and set `digits` and `phase`.
 fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
-    crate::workbench::commands::vocabulary::Command::VisualizationDocumentProperties.execute(app);
+    app.execute_command_key(
+        crate::workbench::results::commands::ResultsCommand::VisualizationDocumentProperties.key(),
+    );
     let Some(ResultDocumentDialog::Properties(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {

@@ -32,8 +32,9 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ExportActiveView, ExportPublicationSnapshot, ExportSchematicSvg,
-    FollowSchematicGrid, PrintActiveView,
+    self, ApplyWaveformDefaults, ExportActiveView, ExportDataset, ExportPublicationSnapshot,
+    ExportSchematicSvg, FollowSchematicGrid, PrintActiveView, RevealExecutedDeck,
+    SelectAnalysisInstance,
 };
 use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
@@ -114,8 +115,9 @@ impl RSpiceApp {
     /// commands it ran next, the print or export workflow it opened, the
     /// schematic or publication snapshot it exported, the snap that follows a
     /// new schematic grid, the shortcut resolver's reset when a shortcut
-    /// library was put in use, and the open waveform view starting again from
-    /// changed defaults.
+    /// library was put in use, the open waveform view starting again from
+    /// changed defaults, and the dataset export, the analysis instance and the
+    /// executed deck a results command asked for.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -167,6 +169,28 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session(),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ExportDataset| file_action(app, FileMenuAction::ExportCsvWaveforms),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, SelectAnalysisInstance(instance)| {
+                app.state.simulate.active_analysis_instance = instance;
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, RevealExecutedDeck(sequence)| {
+                crate::workbench::commands::result_navigation::open_task_deck(
+                    &mut app.state,
+                    sequence,
+                );
+            },
         );
     }
 }

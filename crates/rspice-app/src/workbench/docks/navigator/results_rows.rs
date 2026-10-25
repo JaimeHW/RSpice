@@ -8,6 +8,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::AnalysisPresentationKey;
+use crate::workbench::results::commands::ResultsCommand;
 use rspice_results::result_presentation::ResultArtifactPresentationKey;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
@@ -1519,7 +1520,7 @@ pub(super) fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     theme::paint_focus_ring(ui, &response, add_rect);
     if response.on_hover_text("Open calculator").clicked() {
-        super::super::super::commands::vocabulary::Command::WaveformCalculator.execute(app);
+        app.execute_command_key(ResultsCommand::WaveformCalculator.key());
     }
 }
 

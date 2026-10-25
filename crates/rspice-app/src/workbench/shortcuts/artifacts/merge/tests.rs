@@ -78,10 +78,21 @@ pub(crate) fn set(
     platform: CommandPlatform,
     key: Key,
 ) {
+    set_key(profile, command.key(), slot, platform, key);
+}
+
+/// Bind the command `command` names, as [`set`] binds a command value.
+pub(crate) fn set_key(
+    profile: &mut ShortcutPreferences,
+    command: CommandKey,
+    slot: ShortcutBindingSlot,
+    platform: CommandPlatform,
+    key: Key,
+) {
     profile
         .set_binding(
             &CommandRegistry,
-            command.key(),
+            command,
             slot,
             vec![platform],
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -93,12 +104,12 @@ pub(crate) fn set(
 
 pub(crate) fn with_command_extra(
     profile: &ShortcutPreferences,
-    command: Command,
+    command: CommandKey,
     key: &str,
     value: Value,
 ) -> ShortcutPreferences {
     let mut raw = serde_json::to_value(profile).unwrap();
-    raw["commands"][command.stable_id()][key] = value;
+    raw["commands"][command.as_str()][key] = value;
     serde_json::from_value(raw).unwrap()
 }
 
@@ -403,7 +414,7 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
             "future-binding",
             serde_json::json!({"source":"imported"}),
         ),
-        Command::ZoomFit,
+        Command::ZoomFit.key(),
         "future-command",
         serde_json::json!({"mode":"portable"}),
     );

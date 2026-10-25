@@ -12,6 +12,7 @@ use egui::{CentralPanel, Context, Frame};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
+use crate::workbench::results::commands::ResultsCommand;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
@@ -228,7 +229,7 @@ fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
     });
     run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
     requests::drain(app, outbox, |app, OpenProducingPlan| {
-        commands::vocabulary::Command::OpenProducingPlan.execute(app);
+        app.execute_command_key(ResultsCommand::OpenProducingPlan.key());
     });
 }
 

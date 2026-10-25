@@ -35,13 +35,13 @@ fn clear_results_cannot_remove_the_executor_owned_run() {
     app.state.model.simulation.execution.active_execution = Some(identity);
     app.state.model.simulation.execution.is_running = true;
 
-    assert!(!Command::ClearResults.is_enabled(&app));
+    assert!(!app.command_key_enabled(ResultsCommand::ClearResults.key()));
     assert_eq!(
-        Command::ClearResults.availability(&app),
+        app.command_availability(ResultsCommand::ClearResults.key()),
         CommandAvailability::Disabled("an active simulation execution still owns result history")
     );
 
-    Command::ClearResults.execute(&mut app);
+    app.execute_command_key(ResultsCommand::ClearResults.key());
 
     assert!(
         app.state

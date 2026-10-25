@@ -210,10 +210,6 @@ const TOGGLE_CONSOLE: &[ShortcutBinding] = &[
     primary(chord(Key::J, true, false, false, "Ctrl+J"), DESKTOP),
     alternate(chord(Key::J, true, true, false, "Ctrl+Alt+J"), HOST),
 ];
-const TOGGLE_RESULTS_SPLIT: &[ShortcutBinding] = &[primary(
-    chord(Key::Backslash, true, false, false, "Ctrl+\\"),
-    ALL,
-)];
 const FOCUS_WORKSPACE: &[ShortcutBinding] = &[primary(
     chord(Key::F, true, false, true, "Ctrl+Shift+F"),
     ALL,
@@ -355,8 +351,6 @@ const STOP_SIMULATION: &[ShortcutBinding] = &[
     ),
 ];
 const PREFLIGHT: &[ShortcutBinding] = &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
-const LINKED_CURSORS: &[ShortcutBinding] =
-    &[primary(chord(Key::C, false, false, true, "Shift+C"), ALL)];
 const GENERATED_NETLIST: &[ShortcutBinding] = &[
     primary(chord(Key::L, true, false, false, "Ctrl+L"), DESKTOP),
     alternate(chord(Key::L, true, true, false, "Ctrl+Alt+L"), HOST),
@@ -394,12 +388,9 @@ impl Command {
                 | Self::NewVerilogADevice
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
-                | Self::ImportResultDataset
-                | Self::ExportWaveformsCsv
                 | Self::PublishToWeb
                 | Self::ExportNetlist(_)
                 | Self::FindInDesign
-                | Self::ToggleResultsSplit
                 | Self::CheckDesign
                 | Self::CheckAndSave
                 | Self::ConnectivityManager
@@ -418,18 +409,6 @@ impl Command {
                 | Self::AddAnalysis
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
-                | Self::DatasetManifestBrowser
-                | Self::OpenRunInResults
-                | Self::OpenProducingPlan
-                | Self::OpenTaskDeck
-                | Self::RevealProducerLog
-                | Self::CreateResultDocument
-                | Self::WaveformCalculator
-                | Self::CompareResultDatasets
-                | Self::MeasurementLibrary
-                | Self::FamilySlicing
-                | Self::ResultViewer(_)
-                | Self::EditSpecifications
                 | Self::VerificationPage(_)
                 | Self::ModelsPage(_)
                 | Self::ModelBrowser
@@ -454,8 +433,6 @@ impl Command {
                 | Self::AutomationConsole
                 | Self::DescendHierarchyDirect
                 | Self::ShowInNetlist
-                | Self::AddVisualizationPane
-                | Self::VisualizationDocumentProperties
         )
     }
 
@@ -481,8 +458,6 @@ impl Command {
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
-                | Self::ImportResultDataset
-                | Self::CreateResultDocument
                 | Self::RescanModelLibraries
                 | Self::CheckAndSave
                 | Self::ConnectivityManager
@@ -598,22 +573,6 @@ impl Command {
             // from every place the chip itself is still clickable.
             Self::ManageSimulationPlans => ShortcutContext::Global,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
-            Self::ClearResults
-            | Self::ImportResultDataset
-            | Self::DatasetManifestBrowser
-            | Self::OpenRunInResults
-            | Self::OpenProducingPlan
-            | Self::OpenTaskDeck
-            | Self::RevealProducerLog
-            | Self::CreateResultDocument
-            | Self::WaveformCalculator
-            | Self::ExpressionDiagnostics
-            | Self::CompareResultDatasets
-            | Self::MeasurementLibrary
-            | Self::FamilySlicing
-            | Self::ResultViewer(_)
-            | Self::AddVisualizationPane
-            | Self::VisualizationDocumentProperties => ShortcutContext::ResultsWorkspace,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -626,10 +585,7 @@ impl Command {
             | Self::SymbolUpdatePinsFromContract
             | Self::SymbolSave
             | Self::ExitSymbolInPlace => ShortcutContext::SymbolCanvas,
-            Self::ToggleLinkedCursors => ShortcutContext::ResultsWorkspace,
-            Self::EditSpecifications | Self::VerificationPage(_) => {
-                ShortcutContext::VerificationWorkspace
-            }
+            Self::VerificationPage(_) => ShortcutContext::VerificationWorkspace,
             Self::RunSimulation | Self::StopSimulation => ShortcutContext::RunnableProject,
             Self::ToggleLineComment
             | Self::IndentLines
@@ -724,7 +680,6 @@ impl Command {
             Self::ToggleNavigator => TOGGLE_NAVIGATOR,
             Self::ToggleInspector => TOGGLE_INSPECTOR,
             Self::ToggleConsole => TOGGLE_CONSOLE,
-            Self::ToggleResultsSplit => TOGGLE_RESULTS_SPLIT,
             Self::ToggleFocusMode => FOCUS_WORKSPACE,
             Self::NewApplicationWindow => NEW_APPLICATION_WINDOW,
             Self::PreviousDocument => PREVIOUS_DOCUMENT,
@@ -791,7 +746,6 @@ impl Command {
             Self::RunSimulation => RUN_SIMULATION,
             Self::StopSimulation => STOP_SIMULATION,
             Self::PreflightChecks => PREFLIGHT,
-            Self::ToggleLinkedCursors => LINKED_CURSORS,
             Self::GenerateNetlist => GENERATED_NETLIST,
             Self::AutomationConsole => AUTOMATION_CONSOLE,
             Self::CommandPalette => COMMAND_PALETTE,
@@ -1072,76 +1026,6 @@ impl Command {
             }
             Self::StopSimulation => "no simulation is running",
             Self::PreflightChecks => "the engine is still building the decks of the last check",
-            Self::ClearResults if app.state.model.simulation.execution.has_active_execution() => {
-                "an active simulation execution still owns result history"
-            }
-            Self::ImportResultDataset
-                if app.state.model.simulation.execution.has_active_execution() =>
-            {
-                "an active simulation execution still owns result history"
-            }
-            Self::ImportResultDataset if app.state.model.safe_mode.project_read_only() => {
-                "the project is open read-only"
-            }
-            Self::ExportWaveformsCsv if app.state.model.simulation.retained.has_results() => {
-                "open a result document in Results"
-            }
-            Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
-            Self::CompareResultDatasets if app.state.workbench.workspace != Workspace::Results => {
-                "open an active result document"
-            }
-            Self::CompareResultDatasets => "a second compatible run is required",
-            Self::DatasetManifestBrowser | Self::CreateResultDocument => {
-                "no retained result dataset is available"
-            }
-            Self::OpenRunInResults => "the selected run has no retained dataset to open in Results",
-            Self::OpenProducingPlan => {
-                super::result_navigation::producing_plan_hop(app.state.results_reads())
-                    .err()
-                    .unwrap_or("this dataset does not name a simulation plan that produced it")
-            }
-            // Both refusals come from the resolver that would perform the hop,
-            // so the reason a control is grey is the reason it would have
-            // failed rather than a second account of it.
-            Self::OpenTaskDeck => {
-                super::result_navigation::task_deck_hop(app.state.results_reads())
-                    .err()
-                    .unwrap_or("the selected run has no retained source to open")
-            }
-            Self::RevealProducerLog => {
-                super::result_navigation::producer_log_hop(app.state.results_reads())
-                    .err()
-                    .unwrap_or("no check-marked quantity names a producer")
-            }
-            Self::FamilySlicing
-                if app.state.workbench.current_route().surface_id()
-                    == crate::workbench::SurfaceId::Results
-                    && app.state.model.simulation.retained.has_results() =>
-            {
-                "the result holds no sweep, corner or Monte Carlo family"
-            }
-            Self::MeasurementLibrary
-            | Self::FamilySlicing
-            | Self::VisualizationDocumentProperties
-                if app.state.workbench.current_route().surface_id()
-                    != crate::workbench::SurfaceId::Results =>
-            {
-                "open a result in Results"
-            }
-            Self::MeasurementLibrary
-            | Self::FamilySlicing
-            | Self::VisualizationDocumentProperties => "no retained result dataset is available",
-            Self::ToggleResultsSplit if !app.state.workbench.supports_results_split() => {
-                "open Design, Netlist, or Simulation setup"
-            }
-            Self::ToggleResultsSplit => "no retained result dataset is available",
-            Self::ResultViewer(viewer) => {
-                crate::workbench::documents::result_document::viewer_unavailability_reason(
-                    app.state.results_reads(),
-                    viewer,
-                )
-                .unwrap_or("the active dataset is incompatible with this viewer")
-            }
             Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
             Self::ModelCreateProjectCopy => super::selected_model_for_project_copy(app)
                 .err()
@@ -1151,12 +1035,6 @@ impl Command {
                 super::selected_project_model_for_editor(app)
                     .err()
                     .unwrap_or("the selected model cannot be opened for inspection")
-            }
-            Self::ToggleLinkedCursors if app.state.workbench.workspace != Workspace::Results => {
-                "open a result in Results"
-            }
-            Self::ToggleLinkedCursors | Self::ExpressionDiagnostics => {
-                "no result dataset is available"
             }
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
             Self::ModelSaveRevision if app.state.model.safe_mode.project_read_only() => {
@@ -1248,7 +1126,9 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::command_catalog::CommandCatalog;
     use crate::workbench::ResultViewer;
+    use crate::workbench::results::commands::ResultsCommand;
     use crate::workbench::state::VerificationPage;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
@@ -1297,8 +1177,8 @@ mod tests {
         }
 
         assert!(
-            Command::ResultViewer(ResultViewer::Waves)
-                .shortcut_bindings()
+            crate::workbench::commands::vocabulary::CommandRegistry
+                .default_bindings(ResultsCommand::ResultViewer(ResultViewer::Waves).key())
                 .is_empty()
         );
         assert!(
@@ -1508,19 +1388,27 @@ mod tests {
 
     #[test]
     fn split_results_owns_the_mockup_shortcut_on_every_platform() {
-        assert_eq!(
-            Command::ToggleResultsSplit.shortcut_context(),
-            ShortcutContext::Global
-        );
+        let catalog = crate::workbench::commands::vocabulary::CommandRegistry;
+        let split = ResultsCommand::ToggleResultsSplit.key();
+        assert_eq!(catalog.context(split), Some(ShortcutContext::Global));
         for platform in CommandPlatform::ALL {
-            assert_eq!(
-                Command::ToggleResultsSplit.default_shortcut_label(platform),
-                "Ctrl+\\"
-            );
-            assert_eq!(
-                binding_owners(TOGGLE_RESULTS_SPLIT[0].chord, platform),
-                vec![Command::ToggleResultsSplit]
-            );
+            let binding = catalog
+                .default_bindings(split)
+                .iter()
+                .find(|binding| binding.supports(platform))
+                .expect("the split is bound on every platform");
+            assert_eq!(binding.chord.label, "Ctrl+\\");
+            let owners = catalog
+                .commands()
+                .iter()
+                .copied()
+                .filter(|key| {
+                    catalog.default_bindings(*key).iter().any(|candidate| {
+                        candidate.chord == binding.chord && candidate.supports(platform)
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(owners, vec![split]);
         }
     }
 

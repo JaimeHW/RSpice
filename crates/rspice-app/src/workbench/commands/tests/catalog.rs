@@ -178,7 +178,10 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(SheetsCommand::DeleteSheet.key().as_str(), "delete-sheet");
     assert_eq!(Command::ShowInNetlist.spec().id, "show-in-netlist");
     assert_eq!(Command::ModelEditor.spec().id, "model-editor");
-    assert_eq!(Command::ImportResultDataset.spec().id, "import-dataset");
+    assert_eq!(
+        ResultsCommand::ImportResultDataset.key().as_str(),
+        "import-dataset"
+    );
     // The capability and interoperability matrices were deleted. A shortcut
     // profile that still names them keeps the entry but resolves nothing.
     assert_eq!(Command::from_stable_id("feature-availability"), None);

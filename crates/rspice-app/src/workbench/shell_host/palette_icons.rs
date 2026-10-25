@@ -5,6 +5,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::icons::Icon;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::results::commands::ResultsCommand;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
 /// scope's.
@@ -43,7 +44,6 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         | Command::SaveAll
         | Command::ImportNetlist
         | Command::ImportVerilogA
-        | Command::ExportWaveformsCsv
         | Command::ExportNetlist(_) => Icon::File,
         _ => return None,
     };
@@ -53,8 +53,14 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
 /// The glyph the palette gives a feature's command; `None` for one that
 /// wears its scope's.
 pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
-    match HardcopyCommand::from_key(key)? {
-        HardcopyCommand::ExportSchematicSvg => Some(Icon::File),
+    if let Some(command) = HardcopyCommand::from_key(key) {
+        return match command {
+            HardcopyCommand::ExportSchematicSvg => Some(Icon::File),
+            _ => None,
+        };
+    }
+    match ResultsCommand::from_key(key)? {
+        ResultsCommand::ExportWaveformsCsv => Some(Icon::File),
         _ => None,
     }
 }

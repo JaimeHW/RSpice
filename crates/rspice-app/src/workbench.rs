@@ -107,6 +107,7 @@ pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) use rspice_app_runs::workbench::preflight;
 pub(crate) use rspice_app_state::workbench::preferences;
+pub(crate) mod results;
 pub(crate) mod routing;
 pub(crate) mod settings;
 pub(crate) mod sheets;

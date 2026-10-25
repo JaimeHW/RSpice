@@ -286,14 +286,20 @@ pub(crate) mod ids {
 
     ids! {
         ACCOUNT_ORGANIZATION = "account-organization";
+        CALCULATOR = "calculator";
         CLEAR_CONSOLE = "console-clear";
         COMMAND_PALETTE = "command-palette";
         DESIGN_WORKSPACE = "design";
+        EDIT_SPECIFICATIONS = "specifications";
+        EXPORT_RESULTS = "export-results";
+        EXPRESSION_DIAGNOSTICS = "expression-diagnostics";
+        FAMILY_SLICING = "family-slicing";
         MEASUREMENT_LIBRARY = "measurement-library";
         MODELS_WORKSPACE = "models";
         NETLIST_WORKSPACE = "netlist";
         OPEN_CONSOLE = "open-console";
         OPEN_NOTIFICATIONS = "open-notifications";
+        OPEN_RUN_IN_RESULTS = "open-run-in-results";
         PREFERENCES = "preferences";
         PRINT_HARDCOPY = "print-hardcopy";
         PROJECT_LAUNCHER = "project-launcher";
@@ -301,14 +307,19 @@ pub(crate) mod ids {
         PROJECT_WORKSPACE = "project";
         RESET_LAYOUT = "reset-workspace-layout";
         RESULTS_WORKSPACE = "results";
+        RESULT_OPERATING_POINT = "result-operating-point";
+        RESULT_SPECIFICATIONS = "result-specifications";
+        RESULT_WAVEFORMS = "waveforms";
         SAVE = "save-project";
         SHEET_PROPERTIES = "page-setup";
+        SIMULATION_ANALYSES = "simulation-analyses";
         SIMULATE_WORKSPACE = "simulate";
         SPECIALIST_TOOL_BROWSER = "specialist-tool-browser";
         STIMULUS_WORKSPACE = "stimulus";
         TOGGLE_CONSOLE = "console";
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";
+        TOGGLE_SPLIT_VIEW = "toggle-split-view";
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";

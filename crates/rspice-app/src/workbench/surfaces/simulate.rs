@@ -48,6 +48,7 @@ use crate::ui::widgets::{
     paint_problem_mark, select,
 };
 use crate::workbench::app_state::SimSetupState;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::{
     AnalysisRunPointsDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
     SavedOutputDraft, SimulationPage, SimulationPlanManagerDraft, SimulationPlanManagerMode,
@@ -1196,7 +1197,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         || "Open prior run".to_owned(),
         |prior| format!("Open Run {}", prior.sequence),
     );
-    let split_availability = Command::ToggleResultsSplit.availability(app);
+    let split_availability = app.command_availability(ids::TOGGLE_SPLIT_VIEW);
     let split_enabled = split_availability.is_available();
     let split_reason = match split_availability {
         crate::workbench::framework::command_registry::CommandAvailability::Disabled(reason) => {
@@ -1328,11 +1329,11 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         // Selecting first is what carries the object: the command owns the
         // workspace half of the destination and nothing else.
         if app.state.model.simulation.select_run(index) {
-            Command::OpenRunInResults.execute(app);
+            app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
         }
     }
     if toggle_split {
-        Command::ToggleResultsSplit.execute(app);
+        app.execute_command_key(ids::TOGGLE_SPLIT_VIEW);
     }
 }
 
@@ -1711,7 +1712,7 @@ fn analysis_editor(
         && let Some(PriorPlanRun { index, .. }) = prior_run
         && app.state.model.simulation.select_run(index)
     {
-        Command::OpenRunInResults.execute(app);
+        app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
         return;
     }
     if rename_requested {

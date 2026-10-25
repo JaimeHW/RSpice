@@ -16,6 +16,7 @@ use super::super::super::design_system::{
 };
 use super::{engineering_readout, executed_deck, result_authority::forced_lte_acceptances};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::{AppState, RSpiceApp};
 
 /// The run Run details… is open on, with its manifest taken once when the
@@ -204,7 +205,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         executed_deck::reveal(&mut app.state, run_id);
     }
     if open_plan {
-        crate::workbench::commands::vocabulary::Command::OpenProducingPlan.execute(app);
+        app.execute_command_key(ResultsCommand::OpenProducingPlan.key());
     }
 }
 

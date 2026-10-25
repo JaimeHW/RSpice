@@ -7,6 +7,7 @@
 
 use egui::Ui;
 
+use crate::state::command_catalog::CommandKey;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, ComplexExpressionPolicy, SavedOutput,
@@ -16,7 +17,7 @@ use crate::state::{
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
 use rspice_simulation::capture_ledger;
 use rspice_simulation::output_contract::SavedOutputPreflightReport;
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
@@ -1233,7 +1234,7 @@ pub(super) fn open_materialized_traces(
     app.state.results.results.reveal_waveforms(visibility);
     app.state.results.results.session.selected_trace = selected;
     app.state.results.results.session.clear_cursors();
-    Command::ResultViewer(crate::workbench::ResultViewer::Waves).execute(app);
+    app.execute_command_key(ids::RESULT_WAVEFORMS);
 }
 
 /// The surfaces the expression editor hands off to.
@@ -1291,7 +1292,8 @@ impl EditorHandoff {
     /// Whether the hand-off resolves against a retained dataset.
     ///
     /// This restates the dataset clause of the two commands' availability
-    /// rules rather than calling `Command::is_enabled`, and deliberately.
+    /// rules rather than asking whether the commands are enabled, and
+    /// deliberately.
     /// Their rules also require the reader to already be on a result surface,
     /// which from here is never true and which the dispatch below answers by
     /// navigating there instead. Asking the command directly would disable
@@ -1300,11 +1302,11 @@ impl EditorHandoff {
         matches!(self, Self::ScalarMeasurement | Self::UnitDiagnostics)
     }
 
-    const fn command(self) -> Command {
+    const fn command(self) -> CommandKey {
         match self {
-            Self::Calculator => Command::WaveformCalculator,
-            Self::ScalarMeasurement => Command::MeasurementLibrary,
-            Self::UnitDiagnostics => Command::ExpressionDiagnostics,
+            Self::Calculator => ids::CALCULATOR,
+            Self::ScalarMeasurement => ids::MEASUREMENT_LIBRARY,
+            Self::UnitDiagnostics => ids::EXPRESSION_DIAGNOSTICS,
         }
     }
 
@@ -1319,7 +1321,7 @@ impl EditorHandoff {
                 .workbench
                 .activate(crate::workbench::state::Workspace::Results);
         }
-        self.command().execute(app);
+        app.execute_command_key(self.command());
     }
 }
 

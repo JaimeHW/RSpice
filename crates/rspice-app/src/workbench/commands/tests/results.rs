@@ -8,13 +8,14 @@
 
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 
 #[test]
 fn edit_specifications_opens_the_real_results_editor() {
     let mut app = RSpiceApp::test_instance();
 
-    Command::EditSpecifications.execute(&mut app);
+    app.execute_command_key(ResultsCommand::EditSpecifications.key());
 
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
@@ -27,11 +28,14 @@ fn edit_specifications_opens_the_real_results_editor() {
 #[test]
 fn generic_results_command_opens_the_workspace_without_a_dataset() {
     let mut app = RSpiceApp::test_instance();
-    let command = Command::ResultViewer(crate::workbench::ResultViewer::Waves);
+    let command = ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key();
 
-    assert!(command.is_enabled(&app));
-    assert_eq!(command.availability(&app), CommandAvailability::Available);
-    command.execute(&mut app);
+    assert!(app.command_key_enabled(command));
+    assert_eq!(
+        app.command_availability(command),
+        CommandAvailability::Available
+    );
+    app.execute_command_key(command);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
@@ -44,19 +48,19 @@ fn generic_results_command_opens_the_workspace_without_a_dataset() {
 fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
-    let command = Command::ResultViewer(crate::workbench::ResultViewer::Bode);
+    let command = ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Bode).key();
 
-    assert!(!command.is_enabled(&app));
+    assert!(!app.command_key_enabled(command));
     // Bode admits the complete set of frequency-response families its
     // unit-aware renderer can present; ordinary-noise spectra remain on the
     // Noise viewer that owns them.
     assert_eq!(
-        command.availability(&app),
+        app.command_availability(command),
         CommandAvailability::Disabled(
             "Requires a usable AC, PAC, PXF, STB, or distortion response"
         )
     );
-    command.execute(&mut app);
+    app.execute_command_key(command);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(
@@ -75,36 +79,47 @@ fn exposed_results_calculator_opens_the_real_editor_dialog() {
     let mut app = RSpiceApp::test_instance();
     assert!(!app.state.results.waveform_calculator_dialog);
 
-    Command::WaveformCalculator.execute(&mut app);
+    app.execute_command_key(ResultsCommand::WaveformCalculator.key());
 
     assert!(app.state.results.waveform_calculator_dialog);
 }
 
 #[test]
 fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
+    let registry = command_registry();
     for (command, stable_id) in [
         (
-            Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+            ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves),
             "waveforms",
         ),
-        (Command::DatasetManifestBrowser, "dataset-browser"),
-        (Command::CreateResultDocument, "create-result-document"),
-        (Command::CompareResultDatasets, "compare-datasets"),
-        (Command::ToggleLinkedCursors, "toggle-linked-cursors"),
-        (Command::WaveformCalculator, "calculator"),
-        (Command::MeasurementLibrary, "measurement-library"),
-        (Command::FamilySlicing, "family-slicing"),
-        (Command::VisualizationDocumentProperties, "plot-properties"),
-        (Command::ImportResultDataset, "import-dataset"),
-        (Command::ExportWaveformsCsv, "export-results"),
+        (ResultsCommand::DatasetManifestBrowser, "dataset-browser"),
+        (
+            ResultsCommand::CreateResultDocument,
+            "create-result-document",
+        ),
+        (ResultsCommand::CompareResultDatasets, "compare-datasets"),
+        (ResultsCommand::ToggleLinkedCursors, "toggle-linked-cursors"),
+        (ResultsCommand::WaveformCalculator, "calculator"),
+        (ResultsCommand::MeasurementLibrary, "measurement-library"),
+        (ResultsCommand::FamilySlicing, "family-slicing"),
+        (
+            ResultsCommand::VisualizationDocumentProperties,
+            "plot-properties",
+        ),
+        (ResultsCommand::ImportResultDataset, "import-dataset"),
+        (ResultsCommand::ExportWaveformsCsv, "export-results"),
     ] {
-        assert_eq!(command.stable_id(), stable_id);
-        assert_eq!(Command::from_stable_id(stable_id), Some(command));
-        assert!(vocabulary::COMMAND_REGISTRY.contains(&command));
-        assert!(command_catalog().any(|candidate| candidate == command));
+        let key = command.key();
+        assert_eq!(key.as_str(), stable_id);
+        assert_eq!(registry.resolve(stable_id), Some(key));
+        assert!(registry.order().contains(&key));
+        assert!(
+            registry
+                .ordered()
+                .any(|spec| spec.key == key && spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
+        );
     }
 
-    let registry = command_registry();
     let report = HardcopyCommand::ReportAuthoring.key();
     assert_eq!(report.as_str(), "report-page-editor");
     assert_eq!(registry.resolve("report-page-editor"), Some(report));
@@ -123,10 +138,11 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
 /// bindings as unknown rather than refusing to load.
 #[test]
 fn the_studio_commands_resolve_to_their_result_viewer_successors() {
+    let registry = vocabulary::command_registry();
     for id in ["cursor-manager", "visualization-cursor-manager"] {
         assert_eq!(
-            Command::from_stable_id(id),
-            Some(Command::ToggleLinkedCursors)
+            registry.resolve(id),
+            Some(ResultsCommand::ToggleLinkedCursors.key())
         );
     }
     for id in [
@@ -136,20 +152,26 @@ fn the_studio_commands_resolve_to_their_result_viewer_successors() {
         "annotation-manager",
         "visualization-export-document",
     ] {
-        assert_eq!(Command::from_stable_id(id), None, "{id}");
+        assert_eq!(registry.resolve(id), None, "{id}");
     }
     for (id, command) in [
-        ("visualization-add-pane", Command::AddVisualizationPane),
-        ("measurement-library", Command::MeasurementLibrary),
-        ("family-slicing", Command::FamilySlicing),
-        ("plot-properties", Command::VisualizationDocumentProperties),
+        (
+            "visualization-add-pane",
+            ResultsCommand::AddVisualizationPane,
+        ),
+        ("measurement-library", ResultsCommand::MeasurementLibrary),
+        ("family-slicing", ResultsCommand::FamilySlicing),
+        (
+            "plot-properties",
+            ResultsCommand::VisualizationDocumentProperties,
+        ),
         (
             "visualization-document-properties",
-            Command::VisualizationDocumentProperties,
+            ResultsCommand::VisualizationDocumentProperties,
         ),
-        ("compare-datasets", Command::CompareResultDatasets),
+        ("compare-datasets", ResultsCommand::CompareResultDatasets),
     ] {
-        assert_eq!(Command::from_stable_id(id), Some(command), "{id}");
+        assert_eq!(registry.resolve(id), Some(command.key()), "{id}");
     }
 }
 
@@ -163,24 +185,25 @@ fn the_studio_commands_resolve_to_their_result_viewer_successors() {
 fn every_result_sheet_is_registered_for_commands_and_shortcuts() {
     use crate::workbench::ResultViewer;
 
+    let registry = vocabulary::command_registry();
     for viewer in ResultViewer::all() {
-        let command = Command::ResultViewer(viewer);
+        let key = ResultsCommand::ResultViewer(viewer).key();
         assert!(
-            vocabulary::COMMAND_REGISTRY.contains(&command),
+            registry.order().contains(&key),
             "Result sheet is absent from the command registry: {viewer:?}"
         );
-        assert_eq!(Command::from_stable_id(command.stable_id()), Some(command));
+        assert_eq!(registry.resolve(key.as_str()), Some(key));
     }
 }
 
 #[test]
 fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
     let mut app = RSpiceApp::test_instance();
-    let command = Command::ToggleResultsSplit;
+    let command = ResultsCommand::ToggleResultsSplit.key();
     app.state.workbench.activate(Workspace::Design);
 
     assert_eq!(
-        command.availability(&app),
+        app.command_availability(command),
         CommandAvailability::Disabled("no retained result dataset is available")
     );
     app.state
@@ -192,11 +215,14 @@ fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
             crate::state::AnalysisType::Transient,
             "retained TRAN",
         ));
-    assert_eq!(command.availability(&app), CommandAvailability::Available);
+    assert_eq!(
+        app.command_availability(command),
+        CommandAvailability::Available
+    );
 
     app.state.workbench.activate(Workspace::Results);
     assert_eq!(
-        command.availability(&app),
+        app.command_availability(command),
         CommandAvailability::Disabled("open Design, Netlist, or Simulation setup")
     );
 }
@@ -218,7 +244,7 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
     let history_len = app.state.model.simulation.retained.runs.len();
 
-    Command::ToggleResultsSplit.execute(&mut app);
+    app.execute_command_key(ResultsCommand::ToggleResultsSplit.key());
 
     assert!(app.state.workbench.split_with_results);
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(1));
@@ -236,7 +262,7 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
         "the split projects the canonical dataset instead of cloning it"
     );
 
-    Command::ToggleResultsSplit.execute(&mut app);
+    app.execute_command_key(ResultsCommand::ToggleResultsSplit.key());
     assert!(!app.state.workbench.split_with_results);
 }
 
@@ -244,9 +270,9 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
 fn result_dataset_import_waits_for_an_idle_open_project() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    assert!(Command::ImportResultDataset.is_enabled(&app));
+    assert!(app.command_key_enabled(ResultsCommand::ImportResultDataset.key()));
     app.state.model.simulation.execution.is_running = true;
-    assert!(!Command::ImportResultDataset.is_enabled(&app));
+    assert!(!app.command_key_enabled(ResultsCommand::ImportResultDataset.key()));
 }
 
 /// "Export dataset…" needs the document its export resolves from.
@@ -262,9 +288,9 @@ fn exporting_the_dataset_requires_an_open_result_document() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    assert!(!Command::ExportWaveformsCsv.is_enabled(&app));
+    assert!(!app.command_key_enabled(ResultsCommand::ExportWaveformsCsv.key()));
     assert_eq!(
-        Command::ExportWaveformsCsv.availability(&app),
+        app.command_availability(ResultsCommand::ExportWaveformsCsv.key()),
         CommandAvailability::Disabled("no result dataset is available")
     );
 
@@ -281,9 +307,9 @@ fn exporting_the_dataset_requires_an_open_result_document() {
 
     // Retained, but nothing open to export from: the refusal names what is
     // missing rather than claiming there is no dataset.
-    assert!(!Command::ExportWaveformsCsv.is_enabled(&app));
+    assert!(!app.command_key_enabled(ResultsCommand::ExportWaveformsCsv.key()));
     assert_eq!(
-        Command::ExportWaveformsCsv.availability(&app),
+        app.command_availability(ResultsCommand::ExportWaveformsCsv.key()),
         CommandAvailability::Disabled("open a result document in Results")
     );
 
@@ -291,9 +317,9 @@ fn exporting_the_dataset_requires_an_open_result_document() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
-    assert!(Command::ExportWaveformsCsv.is_enabled(&app));
+    assert!(app.command_key_enabled(ResultsCommand::ExportWaveformsCsv.key()));
     assert_eq!(
-        Command::ExportWaveformsCsv.availability(&app),
+        app.command_availability(ResultsCommand::ExportWaveformsCsv.key()),
         CommandAvailability::Available
     );
 }

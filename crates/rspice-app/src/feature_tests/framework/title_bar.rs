@@ -22,6 +22,7 @@ use crate::workbench::commands::vocabulary::{Command, command_registry};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
 use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
 
@@ -433,8 +434,11 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         .into_iter()
         .flat_map(|menu| listed_commands(application_menu_entries(menu)))
         .collect::<Vec<_>>();
+    assert!(
+        listed.contains(&ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key()),
+        "no menu lists the waveform viewer"
+    );
     for command in [
-        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
         Command::VerificationPage(VerificationPage::Yield),
         Command::ModelsPage(ModelsPage::Models),
         Command::AutomationConsole,
@@ -654,11 +658,15 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
         Command::PlaceBusTap,
         Command::PlaceJunction,
         Command::RunSimulation,
-        Command::WaveformCalculator,
         Command::PdkSettings,
         Command::AutomationConsole,
     ];
     assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
+    assert!(
+        command_registry()
+            .spec(ResultsCommand::WaveformCalculator.key())
+            .is_some()
+    );
 }
 
 /// No View-menu row is drawn twice.
@@ -724,13 +732,13 @@ fn design_placement_menu_matches_the_mockup_order() {
 fn window_layout_menu_places_split_with_results_before_focus_workspace() {
     assert_menu_lists(
         ApplicationMenu::Window,
-        &keys([
-            Command::ToggleNavigator,
-            Command::ToggleInspector,
-            Command::ToggleConsole,
-            Command::ToggleResultsSplit,
-            Command::ToggleFocusMode,
-        ]),
+        &[
+            Command::ToggleNavigator.key(),
+            Command::ToggleInspector.key(),
+            Command::ToggleConsole.key(),
+            ResultsCommand::ToggleResultsSplit.key(),
+            Command::ToggleFocusMode.key(),
+        ],
     );
 }
 
@@ -1225,19 +1233,16 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
 fn switching_rows_are_checked_while_their_state_is_on() {
     let mut app = title_test_app();
     let switches = [
-        Command::ToggleNavigator,
-        Command::ToggleInspector,
-        Command::ToggleConsole,
-        Command::ToggleResultsSplit,
-        Command::ToggleFocusMode,
-        Command::ToggleFullScreen,
-        Command::ToggleLinkedCursors,
+        Command::ToggleNavigator.key(),
+        Command::ToggleInspector.key(),
+        Command::ToggleConsole.key(),
+        ResultsCommand::ToggleResultsSplit.key(),
+        Command::ToggleFocusMode.key(),
+        Command::ToggleFullScreen.key(),
+        ResultsCommand::ToggleLinkedCursors.key(),
     ];
-    for command in switches {
-        assert!(
-            command.checked(&app).is_some(),
-            "{command:?} reads no state"
-        );
+    for key in switches {
+        assert!(Host::checked(&app, key).is_some(), "{key:?} reads no state");
     }
     assert_eq!(Command::Save.checked(&app), None);
     assert_eq!(Command::ResetLayout.checked(&app), None);
@@ -1270,12 +1275,12 @@ fn switching_rows_are_checked_while_their_state_is_on() {
         app.state.workbench.split_with_results = on;
         app.state.workbench.full_screen_presentation = on;
         app.state.results.results.session.linked_cursors = on;
-        for command in [
-            Command::ToggleResultsSplit,
-            Command::ToggleFullScreen,
-            Command::ToggleLinkedCursors,
+        for key in [
+            ResultsCommand::ToggleResultsSplit.key(),
+            Command::ToggleFullScreen.key(),
+            ResultsCommand::ToggleLinkedCursors.key(),
         ] {
-            assert_eq!(command.checked(&app), Some(on), "{command:?}");
+            assert_eq!(Host::checked(&app, key), Some(on), "{key:?}");
         }
     }
 }

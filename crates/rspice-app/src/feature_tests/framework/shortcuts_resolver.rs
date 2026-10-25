@@ -17,6 +17,7 @@ use crate::workbench::app_state::session::shortcuts::ShortcutInputSnapshot;
 use crate::workbench::app_state::session::shortcuts::resolver::*;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 
 fn primary() -> Modifiers {
@@ -604,9 +605,9 @@ fn shift_t_resolves_schematic_text_without_breaking_plain_bus_tap() {
 #[test]
 fn result_context_beats_global_only_when_enabled() {
     let mut profile = ShortcutPreferences::default();
-    bind(
+    bind_key(
         &mut profile,
-        Command::WaveformCalculator,
+        ResultsCommand::WaveformCalculator.key(),
         vec![ShortcutStroke::new(Key::K, true, false, false)],
     );
     bind(
@@ -624,7 +625,10 @@ fn result_context_beats_global_only_when_enabled() {
         Duration::ZERO,
         |_| true,
     );
-    assert_eq!(result.command, Some(Command::WaveformCalculator.key()));
+    assert_eq!(
+        result.command,
+        Some(ResultsCommand::WaveformCalculator.key())
+    );
 }
 
 /// The magnification and copy chords reach the Results workspace.

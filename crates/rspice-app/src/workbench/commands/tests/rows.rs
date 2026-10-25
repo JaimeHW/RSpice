@@ -130,6 +130,7 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                             .map(SettingsCommand::declared_spec)
                     })
                     .or_else(|| HardcopyCommand::from_key(key).map(HardcopyCommand::declared_spec))
+                    .or_else(|| ResultsCommand::from_key(key).map(ResultsCommand::declared_spec))
                     .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
                 return feature_row(index, &spec, apps);
             };
@@ -397,19 +398,18 @@ fn legacy_row_ids_are_unique_and_resolve_to_their_command() {
 
 #[test]
 fn every_legacy_alias_resolves_to_a_registered_command_and_shadows_no_live_id() {
-    let live: HashSet<&str> = COMMAND_REGISTRY
-        .iter()
-        .map(|command| command.stable_id())
-        .collect();
+    let registry = command_registry();
+    let live: HashSet<&str> = registry.order().iter().map(|key| key.as_str()).collect();
     for &(alias, target) in LEGACY_ALIASES {
         assert!(!live.contains(alias), "alias {alias} is also a live id");
-        let resolved = Command::from_stable_id(alias)
+        let resolved = registry
+            .resolve(alias)
             .unwrap_or_else(|| panic!("alias {alias} resolves to nothing"));
         assert!(
-            COMMAND_REGISTRY.contains(&resolved),
+            registry.order().contains(&resolved),
             "alias {alias} resolves to an unregistered {resolved:?}"
         );
-        assert_eq!(resolved.stable_id(), target, "alias {alias}");
+        assert_eq!(resolved.as_str(), target, "alias {alias}");
     }
 
     let recorded: BTreeSet<&str> = LEGACY_ALIASES.iter().map(|(alias, _)| *alias).collect();

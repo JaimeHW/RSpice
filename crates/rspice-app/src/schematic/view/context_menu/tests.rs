@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::schematic::view::schematic_symbol_context;
+use crate::workbench::results::commands::ResultsCommand;
 use egui::{Context, Key, Modifiers, Rect, Ui, pos2, vec2};
 
 use crate::state::{
@@ -248,7 +249,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ),
         (
             "Open operating point",
-            Some(Command::ResultViewer(ResultViewer::Op).key()),
+            Some(ResultsCommand::ResultViewer(ResultViewer::Op).key()),
         ),
     ];
     let menu = |slot: &[(&'static str, Option<CommandKey>)]| {

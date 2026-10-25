@@ -743,6 +743,7 @@ const FEATURE_COMMAND_FILES: &[&str] = &[
     "workbench/sheets/commands.rs",
     "workbench/settings/commands.rs",
     "workbench/hardcopy/commands.rs",
+    "workbench/results/commands.rs",
 ];
 
 /// Registered commands with no route, and why.

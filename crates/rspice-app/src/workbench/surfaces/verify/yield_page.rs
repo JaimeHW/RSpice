@@ -12,6 +12,7 @@
 //! selected row's distribution is drawn under the table; until the reader picks
 //! a row, the row with the lowest yield is the one shown.
 
+use crate::workbench::framework::command_registry::ids;
 use rspice_results::yield_analysis::YieldResult;
 
 use super::histogram::{HistogramModel, histogram_model, paint_histogram};
@@ -203,7 +204,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     .show(ui);
     if output.action == Some(0) {
-        Command::EditSpecifications.execute(app);
+        app.execute_command_key(ids::EDIT_SPECIFICATIONS);
     }
     if let Some(index) = output.run {
         select_verification_run(&mut app.state.model.simulation, index);

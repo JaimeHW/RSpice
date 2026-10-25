@@ -614,6 +614,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // workbench; the command vocabulary reads the labels it owns, and the
     // editors, docks and surfaces read it.
     "localization",
+    // What the results feature's commands declare, the same way. Its labels
+    // read the interface text catalog, so it ranks above it.
+    "results/commands",
     // The command vocabulary: what commands exist, their portable identity,
     // and the label a menu shows. Shortcut profiles, preferences, and the
     // artifact writers name a command without reaching the dispatcher that
@@ -706,6 +709,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The hardcopy feature: its commands' answers over its own slot, the
     // model, the session and what the results workspace shows.
     "hardcopy",
+    // The results feature: its commands' answers over its own slot, the
+    // model, the session and the platform state.
+    "results",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",

@@ -10,8 +10,10 @@ use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::shortcuts::artifacts::merge::tests::{
-    artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, with_command_extra,
+    artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, set_key,
+    with_command_extra,
 };
 use crate::workbench::shortcuts::artifacts::merge::*;
 use egui::Key;
@@ -182,16 +184,16 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
         CommandPlatform::Desktop,
         Key::F6,
     );
-    set(
+    set_key(
         &mut base_profile,
-        Command::ToggleLinkedCursors,
+        ResultsCommand::ToggleLinkedCursors.key(),
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F7,
     );
     let base_profile = with_command_extra(
         &base_profile,
-        Command::ToggleLinkedCursors,
+        ResultsCommand::ToggleLinkedCursors.key(),
         "future-field",
         serde_json::json!({"source":"base"}),
     );
@@ -210,16 +212,16 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
         CommandPlatform::Desktop,
         Key::F8,
     );
-    set(
+    set_key(
         &mut imported,
-        Command::ToggleLinkedCursors,
+        ResultsCommand::ToggleLinkedCursors.key(),
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F9,
     );
     let imported = with_command_extra(
         &imported,
-        Command::ToggleLinkedCursors,
+        ResultsCommand::ToggleLinkedCursors.key(),
         "future-field",
         serde_json::json!({"source":"imported"}),
     );
@@ -254,14 +256,14 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ToggleLinkedCursors.key(),
+            ResultsCommand::ToggleLinkedCursors.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
         "F7"
     );
     assert_eq!(
-        candidate["commands"][Command::ToggleLinkedCursors.stable_id()]["future-field"],
+        candidate["commands"][ResultsCommand::ToggleLinkedCursors.key().as_str()]["future-field"],
         serde_json::json!({"source":"base"})
     );
     assert_eq!(

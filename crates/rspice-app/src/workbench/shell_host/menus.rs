@@ -10,6 +10,7 @@ use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry, 
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
@@ -26,6 +27,11 @@ const fn command_as(command: Command, label: &'static str) -> MenuEntry {
 
 /// The sheets feature's command's row under the label it declares.
 const fn sheets(command: SheetsCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The results feature's command's row under the label it declares.
+const fn results(command: ResultsCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -78,7 +84,7 @@ const FILE_MENU: &[MenuEntry] = &[
     command(Command::ImportVerilogA),
     Separator,
     hardcopy(HardcopyCommand::ExportSchematicSvg),
-    command(Command::ExportWaveformsCsv),
+    results(ResultsCommand::ExportWaveformsCsv),
     hardcopy(HardcopyCommand::ExportPublicationSnapshot),
     command(Command::ExportNetlist(crate::io::NetlistFormat::Spice)),
     Separator,
@@ -278,25 +284,30 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     ),
     command(Command::SimulationOptions),
     command(Command::GenerateNetlist),
-    command(Command::EditSpecifications),
+    results(ResultsCommand::EditSpecifications),
 ];
 
 const RESULTS_MENU: &[MenuEntry] = &[
-    command(Command::ResultViewer(crate::workbench::ResultViewer::Waves)),
-    command(Command::DatasetManifestBrowser),
-    command(Command::CreateResultDocument),
-    command(Command::CompareResultDatasets),
+    results(ResultsCommand::ResultViewer(
+        crate::workbench::ResultViewer::Waves,
+    )),
+    results(ResultsCommand::DatasetManifestBrowser),
+    results(ResultsCommand::CreateResultDocument),
+    results(ResultsCommand::CompareResultDatasets),
     hardcopy(HardcopyCommand::ReportAuthoring),
     Separator,
-    command_as(Command::ToggleLinkedCursors, "Link A/B cursors"),
-    command(Command::WaveformCalculator),
-    command(Command::ExpressionDiagnostics),
-    command(Command::MeasurementLibrary),
-    command(Command::FamilySlicing),
-    command(Command::VisualizationDocumentProperties),
+    MenuEntry::command_as(
+        ResultsCommand::ToggleLinkedCursors.key(),
+        "Link A/B cursors",
+    ),
+    results(ResultsCommand::WaveformCalculator),
+    results(ResultsCommand::ExpressionDiagnostics),
+    results(ResultsCommand::MeasurementLibrary),
+    results(ResultsCommand::FamilySlicing),
+    results(ResultsCommand::VisualizationDocumentProperties),
     Separator,
-    command(Command::ImportResultDataset),
-    command(Command::ExportWaveformsCsv),
+    results(ResultsCommand::ImportResultDataset),
+    results(ResultsCommand::ExportWaveformsCsv),
 ];
 
 const VERIFY_MENU: &[MenuEntry] = &[
@@ -342,7 +353,7 @@ const WINDOW_MENU: &[MenuEntry] = &[
     command_as(Command::ToggleNavigator, "Navigator"),
     command_as(Command::ToggleInspector, "Inspector"),
     command_as(Command::ToggleConsole, "Console"),
-    command(Command::ToggleResultsSplit),
+    results(ResultsCommand::ToggleResultsSplit),
     command_as(Command::ToggleFocusMode, "Focus mode"),
     Separator,
     command(Command::NewApplicationWindow),
@@ -436,9 +447,7 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::PlacePin => WorkbenchIcon::Pin,
         Command::PlaceProbe => WorkbenchIcon::Probe,
         Command::PlaceText => WorkbenchIcon::Text,
-        Command::ProjectLauncher | Command::ImportResultDataset | Command::ManageSourceDocument => {
-            WorkbenchIcon::Folder
-        }
+        Command::ProjectLauncher | Command::ManageSourceDocument => WorkbenchIcon::Folder,
         Command::NewProject | Command::NewCell => WorkbenchIcon::Add,
         Command::Save | Command::SymbolSave | Command::ModelSaveRevision => WorkbenchIcon::Save,
         Command::RescanModelLibraries => WorkbenchIcon::Refresh,
@@ -463,17 +472,11 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         | Command::PreflightChecks
         | Command::ModelValidate
         | Command::ValidateCodeDocument => WorkbenchIcon::Check,
-        Command::VerilogABuildSettings
-        | Command::SimulationOptions
-        | Command::WaveformCalculator => WorkbenchIcon::Sliders,
+        Command::VerilogABuildSettings | Command::SimulationOptions => WorkbenchIcon::Sliders,
         Command::FindCodeDocument => WorkbenchIcon::Search,
-        Command::SourceLanguageTools | Command::EditSpecifications => WorkbenchIcon::Target,
-        Command::CompareResultDatasets
-        | Command::ModelCompareRelease
-        | Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
-        Command::ExportWaveformsCsv | Command::ExportNetlist(crate::io::NetlistFormat::Spice) => {
-            WorkbenchIcon::Export
-        }
+        Command::SourceLanguageTools => WorkbenchIcon::Target,
+        Command::ModelCompareRelease | Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
+        Command::ExportNetlist(crate::io::NetlistFormat::Spice) => WorkbenchIcon::Export,
         Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
@@ -485,11 +488,21 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
 /// The icon a feature command's menu row shows, by the rule
 /// [`command_icon`] follows.
 pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<WorkbenchIcon> {
-    match HardcopyCommand::from_key(key)? {
-        HardcopyCommand::AddReportPage => Some(WorkbenchIcon::Add),
-        HardcopyCommand::SaveReportDocument => Some(WorkbenchIcon::Save),
-        HardcopyCommand::ReportPageProperties => Some(WorkbenchIcon::Sliders),
-        HardcopyCommand::PrintHardcopy => Some(WorkbenchIcon::File),
+    if let Some(command) = HardcopyCommand::from_key(key) {
+        return match command {
+            HardcopyCommand::AddReportPage => Some(WorkbenchIcon::Add),
+            HardcopyCommand::SaveReportDocument => Some(WorkbenchIcon::Save),
+            HardcopyCommand::ReportPageProperties => Some(WorkbenchIcon::Sliders),
+            HardcopyCommand::PrintHardcopy => Some(WorkbenchIcon::File),
+            _ => None,
+        };
+    }
+    match ResultsCommand::from_key(key)? {
+        ResultsCommand::ImportResultDataset => Some(WorkbenchIcon::Folder),
+        ResultsCommand::WaveformCalculator => Some(WorkbenchIcon::Sliders),
+        ResultsCommand::EditSpecifications => Some(WorkbenchIcon::Target),
+        ResultsCommand::CompareResultDatasets => Some(WorkbenchIcon::Compare),
+        ResultsCommand::ExportWaveformsCsv => Some(WorkbenchIcon::Export),
         _ => None,
     }
 }

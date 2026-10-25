@@ -9,7 +9,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 
@@ -49,7 +49,7 @@ pub(in crate::workbench) fn verification_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::EditSpecifications.key(),
+        ids::EDIT_SPECIFICATIONS,
         WorkbenchIcon::Target,
         layout,
     );

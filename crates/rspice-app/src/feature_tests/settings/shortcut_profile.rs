@@ -14,6 +14,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::state::shortcuts::SingleKeyCanvasPolicy;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use egui::Key;
 use egui::os::OperatingSystem;
@@ -45,7 +46,7 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
         preferences
             .resolved_bindings(
                 &CommandRegistry,
-                Command::ResultViewer(crate::workbench::ResultViewer::Waves).key()
+                ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key()
             )
             .is_empty()
     );

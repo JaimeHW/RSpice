@@ -463,6 +463,24 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "8",
         &["|app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session()"],
     ),
+    (
+        "9",
+        &["|app, ExportDataset| file_action(app, FileMenuAction::ExportCsvWaveforms)"],
+    ),
+    (
+        "10",
+        &[
+            "|app, SelectAnalysisInstance(instance)|",
+            "app.state.simulate.active_analysis_instance = instance",
+        ],
+    ),
+    (
+        "11",
+        &[
+            "|app, RevealExecutedDeck(sequence)|",
+            "crate::workbench::commands::result_navigation::open_task_deck(",
+        ],
+    ),
 ];
 
 /// The body of the one function `signature` opens in `source`'s shipped half,
@@ -781,7 +799,7 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        7,
-        "`after_contribution` answers exactly the seven requests it lists"
+        10,
+        "`after_contribution` answers exactly the ten requests it lists"
     );
 }

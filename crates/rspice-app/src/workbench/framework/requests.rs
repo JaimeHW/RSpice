@@ -256,6 +256,36 @@ impl Request for ApplyWaveformDefaults {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Export the displayed dataset as the File menu does: the edit typed into
+/// the inspector lands, then the format is asked. Raised by the results
+/// feature's Export dataset… command, and taken straight after it returns.
+#[derive(Clone, Debug)]
+pub(crate) struct ExportDataset;
+
+impl Request for ExportDataset {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Select an analysis instance on the simulation plan's Analyses page, or
+/// none. Raised by the results feature's hop back to the plan that produced
+/// a dataset, and taken straight after it returns, before the page draws.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SelectAnalysisInstance(pub(crate) Option<crate::product::AnalysisInstanceId>);
+
+impl Request for SelectAnalysisInstance {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Open the source the engine executed for the run of this sequence, or
+/// say why it cannot be. Raised by the results feature's Open task deck
+/// command, and taken straight after it returns.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RevealExecutedDeck(pub(crate) u64);
+
+impl Request for RevealExecutedDeck {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section

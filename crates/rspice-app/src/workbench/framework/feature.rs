@@ -234,6 +234,12 @@ pub(crate) trait CommandSet: Copy + 'static {
     /// Carry the command out. The shell's prologue has already let it
     /// through.
     fn execute(self, cx: &mut Cx<'_, Self::Feature>);
+
+    /// Whether the state the command switches is on right now, for a command
+    /// that switches one; `None` for a command that acts once.
+    fn checked(self, _reads: &Reads<'_, Self::Feature>) -> Option<bool> {
+        None
+    }
 }
 
 /// One registered command: what it declares, and its answers as plain
@@ -243,6 +249,7 @@ pub(crate) struct FeatureCommand<F: Feature> {
     index: usize,
     availability: fn(usize, &Reads<'_, F>) -> CommandAvailability,
     execute: fn(usize, &mut Cx<'_, F>),
+    checked: fn(usize, &Reads<'_, F>) -> Option<bool>,
 }
 
 impl<F: Feature> FeatureCommand<F> {
@@ -252,6 +259,10 @@ impl<F: Feature> FeatureCommand<F> {
 
     pub(crate) fn execute(&self, cx: &mut Cx<'_, F>) {
         (self.execute)(self.index, cx);
+    }
+
+    pub(crate) fn checked(&self, reads: &Reads<'_, F>) -> Option<bool> {
+        (self.checked)(self.index, reads)
     }
 }
 
@@ -373,6 +384,7 @@ impl<F: Feature> FeatureRegistry<F> {
                 index,
                 availability: |index, reads| C::REGISTERED[index].availability(reads),
                 execute: |index, cx| C::REGISTERED[index].execute(cx),
+                checked: |index, reads| C::REGISTERED[index].checked(reads),
             });
         }
         for (index, command) in C::UNLISTED.iter().enumerate() {
@@ -381,6 +393,7 @@ impl<F: Feature> FeatureRegistry<F> {
                 index,
                 availability: |index, reads| C::UNLISTED[index].availability(reads),
                 execute: |index, cx| C::UNLISTED[index].execute(cx),
+                checked: |index, reads| C::UNLISTED[index].checked(reads),
             });
         }
     }

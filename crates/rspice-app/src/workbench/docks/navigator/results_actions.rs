@@ -7,8 +7,9 @@ use crate::workbench::documents::result_document::{
     exact_result_signal_tsv,
 };
 use crate::workbench::framework::requests::ExportResultQuantities;
+use crate::workbench::results::commands::ResultsCommand;
 use rspice_results::result_presentation::{
-    ResultArtifactPresentationKey, SourceWaveformPresentationKey,
+    ResultArtifactPresentationKey, ResultViewer, SourceWaveformPresentationKey,
 };
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
@@ -435,11 +436,12 @@ pub(super) fn result_artifact_context_menu(
         }
         if table.clicked() {
             if select_result_artifact(app, &artifact.identity) {
-                Command::ResultViewer(crate::workbench::ResultViewer::Table).execute(app);
+                app.execute_command_key(ResultsCommand::ResultViewer(ResultViewer::Table).key());
             }
             ui.close();
         }
-        let compare_enabled = exact_available && Command::CompareResultDatasets.is_enabled(app);
+        let compare_enabled =
+            exact_available && app.command_key_enabled(ResultsCommand::CompareResultDatasets.key());
         let compare = ui.add_enabled(
             compare_enabled,
             egui::Button::new("Compare selected with dataset..."),
@@ -453,7 +455,7 @@ pub(super) fn result_artifact_context_menu(
         }
         if compare.clicked() {
             select_result_artifact(app, &artifact.identity);
-            Command::CompareResultDatasets.execute(app);
+            app.execute_command_key(ResultsCommand::CompareResultDatasets.key());
             ui.close();
         }
         ui.separator();
@@ -518,7 +520,7 @@ fn open_result_artifact(app: &mut RSpiceApp, artifact: &ResultArtifact, request_
                 ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
             ]));
         } else {
-            Command::ResultViewer(artifact.viewer).execute(app);
+            app.execute_command_key(ResultsCommand::ResultViewer(artifact.viewer).key());
         }
     }
 }
@@ -597,7 +599,7 @@ pub(super) fn result_signal_context_menu(
             open_signal_table(app, &key, true);
             ui.close();
         }
-        let compare_enabled = exact_available && Command::CompareResultDatasets.is_enabled(app);
+        let compare_enabled = exact_available && app.command_key_enabled(ResultsCommand::CompareResultDatasets.key());
         let compare = ui.add_enabled(
             compare_enabled,
             egui::Button::new("Compare with dataset..."),
@@ -611,7 +613,7 @@ pub(super) fn result_signal_context_menu(
         }
         if compare.clicked() {
             select_result_signal_by_key(app, &key);
-            Command::CompareResultDatasets.execute(app);
+            app.execute_command_key(ResultsCommand::CompareResultDatasets.key());
             ui.close();
         }
         ui.separator();
@@ -720,7 +722,7 @@ fn open_signal_table(
                 app.state.results.results.session.table.analysis = Some(analysis);
                 app.state.results.results.session.table.columns = vec![column];
             }
-            Command::ResultViewer(crate::workbench::ResultViewer::Table).execute(app);
+            app.execute_command_key(ResultsCommand::ResultViewer(ResultViewer::Table).key());
         }
     }
 }

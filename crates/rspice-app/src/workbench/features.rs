@@ -20,6 +20,7 @@ use crate::workbench::framework::feature::{
 };
 use crate::workbench::framework::requests::Outbox;
 use crate::workbench::hardcopy::HardcopyFeature;
+use crate::workbench::results::ResultsFeature;
 use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::WorkbenchSession;
@@ -100,6 +101,18 @@ macro_rules! features {
             None
         }
 
+        /// Whether the state the feature command `key` names switches is on;
+        /// `None` for a command that acts once, and for a key no registered
+        /// feature declares.
+        pub(super) fn checked(state: &AppState, key: CommandKey) -> Option<bool> {
+            $(
+                if let Some(command) = <$feature as Registered>::registry().command(key) {
+                    return command.checked(&<$feature as Registered>::reads(state));
+                }
+            )+
+            None
+        }
+
         /// Whether what the feature dialog step `key` names draws is open;
         /// `false` for a key no registered feature draws.
         pub(super) fn dialog_open(state: &AppState, key: DialogKey) -> bool {
@@ -151,6 +164,7 @@ features! {
     sheets: SheetsFeature,
     settings: SettingsFeature,
     hardcopy: HardcopyFeature,
+    results: ResultsFeature,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers
@@ -195,6 +209,7 @@ mod tests {
         let sheets = <SheetsFeature as Registered>::registry();
         let settings = <SettingsFeature as Registered>::registry();
         let hardcopy = <HardcopyFeature as Registered>::registry();
+        let results = <ResultsFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
             assert_eq!(
@@ -205,6 +220,7 @@ mod tests {
                 sheets.command(*key).is_some(),
                 settings.command(*key).is_some(),
                 hardcopy.command(*key).is_some(),
+                results.command(*key).is_some(),
             ];
             assert_eq!(
                 declaring.iter().filter(|declares| **declares).count(),
@@ -221,6 +237,7 @@ mod tests {
             crate::workbench::sheets::commands::SheetsCommand::ALL.len()
                 + crate::workbench::settings::commands::SettingsCommand::ALL.len()
                 + crate::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
+                + crate::workbench::results::commands::ResultsCommand::ALL.len()
         );
     }
 

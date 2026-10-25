@@ -523,7 +523,10 @@ impl Host for RSpiceApp {
     }
 
     fn checked(&self, key: CommandKey) -> Option<bool> {
-        legacy_command(key).and_then(|command| command.checked(self))
+        legacy_command(key).map_or_else(
+            || features::checked(&self.state, key),
+            |command| command.checked(self),
+        )
     }
 
     fn label(&self, key: CommandKey) -> &'static str {
@@ -935,7 +938,6 @@ mod tests {
                 ids::DESIGN_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Design),
             ),
-            (ids::MEASUREMENT_LIBRARY, Command::MeasurementLibrary),
             (
                 ids::MODELS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Models),
@@ -962,6 +964,10 @@ mod tests {
             ),
             (ids::SAVE, Command::Save),
             (
+                ids::SIMULATION_ANALYSES,
+                Command::SimulationPage(crate::workbench::state::SimulationPage::Analyses),
+            ),
+            (
                 ids::SIMULATE_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Simulate),
             ),
@@ -983,6 +989,43 @@ mod tests {
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(legacy_command(id), Some(command), "{command:?}");
+        }
+    }
+
+    /// Each key framework code names by an id for a results command is the
+    /// key that command declares.
+    #[test]
+    fn each_results_id_names_its_command() {
+        use crate::workbench::ResultViewer;
+        use crate::workbench::results::commands::ResultsCommand;
+        for (id, command) in [
+            (ids::CALCULATOR, ResultsCommand::WaveformCalculator),
+            (ids::EDIT_SPECIFICATIONS, ResultsCommand::EditSpecifications),
+            (ids::EXPORT_RESULTS, ResultsCommand::ExportWaveformsCsv),
+            (
+                ids::EXPRESSION_DIAGNOSTICS,
+                ResultsCommand::ExpressionDiagnostics,
+            ),
+            (ids::FAMILY_SLICING, ResultsCommand::FamilySlicing),
+            (ids::MEASUREMENT_LIBRARY, ResultsCommand::MeasurementLibrary),
+            (ids::OPEN_RUN_IN_RESULTS, ResultsCommand::OpenRunInResults),
+            (
+                ids::RESULT_OPERATING_POINT,
+                ResultsCommand::ResultViewer(ResultViewer::Op),
+            ),
+            (
+                ids::RESULT_SPECIFICATIONS,
+                ResultsCommand::ResultViewer(ResultViewer::Specs),
+            ),
+            (
+                ids::RESULT_WAVEFORMS,
+                ResultsCommand::ResultViewer(ResultViewer::Waves),
+            ),
+            (ids::TOGGLE_SPLIT_VIEW, ResultsCommand::ToggleResultsSplit),
+        ] {
+            assert_eq!(id, command.key(), "{command:?}");
+            assert_eq!(ResultsCommand::from_key(id), Some(command), "{command:?}");
+            assert_eq!(legacy_command(id), None, "{command:?}");
         }
     }
 

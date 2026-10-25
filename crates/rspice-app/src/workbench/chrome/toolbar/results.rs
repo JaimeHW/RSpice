@@ -3,10 +3,10 @@
 
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 
 use super::{
@@ -25,7 +25,7 @@ pub(in crate::workbench) fn results_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::ToggleLinkedCursors.key(),
+        ResultsCommand::ToggleLinkedCursors.key(),
         WorkbenchIcon::Target,
         layout,
     );
@@ -34,7 +34,7 @@ pub(in crate::workbench) fn results_tools(
         toolbar_icon_command(
             ui,
             app,
-            Command::WaveformCalculator.key(),
+            ResultsCommand::WaveformCalculator.key(),
             WorkbenchIcon::Sliders,
             layout,
         );
@@ -43,21 +43,21 @@ pub(in crate::workbench) fn results_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::CompareResultDatasets.key(),
+        ResultsCommand::CompareResultDatasets.key(),
         WorkbenchIcon::Compare,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ImportResultDataset.key(),
+        ResultsCommand::ImportResultDataset.key(),
         WorkbenchIcon::Folder,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ExportWaveformsCsv.key(),
+        ResultsCommand::ExportWaveformsCsv.key(),
         WorkbenchIcon::Export,
         layout,
     );

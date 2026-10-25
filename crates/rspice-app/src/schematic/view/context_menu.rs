@@ -245,7 +245,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::OperatingPoint,
         icon: ContextIcon::Waveform,
         label: "Open operating point",
-        shortcut_command: Some(Command::ResultViewer(ResultViewer::Op).key()),
+        shortcut_command: Some(ids::RESULT_OPERATING_POINT),
     }),
 ];
 

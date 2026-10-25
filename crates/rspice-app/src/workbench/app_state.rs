@@ -214,28 +214,13 @@ impl AppState {
 
     /// The parts the results workspace's predicates read.
     pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
-        ResultsReads {
-            results: &self.results.results,
-            analysis: &self.results.analysis,
-            model: &self.model,
-            workbench: &self.workbench,
-        }
+        self.results.reads(&self.model, &self.workbench)
     }
 
     /// The parts the results workspace's commands write.
     pub(crate) fn results_parts(&mut self) -> ResultsParts<'_> {
-        let results = &mut *self.results;
-        ResultsParts {
-            results: &mut results.results,
-            analysis: &mut results.analysis,
-            result_document_dialog: &mut results.result_document_dialog,
-            create_result_document: &mut results.create_result_document,
-            result_import: &mut results.result_import,
-            specification_editor_route_pending: &mut results.specification_editor_route_pending,
-            model: &mut self.model,
-            workbench: &mut self.workbench,
-            platform: &self.platform,
-        }
+        self.results
+            .parts(&mut self.model, &mut self.workbench, &self.platform)
     }
 
     /// [`Model::library_folders`].

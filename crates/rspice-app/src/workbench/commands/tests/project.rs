@@ -72,7 +72,6 @@ fn project_operation_gate_covers_every_mutating_project_command() {
         Command::OpenDocument,
         Command::ImportNetlist,
         Command::ImportVerilogA,
-        Command::ImportResultDataset,
         Command::CheckAndSave,
         Command::ModelEditor,
     ] {
@@ -82,7 +81,14 @@ fn project_operation_gate_covers_every_mutating_project_command() {
         );
     }
     assert!(!Command::Copy.blocked_by_project_operation());
-    assert!(!Command::ExportWaveformsCsv.blocked_by_project_operation());
+    let blocked = |command: ResultsCommand| {
+        command
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
+    };
+    assert!(blocked(ResultsCommand::ImportResultDataset));
+    assert!(!blocked(ResultsCommand::ExportWaveformsCsv));
 }
 
 #[test]
@@ -115,8 +121,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::NewCell,
         Command::ImportNetlist,
         Command::ImportVerilogA,
-        Command::ImportResultDataset,
-        Command::ExportWaveformsCsv,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
         Command::FindInDesign,
         Command::CheckAndSave,
@@ -132,10 +136,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::ManageSimulationPlans,
         Command::SimulationOptions,
         Command::GenerateNetlist,
-        Command::WaveformCalculator,
-        Command::CompareResultDatasets,
-        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-        Command::EditSpecifications,
         Command::VerificationPage(VerificationPage::Yield),
         Command::ModelsPage(ModelsPage::Models),
         Command::ModelBrowser,
@@ -147,6 +147,22 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     ] {
         assert!(
             command.requires_open_project(),
+            "missing closed-project boundary: {command:?}"
+        );
+    }
+    for command in [
+        ResultsCommand::ImportResultDataset,
+        ResultsCommand::ExportWaveformsCsv,
+        ResultsCommand::WaveformCalculator,
+        ResultsCommand::CompareResultDatasets,
+        ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves),
+        ResultsCommand::EditSpecifications,
+    ] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "missing closed-project boundary: {command:?}"
         );
     }
@@ -217,6 +233,53 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
                 .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "missing closed-project boundary: {command:?}"
         );
+        let mut app = RSpiceApp::test_instance();
+        app.state.close_project_session();
+        app.state.workbench.workspace = Workspace::Project;
+
+        assert!(
+            !app.command_key_enabled(key),
+            "enabled without project: {command:?}"
+        );
+        assert_eq!(
+            app.command_availability(key),
+            CommandAvailability::Disabled("no project is open"),
+            "wrong closed-project reason for {command:?}"
+        );
+
+        let before = app.state.model.log_buffer.revision();
+        app.execute_command_key(key);
+
+        assert_eq!(
+            app.state.workbench.workspace,
+            Workspace::Project,
+            "closed-project command changed workspace: {command:?}"
+        );
+        assert_eq!(
+            app.state.model.log_buffer.revision(),
+            before,
+            "a disabled command is silent: {command:?}"
+        );
+        assert_eq!(
+            app.state.prompt_text(),
+            None,
+            "a disabled command is silent: {command:?}"
+        );
+    }
+
+    // The results feature's commands that need a project hold it too.
+    let results: Vec<_> = ResultsCommand::ALL
+        .into_iter()
+        .filter(|command| {
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT)
+        })
+        .collect();
+    assert!(!results.is_empty());
+    for command in results {
+        let key = command.key();
         let mut app = RSpiceApp::test_instance();
         app.state.close_project_session();
         app.state.workbench.workspace = Workspace::Project;

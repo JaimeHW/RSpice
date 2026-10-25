@@ -3,6 +3,10 @@
 //! and the results workspace's session; the result-document forms, the
 //! external-result import and the request to open the specification editor.
 
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::state::WorkbenchSession;
+
 /// What the results feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResultsState {
@@ -45,6 +49,42 @@ pub(crate) struct ResultsState {
 }
 
 impl ResultsState {
+    /// What the results workspace's predicates read: this slot's viewer
+    /// state, the model and the session.
+    pub(crate) fn reads<'a>(
+        &'a self,
+        model: &'a Model,
+        workbench: &'a WorkbenchSession,
+    ) -> ResultsReads<'a> {
+        ResultsReads {
+            results: &self.results,
+            analysis: &self.analysis,
+            model,
+            workbench,
+        }
+    }
+
+    /// What the results workspace's commands write: this slot's viewer state
+    /// and drafts, the model, the session, and the platform state.
+    pub(crate) fn parts<'a>(
+        &'a mut self,
+        model: &'a mut Model,
+        workbench: &'a mut WorkbenchSession,
+        platform: &'a PlatformState,
+    ) -> ResultsParts<'a> {
+        ResultsParts {
+            results: &mut self.results,
+            analysis: &mut self.analysis,
+            result_document_dialog: &mut self.result_document_dialog,
+            create_result_document: &mut self.create_result_document,
+            result_import: &mut self.result_import,
+            specification_editor_route_pending: &mut self.specification_editor_route_pending,
+            model,
+            workbench,
+            platform,
+        }
+    }
+
     /// The results frame hook. How AC traces are drawn has no control but
     /// Preferences, so the viewer takes it from there on every frame and never
     /// drifts from the page.

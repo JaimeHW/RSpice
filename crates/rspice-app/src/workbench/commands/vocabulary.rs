@@ -19,7 +19,7 @@ use crate::state::command_catalog::{
 use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
-use crate::workbench::localization::OPEN_TASK_DECK;
+use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
@@ -51,8 +51,6 @@ pub enum Command {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
-    ImportResultDataset,
-    ExportWaveformsCsv,
     LiveSession,
     PublishToWeb,
     ExportNetlist(crate::io::NetlistFormat),
@@ -87,7 +85,6 @@ pub enum Command {
     ToggleNavigator,
     ToggleInspector,
     ToggleConsole,
-    ToggleResultsSplit,
     OpenConsole,
     OpenProblems,
     /// Open the session notification panel. The bell opens it on a shell wide
@@ -239,34 +236,6 @@ pub enum Command {
     FindReferences,
     RenameSymbol,
     CompareGeneratedRevisions,
-    ClearResults,
-    ToggleLinkedCursors,
-    DatasetManifestBrowser,
-    /// Activate Results on the selected run's retained dataset. The affordances
-    /// that hop into Results — the completion notice, the jobs history, the
-    /// engine chip, the plan heading — select the run first and then route
-    /// through this one command, so the palette can reach the same place.
-    OpenRunInResults,
-    /// Return from a retained dataset to the simulation plan that produced it,
-    /// selecting the producing analysis instance on the Analyses page.
-    OpenProducingPlan,
-    /// Open the source the selected run's engine was actually handed. The Jobs
-    /// manager row and the Netlist run strip both route here; this is the
-    /// third way in, and the only one reachable without first finding the row
-    /// that offers it.
-    OpenTaskDeck,
-    /// Narrow the console to what one check-marked Data Browser quantity's
-    /// producer wrote. The browser's context menus offer the same hop on the
-    /// row they were opened on.
-    RevealProducerLog,
-    CreateResultDocument,
-    WaveformCalculator,
-    ExpressionDiagnostics,
-    CompareResultDatasets,
-    MeasurementLibrary,
-    FamilySlicing,
-    ResultViewer(crate::workbench::ResultViewer),
-    EditSpecifications,
     VerificationPage(VerificationPage),
     ProjectPage(ProjectPage),
     ModelsPage(ModelsPage),
@@ -297,8 +266,6 @@ pub enum Command {
     AccountOrganization,
     License,
     SpecialistToolBrowser,
-    AddVisualizationPane,
-    VisualizationDocumentProperties,
     HelpCenter,
     ReleaseNotes,
     MigrationGuide,
@@ -380,10 +347,6 @@ impl Command {
             Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
-            Self::ImportResultDataset => {
-                spec("import-dataset", "Import result dataset…", "Results")
-            }
-            Self::ExportWaveformsCsv => spec("export-results", "Export dataset…", "Results"),
             Self::LiveSession => spec("live-session", "Live session…", "File"),
             Self::PublishToWeb => spec("publish-web", "Publish to web…", "File"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
@@ -440,7 +403,6 @@ impl Command {
             Self::ToggleNavigator => spec("toggle-navigator", "Toggle navigator", "Window"),
             Self::ToggleInspector => spec("toggle-inspector", "Toggle inspector", "Window"),
             Self::ToggleConsole => spec("console", "Toggle console", "Window"),
-            Self::ToggleResultsSplit => spec("toggle-split-view", "Split with results", "Window"),
             Self::OpenConsole => spec("open-console", "Open console", "Window"),
             Self::OpenProblems => spec("open-problems", "Open Problems", "Window"),
             Self::OpenNotifications => spec("open-notifications", "Open Notifications", "Window"),
@@ -720,141 +682,6 @@ impl Command {
                 "Compare generated revisions",
                 "Code",
             ),
-            Self::ClearResults => spec("clear-results", "Clear result history", "Results"),
-            Self::ToggleLinkedCursors => {
-                spec("toggle-linked-cursors", "Linked A/B cursors", "Results")
-            }
-            Self::DatasetManifestBrowser => spec(
-                "dataset-browser",
-                "Dataset and manifest browser…",
-                "Results",
-            ),
-            Self::OpenRunInResults => spec("open-run-in-results", "Open run in Results", "Results"),
-            Self::OpenProducingPlan => spec(
-                "open-producing-plan",
-                "Open producing simulation plan",
-                "Results",
-            ),
-            Self::OpenTaskDeck => spec("open-task-deck", OPEN_TASK_DECK, "Results"),
-            Self::RevealProducerLog => {
-                spec("reveal-producer-log", "Open producing run log", "Results")
-            }
-            Self::CreateResultDocument => spec(
-                "create-result-document",
-                "Create result document…",
-                "Results",
-            ),
-            Self::WaveformCalculator => spec("calculator", "Calculator…", "Results"),
-            Self::ExpressionDiagnostics => spec(
-                "expression-diagnostics",
-                "Expression and unit diagnostics…",
-                "Results",
-            ),
-            Self::CompareResultDatasets => {
-                spec("compare-datasets", "Add result comparison…", "Results")
-            }
-            Self::MeasurementLibrary => {
-                spec("measurement-library", "Measurement library…", "Results")
-            }
-            Self::FamilySlicing => spec("family-slicing", "Family slicing and pivot…", "Results"),
-            Self::ResultViewer(crate::workbench::ResultViewer::Manifest) => {
-                spec("result-manifest", "Open dataset manifest", "Results")
-            }
-            // Named for the sheet it selects, not for the workspace it lands
-            // in: `OpenWorkspace(Results)` is the route that restores whatever
-            // sheet was last open, and two palette rows reading "Open results
-            // workspace" would be indistinguishable.
-            Self::ResultViewer(crate::workbench::ResultViewer::Waves) => {
-                spec("waveforms", "Open waveform viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::DcSweep) => {
-                spec("result-dc-sweep", "Open DC sweep viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Bode) => {
-                spec("result-bode", "Open Bode viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Fft) => {
-                spec("result-fft", "Open FFT viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance) => {
-                spec("result-harmonic-balance", "Open HB tones viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::PhaseNoise) => {
-                spec("result-phase-noise", "Open phase-noise viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Eye) => {
-                spec("result-eye", "Open eye-diagram viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Hist) => {
-                spec("result-histogram", "Open histogram viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Op) => spec(
-                "result-operating-point",
-                "Open operating-point viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::NoiseContrib) => {
-                spec("result-noise", "Open noise-contribution viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Contribution) => spec(
-                "result-sensitivity-contribution",
-                "Open sensitivity-contribution viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::TransferFunction) => spec(
-                "result-transfer-function",
-                "Open transfer-function viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::Specs) => spec(
-                "result-specifications",
-                "Open specification results",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::Table) => {
-                spec("result-table", "Open sample table", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Nyquist) => {
-                spec("result-nyquist", "Open Nyquist viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Smith) => {
-                spec("result-smith", "Open Smith-chart viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Polar) => {
-                spec("result-polar", "Open polar-response viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::NetworkMatrix) => spec(
-                "result-network-matrix",
-                "Open network matrix viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::PoleZero) => {
-                spec("result-pole-zero", "Open pole-zero viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Scatter) => spec(
-                "result-scatter",
-                "Open correlation scatter viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::BoxViolin) => spec(
-                "result-distribution",
-                "Open box and violin distribution viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::Events) => {
-                spec("result-events", "Open event history viewer", "Results")
-            }
-            Self::ResultViewer(crate::workbench::ResultViewer::Soa) => spec(
-                "result-safe-operating-area",
-                "Open safe-operating-area viewer",
-                "Results",
-            ),
-            Self::ResultViewer(crate::workbench::ResultViewer::Optimization) => {
-                spec("result-optimization", "Open optimization viewer", "Results")
-            }
-            Self::EditSpecifications => {
-                spec("specifications", "Edit specification matrix", "Results")
-            }
             Self::VerificationPage(VerificationPage::Yield) => {
                 spec("yield", "Verification cockpit", "Verify")
             }
@@ -1008,10 +835,6 @@ impl Command {
                 "Specialist tool browser…",
                 "Navigate",
             ),
-            Self::AddVisualizationPane => spec("visualization-add-pane", "Add pane…", "Results"),
-            Self::VisualizationDocumentProperties => {
-                spec("plot-properties", "Plot document properties…", "Results")
-            }
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
             Self::ReleaseNotes => spec(
                 "release-notes",
@@ -1084,7 +907,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
-    Command::ImportResultDataset,
     Command::LiveSession,
     Command::PublishToWeb,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
@@ -1127,7 +949,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SimulationPage(SimulationPage::Models),
     Command::SimulationPage(SimulationPage::Solver),
     Command::SimulationPage(SimulationPage::Save),
-    Command::ResultViewer(crate::workbench::ResultViewer::Waves),
     Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),
     Command::ModelCreateProjectCopy,
@@ -1153,7 +974,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ToggleNavigator,
     Command::ToggleInspector,
     Command::ToggleConsole,
-    Command::ToggleResultsSplit,
     Command::OpenConsole,
     Command::OpenProblems,
     Command::OpenNotifications,
@@ -1272,45 +1092,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::FindReferences,
     Command::RenameSymbol,
     Command::CompareGeneratedRevisions,
-    Command::ExportWaveformsCsv,
-    Command::ClearResults,
-    Command::ToggleLinkedCursors,
-    Command::DatasetManifestBrowser,
-    Command::OpenRunInResults,
-    Command::OpenProducingPlan,
-    Command::OpenTaskDeck,
-    Command::RevealProducerLog,
-    Command::CreateResultDocument,
-    Command::WaveformCalculator,
-    Command::ExpressionDiagnostics,
-    Command::CompareResultDatasets,
-    Command::MeasurementLibrary,
-    Command::FamilySlicing,
-    Command::ResultViewer(crate::workbench::ResultViewer::Bode),
-    Command::ResultViewer(crate::workbench::ResultViewer::DcSweep),
-    Command::ResultViewer(crate::workbench::ResultViewer::Fft),
-    Command::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance),
-    Command::ResultViewer(crate::workbench::ResultViewer::PhaseNoise),
-    Command::ResultViewer(crate::workbench::ResultViewer::Eye),
-    Command::ResultViewer(crate::workbench::ResultViewer::Hist),
-    Command::ResultViewer(crate::workbench::ResultViewer::Op),
-    Command::ResultViewer(crate::workbench::ResultViewer::NoiseContrib),
-    Command::ResultViewer(crate::workbench::ResultViewer::Contribution),
-    Command::ResultViewer(crate::workbench::ResultViewer::TransferFunction),
-    Command::ResultViewer(crate::workbench::ResultViewer::Specs),
-    Command::ResultViewer(crate::workbench::ResultViewer::Table),
-    Command::ResultViewer(crate::workbench::ResultViewer::Nyquist),
-    Command::ResultViewer(crate::workbench::ResultViewer::Smith),
-    Command::ResultViewer(crate::workbench::ResultViewer::Polar),
-    Command::ResultViewer(crate::workbench::ResultViewer::NetworkMatrix),
-    Command::ResultViewer(crate::workbench::ResultViewer::PoleZero),
-    Command::ResultViewer(crate::workbench::ResultViewer::Scatter),
-    Command::ResultViewer(crate::workbench::ResultViewer::BoxViolin),
-    Command::ResultViewer(crate::workbench::ResultViewer::Events),
-    Command::ResultViewer(crate::workbench::ResultViewer::Soa),
-    Command::ResultViewer(crate::workbench::ResultViewer::Optimization),
-    Command::ResultViewer(crate::workbench::ResultViewer::Manifest),
-    Command::EditSpecifications,
     Command::VerificationPage(VerificationPage::Corners),
     Command::VerificationPage(VerificationPage::Optimization),
     Command::VerificationPage(VerificationPage::DeviceSafety),
@@ -1339,8 +1120,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AccountOrganization,
     Command::License,
     Command::SpecialistToolBrowser,
-    Command::AddVisualizationPane,
-    Command::VisualizationDocumentProperties,
     Command::HelpCenter,
     Command::ReleaseNotes,
     Command::MigrationGuide,
@@ -1372,7 +1151,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::OpenNetlist.key(),
     Command::ImportNetlist.key(),
     Command::ImportVerilogA.key(),
-    Command::ImportResultDataset.key(),
+    ResultsCommand::ImportResultDataset.key(),
     HardcopyCommand::ExportSchematicSvg.key(),
     HardcopyCommand::ExportPublicationSnapshot.key(),
     Command::LiveSession.key(),
@@ -1424,7 +1203,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SimulationPage(SimulationPage::Models).key(),
     Command::SimulationPage(SimulationPage::Solver).key(),
     Command::SimulationPage(SimulationPage::Save).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Waves).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key(),
     Command::VerificationPage(VerificationPage::Yield).key(),
     Command::ModelsPage(ModelsPage::Models).key(),
     Command::ModelCreateProjectCopy.key(),
@@ -1451,7 +1230,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ToggleNavigator.key(),
     Command::ToggleInspector.key(),
     Command::ToggleConsole.key(),
-    Command::ToggleResultsSplit.key(),
+    ResultsCommand::ToggleResultsSplit.key(),
     Command::OpenConsole.key(),
     Command::OpenProblems.key(),
     Command::OpenNotifications.key(),
@@ -1575,45 +1354,45 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::FindReferences.key(),
     Command::RenameSymbol.key(),
     Command::CompareGeneratedRevisions.key(),
-    Command::ExportWaveformsCsv.key(),
-    Command::ClearResults.key(),
-    Command::ToggleLinkedCursors.key(),
-    Command::DatasetManifestBrowser.key(),
-    Command::OpenRunInResults.key(),
-    Command::OpenProducingPlan.key(),
-    Command::OpenTaskDeck.key(),
-    Command::RevealProducerLog.key(),
-    Command::CreateResultDocument.key(),
-    Command::WaveformCalculator.key(),
-    Command::ExpressionDiagnostics.key(),
-    Command::CompareResultDatasets.key(),
-    Command::MeasurementLibrary.key(),
-    Command::FamilySlicing.key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Bode).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::DcSweep).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Fft).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::PhaseNoise).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Eye).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Hist).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Op).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::NoiseContrib).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Contribution).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::TransferFunction).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Specs).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Table).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Nyquist).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Smith).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Polar).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::NetworkMatrix).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::PoleZero).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Scatter).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::BoxViolin).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Events).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Soa).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Optimization).key(),
-    Command::ResultViewer(crate::workbench::ResultViewer::Manifest).key(),
-    Command::EditSpecifications.key(),
+    ResultsCommand::ExportWaveformsCsv.key(),
+    ResultsCommand::ClearResults.key(),
+    ResultsCommand::ToggleLinkedCursors.key(),
+    ResultsCommand::DatasetManifestBrowser.key(),
+    ResultsCommand::OpenRunInResults.key(),
+    ResultsCommand::OpenProducingPlan.key(),
+    ResultsCommand::OpenTaskDeck.key(),
+    ResultsCommand::RevealProducerLog.key(),
+    ResultsCommand::CreateResultDocument.key(),
+    ResultsCommand::WaveformCalculator.key(),
+    ResultsCommand::ExpressionDiagnostics.key(),
+    ResultsCommand::CompareResultDatasets.key(),
+    ResultsCommand::MeasurementLibrary.key(),
+    ResultsCommand::FamilySlicing.key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Bode).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::DcSweep).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Fft).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::PhaseNoise).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Eye).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Hist).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::NoiseContrib).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Contribution).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::TransferFunction).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Specs).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Table).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Nyquist).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Smith).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Polar).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::NetworkMatrix).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::PoleZero).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Scatter).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::BoxViolin).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Events).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Soa).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Optimization).key(),
+    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Manifest).key(),
+    ResultsCommand::EditSpecifications.key(),
     Command::VerificationPage(VerificationPage::Corners).key(),
     Command::VerificationPage(VerificationPage::Optimization).key(),
     Command::VerificationPage(VerificationPage::DeviceSafety).key(),
@@ -1643,8 +1422,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::License.key(),
     Command::SpecialistToolBrowser.key(),
     HardcopyCommand::ReportAuthoring.key(),
-    Command::AddVisualizationPane.key(),
-    Command::VisualizationDocumentProperties.key(),
+    ResultsCommand::AddVisualizationPane.key(),
+    ResultsCommand::VisualizationDocumentProperties.key(),
     Command::HelpCenter.key(),
     Command::ReleaseNotes.key(),
     Command::MigrationGuide.key(),
@@ -1667,17 +1446,17 @@ const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
         Command::ModelsPage(ModelsPage::Qualification).key(),
     ),
     ("fit-canvas", Command::ZoomFit.key()),
-    ("export-waveforms", Command::ExportWaveformsCsv.key()),
+    ("export-waveforms", ResultsCommand::ExportWaveformsCsv.key()),
     // The cursor manager's slots became the linked-cursors toggle, so a
     // shortcut bound to it keeps doing what the slots now do.
-    ("cursor-manager", Command::ToggleLinkedCursors.key()),
+    ("cursor-manager", ResultsCommand::ToggleLinkedCursors.key()),
     (
         "visualization-cursor-manager",
-        Command::ToggleLinkedCursors.key(),
+        ResultsCommand::ToggleLinkedCursors.key(),
     ),
     (
         "visualization-document-properties",
-        Command::VisualizationDocumentProperties.key(),
+        ResultsCommand::VisualizationDocumentProperties.key(),
     ),
     // The one check command became two; a shortcut bound to it keeps
     // checking the cellview in front of the reader.
@@ -1697,6 +1476,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(SheetsCommand::ALL.map(SheetsCommand::declared_spec))
                 .chain(SettingsCommand::ALL.map(SettingsCommand::declared_spec))
                 .chain(HardcopyCommand::LISTED.map(HardcopyCommand::declared_spec))
+                .chain(ResultsCommand::ALL.map(ResultsCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         )

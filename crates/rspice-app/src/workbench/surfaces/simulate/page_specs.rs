@@ -15,6 +15,7 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::{SimulationPage, SpecificationEvidenceFilter};
 
 use crate::ui::widgets::{Button, select};
@@ -1064,7 +1065,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         Command::SimulationPage(SimulationPage::Analyses).execute(app);
     } else if open_evidence {
         app.state.simulate.selected_specification = Some(spec.measurement.clone());
-        Command::ResultViewer(crate::workbench::ResultViewer::Specs).execute(app);
+        app.execute_command_key(ids::RESULT_SPECIFICATIONS);
     }
 }
 

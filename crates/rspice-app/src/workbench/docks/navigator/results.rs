@@ -11,13 +11,13 @@ use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, analysis_default_unit, browser_signal_unit, retained_evidence_is_valid,
 };
 use crate::workbench::framework::requests::{ExportResultQuantities, FocusNavigatorSearch};
+use crate::workbench::results::commands::ResultsCommand;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
 };
 use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPresentationKey};
 
 use super::super::super::commands::result_navigation::open_run_log;
-use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::{
     locate_on_schematic_menu, select_result_analysis_by_key, select_result_browser_key,
@@ -835,7 +835,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.separator();
                         let compare = ui.add_enabled(
                             compare_selection_compatible
-                                && Command::CompareResultDatasets.is_enabled(app),
+                                && app.command_key_enabled(ResultsCommand::CompareResultDatasets.key()),
                             egui::Button::new("Compare selected quantity across datasets..."),
                         );
                         if !checked_ordered.is_empty() && !compare_selection_compatible {
@@ -849,7 +849,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             if let Some(first) = checked_ordered.first()
                                 && select_result_browser_key(app, first)
                             {
-                                Command::CompareResultDatasets.execute(app);
+                                app.execute_command_key(ResultsCommand::CompareResultDatasets.key());
                             }
                             ui.close();
                         }

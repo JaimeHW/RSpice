@@ -670,9 +670,13 @@ mod shortcut_ownership_tests {
     fn linked_cursor_command_toggles_real_results_state() {
         let mut app = RSpiceApp::test_instance();
         assert!(!app.state.results.results.session.linked_cursors);
-        app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
+        app.execute_command_key(
+            crate::workbench::results::commands::ResultsCommand::ToggleLinkedCursors.key(),
+        );
         assert!(app.state.results.results.session.linked_cursors);
-        app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
+        app.execute_command_key(
+            crate::workbench::results::commands::ResultsCommand::ToggleLinkedCursors.key(),
+        );
         assert!(!app.state.results.results.session.linked_cursors);
     }
 

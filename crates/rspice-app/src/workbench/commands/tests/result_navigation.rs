@@ -117,11 +117,11 @@ fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert!(
-        !Command::OpenRunInResults.is_enabled(&app),
+        !app.command_key_enabled(ResultsCommand::OpenRunInResults.key()),
         "with no retained dataset there is nothing for the hop to open"
     );
     assert_eq!(
-        Command::OpenRunInResults.availability(&app),
+        app.command_availability(ResultsCommand::OpenRunInResults.key()),
         CommandAvailability::Disabled(
             "the selected run has no retained dataset to open in Results"
         ),
@@ -130,8 +130,8 @@ fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
 
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     app.state.workbench.activate(Workspace::Simulate);
-    assert!(Command::OpenRunInResults.is_enabled(&app));
-    Command::OpenRunInResults.execute(&mut app);
+    assert!(app.command_key_enabled(ResultsCommand::OpenRunInResults.key()));
+    app.execute_command_key(ResultsCommand::OpenRunInResults.key());
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
         app.state.model.simulation.active_run().map(|run| run.id),
@@ -208,8 +208,8 @@ fn the_producing_plan_hop_carries_the_instance_that_made_the_result() {
     app.state.workbench.activate(Workspace::Results);
     app.state.simulate.active_analysis_instance = None;
 
-    assert!(Command::OpenProducingPlan.is_enabled(&app));
-    Command::OpenProducingPlan.execute(&mut app);
+    assert!(app.command_key_enabled(ResultsCommand::OpenProducingPlan.key()));
+    app.execute_command_key(ResultsCommand::OpenProducingPlan.key());
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
@@ -246,7 +246,7 @@ fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
     app.state.workbench.activate(Workspace::Results);
     let before = app.state.model.log_buffer.revision();
 
-    Command::OpenProducingPlan.execute(&mut app);
+    app.execute_command_key(ResultsCommand::OpenProducingPlan.key());
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert!(
@@ -270,7 +270,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert_eq!(
-        Command::OpenProducingPlan.availability(&app),
+        app.command_availability(ResultsCommand::OpenProducingPlan.key()),
         CommandAvailability::Disabled("no retained dataset is selected")
     );
 
@@ -284,7 +284,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
         .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "legacy"));
     legacy.state.model.simulation.view.active_run_idx = Some(0);
     assert_eq!(
-        Command::OpenProducingPlan.availability(&legacy),
+        legacy.command_availability(ResultsCommand::OpenProducingPlan.key()),
         CommandAvailability::Disabled(
             "this dataset predates prepared-run receipts, so it does not name a producing plan"
         )
@@ -292,7 +292,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
 
     let manual = app_with_prepared_run(RunOrigin::ManualDeck);
     assert_eq!(
-        Command::OpenProducingPlan.availability(&manual),
+        manual.command_availability(ResultsCommand::OpenProducingPlan.key()),
         CommandAvailability::Disabled(
             "this dataset was produced by a manual deck, not a simulation plan"
         )
@@ -300,7 +300,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
 
     let foreign = app_with_prepared_run(RunOrigin::ForeignPlan);
     assert_eq!(
-        Command::OpenProducingPlan.availability(&foreign),
+        foreign.command_availability(ResultsCommand::OpenProducingPlan.key()),
         CommandAvailability::Disabled(
             "the plan that produced this dataset is not the active simulation plan"
         )
@@ -309,7 +309,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
     // A refused hop must not move anything: the status bar carries the reason.
     let mut refused = foreign;
     refused.state.workbench.activate(Workspace::Results);
-    Command::OpenProducingPlan.execute(&mut refused);
+    refused.execute_command_key(ResultsCommand::OpenProducingPlan.key());
     assert_eq!(refused.state.workbench.workspace, Workspace::Results);
     assert!(refused.state.prompt_text().is_some());
 }
@@ -361,20 +361,20 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert_eq!(
-        Command::OpenTaskDeck.availability(&app),
+        app.command_availability(ResultsCommand::OpenTaskDeck.key()),
         CommandAvailability::Disabled("no run is selected"),
     );
 
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     assert_eq!(
-        Command::OpenTaskDeck.availability(&app),
+        app.command_availability(ResultsCommand::OpenTaskDeck.key()),
         CommandAvailability::Disabled(crate::state::absent_deck_reason()),
         "a run whose deck was released has something to open and cannot"
     );
 
     // Taking it anyway says so rather than doing nothing, because the palette
     // is not modal and the archive can be evicted under it.
-    Command::OpenTaskDeck.execute(&mut app);
+    app.execute_command_key(ResultsCommand::OpenTaskDeck.key());
     assert!(
         app.state.prompt_text().is_some(),
         "a refused hop has to report the refusal"
@@ -403,10 +403,10 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
         });
 
     assert_eq!(
-        Command::OpenTaskDeck.availability(&app),
+        app.command_availability(ResultsCommand::OpenTaskDeck.key()),
         CommandAvailability::Available
     );
-    Command::OpenTaskDeck.execute(&mut app);
+    app.execute_command_key(ResultsCommand::OpenTaskDeck.key());
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
         app.state
@@ -437,13 +437,13 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert_eq!(
-        Command::RevealProducerLog.availability(&app),
+        app.command_availability(ResultsCommand::RevealProducerLog.key()),
         CommandAvailability::Disabled("no run is selected"),
     );
 
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     assert_eq!(
-        Command::RevealProducerLog.availability(&app),
+        app.command_availability(ResultsCommand::RevealProducerLog.key()),
         CommandAvailability::Disabled("check-mark the Data Browser quantity whose run log to open"),
     );
 
@@ -487,7 +487,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         .checked_result_quantities
         .insert(second);
     assert_eq!(
-        Command::RevealProducerLog.availability(&app),
+        app.command_availability(ResultsCommand::RevealProducerLog.key()),
         CommandAvailability::Disabled("check-mark exactly one Data Browser quantity"),
         "two check-marks are two destinations, and the command must not pick one"
     );
@@ -505,7 +505,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         .checked_result_quantities
         .insert(artifact.clone());
     assert_eq!(
-        Command::RevealProducerLog.availability(&app),
+        app.command_availability(ResultsCommand::RevealProducerLog.key()),
         CommandAvailability::Available
     );
 
@@ -516,7 +516,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         .active_run()
         .expect("the fixture selected a run")
         .id;
-    Command::RevealProducerLog.execute(&mut app);
+    app.execute_command_key(ResultsCommand::RevealProducerLog.key());
     assert_eq!(
         app.state.workbench.console_page,
         crate::workbench::state::ConsolePage::Console

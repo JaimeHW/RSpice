@@ -330,11 +330,6 @@ impl Command {
                     .secondary_window_ids()
                     .is_empty()
             }
-            Self::ToggleResultsSplit => {
-                state.platform.project_lifecycle.is_open()
-                    && state.workbench.supports_results_split()
-                    && state.model.simulation.retained.has_retained_result_dataset()
-            }
             Self::PreviousDocument | Self::NextDocument => {
                 crate::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
@@ -528,35 +523,6 @@ impl Command {
                 state.runs.preflight.checking.is_some()
                     || stop_simulation_enabled(&state.model.simulation)
             }
-            Self::ClearResults => {
-                state.model.simulation.retained.has_results()
-                    && !state.model.simulation.execution.has_active_execution()
-            }
-            Self::ImportResultDataset => {
-                !state.model.safe_mode.project_read_only()
-                    && !state.model.simulation.execution.has_active_execution()
-            }
-            // Waves is the workspace's default sheet, and its empty state is
-            // the workspace's landing, so this route stays actionable before a
-            // dataset exists. Every other viewer is only actionable when the
-            // active retained dataset satisfies the same compatibility
-            // contract used by the in-workspace viewer tabs.
-            Self::ResultViewer(crate::workbench::ResultViewer::Waves) => true,
-            Self::ResultViewer(viewer) => {
-                crate::workbench::documents::result_document::viewer_is_available(state.results_reads(), viewer)
-            }
-            Self::ToggleLinkedCursors => {
-                state.workbench.workspace == Workspace::Results && state.model.simulation.retained.has_results()
-            }
-            Self::DatasetManifestBrowser => {
-                state.platform.project_lifecycle.is_open() && !state.model.simulation.retained.runs.is_empty()
-            }
-            Self::CreateResultDocument => {
-                state.platform.project_lifecycle.is_open() && state.model.simulation.retained.has_results()
-            }
-            Self::CompareResultDatasets => {
-                crate::workbench::documents::result_document::compare_available(state.results_reads())
-            }
             Self::ModelCreateProjectCopy => selected_model_for_project_copy(app).is_ok(),
             Self::ModelEditor | Self::ModelCorrelation => {
                 selected_project_model_for_editor(app).is_ok()
@@ -660,39 +626,6 @@ impl Command {
                                 .is_none()
                     })
             }
-            Self::AddVisualizationPane => {
-                state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && crate::workbench::documents::result_document::add_pane_available(state.results_reads())
-            }
-            // Add measurement draws over the result viewer, and over a quick
-            // view it evaluates without keeping, so it needs only a result.
-            Self::MeasurementLibrary => {
-                state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && state.model.simulation.retained.has_results()
-            }
-            Self::FamilySlicing => {
-                state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && crate::workbench::documents::result_document::family_available(state.results_reads())
-            }
-            Self::VisualizationDocumentProperties => {
-                state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && state.model.simulation.retained.has_results()
-            }
-            // Both return edges are judged on the dataset, never on the
-            // surface the reader is standing on: they exist precisely to be
-            // taken from somewhere else.
-            Self::OpenRunInResults => {
-                state.platform.project_lifecycle.is_open()
-                    && state
-                        .model.simulation
-                        .active_run()
-                        .is_some_and(|run| !run.analyses.is_empty())
-            }
-            Self::OpenProducingPlan => result_navigation::producing_plan_hop(app.state.results_reads()).is_ok(),
-            Self::OpenTaskDeck => result_navigation::task_deck_hop(app.state.results_reads()).is_ok(),
-            Self::RevealProducerLog => result_navigation::producer_log_hop(app.state.results_reads()).is_ok(),
-            Self::ExpressionDiagnostics => state.model.simulation.retained.has_results(),
-            Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state.results_reads()),
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {
@@ -717,14 +650,8 @@ impl Command {
             Self::ToggleNavigator => Some(workbench.navigator_visible),
             Self::ToggleInspector => Some(workbench.inspector_visible),
             Self::ToggleConsole => Some(workbench.console_visible && !workbench.focus_mode),
-            Self::ToggleResultsSplit => Some(workbench.split_with_results),
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
-            Self::ToggleLinkedCursors => Some(
-                crate::workbench::documents::result_document::linked_cursors(
-                    app.state.results_reads(),
-                ),
-            ),
             _ => None,
         }
     }

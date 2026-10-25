@@ -14,7 +14,7 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, IconButton, mono_input, select};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::RunSetBudgetDrafts;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::run_set::{
@@ -1529,7 +1529,7 @@ pub(super) fn open_point_in_family(
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    Command::FamilySlicing.execute(app);
+    app.execute_command_key(ids::FAMILY_SLICING);
     crate::workbench::documents::result_document::set_family_filter(&mut app.state, query);
 }
 

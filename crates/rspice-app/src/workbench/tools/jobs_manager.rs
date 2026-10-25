@@ -22,6 +22,7 @@ use crate::ui::{
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark},
 };
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::JobsPlanScope;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -455,7 +456,7 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
         return;
     }
     close_to_source(&mut app.state);
-    Command::OpenRunInResults.execute(app);
+    app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
 }
 
 /// Leave the manager in front of the source one run's engine was handed.
