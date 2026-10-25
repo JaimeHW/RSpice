@@ -27,10 +27,13 @@
 pub(crate) fn production_half(source: &str) -> &str {
     const ATTRIBUTE: &str = "#[cfg(test)]";
     for (index, _) in source.match_indices(ATTRIBUTE) {
-        if source[index + ATTRIBUTE.len()..]
-            .trim_start()
-            .starts_with("mod tests")
-        {
+        let item = source[index + ATTRIBUTE.len()..].trim_start();
+        // A test module whose fixtures other modules' tests build from is
+        // visible to the crate; it is the same boundary.
+        let item = item
+            .strip_prefix("pub(crate)")
+            .map_or(item, str::trim_start);
+        if item.starts_with("mod tests") {
             return &source[..index];
         }
     }
@@ -243,6 +246,15 @@ mod tests {
     fn an_out_of_line_test_module_is_a_boundary() {
         assert_eq!(
             production_half("fn shipped() {}\n#[cfg(test)]\nmod tests;\n"),
+            "fn shipped() {}\n"
+        );
+    }
+
+    /// So does a test module other modules' tests import fixtures from.
+    #[test]
+    fn a_crate_visible_test_module_is_a_boundary() {
+        assert_eq!(
+            production_half("fn shipped() {}\n#[cfg(test)]\npub(crate) mod tests;\n"),
             "fn shipped() {}\n"
         );
     }

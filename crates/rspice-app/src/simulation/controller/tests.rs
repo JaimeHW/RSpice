@@ -20,86 +20,6 @@ use std::cell::RefCell;
 use std::path::Path;
 
 #[test]
-fn transient_specialized_views_never_outlive_their_retained_source() {
-    let mut controller = SimulationController::new();
-    let mut state = AppState::default();
-    let x = (0..32)
-        .map(|index| index as f64 * 1.0e-9)
-        .collect::<Vec<_>>();
-    let y = (0..32)
-        .map(|index| ((index as f64) * 0.4).sin())
-        .collect::<Vec<_>>();
-    let retained = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::RetainedTrace::new("V(out)", x, y, "#ffffff"),
-    ]);
-
-    controller.populate_transient_post_views(&mut state, &retained);
-    assert!(state.results.analysis.fft_state.has_data());
-
-    let no_outputs = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
-    controller.populate_transient_post_views(&mut state, &no_outputs);
-    assert!(!state.results.analysis.fft_state.has_data());
-    assert!(state.results.analysis.cache_authority.fft.is_none());
-}
-
-#[test]
-fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failure() {
-    let mut controller = SimulationController::new();
-    let mut state = AppState::default();
-    let run_sequence = state.model.simulation.start_run().id;
-    controller.current_run_id = Some(run_sequence);
-    controller.current_provenance = Some(synthetic_result_provenance());
-    let expected_owner = controller
-        .in_flight_specialized_viewer_provenance(&state.model)
-        .expect("the active prepared analysis owns specialized-viewer caches");
-    let valid_time = (0..17).map(|index| index as f64).collect::<Vec<_>>();
-    let valid_values = (0..17)
-        .map(|index| (index as f64 * 0.25).sin())
-        .collect::<Vec<_>>();
-    let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::RetainedTrace::new("V(out)", valid_time.clone(), valid_values, "#ffffff"),
-    ]);
-    controller.populate_transient_post_views(&mut state, &valid);
-    assert!(state.results.analysis.fft_state.has_data());
-    assert_eq!(
-        state.results.analysis.cache_authority.fft,
-        Some(expected_owner)
-    );
-    assert!(controller.transient_post.fft_loaded.is_some_and(|loaded| {
-        loaded.analysis == expected_owner
-            && matches!(
-                loaded.availability,
-                super::transient_post::DerivedViewAvailability::Ready
-            )
-    }));
-
-    let malformed = AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::RetainedTrace::new("V(out)", valid_time, vec![0.0; 16], "#ffffff"),
-    ]);
-    controller.populate_transient_post_views(&mut state, &malformed);
-
-    assert!(!state.results.analysis.fft_state.has_data());
-    assert!(state.results.analysis.fft_state.source_cache.is_none());
-    assert!(state.results.analysis.cache_authority.fft.is_none());
-    assert!(controller.transient_post.fft_loaded.is_some_and(|loaded| {
-        loaded.analysis == expected_owner
-            && matches!(
-                loaded.availability,
-                super::transient_post::DerivedViewAvailability::Unavailable
-            )
-    }));
-    assert!(matches!(
-        state.results.analysis.fft_state.last_error,
-        Some(rspice_results_ui::fft::FftFailure::Input(
-            rspice_results_ui::fft::FftInputError::LengthMismatch {
-                time_count: 17,
-                value_count: 16
-            }
-        ))
-    ));
-}
-
-#[test]
 fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
     let source = || {
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
@@ -279,7 +199,7 @@ fn synthetic_dc_op_result() -> crate::simulation::SimulationResult {
     crate::simulation::SimulationResult::DcOp(Box::new(result))
 }
 
-fn synthetic_result_provenance() -> AnalysisResultProvenance {
+pub(crate) fn synthetic_result_provenance() -> AnalysisResultProvenance {
     AnalysisResultProvenance::new(
         crate::product::AnalysisInstanceId::new(),
         crate::product::ObjectRevision::INITIAL,

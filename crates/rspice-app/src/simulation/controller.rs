@@ -79,7 +79,7 @@ pub(crate) mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
 mod results_convert;
-mod results_post;
+pub(crate) mod results_post;
 mod results_update;
 mod run_inputs;
 pub(crate) use run_inputs::PreparedRunSetInputs;
@@ -91,7 +91,7 @@ pub(crate) mod test_execution;
 pub(crate) mod test_host;
 mod touchstone;
 mod transient_checkpoint;
-mod transient_post;
+pub(crate) mod transient_post;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;
@@ -141,7 +141,7 @@ pub struct SimulationController {
     /// Current analysis config (stored for result processing when polling completes)
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
-    current_spec: Option<AnalysisSpec>,
+    pub(crate) current_spec: Option<AnalysisSpec>,
     /// Immutable prepared-task label, including its exact Run Set point.
     current_analysis_label: Option<String>,
     /// Exact typed execution options for the active spec-driven task. These
@@ -184,7 +184,7 @@ pub struct SimulationController {
     /// task IDs are deterministic source projections, not plan-owned IDs.
     current_source_domain: AnalysisResultSourceDomain,
     /// Stable run ID that owns the in-flight batch.
-    current_run_id: Option<u64>,
+    pub(crate) current_run_id: Option<u64>,
     /// When the runner took the active task, for its line in the run's log.
     current_task_started: Option<crate::time_compat::Instant>,
     /// What the run advised when it started, which its tasks' engine logs
@@ -221,7 +221,7 @@ pub struct SimulationController {
     /// Cached netlist for multi-analysis runs (avoids regeneration)
     cached_netlist: Option<String>,
     /// Runtime coordinator for transient-derived viewer data (eye/FFT).
-    transient_post: transient_post::TransientPostCoordinator,
+    pub(crate) transient_post: transient_post::TransientPostCoordinator,
     /// App-state design epoch this controller's runner/queue belong to.
     design_execution_epoch: u64,
     /// Retained preflight and generation-safe dispatch authority.
@@ -1963,5 +1963,7 @@ impl SimulationController {
     }
 }
 
+// Visible to the crate, because the shell's feature tests build from its
+// fixtures.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

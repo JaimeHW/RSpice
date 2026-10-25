@@ -4,6 +4,8 @@ mod campaign;
 mod controller;
 mod measurement;
 mod prepared_run;
+mod results_post;
+mod transient_post;
 
 use crate::simulation::controller::test_host::RunTestHost;
 use crate::workbench::app_state::AppState;
