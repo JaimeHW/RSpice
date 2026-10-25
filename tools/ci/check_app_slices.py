@@ -147,7 +147,6 @@ SLICE_RULES = [
     (W + r"chrome/(document_bar|toolbar)/models", "models"),
     (W + r"chrome/(document_bar|toolbar)/project", "project"),
     (W + r"chrome/(activity_rail|document_bar|status_bar|toolbar)/results", "results"),
-    (W + r"chrome/status_bar/run", "run"),
     (W + r"chrome/status_bar/shell", "shell"),
     (W + r"chrome/(document_bar/simulate|toolbar/(run_config_chip|simulate))", "simulate"),
     (W + r"chrome", "framework"),

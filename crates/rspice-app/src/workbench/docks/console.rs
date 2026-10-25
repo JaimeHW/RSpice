@@ -11,13 +11,13 @@ use problems::{ProblemCount, active_problem_count, problems};
 use egui::{Align, Layout, ScrollArea, Sense, Ui, Vec2};
 
 use crate::diagnostics::LogSeverity;
+use crate::simulation::status::simulation_progress_percent;
 use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::AppState;
-use crate::workbench::chrome::status_bar::run::simulation_progress_percent;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::design_system::WorkbenchIcon;

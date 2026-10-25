@@ -883,7 +883,7 @@ mod tests {
             "workbench/chrome/status_bar.rs",
             "workbench/chrome/status_bar/design.rs",
             "workbench/chrome/status_bar/results.rs",
-            "workbench/chrome/status_bar/run.rs",
+            "simulation/status/engine_segment.rs",
             "workbench/chrome/status_bar/sheets.rs",
             "workbench/chrome/status_bar/shell.rs",
             "workbench/chrome/title_bar.rs",

@@ -8,14 +8,13 @@
 
 use std::borrow::Cow;
 
-use crate::simulation::status::EngineAvailability;
+use crate::simulation::status::{EngineAvailability, preflight_status, simulation_engine_status};
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::design::{
     design_engineering_context, selection_summary, zoom_factor,
 };
 use crate::workbench::chrome::status_bar::results::{format_plot_zoom, results_view_summary};
-use crate::workbench::chrome::status_bar::run::{preflight_status, simulation_engine_status};
 use crate::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use crate::workbench::chrome::status_bar::shell::platform_label;
 use crate::workbench::chrome::status_bar::{

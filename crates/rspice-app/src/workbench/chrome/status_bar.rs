@@ -2,7 +2,6 @@
 
 pub(in crate::workbench) mod design;
 pub(in crate::workbench) mod results;
-pub(in crate::workbench) mod run;
 pub(in crate::workbench) mod sheets;
 pub(in crate::workbench) mod shell;
 
@@ -606,9 +605,11 @@ fn paint_processor(painter: &egui::Painter, rect: egui::Rect, color: egui::Color
 mod tests {
     use super::design::{schematic_cursor_summary, selection_summary};
     use super::results::{format_plot_zoom, results_view_summary};
-    use super::run::{preflight_status, simulation_engine_status, simulation_progress_percent};
     use super::sheets::sheet_position_summary;
     use super::*;
+    use crate::simulation::status::{
+        preflight_status, simulation_engine_status, simulation_progress_percent,
+    };
     use crate::workbench::RSpiceApp;
     use crate::workbench::state::Workspace;
 

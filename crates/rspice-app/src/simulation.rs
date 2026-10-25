@@ -26,7 +26,7 @@ pub(crate) mod run_set_tests;
 pub(crate) use rspice_app_state::simulation::stimulus_realize;
 pub(crate) use rspice_app_state::simulation::table_route;
 pub(crate) use rspice_simulation::runner;
-pub(crate) use rspice_simulation::status;
+pub(crate) mod status;
 #[cfg(test)]
 pub(crate) mod veriloga_tests;
 
