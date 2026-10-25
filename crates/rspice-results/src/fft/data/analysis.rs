@@ -15,15 +15,6 @@ use crate::fft::window::WindowFunction;
 // Spectrum Analysis
 // =============================================================================
 
-/// How the carrier used by relative spectrum metrics was selected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FundamentalSelection {
-    /// The largest authenticated non-DC physical RMS bin was treated as the
-    /// carrier. This is auto-detection, not an authored fundamental, and is
-    /// independent of the spectrum's display normalization.
-    DominantNonDcPhysicalRms,
-}
-
 /// Evidence describing how much of the requested harmonic series was
 /// actually observable and independently resolvable.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,8 +54,6 @@ pub struct HarmonicMeasurement {
 /// Analysis results from an FFT spectrum.
 #[derive(Debug, Clone)]
 pub struct SpectrumAnalysis {
-    /// Policy that selected the carrier used by relative metrics.
-    pub fundamental_selection: Option<FundamentalSelection>,
     /// Discrete bin that owns the selected carrier.
     pub fundamental_bin: Option<usize>,
     /// Fundamental frequency (Hz)
@@ -92,7 +81,6 @@ pub struct SpectrumAnalysis {
 impl Default for SpectrumAnalysis {
     fn default() -> Self {
         Self {
-            fundamental_selection: None,
             fundamental_bin: None,
             fundamental_frequency: None,
             fundamental_db: None,
@@ -130,7 +118,6 @@ impl SpectrumAnalysis {
         let fund_log_rms = physical_log_magnitude(fft, fund_bin, fund_mag)?;
         let fund_binary_rms = physical_binary_magnitude(fft, fund_bin, fund_mag)?;
 
-        analysis.fundamental_selection = Some(FundamentalSelection::DominantNonDcPhysicalRms);
         analysis.fundamental_bin = Some(fund_bin);
         analysis.fundamental_frequency = Some(fund_freq);
         analysis.fundamental_db = Some(fund_db);
@@ -1148,10 +1135,6 @@ mod tests {
         for analysis in [&peak, &rms] {
             assert_eq!(analysis.fundamental_bin, Some(32));
             assert_eq!(analysis.fundamental_frequency, Some(32.0));
-            assert_eq!(
-                analysis.fundamental_selection,
-                Some(FundamentalSelection::DominantNonDcPhysicalRms)
-            );
             assert_eq!(
                 analysis.harmonic_coverage,
                 HarmonicCoverage::Complete { requested_order: 1 }

@@ -65,8 +65,6 @@ impl ViewChange {
 pub struct PlotResponse {
     /// The interaction response over the whole well.
     pub response: Response,
-    /// Pointer X in data space while hovering inside the plot area.
-    pub hover_x: Option<f64>,
     /// Data-space X of a primary click inside the plot area, this frame.
     pub clicked_x: Option<f64>,
     /// Updated left-axis horizontal cursor value from a click or drag.
@@ -500,7 +498,6 @@ pub fn show(
 
     let mut out = PlotResponse {
         response,
-        hover_x: None,
         clicked_x: None,
         horizontal_cursor_y: None,
         plot_rect,
@@ -974,7 +971,6 @@ pub fn show(
     {
         let frac = ((pointer.x - plot_rect.left()) / plot_rect.width()) as f64;
         let data_x = spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
-        out.hover_x = Some(data_x);
 
         if let Some(readout) = readout {
             painter.extend(Shape::dashed_line(

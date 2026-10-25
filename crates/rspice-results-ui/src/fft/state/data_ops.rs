@@ -21,7 +21,6 @@ impl FftState {
         self.source_cache = None;
         self.last_error = None;
         self.mark_spectrum_changed();
-        self.update_auto_scale();
     }
 
     /// Load prepared uniformly sampled source and compute FFT using current settings.
@@ -70,7 +69,6 @@ impl FftState {
                 self.analysis = Some(analysis);
                 self.last_error = None;
                 self.mark_spectrum_changed();
-                self.update_auto_scale();
                 Ok(())
             }
             Err(error) => {
@@ -160,7 +158,6 @@ impl FftState {
                 self.analysis = Some(analysis);
                 self.last_error = None;
                 self.mark_spectrum_changed();
-                self.update_auto_scale();
                 Ok(())
             }
             Err(error) => {
@@ -197,7 +194,6 @@ impl FftState {
         self.analysis = None;
         self.source_cache = None;
         self.last_error = None;
-        self.marker_frequencies.clear();
         self.mark_spectrum_changed();
     }
 

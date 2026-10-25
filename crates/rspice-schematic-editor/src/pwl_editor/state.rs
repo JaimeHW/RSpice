@@ -28,8 +28,6 @@ pub struct PwlEditorState {
     pub new_value: String,
     /// Unit for values (V or A).
     pub value_unit: String,
-    /// Whether the data has been modified since opening.
-    pub is_modified: bool,
 }
 
 impl PwlEditorState {
@@ -100,7 +98,6 @@ impl PwlEditorState {
     /// Modification state is recorded even when parsing fails. The raw cell
     /// text is retained while the last valid waveform stays intact.
     pub fn apply_buffer_edits(&mut self) -> Result<(), PwlValidationError> {
-        self.is_modified = true;
         match self.sync_data_from_buffers() {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -121,7 +118,6 @@ impl PwlEditorState {
     /// recreates row buffers from the repaired source. A failed repair keeps
     /// the complete text available for the next edit.
     pub fn replace_raw_source_draft(&mut self, source: String) -> Result<(), PwlValidationError> {
-        self.is_modified = true;
         self.raw_source_draft = Some(source);
         self.repair_raw_source_draft()
     }
@@ -173,7 +169,6 @@ impl PwlEditorState {
 
         self.data.add_point(PwlPoint::new(time, value));
         self.sync_buffers_from_data();
-        self.is_modified = true;
         self.validation_error = self.data.validate().err().map(|error| error.to_string());
         self.new_time.clear();
         self.new_value.clear();
@@ -185,7 +180,6 @@ impl PwlEditorState {
         if let Some(idx) = self.selected_row {
             self.data.remove_point(idx);
             self.sync_buffers_from_data();
-            self.is_modified = true;
             self.validation_error = self.data.validate().err().map(|error| error.to_string());
             self.selected_row = None;
         }
@@ -236,12 +230,11 @@ mod tests {
     }
 
     #[test]
-    fn invalid_row_edit_is_modified_and_retains_the_raw_cell_text() {
+    fn invalid_row_edit_retains_the_raw_cell_text() {
         let mut state = PwlEditorState::from_string("0 0 1n 1", "V");
         state.edit_buffers[1].1 = "1e".to_owned();
 
         assert!(state.apply_buffer_edits().is_err());
-        assert!(state.is_modified);
         assert!(state.validation_error.is_some());
         assert_eq!(state.to_string(), "0 0 1n 1e");
         assert_eq!(state.data.points()[1].value.to_bits(), 1.0f64.to_bits());
@@ -281,7 +274,6 @@ mod tests {
         state.delete_selected();
 
         assert!(state.data.is_empty());
-        assert!(state.is_modified);
         assert_eq!(
             state.validation_error.as_deref(),
             Some("PWL data cannot be empty")

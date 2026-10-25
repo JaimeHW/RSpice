@@ -138,9 +138,6 @@ impl ComponentPropertyDraft {
             if let Some(text) = self.numeric_text_drafts.get(&name).cloned() {
                 self.original_numeric_text_drafts.insert(name.clone(), text);
             }
-            if name == "pwl_data" {
-                self.pwl_editor.is_modified = false;
-            }
         }
         self.prepared_commit.clear();
         self.refresh_validation_summary();

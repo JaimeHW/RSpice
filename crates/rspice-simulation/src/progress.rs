@@ -15,9 +15,6 @@ pub struct SimulationProgress {
 
     /// Total elapsed time
     pub elapsed: Duration,
-
-    /// Estimated time remaining (if calculable)
-    pub estimated_remaining: Option<Duration>,
 }
 
 impl Default for SimulationProgress {
@@ -26,7 +23,6 @@ impl Default for SimulationProgress {
             status: SimulationStatus::Idle,
             start_time: None,
             elapsed: Duration::ZERO,
-            estimated_remaining: None,
         }
     }
 }
@@ -67,22 +63,9 @@ impl SimulationProgress {
         }
     }
 
-    /// Update status and recalculate ETA
+    /// Update status and elapsed time
     pub fn update_status(&mut self, status: SimulationStatus) {
         self.update_elapsed();
-
-        // Calculate ETA based on progress
-        if let Some(progress) = status.progress()
-            && progress > 0.01
-        {
-            let elapsed_secs = self.elapsed.as_secs_f64();
-            let total_estimated = elapsed_secs / progress as f64;
-            let remaining = total_estimated - elapsed_secs;
-            if remaining > 0.0 {
-                self.estimated_remaining = Some(Duration::from_secs_f64(remaining));
-            }
-        }
-
         self.status = status;
     }
 
@@ -92,7 +75,6 @@ impl SimulationProgress {
         self.status = SimulationStatus::Completed {
             elapsed: self.elapsed,
         };
-        self.estimated_remaining = Some(Duration::ZERO);
     }
 
     /// Mark as aborted

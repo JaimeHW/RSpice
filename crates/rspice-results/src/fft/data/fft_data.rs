@@ -333,17 +333,6 @@ impl FftData {
     pub fn nyquist(&self) -> f64 {
         self.sample_rate / 2.0
     }
-
-    /// Frequency range
-    pub fn frequency_range(&self) -> Option<(f64, f64)> {
-        if self.points.is_empty() {
-            return None;
-        }
-        Some((
-            self.points.first()?.frequency,
-            self.points.last()?.frequency,
-        ))
-    }
 }
 
 fn preflight_fft_build(length: usize) -> Result<(), FftBuildError> {
@@ -545,7 +534,8 @@ mod build_tests {
                 .iter()
                 .all(|point| point.magnitude == 0.0 && point.phase == 0.0)
         );
-        assert_eq!(spectrum.frequency_range(), Some((0.0, 8.0)));
+        assert_eq!(spectrum.points[0].frequency, 0.0);
+        assert_eq!(spectrum.points[8].frequency, 8.0);
     }
 
     #[test]

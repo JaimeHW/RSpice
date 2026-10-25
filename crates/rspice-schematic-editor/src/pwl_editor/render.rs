@@ -370,7 +370,6 @@ fn apply_existing_pair_edit(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) -> PwlEditorResult {
-    state.is_modified = true;
     match normalize_pwl_pair(
         &state.edit_buffers[index].0,
         &state.edit_buffers[index].1,
@@ -501,7 +500,6 @@ mod tests {
         );
 
         assert_eq!(result, PwlEditorResult::Modified);
-        assert!(state.is_modified);
         assert!(state.validation_error.is_some());
         assert_eq!(state.to_string(), "0 0 1n 1e");
     }

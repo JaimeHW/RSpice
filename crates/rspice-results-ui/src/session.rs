@@ -494,9 +494,6 @@ pub struct ResultViewerState {
     /// workspace leaves it.
     pub document_presentation:
         Option<rspice_results::visualization_document::VisualizationPresentationPolicy>,
-    /// Screen rect of the document well (docbar excluded) from the last
-    /// rendered frame — the crop window for viewer PNG export. Transient.
-    pub well_rect: Option<egui::Rect>,
     /// OP inspector device-name filter (docbar input). Transient.
     pub op_filter: String,
     /// OP inspector sort: (column key, descending). Transient.

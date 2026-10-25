@@ -2124,11 +2124,9 @@ pub(crate) fn set_active_axis_range(
 fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     apply_pending_view_gesture(ui, &mut app.state);
     let t = Tokens::get(ui.ctx());
-    // The document well backdrop; viewers paint on top. The rect doubles
-    // as the crop window for viewer PNG export.
+    // The document well backdrop; viewers paint on top.
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
-    app.state.results.results.session.well_rect = Some(well);
     let viewer = app.state.results.results.session.viewer;
     let panel = ui.interact(
         well,

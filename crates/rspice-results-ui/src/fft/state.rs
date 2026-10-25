@@ -77,20 +77,6 @@ pub struct FftState {
     pub sample_count: usize,
     /// Number of harmonics to analyze
     pub num_harmonics: usize,
-    /// Magnitude axis min (dB)
-    pub mag_min: f64,
-    /// Magnitude axis max (dB)
-    pub mag_max: f64,
-    /// Auto-scale magnitude
-    pub mag_auto: bool,
-    /// Frequency min (Hz)
-    pub freq_min: f64,
-    /// Frequency max (Hz)
-    pub freq_max: f64,
-    /// Auto-scale frequency
-    pub freq_auto: bool,
-    /// Interactive marker frequencies (Hz) placed by user.
-    pub marker_frequencies: Vec<f64>,
     /// Runtime spectrum revision for display caches.
     spectrum_revision: u64,
 }
@@ -112,13 +98,6 @@ impl Default for FftState {
             sample_count_auto: true,
             sample_count: DEFAULT_MANUAL_SAMPLE_COUNT,
             num_harmonics: 10,
-            mag_min: -120.0,
-            mag_max: 0.0,
-            mag_auto: true,
-            freq_min: 0.0,
-            freq_max: 1000.0,
-            freq_auto: true,
-            marker_frequencies: Vec::new(),
             spectrum_revision: 0,
         }
     }

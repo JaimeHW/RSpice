@@ -143,7 +143,6 @@ fn parameters_contents(
                     number_locale,
                 );
                 if pwl_result == crate::pwl_editor::PwlEditorResult::Modified {
-                    draft.pwl_editor.is_modified = true;
                     draft.set_value(
                         "pwl_data",
                         PropertyValue::String(draft.pwl_editor.to_string()),
