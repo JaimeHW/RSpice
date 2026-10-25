@@ -698,14 +698,15 @@ def measure(source_root: Path, lower_crates: dict[str, Path] | None = None):
     # `SheetText::Field`, `SessionKept::WithoutRuns`), as a test-only item of its
     # own (`thread_preparations::record` under `#[cfg(test)]`), or as an item
     # another crate defines and a module re-exports (`crate::state::Point`,
-    # `crate::ui::input::consume_keys`, `crate::workbench::design_system::elide_text`),
-    # which a bare name cannot tell apart, are left out; `crate::` paths to the
-    # item itself are still counted below.
+    # `crate::ui::input::consume_keys`, `crate::workbench::design_system::elide_text`,
+    # `crate::ui::widgets::segmented`, `persistent::page`), which a bare name
+    # cannot tell apart, are left out; `crate::` paths to the item itself are
+    # still counted below.
     symbols = {
         name: next(iter(found)) for name, found in public_in.items()
         if len(name) >= 4 and len(defined_in[name]) == 1
         and name not in ("Cell", "Align", "Request", "ResultRun", "Point", "Command", "Field",
-                         "WithoutRuns", "record", "consume_keys", "elide_text")
+                         "WithoutRuns", "record", "consume_keys", "elide_text", "segmented", "page")
     }
 
     # `use` declarations: re-export table, external roots, per-file imports and globs.
