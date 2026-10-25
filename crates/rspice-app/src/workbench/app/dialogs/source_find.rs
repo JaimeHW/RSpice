@@ -75,7 +75,7 @@ enum FindAction {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench) fn render_source_find_dialog(&mut self, ctx: &Context) {
+    pub(crate) fn render_source_find_dialog(&mut self, ctx: &Context) {
         if self.state.code.code_workspace.source_search.is_none() {
             crate::ui::input::InputScope::discard(ctx, code_workspace::source_search_query_id());
             return;

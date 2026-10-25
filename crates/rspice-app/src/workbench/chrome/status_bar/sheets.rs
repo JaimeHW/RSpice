@@ -9,7 +9,7 @@ use crate::workbench::app_state::Model;
 /// A single-sheet cell view has no position to report, so the segment is
 /// absent rather than reading `p1/1`. The page number is the catalog's, so it
 /// is the number the sheet strip's chip and the printed title block carry.
-pub(in crate::workbench) fn sheet_position_summary(model: &Model) -> Option<(String, String)> {
+pub(crate) fn sheet_position_summary(model: &Model) -> Option<(String, String)> {
     let catalog = model.multi_sheet_catalog()?;
     let active = catalog.active_sheet_id()?;
     let (page, count) = catalog.page_number_and_count(active)?;

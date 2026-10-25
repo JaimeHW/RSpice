@@ -137,16 +137,16 @@ impl WorkspaceDocumentId {
 
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceDocument {
-    pub(in crate::workbench) id: WorkspaceDocumentId,
-    pub(in crate::workbench) label: String,
-    pub(in crate::workbench) icon: WorkbenchIcon,
-    pub(in crate::workbench) dirty: bool,
+    pub(crate) id: WorkspaceDocumentId,
+    pub(crate) label: String,
+    pub(crate) icon: WorkbenchIcon,
+    pub(crate) dirty: bool,
 }
 
 impl WorkspaceDocument {
     /// What the tab shows when it is too narrow for its label: a cell view's
     /// cell alone, since the tab's icon already names the view.
-    pub(in crate::workbench) fn short_label(&self) -> Option<&str> {
+    pub(crate) fn short_label(&self) -> Option<&str> {
         match &self.id {
             WorkspaceDocumentId::CellView(reference) => Some(reference.cell.as_str()),
             _ => None,

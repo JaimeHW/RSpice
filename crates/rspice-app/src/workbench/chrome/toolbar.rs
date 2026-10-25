@@ -5,7 +5,7 @@ pub(in crate::workbench) mod code;
 pub(crate) mod design;
 pub(in crate::workbench) mod hardcopy;
 pub(in crate::workbench) mod models;
-mod overflow;
+pub(crate) mod overflow;
 pub(in crate::workbench) mod project;
 pub(crate) mod results;
 pub(in crate::workbench) mod run_config_chip;
@@ -450,7 +450,7 @@ fn toolbar_text_command(
 }
 
 #[derive(Clone, Copy)]
-enum ToolbarCommandPresentation {
+pub(crate) enum ToolbarCommandPresentation {
     Icon {
         icon: WorkbenchIcon,
         selected: bool,

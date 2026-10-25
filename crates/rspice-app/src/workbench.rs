@@ -115,7 +115,7 @@ mod shell_host;
 pub(crate) mod shortcuts;
 pub(crate) mod slots;
 pub(crate) mod state;
-mod surfaces;
+pub(crate) mod surfaces;
 pub(crate) mod tools;
 pub(crate) mod user_identity;
 pub(crate) mod workflows;

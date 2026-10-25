@@ -1,6 +1,6 @@
 //! Unified console, problems, measurements, and task history.
 
-mod log_anchor;
+pub(crate) mod log_anchor;
 pub(crate) mod problems;
 pub(crate) mod transcript;
 

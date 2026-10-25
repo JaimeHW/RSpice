@@ -4,7 +4,7 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::Workspace;
 
-pub(super) fn schematic_cursor_summary(
+pub(crate) fn schematic_cursor_summary(
     state: &crate::workbench::app_state::AppState,
     grid_x: f64,
     grid_y: f64,
@@ -78,7 +78,7 @@ pub(in crate::workbench) fn design_engineering_context(
     )
 }
 
-pub(in crate::workbench) fn selection_summary(app: &RSpiceApp) -> String {
+pub(crate) fn selection_summary(app: &RSpiceApp) -> String {
     if !app.state.platform.project_lifecycle.is_open() {
         return "No engineering object selected".to_owned();
     }

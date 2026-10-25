@@ -9,9 +9,7 @@ use crate::workbench::state::WorkspaceDocumentId;
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
-pub(in crate::workbench) fn netlist_workspace_documents(
-    state: &AppState,
-) -> Vec<WorkspaceDocument> {
+pub(crate) fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     if state.code.code_workspace.page != CodeWorkspacePage::Netlist {

@@ -45,7 +45,7 @@ pub(in crate::workbench) fn activate_cell_view(
     }
 }
 
-pub(super) const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
+pub(crate) const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
     match view_type {
         ViewType::Schematic | ViewType::Testbench => WorkbenchIcon::Design,
         ViewType::Symbol => WorkbenchIcon::Models,

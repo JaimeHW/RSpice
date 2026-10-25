@@ -239,15 +239,15 @@ fn focus_is_within_drawer(ctx: &Context, drawer_layer: egui::LayerId) -> bool {
 }
 
 #[derive(Clone, Copy)]
-struct MobileNavigationAction {
-    command: CommandKey,
+pub(crate) struct MobileNavigationAction {
+    pub(crate) command: CommandKey,
     icon: WorkbenchIcon,
-    label: &'static str,
+    pub(crate) label: &'static str,
 }
 
 /// A workspace is called what the shell calls it everywhere else: the phone
 /// sheet used to coin a second name for four of the eight.
-const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
+pub(crate) const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
     MobileNavigationAction {
         command: ids::PROJECT_WORKSPACE,
         icon: WorkbenchIcon::Project,
@@ -297,7 +297,7 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
 /// Notifications are here because a phone's title bar has no room for the
 /// bell: without this row the panel was reachable only from the palette, and
 /// the unread count from nowhere.
-const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
+pub(crate) const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
     MobileNavigationAction {
         command: ids::SPECIALIST_TOOL_BROWSER,
         icon: WorkbenchIcon::More,
@@ -331,10 +331,10 @@ const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
 ];
 
 /// The two groups the sheet holds, in the order it paints them.
-const MOBILE_NAV_GROUPS: [(&str, &[MobileNavigationAction]); 2] =
+pub(crate) const MOBILE_NAV_GROUPS: [(&str, &[MobileNavigationAction]); 2] =
     [("Workspaces", &WORKSPACE_ACTIONS), ("Tools", &TOOL_ACTIONS)];
 
-fn mobile_navigation_natural_height(columns: usize) -> f32 {
+pub(crate) fn mobile_navigation_natural_height(columns: usize) -> f32 {
     let card_rows = MOBILE_NAV_GROUPS
         .iter()
         .map(|(_, actions)| actions.len().div_ceil(columns))
@@ -347,7 +347,7 @@ fn mobile_navigation_natural_height(columns: usize) -> f32 {
         + MOBILE_NAV_GRID_GAP * rows.saturating_sub(1) as f32
 }
 
-fn mobile_navigation_width(screen_width: f32) -> f32 {
+pub(crate) fn mobile_navigation_width(screen_width: f32) -> f32 {
     MOBILE_NAV_MAX_WIDTH.min((screen_width - MOBILE_NAV_GUTTER * 2.0).max(0.0))
 }
 
@@ -607,7 +607,7 @@ fn release_current_focus(ctx: &Context) {
 
 /// What a card states beside its name, the way a navigator row states its
 /// meta: the bell's unread count, for the shell whose title bar draws no bell.
-fn card_meta(command: CommandKey, app: &impl WorkbenchHost) -> Option<String> {
+pub(crate) fn card_meta(command: CommandKey, app: &impl WorkbenchHost) -> Option<String> {
     match command {
         ids::OPEN_NOTIFICATIONS => {
             let unread = app.workbench().toasts.unread_count();
@@ -688,12 +688,12 @@ fn mobile_navigation_card(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DrawerBorder {
+pub(crate) enum DrawerBorder {
     Box,
     InnerLeft,
 }
 
-fn drawer_border(layout: LayoutSpec, drawer: Drawer) -> DrawerBorder {
+pub(crate) fn drawer_border(layout: LayoutSpec, drawer: Drawer) -> DrawerBorder {
     match (drawer, layout.compact_shell) {
         (Drawer::Inspector, false) => DrawerBorder::InnerLeft,
         (Drawer::Navigator | Drawer::Inspector | Drawer::Workspaces, true)
@@ -721,7 +721,7 @@ fn paint_drawer_inner_edge(ui: &egui::Ui, rect: egui::Rect, tokens: &Tokens, bor
     }
 }
 
-fn drawer_scrim_color(tokens: &Tokens) -> egui::Color32 {
+pub(crate) fn drawer_scrim_color(tokens: &Tokens) -> egui::Color32 {
     if tokens.mode == Mode::Light {
         egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
     } else {
@@ -775,7 +775,7 @@ fn drawer_close_button(
     response
 }
 
-fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
+pub(crate) fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
     let size = if layout.compact_shell || layout.coarse_pointer {
         44.0
     } else {
@@ -783,231 +783,4 @@ fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
     };
     let inset = if layout.coarse_pointer { 0.0 } else { 5.0 };
     (size, inset)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workbench::RSpiceApp;
-    use crate::workbench::commands::vocabulary::Command;
-    use crate::workbench::state::WorkbenchSession;
-
-    #[derive(Clone, Copy)]
-    struct ModalFocusFixtureIds {
-        background: Id,
-        first: Id,
-        disabled: Id,
-        last: Id,
-    }
-
-    fn focus_test_input(events: Vec<egui::Event>) -> egui::RawInput {
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            events,
-            ..Default::default()
-        }
-    }
-
-    fn focus_test_key(shift: bool) -> egui::Event {
-        egui::Event::Key {
-            key: egui::Key::Tab,
-            physical_key: Some(egui::Key::Tab),
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers {
-                shift,
-                ..egui::Modifiers::NONE
-            },
-        }
-    }
-
-    fn run_modal_focus_fixture(
-        ctx: &Context,
-        input: egui::RawInput,
-        request_first: bool,
-    ) -> ModalFocusFixtureIds {
-        let mut rendered = None;
-        let _output = ctx.run_ui(input, |ctx| {
-            let background = egui::CentralPanel::default()
-                .show(ctx, |ui| ui.button("Background action"))
-                .inner;
-
-            let floor = Area::new(Id::new("drawer-focus-test.floor"))
-                .kind(UiKind::Modal)
-                .sense(Sense::hover())
-                .order(Order::Foreground)
-                .fixed_pos(egui::Pos2::ZERO);
-            ctx.memory_mut(|memory| memory.set_modal_layer(floor.layer()));
-            floor.show(ctx, |ui| {
-                ui.allocate_exact_size(egui::vec2(800.0, 600.0), Sense::hover());
-            });
-
-            let controls = Area::new(Id::new("drawer-focus-test.controls"))
-                .kind(UiKind::Modal)
-                .sense(Sense::hover())
-                .order(Order::Tooltip)
-                .fixed_pos(egui::pos2(20.0, 20.0))
-                .show(ctx, |ui| {
-                    let first = ui.button("First action");
-                    let disabled = ui.add_enabled(false, egui::Button::new("Unavailable action"));
-                    let last = ui.button("Last action");
-                    if request_first {
-                        first.request_focus();
-                    }
-                    (first.id, disabled.id, last.id)
-                })
-                .inner;
-            rendered = Some(ModalFocusFixtureIds {
-                background: background.id,
-                first: controls.0,
-                disabled: controls.1,
-                last: controls.2,
-            });
-        });
-        rendered.expect("focus fixture must render")
-    }
-
-    #[test]
-    fn drawer_scrims_match_the_mockup_dark_and_light_tokens() {
-        let mut dark = Tokens::default();
-        dark.mode = Mode::Dark;
-        assert_eq!(
-            drawer_scrim_color(&dark),
-            egui::Color32::from_rgba_unmultiplied(2, 6, 8, 158)
-        );
-
-        let mut light = dark.clone();
-        light.mode = Mode::Light;
-        assert_eq!(
-            drawer_scrim_color(&light),
-            egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
-        );
-    }
-
-    /// Fourteen one-line rows under two heads, not taglined cards under four:
-    /// the one-column sheet was 1,237 px of scrolling.
-    #[test]
-    fn mobile_navigation_grid_height_tracks_its_real_rows() {
-        assert_eq!(mobile_navigation_natural_height(2), 486.0);
-        assert_eq!(mobile_navigation_natural_height(1), 850.0);
-    }
-
-    /// A workspace is called what the rest of the shell calls it, and the
-    /// sheet has two heads: the destinations, and everything else.
-    #[test]
-    fn the_phone_sheet_names_a_workspace_once_and_groups_the_rest_as_tools() {
-        for workspace in Workspace::ALL {
-            assert!(
-                WORKSPACE_ACTIONS.iter().any(|action| {
-                    action.command == Command::OpenWorkspace(workspace).key()
-                        && action.label == workspace.label()
-                }),
-                "{workspace:?} is offered under the name the shell gives it"
-            );
-        }
-        assert_eq!(
-            MOBILE_NAV_GROUPS.map(|(label, _)| label),
-            ["Workspaces", "Tools"]
-        );
-    }
-
-    #[test]
-    fn mobile_organization_entry_opens_the_canonical_account_manager() {
-        let action = TOOL_ACTIONS
-            .iter()
-            .find(|action| action.label == "Organization & licensing")
-            .expect("the account entry");
-        assert_eq!(action.command, Command::AccountOrganization.key());
-    }
-
-    /// A phone's title bar draws no bell, so the sheet carries it: the panel
-    /// one tap away, and the unread count beside it in the row's meta.
-    #[test]
-    fn the_phone_sheet_reaches_notifications_and_counts_what_is_unread() {
-        let action = TOOL_ACTIONS
-            .iter()
-            .find(|action| action.command == Command::OpenNotifications.key())
-            .expect("the sheet offers the notification panel");
-        assert_eq!(action.label, "Notifications");
-
-        let ctx = Context::default();
-        let mut app = RSpiceApp::test_instance();
-        assert_eq!(
-            card_meta(Command::OpenNotifications.key(), &app),
-            None,
-            "nothing unread says nothing"
-        );
-        app.state.workbench.toasts.info(&ctx, "Recovery copy saved");
-        app.state.workbench.toasts.info(&ctx, "Library reloaded");
-        assert_eq!(
-            card_meta(Command::OpenNotifications.key(), &app).as_deref(),
-            Some("2 unread")
-        );
-        assert_eq!(card_meta(Command::OpenConsole.key(), &app), None);
-    }
-
-    #[test]
-    fn mobile_navigation_never_overflows_an_exceptionally_narrow_viewport() {
-        assert_eq!(mobile_navigation_width(298.0), 280.0);
-        assert_eq!(mobile_navigation_width(280.0), 262.0);
-        assert_eq!(mobile_navigation_width(12.0), 0.0);
-    }
-
-    #[test]
-    fn drawer_close_targets_follow_pointer_and_breakpoint_cascade() {
-        let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
-        assert_eq!(drawer_close_geometry(compact), (44.0, 5.0));
-
-        let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &WorkbenchSession::default());
-        assert_eq!(drawer_close_geometry(intermediate), (34.0, 5.0));
-
-        let coarse =
-            LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &WorkbenchSession::default());
-        assert_eq!(drawer_close_geometry(coarse), (44.0, 0.0));
-    }
-
-    #[test]
-    fn intermediate_inspector_drawer_uses_only_its_inner_edge() {
-        let state = WorkbenchSession::default();
-        let compact = LayoutSpec::resolve(390.0, 844.0, &state);
-        let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &state);
-
-        assert_eq!(drawer_border(compact, Drawer::Inspector), DrawerBorder::Box);
-        assert_eq!(
-            drawer_border(intermediate, Drawer::Inspector),
-            DrawerBorder::InnerLeft
-        );
-        assert_eq!(
-            drawer_border(intermediate, Drawer::Navigator),
-            DrawerBorder::Box
-        );
-    }
-
-    #[test]
-    fn side_drawer_modal_focus_skips_unavailable_controls_and_wraps_both_directions() {
-        let ctx = Context::default();
-        let ids = run_modal_focus_fixture(&ctx, focus_test_input(Vec::new()), true);
-        let _ = run_modal_focus_fixture(&ctx, focus_test_input(Vec::new()), false);
-        assert_eq!(ctx.memory(|memory| memory.focused()), Some(ids.first));
-
-        let current =
-            run_modal_focus_fixture(&ctx, focus_test_input(vec![focus_test_key(false)]), false);
-        assert_eq!(current.first, ids.first);
-        assert_eq!(ctx.memory(|memory| memory.focused()), Some(ids.last));
-        assert_ne!(ctx.memory(|memory| memory.focused()), Some(ids.disabled));
-
-        let _ = run_modal_focus_fixture(&ctx, focus_test_input(vec![focus_test_key(false)]), false);
-        let _ = run_modal_focus_fixture(&ctx, focus_test_input(Vec::new()), false);
-        assert_eq!(ctx.memory(|memory| memory.focused()), Some(ids.first));
-
-        let _ = run_modal_focus_fixture(&ctx, focus_test_input(vec![focus_test_key(true)]), false);
-        let _ = run_modal_focus_fixture(&ctx, focus_test_input(Vec::new()), false);
-        let focused = ctx.memory(|memory| memory.focused());
-        assert_eq!(focused, Some(ids.last));
-        assert_ne!(focused, Some(ids.background));
-        assert_ne!(focused, Some(ids.disabled));
-    }
 }

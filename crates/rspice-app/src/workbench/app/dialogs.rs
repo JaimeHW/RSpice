@@ -9,7 +9,7 @@
 pub(in crate::workbench) mod check_and_save;
 pub(in crate::workbench) mod check_and_save_validation;
 pub(in crate::workbench) mod configuration_sets;
-pub(in crate::workbench) mod confirmation;
+pub(crate) mod confirmation;
 pub(in crate::workbench) mod confirmation_state;
 pub(in crate::workbench) mod connectivity_manager;
 pub(in crate::workbench) mod create_model_bound_symbol;
@@ -55,7 +55,7 @@ pub(in crate::workbench) mod symbol_definition;
 pub(in crate::workbench) mod unpublish_web;
 pub(in crate::workbench) mod veriloga_build_settings;
 pub(in crate::workbench) mod visibility_options;
-pub(in crate::workbench) mod window_session;
+pub(crate) mod window_session;
 
 use egui::Context;
 

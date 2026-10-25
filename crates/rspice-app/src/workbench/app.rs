@@ -80,7 +80,7 @@ pub(in crate::workbench) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
 pub(crate) mod command_palette;
-pub(in crate::workbench) mod dialogs;
+pub(crate) mod dialogs;
 pub(in crate::workbench) mod drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
@@ -107,7 +107,7 @@ pub(in crate::workbench) use dialogs::design_management::widgets::concept_banner
 
 /// Sheet navigation and sheet lifecycle, named where the sheet strip, the
 /// command dispatcher and the design manager can all reach the one owner.
-pub(in crate::workbench) use actions::sheets;
+pub(crate) use actions::sheets;
 
 pub(crate) use dialogs::configuration_sets::{
     ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,

@@ -103,7 +103,7 @@ pub(in crate::workbench) fn sheet_count(state: &impl AsRef<Model>) -> usize {
 
 /// Make one sheet the canvas the session is editing: [`Model::activate_sheet`],
 /// stated on the status bar.
-pub(in crate::workbench) fn activate_sheet(
+pub(crate) fn activate_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     id: SheetId,

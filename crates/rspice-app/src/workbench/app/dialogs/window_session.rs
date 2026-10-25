@@ -156,10 +156,7 @@ pub(crate) fn open_window_workflow(app: &mut impl WorkbenchHost, workflow: Windo
     }
 }
 
-pub(in crate::workbench) fn render_window_session_dialog(
-    app: &mut impl WorkbenchHost,
-    ctx: &Context,
-) {
+pub(crate) fn render_window_session_dialog(app: &mut impl WorkbenchHost, ctx: &Context) {
     if !app.workbench().window_session_dialog.open {
         return;
     }
@@ -1049,51 +1046,4 @@ fn section_heading(ui: &mut egui::Ui, text: &str) {
             .color(t.color.text_faint),
     );
     ui.add_space(4.0);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workbench::RSpiceApp;
-
-    /// The Windows page lists the windows and the actions on them. Two
-    /// paragraphs restating, on every opening, what detaching does and how
-    /// geometry is restored were constant boilerplate under the table.
-    #[test]
-    fn the_windows_page_carries_no_constant_paragraphs() {
-        let ctx = Context::default();
-        ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .workbench
-            .window_session_dialog
-            .open(WindowSessionPage::Windows);
-        // Access updates are incremental: keep the latest of every node.
-        let mut nodes = std::collections::HashMap::new();
-        for _ in 0..3 {
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1440.0, 900.0),
-                    )),
-                    ..egui::RawInput::default()
-                },
-                |ctx| render_window_session_dialog(&mut app, ctx),
-            );
-            if let Some(update) = output.platform_output.accesskit_update {
-                nodes.extend(update.nodes);
-            }
-        }
-        let says = |text: &str| {
-            nodes.values().any(|node| {
-                node.label().is_some_and(|label| label.contains(text))
-                    || node.value().is_some_and(|value| value.contains(text))
-            })
-        };
-        assert!(says("Application window"), "the windows table is missing");
-        assert!(!says("Detaching changes presentation only"));
-        assert!(!says("Restored geometry is clamped"));
-    }
 }
