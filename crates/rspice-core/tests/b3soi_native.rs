@@ -2160,6 +2160,64 @@ fn native_soi_pd_gate_sidewall_junction_temperature_matches_ngspice46_ac() {
     }
 }
 
+/// ngspice-46 B3SOIDD has no TCJSWG or TPBSWG (it ignores both as
+/// unrecognized): its intrinsic gate-sidewall junction keeps PBSWG and CJSWG
+/// at every temperature and spans the DC width weff, not weffCV
+/// (b3soiddld.c:3440-3444). The corpus N1 card with CJSWG = 1e-9,
+/// TCJSWG = 5e-3, TPBSWG = 2e-3 and DWC = 5e-8 (so weffCV < weff) and the body
+/// tied, at 127 C against TNOM = 27 C: the body sits at -1 V behind 100 kOhm,
+/// so v(b) carries the body capacitance. ngspice-46 (`.option gmin=1e-25
+/// itl1=500`, `ac dec 1 1e6 1e9`, `set numdgt=12`) reads the same with or
+/// without the two coefficients.
+#[test]
+fn native_soi_dd_gate_sidewall_junction_holds_over_temperature_like_ngspice46_ac() {
+    let card = b3soidd_n1_model_card()
+        .replace("CJSWG = 5e-10", "CJSWG = 1e-9 TCJSWG=5e-3 TPBSWG=2e-3")
+        .replace("WINT = 0 ", "WINT = 0 DWC = 5e-8 ");
+    assert!(card.contains("TPBSWG=2e-3") && card.contains("DWC = 5e-8"));
+    let deck = format!(
+        "* B3SOIDD gate-sidewall junction temperature\n\
+         vd d 0 dc 0\n\
+         vs s 0 dc 0\n\
+         vg g 0 dc 0\n\
+         ve e 0 dc 0\n\
+         vb bs 0 dc -1 ac 1\n\
+         rb bs b 100k\n\
+         m1 d g s e b n1 w=10u l=0.25u\n\
+         .option gmin=1e-25 itl1=500\n\
+         .temp 127\n\
+         {card}\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    // (frequency, re v(b), im v(b)) from ngspice-46.
+    let reference = [
+        (1.0e6, 9.876112482868e-01, -1.10613157193e-01),
+        (1.0e7, 4.435738927447e-01, -4.96805892095e-01),
+        (1.0e8, 7.908790654306e-03, -8.85790137939e-02),
+        (1.0e9, 7.971202802794e-05, -8.92780342640e-03),
+    ];
+    let freqs: Vec<Value> = reference.iter().map(|&(freq, _, _)| freq).collect();
+    let results = engine()
+        .run_ac(&netlist, &freqs)
+        .expect("DD sidewall AC runs");
+    for (result, (freq, re, im)) in results.iter().zip(reference) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("b"))
+            .expect("node b in AC result");
+        let v = result.voltages[idx];
+        let rel = (v.re - re).hypot(v.im - im) / re.hypot(im);
+        assert!(
+            rel < 1.0e-9,
+            "v(b) at {freq:.0e} Hz: rspice=({:.9e},{:.9e}) ngspice=({re:.9e},{im:.9e}) rel={rel:.3e}",
+            v.re,
+            v.im
+        );
+    }
+}
+
 /// A floating-body B3SOIDD gain stage at vin = 0.3 V. Its direct Newton
 /// fails in both simulators: the body node runs away below the source (to
 /// -9.7 kV in ngspice-46). ngspice restarts each operating-point aid from a

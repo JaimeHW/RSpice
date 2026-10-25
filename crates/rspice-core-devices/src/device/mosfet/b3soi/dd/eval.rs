@@ -2332,9 +2332,9 @@ pub struct ModelConsts {
     pub phibswg: Value,
     /// Unit-length gate-sidewall junction capacitance `CJSWG`.
     pub cjswg: Value,
-    /// Temperature coefficient of `PBSWG`.
+    /// Temperature coefficient of `PBSWG` (Xyce only; ngspice-46 B3SOIDD has none).
     pub tpbswg: Value,
-    /// Temperature coefficient of `CJSWG`.
+    /// Temperature coefficient of `CJSWG` (Xyce only; ngspice-46 B3SOIDD has none).
     pub tcjswg: Value,
     /// Device polarity (`+1` NMOS / `-1` PMOS) for the extrinsic charge sign.
     pub mtype: Value,
@@ -2377,18 +2377,6 @@ fn cexp100(arg: Value) -> (Value, Value) {
         let exp_arg = arg.exp();
         (exp_arg, exp_arg)
     }
-}
-
-#[inline]
-fn gate_sidewall_junction_charge_params(
-    p: &B3SoiDdSized,
-    m: &ModelConsts,
-    width_cv: Value,
-) -> (Value, Value) {
-    let temp_delta = p.temp - p.tnom;
-    let phi_bswg = m.phibswg - m.tpbswg * temp_delta;
-    let cjs = m.cjswg * width_cv * m.tsi / 1e-7;
-    (phi_bswg, cjs * (1.0 + m.tcjswg * temp_delta))
 }
 
 /// Smooth `dvt2`-type discontinuity guard (b3soiddld.c:1020-1031 pattern).
@@ -3359,7 +3347,11 @@ fn eval_charges_capmod2_or_3(
     let mut cdsb = cgg + cgd + cgb + cge + cbg + cbd + cbb + cbe + csg + csd + csb + cse;
 
     // --- Intrinsic S/D junction charge (b3soiddld.c:3438-3494) ---
-    let (phi_bswg, cjsbs) = gate_sidewall_junction_charge_params(p, m, p.weff_cv / p.nseg);
+    // ngspice-46 B3SOIDD has no TCJSWG or TPBSWG: the gate-sidewall junction
+    // keeps its TNOM potential and capacitance at every temperature, over the
+    // DC width `weff` (b3soiddld.c:3440-3444).
+    let phi_bswg = m.phibswg;
+    let cjsbs = m.cjswg * p.weff * m.tsi / 1e-7;
     let mjswg = m.mjswg;
 
     let (t3, dt3_dvb_s);
