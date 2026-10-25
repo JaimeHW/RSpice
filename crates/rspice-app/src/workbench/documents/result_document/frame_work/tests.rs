@@ -584,7 +584,7 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
     // used to be where the dataset walks were.
     let _ = super::super::sheet_purpose(state);
     for candidate in ResultViewer::all() {
-        let _ = super::super::viewer_availability(state, candidate);
+        let _ = super::super::viewer_availability(state.results_reads(), candidate);
     }
     // The wave instrument's sheet bar decides on every frame whether to offer
     // the family-envelope control, and deciding means building the envelope
@@ -790,7 +790,7 @@ fn the_table_maps_a_cursor_without_scanning_the_grid() {
 fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
     let mut state = state_for(ResultViewer::Soa);
     state.results.results.session.viewer = ResultViewer::Soa;
-    assert!(soa::active_payload_is_valid(&state));
+    assert!(soa::active_payload_is_valid(state.results_reads()));
     let purpose = super::super::sheet_purpose(&state);
     assert!(
         !purpose.contains("failed validation"),
@@ -811,7 +811,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
         state.model.simulation.view.data_version.wrapping_add(1);
 
     assert!(
-        !soa::active_payload_is_valid(&state),
+        !soa::active_payload_is_valid(state.results_reads()),
         "the SOA gate served a verdict from the previous dataset generation"
     );
     let purpose = super::super::sheet_purpose(&state);
@@ -926,7 +926,8 @@ fn the_smith_gate_verifies_its_traces_once_per_dataset_generation() {
     select_analysis(&mut state, AnalysisType::SParameter);
 
     let first = WorkCounts::reset();
-    let offered = super::super::viewer_availability(&state, ResultViewer::Smith).available;
+    let offered =
+        super::super::viewer_availability(state.results_reads(), ResultViewer::Smith).available;
     let first = first.since();
     assert!(
         offered,
@@ -939,7 +940,9 @@ fn the_smith_gate_verifies_its_traces_once_per_dataset_generation() {
 
     let baseline = WorkCounts::reset();
     for _ in 0..IDLE_FRAMES {
-        assert!(super::super::viewer_availability(&state, ResultViewer::Smith).available);
+        assert!(
+            super::super::viewer_availability(state.results_reads(), ResultViewer::Smith).available
+        );
     }
     assert_eq!(
         baseline.since().get(DatasetWalk::SParameterTraceScan),

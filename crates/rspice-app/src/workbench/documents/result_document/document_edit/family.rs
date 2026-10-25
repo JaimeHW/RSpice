@@ -32,12 +32,14 @@ fn manifest(analysis: &AnalysisResult) -> Result<FamilyManifest, String> {
 
 /// The scope a policy is kept in, with the result it slices.
 fn scope(state: &AppState) -> Result<(Scope, &SimulationRun, &AnalysisResult), String> {
-    let (run, analysis) = reading_analysis(state)?;
-    let scope = match active_document_id(state) {
+    let (run, analysis) = reading_analysis(state.results_reads())?;
+    let scope = match active_document_id(state.results_reads()) {
         Some(document_id) => {
-            let (_, pane_id) =
-                super::super::persistent_document::reading_position(state, document_id)
-                    .ok_or_else(|| "The result document has no pane.".to_owned())?;
+            let (_, pane_id) = super::super::persistent_document::reading_position(
+                state.results_reads(),
+                document_id,
+            )
+            .ok_or_else(|| "The result document has no pane.".to_owned())?;
             Scope::Pane(document_id, pane_id)
         }
         None => Scope::QuickView(super::super::AnalysisPresentationKey::new(
@@ -71,7 +73,7 @@ fn current_policy(state: &AppState, scope: Scope) -> Option<FamilyPresentationPo
 }
 
 /// Whether the result the reader is looking at holds a family to slice.
-pub(crate) fn family_available(state: &AppState) -> bool {
+pub(crate) fn family_available(state: ResultsReads<'_>) -> bool {
     reading_analysis(state).is_ok_and(|(_, analysis)| manifest(analysis).is_ok())
 }
 
@@ -240,7 +242,8 @@ pub(in super::super) fn pane_selection(
     let binding = pane
         .binding
         .ok_or_else(|| "The pane shows no dataset to slice.".to_owned())?;
-    let (run, analysis) = super::super::persistent_document::resolve_binding(state, binding)?;
+    let (run, analysis) =
+        super::super::persistent_document::resolve_binding(state.results_reads(), binding)?;
     let run = &state.model.simulation.retained.runs[run];
     let analysis = &run.analyses[analysis];
     selection(run, analysis, &manifest(analysis)?, policy).map(Some)
@@ -289,7 +292,7 @@ fn undeclared_dimension(
     policy: &FamilyPresentationPolicy,
     manifest: &FamilyManifest,
 ) -> Result<(), String> {
-    let document = project_document(state, document_id)?;
+    let document = project_document(state.results_reads(), document_id)?;
     let binding = document
         .panes()
         .iter()

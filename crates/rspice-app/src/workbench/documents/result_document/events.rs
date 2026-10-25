@@ -1,6 +1,6 @@
 //! Event source validation, history cache lifetime and selection recovery.
 
-use super::{AnalysisPresentationKey, SheetContext};
+use super::{AnalysisPresentationKey, ResultsReads, SheetContext};
 #[cfg(test)]
 use crate::state::{AnalysisType, RetainedTrace};
 use crate::{
@@ -70,7 +70,9 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
     {
         return Some(Arc::clone(&cache.order));
     }
-    if !analysis_is_renderable(analysis) || !super::retained_evidence_is_valid(state, key) {
+    if !analysis_is_renderable(analysis)
+        || !super::retained_evidence_is_valid(state.results_reads(), key)
+    {
         return None;
     }
     let order = Arc::new(build_event_order(analysis, expanded));
@@ -88,7 +90,7 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
         super::frame_work::note_scan,
     )
 }
-pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
+pub(super) fn active_analysis_is_renderable(state: ResultsReads<'_>) -> bool {
     let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
@@ -130,7 +132,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 (
                     AnalysisPresentationKey::new(run.dataset_id, analysis),
                     super::analysis_answers_structural_gate(
-                        state,
+                        state.results_reads(),
                         run.dataset_id,
                         analysis,
                         super::StructuralGate::EventHistory,
@@ -146,7 +148,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewer::show_absent(ui, EventAbsence::NoEvents);
         return;
     }
-    if !super::retained_evidence_is_valid(state, analysis_key) {
+    if !super::retained_evidence_is_valid(state.results_reads(), analysis_key) {
         viewer::show_absent(ui, EventAbsence::InvalidEvidence);
         return;
     }
@@ -479,7 +481,7 @@ mod availability_tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         assert!(
-            !active_analysis_is_renderable(&state),
+            !active_analysis_is_renderable(state.results_reads()),
             "an unvalidated, invalid analysis was offered its sheet"
         );
     }

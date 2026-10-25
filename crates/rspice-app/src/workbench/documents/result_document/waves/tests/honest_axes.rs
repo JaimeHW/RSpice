@@ -488,7 +488,7 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
         state.model.simulation.active_analysis().unwrap()
     ));
     assert!(super::super::super::viewer_is_available(
-        &state,
+        state.results_reads(),
         state.results.results.session.viewer
     ));
     let presentation = state.model.preferences.result_presentation_policy();

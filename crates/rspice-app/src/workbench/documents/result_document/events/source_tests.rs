@@ -793,7 +793,7 @@ fn event_source_projected_idle_reads_do_not_rescan_the_trace() {
     assert!(work.since().get(DatasetWalk::EventProjectionScan) > 0);
     let work = WorkCounts::reset();
     for _ in 0..12 {
-        assert!(active_analysis_is_renderable(&state));
+        assert!(active_analysis_is_renderable(state.results_reads()));
         assert!(event_selection_block(&mut state, &selection).is_none());
         paint(&mut state, false);
         paint(&mut state, true);
@@ -822,7 +822,7 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
             .validate_retained_evidence()
             .is_err()
     );
-    assert!(!active_analysis_is_renderable(&state));
+    assert!(!active_analysis_is_renderable(state.results_reads()));
     assert!(event_order(&mut state).is_none());
     assert!(
         crate::io::simulation_state_from_results(crate::io::capture_simulation_results(

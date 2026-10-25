@@ -1158,7 +1158,8 @@ impl Command {
             Self::ToggleResultsSplit => "no retained result dataset is available",
             Self::ResultViewer(viewer) => {
                 crate::workbench::documents::result_document::viewer_unavailability_reason(
-                    &app.state, viewer,
+                    app.state.results_reads(),
+                    viewer,
                 )
                 .unwrap_or("the active dataset is incompatible with this viewer")
             }

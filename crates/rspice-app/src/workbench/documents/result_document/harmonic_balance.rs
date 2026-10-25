@@ -1,5 +1,6 @@
 //! Coefficient-spectrum source qualification and application viewport ownership.
 
+use super::ResultsReads;
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::ui::tokens::Tokens;
 use crate::workbench::AppState;
@@ -24,7 +25,7 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     )
 }
 
-pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
+pub(super) fn active_analysis_is_renderable(state: ResultsReads<'_>) -> bool {
     state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.iter().any(|analysis| {
             super::analysis_answers_structural_gate(

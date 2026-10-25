@@ -941,7 +941,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         })
     } else {
         crate::workbench::documents::result_document::viewer_unavailability_reason(
-            &app.state,
+            app.state.results_reads(),
             crate::workbench::ResultViewer::Specs,
         )
     };

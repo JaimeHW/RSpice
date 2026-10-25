@@ -134,7 +134,7 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
 /// Add the selected result as a pane: to the open result document after its
 /// selected pane, or, over a quick view, to a new result document.
 pub(crate) fn add_selected_result_as_pane(app: &mut RSpiceApp) {
-    if add_pane_available(&app.state) {
+    if add_pane_available(app.state.results_reads()) {
         open_add_pane(&mut app.state);
     } else {
         create_document::open(app);
@@ -187,7 +187,10 @@ use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
-use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+use crate::workbench::app_state::{
+    Model, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
+};
+use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;
 use rspice_results::result_presentation::{
@@ -484,9 +487,9 @@ pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
 ///
 /// Every plot sheet does; the structured documents (OP, specs, table, XF,
 /// manifest) have no viewport at all and must not offer the gesture.
-pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
+pub(crate) fn fit_gesture_available(state: ResultsReads<'_>) -> bool {
     state.model.simulation.retained.has_results()
-        && viewer_draws_a_pane(state.results.results.session.viewer)
+        && viewer_draws_a_pane(state.results.session.viewer)
 }
 
 /// Whether this sheet draws a plot pane at all.
@@ -510,9 +513,9 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
 ///
 /// Only the unit-pane stack exposes the retained extents a zoom step has to
 /// be computed against; the single-canvas viewers own their own gestures.
-pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
+pub(crate) fn zoom_gesture_available(state: ResultsReads<'_>) -> bool {
     state.model.simulation.retained.has_results()
-        && viewer_uses_wave_stack(state.results.results.session.viewer)
+        && viewer_uses_wave_stack(state.results.session.viewer)
 }
 
 /// Apply any queued viewport gesture, now that the sheet's models and theme
@@ -587,6 +590,21 @@ impl<'a> SheetContext<'a> {
             results: &mut state.results.results,
         }
     }
+}
+
+/// What the results workspace's predicates read: its viewer state and the
+/// specialized viewers' state, the model whose retained runs they judge, and
+/// the session whose active document they stand on.
+///
+/// Whether a viewer, a pane or a hop is available is a question about those
+/// four parts alone, so the predicates take them rather than the application
+/// state, and a feature's availability can answer them from what it reads.
+#[derive(Clone, Copy)]
+pub(crate) struct ResultsReads<'a> {
+    pub(crate) results: &'a ResultsState,
+    pub(crate) analysis: &'a AnalysisWorkspaceState,
+    pub(crate) model: &'a Model,
+    pub(crate) workbench: &'a WorkbenchSession,
 }
 
 /// How a retained plot-marker kind reads as a Results marker kind.
@@ -1125,14 +1143,13 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
 /// queries before frame preparation. Both successful and failed verdicts are
 /// invalidated when the source changes, even if its display version repeats.
 pub(crate) fn retained_evidence_is_valid(
-    state: &AppState,
+    state: ResultsReads<'_>,
     analysis: AnalysisPresentationKey,
 ) -> bool {
-    state
-        .results
-        .results
-        .retained_evidence_validity
-        .get_or_insert_with(&state.model.simulation, analysis, || {
+    state.results.retained_evidence_validity.get_or_insert_with(
+        &state.model.simulation,
+        analysis,
+        || {
             state
                 .model
                 .simulation
@@ -1144,7 +1161,8 @@ pub(crate) fn retained_evidence_is_valid(
                     frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
                     resolved.validate_retained_evidence().is_ok()
                 })
-        })
+        },
+    )
 }
 
 pub(crate) use rspice_results::renderability::StructuralGate;
@@ -1170,7 +1188,7 @@ pub(crate) fn structural_gate_is_answered_directly(
 /// revision itself. Tab availability cannot reuse an older structural answer
 /// while waiting for a painted frame to invalidate the cache.
 pub(crate) fn analysis_answers_structural_gate(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: DatasetId,
     analysis: &AnalysisResult,
     gate: StructuralGate,
@@ -1184,7 +1202,6 @@ pub(crate) fn analysis_answers_structural_gate(
     }
     let key = (AnalysisPresentationKey::new(dataset_id, analysis), gate);
     state
-        .results
         .results
         .structural_gates
         .get_or_insert_with(&state.model.simulation, key, || {
@@ -1285,7 +1302,7 @@ fn captured_ordinate(viewer: ResultViewer, view: PlotView) -> Option<(f64, f64)>
 /// second copy of the walk there would be a second answer to keep in step as
 /// well as a second million-sample scan.
 pub(crate) fn analysis_evidence_is_valid(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: DatasetId,
     analysis: &AnalysisResult,
 ) -> bool {
@@ -1293,7 +1310,7 @@ pub(crate) fn analysis_evidence_is_valid(
 }
 
 /// Current retained distributions, including freshly restored runs.
-pub(crate) fn histogram_is_available(state: &AppState) -> bool {
+pub(crate) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
     hist::histogram_is_available(state)
 }
 
@@ -1321,7 +1338,7 @@ pub(crate) fn analysis_evidence_failure(
     dataset_id: DatasetId,
     analysis: &AnalysisResult,
 ) -> Option<String> {
-    if analysis_evidence_is_valid(state, dataset_id, analysis) {
+    if analysis_evidence_is_valid(state.results_reads(), dataset_id, analysis) {
         return None;
     }
     Some(
@@ -1491,8 +1508,10 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         ),
     ] {
         let permitted = match gesture {
-            ViewGesture::Fit => fit_gesture_available(&app.state),
-            ViewGesture::ZoomIn | ViewGesture::ZoomOut => zoom_gesture_available(&app.state),
+            ViewGesture::Fit => fit_gesture_available(app.state.results_reads()),
+            ViewGesture::ZoomIn | ViewGesture::ZoomOut => {
+                zoom_gesture_available(app.state.results_reads())
+            }
         };
         if permitted && consume_command_key(ctx, &app.state, command) {
             request_view_gesture(&mut app.state, gesture);
@@ -1548,7 +1567,7 @@ fn consume_command_key(
     state: &AppState,
     command: crate::workbench::commands::vocabulary::Command,
 ) -> bool {
-    let platform = crate::workbench::app_state::runtime_command_platform(ctx);
+    let platform = runtime_command_platform(ctx);
     state
         .model
         .preferences
@@ -1784,12 +1803,12 @@ pub(crate) fn project_viewer_for_analysis(
     }
 }
 
-pub(crate) fn viewer_is_available(state: &AppState, viewer: ResultViewer) -> bool {
+pub(crate) fn viewer_is_available(state: ResultsReads<'_>, viewer: ResultViewer) -> bool {
     viewer_availability(state, viewer).available
 }
 
 pub(crate) fn viewer_unavailability_reason(
-    state: &AppState,
+    state: ResultsReads<'_>,
     viewer: ResultViewer,
 ) -> Option<&'static str> {
     let availability = viewer_availability(state, viewer);
@@ -2006,7 +2025,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         let shortcut = app.state.model.preferences.shortcuts().resolved_label(
             &crate::workbench::commands::vocabulary::CommandRegistry,
             crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
-            crate::workbench::app_state::runtime_command_platform(ui.ctx()),
+            runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );
         let hint = if shortcut.is_empty() {
@@ -2073,8 +2092,8 @@ const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
 /// controls, result-document creation and properties remain owned by the full
 /// Results workspace; every compatible existing viewer stays reachable here.
 fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
-    let available =
-        ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
+    let available = ResultViewer::all()
+        .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
     if let Some(viewer) =
         chrome::bars::compact_document_bar(ui, state.results.results.session.viewer, available)
     {
@@ -2111,7 +2130,7 @@ fn show_docbar_for_family(
 ) -> Option<usize> {
     let available = ResultViewer::all().filter(|&viewer| {
         family_label.is_none_or(|family| family_allows_viewer(family, viewer))
-            && viewer_availability(&app.state, viewer).available
+            && viewer_availability(app.state.results_reads(), viewer).available
     });
     let actions = chrome::bars::document_bar(
         ui,
@@ -2198,7 +2217,7 @@ fn memoized_incomplete_evidence_reason(
     if !analysis.success {
         return Some("the run did not complete — these samples stop where it failed");
     }
-    (!analysis_evidence_is_valid(state, dataset_id, analysis))
+    (!analysis_evidence_is_valid(state.results_reads(), dataset_id, analysis))
         .then_some("the saved results failed validation")
 }
 
@@ -2222,7 +2241,7 @@ fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
 
 fn sheet_purpose(state: &AppState) -> String {
     let viewer = state.results.results.session.viewer;
-    let detail = viewer_availability(state, viewer).reason;
+    let detail = viewer_availability(state.results_reads(), viewer).reason;
     match active_incomplete_evidence_reason(state) {
         Some(caution) => format!("{} · {detail} · {caution}", viewer.tab_label()),
         None => format!("{} · {detail}", viewer.tab_label()),
@@ -2231,8 +2250,8 @@ fn sheet_purpose(state: &AppState) -> String {
 
 #[cfg(test)]
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
-    let available =
-        ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
+    let available = ResultViewer::all()
+        .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
     if let Some(viewer) =
         chrome::bars::viewer_tabs(ui, state.results.results.session.viewer, available)
     {
@@ -2257,20 +2276,20 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
 }
 
 fn reconcile_active_viewer(state: &mut AppState) {
-    if viewer_availability(state, state.results.results.session.viewer).available {
+    if viewer_availability(state.results_reads(), state.results.results.session.viewer).available {
         return;
     }
     if state.model.simulation.active_run().is_none() {
         return;
     }
-    if let Some(viewer) =
-        ResultViewer::all().find(|viewer| viewer_availability(state, *viewer).available)
+    if let Some(viewer) = ResultViewer::all()
+        .find(|viewer| viewer_availability(state.results_reads(), *viewer).available)
     {
         state.results.results.session.viewer = viewer;
     }
 }
 
-fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailability {
+fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> ViewerAvailability {
     let active_run = state.model.simulation.active_run();
     match viewer {
         ResultViewer::Waves => {
@@ -2557,7 +2576,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
     }
 }
 
-fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAvailability {
+fn specialized_availability(state: ResultsReads<'_>, viewer: ActiveViewer) -> ViewerAvailability {
     let capability = state.viewer_capability(viewer);
     ViewerAvailability {
         available: capability.available,

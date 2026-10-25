@@ -16,7 +16,7 @@ use crate::workbench::design_system::section_header;
 use std::sync::Arc;
 
 use super::frame_work::{self, DatasetWalk};
-use super::{AnalysisPresentationKey, OptimizationSelection};
+use super::{AnalysisPresentationKey, OptimizationSelection, ResultsReads};
 
 use rspice_results::optimization::history::{OptimizationIndices, OptimizationView};
 
@@ -31,9 +31,10 @@ pub(super) struct OptimizationPlan {
 /// Locate the active analysis' optimizer history, once per generation.
 ///
 /// Behind a cell because the availability gate that calls this every frame
-/// holds only `&AppState`; the answer is a property of immutable evidence, so
-/// the cell hands back the same verdict rather than recomputing it.
-fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
+/// holds only shared references; the answer is a property of immutable
+/// evidence, so the cell hands back the same verdict rather than recomputing
+/// it.
+fn optimization_plan(state: ResultsReads<'_>) -> Option<Arc<OptimizationPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
@@ -41,7 +42,7 @@ fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-    if let Some(plan) = state.results.results.plans.optimization.borrow().as_ref()
+    if let Some(plan) = state.results.plans.optimization.borrow().as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
     {
@@ -53,7 +54,7 @@ fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
         analysis: analysis_key,
         located: locate_optimization(analysis, evidence_is_valid),
     });
-    *state.results.results.plans.optimization.borrow_mut() = Some(Arc::clone(&built));
+    *state.results.plans.optimization.borrow_mut() = Some(Arc::clone(&built));
     Some(built)
 }
 
@@ -86,7 +87,7 @@ pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheet
     })
 }
 
-pub(super) fn active_metadata_is_valid(state: &AppState) -> bool {
+pub(super) fn active_metadata_is_valid(state: ResultsReads<'_>) -> bool {
     active_optimization(&state.model.simulation, optimization_plan(state).as_deref()).is_some()
 }
 
@@ -95,7 +96,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Select a dataset with optimization results");
         return;
     };
-    let plan = optimization_plan(state);
+    let plan = optimization_plan(state.results_reads());
     let Some((analysis, view)) = active_optimization(&state.model.simulation, plan.as_deref())
     else {
         well_hint(
@@ -262,19 +263,24 @@ mod tests {
     #[test]
     fn retained_view_source_optimizer_gate_refreshes_without_frame_preparation() {
         let mut state = optimization_state(64);
-        let original = optimization_plan(&state).unwrap();
+        let original = optimization_plan(state.results_reads()).unwrap();
         assert_eq!(original.located.as_ref().unwrap().best_index(), 63);
         let version = state.model.simulation.view.data_version;
         state.model.simulation.retained.runs[0].analyses[0]
             .waveforms
             .remove(1);
-        assert!(!active_metadata_is_valid(&state));
-        assert!(optimization_plan(&state).unwrap().located.is_none());
+        assert!(!active_metadata_is_valid(state.results_reads()));
+        assert!(
+            optimization_plan(state.results_reads())
+                .unwrap()
+                .located
+                .is_none()
+        );
 
         state.model.simulation.retained.runs[0].analyses[0] =
             optimization_state(3).model.simulation.retained.runs[0].analyses[0].clone();
-        assert!(active_metadata_is_valid(&state));
-        let repaired = optimization_plan(&state).unwrap();
+        assert!(active_metadata_is_valid(state.results_reads()));
+        let repaired = optimization_plan(state.results_reads()).unwrap();
         assert_eq!(repaired.analysis, original.analysis);
         let (_, view) = active_optimization(&state.model.simulation, Some(&repaired)).unwrap();
         assert_eq!(view.best_index, 2);
@@ -290,9 +296,9 @@ mod tests {
     #[test]
     fn the_history_is_located_once_per_dataset_generation() {
         let state = optimization_state(64);
-        let first = optimization_plan(&state).expect("a located optimizer history");
+        let first = optimization_plan(state.results_reads()).expect("a located optimizer history");
         assert!(first.located.is_some());
-        let again = optimization_plan(&state).expect("a located optimizer history");
+        let again = optimization_plan(state.results_reads()).expect("a located optimizer history");
         assert!(Arc::ptr_eq(&first, &again));
 
         // The projection through the memo is the projection it replaced.
@@ -323,12 +329,13 @@ mod tests {
             .retain(|waveform| waveform.name != "OPT_GAIN");
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
-        let after = optimization_plan(&state).expect("a plan for the new generation");
+        let after =
+            optimization_plan(state.results_reads()).expect("a plan for the new generation");
         assert!(
             after.located.is_none(),
             "the sheet offered a history the new dataset generation no longer retains"
         );
-        assert!(!active_metadata_is_valid(&state));
+        assert!(!active_metadata_is_valid(state.results_reads()));
     }
 
     /// The candidate table lays out what its viewport shows, not one row per

@@ -514,7 +514,9 @@ fn latest_validated_analysis(
     let dataset_id = app.state.model.simulation.active_run()?.dataset_id;
     latest_analysis(app, analysis_type).filter(|analysis| {
         crate::workbench::documents::result_document::analysis_evidence_is_valid(
-            &app.state, dataset_id, analysis,
+            app.state.results_reads(),
+            dataset_id,
+            analysis,
         )
     })
 }

@@ -1,7 +1,7 @@
 //! Selected sensitivity evidence and history-bound presentation cache.
 
-use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
+use super::{AnalysisPresentationKey, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 use crate::workbench::AppState;
 use egui::Ui;
@@ -13,7 +13,7 @@ mod study;
 pub(super) use mismatch::MismatchPlan;
 pub(super) use study::{StudyPlan, domain_bar};
 
-fn active_sensitivity(state: &AppState) -> ActiveSensitivity<'_> {
+fn active_sensitivity(state: ResultsReads<'_>) -> ActiveSensitivity<'_> {
     let Some(analysis) = state.model.simulation.active_analysis() else {
         return ActiveSensitivity::Missing;
     };
@@ -39,7 +39,7 @@ fn active_sensitivity(state: &AppState) -> ActiveSensitivity<'_> {
         rows,
     })
 }
-pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     if study::serves_active_analysis(state) {
         return study::active_payload_is_valid(state);
     }
@@ -69,7 +69,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     {
         return Some(Arc::clone(plan));
     }
-    let ActiveSensitivity::Ready(view) = active_sensitivity(state) else {
+    let ActiveSensitivity::Ready(view) = active_sensitivity(state.results_reads()) else {
         return None;
     };
     frame_work::note(DatasetWalk::SensitivityRank);
@@ -82,34 +82,34 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     Some(built)
 }
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    if study::serves_active_analysis(state) {
+    if study::serves_active_analysis(state.results_reads()) {
         study::show(ui, state);
         return;
     }
-    if mismatch::serves_active_analysis(state) {
+    if mismatch::serves_active_analysis(state.results_reads()) {
         mismatch::show(ui, state);
         return;
     }
     let plan = sensitivity_plan(state);
     viewer::show(
         ui,
-        active_sensitivity(state),
+        active_sensitivity(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    if study::serves_active_analysis(state) {
+    if study::serves_active_analysis(state.results_reads()) {
         study::right_panel(ui, state);
         return;
     }
-    if mismatch::serves_active_analysis(state) {
+    if mismatch::serves_active_analysis(state.results_reads()) {
         mismatch::right_panel(ui, state);
         return;
     }
     let plan = sensitivity_plan(state);
     viewer::right_panel(
         ui,
-        active_sensitivity(state),
+        active_sensitivity(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
@@ -165,11 +165,11 @@ mod tests {
         ]);
 
         assert!(matches!(
-            active_sensitivity(&state),
+            active_sensitivity(state.results_reads()),
             ActiveSensitivity::Missing
         ));
         assert!(state.model.simulation.select_analysis(1));
-        let ActiveSensitivity::Ready(view) = active_sensitivity(&state) else {
+        let ActiveSensitivity::Ready(view) = active_sensitivity(state.results_reads()) else {
             panic!("the selected sensitivity payload should be available");
         };
         assert_eq!(view.analysis_label, "SENS");
@@ -191,7 +191,7 @@ mod tests {
         let state = state_with_analyses(vec![invalid]);
 
         assert!(matches!(
-            active_sensitivity(&state),
+            active_sensitivity(state.results_reads()),
             ActiveSensitivity::Invalid
         ));
     }
@@ -237,7 +237,7 @@ mod tests {
         let again = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
         assert!(Arc::ptr_eq(&first, &again));
 
-        let ActiveSensitivity::Ready(view) = active_sensitivity(&state) else {
+        let ActiveSensitivity::Ready(view) = active_sensitivity(state.results_reads()) else {
             panic!("the fixture retains a sensitivity payload");
         };
         assert_eq!(

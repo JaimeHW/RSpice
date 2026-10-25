@@ -12,7 +12,7 @@ use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-use super::{AnalysisPresentationKey, ResultViewer};
+use super::{AnalysisPresentationKey, ResultViewer, ResultsReads};
 
 /// The document presentation that owns a resolved result view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +112,8 @@ fn resolve_dataset_view(
         .iter()
         .enumerate()
         .filter_map(|(index, analysis)| {
-            analysis_supports_viewer_memoized(state, dataset_id, viewer, analysis).then_some(index)
+            analysis_supports_viewer_memoized(state.results_reads(), dataset_id, viewer, analysis)
+                .then_some(index)
         })
         .collect::<Vec<_>>();
 
@@ -232,7 +233,7 @@ fn resolve_visualization_pane(
         .ok_or_else(|| "The pane's bound analysis is no longer retained.".to_owned())?;
     let analysis = &run.analyses[analysis_index];
     let viewer = analysis_supports_viewer_memoized(
-        state,
+        state.results_reads(),
         run.dataset_id,
         state.results.results.session.viewer,
         analysis,
@@ -304,7 +305,7 @@ pub(crate) fn analysis_supports_viewer(viewer: ResultViewer, analysis: &Analysis
 /// would have. Every per-frame caller must use this one; the plain predicate
 /// above is for callers that hold a run without a session to memoize against.
 pub(crate) fn analysis_supports_viewer_memoized(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: DatasetId,
     viewer: ResultViewer,
     analysis: &AnalysisResult,

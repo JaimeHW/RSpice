@@ -22,7 +22,7 @@ use crate::results::visualization_document::{
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::ResultViewer;
+use super::{ResultViewer, ResultsReads};
 
 #[derive(Debug, Clone)]
 struct DocumentProjection {
@@ -281,7 +281,7 @@ pub(super) fn select_page(state: &mut AppState, document_id: ResultDocumentId, i
 /// resolves them: the remembered selection while it still exists, otherwise
 /// the first page and its first pane.
 pub(super) fn reading_position(
-    state: &AppState,
+    state: ResultsReads<'_>,
     document_id: ResultDocumentId,
 ) -> Option<(PageId, PaneId)> {
     let document = state
@@ -291,7 +291,6 @@ pub(super) fn reading_position(
         .visualization_document(document_id)?;
     let page = state
         .results
-        .results
         .session
         .persistent_document_page(document_id)
         .and_then(|selected| document.pages().iter().find(|page| page.id == selected))
@@ -299,7 +298,6 @@ pub(super) fn reading_position(
     let panes = ordered_page_panes(document.panes(), page);
     let pane_id = resolved_active_pane_id(
         state
-            .results
             .results
             .session
             .persistent_document_pane(document_id)
@@ -331,13 +329,13 @@ fn compatible_active_viewer(
 ) -> Option<ResultViewer> {
     let selected = state.results.results.session.viewer;
     if super::family_allows_viewer(family_label, selected)
-        && super::viewer_is_available(state, selected)
+        && super::viewer_is_available(state.results_reads(), selected)
     {
         return Some(selected);
     }
     ResultViewer::from_viewer_document_id(&pane.viewer_id).filter(|viewer| {
         super::family_allows_viewer(family_label, *viewer)
-            && super::viewer_is_available(state, *viewer)
+            && super::viewer_is_available(state.results_reads(), *viewer)
     })
 }
 
@@ -865,11 +863,11 @@ fn render_pane_viewer(
         return;
     }
     let viewer = bound_viewer_projection(&app.state, viewer);
-    if !super::viewer_is_available(&app.state, viewer) {
+    if !super::viewer_is_available(app.state.results_reads(), viewer) {
         unavailable_surface(
             ui,
             &pane.title,
-            super::viewer_unavailability_reason(&app.state, viewer)
+            super::viewer_unavailability_reason(app.state.results_reads(), viewer)
                 .unwrap_or("The retained analysis does not satisfy this viewer contract."),
         );
         return;
@@ -1151,7 +1149,7 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
     let binding = pane
         .binding
         .ok_or_else(|| "This result pane is not bound to a run.".to_owned())?;
-    let (run_index, analysis_index) = resolve_binding(state, binding)?;
+    let (run_index, analysis_index) = resolve_binding(state.results_reads(), binding)?;
     if state.model.simulation.view.active_run_idx == Some(run_index)
         && state.model.simulation.view.active_analysis_idx == Some(analysis_index)
     {
@@ -1167,7 +1165,7 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
 }
 
 pub(super) fn resolve_binding(
-    state: &AppState,
+    state: ResultsReads<'_>,
     binding: PaneDataBinding,
 ) -> Result<(usize, usize), String> {
     let run_index = state

@@ -1,5 +1,6 @@
 //! XF source selection, validation and retained dataset authority.
 
+use super::ResultsReads;
 use crate::state::{AnalysisResultPayload, SimulationRun};
 #[cfg(test)]
 use crate::state::{
@@ -12,7 +13,7 @@ use egui::Ui;
 use rspice_results_ui::transfer_function::gain_unit;
 use rspice_results_ui::transfer_function::{self as view, TransferFunctionView};
 
-fn active_transfer_function(state: &AppState) -> Option<TransferFunctionView<'_>> {
+fn active_transfer_function(state: ResultsReads<'_>) -> Option<TransferFunctionView<'_>> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
@@ -65,12 +66,12 @@ fn dataset_authority_label(run: &SimulationRun) -> &'static str {
     }
 }
 
-pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     active_transfer_function(state).is_some()
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    view::show(ui, active_transfer_function(state));
+    view::show(ui, active_transfer_function(state.results_reads()));
 }
 
 #[cfg(test)]
@@ -154,11 +155,12 @@ mod tests {
             tf,
         ]);
 
-        assert!(active_transfer_function(&state).is_none());
-        assert!(!active_payload_is_valid(&state));
+        assert!(active_transfer_function(state.results_reads()).is_none());
+        assert!(!active_payload_is_valid(state.results_reads()));
         assert!(state.model.simulation.select_analysis(1));
 
-        let view = active_transfer_function(&state).expect("selected TF payload is active");
+        let view =
+            active_transfer_function(state.results_reads()).expect("selected TF payload is active");
         assert_eq!(view.analysis_label, "XF active");
         assert_eq!(view.input_source, "VIN");
         assert_eq!(view.output_expression, "I(VMEAS)");
@@ -166,7 +168,7 @@ mod tests {
             view.gain,
             Some(TransferFunctionScalarEvidence::Finite(-0.25))
         );
-        assert!(active_payload_is_valid(&state));
+        assert!(active_payload_is_valid(state.results_reads()));
     }
 
     #[test]
@@ -198,17 +200,17 @@ mod tests {
             ),
         ]);
 
-        let first = active_transfer_function(&state).expect("first TF");
+        let first = active_transfer_function(state.results_reads()).expect("first TF");
         assert_eq!(first.analysis_label, "A per V");
         assert_eq!(gain_unit(&first), "A/V");
 
         assert!(state.model.simulation.select_analysis(1));
-        let second = active_transfer_function(&state).expect("second TF");
+        let second = active_transfer_function(state.results_reads()).expect("second TF");
         assert_eq!(second.analysis_label, "V per A");
         assert_eq!(gain_unit(&second), "V/A");
 
         assert!(state.model.simulation.select_analysis(2));
-        let relative = active_transfer_function(&state).expect("relative TF");
+        let relative = active_transfer_function(state.results_reads()).expect("relative TF");
         assert_eq!(relative.analysis_label, "Relative");
         assert_eq!(gain_unit(&relative), "1");
     }
@@ -224,7 +226,9 @@ mod tests {
             1.0,
         );
         failed.success = false;
-        assert!(active_transfer_function(&state_with_analyses(vec![failed])).is_none());
+        assert!(
+            active_transfer_function(state_with_analyses(vec![failed]).results_reads()).is_none()
+        );
 
         let payload = tf_result(
             2,
@@ -238,7 +242,10 @@ mod tests {
         .result_payload;
         let mut mismatched = AnalysisResult::new(2, AnalysisType::Ac, "AC");
         mismatched.result_payload = payload;
-        assert!(active_transfer_function(&state_with_analyses(vec![mismatched])).is_none());
+        assert!(
+            active_transfer_function(state_with_analyses(vec![mismatched]).results_reads())
+                .is_none()
+        );
     }
 
     #[test]
@@ -252,7 +259,7 @@ mod tests {
             1.0,
         )]);
 
-        let view = active_transfer_function(&state).expect("active XF view");
+        let view = active_transfer_function(state.results_reads()).expect("active XF view");
 
         assert_eq!(view.dataset_authority, "prepared receipt unavailable");
         assert_eq!(

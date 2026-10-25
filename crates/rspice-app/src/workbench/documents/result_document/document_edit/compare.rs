@@ -20,7 +20,7 @@ use crate::results::visualization_document::ComparisonReceipt;
 /// The retained runs that hold the candidate's analysis on the same X axis,
 /// each with its matching analysis and the signals the two share.
 fn baselines<'a>(
-    state: &'a AppState,
+    state: ResultsReads<'a>,
     run: &SimulationRun,
     analysis: &AnalysisResult,
 ) -> Vec<(&'a SimulationRun, Vec<String>)> {
@@ -44,15 +44,15 @@ fn run_label(run: &SimulationRun) -> String {
 }
 
 /// Whether Compare datasets has a candidate and a baseline to compare it with.
-pub(crate) fn compare_available(state: &AppState) -> bool {
+pub(crate) fn compare_available(state: ResultsReads<'_>) -> bool {
     reading_analysis(state).is_ok_and(|(run, analysis)| !baselines(state, run, analysis).is_empty())
 }
 
 /// Open Compare datasets on the result the reader is looking at, against the
 /// first compatible baseline.
 pub(crate) fn open_compare(state: &mut AppState) {
-    let baseline = match reading_analysis(state) {
-        Ok((run, analysis)) => baselines(state, run, analysis)
+    let baseline = match reading_analysis(state.results_reads()) {
+        Ok((run, analysis)) => baselines(state.results_reads(), run, analysis)
             .first()
             .map(|(baseline, _)| baseline.dataset_id),
         // Compare datasets is disabled while either is missing.
@@ -114,7 +114,7 @@ fn numbers(draft: &CompareDraft) -> Result<CompareNumbers, String> {
 /// Resolve the form's choices against the retained datasets, moving a
 /// baseline or signal that no longer exists onto the first one that does.
 pub(super) fn choices(state: &AppState, draft: &mut CompareDraft) -> CompareChoices {
-    let (run, analysis) = match reading_analysis(state) {
+    let (run, analysis) = match reading_analysis(state.results_reads()) {
         Ok(found) => found,
         Err(refusal) => {
             return CompareChoices {
@@ -125,7 +125,7 @@ pub(super) fn choices(state: &AppState, draft: &mut CompareDraft) -> CompareChoi
             };
         }
     };
-    let baselines = baselines(state, run, analysis);
+    let baselines = baselines(state.results_reads(), run, analysis);
     let selected = draft
         .baseline
         .and_then(|id| {
@@ -166,7 +166,7 @@ pub(super) fn commit(
     }
     let numbers = numbers(&draft)?;
     let (outcome, edits) = {
-        let (run, analysis) = reading_analysis(state)?;
+        let (run, analysis) = reading_analysis(state.results_reads())?;
         let baseline = draft
             .baseline
             .and_then(|id| {
@@ -196,9 +196,9 @@ pub(super) fn commit(
             },
         )?;
         let outcome = outcome(state, analysis, baseline, &receipt, &signal_names, &numbers);
-        let edits = match active_document_id(state) {
+        let edits = match active_document_id(state.results_reads()) {
             Some(document_id) => {
-                let document = project_document(state, document_id)?;
+                let document = project_document(state.results_reads(), document_id)?;
                 let mut edits = Vec::new();
                 for (source_run, source_analysis) in
                     [(baseline, baseline_analysis), (run, analysis)]

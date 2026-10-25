@@ -1,7 +1,7 @@
 //! Selected study evidence and history-bound presentation cache.
 
-use super::super::AnalysisPresentationKey;
 use super::super::frame_work::{self, DatasetWalk};
+use super::super::{AnalysisPresentationKey, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 use crate::workbench::AppState;
 use egui::Ui;
@@ -9,7 +9,7 @@ use rspice_results_ui::sensitivity::study as viewer;
 use std::sync::Arc;
 use viewer::{ActiveStudy, StudyView};
 
-pub(super) fn active_study(state: &AppState) -> ActiveStudy<'_> {
+pub(super) fn active_study(state: ResultsReads<'_>) -> ActiveStudy<'_> {
     let Some(analysis) = state.model.simulation.active_analysis() else {
         return ActiveStudy::Missing;
     };
@@ -27,7 +27,7 @@ pub(super) fn active_study(state: &AppState) -> ActiveStudy<'_> {
         quantity_policy: state.model.preferences.quantity_presentation_policy(),
     })
 }
-pub(super) fn serves_active_analysis(state: &AppState) -> bool {
+pub(super) fn serves_active_analysis(state: ResultsReads<'_>) -> bool {
     state
         .model
         .simulation
@@ -39,7 +39,7 @@ pub(super) fn serves_active_analysis(state: &AppState) -> bool {
             )
         })
 }
-pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     matches!(active_study(state), ActiveStudy::Ready(_))
 }
 
@@ -57,7 +57,7 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
-    let ActiveStudy::Ready(view) = active_study(state) else {
+    let ActiveStudy::Ready(view) = active_study(state.results_reads()) else {
         return None;
     };
     let index = state
@@ -105,7 +105,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let plan = study_plan(state);
     viewer::show(
         ui,
-        active_study(state),
+        active_study(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
@@ -113,7 +113,7 @@ pub(super) fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let plan = study_plan(state);
     viewer::right_panel(
         ui,
-        active_study(state),
+        active_study(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
@@ -175,12 +175,18 @@ mod tests {
     #[test]
     fn only_the_active_analysis_and_only_a_valid_payload_is_drawn() {
         let mut state = state_with(swept_evidence());
-        assert!(serves_active_analysis(&state));
-        assert!(active_payload_is_valid(&state));
+        assert!(serves_active_analysis(state.results_reads()));
+        assert!(active_payload_is_valid(state.results_reads()));
 
         state.model.simulation.retained.runs[0].analyses[0].success = false;
-        assert!(serves_active_analysis(&state), "the payload is still there");
-        assert!(matches!(active_study(&state), ActiveStudy::Invalid));
+        assert!(
+            serves_active_analysis(state.results_reads()),
+            "the payload is still there"
+        );
+        assert!(matches!(
+            active_study(state.results_reads()),
+            ActiveStudy::Invalid
+        ));
         assert!(study_plan(&mut state).is_none());
     }
     #[test]

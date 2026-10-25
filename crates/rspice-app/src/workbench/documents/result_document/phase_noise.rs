@@ -59,7 +59,7 @@ fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
     // and level, and this resolves on every frame the sheet is open.
     let renderable = |analysis: &AnalysisResult| {
         super::analysis_answers_structural_gate(
-            state,
+            state.results_reads(),
             run.dataset_id,
             analysis,
             super::StructuralGate::PhaseNoiseSpectrum,

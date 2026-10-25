@@ -23,7 +23,7 @@ pub(crate) fn open_measurement(state: &mut AppState) {
 
 /// What the form shows for `draft` on this frame.
 pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> MeasurementPreview {
-    let (run, analysis) = match reading_analysis(state) {
+    let (run, analysis) = match reading_analysis(state.results_reads()) {
         Ok(found) => found,
         Err(refusal) => {
             return MeasurementPreview {
@@ -33,8 +33,11 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
             };
         }
     };
-    let pane = active_document_id(state).and_then(|document_id| {
-        let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)?;
+    let pane = active_document_id(state.results_reads()).and_then(|document_id| {
+        let (_, pane_id) = super::super::persistent_document::reading_position(
+            state.results_reads(),
+            document_id,
+        )?;
         let document = state
             .model
             .workspace
@@ -70,16 +73,22 @@ pub(super) fn commit(
     state: &mut AppState,
     draft: &MeasurementDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
-    let document_id = active_document_id(state).ok_or_else(|| QUICK_VIEW.to_owned())?;
+    let document_id =
+        active_document_id(state.results_reads()).ok_or_else(|| QUICK_VIEW.to_owned())?;
     let expression = draft.expression.trim().to_owned();
     if expression.is_empty() {
         return Err("Enter an expression to measure.".to_owned());
     }
-    let (_, analysis) = reading_analysis(state)?;
+    let (_, analysis) = reading_analysis(state.results_reads())?;
     let value = evaluate(analysis, &expression)?;
-    let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)
-        .ok_or_else(|| "The result document has no pane.".to_owned())?;
-    let trace_ids = pane_traces(project_document(state, document_id)?, pane_id, &expression)?;
+    let (_, pane_id) =
+        super::super::persistent_document::reading_position(state.results_reads(), document_id)
+            .ok_or_else(|| "The result document has no pane.".to_owned())?;
+    let trace_ids = pane_traces(
+        project_document(state.results_reads(), document_id)?,
+        pane_id,
+        &expression,
+    )?;
     transact(
         state,
         document_id,

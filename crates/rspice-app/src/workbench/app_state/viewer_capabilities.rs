@@ -12,6 +12,7 @@ use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::documents::result_document::{ResultsReads, histogram_is_available};
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Provenance for the mutable specialized result caches.
@@ -50,6 +51,21 @@ pub struct ViewerCapability {
     pub available: bool,
     /// Static user-facing reason describing required data.
     pub reason: &'static str,
+}
+
+impl AnalysisWorkspaceState {
+    /// The exact result that owns a viewer's mutable cache, for the viewers
+    /// that keep one.
+    fn cache_provenance(&self, viewer: ActiveViewer) -> Option<SpecializedViewerCacheProvenance> {
+        match viewer {
+            ActiveViewer::BodePlot => self.cache_authority.bode,
+            ActiveViewer::Nyquist => self.cache_authority.nyquist,
+            ActiveViewer::SmithChart => self.cache_authority.smith,
+            ActiveViewer::Fft => self.cache_authority.fft,
+            ActiveViewer::EyeDiagram => self.cache_authority.eye,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => None,
+        }
+    }
 }
 
 impl ViewerCapability {
@@ -198,7 +214,7 @@ impl AppState {
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
         ] {
-            let retained = self.specialized_viewer_cache_authority(viewer);
+            let retained = self.results.analysis.cache_provenance(viewer);
             let unbound_data = retained.is_none() && self.specialized_viewer_cache_has_data(viewer);
             let belongs_to_another_result = retained.is_some() && retained != active;
             if unbound_data || belongs_to_another_result {
@@ -227,20 +243,6 @@ impl AppState {
         self.clear_specialized_viewer_cache_authority(viewer);
     }
 
-    fn specialized_viewer_cache_authority(
-        &self,
-        viewer: ActiveViewer,
-    ) -> Option<SpecializedViewerCacheProvenance> {
-        match viewer {
-            ActiveViewer::BodePlot => self.results.analysis.cache_authority.bode,
-            ActiveViewer::Nyquist => self.results.analysis.cache_authority.nyquist,
-            ActiveViewer::SmithChart => self.results.analysis.cache_authority.smith,
-            ActiveViewer::Fft => self.results.analysis.cache_authority.fft,
-            ActiveViewer::EyeDiagram => self.results.analysis.cache_authority.eye,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => None,
-        }
-    }
-
     fn specialized_viewer_cache_authority_mut(
         &mut self,
         viewer: ActiveViewer,
@@ -257,12 +259,6 @@ impl AppState {
         }
     }
 
-    fn specialized_viewer_cache_matches_active(&self, viewer: ActiveViewer) -> bool {
-        self.model
-            .active_specialized_viewer_cache_provenance()
-            .is_some_and(|active| self.specialized_viewer_cache_authority(viewer) == Some(active))
-    }
-
     fn specialized_viewer_cache_has_data(&self, viewer: ActiveViewer) -> bool {
         match viewer {
             ActiveViewer::BodePlot => !self.results.analysis.bode_plot_state.is_empty(),
@@ -274,13 +270,27 @@ impl AppState {
         }
     }
 
+    /// Whether a viewer is currently available for activation.
+    #[cfg(test)]
+    pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
+        self.results_reads().viewer_capability(viewer).available
+    }
+}
+
+impl ResultsReads<'_> {
+    fn specialized_viewer_cache_matches_active(self, viewer: ActiveViewer) -> bool {
+        self.model
+            .active_specialized_viewer_cache_provenance()
+            .is_some_and(|active| self.analysis.cache_provenance(viewer) == Some(active))
+    }
+
     /// Resolve whether a viewer can currently be opened with meaningful data.
-    pub fn viewer_capability(&self, viewer: ActiveViewer) -> ViewerCapability {
+    pub(crate) fn viewer_capability(self, viewer: ActiveViewer) -> ViewerCapability {
         match viewer {
             ActiveViewer::Waveform => ViewerCapability::available("Always available"),
             ActiveViewer::SmithChart => {
                 if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.results.analysis.smith_chart_state.traces.is_empty()
+                    || self.analysis.smith_chart_state.traces.is_empty()
                 {
                     ViewerCapability::unavailable(
                         "Requires retained S-parameter traces and per-port reference impedances",
@@ -293,10 +303,10 @@ impl AppState {
             }
             ActiveViewer::EyeDiagram => {
                 if self.specialized_viewer_cache_matches_active(viewer)
-                    && self.results.analysis.eye_diagram_state.trace_count() > 0
+                    && self.analysis.eye_diagram_state.trace_count() > 0
                 {
                     ViewerCapability::available("Active analysis eye traces loaded")
-                } else if active_analysis_supports_eye_diagram(&self.model) {
+                } else if active_analysis_supports_eye_diagram(self.model) {
                     ViewerCapability::available(
                         "Can derive eye data from active transient waveforms",
                     )
@@ -305,7 +315,7 @@ impl AppState {
                 }
             }
             ActiveViewer::Histogram => {
-                if crate::workbench::documents::result_document::histogram_is_available(self) {
+                if histogram_is_available(self) {
                     ViewerCapability::available("Retained Monte Carlo samples available")
                 } else {
                     ViewerCapability::unavailable("Requires retained Monte Carlo samples")
@@ -313,7 +323,7 @@ impl AppState {
             }
             ActiveViewer::BodePlot => {
                 if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.results.analysis.bode_plot_state.is_empty()
+                    || self.analysis.bode_plot_state.is_empty()
                 {
                     ViewerCapability::unavailable("Requires AC/transfer-function response data")
                 } else {
@@ -322,7 +332,7 @@ impl AppState {
             }
             ActiveViewer::Nyquist => {
                 if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.results.analysis.nyquist_state.is_empty()
+                    || self.analysis.nyquist_state.is_empty()
                 {
                     // The sheet takes a retained loop-gain contour and nothing
                     // else — an AC node response is not a loop gain, and the
@@ -337,9 +347,8 @@ impl AppState {
                 }
             }
             ActiveViewer::Fft => {
-                let has_spectrum = self.results.analysis.fft_state.has_data()
+                let has_spectrum = self.analysis.fft_state.has_data()
                     && self
-                        .results
                         .analysis
                         .fft_state
                         .data
@@ -347,7 +356,7 @@ impl AppState {
                         .is_some_and(|data| !data.is_empty());
                 if self.specialized_viewer_cache_matches_active(viewer) && has_spectrum {
                     ViewerCapability::available("Active analysis FFT spectrum data loaded")
-                } else if active_analysis_supports_fft(&self.model) {
+                } else if active_analysis_supports_fft(self.model) {
                     ViewerCapability::available("Can derive FFT from active transient waveforms")
                 } else {
                     ViewerCapability::unavailable("Requires sampled time-domain data for FFT")
@@ -377,12 +386,6 @@ impl AppState {
                 }
             }
         }
-    }
-
-    /// Whether a viewer is currently available for activation.
-    #[cfg(test)]
-    pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
-        self.viewer_capability(viewer).available
     }
 }
 
@@ -705,7 +708,9 @@ mod tests {
     #[test]
     fn the_nyquist_gate_names_the_stability_analysis_and_its_single_locus() {
         let mut state = AppState::default();
-        let closed = state.viewer_capability(ActiveViewer::Nyquist);
+        let closed = state
+            .results_reads()
+            .viewer_capability(ActiveViewer::Nyquist);
         assert!(!closed.available);
         assert!(
             closed.reason.contains(".STB"),
@@ -719,7 +724,9 @@ mod tests {
         );
 
         seed_result_viewers(&mut state);
-        let open = state.viewer_capability(ActiveViewer::Nyquist);
+        let open = state
+            .results_reads()
+            .viewer_capability(ActiveViewer::Nyquist);
         assert!(open.available, "{}", open.reason);
         assert!(
             !open.reason.contains("curves"),

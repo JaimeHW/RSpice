@@ -283,11 +283,11 @@ fn waveform_data_does_not_enable_incompatible_result_viewers() {
         ]),
     );
 
-    assert!(viewer_availability(&state, ResultViewer::Waves).available);
-    assert!(!viewer_availability(&state, ResultViewer::Bode).available);
-    assert!(!viewer_availability(&state, ResultViewer::Hist).available);
-    assert!(!viewer_availability(&state, ResultViewer::NoiseContrib).available);
-    assert!(!viewer_availability(&state, ResultViewer::Contribution).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::Waves).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Bode).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Hist).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::NoiseContrib).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Contribution).available);
 }
 
 #[test]
@@ -307,8 +307,8 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     state.model.simulation.retained.runs = vec![run].into();
     assert!(state.model.simulation.select_run(0));
 
-    assert!(viewer_availability(&state, ResultViewer::Waves).available);
-    assert!(viewer_availability(&state, ResultViewer::DcSweep).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::Waves).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::DcSweep).available);
 
     state.results.results.session.viewer = ResultViewer::Waves;
     let presentation = state.model.preferences.result_presentation_policy();
@@ -340,8 +340,8 @@ fn ordinary_noise_enables_noise_but_never_substitutes_for_bode() {
         ]),
     );
 
-    assert!(viewer_availability(&state, ResultViewer::NoiseContrib).available);
-    assert!(!viewer_availability(&state, ResultViewer::Bode).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::NoiseContrib).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Bode).available);
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
             ),
         );
         assert!(
-            viewer_availability(&state, ResultViewer::Bode).available,
+            viewer_availability(state.results_reads(), ResultViewer::Bode).available,
             "{} must feed Bode",
             analysis_type.short_label()
         );
@@ -385,7 +385,7 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
             .with_unit("°"),
         ]),
     );
-    assert!(viewer_availability(&stb, ResultViewer::Bode).available);
+    assert!(viewer_availability(stb.results_reads(), ResultViewer::Bode).available);
 
     let pstb = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Pstb, "PSTB").with_waveforms(vec![
@@ -398,8 +398,8 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
             .with_unit("dB"),
         ]),
     );
-    assert!(!viewer_availability(&pstb, ResultViewer::Bode).available);
-    assert!(viewer_availability(&pstb, ResultViewer::Table).available);
+    assert!(!viewer_availability(pstb.results_reads(), ResultViewer::Bode).available);
+    assert!(viewer_availability(pstb.results_reads(), ResultViewer::Table).available);
 }
 
 #[test]
@@ -415,7 +415,7 @@ fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
                 )],
             ),
         );
-        assert!(viewer_availability(&state, ResultViewer::Waves).available);
+        assert!(viewer_availability(state.results_reads(), ResultViewer::Waves).available);
     }
 
     let disto = state_with_analysis(
@@ -429,7 +429,7 @@ fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
             .with_unit("dBc"),
         ]),
     );
-    assert!(viewer_availability(&disto, ResultViewer::Bode).available);
+    assert!(viewer_availability(disto.results_reads(), ResultViewer::Bode).available);
 }
 
 #[test]
@@ -445,7 +445,7 @@ fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
             .with_complex_components("V(out) Spectrum", vec![1.0, 0.1], vec![0.0, 0.0]),
         ]),
     );
-    assert!(viewer_availability(&fourier, ResultViewer::HarmonicBalance).available);
+    assert!(viewer_availability(fourier.results_reads(), ResultViewer::HarmonicBalance).available);
 
     for analysis_type in [
         AnalysisType::SParameter,
@@ -463,8 +463,8 @@ fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
                         .with_complex_components("S11", vec![0.5, 0.25], vec![0.0, -0.1]),
                 ]),
         );
-        assert!(viewer_availability(&state, ResultViewer::Smith).available);
-        assert!(viewer_availability(&state, ResultViewer::Table).available);
+        assert!(viewer_availability(state.results_reads(), ResultViewer::Smith).available);
+        assert!(viewer_availability(state.results_reads(), ResultViewer::Table).available);
     }
 }
 
@@ -480,8 +480,8 @@ fn hbnoise_uses_the_noise_density_projection_and_never_impersonates_ac() {
     ]);
     let state = state_with_analysis(analysis.clone());
 
-    assert!(viewer_availability(&state, ResultViewer::NoiseContrib).available);
-    assert!(!viewer_availability(&state, ResultViewer::Bode).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::NoiseContrib).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Bode).available);
     assert_eq!(
         project_viewer_for_analysis(ResultViewer::Bode, &analysis),
         ResultViewer::NoiseContrib
@@ -512,9 +512,9 @@ fn op_viewer_requires_the_selected_analysis_device_report() {
     assert!(state.model.simulation.select_run(0));
 
     assert!(state.model.simulation.select_analysis(1));
-    assert!(!viewer_availability(&state, ResultViewer::Op).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Op).available);
     assert!(state.model.simulation.select_analysis(0));
-    assert!(viewer_availability(&state, ResultViewer::Op).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::Op).available);
 }
 
 /// The OP tab and the OP sheet answer the same question.
@@ -549,13 +549,13 @@ fn the_op_tab_is_offered_only_where_the_op_sheet_renders() {
         "the sheet's own projection refuses a transient, so the tab must too"
     );
     assert!(
-        !viewer_availability(&transient, ResultViewer::Op).available,
+        !viewer_availability(transient.results_reads(), ResultViewer::Op).available,
         "a transient's retained bias solution lit a sheet that refuses to draw it"
     );
 
     let operating_point =
         state_with_analysis(AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(dc));
-    assert!(viewer_availability(&operating_point, ResultViewer::Op).available);
+    assert!(viewer_availability(operating_point.results_reads(), ResultViewer::Op).available);
 }
 
 /// The specs tab speaks for the run the sheet reads, which is the active one.
@@ -584,13 +584,13 @@ fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
 
     assert!(state.model.simulation.select_run(0));
     assert!(
-        viewer_availability(&state, ResultViewer::Specs).available,
+        viewer_availability(state.results_reads(), ResultViewer::Specs).available,
         "the run the sheet reads holds a measurement"
     );
 
     assert!(state.model.simulation.select_run(1));
     assert!(
-        !viewer_availability(&state, ResultViewer::Specs).available,
+        !viewer_availability(state.results_reads(), ResultViewer::Specs).available,
         "the tab was offered for a measurement in a run the sheet never reads"
     );
 }
@@ -610,12 +610,14 @@ fn contribution_viewer_requires_the_active_valid_sensitivity_payload() {
         AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
             .with_result_payload(payload.clone()),
     );
-    assert!(viewer_availability(&state, ResultViewer::Contribution).available);
+    assert!(viewer_availability(state.results_reads(), ResultViewer::Contribution).available);
 
     let mut wrong = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     wrong.result_payload = Some(payload);
     let wrong_analysis = state_with_analysis(wrong);
-    assert!(!viewer_availability(&wrong_analysis, ResultViewer::Contribution).available);
+    assert!(
+        !viewer_availability(wrong_analysis.results_reads(), ResultViewer::Contribution).available
+    );
 }
 
 #[test]
@@ -865,13 +867,16 @@ fn every_campaign_analysis_reaches_a_sheet_that_can_draw_it() {
         );
         let state = state_with_analysis(analysis);
         assert!(
-            viewer_availability(&state, viewer).available,
+            viewer_availability(state.results_reads(), viewer).available,
             "{viewer:?} is unreachable"
         );
         // The sheet's own evidence gate must agree with the tab that
         // offered it, or the tab opens onto a refusal.
         let key = active_analysis_key(&state);
-        assert!(retained_evidence_is_valid(&state, key), "{viewer:?}");
+        assert!(
+            retained_evidence_is_valid(state.results_reads(), key),
+            "{viewer:?}"
+        );
     }
 }
 
@@ -880,7 +885,7 @@ fn every_campaign_analysis_reaches_a_sheet_that_can_draw_it() {
 #[test]
 fn a_transient_without_event_nodes_offers_no_event_sheet() {
     let state = transient_state();
-    assert!(!viewer_availability(&state, ResultViewer::Events).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Events).available);
 }
 
 /// Render the real tab strip and read the accessibility tree it publishes.
@@ -1023,9 +1028,9 @@ fn every_available_sheet_draws_the_evidence_it_claims() {
     for viewer in ResultViewer::all() {
         let mut app = app_showing(viewer);
         assert!(
-            viewer_availability(&app.state, viewer).available,
+            viewer_availability(app.state.results_reads(), viewer).available,
             "the {viewer:?} fixture does not satisfy the sheet's own contract: {}",
-            viewer_availability(&app.state, viewer).reason
+            viewer_availability(app.state.results_reads(), viewer).reason
         );
         draw_sheet_and_tessellate(&mut app, viewer);
     }
@@ -1370,7 +1375,7 @@ fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
     // Still drawable: refusing the partial samples would take away the
     // one view that answers "where did it go wrong?".
     assert!(
-        viewer_availability(&app.state, ResultViewer::Waves).available,
+        viewer_availability(app.state.results_reads(), ResultViewer::Waves).available,
         "partial transient samples must stay drawable"
     );
     let purpose = sheet_purpose(&app.state);
@@ -1851,19 +1856,19 @@ fn fitting_without_an_active_pane_releases_every_strip() {
 fn zoom_is_offered_only_where_it_can_be_carried_out() {
     let mut state = transient_state();
     state.results.results.session.viewer = ResultViewer::Waves;
-    assert!(zoom_gesture_available(&state));
-    assert!(fit_gesture_available(&state));
+    assert!(zoom_gesture_available(state.results_reads()));
+    assert!(fit_gesture_available(state.results_reads()));
 
     state.results.results.session.viewer = ResultViewer::Fft;
-    assert!(!zoom_gesture_available(&state));
+    assert!(!zoom_gesture_available(state.results_reads()));
     assert!(
-        fit_gesture_available(&state),
+        fit_gesture_available(state.results_reads()),
         "a single-canvas plot still has a viewport to release"
     );
 
     state.results.results.session.viewer = ResultViewer::Table;
-    assert!(!fit_gesture_available(&state));
-    assert!(!zoom_gesture_available(&state));
+    assert!(!fit_gesture_available(state.results_reads()));
+    assert!(!zoom_gesture_available(state.results_reads()));
 }
 
 /// A signal whose name declares no accessor reads in its analysis' own

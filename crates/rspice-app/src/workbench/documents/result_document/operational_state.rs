@@ -380,7 +380,7 @@ pub(crate) fn classify_viewer(
     };
     if analysis_keys
         .into_iter()
-        .any(|key| !super::retained_evidence_is_valid(state, key))
+        .any(|key| !super::retained_evidence_is_valid(state.results_reads(), key))
     {
         return ResultOperationalStatus::canonical(ResultOperationalState::Corrupted, true);
     }
@@ -469,11 +469,12 @@ pub(crate) fn classify_viewer(
     }
 
     if super::viewer_requires_retained_results(viewer)
-        && !super::viewer_availability(state, viewer).available
+        && !super::viewer_availability(state.results_reads(), viewer).available
     {
         return ResultOperationalStatus {
             state: ResultOperationalState::Unsupported,
-            detail: super::viewer_unavailability_reason(state, viewer).map(str::to_owned),
+            detail: super::viewer_unavailability_reason(state.results_reads(), viewer)
+                .map(str::to_owned),
             blocks_visuals: true,
             dismissible: false,
         };

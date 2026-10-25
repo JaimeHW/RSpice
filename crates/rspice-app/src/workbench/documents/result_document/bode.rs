@@ -12,7 +12,7 @@ use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
 use crate::workbench::AppState;
 use rspice_results_ui::bode::inspector::{self, BodeInspector, NoiseSpectrumModel};
 
-use super::BodeDerived;
+use super::{BodeDerived, ResultsReads};
 
 /// The selected frequency-response signal pair's computed stability numbers.
 struct BodeModel {
@@ -37,13 +37,12 @@ fn resolve_noise_spectrum_shape(analysis: &AnalysisResult) -> Option<NoiseSpectr
 /// Its memo checks the retained history revision on every read. A tab-strip
 /// query before frame preparation cannot reuse the shape of an older source.
 pub(super) fn noise_spectrum_shape(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: crate::product::DatasetId,
     analysis: &AnalysisResult,
 ) -> Option<NoiseSpectrumShape> {
     let key = super::AnalysisPresentationKey::new(dataset_id, analysis);
     state
-        .results
         .results
         .noise_spectrum_shapes
         .get_or_insert_with(&state.model.simulation, key, || {
@@ -54,7 +53,7 @@ pub(super) fn noise_spectrum_shape(
 /// Whether one analysis holds an ordinary-noise spectrum this workspace can
 /// draw, through the memo that owns the question.
 pub(super) fn ordinary_noise_spectrum_is_renderable_in(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: crate::product::DatasetId,
     analysis: &AnalysisResult,
 ) -> bool {
@@ -177,7 +176,13 @@ pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     rspice_results::renderability::select_ordinary_noise_analysis(
         state.model.simulation.view.active_analysis_idx,
         &run.analyses,
-        |analysis| ordinary_noise_spectrum_is_renderable_in(state, run.dataset_id, analysis),
+        |analysis| {
+            ordinary_noise_spectrum_is_renderable_in(
+                state.results_reads(),
+                run.dataset_id,
+                analysis,
+            )
+        },
     )
 }
 
@@ -190,7 +195,7 @@ fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)>
 fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
     let run = state.model.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
-    let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
+    let shape = noise_spectrum_shape(state.results_reads(), run.dataset_id, analysis)?;
     let frequency = Arc::clone(&analysis.waveforms.get(shape.anchor)?.x);
     let (total_rms, input_rms, band) = analysis
         .noise_summary
@@ -275,7 +280,7 @@ mod tests {
     fn selected_noise_trace_count(state: &AppState) -> Option<usize> {
         let run = state.model.simulation.active_run()?;
         let (_, analysis) = selected_noise_analysis(state)?;
-        Some(noise_spectrum_shape(state, run.dataset_id, analysis)?.trace_count)
+        Some(noise_spectrum_shape(state.results_reads(), run.dataset_id, analysis)?.trace_count)
     }
 
     fn ac_result(

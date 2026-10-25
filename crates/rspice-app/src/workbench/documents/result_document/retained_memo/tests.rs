@@ -56,7 +56,7 @@ fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() 
     let mut state = retained_state(AnalysisType::Transient, 3);
     let key = key(&state);
     let version = state.model.simulation.view.data_version;
-    assert!(retained_evidence_is_valid(&state, key));
+    assert!(retained_evidence_is_valid(state.results_reads(), key));
     Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y).pop();
     assert!(
         state.model.simulation.retained.runs[0].analyses[0]
@@ -64,13 +64,13 @@ fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() 
             .is_err()
     );
     assert!(
-        !retained_evidence_is_valid(&state, key),
+        !retained_evidence_is_valid(state.results_reads(), key),
         "a stale success hid corrupt evidence"
     );
     Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
         .push(1.0);
     assert!(
-        retained_evidence_is_valid(&state, key),
+        retained_evidence_is_valid(state.results_reads(), key),
         "a stale failure hid repaired evidence"
     );
     assert_eq!(state.model.simulation.view.data_version, version);
@@ -82,11 +82,11 @@ fn retained_memo_absent_analysis_becomes_available_without_frame_preparation() {
     let next = analysis(AnalysisType::Transient, 2, 3);
     let key =
         AnalysisPresentationKey::new(state.model.simulation.retained.runs[0].dataset_id, &next);
-    assert!(!retained_evidence_is_valid(&state, key));
+    assert!(!retained_evidence_is_valid(state.results_reads(), key));
     let version = state.model.simulation.view.data_version;
     state.model.simulation.retained.runs[0].analyses.push(next);
     assert!(
-        retained_evidence_is_valid(&state, key),
+        retained_evidence_is_valid(state.results_reads(), key),
         "a cached absence hid the retained analysis"
     );
     assert_eq!(state.model.simulation.view.data_version, version);
@@ -96,7 +96,12 @@ fn gate_tracks_coordinates(kind: AnalysisType, gate: StructuralGate) {
     let mut state = retained_state(kind, 3);
     let answer = |state: &AppState| {
         let run = &state.model.simulation.retained.runs[0];
-        analysis_answers_structural_gate(state, run.dataset_id, &run.analyses[0], gate)
+        analysis_answers_structural_gate(
+            state.results_reads(),
+            run.dataset_id,
+            &run.analyses[0],
+            gate,
+        )
     };
     assert!(answer(&state));
     let version = state.model.simulation.view.data_version;
@@ -191,16 +196,19 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
 
 fn read_all(state: &AppState) {
     let run = &state.model.simulation.retained.runs[0];
-    assert!(retained_evidence_is_valid(state, key(state)));
+    assert!(retained_evidence_is_valid(
+        state.results_reads(),
+        key(state)
+    ));
     let _ = retained_dataset_digest(state, run);
     assert!(analysis_answers_structural_gate(
-        state,
+        state.results_reads(),
         run.dataset_id,
         &run.analyses[1],
         StructuralGate::OrdinaryNoiseSpectrum
     ));
     assert!(analysis_answers_structural_gate(
-        state,
+        state.results_reads(),
         run.dataset_id,
         &run.analyses[2],
         StructuralGate::BodeResponse

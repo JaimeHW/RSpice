@@ -172,7 +172,7 @@ fn the_add_pane_form_draws_over_the_document() {
 fn add_pane_is_offered_only_over_a_project_result_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
-    assert!(!add_pane_available(&app.state));
+    assert!(!add_pane_available(app.state.results_reads()));
     open_add_pane(&mut app.state);
     assert!(app.state.results.result_document_dialog.is_none());
 }
@@ -347,7 +347,7 @@ fn run_comparison(
     app: &mut RSpiceApp,
 ) -> rspice_results_ui::document_dialogs::compare::CompareOutcome {
     app.state.workbench.workspace = Workspace::Results;
-    assert!(compare_available(&app.state));
+    assert!(compare_available(app.state.results_reads()));
     open_compare(&mut app.state);
     let Some(ResultDocumentDialog::Compare(mut draft)) =
         app.state.results.result_document_dialog.clone()
@@ -478,7 +478,7 @@ fn compare_is_refused_without_a_compatible_baseline() {
     assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.workspace = Workspace::Results;
 
-    assert!(!compare_available(&app.state));
+    assert!(!compare_available(app.state.results_reads()));
     open_compare(&mut app.state);
     assert!(app.state.results.result_document_dialog.is_none());
 }
@@ -632,7 +632,7 @@ fn soa_run(id: u64) -> SimulationRun {
 fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
     app.state.workbench.workspace = Workspace::Results;
     app.state.results.results.session.viewer = ResultViewer::Waves;
-    assert!(family_available(&app.state));
+    assert!(family_available(app.state.results_reads()));
     open_family(&mut app.state);
     let Some(ResultDocumentDialog::Family(mut draft)) =
         app.state.results.result_document_dialog.clone()

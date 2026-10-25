@@ -3,6 +3,7 @@
 use egui::Ui;
 use rspice_results::network_matrix::trace_identity;
 
+use super::ResultsReads;
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
@@ -20,7 +21,7 @@ pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) ->
 /// The verdict comes from the workspace memo rather than a fresh walk, which
 /// is why it is spelled through the structural gate and not through
 /// [`analysis_is_renderable`].
-pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
+pub(super) fn availability(state: ResultsReads<'_>) -> super::ViewerAvailability {
     if state.model.simulation.active_run().is_some_and(|run| {
         state
             .model
@@ -58,7 +59,11 @@ pub(super) fn structure_is_renderable(analysis: &crate::state::AnalysisResult) -
 /// result. Cache provenance makes repeated frames a no-op and prevents a
 /// same-shape result from inheriting another run's RF traces.
 pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
-    if state.viewer_capability(ActiveViewer::SmithChart).available {
+    if state
+        .results_reads()
+        .viewer_capability(ActiveViewer::SmithChart)
+        .available
+    {
         return true;
     }
     let Some(run) = state.model.simulation.active_run() else {
@@ -72,7 +77,7 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
         return false;
     };
     if !structure_is_renderable(analysis)
-        || !super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+        || !super::analysis_evidence_is_valid(state.results_reads(), run.dataset_id, analysis)
     {
         state.results.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);

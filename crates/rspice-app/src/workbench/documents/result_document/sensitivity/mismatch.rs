@@ -1,7 +1,7 @@
 //! Selected mismatch evidence and history-bound presentation cache.
 
-use super::super::AnalysisPresentationKey;
 use super::super::frame_work::{self, DatasetWalk};
+use super::super::{AnalysisPresentationKey, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 use crate::workbench::AppState;
 use egui::Ui;
@@ -9,7 +9,7 @@ use rspice_results_ui::sensitivity::mismatch as viewer;
 use std::sync::Arc;
 use viewer::{ActiveMismatch, MismatchView};
 
-pub(super) fn active_mismatch(state: &AppState) -> ActiveMismatch<'_> {
+pub(super) fn active_mismatch(state: ResultsReads<'_>) -> ActiveMismatch<'_> {
     let Some(analysis) = state.model.simulation.active_analysis() else {
         return ActiveMismatch::Missing;
     };
@@ -26,7 +26,7 @@ pub(super) fn active_mismatch(state: &AppState) -> ActiveMismatch<'_> {
         evidence: evidence.as_ref(),
     })
 }
-pub(super) fn serves_active_analysis(state: &AppState) -> bool {
+pub(super) fn serves_active_analysis(state: ResultsReads<'_>) -> bool {
     state
         .model
         .simulation
@@ -38,7 +38,7 @@ pub(super) fn serves_active_analysis(state: &AppState) -> bool {
             )
         })
 }
-pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     matches!(active_mismatch(state), ActiveMismatch::Ready(_))
 }
 
@@ -62,7 +62,7 @@ fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
     {
         return Some(Arc::clone(plan));
     }
-    let ActiveMismatch::Ready(view) = active_mismatch(state) else {
+    let ActiveMismatch::Ready(view) = active_mismatch(state.results_reads()) else {
         return None;
     };
     frame_work::note(DatasetWalk::MismatchCumulative);
@@ -78,12 +78,12 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let plan = mismatch_plan(state);
     viewer::show(
         ui,
-        active_mismatch(state),
+        active_mismatch(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
 pub(super) fn right_panel(ui: &mut Ui, state: &AppState) {
-    viewer::right_panel(ui, active_mismatch(state));
+    viewer::right_panel(ui, active_mismatch(state.results_reads()));
 }
 
 #[cfg(test)]
@@ -108,8 +108,8 @@ mod tests {
     #[test]
     fn the_contribution_sheet_lists_dc_mismatch_contributors_in_the_engine_order() {
         let mut state = state_with(evidence());
-        assert!(serves_active_analysis(&state));
-        assert!(active_payload_is_valid(&state));
+        assert!(serves_active_analysis(state.results_reads()));
+        assert!(active_payload_is_valid(state.results_reads()));
         let plan = mismatch_plan(&mut state).expect("a valid payload has a plan");
         let cumulative = plan.display.cumulative();
         assert_eq!(cumulative.len(), 2);
@@ -117,7 +117,7 @@ mod tests {
         assert!((cumulative[1] - 0.8).abs() < 1.0e-12, "{cumulative:?}");
         assert!((plan.display.max_contribution() - 2.0e-3).abs() < 1.0e-18);
 
-        let ActiveMismatch::Ready(view) = active_mismatch(&state) else {
+        let ActiveMismatch::Ready(view) = active_mismatch(state.results_reads()) else {
             panic!("the active analysis carries the payload");
         };
         let order: Vec<&str> = view
@@ -158,8 +158,11 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        assert!(!serves_active_analysis(&state));
-        assert!(super::super::active_payload_is_valid(&state));
-        assert!(matches!(active_mismatch(&state), ActiveMismatch::Missing));
+        assert!(!serves_active_analysis(state.results_reads()));
+        assert!(super::super::active_payload_is_valid(state.results_reads()));
+        assert!(matches!(
+            active_mismatch(state.results_reads()),
+            ActiveMismatch::Missing
+        ));
     }
 }

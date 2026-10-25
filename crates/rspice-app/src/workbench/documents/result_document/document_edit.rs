@@ -24,10 +24,10 @@ use crate::results::visualization_document::{
 use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-use super::{AppState, RSpiceApp, ResultViewer};
+use super::{AppState, RSpiceApp, ResultViewer, ResultsReads};
 
 /// The project result document the Results workspace is showing, if any.
-pub(super) fn active_document_id(state: &AppState) -> Option<ResultDocumentId> {
+pub(super) fn active_document_id(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
     match state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => Some(*document_id),
         _ => None,
@@ -35,7 +35,7 @@ pub(super) fn active_document_id(state: &AppState) -> Option<ResultDocumentId> {
 }
 
 fn project_document(
-    state: &AppState,
+    state: ResultsReads<'_>,
     document_id: ResultDocumentId,
 ) -> Result<&VisualizationDocument, String> {
     state
@@ -52,7 +52,7 @@ fn transact(
     document_id: ResultDocumentId,
     edits: Vec<DocumentEdit>,
 ) -> Result<VisualizationTransactionReceipt, String> {
-    let revision = project_document(state, document_id)?.revision();
+    let revision = project_document(state.results_reads(), document_id)?.revision();
     state
         .model
         .workspace
@@ -65,7 +65,7 @@ fn transact(
 /// binding over a project result document, the active one over a quick view.
 /// Drawing a page re-selects the active run once per pane, so a document's
 /// pane is resolved from its binding, never from the active selection.
-fn reading_analysis(state: &AppState) -> Result<(&SimulationRun, &AnalysisResult), String> {
+fn reading_analysis(state: ResultsReads<'_>) -> Result<(&SimulationRun, &AnalysisResult), String> {
     if state.workbench.workspace != Workspace::Results {
         return Err("Open a result in Results.".to_owned());
     }
@@ -175,14 +175,14 @@ fn commit_open_dialog(state: &mut AppState) {
 
 /// Whether a pane can be added: a project result document is open and a
 /// retained dataset exists to bind the pane to.
-pub(crate) fn add_pane_available(state: &AppState) -> bool {
+pub(crate) fn add_pane_available(state: ResultsReads<'_>) -> bool {
     active_document_id(state).is_some() && state.model.simulation.retained.has_results()
 }
 
 /// Open the Add pane form, seeded with the dataset, analysis and sheet the
 /// selected pane shows.
 pub(crate) fn open_add_pane(state: &mut AppState) {
-    if !add_pane_available(state) {
+    if !add_pane_available(state.results_reads()) {
         return;
     }
     let draft = AddPaneDraft {
@@ -253,8 +253,9 @@ fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoice
     {
         draft.viewer = viewers.first().map(|(viewer, _)| *viewer);
     }
-    let position = active_document_id(state).and_then(|document_id| {
-        let (_, pane_id) = super::persistent_document::reading_position(state, document_id)?;
+    let position = active_document_id(state.results_reads()).and_then(|document_id| {
+        let (_, pane_id) =
+            super::persistent_document::reading_position(state.results_reads(), document_id)?;
         let document = state
             .model
             .workspace
@@ -285,10 +286,11 @@ fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoice
 /// pane. A single-pane page becomes a page of rows, since it can only ever
 /// hold one.
 fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
-    let document_id =
-        active_document_id(state).ok_or_else(|| "No result document is open.".to_owned())?;
-    let (page_id, anchor) = super::persistent_document::reading_position(state, document_id)
-        .ok_or_else(|| "The result document has no pane to add after.".to_owned())?;
+    let document_id = active_document_id(state.results_reads())
+        .ok_or_else(|| "No result document is open.".to_owned())?;
+    let (page_id, anchor) =
+        super::persistent_document::reading_position(state.results_reads(), document_id)
+            .ok_or_else(|| "The result document has no pane to add after.".to_owned())?;
     let run = draft
         .dataset
         .and_then(|dataset| {
@@ -324,7 +326,7 @@ fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
         analysis_id: super::create_document::source_analysis_identity(run, analysis),
         dataset: DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
     };
-    let document = project_document(state, document_id)?;
+    let document = project_document(state.results_reads(), document_id)?;
     let page = document
         .pages()
         .iter()
@@ -412,11 +414,11 @@ pub(super) fn toggle_pane_x_link(
 /// keeps the links, so they hold across panes and through a save; over a
 /// quick view the session's toggle links the viewer's own cursor rows.
 pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
-    let Some(document_id) = active_document_id(state) else {
+    let Some(document_id) = active_document_id(state.results_reads()) else {
         state.results.results.session.toggle_linked_cursors();
         return;
     };
-    let result = project_document(state, document_id)
+    let result = project_document(state.results_reads(), document_id)
         .map(links::cursors_linked)
         .and_then(|linked| links::set_cursor_links(state, document_id, !linked));
     report(state, result);
@@ -425,9 +427,9 @@ pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
 /// Whether A/B cursors are linked where [`toggle_linked_cursors`] would
 /// switch them: the document's links over a project result document, the
 /// session's toggle over a quick view.
-pub(crate) fn linked_cursors(state: &AppState) -> bool {
+pub(crate) fn linked_cursors(state: ResultsReads<'_>) -> bool {
     match active_document_id(state) {
-        None => state.results.results.session.linked_cursors,
+        None => state.results.session.linked_cursors,
         Some(document_id) => project_document(state, document_id).is_ok_and(links::cursors_linked),
     }
 }
@@ -473,7 +475,7 @@ fn move_pane_edit(
     pane_id: PaneId,
     direction: PaneMove,
 ) -> Result<DocumentEdit, String> {
-    let document = project_document(state, document_id)?;
+    let document = project_document(state.results_reads(), document_id)?;
     let (position, mut order) = page_order(document, pane_id)
         .ok_or_else(|| "The pane is no longer in this document.".to_owned())?;
     let neighbour = match direction {
@@ -511,7 +513,7 @@ fn remove_pane_edits(
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) -> Result<Vec<DocumentEdit>, String> {
-    let document = project_document(state, document_id)?;
+    let document = project_document(state.results_reads(), document_id)?;
     if !document.panes().iter().any(|pane| pane.id == pane_id) {
         return Err("The pane is no longer in this document.".to_owned());
     }

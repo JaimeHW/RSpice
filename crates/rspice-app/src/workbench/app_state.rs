@@ -43,6 +43,7 @@ pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::NoticeKind;
+use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
@@ -209,6 +210,16 @@ impl AppState {
         &self,
     ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
         self.model.include_search_chain()
+    }
+
+    /// The parts the results workspace's predicates read.
+    pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
+        ResultsReads {
+            results: &self.results.results,
+            analysis: &self.results.analysis,
+            model: &self.model,
+            workbench: &self.workbench,
+        }
     }
 
     /// [`Model::library_folders`].

@@ -7,6 +7,7 @@ mod source_tests;
 use egui::Ui;
 use std::sync::Arc;
 
+use super::ResultsReads;
 use crate::product::DatasetId;
 use crate::source_revision::SourceRevision;
 use crate::state::{
@@ -173,7 +174,7 @@ struct MonteCarloAuthority<'a> {
 }
 
 fn active_monte_carlo_authority<'a>(
-    state: &'a AppState,
+    state: ResultsReads<'a>,
     histogram_name: &str,
 ) -> Option<MonteCarloAuthority<'a>> {
     let analysis = state.model.simulation.active_analysis()?;
@@ -223,7 +224,7 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments
         .and_then(|analysis| analysis.family_metadata.as_ref())
         .is_some()
     {
-        let authority = active_monte_carlo_authority(state, histogram_name)?;
+        let authority = active_monte_carlo_authority(state.results_reads(), histogram_name)?;
         let variable = authority.variable;
         return moments_from_samples(&variable.samples).filter(|moments| {
             moments_match(
@@ -237,7 +238,7 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments
         });
     }
 
-    if !legacy_yield_is_eligible(state) {
+    if !legacy_yield_is_eligible(state.results_reads()) {
         return None;
     }
     let result = matching_yield_result(&state.model.simulation, histogram_name)
@@ -301,7 +302,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     {
         return Arc::clone(plan);
     }
-    let authority = active_monte_carlo_authority(state, histogram);
+    let authority = active_monte_carlo_authority(state.results_reads(), histogram);
     let yield_result = matching_yield_result(&state.model.simulation, histogram);
     let yield_is_consistent = yield_result.is_some_and(|result| {
         if !yield_result_is_consistent(result) {
@@ -324,7 +325,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
                             .zip(&authority.variable.samples)
                             .all(|(a, b)| a.to_bits() == b.to_bits())
                 }),
-            None => legacy_yield_is_eligible(state),
+            None => legacy_yield_is_eligible(state.results_reads()),
         }
     });
     let moments = exact_moments(state, histogram);
@@ -373,7 +374,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     built
 }
 
-fn legacy_yield_is_eligible(state: &AppState) -> bool {
+fn legacy_yield_is_eligible(state: ResultsReads<'_>) -> bool {
     state.model.simulation.active_run().is_some()
         && state
             .model
@@ -387,7 +388,7 @@ fn legacy_yield_is_eligible(state: &AppState) -> bool {
 }
 
 /// Names come from current retained evidence, never the mutable legacy bins.
-fn histogram_names(state: &AppState) -> Vec<&str> {
+fn histogram_names(state: ResultsReads<'_>) -> Vec<&str> {
     if let Some(analysis) = state.model.simulation.active_analysis()
         && analysis.family_metadata.is_some()
     {
@@ -419,7 +420,7 @@ fn histogram_names(state: &AppState) -> Vec<&str> {
         .collect()
 }
 
-pub(super) fn histogram_is_available(state: &AppState) -> bool {
+pub(super) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
     let names = histogram_names(state);
     names.iter().any(|name| {
         active_monte_carlo_authority(state, name)
@@ -446,7 +447,7 @@ pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<Histogram
 
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: &AppState) -> Option<String> {
-    let names = histogram_names(state);
+    let names = histogram_names(state.results_reads());
     let index = rspice_results_ui::histogram::state::measurement_index(
         state.results.analysis.histogram_state.selected.as_deref(),
         0,
@@ -457,7 +458,7 @@ fn selected_histogram_name(state: &AppState) -> Option<String> {
 
 /// Render controls, resolve the current population, and apply local plot outcomes.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let names: Vec<String> = histogram_names(state)
+    let names: Vec<String> = histogram_names(state.results_reads())
         .into_iter()
         .map(str::to_owned)
         .collect();
@@ -560,15 +561,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .map(|histogram| HistogramInspector {
             histogram,
             moments: plan.moments,
-            method: active_monte_carlo_authority(state, &histogram.name).map(|authority| {
-                MonteCarloMethod {
+            method: active_monte_carlo_authority(state.results_reads(), &histogram.name).map(
+                |authority| MonteCarloMethod {
                     seed: authority.seed,
                     runs_requested: authority.runs_requested,
                     runs_completed: authority.runs_completed,
                     failures: authority.failures,
                     mean_confidence: authority.variable.mean_confidence,
-                }
-            }),
+                },
+            ),
             yield_result: selected_yield_result(
                 &state.model.simulation,
                 &histogram.name,
@@ -722,13 +723,13 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        let authority = active_monte_carlo_authority(&state, "offset")
+        let authority = active_monte_carlo_authority(state.results_reads(), "offset")
             .expect("exact selected variable authority");
         assert_eq!(authority.seed, 0x73a4);
         assert_eq!(authority.runs_completed, 3);
         assert_eq!(authority.failures, 1);
         assert_eq!(exact_moments(&state, "offset").unwrap().mean, 2.0);
-        assert!(active_monte_carlo_authority(&state, "missing").is_none());
+        assert!(active_monte_carlo_authority(state.results_reads(), "missing").is_none());
     }
 
     #[test]
@@ -749,7 +750,7 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        assert!(active_monte_carlo_authority(&state, "gain").is_none());
+        assert!(active_monte_carlo_authority(state.results_reads(), "gain").is_none());
     }
 
     #[test]

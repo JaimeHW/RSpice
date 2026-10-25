@@ -81,7 +81,10 @@ pub(super) fn toggle_x_link(
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) -> Result<(), String> {
-    let edits = x_link_edits(project_document(state, document_id)?, pane_id)?;
+    let edits = x_link_edits(
+        project_document(state.results_reads(), document_id)?,
+        pane_id,
+    )?;
     if edits.is_empty() {
         return Ok(());
     }
@@ -334,9 +337,10 @@ pub(super) fn set_cursor_links(
     document_id: ResultDocumentId,
     linked: bool,
 ) -> Result<(), String> {
-    let reference_pane = super::super::persistent_document::reading_position(state, document_id)
-        .map(|(_, pane_id)| pane_id);
-    let document = project_document(state, document_id)?;
+    let reference_pane =
+        super::super::persistent_document::reading_position(state.results_reads(), document_id)
+            .map(|(_, pane_id)| pane_id);
+    let document = project_document(state.results_reads(), document_id)?;
     let mut edits = document
         .link_groups()
         .iter()

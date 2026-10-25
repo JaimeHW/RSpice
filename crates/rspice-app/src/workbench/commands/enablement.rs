@@ -285,7 +285,7 @@ impl Command {
                 active_symbol_editor(app)
                     || active_schematic_editor(app)
                     || (state.workbench.workspace == Workspace::Results
-                        && crate::workbench::documents::result_document::fit_gesture_available(state))
+                        && crate::workbench::documents::result_document::fit_gesture_available(state.results_reads()))
             }
             Self::FitSchematicContent => active_schematic_editor(app),
             // Magnifying a result viewport needs the sheet's own extents, so
@@ -295,7 +295,7 @@ impl Command {
                 active_symbol_editor(app)
                     || active_schematic_editor(app)
                     || (state.workbench.workspace == Workspace::Results
-                        && crate::workbench::documents::result_document::zoom_gesture_available(state))
+                        && crate::workbench::documents::result_document::zoom_gesture_available(state.results_reads()))
             }
             Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
             Self::ZoomToSelection => {
@@ -552,7 +552,7 @@ impl Command {
             // contract used by the in-workspace viewer tabs.
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => true,
             Self::ResultViewer(viewer) => {
-                crate::workbench::documents::result_document::viewer_is_available(state, viewer)
+                crate::workbench::documents::result_document::viewer_is_available(state.results_reads(), viewer)
             }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.model.simulation.retained.has_results()
@@ -564,7 +564,7 @@ impl Command {
                 state.platform.project_lifecycle.is_open() && state.model.simulation.retained.has_results()
             }
             Self::CompareResultDatasets => {
-                crate::workbench::documents::result_document::compare_available(state)
+                crate::workbench::documents::result_document::compare_available(state.results_reads())
             }
             Self::ModelCreateProjectCopy => selected_model_for_project_copy(app).is_ok(),
             Self::ModelEditor | Self::ModelCorrelation => {
@@ -679,7 +679,7 @@ impl Command {
             }
             Self::AddVisualizationPane => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && crate::workbench::documents::result_document::add_pane_available(state)
+                    && crate::workbench::documents::result_document::add_pane_available(state.results_reads())
             }
             // Add measurement draws over the result viewer, and over a quick
             // view it evaluates without keeping, so it needs only a result.
@@ -689,7 +689,7 @@ impl Command {
             }
             Self::FamilySlicing => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && crate::workbench::documents::result_document::family_available(state)
+                    && crate::workbench::documents::result_document::family_available(state.results_reads())
             }
             Self::VisualizationDocumentProperties => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
@@ -737,9 +737,11 @@ impl Command {
             Self::ToggleResultsSplit => Some(workbench.split_with_results),
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
-            Self::ToggleLinkedCursors => {
-                Some(crate::workbench::documents::result_document::linked_cursors(&app.state))
-            }
+            Self::ToggleLinkedCursors => Some(
+                crate::workbench::documents::result_document::linked_cursors(
+                    app.state.results_reads(),
+                ),
+            ),
             _ => None,
         }
     }

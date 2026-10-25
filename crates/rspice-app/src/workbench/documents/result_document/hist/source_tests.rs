@@ -84,7 +84,12 @@ fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
         crate::io::capture_simulation_results(&original.model.simulation),
     )
     .unwrap();
-    assert!(state.viewer_capability(ActiveViewer::Histogram).available);
+    assert!(
+        state
+            .results_reads()
+            .viewer_capability(ActiveViewer::Histogram)
+            .available
+    );
     assert!(paint(&mut state, false).contains("gain"));
     assert!(paint(&mut state, true).contains("Std dev"));
     let text = paint(&mut state, false);
@@ -283,7 +288,12 @@ fn hist_source_unchanged_large_histories_do_not_repeat_population_walks() {
     paint(&mut state, true);
     let work = WorkCounts::reset();
     for _ in 0..4 {
-        assert!(state.viewer_capability(ActiveViewer::Histogram).available);
+        assert!(
+            state
+                .results_reads()
+                .viewer_capability(ActiveViewer::Histogram)
+                .available
+        );
         assert!(active_histogram(&state).is_some());
         paint(&mut state, false);
         paint(&mut state, true);
@@ -320,7 +330,7 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
     assert!(active_histogram(&state).is_none());
     state.results.analysis.histogram_state.custom_range = false;
     state.model.simulation.retained.runs[0].analyses[0].success = false;
-    assert!(!histogram_is_available(&state));
+    assert!(!histogram_is_available(state.results_reads()));
     assert!(active_histogram(&state).is_none());
     state.model.simulation.retained.runs[0].analyses[0].success = true;
     assert_eq!(active_histogram(&state).unwrap().total_count, 3);

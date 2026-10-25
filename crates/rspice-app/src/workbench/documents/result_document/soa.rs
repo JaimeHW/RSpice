@@ -1,7 +1,7 @@
 //! SOA source qualification, cached presentation lifetime and shared application actions.
 
 use super::{
-    AnalysisPresentationKey, SoaRuleSelection,
+    AnalysisPresentationKey, ResultsReads, SoaRuleSelection,
     frame_work::{self, DatasetWalk},
 };
 #[cfg(test)]
@@ -41,7 +41,7 @@ fn active_soa(
 }
 
 /// The memoized retained-evidence verdict for whichever analysis is active.
-fn active_evidence_is_valid(state: &AppState) -> bool {
+fn active_evidence_is_valid(state: ResultsReads<'_>) -> bool {
     let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
@@ -52,7 +52,7 @@ fn active_evidence_is_valid(state: &AppState) -> bool {
         .is_some_and(|analysis| super::analysis_evidence_is_valid(state, run.dataset_id, analysis))
 }
 
-pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     active_soa(&state.model.simulation, active_evidence_is_valid(state)).is_some()
 }
 
@@ -82,8 +82,10 @@ fn soa_plan(
     // Eligibility and validation precede even a cache hit. Neither a stable
     // presentation key nor a numeric version proves the evidence is current.
     let dataset_id = state.model.simulation.active_run()?.dataset_id;
-    let (analysis, evaluations, _) =
-        active_soa(&state.model.simulation, active_evidence_is_valid(state))?;
+    let (analysis, evaluations, _) = active_soa(
+        &state.model.simulation,
+        active_evidence_is_valid(state.results_reads()),
+    )?;
     if AnalysisPresentationKey::new(dataset_id, analysis) != analysis_key {
         return None;
     }
@@ -123,7 +125,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Select a dataset with SOA results");
         return;
     };
-    let evidence_is_valid = active_evidence_is_valid(state);
+    let evidence_is_valid = active_evidence_is_valid(state.results_reads());
     let Some(analysis_key) = state
         .model
         .simulation

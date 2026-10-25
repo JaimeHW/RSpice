@@ -1573,7 +1573,8 @@ impl Command {
             Self::ResultViewer(viewer) => {
                 if viewer == crate::workbench::ResultViewer::Waves
                     || crate::workbench::documents::result_document::viewer_is_available(
-                        &app.state, viewer,
+                        app.state.results_reads(),
+                        viewer,
                     )
                 {
                     app.state.results.results.session.viewer = viewer;

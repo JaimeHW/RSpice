@@ -16,7 +16,7 @@ use rspice_vocabulary::product::DatasetId;
 #[cfg(test)]
 use view::{formatted, magnitude_db};
 
-use super::{AnalysisPresentationKey, AppState, SheetContext};
+use super::{AnalysisPresentationKey, ResultsReads, SheetContext};
 use crate::state::AnalysisResult;
 #[cfg(test)]
 use crate::state::AnalysisType;
@@ -74,7 +74,7 @@ pub(super) fn structure_is_renderable(analysis: &AnalysisResult) -> bool {
 ///
 /// The structural verdict comes from the workspace memo rather than a fresh
 /// walk of every retained coefficient.
-pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
+pub(super) fn availability(state: ResultsReads<'_>) -> super::ViewerAvailability {
     if state.model.simulation.active_run().is_some_and(|run| {
         state
             .model
