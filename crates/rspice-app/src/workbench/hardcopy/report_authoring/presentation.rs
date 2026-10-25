@@ -7,11 +7,11 @@ use rspice_results_ui::report::{
 };
 use rspice_vocabulary::product::ResultDocumentId;
 
-pub(super) struct ReportHost<'a>(pub(super) &'a mut RSpiceApp);
+pub(super) struct ReportHost<'a, 'c>(pub(super) &'a mut Cx<'c, HardcopyFeature>);
 
-impl PreviewHost for ReportHost<'_> {
+impl PreviewHost for ReportHost<'_, '_> {
     fn summary_metrics(&self) -> SummaryMetrics {
-        let metrics = ReportSummaryMetrics::from_state(&self.0.state);
+        let metrics = ReportSummaryMetrics::from_model(self.0.model);
         SummaryMetrics {
             checks_passing: metrics.checks_passing,
             checks_total: metrics.checks_total,
@@ -21,19 +21,19 @@ impl PreviewHost for ReportHost<'_> {
         }
     }
     fn selected_block(&self) -> Option<ReportBlockId> {
-        self.0.state.hardcopy.report_authoring.selected_report_block
+        self.0.state.report_authoring.selected_report_block
     }
     fn select_block(&mut self, block: ReportBlockId) {
-        self.0.state.hardcopy.report_authoring.selected_report_block = Some(block);
+        self.0.state.report_authoring.selected_report_block = Some(block);
     }
     fn reference_resolves(&self, reference: &ReportReferenceMode) -> bool {
-        report_reference_resolves(&self.0.state, reference)
+        report_reference_resolves(self.0.model, reference)
     }
     fn writable(&self) -> bool {
-        report_mutation_allowed(&self.0.state)
+        report_mutation_allowed(&*self.0)
     }
     fn blocked_reason(&self) -> &'static str {
-        report_mutation_block_reason(&self.0.state)
+        report_mutation_block_reason(&*self.0)
     }
     fn set_block_enabled(
         &mut self,
@@ -44,41 +44,32 @@ impl PreviewHost for ReportHost<'_> {
         set_report_block_enabled(self.0, document, block, enabled);
     }
     fn retained_figure_available(&self) -> bool {
-        !report_figure_options(&self.0.state).is_empty()
+        !report_figure_options(self.0.model).is_empty()
     }
     fn add_element(&mut self) {
         open_add_report_element(self.0);
     }
     fn remove_element(&mut self) {
-        self.0
-            .state
-            .hardcopy
-            .report_authoring
-            .remove_report_block_open = true;
-        self.0.state.hardcopy.report_authoring.transaction_error = None;
+        self.0.state.report_authoring.remove_report_block_open = true;
+        self.0.state.report_authoring.transaction_error = None;
     }
     fn insert_result(&mut self) {
         open_insert_result_document(self.0);
     }
 }
 
-impl InspectorHost for ReportHost<'_> {
+impl InspectorHost for ReportHost<'_, '_> {
     fn writable(&self) -> bool {
-        report_mutation_allowed(&self.0.state)
+        report_mutation_allowed(&*self.0)
     }
     fn blocked_reason(&self) -> &'static str {
-        report_mutation_block_reason(&self.0.state)
+        report_mutation_block_reason(&*self.0)
     }
     fn bound_result_label(&self, document: &ReportDocument) -> (String, bool) {
-        report_bound_result_label(&self.0.state, document)
+        report_bound_result_label(self.0.model, document)
     }
     fn transaction_error(&self) -> Option<&str> {
-        self.0
-            .state
-            .hardcopy
-            .report_authoring
-            .transaction_error
-            .as_deref()
+        self.0.state.report_authoring.transaction_error.as_deref()
     }
     fn commit_publication(&mut self, document: ResultDocumentId, setting: DocumentPublicationEdit) {
         commit_document_publication_setting(self.0, document, setting);
@@ -88,18 +79,18 @@ impl InspectorHost for ReportHost<'_> {
     }
 }
 
-impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
+impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_, '_> {
     fn project_open(&self) -> bool {
-        self.0.state.platform.project_lifecycle.is_open()
+        self.0.platform.project_lifecycle.is_open()
     }
     fn synchronize_selection(&mut self) {
-        synchronize_report_selection(&mut self.0.state);
+        synchronize_report_selection(&mut *self.0);
     }
     fn document_snapshot(&self) -> Option<ReportDocument> {
-        active_document(&self.0.state).cloned()
+        active_document(&*self.0).cloned()
     }
     fn selected_page(&self, document: &ReportDocument) -> Option<ReportPageId> {
-        selected_page_id(&self.0.state, document)
+        selected_page_id(&*self.0, document)
     }
     fn create_document(&mut self) {
         open_create_document(self.0);
@@ -111,18 +102,18 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
         open_page_properties(self.0);
     }
     fn can_move_page(&self, direction: PageMoveDirection) -> bool {
-        can_move_selected_page(&self.0.state, direction)
+        can_move_selected_page(&*self.0, direction)
     }
     fn move_page(&mut self, direction: PageMoveDirection) {
         move_selected_page(self.0, direction);
     }
     fn select_page(&mut self, page: ReportPageId) {
-        self.0.state.hardcopy.report_authoring.selected_page = Some(page);
-        self.0.state.hardcopy.report_authoring.selected_report_block = None;
+        self.0.state.report_authoring.selected_page = Some(page);
+        self.0.state.report_authoring.selected_report_block = None;
     }
     fn prepare_page_settings(&mut self, page: &rspice_results::report_document::ReportPage) {
         let page_id = page.id();
-        let editor = &mut self.0.state.hardcopy.report_authoring;
+        let editor = &mut self.0.state.report_authoring;
         if editor.inline_page_settings_page != Some(page_id) {
             editor.inline_page_settings_page = Some(page_id);
             editor.inline_page_title_draft = page.title().to_owned();
@@ -130,12 +121,7 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
         }
     }
     fn title_draft(&mut self) -> &mut String {
-        &mut self
-            .0
-            .state
-            .hardcopy
-            .report_authoring
-            .inline_page_title_draft
+        &mut self.0.state.report_authoring.inline_page_title_draft
     }
     fn commit_page_setting(&mut self, page: ReportPageId, setting: PageSettingEdit) {
         commit_page_setting(self.0, page, setting);
@@ -144,30 +130,29 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
         &self,
         binding: ReportPageEvidenceBinding,
     ) -> Vec<(String, ReportPageEvidenceBinding)> {
-        evidence_binding_options(&self.0.state, binding)
+        evidence_binding_options(self.0.model, binding)
     }
     fn evidence_label(&self, binding: ReportPageEvidenceBinding) -> String {
-        evidence_binding_label(&self.0.state, binding)
+        evidence_binding_label(self.0.model, binding)
     }
 }
 
-impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
+impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_, '_> {
     type Figure = result_insert::ReportFigureOption;
     fn editor(&mut self) -> &mut rspice_results_ui::report::session::ReportAuthoringState {
-        &mut self.0.state.hardcopy.report_authoring
+        &mut self.0.state.report_authoring
     }
     fn writable(&self) -> bool {
-        report_mutation_allowed(&self.0.state)
+        report_mutation_allowed(&*self.0)
     }
     fn blocked_reason(&self) -> &'static str {
-        report_mutation_block_reason(&self.0.state)
+        report_mutation_block_reason(&*self.0)
     }
     fn document_snapshot(&self) -> Option<ReportDocument> {
-        active_document(&self.0.state).cloned()
+        active_document(&*self.0).cloned()
     }
     fn run_options(&self) -> Vec<String> {
         self.0
-            .state
             .model
             .simulation
             .retained
@@ -178,18 +163,18 @@ impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
             .collect()
     }
     fn removal_target(&self) -> (String, bool) {
-        let block_id = self.0.state.hardcopy.report_authoring.selected_report_block;
+        let block_id = self.0.state.report_authoring.selected_report_block;
         let block_title = block_id
-            .and_then(|id| active_document(&self.0.state)?.block(id))
+            .and_then(|id| active_document(&*self.0)?.block(id))
             .map(|block| report_block_element_title(block.kind()).into_owned())
             .unwrap_or_else(|| "Unavailable report element".to_owned());
         let valid = block_id.is_some_and(|id| {
-            active_document(&self.0.state).is_some_and(|document| document.block(id).is_some())
+            active_document(&*self.0).is_some_and(|document| document.block(id).is_some())
         });
         (block_title, valid)
     }
     fn figure_options(&self) -> Vec<Self::Figure> {
-        report_figure_options(&self.0.state)
+        report_figure_options(self.0.model)
     }
     fn figure_label(figure: &Self::Figure) -> &str {
         figure.label()

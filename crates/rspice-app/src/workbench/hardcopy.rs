@@ -6,14 +6,19 @@
 //! read what the results workspace shows through its port. The exports and
 //! the print and export workflows still run in the shell, on the request a
 //! command raises, straight after the command in the same dispatch.
+//!
+//! The report route is the feature's too: it draws the route's stage in the
+//! same context, and declares the tools the route's toolbar shows, which
+//! the shell lays out and dispatches like any other.
 
 pub(crate) mod commands;
 pub(crate) mod report;
 pub(crate) mod report_authoring;
 
+use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, Reads, Session,
+    CommandSet, Cx, Feature, FeatureRegistry, FeatureSurface, Reads, Session, ToolbarTool,
 };
 use crate::workbench::framework::requests::{
     ExportActiveView, ExportPublicationSnapshot, ExportSchematicSvg, PrintActiveView,
@@ -33,8 +38,34 @@ impl Feature for HardcopyFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<HardcopyCommand>();
+        registry.surface(FeatureSurface {
+            show: report_authoring::show,
+        });
+        registry.toolbar(REPORT_TOOLS);
     }
 }
+
+/// The report route's toolbar: its document actions, in the order the
+/// toolbar lays them out. The mockup's Build review draft action stays off
+/// it until exact plot artwork publication and the release handoff complete
+/// the full contract: the route never offers an artifact it cannot produce.
+const REPORT_TOOLS: &[ToolbarTool] = &[
+    ToolbarTool {
+        key: HardcopyCommand::SaveReportDocument.key(),
+        icon: WorkbenchIcon::Save,
+        label: "Save report document",
+    },
+    ToolbarTool {
+        key: HardcopyCommand::AddReportPage.key(),
+        icon: WorkbenchIcon::Add,
+        label: "Add report page",
+    },
+    ToolbarTool {
+        key: HardcopyCommand::ReportPageProperties.key(),
+        icon: WorkbenchIcon::Sliders,
+        label: "Page properties",
+    },
+];
 
 impl CommandSet for HardcopyCommand {
     type Feature = HardcopyFeature;

@@ -41,6 +41,7 @@ use crate::workbench::framework::host::{
     StatusCell, ToolbarScope, ToolbarSlot,
 };
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
+use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
 use crate::workbench::sheets::SheetsFeature;
@@ -73,7 +74,6 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
-                use crate::workbench::hardcopy::report_authoring;
                 use crate::workbench::surfaces::{
                     automation, design, library_cellview_manager, model_correlation, model_editor,
                     models, netlist, pdk_technology_admin, project, results, simulate, stimulus,
@@ -83,7 +83,8 @@ impl Host for RSpiceApp {
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::ReportAuthoring
                 {
-                    report_authoring::show(ui, app);
+                    features::show_surface::<HardcopyFeature>(&mut app.state, ui);
+                    app.after_contribution();
                     return;
                 }
                 if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor
@@ -236,7 +237,7 @@ impl Host for RSpiceApp {
                 use crate::workbench::chrome::toolbar::design::{
                     design_tools, stimulus_tools, symbol_tools,
                 };
-                use crate::workbench::chrome::toolbar::hardcopy::report_authoring_tools;
+                use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
                 use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
                 use crate::workbench::chrome::toolbar::results::results_tools;
@@ -247,7 +248,12 @@ impl Host for RSpiceApp {
                 match scope {
                     ToolbarScope::NoProject => no_project_tools(ui, app, layout),
                     ToolbarScope::Surface(SurfaceOwner::ReportAuthoring) => {
-                        report_authoring_tools(ui, app, layout);
+                        feature_tools(
+                            ui,
+                            app,
+                            features::toolbar_tools::<HardcopyFeature>(),
+                            layout,
+                        );
                     }
                     ToolbarScope::Surface(SurfaceOwner::ModelEditor) => {
                         model_editor_tools(ui, app, layout);

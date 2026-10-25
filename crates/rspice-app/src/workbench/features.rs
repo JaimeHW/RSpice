@@ -15,7 +15,9 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
-use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, Peers, Reads, Session};
+use crate::workbench::framework::feature::{
+    Cx, Feature, FeatureRegistry, Peers, Reads, Session, ToolbarTool,
+};
 use crate::workbench::framework::requests::Outbox;
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::settings::SettingsFeature;
@@ -157,6 +159,19 @@ pub(super) fn show_inspector<F: Registered>(state: &mut AppState, ui: &mut egui:
     if let Some(inspector) = F::registry().inspector_section() {
         (inspector.show)(&mut F::cx(state), ui);
     }
+}
+
+/// Draw `F`'s surface on the stage's `ui`. The caller answers what it raised
+/// straight after.
+pub(super) fn show_surface<F: Registered>(state: &mut AppState, ui: &mut egui::Ui) {
+    if let Some(surface) = F::registry().surface_section() {
+        (surface.show)(&mut F::cx(state), ui);
+    }
+}
+
+/// The tools `F` puts on the context toolbar, in order.
+pub(super) fn toolbar_tools<F: Registered>() -> &'static [ToolbarTool] {
+    F::registry().toolbar_tools()
 }
 
 /// Commit what `F`'s inspector section holds typed and not yet committed.

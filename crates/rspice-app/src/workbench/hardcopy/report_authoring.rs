@@ -23,8 +23,10 @@ use crate::results::report_document::{
     ReviewNoteBlock, ReviewNoteStatus, SpecificationDisposition, SpecificationEntry,
     SpecificationsBlock, TableCell, TableColumn,
 };
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::hardcopy::report as report_editor;
-use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
@@ -34,14 +36,14 @@ use result_insert::{
     commit_insert_result_document, open_insert_result_document, report_figure_options,
 };
 
-fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> bool {
-    if !report_mutation_allowed(state) {
+fn can_move_selected_page(cx: &Cx<'_, HardcopyFeature>, direction: PageMoveDirection) -> bool {
+    if !report_mutation_allowed(cx) {
         return false;
     }
-    let Some(document) = active_document(state) else {
+    let Some(document) = active_document(cx) else {
         return false;
     };
-    let Some(page_id) = selected_page_id(state, document) else {
+    let Some(page_id) = selected_page_id(cx, document) else {
         return false;
     };
     let Some(index) = document
@@ -57,14 +59,13 @@ fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> boo
     }
 }
 
-fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
-    if !report_mutation_allowed(&app.state) {
-        let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
+fn move_selected_page(cx: &mut Cx<'_, HardcopyFeature>, direction: PageMoveDirection) {
+    if !report_mutation_allowed(cx) {
+        let reason = report_mutation_block_reason(cx).to_owned();
+        cx.state.report_authoring.transaction_error = Some(reason);
         return;
     }
-    let selected_page =
-        active_document(&app.state).and_then(|document| selected_page_id(&app.state, document));
+    let selected_page = active_document(cx).and_then(|document| selected_page_id(cx, document));
     let Some(page_id) = selected_page else {
         return;
     };
@@ -72,7 +73,7 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
         PageMoveDirection::Earlier => "Move report page earlier",
         PageMoveDirection::Later => "Move report page later",
     };
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         let Some(index) = document
             .pages()
             .iter()
@@ -105,32 +106,36 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
     });
     match result {
         Ok(changed) => {
-            app.state.hardcopy.report_authoring.selected_page = Some(page_id);
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty |= changed;
+            cx.state.report_authoring.selected_page = Some(page_id);
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.hardcopy.report_authoring.transaction_error = Some(error);
+            cx.state.report_authoring.transaction_error = Some(error);
         }
     }
 }
 
-fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: PageSettingEdit) {
-    if !report_mutation_allowed(&app.state) {
-        let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
+fn commit_page_setting(
+    cx: &mut Cx<'_, HardcopyFeature>,
+    page_id: ReportPageId,
+    setting: PageSettingEdit,
+) {
+    if !report_mutation_allowed(cx) {
+        let reason = report_mutation_block_reason(cx).to_owned();
+        cx.state.report_authoring.transaction_error = Some(reason);
         return;
     }
     if let PageSettingEdit::Title(title) = &setting
         && !valid_title(title)
     {
-        app.state.hardcopy.report_authoring.transaction_error = Some(
+        cx.state.report_authoring.transaction_error = Some(
             "The page title must be trimmed, non-empty, single-line text of at most 512 characters."
                 .to_owned(),
         );
         return;
     }
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         let page = document
             .page(page_id)
             .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
@@ -191,27 +196,27 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
     });
     match result {
         Ok(changed) => {
-            app.state.hardcopy.report_authoring.selected_page = Some(page_id);
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty |= changed;
+            cx.state.report_authoring.selected_page = Some(page_id);
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.hardcopy.report_authoring.transaction_error = Some(error);
+            cx.state.report_authoring.transaction_error = Some(error);
         }
     }
 }
 
 fn commit_document_publication_setting(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, HardcopyFeature>,
     document_id: crate::product::ResultDocumentId,
     setting: DocumentPublicationEdit,
 ) {
-    if !report_mutation_allowed(&app.state) {
-        let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
+    if !report_mutation_allowed(cx) {
+        let reason = report_mutation_block_reason(cx).to_owned();
+        cx.state.report_authoring.transaction_error = Some(reason);
         return;
     }
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         if document.id() != document_id {
             return Err(
                 "The report document changed before its publication policy committed.".to_owned(),
@@ -251,28 +256,28 @@ fn commit_document_publication_setting(
     });
     match result {
         Ok(changed) => {
-            app.state.model.workspace.content.report_documents_dirty |= changed;
-            app.state.hardcopy.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty |= changed;
+            cx.state.report_authoring.transaction_error = None;
         }
         Err(error) => {
-            app.state.hardcopy.report_authoring.transaction_error = Some(error);
+            cx.state.report_authoring.transaction_error = Some(error);
         }
     }
 }
 
 fn set_report_block_enabled(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, HardcopyFeature>,
     document_id: crate::product::ResultDocumentId,
     block_id: ReportBlockId,
     enabled: bool,
 ) {
-    if !report_mutation_allowed(&app.state) {
-        let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
+    if !report_mutation_allowed(cx) {
+        let reason = report_mutation_block_reason(cx).to_owned();
+        cx.state.report_authoring.transaction_error = Some(reason);
         return;
     }
     let timestamp = timestamp_unix_ms();
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         if document.id() != document_id {
             return Err(
                 "The report document changed before the element update committed.".to_owned(),
@@ -305,24 +310,23 @@ fn set_report_block_enabled(
     });
     match result {
         Ok(changed) => {
-            app.state.hardcopy.report_authoring.selected_report_block = Some(block_id);
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty |= changed;
+            cx.state.report_authoring.selected_report_block = Some(block_id);
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.hardcopy.report_authoring.transaction_error = Some(error);
+            cx.state.report_authoring.transaction_error = Some(error);
         }
     }
 }
 
-fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidenceBinding) -> String {
+fn evidence_binding_label(model: &Model, evidence_binding: ReportPageEvidenceBinding) -> String {
     match evidence_binding {
         ReportPageEvidenceBinding::Unbound => "Unbound · select a run".to_owned(),
         ReportPageEvidenceBinding::LatestAcceptedRun => {
             "Latest accepted run — resolve on draft build".to_owned()
         }
-        ReportPageEvidenceBinding::ExactDataset { binding } => state
-            .model
+        ReportPageEvidenceBinding::ExactDataset { binding } => model
             .simulation
             .retained
             .runs
@@ -342,11 +346,10 @@ fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidence
 }
 
 fn evidence_binding_options(
-    state: &AppState,
+    model: &Model,
     current: ReportPageEvidenceBinding,
 ) -> Vec<(String, ReportPageEvidenceBinding)> {
-    let mut options = state
-        .model
+    let mut options = model
         .simulation
         .retained
         .runs
@@ -364,7 +367,7 @@ fn evidence_binding_options(
     if !options.iter().any(|(_, option)| *option == current)
         && matches!(current, ReportPageEvidenceBinding::ExactDataset { .. })
     {
-        options.push((evidence_binding_label(state, current), current));
+        options.push((evidence_binding_label(model, current), current));
     }
     options.push((
         "Latest accepted run — resolve on draft build".to_owned(),
@@ -377,20 +380,21 @@ fn evidence_binding_options(
     options
 }
 
-fn open_create_document(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
+fn open_create_document(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) {
         return;
     }
-    let editor = &mut app.state.hardcopy.report_authoring;
+    let editor = &mut cx.state.report_authoring;
     editor.create_document_title = "Verification report".to_owned();
     editor.create_document_template = report_template_index(ReportTemplate::ReleaseVerification42);
     editor.transaction_error = None;
     editor.create_document_open = true;
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    report::composer::show(ui, &mut presentation::ReportHost(app));
-    report::dialogs::show(ui.ctx(), &mut presentation::ReportHost(app));
+/// Draw the report route's stage: the composer, and the dialogs it opens.
+pub(crate) fn show(cx: &mut Cx<'_, HardcopyFeature>, ui: &mut Ui) {
+    report::composer::show(ui, &mut presentation::ReportHost(cx));
+    report::dialogs::show(ui.ctx(), &mut presentation::ReportHost(cx));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,11 +434,10 @@ struct ReportSummaryMetrics {
 }
 
 impl ReportSummaryMetrics {
-    fn from_state(state: &AppState) -> Self {
-        let run = state.model.simulation.active_run();
-        let checks_total = state.model.workspace.content.specs.len();
-        let checks_passing = state
-            .model
+    fn from_model(model: &Model) -> Self {
+        let run = model.simulation.active_run();
+        let checks_total = model.workspace.content.specs.len();
+        let checks_passing = model
             .workspace
             .content
             .specs
@@ -459,8 +462,7 @@ impl ReportSummaryMetrics {
             })
             .count();
 
-        let joint_yield = state
-            .model
+        let joint_yield = model
             .simulation
             .yield_results_for_active_dataset()
             .and_then(ReportJointYield::from_results);
@@ -494,11 +496,10 @@ impl ReportSummaryMetrics {
     }
 }
 
-fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) -> bool {
+fn report_reference_resolves(model: &Model, reference: &ReportReferenceMode) -> bool {
     let snapshot = reference.snapshot();
     match &snapshot.source {
-        ReportSourceId::VisualizationDocument { document_id } => state
-            .model
+        ReportSourceId::VisualizationDocument { document_id } => model
             .workspace
             .content
             .visualization_documents
@@ -511,7 +512,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
                         .is_ok_and(|digest| digest == snapshot.content_digest)
             }),
         ReportSourceId::Dataset { dataset_id } => {
-            state.model.simulation.retained.runs.iter().any(|run| {
+            model.simulation.retained.runs.iter().any(|run| {
                 run.dataset_id == *dataset_id
                     && run.dataset_content_digest() == snapshot.content_digest
                     && snapshot.dataset_bindings.iter().any(|binding| {
@@ -522,7 +523,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
         }
         ReportSourceId::VerificationEvidence { .. } => {
             snapshot.dataset_bindings.iter().all(|binding| {
-                state.model.simulation.retained.runs.iter().any(|run| {
+                model.simulation.retained.runs.iter().any(|run| {
                     run.dataset_id == binding.dataset_id
                         && run.dataset_content_digest() == binding.content_digest
                 })
@@ -532,7 +533,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
     }
 }
 
-fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (String, bool) {
+fn report_bound_result_label(model: &Model, document: &ReportDocument) -> (String, bool) {
     let mut binding = None;
     for page in document.pages() {
         let ReportPageEvidenceBinding::ExactDataset {
@@ -550,8 +551,7 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
     let Some(binding) = binding else {
         return ("No report pages are bound".to_owned(), false);
     };
-    let label = state
-        .model
+    let label = model
         .simulation
         .retained
         .runs
@@ -570,50 +570,42 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
     (label, true)
 }
 
-fn open_release_cockpit(app: &mut RSpiceApp) {
-    if let Err(error) = app.state.workbench.navigate(
+fn open_release_cockpit(cx: &mut Cx<'_, HardcopyFeature>) {
+    if let Err(error) = cx.wb.navigate(
         SurfaceRoute::surface(SurfaceId::ReleaseCockpit),
         RouteTransitionSource::User,
     ) {
-        app.state
+        cx.wb
             .prompt(format!("Cannot open release package assembly: {error}"));
     }
 }
 
-fn commit_create_document(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        app.state.hardcopy.report_authoring.transaction_error =
-            Some(report_mutation_block_reason(&app.state).to_owned());
+fn commit_create_document(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) {
+        cx.state.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(cx).to_owned());
         return;
     }
-    let title = app
-        .state
-        .hardcopy
-        .report_authoring
-        .create_document_title
-        .to_owned();
+    let title = cx.state.report_authoring.create_document_title.to_owned();
     if !valid_title(&title) {
-        app.state.hardcopy.report_authoring.transaction_error = Some(
+        cx.state.report_authoring.transaction_error = Some(
             "The report title must be trimmed, non-empty, single-line text of at most 512 characters."
                 .to_owned(),
         );
         return;
     }
-    let template =
-        report_template_from_index(app.state.hardcopy.report_authoring.create_document_template);
-    let initial_evidence_binding = app
-        .state
+    let template = report_template_from_index(cx.state.report_authoring.create_document_template);
+    let initial_evidence_binding = cx
         .model
         .simulation
         .active_run()
         .filter(|run| !run.analyses.is_empty())
         .or_else(|| {
-            app.state
-                .model
+            cx.model
                 .simulation
                 .retained
                 .newest_retained_result_run_index()
-                .and_then(|index| app.state.model.simulation.retained.runs.get(index))
+                .and_then(|index| cx.model.simulation.retained.runs.get(index))
         })
         .map(|run| ReportPageEvidenceBinding::ExactDataset {
             binding: crate::product::DatasetBinding::new(
@@ -665,38 +657,27 @@ fn commit_create_document(app: &mut RSpiceApp) {
         Ok(document) => {
             let document_id = document.id();
             let page_id = document.pages().first().map(|page| page.id());
-            app.state
-                .model
-                .workspace
-                .content
-                .report_documents
-                .push(document);
-            app.state.model.workspace.content.report_documents_dirty = true;
-            let editor = &mut app.state.hardcopy.report_authoring;
+            cx.model.workspace.content.report_documents.push(document);
+            cx.model.workspace.content.report_documents_dirty = true;
+            let editor = &mut cx.state.report_authoring;
             editor.selected_document = Some(document_id);
             editor.selected_page = page_id;
             editor.create_document_open = false;
             editor.transaction_error = None;
         }
-        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
+        Err(error) => cx.state.report_authoring.transaction_error = Some(error),
     }
 }
 
-fn commit_add_page(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        app.state.hardcopy.report_authoring.transaction_error =
-            Some(report_mutation_block_reason(&app.state).to_owned());
+fn commit_add_page(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) {
+        cx.state.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(cx).to_owned());
         return;
     }
-    let title = app
-        .state
-        .hardcopy
-        .report_authoring
-        .add_page_title
-        .trim()
-        .to_owned();
+    let title = cx.state.report_authoring.add_page_title.trim().to_owned();
     let timestamp = timestamp_unix_ms();
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         document
             .transact_with_context(
                 document.revision(),
@@ -713,20 +694,20 @@ fn commit_add_page(app: &mut RSpiceApp) {
                 ReportEntityRef::Page(id) => Some(*id),
                 _ => None,
             });
-            app.state.hardcopy.report_authoring.selected_page = created_page;
-            app.state.hardcopy.report_authoring.add_page_open = false;
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty = true;
+            cx.state.report_authoring.selected_page = created_page;
+            cx.state.report_authoring.add_page_open = false;
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
+        Err(error) => cx.state.report_authoring.transaction_error = Some(error),
     }
 }
 
-fn open_add_report_element(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) || active_document(&app.state).is_none() {
+fn open_add_report_element(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) || active_document(cx).is_none() {
         return;
     }
-    let editor = &mut app.state.hardcopy.report_authoring;
+    let editor = &mut cx.state.report_authoring;
     editor.add_report_element_kind = 0;
     editor.add_report_element_title = "Engineering summary".to_owned();
     editor.add_report_element_primary =
@@ -741,11 +722,10 @@ fn open_add_report_element(app: &mut RSpiceApp) {
 }
 
 fn report_dataset_snapshot(
-    state: &AppState,
+    model: &Model,
     filtered_run_index: usize,
 ) -> Result<(ReportReferenceSnapshot, crate::product::DatasetBinding), String> {
-    let run = state
-        .model
+    let run = model
         .simulation
         .retained
         .runs
@@ -766,13 +746,13 @@ fn report_dataset_snapshot(
     Ok((snapshot, binding))
 }
 
-fn commit_add_report_element(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        app.state.hardcopy.report_authoring.transaction_error =
-            Some(report_mutation_block_reason(&app.state).to_owned());
+fn commit_add_report_element(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) {
+        cx.state.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(cx).to_owned());
         return;
     }
-    let editor = &app.state.hardcopy.report_authoring;
+    let editor = &cx.state.report_authoring;
     let kind_index = editor.add_report_element_kind.min(6);
     let title = editor.add_report_element_title.trim().to_owned();
     let primary = editor.add_report_element_primary.trim().to_owned();
@@ -782,10 +762,10 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
     let status = editor.add_report_element_status;
     let source_index = editor.add_report_element_source_run;
     let reference = if matches!(kind_index, 1 | 2 | 3 | 4 | 6) {
-        match report_dataset_snapshot(&app.state, source_index) {
+        match report_dataset_snapshot(cx.model, source_index) {
             Ok((snapshot, _)) => Some(ReportReferenceMode::Linked { snapshot }),
             Err(error) => {
-                app.state.hardcopy.report_authoring.transaction_error = Some(error);
+                cx.state.report_authoring.transaction_error = Some(error);
                 return;
             }
         }
@@ -856,10 +836,10 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
             resolved_at_unix_ms: (status != 0).then_some(timestamp),
         }),
         6 => {
-            let (_, binding) = match report_dataset_snapshot(&app.state, source_index) {
+            let (_, binding) = match report_dataset_snapshot(cx.model, source_index) {
                 Ok(value) => value,
                 Err(error) => {
-                    app.state.hardcopy.report_authoring.transaction_error = Some(error);
+                    cx.state.report_authoring.transaction_error = Some(error);
                     return;
                 }
             };
@@ -883,7 +863,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
             ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    app.state.hardcopy.report_authoring.transaction_error = Some(error.to_string());
+                    cx.state.report_authoring.transaction_error = Some(error.to_string());
                     return;
                 }
             };
@@ -906,14 +886,13 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
             markdown: format!("## {title}\n\n{primary}"),
         }),
     };
-    let Some(page_id) =
-        active_document(&app.state).and_then(|document| selected_page_id(&app.state, document))
+    let Some(page_id) = active_document(cx).and_then(|document| selected_page_id(cx, document))
     else {
-        app.state.hardcopy.report_authoring.transaction_error =
+        cx.state.report_authoring.transaction_error =
             Some("Select a report page before adding an element.".to_owned());
         return;
     };
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         let page = document
             .page(page_id)
             .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
@@ -933,16 +912,16 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
     });
     match result {
         Ok(receipt) => {
-            app.state.hardcopy.report_authoring.selected_report_block =
+            cx.state.report_authoring.selected_report_block =
                 receipt.created.iter().find_map(|entity| match entity {
                     ReportEntityRef::Block(id) => Some(*id),
                     _ => None,
                 });
-            app.state.hardcopy.report_authoring.add_report_element_open = false;
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty = true;
+            cx.state.report_authoring.add_report_element_open = false;
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
+        Err(error) => cx.state.report_authoring.transaction_error = Some(error),
     }
 }
 
@@ -970,18 +949,18 @@ fn report_field_key(label: &str) -> String {
     }
 }
 
-fn commit_remove_report_block(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        app.state.hardcopy.report_authoring.transaction_error =
-            Some(report_mutation_block_reason(&app.state).to_owned());
+fn commit_remove_report_block(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) {
+        cx.state.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(cx).to_owned());
         return;
     }
-    let Some(block_id) = app.state.hardcopy.report_authoring.selected_report_block else {
-        app.state.hardcopy.report_authoring.transaction_error =
+    let Some(block_id) = cx.state.report_authoring.selected_report_block else {
+        cx.state.report_authoring.transaction_error =
             Some("Select a report page element before removing it.".to_owned());
         return;
     };
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+    let result = active_document_mut(cx).and_then(|document| {
         let block = document
             .block(block_id)
             .ok_or_else(|| "The selected report element no longer exists.".to_owned())?;
@@ -1000,40 +979,33 @@ fn commit_remove_report_block(app: &mut RSpiceApp) {
     });
     match result {
         Ok(_) => {
-            app.state.hardcopy.report_authoring.selected_report_block = None;
-            app.state.hardcopy.report_authoring.remove_report_block_open = false;
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty = true;
+            cx.state.report_authoring.selected_report_block = None;
+            cx.state.report_authoring.remove_report_block_open = false;
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
+        Err(error) => cx.state.report_authoring.transaction_error = Some(error),
     }
 }
 
-fn commit_page_properties(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state) {
-        app.state.hardcopy.report_authoring.transaction_error =
-            Some(report_mutation_block_reason(&app.state).to_owned());
+fn commit_page_properties(cx: &mut Cx<'_, HardcopyFeature>) {
+    if !report_mutation_allowed(cx) {
+        cx.state.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(cx).to_owned());
         return;
     }
-    let Some(page_id) = app.state.hardcopy.report_authoring.page_properties_page else {
-        app.state.hardcopy.report_authoring.transaction_error =
+    let Some(page_id) = cx.state.report_authoring.page_properties_page else {
+        cx.state.report_authoring.transaction_error =
             Some("The selected report page no longer exists.".to_owned());
         return;
     };
-    let title = app
-        .state
-        .hardcopy
-        .report_authoring
-        .page_title_draft
-        .trim()
-        .to_owned();
+    let title = cx.state.report_authoring.page_title_draft.trim().to_owned();
     let inline_title = title.clone();
     let timestamp = timestamp_unix_ms();
-    let template =
-        report_template_from_index(app.state.hardcopy.report_authoring.report_template_draft);
+    let template = report_template_from_index(cx.state.report_authoring.report_template_draft);
     let update_policy =
-        page_update_policy_from_index(app.state.hardcopy.report_authoring.page_update_policy_draft);
-    let result = active_document_mut(&mut app.state).and_then(|document| {
+        page_update_policy_from_index(cx.state.report_authoring.page_update_policy_draft);
+    let result = active_document_mut(cx).and_then(|document| {
         let page = document
             .page(page_id)
             .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
@@ -1075,34 +1047,30 @@ fn commit_page_properties(app: &mut RSpiceApp) {
     });
     match result {
         Ok(changed) => {
-            app.state.hardcopy.report_authoring.selected_page = Some(page_id);
-            app.state
-                .hardcopy
-                .report_authoring
-                .inline_page_settings_page = Some(page_id);
-            app.state.hardcopy.report_authoring.inline_page_title_draft = inline_title;
-            app.state.hardcopy.report_authoring.page_properties_open = false;
-            app.state.hardcopy.report_authoring.transaction_error = None;
-            app.state.model.workspace.content.report_documents_dirty |= changed;
+            cx.state.report_authoring.selected_page = Some(page_id);
+            cx.state.report_authoring.inline_page_settings_page = Some(page_id);
+            cx.state.report_authoring.inline_page_title_draft = inline_title;
+            cx.state.report_authoring.page_properties_open = false;
+            cx.state.report_authoring.transaction_error = None;
+            cx.model.workspace.content.report_documents_dirty |= changed;
         }
-        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
+        Err(error) => cx.state.report_authoring.transaction_error = Some(error),
     }
 }
 
-fn synchronize_report_selection(state: &mut AppState) {
-    let documents = &state.model.workspace.content.report_documents;
-    let selected_is_valid = state
-        .hardcopy
+fn synchronize_report_selection(cx: &mut Cx<'_, HardcopyFeature>) {
+    let documents = &cx.model.workspace.content.report_documents;
+    let selected_is_valid = cx
+        .state
         .report_authoring
         .selected_document
         .is_some_and(|id| documents.iter().any(|doc| doc.id() == id));
     if !selected_is_valid {
-        state.hardcopy.report_authoring.selected_document =
-            documents.first().map(ReportDocument::id);
+        cx.state.report_authoring.selected_document = documents.first().map(ReportDocument::id);
     }
-    let current_page = state.hardcopy.report_authoring.selected_page;
-    let current_block = state.hardcopy.report_authoring.selected_report_block;
-    let selection = active_document(state).map(|document| {
+    let current_page = cx.state.report_authoring.selected_page;
+    let current_block = cx.state.report_authoring.selected_report_block;
+    let selection = active_document(cx).map(|document| {
         let selected_page = current_page
             .filter(|page_id| document.page(*page_id).is_some())
             .or_else(|| document.pages().first().map(|page| page.id()));
@@ -1120,31 +1088,29 @@ fn synchronize_report_selection(state: &mut AppState) {
     });
     if let Some((selected_page, selected_block_is_on_page)) = selection {
         if current_page != selected_page {
-            state.hardcopy.report_authoring.selected_page = selected_page;
+            cx.state.report_authoring.selected_page = selected_page;
         }
         if !selected_block_is_on_page {
-            state.hardcopy.report_authoring.selected_report_block = None;
+            cx.state.report_authoring.selected_report_block = None;
         }
     } else {
-        state.hardcopy.report_authoring.selected_page = None;
-        state.hardcopy.report_authoring.selected_report_block = None;
-        state.hardcopy.report_authoring.inline_page_settings_page = None;
-        state
-            .hardcopy
-            .report_authoring
-            .inline_page_title_draft
-            .clear();
+        cx.state.report_authoring.selected_page = None;
+        cx.state.report_authoring.selected_report_block = None;
+        cx.state.report_authoring.inline_page_settings_page = None;
+        cx.state.report_authoring.inline_page_title_draft.clear();
     }
 }
 
-fn active_document(state: &AppState) -> Option<&ReportDocument> {
-    report_editor::active_document(&state.hardcopy.report_authoring, &state.model)
+fn active_document<'s>(cx: &'s Cx<'_, HardcopyFeature>) -> Option<&'s ReportDocument> {
+    report_editor::active_document(&cx.state.report_authoring, cx.model)
 }
 
-fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, String> {
-    let documents = &mut state.model.workspace.content.report_documents;
-    let id = state
-        .hardcopy
+fn active_document_mut<'s>(
+    cx: &'s mut Cx<'_, HardcopyFeature>,
+) -> Result<&'s mut ReportDocument, String> {
+    let documents = &mut cx.model.workspace.content.report_documents;
+    let id = cx
+        .state
         .report_authoring
         .selected_document
         .ok_or_else(|| "No report document is selected.".to_owned())?;
@@ -1154,34 +1120,27 @@ fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, Stri
         .ok_or_else(|| "The selected report document no longer exists.".to_owned())
 }
 
-fn selected_page_id(state: &AppState, document: &ReportDocument) -> Option<ReportPageId> {
-    report_editor::selected_page_id(&state.hardcopy.report_authoring, document)
+fn selected_page_id(
+    cx: &Cx<'_, HardcopyFeature>,
+    document: &ReportDocument,
+) -> Option<ReportPageId> {
+    report_editor::selected_page_id(&cx.state.report_authoring, document)
 }
 
-fn open_add_page(app: &mut RSpiceApp) {
-    let state = &mut app.state;
-    report_editor::open_add_page(
-        &mut state.hardcopy.report_authoring,
-        &state.model,
-        &state.platform,
-    );
+fn open_add_page(cx: &mut Cx<'_, HardcopyFeature>) {
+    report_editor::open_add_page(&mut cx.state.report_authoring, cx.model, cx.platform);
 }
 
-fn open_page_properties(app: &mut RSpiceApp) {
-    let state = &mut app.state;
-    report_editor::open_page_properties(
-        &mut state.hardcopy.report_authoring,
-        &state.model,
-        &state.platform,
-    );
+fn open_page_properties(cx: &mut Cx<'_, HardcopyFeature>) {
+    report_editor::open_page_properties(&mut cx.state.report_authoring, cx.model, cx.platform);
 }
 
-fn report_mutation_allowed(state: &AppState) -> bool {
-    report_editor::mutation_allowed(&state.model, &state.platform)
+fn report_mutation_allowed(cx: &Cx<'_, HardcopyFeature>) -> bool {
+    report_editor::mutation_allowed(cx.model, cx.platform)
 }
 
-fn report_mutation_block_reason(state: &AppState) -> &'static str {
-    report_editor::mutation_block_reason(&state.model, &state.platform)
+fn report_mutation_block_reason(cx: &Cx<'_, HardcopyFeature>) -> &'static str {
+    report_editor::mutation_block_reason(cx.model, cx.platform)
 }
 
 fn timestamp_unix_ms() -> u64 {

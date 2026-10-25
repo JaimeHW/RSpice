@@ -14,6 +14,7 @@
 //! does once the prologue lets it through.
 
 use crate::state::command_catalog::CommandKey;
+use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
@@ -276,11 +277,30 @@ pub(crate) struct FeatureInspector<F: Feature> {
     pub(crate) commit_pending_edit: fn(&mut Cx<'_, F>, &egui::Context),
 }
 
+/// The surface a feature draws in its context, on the stage of the route the
+/// shell resolves to it.
+pub(crate) struct FeatureSurface<F: Feature> {
+    /// Draw the surface in the stage's `Ui`.
+    pub(crate) show: fn(&mut Cx<'_, F>, &mut egui::Ui),
+}
+
+/// One tool a feature puts on the context toolbar while its scope shows: a
+/// command it declares, which the toolbar draws as a labelled button and
+/// lays out, answers, dispatches and folds into its overflow like any other.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ToolbarTool {
+    pub(crate) key: CommandKey,
+    pub(crate) icon: WorkbenchIcon,
+    pub(crate) label: &'static str,
+}
+
 /// Everything one feature registered, built once.
 pub(crate) struct FeatureRegistry<F: Feature> {
     commands: Vec<FeatureCommand<F>>,
     dialogs: &'static [FeatureDialog<F>],
     inspector: Option<FeatureInspector<F>>,
+    surface: Option<FeatureSurface<F>>,
+    toolbar: &'static [ToolbarTool],
 }
 
 impl<F: Feature> FeatureRegistry<F> {
@@ -290,6 +310,8 @@ impl<F: Feature> FeatureRegistry<F> {
             commands: Vec::new(),
             dialogs: &[],
             inspector: None,
+            surface: None,
+            toolbar: &[],
         };
         F::register(&mut registry);
         registry
@@ -308,6 +330,27 @@ impl<F: Feature> FeatureRegistry<F> {
     /// The inspector section the feature registered, if it draws one.
     pub(crate) fn inspector_section(&self) -> Option<&FeatureInspector<F>> {
         self.inspector.as_ref()
+    }
+
+    /// Register the surface the feature draws on its route's stage.
+    pub(crate) fn surface(&mut self, surface: FeatureSurface<F>) {
+        self.surface = Some(surface);
+    }
+
+    /// The surface the feature registered, if it draws one.
+    pub(crate) fn surface_section(&self) -> Option<&FeatureSurface<F>> {
+        self.surface.as_ref()
+    }
+
+    /// Register the tools the feature puts on the context toolbar, in the
+    /// order the toolbar lays them out.
+    pub(crate) fn toolbar(&mut self, tools: &'static [ToolbarTool]) {
+        self.toolbar = tools;
+    }
+
+    /// The tools the feature registered for the context toolbar.
+    pub(crate) fn toolbar_tools(&self) -> &'static [ToolbarTool] {
+        self.toolbar
     }
 
     /// The registered dialog step `key` names, if the feature draws one.

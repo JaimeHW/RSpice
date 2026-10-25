@@ -3,7 +3,6 @@
 
 pub(in crate::workbench) mod code;
 pub(crate) mod design;
-pub(in crate::workbench) mod hardcopy;
 pub(in crate::workbench) mod models;
 pub(crate) mod overflow;
 pub(in crate::workbench) mod project;
@@ -17,6 +16,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::ToolbarTool;
 use crate::workbench::framework::host::{Point, ToolbarScope, ToolbarSlot};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
@@ -447,6 +447,19 @@ fn toolbar_text_command(
         layout,
         ToolbarCommandPresentation::Text { icon, label },
     );
+}
+
+/// Draw the tools a feature put on the toolbar, in order, each as a
+/// labelled command.
+pub(in crate::workbench) fn feature_tools(
+    ui: &mut egui::Ui,
+    app: &mut impl WorkbenchHost,
+    tools: &[ToolbarTool],
+    layout: LayoutSpec,
+) {
+    for tool in tools {
+        toolbar_text_command(ui, app, tool.key, tool.icon, tool.label, layout);
+    }
 }
 
 #[derive(Clone, Copy)]
