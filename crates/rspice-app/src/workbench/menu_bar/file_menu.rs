@@ -1,10 +1,10 @@
 //! File action layer: dirty-state confirmations, project/file IO dispatch,
 //! exports and application exit. Rendering lives in the workbench title bar.
 
+use crate::io::FileWorkflowIo;
 use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
-use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 /// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,7 +206,7 @@ mod tests {
     }
     struct NoIo;
 
-    impl crate::workbench::workflows::file_workflow::FileWorkflowIo for NoIo {
+    impl crate::io::FileWorkflowIo for NoIo {
         #[cfg(not(target_arch = "wasm32"))]
         fn show_open_dialog(&self) -> Result<std::path::PathBuf, crate::io::SchematicIoError> {
             panic!("unexpected file I/O")

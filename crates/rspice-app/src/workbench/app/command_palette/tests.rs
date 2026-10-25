@@ -271,9 +271,7 @@ fn test_app() -> RSpiceApp {
             "This test instance runs without a model-pack store.",
         ),
         live_session: crate::workbench::live_session::LiveSessionEngine::default(),
-        file_workflow_io: Box::new(
-            crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
-        ),
+        file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
         export_workflow_io: Box::new(
             crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         ),

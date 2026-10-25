@@ -42,9 +42,7 @@
   "lower->upper": {
     "framework->session": 486,
     "run->session": 1,
-    "services->project": 9,
-    "services->session": 17,
-    "services->shell": 1
+    "services->session": 17
   },
   "whole-app": {
     "&RSpiceApp params outside shell": 283,

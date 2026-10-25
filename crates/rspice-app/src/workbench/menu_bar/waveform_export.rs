@@ -203,7 +203,7 @@ pub(crate) fn action_export_result_selection_with_io(
         filter_extensions: &["txt"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "txt");
+            crate::io::file_exchange::ensure_file_extension(&mut path, "txt");
             io.observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents))
         }
@@ -768,7 +768,7 @@ fn publish_result_text(
         filter_extensions: &[extension],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+            crate::io::file_exchange::ensure_file_extension(&mut path, extension);
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, contents))
@@ -893,7 +893,7 @@ fn export_native_result_bundle(
         filter_extensions: &filter_extensions,
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+            crate::io::file_exchange::ensure_file_extension(&mut path, extension);
             let export = io.observe_destination(&path).and_then(|destination| {
                 io.write_bytes_file_observed(&destination, &bytes, kind.media_type())
             });
@@ -941,7 +941,7 @@ fn export_csv(
         filter_extensions: &["csv"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "csv");
+            crate::io::file_exchange::ensure_file_extension(&mut path, "csv");
 
             let export = io
                 .observe_destination(&path)
@@ -1000,7 +1000,7 @@ fn export_tsv(
         filter_extensions: &["tsv"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "tsv");
+            crate::io::file_exchange::ensure_file_extension(&mut path, "tsv");
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
@@ -1069,7 +1069,7 @@ fn export_touchstone(
         filter_extensions: &["snp", "ts"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "snp");
+            crate::io::file_exchange::ensure_file_extension(&mut path, "snp");
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));

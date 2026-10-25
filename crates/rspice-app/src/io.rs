@@ -5,8 +5,9 @@
 //! # Submodules
 //!
 //! - `session_io` - Session state serialization
-//! - `file_exchange` - Desktop and browser file pickers, and bounded reads
-//! - `schematic_io` - Schematic file save/load
+//! - `file_exchange` - Desktop and browser file pickers, bounded reads, and
+//!   destination extensions
+//! - `schematic_io` - Schematic file save/load, and the workflows' I/O port
 //! - `netlist_export` - Netlist generation from schematic
 //! - `generated_bundle` - Portable generated-netlist archive writing
 //! - `waveform_io` - Waveform export (CSV, TSV, Touchstone)
@@ -39,11 +40,14 @@ pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecut
 // they read alike. Nothing outside a test may reach past the context type.
 #[cfg(test)]
 pub(crate) use rspice_project::{ProjectModelLibrary, persisted_active_model_section_names};
-pub use schematic_io::{SchematicIoError, load_schematic, save_schematic, show_save_dialog};
+pub(crate) use schematic_io::{FileWorkflowIo, NativeFileWorkflowIo};
+pub use schematic_io::{load_schematic, save_schematic, show_save_dialog};
 // Native file pickers. The browser reaches its own import path instead.
 #[cfg(not(target_arch = "wasm32"))]
 pub use project_io::{show_open_project_dialog, show_save_project_dialog};
+// Only the native picker's cancellation is told apart from a failure, so only
+// native code names the error.
 #[cfg(not(target_arch = "wasm32"))]
-pub use schematic_io::{SchematicFile, show_open_dialog};
+pub use schematic_io::{SchematicFile, SchematicIoError, show_open_dialog};
 
 pub use waveform_io::{WaveformDataset, WaveformFormat, WaveformWriter};

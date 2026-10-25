@@ -100,7 +100,7 @@ pub(super) fn export_hdf5(
         filter_extensions: &[EXTENSION],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, EXTENSION);
+            crate::io::file_exchange::ensure_file_extension(&mut path, EXTENSION);
             let export = io.observe_destination(&path).and_then(|destination| {
                 io.write_bytes_file_observed(&destination, &bytes, HDF5_MIME_TYPE)
             });

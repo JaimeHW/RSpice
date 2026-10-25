@@ -354,7 +354,7 @@ pub(crate) fn suggested_schematic_save_path(default_name: Option<&str>) -> PathB
             .filter(|name| !name.trim().is_empty())
             .unwrap_or("untitled.rsch"),
     );
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "rsch");
+    crate::io::file_exchange::ensure_file_extension(&mut path, "rsch");
     path
 }
 
@@ -506,6 +506,64 @@ fn read_schematic_text_with_limit(
     String::from_utf8(bytes).map_err(|error| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()).into()
     })
+}
+
+// =============================================================================
+// Workflow I/O Port
+// =============================================================================
+
+/// IO abstraction for schematic file workflows.
+///
+/// This allows open/save behavior to be fully unit tested without invoking
+/// native dialogs.
+pub(crate) trait FileWorkflowIo {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_open_dialog(&self) -> Result<PathBuf, SchematicIoError>;
+    fn show_save_dialog(&self, default_name: Option<&str>) -> Result<PathBuf, SchematicIoError>;
+    fn load_schematic(&self, path: &Path) -> Result<SchematicState, SchematicIoError>;
+    /// Write `schematic` to `path`, first copying the previous file to a
+    /// backup when `keep_backup` asks.
+    fn save_schematic(
+        &self,
+        schematic: &SchematicState,
+        path: &Path,
+        keep_backup: bool,
+    ) -> Result<(), SchematicIoError>;
+    fn saved_paths_are_reopenable(&self) -> bool {
+        true
+    }
+}
+
+/// Production IO backend using native dialogs and filesystem operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct NativeFileWorkflowIo;
+
+impl FileWorkflowIo for NativeFileWorkflowIo {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_open_dialog(&self) -> Result<PathBuf, SchematicIoError> {
+        crate::io::show_open_dialog()
+    }
+
+    fn show_save_dialog(&self, default_name: Option<&str>) -> Result<PathBuf, SchematicIoError> {
+        crate::io::show_save_dialog(default_name)
+    }
+
+    fn load_schematic(&self, path: &Path) -> Result<SchematicState, SchematicIoError> {
+        crate::io::load_schematic(path)
+    }
+
+    fn save_schematic(
+        &self,
+        schematic: &SchematicState,
+        path: &Path,
+        keep_backup: bool,
+    ) -> Result<(), SchematicIoError> {
+        crate::io::save_schematic(schematic, path, keep_backup)
+    }
+
+    fn saved_paths_are_reopenable(&self) -> bool {
+        !cfg!(target_arch = "wasm32")
+    }
 }
 
 #[cfg(test)]

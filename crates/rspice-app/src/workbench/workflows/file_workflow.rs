@@ -3,9 +3,11 @@
 //! New, open, save, and save-as for a standalone schematic, behind the same
 //! I/O trait split as the export workflows.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::io::FileWorkflowIo;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
 use crate::workbench::app_state::AppState;
@@ -58,60 +60,6 @@ impl<'a> SchematicLoadOrigin<'a> {
     }
 }
 
-/// IO abstraction for schematic file workflows.
-///
-/// This allows open/save behavior to be fully unit tested without invoking
-/// native dialogs.
-pub(crate) trait FileWorkflowIo {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn show_open_dialog(&self) -> Result<PathBuf, SchematicIoError>;
-    fn show_save_dialog(&self, default_name: Option<&str>) -> Result<PathBuf, SchematicIoError>;
-    fn load_schematic(&self, path: &Path) -> Result<SchematicState, SchematicIoError>;
-    /// Write `schematic` to `path`, first copying the previous file to a
-    /// backup when `keep_backup` asks.
-    fn save_schematic(
-        &self,
-        schematic: &SchematicState,
-        path: &Path,
-        keep_backup: bool,
-    ) -> Result<(), SchematicIoError>;
-    fn saved_paths_are_reopenable(&self) -> bool {
-        true
-    }
-}
-
-/// Production IO backend using native dialogs and filesystem operations.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct NativeFileWorkflowIo;
-
-impl FileWorkflowIo for NativeFileWorkflowIo {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn show_open_dialog(&self) -> Result<PathBuf, SchematicIoError> {
-        crate::io::show_open_dialog()
-    }
-
-    fn show_save_dialog(&self, default_name: Option<&str>) -> Result<PathBuf, SchematicIoError> {
-        crate::io::show_save_dialog(default_name)
-    }
-
-    fn load_schematic(&self, path: &Path) -> Result<SchematicState, SchematicIoError> {
-        crate::io::load_schematic(path)
-    }
-
-    fn save_schematic(
-        &self,
-        schematic: &SchematicState,
-        path: &Path,
-        keep_backup: bool,
-    ) -> Result<(), SchematicIoError> {
-        crate::io::save_schematic(schematic, path, keep_backup)
-    }
-
-    fn saved_paths_are_reopenable(&self) -> bool {
-        !cfg!(target_arch = "wasm32")
-    }
-}
-
 /// Reset the current schematic to a new empty document.
 #[cfg(test)]
 pub(crate) fn create_new_schematic(state: &mut AppState) {
@@ -157,15 +105,6 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
             }
         }
     }
-}
-
-/// Sibling checkpoint path for a schematic file: `design.rsp` →
-/// `design.rsp.autosave`. Native only — the web build has no checkpoints.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn autosave_checkpoint_path(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_owned();
-    name.push(".autosave");
-    PathBuf::from(name)
 }
 
 /// Open a schematic, first offering any checkpoint that is eligible under its
@@ -620,8 +559,10 @@ pub(crate) fn save_schematic_as_with_io(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::NativeFileWorkflowIo;
     use crate::state::{CellViewRef, View, ViewType};
     use std::cell::RefCell;
+    use std::path::PathBuf;
     use std::rc::Rc;
 
     #[derive(Debug, Clone)]

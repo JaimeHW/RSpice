@@ -424,11 +424,10 @@ impl RSpiceApp {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::io::{SchematicIoError, WaveformDataset};
+    use crate::io::{FileWorkflowIo, SchematicIoError, WaveformDataset};
     use crate::simulation::plan::AnalysisKind;
     use crate::state::{Component, ComponentType, Point, SchematicState};
     use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-    use crate::workbench::workflows::file_workflow::FileWorkflowIo;
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;

@@ -9,6 +9,8 @@ use rspice_design::drc::DrcResult;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::diagnostics::{LogSeverity, LogSource};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::io::FileWorkflowIo;
 use crate::io::ProjectSnapshot;
 use crate::services::session::SessionKept;
 use crate::state::result_presentation::ResultPresentation;
@@ -25,7 +27,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
 };
 use crate::workbench::lifecycle::recovery::{self, RecoveryCandidate};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::workflows::file_workflow::{self, FileWorkflowIo};
+use crate::workbench::workflows::file_workflow;
 
 impl ResultPresentationSource for crate::workbench::documents::result_document::ResultsState {
     fn project_presentation(&self, simulation: &SimulationState) -> ResultPresentation {

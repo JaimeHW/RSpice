@@ -114,6 +114,14 @@ fn writer_lease_key(checkpoint: &Path) -> Result<PathBuf, String> {
     })
 }
 
+/// Sibling checkpoint path for a schematic file: `design.rsp` →
+/// `design.rsp.autosave`. Native only — the web build has no checkpoints.
+pub(crate) fn autosave_checkpoint_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".autosave");
+    PathBuf::from(name)
+}
+
 fn checkpoint_manifest_path(checkpoint: &Path) -> PathBuf {
     append_suffix(checkpoint, ".manifest.json")
 }
@@ -130,7 +138,7 @@ fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
 
 fn checkpoint_generation_path(source: &Path, generation_id: Uuid) -> PathBuf {
     append_suffix(
-        &crate::workbench::workflows::file_workflow::autosave_checkpoint_path(source),
+        &autosave_checkpoint_path(source),
         &format!("{CHECKPOINT_GENERATION_MARKER}{generation_id}"),
     )
 }
@@ -139,7 +147,7 @@ fn checkpoint_generation_path(source: &Path, generation_id: Uuid) -> PathBuf {
 /// unsuffixed path remains readable for checkpoints written by older builds;
 /// current writers publish immutable UUID-named generations beside it.
 pub(crate) fn checkpoint_paths_for_source(source: &Path) -> Vec<PathBuf> {
-    let legacy = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(source);
+    let legacy = autosave_checkpoint_path(source);
     let mut checkpoints = Vec::new();
     if legacy.exists() {
         checkpoints.push(legacy.clone());
@@ -339,7 +347,7 @@ fn open_and_lock_lease(checkpoint: &Path, create: bool) -> Result<File, String> 
 /// `create_new` on the lease is the namespace CAS: even a UUID collision cannot
 /// cause an existing checkpoint, manifest, or lease to be replaced.
 fn reserve_writer_generation(source: &Path) -> Result<PathBuf, String> {
-    let base = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(source);
+    let base = autosave_checkpoint_path(source);
     let parent = base
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -991,7 +999,7 @@ mod tests {
         let root = unique_temp_dir("legacy-preservation");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let legacy = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let legacy = autosave_checkpoint_path(&source);
         let legacy_bytes = serialize_checkpoint(&source, &SchematicState::default())
             .expect("serialize legacy checkpoint");
         atomic_write(&legacy, &legacy_bytes).expect("publish legacy checkpoint");
@@ -1058,8 +1066,7 @@ mod tests {
     fn cleanup_fails_closed_while_another_owner_holds_the_lease() {
         let root = unique_temp_dir("cleanup-race");
         let source = root.join("design.rsch");
-        let checkpoint =
-            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint = autosave_checkpoint_path(&source);
         std::fs::write(&source, "saved source").expect("write source");
         std::fs::write(&checkpoint, "recovery bytes").expect("write checkpoint");
         let lease = open_and_lock_lease(&checkpoint, true).expect("hold competing lease");
@@ -1082,8 +1089,7 @@ mod tests {
         let root = unique_temp_dir("legacy");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let checkpoint =
-            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint = autosave_checkpoint_path(&source);
         let bytes = serialize_checkpoint(&source, &SchematicState::default())
             .expect("serialize legacy checkpoint");
         atomic_write(&checkpoint, &bytes).expect("write legacy checkpoint");

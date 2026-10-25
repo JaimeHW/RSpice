@@ -1918,7 +1918,7 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
     else {
         return Ok(PublicationCompletion::Cancelled);
     };
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+    crate::io::file_exchange::ensure_file_extension(&mut path, extension);
     let destination = app.export_workflow_io.observe_destination(&path)?;
 
     // The picker may have yielded. The exact current source is authenticated

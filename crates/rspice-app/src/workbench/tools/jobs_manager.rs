@@ -1335,7 +1335,7 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     }) else {
         return;
     };
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "json");
+    crate::io::file_exchange::ensure_file_extension(&mut path, "json");
     let result = io
         .observe_destination(&path)
         .and_then(|destination| io.write_text_file_observed(&destination, &payload));

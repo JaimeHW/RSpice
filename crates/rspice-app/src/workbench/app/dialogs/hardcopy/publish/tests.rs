@@ -725,7 +725,7 @@ fn identity_bands_are_exactly_one_line_each() {
 #[test]
 fn selected_export_name_receives_the_contract_extension() {
     let mut path = std::path::PathBuf::from("review-output");
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "pdf");
+    crate::io::file_exchange::ensure_file_extension(&mut path, "pdf");
     assert_eq!(path, std::path::PathBuf::from("review-output.pdf"));
 }
 

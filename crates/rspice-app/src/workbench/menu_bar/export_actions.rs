@@ -75,7 +75,7 @@ pub(super) fn action_export_svg_with_io(
         filter_extensions: &["svg"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "svg");
+            crate::io::file_exchange::ensure_file_extension(&mut path, "svg");
 
             let export = io
                 .observe_destination(&path)
@@ -168,7 +168,7 @@ pub(crate) fn action_export_netlist_with_io(
         filter_extensions: &[extension],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+            crate::io::file_exchange::ensure_file_extension(&mut path, extension);
 
             let export = io.observe_destination(&path).and_then(|destination| {
                 io.write_text_file_observed(&destination, &netlist_content)
@@ -271,7 +271,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     }) else {
         return false;
     };
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "zip");
+    crate::io::file_exchange::ensure_file_extension(&mut path, "zip");
     let result = io.observe_destination(&path).and_then(|destination| {
         io.write_bytes_file_observed(&destination, &bundle, "application/zip")
     });
@@ -329,7 +329,7 @@ fn publish_generated_source(
     }) else {
         return false;
     };
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+    crate::io::file_exchange::ensure_file_extension(&mut path, extension);
     let result = io
         .observe_destination(&path)
         .and_then(|destination| io.write_text_file_observed(&destination, &source));
@@ -572,10 +572,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
         filter_extensions: &["rspicepub"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(
-                &mut path,
-                "rspicepub",
-            );
+            crate::io::file_exchange::ensure_file_extension(&mut path, "rspicepub");
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &content));

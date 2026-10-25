@@ -118,6 +118,21 @@ pub(crate) struct SavedFile {
 /// cancellation message to keep from reporting one.
 pub(crate) type Outcome<T> = Result<Option<T>, String>;
 
+pub(crate) fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case(expected_ext))
+}
+
+/// Give a chosen destination its expected extension. Every save path goes
+/// through this one rule, because a document saved without its expected
+/// extension is a document the next open will not find.
+pub(crate) fn ensure_file_extension(path: &mut std::path::PathBuf, expected_ext: &str) {
+    if !has_file_extension(path, expected_ext) {
+        path.set_extension(expected_ext);
+    }
+}
+
 type Mailbox<T> = Arc<Mutex<Option<Outcome<T>>>>;
 
 /// Ask the reader for a file to read, bounded at `max_bytes` and decoded as

@@ -300,8 +300,7 @@ pub struct RSpiceApp {
     /// the relay port the cloud service hands out.
     pub(crate) live_session: crate::workbench::live_session::LiveSessionEngine,
     /// File workflow IO backend (native in production, injectable in tests).
-    pub(crate) file_workflow_io:
-        Box<dyn crate::workbench::workflows::file_workflow::FileWorkflowIo>,
+    pub(crate) file_workflow_io: Box<dyn crate::io::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
     pub(crate) export_workflow_io:
         Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
@@ -415,9 +414,7 @@ impl RSpiceApp {
                 "This test instance runs without a model-pack store.",
             ),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
-            file_workflow_io: Box::new(
-                crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
-            ),
+            file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
             export_workflow_io: Box::new(
                 crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
             ),
@@ -579,7 +576,7 @@ impl RSpiceApp {
             ),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
-                crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
+                crate::io::NativeFileWorkflowIo,
             ),
             export_workflow_io: Box::new(
                 crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,

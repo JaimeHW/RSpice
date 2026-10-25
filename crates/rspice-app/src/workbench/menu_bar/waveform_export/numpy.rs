@@ -166,7 +166,7 @@ pub(super) fn export_numpy(
         filter_extensions: &filter_extensions,
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+            crate::io::file_exchange::ensure_file_extension(&mut path, extension);
             let export = io.observe_destination(&path).and_then(|destination| {
                 io.write_bytes_file_observed(&destination, &bytes, kind.mime_type())
             });

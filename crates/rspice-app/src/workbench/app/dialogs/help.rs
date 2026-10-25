@@ -691,7 +691,7 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
     }) else {
         return;
     };
-    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "json");
+    crate::io::file_exchange::ensure_file_extension(&mut path, "json");
     let result = app
         .export_workflow_io
         .observe_destination(&path)

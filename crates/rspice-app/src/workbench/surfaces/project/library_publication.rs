@@ -728,10 +728,7 @@ fn publish_native(
     else {
         return Ok(PublicationAction::Cancelled);
     };
-    crate::workbench::workflows::file_actions::ensure_file_extension(
-        &mut path,
-        PROJECT_ARTIFACT_EXTENSION,
-    );
+    crate::io::file_exchange::ensure_file_extension(&mut path, PROJECT_ARTIFACT_EXTENSION);
     let destination = app.export_workflow_io.observe_destination(&path)?;
     let candidate = app.prepare_project_library_publication(
         draft.label.clone(),

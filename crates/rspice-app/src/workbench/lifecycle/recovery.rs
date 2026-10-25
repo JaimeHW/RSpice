@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
+use crate::io::{FileWorkflowIo, ProjectExecutionContext, ProjectSimulationResults};
 use crate::services::recent_files::RecentKind;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
@@ -25,14 +25,14 @@ use crate::state::{
     View, ViewType,
 };
 use crate::workbench::app_state::{Model, PlatformState, SimSetupState};
-use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 use crate::state::write_policy::LocalSafeModeOptions;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::recovery_checkpoint::{
     CheckpointBinding, CheckpointInspection, CheckpointOwnership, SourceSnapshotRelation,
-    discard_bound_checkpoint, inspect_checkpoint, read_bound_checkpoint, read_source_snapshot,
+    autosave_checkpoint_path, discard_bound_checkpoint, inspect_checkpoint, read_bound_checkpoint,
+    read_source_snapshot,
 };
 
 // Browser builds retain the shared launcher model but intentionally construct
@@ -457,9 +457,7 @@ fn checkpoint_age(modified: std::time::SystemTime) -> String {
 fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let expected = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(
-            &candidate.original,
-        );
+        let expected = autosave_checkpoint_path(&candidate.original);
         if expected != candidate.checkpoint {
             return Err(
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),
@@ -1344,15 +1342,11 @@ mod tests {
         let root = unique_temp_dir("recovery-discovery");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let checkpoint =
-            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint = autosave_checkpoint_path(&source);
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
 
-        let candidates = discover_candidates(
-            &[source.clone()],
-            &[],
-            &crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
-        );
+        let candidates =
+            discover_candidates(&[source.clone()], &[], &crate::io::NativeFileWorkflowIo);
         assert_eq!(candidates.len(), 1);
         assert!(matches!(
             candidates[0].integrity,
@@ -1368,7 +1362,7 @@ mod tests {
         let root = unique_temp_dir("recovery-generations");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
-        let legacy = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let legacy = autosave_checkpoint_path(&source);
         std::fs::write(&legacy, "not schematic json").expect("write malformed legacy point");
         let mut generated_name = legacy.as_os_str().to_owned();
         generated_name.push(format!(".generation-{}", uuid::Uuid::new_v4()));
@@ -1382,7 +1376,7 @@ mod tests {
         let candidates = discover_candidates(
             &[source.clone()],
             &[source],
-            &crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
+            &crate::io::NativeFileWorkflowIo,
         );
 
         assert_eq!(candidates.len(), 2);
