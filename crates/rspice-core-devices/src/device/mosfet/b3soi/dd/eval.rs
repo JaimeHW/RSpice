@@ -2188,10 +2188,14 @@ pub fn eval(
 
     // Thermal power row. ngspice intentionally omits the bipolar-current power
     // term here for convergence (b3soiddld.c operating-point assignment).
-    op.gtemp_g = -gm * vds;
-    op.gtemp_b = -gmb * vds;
-    op.gtemp_e = -gme * vds;
-    op.gtemp_d = -gds * vds - ids;
+    // The node derivatives of the power carry the type sign, as B4SOI writes
+    // them (b4soild.c:6241-6247); ngspice-46 DD leaves it out
+    // (b3soiddld.c:2584-2588), which flips the PMOS thermal-row Jacobian but
+    // not its residual.
+    op.gtemp_g = -mtype * gm * vds;
+    op.gtemp_b = -mtype * gmb * vds;
+    op.gtemp_e = -mtype * gme * vds;
+    op.gtemp_d = -mtype * (gds * vds + ids);
     op.gtemp_t = 0.0;
     op.thermal_eq_current = -ids * vds
         - mtype * (op.gtemp_g * vgs + op.gtemp_b * vbs + op.gtemp_e * ves + op.gtemp_d * vds)
