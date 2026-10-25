@@ -1,3 +1,8 @@
+//! The shortcut resolver over the shell's command registry: multi-stroke
+//! sequences and their timeouts on an injected clock, which candidate an
+//! event dispatches by platform, enablement, focus and context precedence,
+//! and the conventional chords of each workspace.
+
 use std::time::Duration;
 
 use egui::{Event, Key, Modifiers};

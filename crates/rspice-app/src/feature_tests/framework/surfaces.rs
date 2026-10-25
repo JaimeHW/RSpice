@@ -1,3 +1,7 @@
+//! The workspace surfaces: the search shortcut's hand-off keeps the source
+//! editor and the edits before it, and the Results split stage stays equal,
+//! bounded at narrow widths and named for assistive technology.
+
 use crate::state::ProjectSourceLanguage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};

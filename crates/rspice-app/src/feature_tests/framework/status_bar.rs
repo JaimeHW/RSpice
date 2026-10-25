@@ -1,3 +1,7 @@
+//! The status bar: its rules and segment geometry, the expiring prompt, the
+//! checks count and marks, the result, zoom, page and coordinate segments,
+//! the engine's lifecycle mark, and what gives way on a narrow bar.
+
 use crate::simulation::status::EngineAvailability;
 use crate::simulation::status::{
     preflight_status, simulation_engine_status, simulation_progress_percent,

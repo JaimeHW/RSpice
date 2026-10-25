@@ -1,3 +1,7 @@
+//! The document bar: which documents each workspace's strip lists and keeps,
+//! what activating, cycling and closing a tab does to them, and how the tabs
+//! share the strip's width, elide their labels and scroll into view.
+
 use crate::product::ObjectRevision;
 use crate::state::ViewType;
 use crate::state::{

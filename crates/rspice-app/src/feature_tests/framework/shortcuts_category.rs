@@ -1,3 +1,5 @@
+//! The shortcut reference lists every discoverable command exactly once.
+
 use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::app_state::session::shortcuts::category::*;
 use crate::workbench::commands::vocabulary::{Command, command_registry};

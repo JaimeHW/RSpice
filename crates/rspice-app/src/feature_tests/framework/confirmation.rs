@@ -1,3 +1,7 @@
+//! The confirmation dialog on its narrow surface: the close-project review and
+//! the save prompt each ask one question, stack their verbs on a phone and paint
+//! no fill band, and a review raised during a run offers Stop and no save verbs.
+
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::confirmation::*;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;

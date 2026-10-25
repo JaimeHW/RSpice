@@ -1,3 +1,7 @@
+//! The docks' sizes: responsive and reset layouts discard egui's panel memory
+//! and only a matching explicit resize keeps it, every dock keeps the size it
+//! was dragged to, and the splitter keys step the dock the width class shows.
+
 use crate::workbench::docks::{SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::WorkbenchSession;

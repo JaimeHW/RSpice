@@ -1,3 +1,7 @@
+//! The phone's drawers and navigation sheet: the scrim's tokens, the grid's
+//! height against its real rows, the workspace entry and the tool groups, the
+//! account and notification entries, and the floor on very narrow viewports.
+
 use crate::ui::tokens::{Mode, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;

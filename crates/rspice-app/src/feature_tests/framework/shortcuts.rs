@@ -1,3 +1,6 @@
+//! The accessible shortcut summary reads the effective custom profile and the
+//! host's platform, not the defaults.
+
 use egui::Key;
 
 use crate::state::command_catalog::CommandPlatform;

@@ -1,3 +1,7 @@
+//! Console rows anchored to a run's log: a double click marks what the run
+//! named, an anchor that no longer resolves renders inert and says why, and a
+//! run line refuses once its run is gone.
+
 use crate::diagnostics::LogAnchor;
 use crate::diagnostics::LogSource;
 use crate::state::SimulationRun;

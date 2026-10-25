@@ -1,3 +1,5 @@
+//! The window session dialog's Windows page carries no constant paragraphs.
+
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::window_session::*;
 use egui::Context;

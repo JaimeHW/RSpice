@@ -1,3 +1,6 @@
+//! The toolbar's More tools rows take the keyboard and show a focus ring only
+//! when the keyboard reached them.
+
 use crate::state::Tool;
 use crate::ui::panels::WorkbenchIcon;
 use crate::ui::tokens::Tokens;
