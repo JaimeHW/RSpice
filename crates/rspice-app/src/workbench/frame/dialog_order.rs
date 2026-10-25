@@ -567,9 +567,9 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
         is_open: |state| state.results.dataset_export.is_some(),
     },
     ModalSpec {
-        key: DialogKey("simulate.run_details"),
+        key: DialogKey("results.run_details"),
         modality: Modality::Dialog,
-        is_open: |state| state.simulate.run_details.is_some(),
+        is_open: |state| state.results.run_details.is_some(),
     },
     ModalSpec {
         key: DialogKey("project.launcher"),

@@ -31,7 +31,7 @@
     "simulate->design": 4,
     "simulate->models": 19,
     "simulate->project": 2,
-    "simulate->results": 6
+    "simulate->results": 5
   },
   "lower->upper": {},
   "whole-app": {

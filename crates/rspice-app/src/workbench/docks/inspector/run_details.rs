@@ -47,13 +47,13 @@ pub(in crate::workbench::docks) fn open(state: &mut AppState, run_id: u64) {
         return;
     };
     let manifest = crate::workbench::documents::result_document::manifest::manifest_for_run(run);
-    state.simulate.run_details = Some(RunDetailsDialogState { run_id, manifest });
+    state.results.run_details = Some(RunDetailsDialogState { run_id, manifest });
 }
 
 /// Draw Run details… while it is open, and act on its two routes once the
 /// borrow of the run it describes is done.
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(dialog) = app.state.simulate.run_details.as_ref() else {
+    let Some(dialog) = app.state.results.run_details.as_ref() else {
         return;
     };
     let run_id = dialog.run_id;
@@ -67,7 +67,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         .find(|run| run.id == run_id)
     else {
         // The run left the history while its details were open.
-        app.state.simulate.run_details = None;
+        app.state.results.run_details = None;
         return;
     };
     let manifest = &dialog.manifest;
@@ -198,7 +198,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     let close = matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled);
     if close || open_plan || open_deck.is_some() {
-        app.state.simulate.run_details = None;
+        app.state.results.run_details = None;
     }
     if let Some(run_id) = open_deck {
         executed_deck::reveal(&mut app.state, run_id);

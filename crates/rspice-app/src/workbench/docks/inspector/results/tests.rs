@@ -681,7 +681,7 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
     run_details::open(&mut app.state, u64::MAX);
     assert_eq!(
         app.state
-            .simulate
+            .results
             .run_details
             .as_ref()
             .map(|details| details.run_id),

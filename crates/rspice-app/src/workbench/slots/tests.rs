@@ -311,7 +311,7 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("run_details", |dialogs| {
         let run = crate::state::SimulationRun::new(1);
-        dialogs.simulate.run_details = Some(RunDetailsDialogState {
+        dialogs.results.run_details = Some(RunDetailsDialogState {
             run_id: run.id,
             manifest: crate::workbench::documents::result_document::manifest::manifest_for_run(
                 &run,

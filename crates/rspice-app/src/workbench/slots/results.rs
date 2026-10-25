@@ -1,13 +1,15 @@
-//! The results feature's dialogs, the dataset export format question, the
-//! waveform calculator and the expression diagnostics tool, and the results
-//! workspace's session; the result-document forms, the external-result import
-//! and the request to open the specification editor.
+//! The results feature's dialogs, the dataset export format question, Run
+//! details…, the waveform calculator and the expression diagnostics tool,
+//! and the results workspace's session; the result-document forms, the
+//! external-result import and the request to open the specification editor.
 
 /// What the results feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResultsState {
     /// The format question "Export dataset…" asks, while it is open.
     pub(crate) dataset_export: Option<crate::workbench::menu_bar::DatasetExportPicker>,
+    /// Run details…: the provenance of one retained run.
+    pub(crate) run_details: Option<crate::workbench::docks::RunDetailsDialogState>,
 
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,
