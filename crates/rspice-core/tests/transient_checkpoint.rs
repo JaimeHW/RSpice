@@ -1122,6 +1122,42 @@ fn segmented_run_continues_the_unsegmented_trajectory() {
     );
 }
 
+#[test]
+fn resumed_fft_window_before_the_checkpoint_reports_the_available_history() {
+    let netlist = Netlist::parse(
+        "* resumed fft history\nV1 out 0 1\nR1 out 0 1k\n.options fft fftout=0\n\
+         .fft V(out) np=8 window=rect format=unorm\n.end\n",
+    )
+    .expect("deck parses");
+    let engine = Engine::default();
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 2e-6, 0.2e-6)
+        .expect("first segment completes");
+    assert!(first.fft_results[0].status.is_complete());
+    let checkpoint = checkpoint.into_checkpoint().unwrap();
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 10e-6, 0.2e-6)
+        .expect("resumed segment completes");
+    assert_eq!(resumed.time[0], 2e-6);
+    assert_eq!(resumed.time.last(), Some(&10e-6));
+    let fft = &resumed.fft_results[0];
+    // The window opens at 0 s, before the resumed history begins: no bins
+    // may be computed from samples the resumed run does not hold.
+    assert_eq!(
+        fft.status,
+        rspice_core::engine::TransientFftStatus::IncompleteHistory {
+            available_start: 2e-6,
+            available_stop: 10e-6,
+        }
+    );
+    fft.validate_status().unwrap();
+    assert_eq!(fft.start_time, 0.0);
+    assert_eq!(fft.stop_time, 10e-6);
+    assert_eq!(fft.point_count, 8);
+    assert!(fft.bins.is_empty());
+    assert!(fft.metrics.is_none());
+}
+
 fn first_step(result: &rspice_core::engine::TransientResult) -> f64 {
     result.time[1] - result.time[0]
 }
