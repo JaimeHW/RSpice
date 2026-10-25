@@ -81,8 +81,9 @@ pub(crate) mod automation_workflow;
 // Core Infrastructure
 // =============================================================================
 
-/// Application service adapters and platform integration.
 pub(crate) mod services {
+    //! Application service adapters and platform integration.
+    //!
     //! Services Module
     //!
     //! Backend services for the RSpice UI application.
