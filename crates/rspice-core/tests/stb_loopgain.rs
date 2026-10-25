@@ -139,6 +139,26 @@ c1 ctrl 0 159.154943091895n
     );
 }
 
+#[test]
+fn probe_that_names_no_voltage_source_is_rejected() {
+    let netlist = Netlist::parse(
+        "* single-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\nR1 x ctrl 1k\nC1 ctrl 0 159.154943091895n\n\
+         .stb dec 20 10 10meg probe=VPROBE\n.end\n",
+    )
+    .expect("deck parses");
+    let config = StbConfig::new()
+        .with_sweep(10.0, 1.0e7, 20)
+        .with_probe("MISSING");
+    let message = Engine::new(SimulationConfig::default())
+        .run_stb(&netlist, config)
+        .expect_err("an absent probe must not be measured")
+        .to_string();
+    assert!(
+        message.contains("not a voltage source"),
+        "error must name the probe contract, got: {message}"
+    );
+}
+
 const A2: f64 = 200.0;
 const RO: f64 = 10.0e3;
 const RF: f64 = 10.0e3;
