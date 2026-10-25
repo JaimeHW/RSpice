@@ -35,8 +35,8 @@ use crate::workbench::AppState;
 use crate::workbench::framework::host::Point;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::PANEL_HEADER_H;
 use super::super::state::Workspace;
+use crate::ui::panels::PANEL_HEADER_H;
 
 const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
 

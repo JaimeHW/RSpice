@@ -160,7 +160,7 @@ pub(super) fn menu_rows(
     resolve_menu_rows(
         entries,
         app,
-        crate::workbench::app_state::runtime_command_platform(ctx),
+        crate::workbench::app_state::session::shortcuts::runtime_command_platform(ctx),
         ctx.os(),
     )
 }

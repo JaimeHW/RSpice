@@ -5,7 +5,8 @@
 //! or sign-off path exists. This module is the single runtime gate between a
 //! canonical [`SurfaceId`] and application navigation.
 
-use crate::workbench::{SurfaceId, SurfaceRoute};
+use crate::workbench::routing::surface_catalog::SurfaceId;
+use crate::workbench::routing::surface_route::SurfaceRoute;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceExecutionAvailability {

@@ -83,9 +83,7 @@ pub use preferences::{
     EngineeringExportFormat, FolderListPreference, ScalarPreference, TogglePreference,
     UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
-pub use routing::availability::{
-    SurfaceExecutionAvailability, SurfaceRouteUnavailable, surface_availability,
-};
+pub use routing::availability::SurfaceRouteUnavailable;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use routing::navigation::BrowserHistoryEffect;
 pub use routing::navigation::{RouteTransition, RouteTransitionSource, SurfaceNavigation};

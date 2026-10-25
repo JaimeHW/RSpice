@@ -17,7 +17,10 @@ use rspice_results_ui::report::page_marker;
 #[test]
 fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     let mut app = RSpiceApp::test_instance();
-    assert!(crate::workbench::surface_availability(SurfaceId::ReportAuthoring).can_open());
+    assert!(
+        crate::workbench::routing::availability::surface_availability(SurfaceId::ReportAuthoring)
+            .can_open()
+    );
     assert!(
         crate::workbench::commands::vocabulary::command_catalog()
             .any(|command| command == Command::ReportAuthoring)

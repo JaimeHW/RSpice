@@ -9,8 +9,10 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
-use crate::workbench::app::{ConfirmationResponse, ProjectReviewRequest};
-use crate::workbench::design_system::WorkbenchIcon;
+use crate::ui::panels::WorkbenchIcon;
+use crate::workbench::app::dialogs::confirmation_state::{
+    ConfirmationResponse, ProjectReviewRequest,
+};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, ProjectDocumentId, RevertReviewToken,
@@ -375,12 +377,7 @@ fn unsaved_list(ui: &mut Ui, unsaved: &[(WorkbenchIcon, String)]) {
                 ),
                 t.color.text_dim,
             );
-            let shown = crate::workbench::design_system::elide_text(
-                ui,
-                name,
-                &font,
-                row.width() - NAME_INDENT,
-            );
+            let shown = crate::ui::panels::elide_text(ui, name, &font, row.width() - NAME_INDENT);
             let elided = shown != *name;
             ui.painter().text(
                 egui::pos2(row.left() + NAME_INDENT, row.center().y),

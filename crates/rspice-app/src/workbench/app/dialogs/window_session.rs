@@ -11,8 +11,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::lifecycle::window_session::ApplicationWindowId;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
-use crate::workbench::{ApplicationWindowId, WorkspacePreset};
+use rspice_app_state::workbench::preferences::WorkspacePreset;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum WindowSessionPage {
@@ -65,17 +66,17 @@ pub(crate) struct WindowSessionDialogState {
     pub(crate) open: bool,
     pub(crate) page: WindowSessionPage,
     pub(crate) workflow: Option<WindowWorkflow>,
-    pub(crate) source_window: crate::workbench::ApplicationWindowId,
+    pub(crate) source_window: ApplicationWindowId,
     pub(crate) source_document: Option<crate::workbench::state::WorkspaceDocumentId>,
     pub(crate) source_label: String,
     pub(crate) initial_content: NewWindowInitialContent,
-    pub(crate) destination: Option<crate::workbench::ApplicationWindowId>,
+    pub(crate) destination: Option<ApplicationWindowId>,
     pub(crate) layout_choice: WindowLayoutChoice,
     pub(crate) restore_on_launch: bool,
     pub(crate) synchronize_chrome: bool,
     pub(crate) recover_all_future_windows: bool,
     pub(crate) reattach_at_end: bool,
-    pub(crate) recovery_selected: std::collections::BTreeSet<crate::workbench::ApplicationWindowId>,
+    pub(crate) recovery_selected: std::collections::BTreeSet<ApplicationWindowId>,
     pub(crate) error: Option<String>,
 }
 

@@ -9,7 +9,8 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::workbench::{SurfaceId, SurfaceRoute};
+use crate::workbench::routing::surface_catalog::SurfaceId;
+use crate::workbench::routing::surface_route::SurfaceRoute;
 
 const HISTORY_LIMIT: usize = 32;
 const RECENT_LIMIT: usize = 16;

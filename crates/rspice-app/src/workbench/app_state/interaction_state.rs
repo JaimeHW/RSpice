@@ -108,7 +108,7 @@ struct SchematicDragOwner {
     document: crate::state::CellViewRef,
     occurrence: Option<rspice_design::occurrence::DocumentOccurrence>,
     sheet: Option<(Option<rspice_design_model::design_management::SheetId>, u64)>,
-    window: crate::workbench::ApplicationWindowId,
+    window: crate::workbench::lifecycle::window_session::ApplicationWindowId,
     viewport: egui::ViewportId,
     operation_id: u64,
 }
@@ -304,7 +304,7 @@ impl super::AppState {
 
     pub(crate) fn cancel_schematic_drag_in_window(
         &mut self,
-        window: crate::workbench::ApplicationWindowId,
+        window: crate::workbench::lifecycle::window_session::ApplicationWindowId,
     ) {
         if self
             .workbench
@@ -340,7 +340,8 @@ impl super::AppState {
         let invalid_context = !self.schematic_drag_in_progress()
             || self.model.schematic.session.editor.tool != crate::state::Tool::Select
             || self.schematic_edit_read_only()
-            || self.workbench.current_route().surface_id() != crate::workbench::SurfaceId::Design;
+            || self.workbench.current_route().surface_id()
+                != crate::workbench::routing::surface_catalog::SurfaceId::Design;
         let interrupted = ctx.input(|input| {
             let released = input.pointer.button_released(egui::PointerButton::Primary);
             !input.focused

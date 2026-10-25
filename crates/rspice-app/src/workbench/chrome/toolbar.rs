@@ -20,9 +20,9 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::host::{Point, ToolbarScope, ToolbarSlot};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::{LayoutSpec, RUN_CONFIG_CHIP_MAX_WIDTH};
 use super::super::state::{Drawer, Workspace};
+use crate::ui::panels::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::CommandAvailability;
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
@@ -155,7 +155,7 @@ fn global_document_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout
     let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(app.state());
     let shortcut = app.shortcut_label(
         ids::SAVE,
-        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let state_label = if dirty {
@@ -493,7 +493,7 @@ fn toolbar_command(
     };
     let shortcut = app.shortcut_label(
         command,
-        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let label = if shortcut.is_empty() {

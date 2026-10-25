@@ -10,9 +10,9 @@ use crate::workbench::chrome::toolbar::drawer_owner;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
+use crate::ui::panels::WorkbenchIcon;
 
 /// The sheet's title and its close target, which is 44 px square: the band
 /// held a branding eyebrow over the title and was 57.

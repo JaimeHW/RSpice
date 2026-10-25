@@ -11,10 +11,10 @@ use egui::{Popup, Rect, Sense, Vec2};
 
 use super::ToolbarCommandPresentation;
 use crate::state::command_catalog::CommandKey;
+use crate::ui::panels::{WorkbenchIcon, icon_button};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::AppState;
-use crate::workbench::design_system::{WorkbenchIcon, icon_button};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::Host;
 use crate::workbench::framework::workbench_host::WorkbenchHost;

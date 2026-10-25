@@ -595,7 +595,8 @@ impl PaletteEntry {
                 }
                 state.model.simulation.view.data_version =
                     state.model.simulation.view.data_version.wrapping_add(1);
-                state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
+                state.results.results.session.viewer =
+                    rspice_results::result_presentation::ResultViewer::Waves;
                 state
                     .results
                     .results
@@ -1050,7 +1051,7 @@ pub(in crate::workbench) fn render_command_palette(app: &mut impl WorkbenchHost,
             app,
             &app.workbench().command_palette.query,
             scope,
-            crate::workbench::app_state::runtime_command_platform(ctx),
+            crate::workbench::app_state::session::shortcuts::runtime_command_platform(ctx),
             ctx.os(),
         );
         let selected = &mut app.workbench_mut().command_palette.selected;
@@ -1148,7 +1149,7 @@ pub(in crate::workbench) fn render_command_palette(app: &mut impl WorkbenchHost,
         restore_focus(ctx, focus_state_id, search_id(), modal_layer);
         if route_owned {
             app.state_mut().close_route_owned_transient(
-                crate::workbench::SurfaceId::CommandPalette,
+                crate::workbench::routing::surface_catalog::SurfaceId::CommandPalette,
                 "Command Palette",
             );
         }

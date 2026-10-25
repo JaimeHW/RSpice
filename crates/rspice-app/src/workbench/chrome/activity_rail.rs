@@ -8,8 +8,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};
 use super::super::state::Workspace;
+use crate::ui::panels::{ACTIVITY_RAIL_W, WorkbenchIcon};
 
 const ACTIVITY_BUTTON_WIDTH: f32 = 50.0;
 const ACTIVITY_BUTTON_HEIGHT: f32 = 45.0;
@@ -76,7 +76,9 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost) {
                 let command = app.open_workspace(workspace);
                 let shortcut = app.shortcut_label(
                     command,
-                    crate::workbench::app_state::runtime_command_platform(ui.ctx()),
+                    crate::workbench::app_state::session::shortcuts::runtime_command_platform(
+                        ui.ctx(),
+                    ),
                     ui.ctx().os(),
                 );
                 let response = ui

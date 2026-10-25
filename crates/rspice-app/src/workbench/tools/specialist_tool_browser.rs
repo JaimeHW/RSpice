@@ -22,11 +22,12 @@ use crate::ui::{
 use crate::workbench::AppState;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use crate::workbench::{
-    RouteTransitionSource, SurfaceExecutionAvailability, SurfaceId, SurfaceRoute,
-    design_system::WorkbenchIcon,
-    state::{SpecialistToolBrowserState, SpecialistToolFilter, Workspace},
-};
+use crate::ui::panels::WorkbenchIcon;
+use crate::workbench::routing::availability::{SurfaceExecutionAvailability, surface_availability};
+use crate::workbench::routing::navigation::RouteTransitionSource;
+use crate::workbench::routing::surface_catalog::SurfaceId;
+use crate::workbench::routing::surface_route::SurfaceRoute;
+use crate::workbench::state::{SpecialistToolBrowserState, SpecialistToolFilter, Workspace};
 
 mod workspace_rows;
 
@@ -109,7 +110,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost) {
 fn execute_action(app: &mut impl WorkbenchHost, action: BrowserAction) {
     match action {
         BrowserAction::Unavailable(surface) => {
-            let reason = match crate::workbench::surface_availability(surface) {
+            let reason = match surface_availability(surface) {
                 SurfaceExecutionAvailability::Unavailable { reason } => reason,
                 SurfaceExecutionAvailability::Available { .. } => {
                     "This specialist workspace is not currently available."

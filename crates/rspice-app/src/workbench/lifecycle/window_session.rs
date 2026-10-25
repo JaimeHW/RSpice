@@ -11,10 +11,9 @@ use serde::{Deserialize, Serialize};
 
 mod ownership;
 
-use crate::workbench::{
-    SurfaceId, SurfaceRoute,
-    state::{Drawer, Workspace, WorkspaceDocumentId, WorkspaceLayoutState},
-};
+use crate::workbench::routing::surface_catalog::SurfaceId;
+use crate::workbench::routing::surface_route::SurfaceRoute;
+use crate::workbench::state::{Drawer, Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
 
 const PRIMARY_WINDOW_VALUE: u64 = 1;
 const FIRST_SECONDARY_WINDOW_VALUE: u64 = 2;

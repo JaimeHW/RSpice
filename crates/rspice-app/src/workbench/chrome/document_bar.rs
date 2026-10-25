@@ -17,9 +17,9 @@ use crate::workbench::AppState;
 use crate::workbench::framework::host::DocumentHost;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::{WorkbenchIcon, elide_text};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
+use crate::ui::panels::{WorkbenchIcon, elide_text};
 
 const TAB_MAX_WIDTH: f32 = 190.0;
 /// The narrowest a tab shrinks to before the strip scrolls instead: its icon,
@@ -357,7 +357,7 @@ pub(crate) struct WorkspaceDocumentDescriptor {
     pub(crate) active: bool,
     pub(crate) open: bool,
     pub(crate) closable: bool,
-    pub(crate) owner: crate::workbench::ApplicationWindowId,
+    pub(crate) owner: crate::workbench::lifecycle::window_session::ApplicationWindowId,
 }
 
 pub(crate) fn document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDescriptor> {

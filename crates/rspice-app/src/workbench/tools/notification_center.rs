@@ -21,6 +21,7 @@ use egui::{
     Sense, Stroke, Ui, UiBuilder, Vec2, ViewportId, pos2, vec2,
 };
 
+use crate::ui::panels::{WorkbenchIcon, elide_text};
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::notice;
@@ -31,7 +32,6 @@ use crate::ui::widgets::{
 use crate::workbench::AppState;
 use crate::workbench::browser::background_alerts::{self, BackgroundAlerts};
 use crate::workbench::chrome::title_bar;
-use crate::workbench::design_system::{WorkbenchIcon, elide_text};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::state::NotificationFilter;
 

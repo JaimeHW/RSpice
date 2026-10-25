@@ -10,9 +10,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::host::{Host, Point};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::WorkbenchSession;
+use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::ids;
 
@@ -720,7 +720,7 @@ fn search_button(
     let t = Tokens::get(ui.ctx());
     let shortcut = app.shortcut_label(
         ids::COMMAND_PALETTE,
-        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let keycap = shortcut.replace('+', " ");

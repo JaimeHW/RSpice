@@ -7,10 +7,10 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 use super::activity_rail::{paint_numeric_badge, workspace_icon};
+use crate::ui::panels::WorkbenchIcon;
 
 const PHONE_ACTIVE_EDGE: f32 = 2.0;
 const PHONE_ICON_SIZE: f32 = 17.0;

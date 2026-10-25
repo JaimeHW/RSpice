@@ -232,10 +232,7 @@ pub(crate) const DIALOG_BODY_INSET: f32 = 12.0;
 pub(crate) fn band_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
-        vec2(
-            ui.available_width(),
-            crate::workbench::design_system::PANEL_SECTION_H,
-        ),
+        vec2(ui.available_width(), crate::ui::panels::PANEL_SECTION_H),
         Sense::hover(),
     );
     let spoken = meta.map_or_else(|| title.to_owned(), |meta| format!("{title}, {meta}"));

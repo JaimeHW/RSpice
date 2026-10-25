@@ -6,5 +6,5 @@ pub(crate) use rspice_ui_kit::raster;
 pub use rspice_ui_kit::tokens::Direction;
 pub use rspice_ui_kit::{Density, EngineeringCanvasTheme, Mode, Theme};
 pub(crate) use rspice_ui_kit::{
-    accessibility, icons, input, palette, plot, theme, tokens, viewport, widgets,
+    accessibility, icons, input, palette, panels, plot, theme, tokens, viewport, widgets,
 };

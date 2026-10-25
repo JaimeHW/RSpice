@@ -27,9 +27,9 @@ use crate::workbench::framework::host::Point;
 use crate::workbench::framework::requests::{FocusNavigatorSearch, Outbox, Request};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, section_header};
 use super::super::state::{VerificationPage, Workspace};
 use crate::state::ModelsPage;
+use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon, section_header};
 use crate::ui::widgets::paint_problem_mark;
 
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;

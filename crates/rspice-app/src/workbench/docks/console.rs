@@ -20,9 +20,9 @@ use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::AppState;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
-use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{ConsoleChannel, ConsolePage};
+use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::framework::command_registry::ids;
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
