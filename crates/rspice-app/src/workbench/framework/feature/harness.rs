@@ -1,6 +1,5 @@
-//! One feature on its own, for its tests: its state, a model, a session and
-//! the platform services' state, with every peer it reads showing what a
-//! fresh session shows.
+//! One feature on its own, for its tests: its state, a model and a session,
+//! with every peer it reads showing what a fresh session shows.
 //!
 //! The harness answers and runs the feature's own commands as the feature
 //! does, in the same context. The shell's prologue (a project operation in
@@ -12,7 +11,7 @@
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::CommandAvailability;
 
 use super::{Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry, Peers, Reads};
@@ -32,7 +31,6 @@ pub(crate) struct FeatureHarness<F: Feature> {
     pub(crate) state: F::State,
     pub(crate) model: Model,
     pub(crate) wb: F::Session,
-    pub(crate) platform: PlatformState,
 }
 
 impl<F: Feature> FeatureHarness<F>
@@ -45,7 +43,6 @@ where
             state: F::State::default(),
             model,
             wb,
-            platform: PlatformState::default(),
         }
     }
 
@@ -66,7 +63,6 @@ where
             &mut self.state,
             &mut self.model,
             &mut self.wb,
-            &mut self.platform,
             Peers::new(&NullPorts),
         ));
     }

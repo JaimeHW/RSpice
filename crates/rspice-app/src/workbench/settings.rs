@@ -1,16 +1,14 @@
 //! The settings feature: Preferences, the workspace layout manager and the
 //! keyboard shortcut workflows.
 //!
-//! Its commands and frame steps run in a [`Cx`] over the feature's own dialog
-//! state, the model, whose preferences it edits, the session, whose route
-//! opens Preferences, and the platform services' state, whose autosave
-//! interval the preferences file keeps.
+//! Its commands run in a [`Cx`] over the feature's own dialog state, the
+//! model, whose preferences it edits, and the session, whose route opens
+//! Preferences.
 
 pub(crate) mod commands;
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::dialogs::preferences::shortcut_preferences::COMMAND_REFERENCE;
-use crate::workbench::app_state::session::preferences_file::PreferencesFileParts;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::feature::{CommandSet, Cx, Feature, FeatureRegistry, Reads};
 use crate::workbench::shortcuts::artifacts::VSCODE_COMMAND_MAPPINGS;
@@ -29,34 +27,6 @@ impl Feature for SettingsFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SettingsCommand>();
-    }
-}
-
-impl SettingsFeature {
-    /// The settings frame step that keeps the preferences file current: a
-    /// change is noticed, and written once it settles.
-    pub(in crate::workbench) fn persist_preferences_file(
-        cx: &mut Cx<'_, Self>,
-        ctx: &egui::Context,
-    ) {
-        Self::preferences_file(cx).persist_preferences_file(ctx);
-    }
-
-    /// Write any preference change not yet in the file now, rather than
-    /// when it settles: the shell's last step before the session is saved.
-    pub(in crate::workbench) fn flush_preferences_file(cx: &mut Cx<'_, Self>) {
-        Self::preferences_file(cx).flush_preferences_file();
-    }
-
-    /// What the preferences file reads and writes, from the context.
-    fn preferences_file<'c>(cx: &'c mut Cx<'_, Self>) -> PreferencesFileParts<'c> {
-        PreferencesFileParts {
-            file: &mut cx.state.preferences_file,
-            browser_spoken_feedback: &mut cx.state.browser_spoken_feedback,
-            model: &mut *cx.model,
-            workbench: &mut *cx.wb,
-            platform: &mut *cx.platform,
-        }
     }
 }
 
