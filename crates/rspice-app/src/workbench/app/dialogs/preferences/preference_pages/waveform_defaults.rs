@@ -3,6 +3,7 @@
 
 use egui::Ui;
 
+use crate::workbench::framework::requests::ApplyWaveformDefaults;
 use crate::workbench::{ChoicePreference, TogglePreference};
 
 use super::super::preferences_shell::{searchable_row, section_heading, segmented, value_column};
@@ -70,10 +71,10 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-/// Start the open viewer from these defaults, as a new one would start.
+/// Ask the open viewer to start from these defaults, as a new one would
+/// start.
 pub(super) fn apply_to_viewer(state: &mut AppState) {
-    state.results.results.session.phase_continuous = state.model.preferences.unwrapped_phase();
-    state.start_waveform_view_from_preferences();
+    state.workbench.outbox.push(ApplyWaveformDefaults);
 }
 
 /// A segmented row over `segments`, each a label and the stored index it

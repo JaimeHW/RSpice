@@ -211,6 +211,18 @@ impl Request for ResetShortcutResolver {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Start the open waveform view from Results ▸ Waveform defaults, as a new
+/// view starts: wrapped or unwrapped phase, and the minor grid. Raised by
+/// the settings feature when the reader changes or restores those
+/// defaults, and taken straight after the call that raised it, before the
+/// view is drawn again.
+#[derive(Clone, Debug)]
+pub(crate) struct ApplyWaveformDefaults;
+
+impl Request for ApplyWaveformDefaults {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section
