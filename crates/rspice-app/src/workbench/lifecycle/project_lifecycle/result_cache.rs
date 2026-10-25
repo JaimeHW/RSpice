@@ -11,7 +11,7 @@ use crate::product::DatasetId;
 use crate::state::{ExecutedDeckArchive, RunHistoryRevision, SimulationState};
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct ResultCache(RefCell<Option<CachedResults>>);
+pub(crate) struct ResultCache(RefCell<Option<CachedResults>>);
 
 #[derive(Debug, Clone)]
 struct CachedResults {
@@ -88,7 +88,7 @@ impl CachedResults {
 }
 
 impl ResultCache {
-    pub(super) fn capture(&self, state: &SimulationState) -> ProjectSimulationResults {
+    pub(crate) fn capture(&self, state: &SimulationState) -> ProjectSimulationResults {
         let mut cached = self.0.borrow_mut();
         if let Some(held) = cached.as_ref().filter(|held| held.matches(state)) {
             return held.snapshot.clone();

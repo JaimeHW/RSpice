@@ -1,11 +1,40 @@
 //! Accepted content must not be rescanned by recurring dirty-state queries.
 
 use super::*;
+use crate::state::result_presentation::AnalysisPresentationKey;
+
+/// A new session holding one completed transient run, selected, with the
+/// results workspace in front.
+fn retained_results() -> (ServicesHost, AnalysisPresentationKey) {
+    let mut state = ServicesHost::default();
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "Tran")
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![1.0, 2.0],
+                "#ffffff",
+            )]),
+    );
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .unwrap();
+    run.mark_running().unwrap();
+    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+        .unwrap();
+    let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    state.model.simulation.retained.runs.push(run);
+    assert!(state.model.simulation.select_run(0));
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
+    (state, key)
+}
 
 #[test]
 fn accepted_content_is_fingerprinted_only_once_across_dirty_queries() {
     for samples in [2, 100_000] {
-        let (mut state, _) = super::durable_content::retained_results();
+        let (mut state, _) = retained_results();
         state.model.simulation.retained.runs[0].analyses[0].waveforms =
             vec![crate::state::RetainedTrace::new(
                 "V(out)",
@@ -35,78 +64,4 @@ fn accepted_content_is_fingerprinted_only_once_across_dirty_queries() {
             "{samples} samples required {passes} full fingerprint passes; budget is one accepted pass plus twelve working queries"
         );
     }
-}
-
-#[test]
-fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerprints() {
-    let mut state = AppState::default();
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Design);
-    let baseline = snapshot(&state).unwrap();
-    state
-        .platform
-        .project_lifecycle
-        .accept_project(baseline, None);
-    let accepted = state.platform.project_lifecycle.accepted().unwrap();
-    let original_digest = accepted.fingerprints().unwrap().content_digest();
-    registry::FINGERPRINT_PASSES.with(|passes| passes.set(0));
-    let retained = state.platform.project_lifecycle.clone();
-    assert!(std::ptr::eq(
-        accepted.baseline(),
-        retained.accepted().unwrap().baseline()
-    ));
-    assert!(std::ptr::eq(
-        accepted.fingerprints().unwrap(),
-        retained.accepted().unwrap().fingerprints().unwrap()
-    ));
-    assert_eq!(registry::FINGERPRINT_PASSES.with(std::cell::Cell::get), 0);
-
-    assert!(
-        state
-            .model
-            .schematic
-            .with_undo("Place resistor", |schematic| {
-                schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
-            })
-    );
-    assert!(has_unsaved_changes(&state));
-    assert!(active_document_is_dirty(&state));
-    assert_eq!(dirty_document_count(&state), 1);
-    assert_eq!(
-        retained
-            .accepted()
-            .unwrap()
-            .fingerprints()
-            .unwrap()
-            .content_digest(),
-        original_digest
-    );
-    assert!(state.model.schematic.undo());
-    assert!(!has_unsaved_changes(&state));
-    assert!(state.model.schematic.redo());
-    assert!(has_unsaved_changes(&state));
-
-    let replacement = snapshot(&state).unwrap();
-    accept_loaded_project(&mut state, replacement, None);
-    state.assert_project_open_fact();
-    assert!(!has_unsaved_changes(&state));
-    let current = state.platform.project_lifecycle.accepted().unwrap();
-    assert!(!std::ptr::eq(
-        current.baseline(),
-        retained.accepted().unwrap().baseline()
-    ));
-    assert_ne!(
-        current.fingerprints().unwrap().content_digest(),
-        original_digest
-    );
-    assert_eq!(
-        retained
-            .accepted()
-            .unwrap()
-            .fingerprints()
-            .unwrap()
-            .content_digest(),
-        original_digest
-    );
 }

@@ -8,7 +8,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
     for scope in [SaveScope::AllDocuments, SaveScope::ActiveDocument] {
         for later_change in 0..3 {
             let path = unique_path("acknowledged-gesture");
-            let mut state = AppState::default();
+            let mut state = ServicesHost::default();
             state
                 .workbench
                 .activate(crate::workbench::state::Workspace::Design);
@@ -99,7 +99,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
 fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
     for scope in [SaveScope::AllDocuments, SaveScope::ActiveDocument] {
         let path = unique_path("acknowledged-invalid-draft");
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         state
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
@@ -234,7 +234,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
 
 #[test]
 fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
-    let mut state = AppState::default();
+    let mut state = ServicesHost::default();
     state
         .platform
         .project_lifecycle

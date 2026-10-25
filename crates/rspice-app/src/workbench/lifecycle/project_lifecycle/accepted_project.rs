@@ -7,7 +7,7 @@ use crate::io::ProjectSnapshot;
 use crate::state::SchematicState;
 
 impl ProjectLifecycleState {
-    pub(super) fn accept_project(
+    pub(crate) fn accept_project(
         &mut self,
         baseline: ProjectSnapshot,
         binding: Option<PersistenceBinding>,

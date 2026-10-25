@@ -840,7 +840,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/result_document", "app_state", 36),
     ("lifecycle/recovery", "app_state", 4),
     ("documents/netlist_document", "app_state", 2),
-    ("lifecycle/project_lifecycle", "app_state", 3),
+    ("lifecycle/project_lifecycle", "app_state", 2),
     ("hardcopy_adapters/sources", "app_state", 2),
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above; `-> app` also counts the

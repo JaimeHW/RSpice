@@ -30,6 +30,12 @@ pub(crate) struct HostWorkbench {
     pub(crate) workspace: Workspace,
 }
 
+impl HostWorkbench {
+    pub(crate) fn activate(&mut self, workspace: Workspace) {
+        self.workspace = workspace;
+    }
+}
+
 impl Default for ServicesHost {
     /// The model, platform slot and workspace a new session starts with.
     fn default() -> Self {
@@ -41,6 +47,15 @@ impl Default for ServicesHost {
                 workspace: session.workbench.workspace,
             },
         }
+    }
+}
+
+impl ServicesHost {
+    /// The model's synchronization of the active schematic into the
+    /// workspace. What the application would say about it on the status bar
+    /// has no status bar here.
+    pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
+        let _ = self.model.sync_active_schematic_to_workspace();
     }
 }
 

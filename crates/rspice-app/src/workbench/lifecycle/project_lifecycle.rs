@@ -96,7 +96,7 @@ pub(crate) struct ProjectLifecycleState {
     accepted_binding: Option<PersistenceBinding>,
     #[cfg(not(target_arch = "wasm32"))]
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
-    result_cache: result_cache::ResultCache,
+    pub(crate) result_cache: result_cache::ResultCache,
     #[cfg(target_arch = "wasm32")]
     browser_reconnect_binding: Option<PersistenceBinding>,
     #[cfg(target_arch = "wasm32")]
@@ -183,7 +183,7 @@ pub(crate) fn snapshot(
     capture_snapshot(state, SnapshotContent::Committed)
 }
 
-fn capture_snapshot(
+pub(crate) fn capture_snapshot(
     state: &dyn LifecycleSource,
     content: SnapshotContent,
 ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
@@ -1180,7 +1180,7 @@ fn finish_successful_save(
     adopt_successful_save(state, candidate, binding, scope, post_save_registry);
 }
 
-fn prepare_post_save_registry(
+pub(crate) fn prepare_post_save_registry(
     state: &dyn LifecycleSource,
     candidate: &rspice_project::ProjectFile,
     scope: SaveScope,

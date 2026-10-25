@@ -3,3 +3,4 @@
 //! services.
 
 mod document_registry;
+mod project_lifecycle;
