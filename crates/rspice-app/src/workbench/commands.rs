@@ -705,12 +705,11 @@ impl Command {
             | Self::ReportAuthoring
             | Self::SaveReportDocument
             | Self::AddReportPage
-            | Self::ReportPageProperties => CommandOwner::Hardcopy,
-            Self::ExportPublicationSnapshot
-            | Self::LiveSession
-            | Self::PublishToWeb
-            | Self::AccountOrganization
-            | Self::License => CommandOwner::Cloud,
+            | Self::ReportPageProperties
+            | Self::ExportPublicationSnapshot => CommandOwner::Hardcopy,
+            Self::LiveSession | Self::PublishToWeb | Self::AccountOrganization | Self::License => {
+                CommandOwner::Cloud
+            }
         }
     }
 
