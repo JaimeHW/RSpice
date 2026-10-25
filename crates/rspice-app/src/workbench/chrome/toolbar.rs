@@ -27,7 +27,7 @@ use crate::workbench::framework::command_registry::CommandAvailability;
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
 
-pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
+pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     let t = Tokens::get(ctx);
@@ -105,7 +105,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                         // The workspace's tools, and behind More tools
                         // whatever a narrow row has no slot for (U-11).
                         ui.horizontal_centered(|ui| {
-                            overflow::reset(ui);
+                            overflow::reset::<H::Session>(ui);
                             workspace_tools(ui, app, layout);
                             overflow::more_tools(ui, app, layout);
                         });
