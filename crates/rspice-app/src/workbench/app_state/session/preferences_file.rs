@@ -543,8 +543,8 @@ impl PreferencesFileParts<'_> {
                         self.apply_personal_settings(settings);
                         self.file.written = encode_bytes(
                             &Values::of(
-                                &self.workbench,
-                                &self.platform,
+                                self.workbench,
+                                self.platform,
                                 *self.browser_spoken_feedback,
                                 &self.model.preferences,
                             ),
@@ -569,8 +569,8 @@ impl PreferencesFileParts<'_> {
             }
         }
         self.file.observed = fingerprint(
-            &self.workbench,
-            &self.platform,
+            self.workbench,
+            self.platform,
             *self.browser_spoken_feedback,
             &mut self.model.preferences,
         );
@@ -655,8 +655,8 @@ impl PreferencesFileParts<'_> {
                 runtime.looks += 1;
             }
             let observed = fingerprint(
-                &self.workbench,
-                &self.platform,
+                self.workbench,
+                self.platform,
                 *self.browser_spoken_feedback,
                 &mut self.model.preferences,
             );
@@ -678,8 +678,8 @@ impl PreferencesFileParts<'_> {
     pub(in crate::workbench) fn flush_preferences_file(&mut self) {
         self.file.write_due = None;
         self.file.observed = fingerprint(
-            &self.workbench,
-            &self.platform,
+            self.workbench,
+            self.platform,
             *self.browser_spoken_feedback,
             &mut self.model.preferences,
         );
@@ -696,8 +696,8 @@ impl PreferencesFileParts<'_> {
         }
         let outcome = encode_bytes(
             &Values::of(
-                &self.workbench,
-                &self.platform,
+                self.workbench,
+                self.platform,
                 *self.browser_spoken_feedback,
                 &self.model.preferences,
             ),
@@ -735,8 +735,8 @@ impl PreferencesFileParts<'_> {
     pub(in crate::workbench) fn settings_file_bytes(&self) -> Result<Vec<u8>, String> {
         let preferences = encode(
             &Values::of(
-                &self.workbench,
-                &self.platform,
+                self.workbench,
+                self.platform,
                 *self.browser_spoken_feedback,
                 &self.model.preferences,
             ),
