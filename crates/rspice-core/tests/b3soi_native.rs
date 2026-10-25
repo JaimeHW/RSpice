@@ -979,6 +979,98 @@ fn native_soi_fd_capmod2_ac_matches_ngspice46_level55_oracle() {
     }
 }
 
+/// Trapezoid integral of a sampled current over `[from, to]`, with the window
+/// ends interpolated: the charge it moved there.
+fn charge_moved(time: &[Value], current: &[Value], from: Value, to: Value) -> Value {
+    let mut prev = (from, interpolate(time, current, from));
+    let mut sum = 0.0;
+    for (&t, &i) in time.iter().zip(current) {
+        if t > from && t < to {
+            sum += 0.5 * (t - prev.0) * (i + prev.1);
+            prev = (t, i);
+        }
+    }
+    sum + 0.5 * (to - prev.0) * (interpolate(time, current, to) + prev.1)
+}
+
+/// The charge each window of `windows` moved through each named source.
+fn fd_charges_moved(
+    deck: &str,
+    tstop: Value,
+    step: Value,
+    sources: &[&str],
+    windows: &[(Value, Value)],
+) -> Vec<Vec<Value>> {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = engine()
+        .run_tran(&netlist, tstop, step)
+        .expect("FD ramp runs");
+    sources
+        .iter()
+        .map(|name| {
+            let branch = result
+                .branch_names
+                .iter()
+                .position(|branch| branch.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing branch {name} in {:?}", result.branch_names));
+            let current = &result.branch_currents[branch];
+            windows
+                .iter()
+                .map(|&(from, to)| charge_moved(&result.time, current, from, to))
+                .collect()
+        })
+        .collect()
+}
+
+/// ngspice-46 B3SOIFD runs one charge block for CAPMOD 2 and 3; CAPMOD 3 only
+/// re-derives the back-gate charge's drain voltage from the IV Vdsat. Along a
+/// gate ramp at VE = 0.5 V the charge each 0.3 V window moves through the gate
+/// and the back gate is ngspice-46's (`tran 0.01p 16p 0 0.01p`, `method=trap`,
+/// `meas integ`; the same windows at 0.002 ps agree to 7e-5). The CAPMOD 2 card
+/// moves 1.835e-16, 9.85e-17 and 9.65e-17 C through the back gate in the last
+/// three windows.
+#[test]
+fn native_soi_fd_capmod3_charges_match_ngspice46_along_a_gate_ramp() {
+    let deck = format!(
+        "* B3SOIFD CAPMOD 3 gate ramp\n\
+         vd d 0 1.5\n\
+         vg g 0 pwl(0 0 1p 0 2p 0.1 5p 0.4 8p 0.7 11p 1.0 14p 1.3 16p 1.5)\n\
+         vs s 0 0\n\
+         ve e 0 0.5\n\
+         m1 d g s e n1 w=10u l=0.25u\n\
+         .option gmin=1e-25\n\
+         {}\n\
+         .end\n",
+        fd_n1_model_card()
+    );
+    let windows = [
+        (2.0e-12, 5.0e-12),
+        (5.0e-12, 8.0e-12),
+        (8.0e-12, 11.0e-12),
+        (11.0e-12, 14.0e-12),
+    ];
+    let ngspice: [(&str, [Value; 4]); 2] = [
+        (
+            "vg",
+            [-6.741358e-16, -4.714372e-15, -5.695596e-15, -5.647780e-15],
+        ),
+        (
+            "ve",
+            [8.473586e-16, 2.028175e-16, 1.250468e-16, 1.249793e-16],
+        ),
+    ];
+    let moved = fd_charges_moved(&deck, 16.0e-12, 0.01e-12, &["vg", "ve"], &windows);
+    for ((source, expected), got) in ngspice.iter().zip(&moved) {
+        for (k, (&want, &q)) in expected.iter().zip(got).enumerate() {
+            let rel = (q - want).abs() / want.abs();
+            assert!(
+                rel < 1.0e-3,
+                "{source} window {k}: rspice {q:.6e} C vs ngspice {want:.6e} C (rel {rel:.2e})"
+            );
+        }
+    }
+}
+
 #[test]
 fn native_soi_dd_capmod2_ac_matches_ngspice46_level56_oracle() {
     let model = b3soidd_n1_model_card().replace("CAPMOD = 3", "CAPMOD = 2");
