@@ -36,15 +36,15 @@ pub enum DerivedViewAvailability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadedDerivedView {
-    pub(crate) analysis: SpecializedViewerCacheProvenance,
-    pub(crate) availability: DerivedViewAvailability,
+    pub analysis: SpecializedViewerCacheProvenance,
+    pub availability: DerivedViewAvailability,
 }
 
 #[derive(Debug)]
 pub struct PendingDerivedViewTask {
-    pub(crate) analysis: SpecializedViewerCacheProvenance,
-    pub(crate) receiver: mpsc::Receiver<DerivedViewTaskResult>,
-    pub(crate) cancel_flag: Arc<AtomicBool>,
+    pub analysis: SpecializedViewerCacheProvenance,
+    pub receiver: mpsc::Receiver<DerivedViewTaskResult>,
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ struct DerivedWaveformSource {
 /// A folded eye and the period it was folded at — including the case where
 /// nothing could be folded, which the sheet still has to explain.
 #[derive(Debug)]
-pub(crate) struct EyeBuild {
+pub struct EyeBuild {
     data: Option<EyeData>,
     provenance: EyeTimebaseProvenance,
 }
@@ -73,12 +73,12 @@ pub enum DerivedViewResultPayload {
 
 #[derive(Debug)]
 pub struct DerivedViewTaskResult {
-    pub(crate) analysis: SpecializedViewerCacheProvenance,
-    pub(crate) payload: DerivedViewResultPayload,
+    pub analysis: SpecializedViewerCacheProvenance,
+    pub payload: DerivedViewResultPayload,
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct TransientPostCoordinator {
+pub struct TransientPostCoordinator {
     eye_task: Option<PendingDerivedViewTask>,
     pub fft_task: Option<PendingDerivedViewTask>,
     pub(super) eye_loaded: Option<LoadedDerivedView>,

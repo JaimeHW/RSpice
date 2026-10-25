@@ -116,20 +116,20 @@ pub struct PreflightDialogState {
     /// A caller asked for the governed preflight-and-queue pass. The frame
     /// loop consumes it on its next pass, so the request records intent
     /// without its origin naming the workflow.
-    pub(in crate::workbench) run_and_queue_requested: bool,
+    pub run_and_queue_requested: bool,
     /// A pass whose run is still being prepared and checked, off the UI
     /// thread.
     pub checking: Option<PreflightCheck>,
     /// The reader stopped that pass. The frame loop cancels it before it
     /// looks for the pass's verdict, so a verdict that lands in between
     /// authorizes nothing.
-    pub(in crate::workbench) check_cancel_requested: bool,
+    pub check_cancel_requested: bool,
 }
 
 /// What a pass decided in the frame that took the press, held until the
 /// worker has prepared the run and the engine has built its decks.
 #[derive(Debug, Clone)]
-pub(crate) struct PreflightCheck {
+pub struct PreflightCheck {
     /// The report as far as the press took it: the revisions it inspected,
     /// and its advisories. What preparing the run and building its decks
     /// finds joins it.

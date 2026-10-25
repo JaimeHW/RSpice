@@ -1,7 +1,7 @@
 //! App-facing aliases and integration tests for portable Envelope authoring.
 
 #[cfg(test)]
-use crate::simulation::multi_run::{
+use rspice_simulation_contract::analysis_spec::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
 };
 #[cfg(test)]

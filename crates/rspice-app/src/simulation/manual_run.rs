@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 /// The deck a manual-deck run was started from, and the baseline the last
 /// completed one left.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ManualRunHandoff {
+pub struct ManualRunHandoff {
     /// Zero-based lines edited since the last completed manual-deck run.
     pub edited_lines: HashSet<usize>,
     /// Exact editor buffer from the last successful manual-deck run.

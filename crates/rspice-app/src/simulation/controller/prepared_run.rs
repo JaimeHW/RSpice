@@ -325,7 +325,7 @@ pub enum CampaignOutcome {
 /// last, so by the time a frame looks the newest run has already moved on.
 /// Transient by construction.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct RunWatch {
+pub struct RunWatch {
     /// Runs seen before they ended, by stable identity. A run that was over
     /// when it was first seen, such as history opened with a project, is
     /// never in here, so it is never announced as having just finished.

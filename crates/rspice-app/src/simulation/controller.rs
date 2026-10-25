@@ -97,12 +97,12 @@ pub use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 use self::live_transient::LiveTransientAccumulator;
 
 #[derive(Clone)]
-pub(crate) struct PreparedCampaignMember {
+pub struct PreparedCampaignMember {
     plan_name: String,
     snapshot: crate::simulation::execution::PreparedRunSnapshot,
 }
 
-pub(crate) struct ActiveSimulationCampaign {
+pub struct ActiveSimulationCampaign {
     id: crate::product::SimulationCampaignId,
     name: String,
     member_count: u32,
@@ -118,7 +118,7 @@ pub(crate) struct ActiveSimulationCampaign {
 /// Reviewed forecast returned after a campaign has been frozen and its first
 /// member has been submitted to the local execution queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SimulationCampaignDispatchReceipt {
+pub struct SimulationCampaignDispatchReceipt {
     pub campaign_id: crate::product::SimulationCampaignId,
     pub member_count: usize,
     pub task_count: usize,
@@ -401,7 +401,7 @@ impl SimulationController {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn set_engine_wakeup(&mut self, wakeup: std::sync::Arc<dyn Fn() + Send + Sync>) {
+    pub fn set_engine_wakeup(&mut self, wakeup: std::sync::Arc<dyn Fn() + Send + Sync>) {
         self.runner
             .set_engine_capability_observer(std::sync::Arc::new(|observation| {
                 let Some(root) = web_sys::window()
