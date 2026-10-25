@@ -71,6 +71,18 @@ impl CellViewRef {
         format!("{}/{}/{}", self.library, self.cell, self.view)
     }
 
+    /// The reference a [`Self::key`] names. Segments cannot hold a slash, so
+    /// the key splits exactly.
+    pub fn from_key(key: &str) -> Option<Self> {
+        let mut parts = key.split('/');
+        let (Some(library), Some(cell), Some(view), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        Some(Self::new(library, cell, view))
+    }
+
     /// Validate every segment before this reference participates in a
     /// persisted slash-delimited key.
     pub fn validate_name_segments(&self) -> Result<(), CellViewNameError> {
@@ -104,6 +116,14 @@ mod tests {
         assert_eq!(
             validate_cell_view_name_segment("has space"),
             Err(CellViewNameError::UnsupportedCharacter(' '))
+        );
+
+        let reference = CellViewRef::new("user", "bandgap_2", "schematic");
+        assert_eq!(CellViewRef::from_key(&reference.key()), Some(reference));
+        assert_eq!(CellViewRef::from_key("user/bandgap_2"), None);
+        assert_eq!(
+            CellViewRef::from_key("user/bandgap_2/schematic/extra"),
+            None
         );
     }
 }

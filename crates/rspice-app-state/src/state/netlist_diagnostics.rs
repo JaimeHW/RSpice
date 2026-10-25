@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 
+use super::code_diagnostics::intern_string;
+
 pub const MAX_NETLIST_DIAGNOSTICS: usize = 1_000_000;
 
 /// A single quick fix candidate for a diagnostic.
@@ -343,14 +345,6 @@ fn intern_netlist_diagnostic_strings(
     intern_string(pool, &mut diagnostic.canonical.code);
     intern_string(pool, &mut diagnostic.canonical.document_id);
     intern_string(pool, &mut diagnostic.canonical.validation_id);
-}
-
-fn intern_string(pool: &mut HashMap<Arc<str>, Arc<str>>, value: &mut Arc<str>) {
-    if let Some(existing) = pool.get(value.as_ref()) {
-        *value = Arc::clone(existing);
-    } else {
-        pool.insert(Arc::clone(value), Arc::clone(value));
-    }
 }
 
 fn same_source(left: Option<&std::path::Path>, right: Option<&std::path::Path>) -> bool {

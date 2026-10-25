@@ -160,7 +160,7 @@ fn intern_diagnostic_strings(
     }
 }
 
-fn intern_string(pool: &mut HashMap<Arc<str>, Arc<str>>, value: &mut Arc<str>) {
+pub(super) fn intern_string(pool: &mut HashMap<Arc<str>, Arc<str>>, value: &mut Arc<str>) {
     if let Some(existing) = pool.get(value.as_ref()) {
         *value = Arc::clone(existing);
     } else {

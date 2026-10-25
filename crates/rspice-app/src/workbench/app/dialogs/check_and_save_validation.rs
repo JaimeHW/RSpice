@@ -980,22 +980,6 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
     }
 }
 
-/// The cell view a `library/cell/view` buffer key names.
-fn cell_view_reference(key: &str) -> Option<CellViewRef> {
-    let mut segments = key.split('/');
-    match (
-        segments.next(),
-        segments.next(),
-        segments.next(),
-        segments.next(),
-    ) {
-        (Some(library), Some(cell), Some(view), None) => {
-            Some(CellViewRef::new(library, cell, view))
-        }
-        _ => None,
-    }
-}
-
 /// One cell view exactly as the projection materialized it, or nothing when
 /// the configuration did not resolve. Nothing is the honest answer: a
 /// hierarchy-derived finding read off the live editor buffer would name a
@@ -1118,7 +1102,7 @@ impl DesignCheckPlan {
                 } else {
                     CheckScope::Hierarchy
                 };
-                Some((cell_view_reference(&key)?, scope))
+                Some((CellViewRef::from_key(&key)?, scope))
             })
             .collect();
         Self {

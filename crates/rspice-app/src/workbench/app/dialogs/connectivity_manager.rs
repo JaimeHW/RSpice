@@ -1025,16 +1025,6 @@ fn validate_bus_draft(dialog: &ConnectivityManagerDialogState) -> Result<BusDecl
     Ok(declaration)
 }
 
-fn cell_view_reference_from_key(key: &str) -> Option<CellViewRef> {
-    let mut parts = key.split('/');
-    let (Some(library), Some(cell), Some(view), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return None;
-    };
-    Some(CellViewRef::new(library, cell, view))
-}
-
 impl RSpiceApp {
     pub(in crate::workbench) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
         if !self.state.design.connectivity_manager.open {
@@ -1310,7 +1300,7 @@ impl RSpiceApp {
                     .content
                     .active_schematic_reference()
                     .key()
-            && let Some(reference) = cell_view_reference_from_key(view_key)
+            && let Some(reference) = CellViewRef::from_key(view_key)
         {
             self.state.open_workspace_view(reference);
         }

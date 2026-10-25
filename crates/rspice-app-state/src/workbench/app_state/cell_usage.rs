@@ -51,7 +51,7 @@ impl Model {
             );
         }
         for (key, schematic) in &content.schematic_buffers {
-            let Some(reference) = reference_from_key(key) else {
+            let Some(reference) = CellViewRef::from_key(key) else {
                 continue;
             };
             if live
@@ -165,16 +165,4 @@ fn collect(
             });
         }
     }
-}
-
-/// The reference a `library/cell/view` buffer key names. Names cannot hold a
-/// slash, so the key splits exactly.
-fn reference_from_key(key: &str) -> Option<CellViewRef> {
-    let mut parts = key.split('/');
-    let (Some(library), Some(cell), Some(view), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return None;
-    };
-    Some(CellViewRef::new(library, cell, view))
 }
