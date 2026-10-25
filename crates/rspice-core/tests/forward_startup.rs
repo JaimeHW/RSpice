@@ -46,6 +46,33 @@ fn root_forward_nodesets_are_materialized_then_released() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn undefined_startup_node_is_a_structured_diagnostic_and_a_warning() {
+    use rspice_core::netlist::{
+        StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope,
+    };
+    let netlist =
+        Netlist::parse_validated("startup diagnostics\nV1 in 0 1\n.IC V(MISSING)=1\n.END\n")
+            .unwrap();
+    assert!(
+        netlist
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "startup-undefined-node")
+    );
+    let diagnostics = netlist.startup_diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.code, StartupDiagnosticCode::UndefinedNode);
+    assert_eq!(diagnostic.stage, StartupDiagnosticStage::StartupTopology);
+    assert_eq!(diagnostic.kind, StartupDirectiveKind::Ic);
+    assert_eq!(diagnostic.canonical_nodes, ["MISSING"]);
+    assert_eq!(diagnostic.origins[0].line, 3);
+    assert_eq!(diagnostic.origins[0].path, None);
+    assert_eq!(diagnostic.scopes[0], StartupDirectiveScope::TopLevel);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn forward_cards_capture_known_values_functions_and_authored_order() {
     for directive in [".IC", ".NODESET"] {
         let source = format!(

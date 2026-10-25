@@ -6,7 +6,9 @@ use rspice_core::Netlist;
 use rspice_core::abort_signal::CountingAbort;
 use rspice_core::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult};
 use rspice_core::netlist::OutputSymbolKind::{Device, Node};
-use rspice_core::netlist::{ParseError, validate_output_symbols};
+use rspice_core::netlist::{
+    NetlistParseOptions, OutputDirectiveKind, ParseError, validate_output_symbols,
+};
 
 fn analyzer(fundamental: f64, harmonics: usize) -> FourierAnalysis {
     FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(harmonics))
@@ -207,6 +209,73 @@ fn unresolved_four_symbols_are_reported_in_authored_operand_order() {
             .all(|symbol| symbol.origin.line == 5),
         "every unresolved `.FOUR` symbol keeps its authored card line"
     );
+}
+
+#[test]
+fn unresolved_print_symbols_are_typed_ordered_and_repeated() {
+    // Each operand is its own request, so one name used twice is reported twice.
+    let error = Netlist::parse_validated(
+        "* invalid outputs\nV1 1 0 1\n.PRINT OP I(RBogo) V(2) {VP(bogo9)} {VM(bogo9)}\n.OP\n.END\n",
+    )
+    .expect_err("every `.PRINT` operand names a symbol the circuit does not define");
+    let ParseError::OutputSymbolValidation(error) = error else {
+        panic!("expected the typed output-symbol validation failure, got {error}");
+    };
+    let reported = error
+        .unresolved
+        .iter()
+        .map(|symbol| {
+            (
+                symbol.directive,
+                symbol.operator.as_str(),
+                symbol.symbol.as_str(),
+                symbol.kind,
+                symbol.origin.line,
+                symbol.origin.path.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reported,
+        vec![
+            (OutputDirectiveKind::Print, "I", "RBogo", Device, 3, None),
+            (OutputDirectiveKind::Print, "V", "2", Node, 3, None),
+            (OutputDirectiveKind::Print, "VP", "bogo9", Node, 3, None),
+            (OutputDirectiveKind::Print, "VM", "bogo9", Node, 3, None),
+        ]
+    );
+}
+
+#[test]
+fn unresolved_output_symbols_keep_the_deck_file_provenance() {
+    let path =
+        std::env::temp_dir().join(format!("rspice-invalid-output-{}.cir", std::process::id()));
+    std::fs::write(
+        &path,
+        "invalid output\nV1 1 0 1\n.PRINT OP V(missing)\n.END\n",
+    )
+    .unwrap();
+    let source = Netlist::read_source_with_options(&path, NetlistParseOptions::default()).unwrap();
+    let error = Netlist::parse_validated_with_path_and_options(
+        &source,
+        &path,
+        NetlistParseOptions::default(),
+    )
+    .expect_err("V(missing) names no node of the deck");
+    let deck = std::fs::canonicalize(&path).unwrap();
+    let ParseError::OutputSymbolValidation(error) = error else {
+        panic!("expected the typed output-symbol validation failure, got {error}");
+    };
+    assert_eq!(error.unresolved.len(), 1);
+    let item = &error.unresolved[0];
+    assert_eq!(item.origin.line, 3);
+    let origin = item
+        .origin
+        .path
+        .as_deref()
+        .expect("a deck read from a file names that file");
+    assert_eq!(std::fs::canonicalize(origin).unwrap(), deck);
+    std::fs::remove_file(&path).unwrap();
 }
 
 #[test]
