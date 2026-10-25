@@ -116,7 +116,7 @@ pub use output_symbols::{
 pub(crate) use output_symbols::{
     OutputOperand, collect_output_node_namespace_from_elements_with_abort,
 };
-pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
+pub use param_scope::ParamResolver;
 pub use parser::*;
 pub use source_map::*;
 pub use spectre_statistics::*;
