@@ -18,7 +18,8 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
-use crate::workbench::app::RSpiceApp;
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::preferences_file::{
     MAX_SETTINGS_FILE_BYTES, PreferencesFileParts, PreferencesFileRuntime, SETTINGS_FILE,
     stage_settings_import,
@@ -27,9 +28,7 @@ use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryParts, ShortcutLibraryPersistenceRuntime, ShortcutLibraryPublication,
     ShortcutLibraryPublicationContinuation,
 };
-use crate::workbench::app_state::{
-    AppState, Model, PlatformState, ShortcutContextMatch, trim_recent_files,
-};
+use crate::workbench::app_state::{Model, PlatformState, ShortcutContextMatch, trim_recent_files};
 use crate::workbench::framework::feature::CloudPort;
 use crate::workbench::state::WorkbenchSession;
 
@@ -91,17 +90,9 @@ pub(crate) struct PreferencesDialogs<'a> {
     pub(crate) cloud: &'a dyn CloudPort,
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_preferences_dialog(&mut self, ctx: &Context) {
-        preferences_dialogs(&mut self.state).render(ctx);
-        // A library a dialog put in use resets the resolver, and a waveform
-        // default it changed reaches the open view, before the frame goes on.
-        self.state.take_shortcut_resolver_reset();
-        preference_pages::take_waveform_defaults_request(&mut self.state);
-    }
-}
-
-/// Preferences and the windows it opens, over the application state's parts.
+/// Preferences and the windows it opens, over the application state's
+/// parts, for a test that draws them without the feature's context.
+#[cfg(test)]
 fn preferences_dialogs(state: &mut AppState) -> PreferencesDialogs<'_> {
     PreferencesDialogs {
         preferences_open: &mut state.settings.preferences_open,
@@ -124,12 +115,13 @@ fn preferences_dialogs(state: &mut AppState) -> PreferencesDialogs<'_> {
 
 impl PreferencesDialogs<'_> {
     /// Answer the gesture just made, on the status bar, as
-    /// [`AppState::prompt`] does.
+    /// [`AppState::prompt`](crate::workbench::app_state::AppState::prompt) does.
     fn prompt(&mut self, text: impl Into<String>) {
         self.workbench.prompt(text);
     }
 
-    /// Record an event in the Console, as [`AppState::record`] does.
+    /// Record an event in the Console, as
+    /// [`AppState::record`](crate::workbench::app_state::AppState::record) does.
     fn record(&mut self, severity: LogSeverity, source: LogSource, text: impl Into<String>) -> u64 {
         self.model.record(severity, source, text)
     }
@@ -705,6 +697,7 @@ pub(in crate::workbench) fn normalize_autosave_minutes(minutes: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
     use crate::workbench::{BrowserHistoryEffect, ChoicePreference, TogglePreference};
 
     fn preferences_route() -> SurfaceRoute {
@@ -782,7 +775,8 @@ mod tests {
         let mut app = test_app();
         app.state.settings.preferences_open = true;
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            app.render_preferences_dialog(ctx)
+            preferences_dialogs(&mut app.state).render(ctx);
+            app.after_contribution();
         });
         assert!(output.platform_output.accesskit_update.is_none());
         assert!(!app.state.settings.preferences_open);
@@ -805,7 +799,8 @@ mod tests {
             .open(crate::workbench::WorkspacePreset::Engineering);
 
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            app.render_preferences_dialog(ctx)
+            preferences_dialogs(&mut app.state).render(ctx);
+            app.after_contribution();
         });
 
         assert!(!app.state.settings.preferences_open);
@@ -1169,7 +1164,8 @@ mod tests {
         set_pending_restore(&ctx, Some(PreferenceCategory::Appearance));
 
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            app.render_preferences_dialog(ctx);
+            preferences_dialogs(&mut app.state).render(ctx);
+            app.after_contribution();
         });
         assert_eq!(app.state.workbench.theme.mode, crate::ui::Mode::Light);
         assert!(
@@ -1195,7 +1191,10 @@ mod tests {
                 }],
                 ..egui::RawInput::default()
             },
-            |ctx| app.render_preferences_dialog(ctx),
+            |ctx| {
+                preferences_dialogs(&mut app.state).render(ctx);
+                app.after_contribution();
+            },
         );
         assert!(pending_restore(&ctx).is_none());
         assert_eq!(app.state.workbench.theme.mode, crate::ui::Mode::Light);
@@ -1223,7 +1222,8 @@ mod tests {
         set_pending_restore(&ctx, Some(PreferenceCategory::Results));
 
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            app.render_preferences_dialog(ctx);
+            preferences_dialogs(&mut app.state).render(ctx);
+            app.after_contribution();
         });
         assert!(
             app.state.results.results.session.phase_continuous,
@@ -1241,7 +1241,10 @@ mod tests {
                 }],
                 ..egui::RawInput::default()
             },
-            |ctx| app.render_preferences_dialog(ctx),
+            |ctx| {
+                preferences_dialogs(&mut app.state).render(ctx);
+                app.after_contribution();
+            },
         );
         assert!(pending_restore(&ctx).is_none());
         assert!(!app.state.results.results.session.phase_continuous);

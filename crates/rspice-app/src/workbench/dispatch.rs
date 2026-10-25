@@ -31,7 +31,9 @@ use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec,
 };
 use crate::workbench::framework::feature::Execute;
-use crate::workbench::framework::requests::{self, FollowSchematicGrid, PrintActiveView};
+use crate::workbench::framework::requests::{
+    self, ApplyWaveformDefaults, FollowSchematicGrid, PrintActiveView,
+};
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
 /// The dispatcher by key: where a key becomes the command it names, a
@@ -107,8 +109,10 @@ impl RSpiceApp {
     }
 
     /// Answer what a feature's call raised for straight after it: the
-    /// commands it ran next, the print workflow it opened, and the snap that
-    /// follows a new schematic grid.
+    /// commands it ran next, the print workflow it opened, the snap that
+    /// follows a new schematic grid, the shortcut resolver's reset when a
+    /// shortcut library was put in use, and the open waveform view starting
+    /// again from changed defaults.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -132,6 +136,12 @@ impl RSpiceApp {
                 let state = &mut app.state;
                 state.design.follow_schematic_grid(&state.model);
             },
+        );
+        self.state.take_shortcut_resolver_reset();
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session(),
         );
     }
 }

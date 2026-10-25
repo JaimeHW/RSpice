@@ -28,8 +28,7 @@ use super::preferences_shell::{
     PreferenceCategory, action_buttons, control_width, preference_row, preference_switch,
     searchable_row, section_heading, segmented, value_column,
 };
-use super::{AppState, PreferencePageActions, PreferencesDialogs};
-use crate::workbench::framework::requests::{self, ApplyWaveformDefaults};
+use super::{PreferencePageActions, PreferencesDialogs};
 
 /// Width of a numeric field, which is sized to the digits it holds rather
 /// than to the control column the selects share.
@@ -902,17 +901,6 @@ fn set_browser_spoken_feedback(state: &mut PreferencesDialogs<'_>, enabled: bool
 /// Shortcuts are the one page this does not write directly: their shipped
 /// profile is handed to `actions` and saved before it goes live, the same
 /// way an edit made on the page is.
-/// Start the open waveform view from the waveform defaults if a page asked
-/// for it. The dialog takes this straight after the pages and the restore
-/// it draws, before anything draws the view again.
-pub(super) fn take_waveform_defaults_request(state: &mut AppState) {
-    requests::drain(
-        state,
-        |state| &mut state.workbench.outbox,
-        |state, ApplyWaveformDefaults| state.start_waveform_viewer_session(),
-    );
-}
-
 pub(super) fn restore_defaults(
     category: PreferenceCategory,
     state: &mut PreferencesDialogs<'_>,
@@ -1051,6 +1039,7 @@ mod tests {
     use super::*;
     use crate::workbench::RSpiceApp;
     use crate::workbench::app::dialogs::preferences::preferences_dialogs;
+    use crate::workbench::app_state::AppState;
 
     /// The page source, with each file's test module cut off its end.
     ///
@@ -1448,7 +1437,7 @@ mod tests {
             &mut preferences_dialogs(&mut app.state),
             &mut PreferencePageActions::default(),
         );
-        take_waveform_defaults_request(&mut app.state);
+        app.after_contribution();
         assert!(!app.state.results.results.session.phase_continuous);
         assert!(!app.state.results.results.session.show_minor_grid);
     }

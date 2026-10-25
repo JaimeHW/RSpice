@@ -3,18 +3,18 @@
 //!
 //! A feature's code never holds the whole application. Each command it
 //! declares is answered and carried out in a [`Cx`]: its own state, the
-//! model every feature shares, the session, and narrow views of the other
-//! features it reads, read-only but for letting go of design's canvas
-//! gesture. The shell builds that context from the application's parts for
-//! each call; it is three references and a view, so building one allocates
-//! nothing.
+//! model every feature shares, the session, the platform services' state,
+//! and narrow views of the other features it reads, read-only but for
+//! letting go of design's canvas gesture. The shell builds that context
+//! from the application's parts for each call; it is four references and
+//! a view, so building one allocates nothing.
 //!
 //! The shell's dispatcher runs every command's prologue, whoever owns it;
 //! the feature answers only whether its command can run here and what it
 //! does once the prologue lets it through.
 
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::{Model, PlatformState};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use super::command_registry::{CommandAvailability, CommandSpec};
@@ -74,15 +74,20 @@ impl<T: DesignPort + CanvasGesturePort> DesignPeer for T {}
 /// design's canvas gesture.
 pub(crate) struct Peers<'a> {
     design: &'a mut dyn DesignPeer,
+    cloud: &'a dyn CloudPort,
 }
 
 impl<'a> Peers<'a> {
-    pub(crate) fn new(design: &'a mut dyn DesignPeer) -> Self {
-        Self { design }
+    pub(crate) fn new(design: &'a mut dyn DesignPeer, cloud: &'a dyn CloudPort) -> Self {
+        Self { design, cloud }
     }
 
     pub(crate) fn design(&self) -> &dyn DesignPort {
         &*self.design
+    }
+
+    pub(crate) fn cloud(&self) -> &'a dyn CloudPort {
+        self.cloud
     }
 }
 
@@ -97,6 +102,9 @@ pub(crate) struct Cx<'a, F: Feature> {
     pub(crate) state: &'a mut F::State,
     pub(crate) model: &'a mut Model,
     pub(crate) wb: &'a mut F::Session,
+    /// What the platform services keep between frames: the autosave
+    /// interval and the recent files among them.
+    pub(crate) platform: &'a mut PlatformState,
     pub(crate) peers: Peers<'a>,
 }
 
@@ -105,12 +113,14 @@ impl<'a, F: Feature> Cx<'a, F> {
         state: &'a mut F::State,
         model: &'a mut Model,
         wb: &'a mut F::Session,
+        platform: &'a mut PlatformState,
         peers: Peers<'a>,
     ) -> Self {
         Self {
             state,
             model,
             wb,
+            platform,
             peers,
         }
     }

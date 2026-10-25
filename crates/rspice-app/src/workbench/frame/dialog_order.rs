@@ -51,13 +51,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("settings.preferences"),
         modality: Modality::Dialog,
-        is_open: Some(|state| {
-            state.settings.preferences_open
-                || state.settings.workspace_layout_manager.open
-                || state.settings.shortcut_portability.application_modal_open()
-                || state.settings.shortcut_editor.open
-        }),
-        render: |app, ctx| app.render_preferences_dialog(ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("settings.preferences"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("settings.preferences")),
     },
     DialogSpec {
         key: DialogKey("cloud.license"),
@@ -676,23 +671,29 @@ mod tests {
     use super::{AppState, DIALOG_ORDER, features};
 
     /// The order lists every dialog step a registered feature draws, under
-    /// the key the feature draws it by and in the order the feature registers
-    /// them, and lists no other step of that feature's slot.
+    /// the key the feature draws it by and in the order that feature
+    /// registers them, and lists no other step of that feature's slot.
     #[test]
     fn the_order_lists_exactly_the_steps_the_features_draw() {
         let registered = features::registered_dialogs();
         assert!(!registered.is_empty());
-        let owned_by_a_feature = |key: &str| {
-            key.split_once('.')
-                .is_some_and(|(owner, _)| registered.iter().any(|(slot, _)| *slot == owner))
-        };
-        let listed = DIALOG_ORDER
-            .iter()
-            .map(|spec| spec.key)
-            .filter(|key| owned_by_a_feature(key.0))
-            .collect::<Vec<_>>();
-        let drawn = registered.iter().map(|(_, key)| *key).collect::<Vec<_>>();
-        assert_eq!(listed, drawn);
+        for (feature_slot, _) in &registered {
+            let listed = DIALOG_ORDER
+                .iter()
+                .map(|spec| spec.key)
+                .filter(|key| {
+                    key.0
+                        .split_once('.')
+                        .is_some_and(|(owner, _)| owner == *feature_slot)
+                })
+                .collect::<Vec<_>>();
+            let drawn = registered
+                .iter()
+                .filter(|(slot, _)| slot == feature_slot)
+                .map(|(_, key)| *key)
+                .collect::<Vec<_>>();
+            assert_eq!(listed, drawn, "the {feature_slot} feature's dialog steps");
+        }
         for (slot, key) in &registered {
             assert!(
                 key.0
