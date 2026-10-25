@@ -45,7 +45,6 @@ impl SemanticAnalyzer {
             attrs: SymbolAttrs {
                 discipline: Some("electrical".into()),
                 is_internal: true,
-                internal_node_index: Some(index),
                 ..Default::default()
             },
         })?;

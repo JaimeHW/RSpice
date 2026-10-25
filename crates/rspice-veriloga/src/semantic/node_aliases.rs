@@ -187,7 +187,6 @@ impl SemanticAnalyzer {
             if let Some(symbol) = analyzed.symbol_table.lookup_mut(&alias.net) {
                 symbol.kind = SymbolKind::Port;
                 symbol.attrs.is_internal = false;
-                symbol.attrs.internal_node_index = None;
                 symbol.attrs.direction = Some(PortDirection::Inout);
             }
             analyzed.node_aliases.push(alias);

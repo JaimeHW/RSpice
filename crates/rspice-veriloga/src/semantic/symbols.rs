@@ -60,8 +60,6 @@ pub struct SymbolAttrs {
     pub is_internal: bool,
     /// Whether this node is declared ground
     pub is_ground: bool,
-    /// Index in internal nodes array (for VM access)
-    pub internal_node_index: Option<usize>,
 }
 
 impl SymbolTable {

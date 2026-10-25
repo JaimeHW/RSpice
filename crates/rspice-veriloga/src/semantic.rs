@@ -1461,7 +1461,6 @@ impl SemanticAnalyzer {
                     attrs: SymbolAttrs {
                         discipline: Some(discipline.clone()),
                         is_internal: true,
-                        internal_node_index: Some(internal_node_idx),
                         ..Default::default()
                     },
                 })?;
