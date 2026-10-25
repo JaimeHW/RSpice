@@ -183,4 +183,36 @@ mod tests {
             crate::workbench::sheets::commands::SheetsCommand::ALL.len()
         );
     }
+
+    /// A feature that showed the sheet's properties from its own surface
+    /// asks for the Sheet section. The sheets feature's section takes the
+    /// request as it draws, and the panel spends it bringing its Sheet
+    /// section into view, as when the sheets feature asks itself.
+    #[test]
+    fn the_sheet_section_takes_a_reveal_request_as_it_draws() {
+        use crate::workbench::framework::requests::RevealSheetSection;
+
+        let mut app = crate::workbench::RSpiceApp::test_instance();
+        app.state.workbench.outbox.push(RevealSheetSection);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(312.0);
+                show_inspector::<SheetsFeature>(&mut app.state, ui);
+            });
+        });
+        assert!(
+            app.state
+                .workbench
+                .outbox
+                .peek::<RevealSheetSection>()
+                .is_none(),
+            "the section takes the request"
+        );
+        assert!(
+            !app.state.sheets.reveal_sheet_section,
+            "the panel brought its Sheet section into view, once"
+        );
+    }
 }

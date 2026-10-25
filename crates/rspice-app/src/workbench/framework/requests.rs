@@ -57,6 +57,9 @@ pub(crate) enum Drain {
     /// the frame that call ran: a command another command raised runs once
     /// the one that raised it is done.
     AfterContribution,
+    /// The drawing sheet's inspector section, as it draws: in the inspector's
+    /// dock, or in its drawer after the surfaces.
+    SheetSection,
 }
 
 /// A value one part of the workbench raises for another to act on once.
@@ -194,6 +197,17 @@ pub(crate) struct FollowSchematicGrid;
 
 impl Request for FollowSchematicGrid {
     const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Bring the drawing sheet's inspector section into view. Raised by a
+/// feature that shows the open sheet's properties from its own surface,
+/// once it has cleared the selection and opened the inspector; the section
+/// takes it as it next draws.
+#[derive(Clone, Debug)]
+pub(crate) struct RevealSheetSection;
+
+impl Request for RevealSheetSection {
+    const DRAIN: Drain = Drain::SheetSection;
 }
 
 /// Put this text on the platform clipboard.

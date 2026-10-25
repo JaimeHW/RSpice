@@ -52,6 +52,16 @@ impl Model {
         }
     }
 
+    /// Whether the open view's sheet is one an editor may change: a writable
+    /// schematic or testbench.
+    pub fn drawing_sheet_writable(&self) -> bool {
+        !self.schematic_edit_read_only()
+            && matches!(
+                self.workspace.content.active_view_type(),
+                crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+            )
+    }
+
     /// Every title-block field `sheet` letters, with the value the project
     /// supplies where the sheet types none of its own.
     pub fn title_block_fields(

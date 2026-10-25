@@ -120,7 +120,6 @@ pub(crate) use dialogs::design_management::{
 
 pub(crate) use dialogs::rule_setup::open_rule_setup;
 
-pub(crate) use actions::sheets::reveal_sheet_properties;
 pub(crate) use dialogs::drawing_sheet_defaults::{
     DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
 };

@@ -8,12 +8,11 @@ use crate::state::{
     DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope,
     DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
     DrawingSheetTitleFieldId, DrawingSheetTransactionKind, DrawingSheetTransactionReceipt,
-    DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetId, ViewType,
+    DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetId,
     drawing_sheet_sizes_mixed,
 };
-use crate::workbench::SurfaceId;
 use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
-use crate::workbench::state::{WorkbenchSession, Workspace};
+use crate::workbench::state::WorkbenchSession;
 
 use super::draft::{DrawingSheetDraft, SheetSizeChoice};
 
@@ -21,13 +20,7 @@ use super::draft::{DrawingSheetDraft, SheetSizeChoice};
 /// on the design surface. Print and Export own output media and never stand
 /// in for the sheet.
 pub(crate) fn drawing_sheet_editable(workbench: &WorkbenchSession, model: &Model) -> bool {
-    workbench.workspace == Workspace::Design
-        && workbench.current_route().surface_id() == SurfaceId::Design
-        && !model.schematic_edit_read_only()
-        && matches!(
-            model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
-        )
+    workbench.shows_design_surface() && model.drawing_sheet_writable()
 }
 
 /// One property of the active sheet, as the sheet panel edits it.

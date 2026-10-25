@@ -5,6 +5,7 @@ use crate::state::{
     Component, ComponentType, DrawingSheetTitleFieldId, Point, SheetDefinition, SheetPortPolicy,
     SheetTemplate,
 };
+use crate::workbench::app_state::AppState;
 
 /// One cell view with two governed sheets, and one component on each.
 fn two_sheet_state() -> (AppState, SheetId, SheetId) {

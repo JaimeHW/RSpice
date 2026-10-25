@@ -36,7 +36,7 @@ use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureRegistry, Reads, Session,
 };
-use crate::workbench::framework::requests::PrintActiveView;
+use crate::workbench::framework::requests::{PrintActiveView, RevealSheetSection};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::slots::SheetsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -55,6 +55,11 @@ impl Feature for SheetsFeature {
         registry.dialogs(DIALOGS);
         registry.inspector(FeatureInspector {
             show: |cx, ui| {
+                // Another feature showed the sheet's properties and asked for
+                // the section; it is brought into view as it draws.
+                if cx.wb.outbox().take::<RevealSheetSection>().is_some() {
+                    cx.state.reveal_sheet_section = true;
+                }
                 let review_markers = cx.peers.design().review_markers();
                 sheet_panel(
                     ui,

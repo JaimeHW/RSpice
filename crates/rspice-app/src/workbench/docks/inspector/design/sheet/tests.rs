@@ -999,7 +999,12 @@ fn a_value_the_block_cuts_short_says_so_under_its_row() {
 #[test]
 fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::app::reveal_sheet_properties(&mut app.state);
+    let state = &mut app.state;
+    crate::workbench::app::sheets::reveal_sheet_properties_on(
+        &mut state.model,
+        &mut state.workbench,
+        &mut state.sheets.reveal_sheet_section,
+    );
     assert!(app.state.sheets.reveal_sheet_section);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.starts_with("Sheet\nSize\n"), "{painted}");

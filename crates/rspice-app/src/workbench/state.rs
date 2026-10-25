@@ -997,6 +997,14 @@ impl WorkbenchSession {
         outcome
     }
 
+    /// Whether the design surface is showing in the design workspace: the
+    /// only place the open sheet is edited. Print and Export own output
+    /// media and never stand in for the sheet.
+    pub(crate) fn shows_design_surface(&self) -> bool {
+        self.workspace == Workspace::Design
+            && self.current_route().surface_id() == SurfaceId::Design
+    }
+
     /// Show the bottom dock, at its own height and out of focus mode, on
     /// whichever page it last showed.
     pub(crate) fn open_console(&mut self) {

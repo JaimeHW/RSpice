@@ -21,6 +21,7 @@ use crate::workbench::{
         open_stimulus_link, replace_instance_available,
     },
     framework::command_registry::ids,
+    framework::requests::RevealSheetSection,
 };
 
 use super::SchematicSymbolContext;
@@ -1495,7 +1496,7 @@ fn execute_context_action(
         ContextAction::CreateSymbolFromPorts => {
             crate::workbench::app::open_create_model_bound_symbol_dialog(state);
         }
-        ContextAction::SheetProperties => crate::workbench::app::reveal_sheet_properties(state),
+        ContextAction::SheetProperties => show_sheet_properties(state),
         ContextAction::FitContent => {
             state.model.schematic.session.editor.needs_fit = true;
             state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
@@ -1505,6 +1506,22 @@ fn execute_context_action(
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::Choose(_) => {}
     }
+}
+
+/// Show the open sheet's properties: with nothing selected the inspector is
+/// the sheet's, so the selection is cleared and the inspector is opened
+/// where it is closed, before the scene is drawn, and the sheets feature is
+/// asked to bring its Sheet section into view. Only an editable sheet is
+/// shown so; anywhere else nothing changes.
+fn show_sheet_properties(state: &mut AppState) {
+    if !(state.workbench.shows_design_surface() && state.model.drawing_sheet_writable()) {
+        return;
+    }
+    state.model.schematic.session.editor.selection.clear();
+    state.model.schematic.session.editor.net_highlight.clear();
+    state.workbench.inspector_visible = true;
+    state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+    state.workbench.outbox.push(RevealSheetSection);
 }
 
 fn open_operating_point(state: &mut AppState) {

@@ -17,7 +17,7 @@ use crate::state::{
     SheetDeleteResolution, SheetId, SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 /// One sheet as the navigation surfaces present it.
@@ -72,18 +72,10 @@ pub(in crate::workbench) fn sheet_entries(state: &impl AsRef<Model>) -> Vec<Shee
 /// the sheet's, so the selection is cleared, the inspector is opened where it
 /// is closed, and it is scrolled to its Sheet section. Only an editable sheet
 /// is shown so; anywhere else nothing changes.
-pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
-    reveal_sheet_properties_on(
-        &mut state.model,
-        &mut state.workbench,
-        &mut state.sheets.reveal_sheet_section,
-    );
-}
-
-/// [`reveal_sheet_properties`] over the parts it writes: the model's
-/// selection, the session's inspector, and `reveal_sheet_section`, the
-/// sheets slot's request that the inspector bring its Sheet section into
-/// view.
+///
+/// It writes the model's selection, the session's inspector, and
+/// `reveal_sheet_section`, the sheets slot's request that the inspector
+/// bring its Sheet section into view.
 pub(crate) fn reveal_sheet_properties_on(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
