@@ -5,6 +5,7 @@
 
 use super::legacy_bsim::{LegacyBsimModel, LegacyBsimRegion, LegacyBsimSizedModel};
 use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
+use super::{dev_fetlim, dev_limvds};
 use crate::constants::VT_REFERENCE;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, CscPatternToken, StaticMatrix};

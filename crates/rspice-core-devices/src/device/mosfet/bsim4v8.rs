@@ -92,7 +92,6 @@ pub use params::{Binned, Bsim4v8Model};
 pub use temp::{Bsim4v8Geometry, Bsim4v8InstTemp, Bsim4v8ModelTemp, Bsim4v8SizeDep, SizeDepCache};
 
 use crate::Value;
-use crate::device::mosfet::Mosfet;
 use std::sync::Arc;
 
 /// One BSIM4 v4.8 instance: shared model card + size knot + instance tail.
@@ -332,15 +331,15 @@ impl Bsim4v8 {
         let vgdo = old.vgs - old.vds;
 
         if old.vds >= 0.0 {
-            vgs = Mosfet::dev_fetlim(vgs, old.vgs, von_prev);
+            vgs = super::dev_fetlim(vgs, old.vgs, von_prev);
             vds = vgs - vgd;
-            vds = Mosfet::dev_limvds(vds, old.vds);
+            vds = super::dev_limvds(vds, old.vds);
             vgd = vgs - vds;
             let _ = vgd;
         } else {
-            vgd = Mosfet::dev_fetlim(vgd, vgdo, von_prev);
+            vgd = super::dev_fetlim(vgd, vgdo, von_prev);
             vds = vgs - vgd;
-            vds = -Mosfet::dev_limvds(-vds, -old.vds);
+            vds = -super::dev_limvds(-vds, -old.vds);
             vgs = vgd + vds;
         }
 
@@ -371,8 +370,9 @@ impl Bsim4v8 {
 
 /// `DEVpnjlim` (ngspice devsup.c:49-84) including the `*icheck` out-flag
 /// that b4ld.c feeds into the convergence counter. The flag-less variant
-/// lives on [`Mosfet`] (`dev_pnjlim`); the BSIM4 load needs the flag, so
-/// the few lines are mirrored here with the check semantics intact.
+/// lives on [`Mosfet`](super::Mosfet) (`dev_pnjlim`); the BSIM4 load needs
+/// the flag, so the few lines are mirrored here with the check semantics
+/// intact.
 pub(super) fn pnjlim(
     vnew: Value,
     vold: Value,

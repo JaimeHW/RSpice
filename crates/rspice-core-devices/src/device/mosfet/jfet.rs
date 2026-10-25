@@ -33,6 +33,7 @@
 //! .MODEL JMOD NJF(VTO=-2 BETA=1E-3 LAMBDA=0.01)
 //! ```
 
+use super::dev_fetlim;
 use crate::NodeId;
 use crate::Value;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};

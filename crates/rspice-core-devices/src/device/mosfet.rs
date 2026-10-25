@@ -1,7 +1,9 @@
 //! MOSFET and FET device models
 //!
 //! Includes various MOSFET models (Level 1-3, BSIM3, BSIM4, EKV, VDMOS) and JFETs.
-//! Also contains shared utilities for smooth region transitions.
+//! Also contains the shared smooth region transitions and ngspice FET step limiters.
+
+use crate::Value;
 
 /// The four circuit nodes a four-terminal MOSFET attaches to. They are
 /// positional in the netlist (`M<name> nd ng ns nb`) and trivial to transpose;
@@ -13,6 +15,63 @@ pub struct MosTerminals {
     pub gate: crate::NodeId,
     pub source: crate::NodeId,
     pub bulk: crate::NodeId,
+}
+
+/// ngspice `DEVlimvds`: bounds one Newton step of a drain-source voltage.
+#[inline]
+pub(crate) fn dev_limvds(vnew: Value, vold: Value) -> Value {
+    if vold >= 3.5 {
+        if vnew > vold {
+            vnew.min(3.0 * vold + 2.0)
+        } else if vnew < 3.5 {
+            vnew.max(2.0)
+        } else {
+            vnew
+        }
+    } else if vnew > vold {
+        vnew.min(4.0)
+    } else {
+        vnew.max(-0.5)
+    }
+}
+
+/// ngspice `DEVfetlim`: bounds one Newton step of a FET gate voltage around
+/// the threshold `vto`.
+#[inline]
+pub(crate) fn dev_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
+    let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
+    let vtstlo = (vold - vto).abs() + 1.0;
+    let vtox = vto + 3.5;
+    let delv = vnew - vold;
+
+    if vold >= vto {
+        if vold >= vtox {
+            if delv <= 0.0 {
+                if vnew >= vtox {
+                    if -delv > vtstlo { vold - vtstlo } else { vnew }
+                } else {
+                    vnew.max(vto + 2.0)
+                }
+            } else if delv >= vtsthi {
+                vold + vtsthi
+            } else {
+                vnew
+            }
+        } else if delv <= 0.0 {
+            vnew.max(vto - 0.5)
+        } else {
+            vnew.min(vto + 4.0)
+        }
+    } else if delv <= 0.0 {
+        if -delv > vtsthi { vold - vtsthi } else { vnew }
+    } else {
+        let vtemp = vto + 0.5;
+        if vnew <= vtemp {
+            if delv > vtstlo { vold + vtstlo } else { vnew }
+        } else {
+            vtemp
+        }
+    }
 }
 
 mod ac_nqs;

@@ -29,6 +29,7 @@
 //! | TT | Body diode transit time | 50ns |
 //! | BV | Breakdown voltage | 100V |
 
+use super::{dev_fetlim, dev_limvds};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{NodeId, Value};

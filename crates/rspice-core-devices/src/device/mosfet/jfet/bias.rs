@@ -758,47 +758,6 @@ impl Jfet {
             && vgd_raw == self.last_raw_vgd
     }
 
-    /// SPICE DEVfetlim voltage limiting helper.
-    ///
-    /// This bounds per-iteration FET gate-voltage excursions and improves
-    /// convergence robustness for stiff nonlinear bias points.
-    #[inline]
-    pub(super) fn fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
-        let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
-        let vtstlo = (vold - vto).abs() + 1.0;
-        let vtox = vto + 3.5;
-        let delv = vnew - vold;
-
-        if vold >= vto {
-            if vold >= vtox {
-                if delv <= 0.0 {
-                    if vnew >= vtox {
-                        if -delv > vtstlo { vold - vtstlo } else { vnew }
-                    } else {
-                        vnew.max(vto + 2.0)
-                    }
-                } else if delv >= vtsthi {
-                    vold + vtsthi
-                } else {
-                    vnew
-                }
-            } else if delv <= 0.0 {
-                vnew.max(vto - 0.5)
-            } else {
-                vnew.min(vto + 4.0)
-            }
-        } else if delv <= 0.0 {
-            if -delv > vtsthi { vold - vtsthi } else { vnew }
-        } else {
-            let vtemp = vto + 0.5;
-            if vnew <= vtemp {
-                if delv > vtstlo { vold + vtstlo } else { vnew }
-            } else {
-                vtemp
-            }
-        }
-    }
-
     /// SPICE DEVpnjlim helper for Schottky/PN gate-junction limiting.
     ///
     /// This limits overly aggressive forward-bias updates before `fetlim`
@@ -980,8 +939,8 @@ impl Jfet {
             .0;
         vgs_int = Self::pnjlim(vgs_int, vgs_old_int, nvt, vcrit);
         vgd_int = Self::pnjlim(vgd_int, vgd_old_int, nvt, vcrit);
-        vgs_int = Self::fetlim(vgs_int, vgs_old_int, threshold);
-        vgd_int = Self::fetlim(vgd_int, vgd_old_int, threshold);
+        vgs_int = dev_fetlim(vgs_int, vgs_old_int, threshold);
+        vgd_int = dev_fetlim(vgd_int, vgd_old_int, threshold);
 
         (vgs_int / pol, vgd_int / pol)
     }
@@ -1156,8 +1115,8 @@ impl Jfet {
         let vgd_old_int = pol * (self.vgs - self.vds);
         let vgs_new_int = pol * vgs_new;
         let vgd_new_int = pol * vgd_new;
-        let vgs_limited_int = Self::fetlim(vgs_new_int, vgs_old_int, vto_int);
-        let vgd_limited_int = Self::fetlim(vgd_new_int, vgd_old_int, vto_int);
+        let vgs_limited_int = dev_fetlim(vgs_new_int, vgs_old_int, vto_int);
+        let vgd_limited_int = dev_fetlim(vgd_new_int, vgd_old_int, vto_int);
         (vgs_limited_int / pol, vgd_limited_int / pol)
     }
 

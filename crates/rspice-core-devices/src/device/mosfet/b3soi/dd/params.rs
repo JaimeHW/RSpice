@@ -3,31 +3,13 @@
 //! Parameter list transcribed from ngspice-46 `b3soidd.c` (`B3SOIDDmPTable`),
 //! defaults from `b3soiddset.c` (`B3SOIDDsetup`, lines 52-873).
 
+pub use super::super::common::Binned;
 use super::super::common::{
     B3SOI_BINUNIT_VALUES, B3SOI_CAPMOD_VALUES, B3SOI_MOBMOD_VALUES, B3SOI_PARAMCHK_VALUES,
-    B3SOI_SHMOD_VALUES, B3SoiDialect, EPSOX, PI, mobmod_selector, model_selector,
+    B3SOI_SHMOD_VALUES, B3SoiDialect, EPSOX, PI, binned, get, mobmod_selector, model_selector, val,
 };
 use crate::Value;
 use std::collections::HashMap;
-
-/// Binned model parameter: nominal value plus L/W/cross-term dependence.
-///
-/// `b3soiddtemp.c` evaluates every binned family as
-/// `v + l*Inv_L + w*Inv_W + p*Inv_LW`.
-#[derive(Debug, Clone, Copy)]
-pub struct Binned {
-    pub v: Value,
-    pub l: Value,
-    pub w: Value,
-    pub p: Value,
-}
-
-impl Binned {
-    #[inline]
-    pub fn eval(&self, inv_l: Value, inv_w: Value, inv_lw: Value) -> Value {
-        self.v + self.l * inv_l + self.w * inv_w + self.p * inv_lw
-    }
-}
 
 /// Full B3SOIDD `.model` card (one per model statement, shared by instances).
 #[derive(Debug, Clone)]
@@ -267,34 +249,6 @@ pub struct B3SoiDdModel {
     pub cboxt: Value,
     pub nfb: Value,
     pub adice: Value,
-}
-
-#[inline]
-fn get(map: &HashMap<String, Value>, key: &str) -> Option<Value> {
-    map.get(key).copied().filter(|v| v.is_finite())
-}
-
-#[inline]
-fn val(map: &HashMap<String, Value>, key: &str, default: Value) -> Value {
-    get(map, key).unwrap_or(default)
-}
-
-/// Fetch a binned family: `name`, `l<name>`, `w<name>`, `p<name>`.
-/// `alias` allows the secondary spelling used by Berkeley (e.g. `NCH`).
-fn binned(
-    map: &HashMap<String, Value>,
-    name: &str,
-    v_def: Value,
-    l_def: Value,
-    w_def: Value,
-    p_def: Value,
-) -> Binned {
-    Binned {
-        v: val(map, name, v_def),
-        l: val(map, &format!("L{name}"), l_def),
-        w: val(map, &format!("W{name}"), w_def),
-        p: val(map, &format!("P{name}"), p_def),
-    }
 }
 
 impl B3SoiDdModel {

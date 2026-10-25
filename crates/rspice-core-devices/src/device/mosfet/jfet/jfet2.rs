@@ -592,8 +592,8 @@ impl Jfet {
 
         vgs_int = Self::pnjlim(vgs_int, vgs_old_int, vt, vcrit);
         vgd_int = Self::pnjlim(vgd_int, vgd_old_int, vt, vcrit);
-        vgs_int = Self::fetlim(vgs_int, vgs_old_int, self.params.vto);
-        vgd_int = Self::fetlim(vgd_int, vgd_old_int, self.params.vto);
+        vgs_int = dev_fetlim(vgs_int, vgs_old_int, self.params.vto);
+        vgd_int = dev_fetlim(vgd_int, vgd_old_int, self.params.vto);
 
         (vgs_int / pol, vgd_int / pol)
     }
@@ -628,8 +628,8 @@ impl Jfet {
 
         vgs_int = Self::pnjlim(vgs_int, vgs_old_int, vt, vcrit);
         vgd_int = Self::pnjlim(vgd_int, vgd_old_int, vt, vcrit);
-        vgs_int = Self::fetlim(vgs_int, vgs_old_int, self.params.vto);
-        vgd_int = Self::fetlim(vgd_int, vgd_old_int, self.params.vto);
+        vgs_int = dev_fetlim(vgs_int, vgs_old_int, self.params.vto);
+        vgd_int = dev_fetlim(vgd_int, vgd_old_int, self.params.vto);
 
         (vgs_int / pol, vgd_int / pol)
     }

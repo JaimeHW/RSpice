@@ -1294,60 +1294,6 @@ impl Vdmos {
     }
 
     #[inline]
-    fn dev_limvds(vnew: Value, vold: Value) -> Value {
-        if vold >= 3.5 {
-            if vnew > vold {
-                vnew.min(3.0 * vold + 2.0)
-            } else if vnew < 3.5 {
-                vnew.max(2.0)
-            } else {
-                vnew
-            }
-        } else if vnew > vold {
-            vnew.min(4.0)
-        } else {
-            vnew.max(-0.5)
-        }
-    }
-
-    #[inline]
-    fn dev_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
-        let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
-        let vtstlo = (vold - vto).abs() + 1.0;
-        let vtox = vto + 3.5;
-        let delv = vnew - vold;
-
-        if vold >= vto {
-            if vold >= vtox {
-                if delv <= 0.0 {
-                    if vnew >= vtox {
-                        if -delv > vtstlo { vold - vtstlo } else { vnew }
-                    } else {
-                        vnew.max(vto + 2.0)
-                    }
-                } else if delv >= vtsthi {
-                    vold + vtsthi
-                } else {
-                    vnew
-                }
-            } else if delv <= 0.0 {
-                vnew.max(vto - 0.5)
-            } else {
-                vnew.min(vto + 4.0)
-            }
-        } else if delv <= 0.0 {
-            if -delv > vtsthi { vold - vtsthi } else { vnew }
-        } else {
-            let vtemp = vto + 0.5;
-            if vnew <= vtemp {
-                if delv > vtstlo { vold + vtstlo } else { vnew }
-            } else {
-                vtemp
-            }
-        }
-    }
-
-    #[inline]
     fn dev_pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value) -> (Value, bool) {
         if vnew > vcrit && (vnew - vold).abs() > 2.0 * vt {
             let limited = if vold > 0.0 {
@@ -1445,13 +1391,13 @@ impl Vdmos {
         };
 
         if old_vds_m >= 0.0 {
-            vgs_m = Self::dev_fetlim(vgs_m, old_vgs_m, von_m);
+            vgs_m = dev_fetlim(vgs_m, old_vgs_m, von_m);
             vds_m = vgs_m - vgd_initial_m;
-            vds_m = Self::dev_limvds(vds_m, old_vds_m);
+            vds_m = dev_limvds(vds_m, old_vds_m);
         } else {
-            let vgd_m = Self::dev_fetlim(vgd_initial_m, old_vgd_m, von_m);
+            let vgd_m = dev_fetlim(vgd_initial_m, old_vgd_m, von_m);
             vds_m = vgs_m - vgd_m;
-            vds_m = -Self::dev_limvds(-vds_m, -old_vds_m);
+            vds_m = -dev_limvds(-vds_m, -old_vds_m);
             vgs_m = vgd_m + vds_m;
         }
 

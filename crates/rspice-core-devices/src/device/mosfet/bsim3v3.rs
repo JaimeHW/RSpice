@@ -58,7 +58,6 @@ pub use params::{Binned, Bsim3v3EquationSet, Bsim3v3Model};
 pub use temp::{Bsim3v3Geometry, Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep, SizeDepCache};
 
 use crate::Value;
-use crate::device::mosfet::Mosfet;
 use std::sync::Arc;
 
 /// One BSIM3v3.3 instance: shared model card + size knot + instance tail.
@@ -225,15 +224,15 @@ impl Bsim3v3 {
         let vgdo = old.vgs - old.vds;
 
         if old.vds >= 0.0 {
-            vgs = Mosfet::dev_fetlim(vgs, old.vgs, von_prev);
+            vgs = super::dev_fetlim(vgs, old.vgs, von_prev);
             vds = vgs - vgd;
-            vds = Mosfet::dev_limvds(vds, old.vds);
+            vds = super::dev_limvds(vds, old.vds);
             vgd = vgs - vds;
             let _ = vgd;
         } else {
-            vgd = Mosfet::dev_fetlim(vgd, vgdo, von_prev);
+            vgd = super::dev_fetlim(vgd, vgdo, von_prev);
             vds = vgs - vgd;
-            vds = -Mosfet::dev_limvds(-vds, -old.vds);
+            vds = -super::dev_limvds(-vds, -old.vds);
             vgs = vgd + vds;
         }
 
@@ -264,8 +263,8 @@ impl Bsim3v3 {
 
 /// `DEVpnjlim` (ngspice devsup.c:49-84) including the `*icheck` out-flag that
 /// b3ld.c feeds into the convergence counter. The flag-less variant lives on
-/// [`Mosfet`] (`dev_pnjlim`); the BSIM3 load needs the flag, so the few lines
-/// are mirrored here with the check semantics intact.
+/// [`Mosfet`](super::Mosfet) (`dev_pnjlim`); the BSIM3 load needs the flag,
+/// so the few lines are mirrored here with the check semantics intact.
 fn pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value, icheck: &mut bool) -> Value {
     if vnew > vcrit && (vnew - vold).abs() > vt + vt {
         *icheck = true;

@@ -103,6 +103,53 @@ fn selector_values(allowed: &[i32]) -> String {
         .join("/")
 }
 
+/// Binned model parameter: nominal value plus L/W/cross-term dependence.
+///
+/// `b3soi{dd,fd,pd}temp.c` evaluate every binned family as
+/// `v + l*Inv_L + w*Inv_W + p*Inv_LW`.
+#[derive(Debug, Clone, Copy)]
+pub struct Binned {
+    pub v: Value,
+    pub l: Value,
+    pub w: Value,
+    pub p: Value,
+}
+
+impl Binned {
+    #[inline]
+    pub fn eval(&self, inv_l: Value, inv_w: Value, inv_lw: Value) -> Value {
+        self.v + self.l * inv_l + self.w * inv_w + self.p * inv_lw
+    }
+}
+
+/// A finite model-card value, or `None` when the card omits it.
+#[inline]
+pub(crate) fn get(map: &HashMap<String, Value>, key: &str) -> Option<Value> {
+    map.get(key).copied().filter(|v| v.is_finite())
+}
+
+#[inline]
+pub(crate) fn val(map: &HashMap<String, Value>, key: &str, default: Value) -> Value {
+    get(map, key).unwrap_or(default)
+}
+
+/// Fetch a binned family: `name`, `L<name>`, `W<name>`, `P<name>`.
+pub(crate) fn binned(
+    map: &HashMap<String, Value>,
+    name: &str,
+    v_def: Value,
+    l_def: Value,
+    w_def: Value,
+    p_def: Value,
+) -> Binned {
+    Binned {
+        v: val(map, name, v_def),
+        l: val(map, &format!("L{name}"), l_def),
+        w: val(map, &format!("W{name}"), w_def),
+        p: val(map, &format!("P{name}"), p_def),
+    }
+}
+
 /// `exp(34.0)` guard value (ngspice `MAX_EXP`).
 pub const MAX_EXP: Value = 5.834617425e14;
 /// `exp(-34.0)` guard value (ngspice `MIN_EXP`).
