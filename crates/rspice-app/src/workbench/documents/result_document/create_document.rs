@@ -127,8 +127,9 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
         family: ResultDocumentFamily,
     ) {
         draft.family_id = family.id().to_owned();
-        draft.name = next_document_name(self.0, family);
-        draft.name_touched = false;
+        if !draft.name_touched {
+            draft.name = next_document_name(self.0, family);
+        }
         if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
             draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
                 .unwrap_or_default()
@@ -1166,6 +1167,38 @@ mod tests {
         let resolved = resolve_draft(&app.state, &draft).expect("explicit viewer resolves");
 
         assert_eq!(resolved.viewer.id, "eye-viewer");
+    }
+
+    #[test]
+    fn untouched_default_name_follows_the_selected_family() {
+        let mut app = RSpiceApp::test_instance();
+        open(&mut app);
+        let mut draft = app.state.results.create_result_document.clone();
+        let family = ResultDocumentFamily::FrequencyAndStability;
+
+        CreateDocumentSources(&app.state).select_family(&mut draft, family);
+
+        assert_eq!(draft.name, format!("{} · 01", family.label()));
+        assert!(!draft.name_touched);
+    }
+
+    #[test]
+    fn typed_name_survives_a_family_change() {
+        let mut app = RSpiceApp::test_instance();
+        open(&mut app);
+        let mut draft = app.state.results.create_result_document.clone();
+        draft.name = "Loop gain review".to_owned();
+        draft.name_touched = true;
+
+        CreateDocumentSources(&app.state)
+            .select_family(&mut draft, ResultDocumentFamily::FrequencyAndStability);
+
+        assert_eq!(draft.name, "Loop gain review");
+        assert_eq!(
+            draft.family_id,
+            ResultDocumentFamily::FrequencyAndStability.id()
+        );
+        assert!(draft.name_touched);
     }
 
     #[test]
