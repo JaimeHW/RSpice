@@ -82,4 +82,4 @@ pub(crate) fn read_project_bytes(path: &Path) -> Result<ProjectBytes, ProjectIoE
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

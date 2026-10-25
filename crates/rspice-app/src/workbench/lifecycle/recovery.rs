@@ -1063,7 +1063,7 @@ pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunProvenance};
     #[cfg(not(target_arch = "wasm32"))]
@@ -1334,7 +1334,7 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn unique_temp_dir(label: &str) -> PathBuf {
+    pub(crate) fn unique_temp_dir(label: &str) -> PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")

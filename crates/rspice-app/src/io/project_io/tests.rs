@@ -268,7 +268,7 @@ fn clear_v14_specification_fields_json(results: &mut serde_json::Value) {
     }
 }
 
-fn seal_prepared_run(
+pub(crate) fn seal_prepared_run(
     run: &mut SimulationRun,
     source_domain: AnalysisResultSourceDomain,
     simulation_plan_id: Option<SimulationPlanId>,
@@ -393,7 +393,7 @@ fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts
     );
 }
 
-fn project_with_execution_context() -> ProjectSnapshot {
+pub(crate) fn project_with_execution_context() -> ProjectSnapshot {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
     let ac = AnalysisKind::Ac.legacy_index();
     let noise = AnalysisKind::Noise.legacy_index();

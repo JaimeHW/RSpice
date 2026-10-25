@@ -1,11 +1,10 @@
 //! The recovery guard's whole-session cases: a restored session, and a
 //! project the application saved.
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
-
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::recovery::recovery_replacement_block_reason;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::lifecycle::recovery::tests::unique_temp_dir;
 
 #[test]
 fn replacement_guard_compares_initial_plan_draft_to_the_documented_default() {
@@ -81,15 +80,4 @@ fn replacement_guard_compares_project_owned_state_to_saved_snapshot() {
     assert!(reason.contains("simulation plan or model-library bindings"));
 
     std::fs::remove_dir_all(root).expect("remove fixture");
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn unique_temp_dir(label: &str) -> PathBuf {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("rspice-{label}-{}-{nonce}", std::process::id()));
-    std::fs::create_dir_all(&path).expect("create fixture directory");
-    path
 }
