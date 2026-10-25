@@ -156,14 +156,6 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn bug706_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn bug706_plain_resistor(element: &rspice_core::netlist::Element) -> bool {
         element.provenance == ElementProvenance::Authored
             && matches!(&element.kind, ElementKind::Resistor {
@@ -184,7 +176,7 @@ impl XyceTestRunner {
     fn bug706_source_matches(element: &rspice_core::netlist::Element) -> bool {
         element.provenance == ElementProvenance::Authored
             && element.name.eq_ignore_ascii_case("V1")
-            && Self::bug706_nodes_match(&element.nodes, &["1", "0"])
+            && Self::nodes_match(&element.nodes, &["1", "0"])
             && matches!(&element.kind, ElementKind::VoltageSource(SourceSpec::DcTransient {
                 dc_value,
                 transient,
@@ -221,7 +213,7 @@ impl XyceTestRunner {
         count: usize,
     ) -> Result<(), String> {
         if !definition.name.eq_ignore_ascii_case(name)
-            || !Self::bug706_nodes_match(
+            || !Self::nodes_match(
                 &definition.ports,
                 &["1", if count == 3 { "4" } else { "11" }],
             )
@@ -236,7 +228,7 @@ impl XyceTestRunner {
             let right = (ordinal + 1).to_string();
             if element.provenance != ElementProvenance::Authored
                 || !element.name.eq_ignore_ascii_case(&format!("X{ordinal}"))
-                || !Self::bug706_nodes_match(&element.nodes, &[&left, &right])
+                || !Self::nodes_match(&element.nodes, &[&left, &right])
                 || !matches!(&element.kind, ElementKind::Subcircuit { subckt_name, params }
                     if subckt_name.eq_ignore_ascii_case(child) && params.is_empty())
             {
@@ -284,14 +276,14 @@ impl XyceTestRunner {
         };
         if !Self::bug706_source_matches(source)
             || !resistor.name.eq_ignore_ascii_case("R1")
-            || !Self::bug706_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || !Self::bug706_plain_resistor(resistor)
             || !capacitor.name.eq_ignore_ascii_case("C1")
-            || !Self::bug706_nodes_match(&capacitor.nodes, &["2", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["2", "0"])
             || !Self::bug706_plain_capacitor(capacitor)
             || instance.provenance != ElementProvenance::Authored
             || !instance.name.eq_ignore_ascii_case("X1")
-            || !Self::bug706_nodes_match(&instance.nodes, &["2", "3"])
+            || !Self::nodes_match(&instance.nodes, &["2", "3"])
             || !matches!(&instance.kind, ElementKind::Subcircuit { subckt_name, params }
                 if subckt_name.eq_ignore_ascii_case("rc3000") && params.is_empty())
         {
@@ -318,14 +310,14 @@ impl XyceTestRunner {
         }
         let rc = definitions["rc"];
         if !rc.name.eq_ignore_ascii_case("rc")
-            || !Self::bug706_nodes_match(&rc.ports, &["1", "2"])
+            || !Self::nodes_match(&rc.ports, &["1", "2"])
             || rc.elements.len() != 2
             || !Self::bug706_subckt_metadata_is_empty(rc)
             || !rc.elements[0].name.eq_ignore_ascii_case("R")
-            || !Self::bug706_nodes_match(&rc.elements[0].nodes, &["1", "2"])
+            || !Self::nodes_match(&rc.elements[0].nodes, &["1", "2"])
             || !Self::bug706_plain_resistor(&rc.elements[0])
             || !rc.elements[1].name.eq_ignore_ascii_case("C")
-            || !Self::bug706_nodes_match(&rc.elements[1].nodes, &["2", "0"])
+            || !Self::nodes_match(&rc.elements[1].nodes, &["2", "0"])
             || !Self::bug706_plain_capacitor(&rc.elements[1])
         {
             return Err(format!("{LABEL} leaf rc definition changed"));

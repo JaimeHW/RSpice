@@ -49,14 +49,6 @@ impl Bug805SonRole {
 }
 
 impl XyceTestRunner {
-    fn bug805_son_nodes_match(nodes: &[String], expected: &[&str]) -> bool {
-        nodes.len() == expected.len()
-            && nodes
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug805_son_passive(
         element: &rspice_core::netlist::Element,
         name: &str,
@@ -78,7 +70,7 @@ impl XyceTestRunner {
         };
         if !element.name.eq_ignore_ascii_case(name)
             || element.provenance != ElementProvenance::Authored
-            || !Self::bug805_son_nodes_match(&element.nodes, &nodes)
+            || !Self::nodes_match(&element.nodes, &nodes)
             || !kind_matches
         {
             return Err(format!("{LABEL} passive {name} changed: {element:?}"));
@@ -150,7 +142,7 @@ impl XyceTestRunner {
         }
         let source = elements["vs"];
         if source.provenance != ElementProvenance::Authored
-            || !Self::bug805_son_nodes_match(&source.nodes, &["1", "0"])
+            || !Self::nodes_match(&source.nodes, &["1", "0"])
             || !matches!(&source.kind, ElementKind::VoltageSource(SourceSpec::Sin {
                 offset, amplitude, frequency, delay, damping, phase,
             }) if offset.to_bits() == 0.0f64.to_bits()

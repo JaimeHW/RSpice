@@ -59,14 +59,6 @@ impl XyceTestRunner {
         .expect("Release-7.10 BUG340 ACComparator tolerances are valid")
     }
 
-    fn bug340_nodes(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug340_source_and_plan(source: &str, path: &Path) -> Result<Bug340Plan, String> {
         if Self::contains_control_block(source) {
             return Err(format!(
@@ -188,9 +180,9 @@ impl XyceTestRunner {
         let v1 = element("V1").ok_or_else(|| format!("{LABEL} lost V1"))?;
         let r1 = element("R1").ok_or_else(|| format!("{LABEL} lost R1"))?;
         let c1 = element("C1").ok_or_else(|| format!("{LABEL} lost C1"))?;
-        if !Self::bug340_nodes(&v1.nodes, &["1", "0"])
-            || !Self::bug340_nodes(&r1.nodes, &["1", "2"])
-            || !Self::bug340_nodes(&c1.nodes, &["2", "0"])
+        if !Self::nodes_match(&v1.nodes, &["1", "0"])
+            || !Self::nodes_match(&r1.nodes, &["1", "2"])
+            || !Self::nodes_match(&c1.nodes, &["2", "0"])
             || !matches!(&v1.kind, ElementKind::VoltageSource(SourceSpec::Sin {
                 offset,
                 amplitude,

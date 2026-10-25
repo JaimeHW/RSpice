@@ -130,14 +130,6 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn issue565566_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn issue565566_table_expression_matches(expression: &str) -> bool {
         expression
             .trim()
@@ -231,7 +223,7 @@ impl XyceTestRunner {
         }
         let resistor = elements["rtest"];
         if resistor.provenance != ElementProvenance::Authored
-            || !Self::issue565566_nodes_match(&resistor.nodes, &["Y", "0"])
+            || !Self::nodes_match(&resistor.nodes, &["Y", "0"])
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value, value_expr: None, model: None, instance_params, deferred_params,
             } if value.to_bits() == 1.0f64.to_bits()
@@ -244,7 +236,7 @@ impl XyceTestRunner {
             Issue565566Role::TableReference => "b_ivcy",
         }];
         if source.provenance != ElementProvenance::Authored
-            || !Self::issue565566_nodes_match(&source.nodes, &["Y", "0"])
+            || !Self::nodes_match(&source.nodes, &["Y", "0"])
         {
             return Err(format!(
                 "{LABEL} {} source topology changed",
@@ -340,7 +332,7 @@ impl XyceTestRunner {
             .find(|element| element.name.eq_ignore_ascii_case(source_name))
             .ok_or_else(|| format!("{LABEL} step {index} lost {source_name}"))?;
         if source.provenance != ElementProvenance::Authored
-            || !Self::issue565566_nodes_match(&source.nodes, &["Y", "0"])
+            || !Self::nodes_match(&source.nodes, &["Y", "0"])
         {
             return Err(format!(
                 "{LABEL} step {index} source terminals/provenance changed: {source:?}"

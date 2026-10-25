@@ -5,14 +5,6 @@ use std::io::Cursor;
 const BUG519_LABEL: &str = "BUG_519_SON binary/ASCII RAW wrapper";
 
 impl XyceTestRunner {
-    fn bug519_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug519_typed_contract(
         &self,
         source: &str,
@@ -66,7 +58,7 @@ impl XyceTestRunner {
         };
         let expected_points = [(0.0f64, 0.0f64), (1.0f64, 1.0f64)];
         if !voltage.name.eq_ignore_ascii_case("V1")
-            || !Self::bug519_nodes_match(&voltage.nodes, &["1", "0"])
+            || !Self::nodes_match(&voltage.nodes, &["1", "0"])
             || voltage.provenance != ElementProvenance::Authored
             || !matches!(&voltage.kind, ElementKind::VoltageSource(
                 rspice_core::netlist::SourceSpec::Pwl { points, delay, repeat_from }
@@ -77,7 +69,7 @@ impl XyceTestRunner {
                 && delay.to_bits() == 0.0f64.to_bits()
                 && repeat_from.is_none())
             || !resistor.name.eq_ignore_ascii_case("R1")
-            || !Self::bug519_nodes_match(&resistor.nodes, &["1", "0"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "0"])
             || resistor.provenance != ElementProvenance::Authored
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,

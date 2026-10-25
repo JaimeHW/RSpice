@@ -177,14 +177,6 @@ impl XyceTestRunner {
         Ok(tolerances)
     }
 
-    fn bug306_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug306_model(model: &rspice_core::netlist::ModelDef) -> bool {
         let expected: [(&str, Value); 38] = [
             ("BF", 130.0),
@@ -361,7 +353,7 @@ impl XyceTestRunner {
                                expected: Value| {
             element.provenance == ElementProvenance::Authored
                 && element.name.eq_ignore_ascii_case(name)
-                && Self::bug306_nodes_match(&element.nodes, nodes)
+                && Self::nodes_match(&element.nodes, nodes)
                 && matches!(&element.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                     if value.to_bits() == expected.to_bits())
         };
@@ -369,7 +361,7 @@ impl XyceTestRunner {
             || !plain_dc_source(vic, "vic", &["0", "3"], 5.0)
             || vib.provenance != ElementProvenance::Authored
             || !vib.name.eq_ignore_ascii_case("vib")
-            || !Self::bug306_nodes_match(&vib.nodes, &["0", "2"])
+            || !Self::nodes_match(&vib.nodes, &["0", "2"])
             || !matches!(&vib.kind, ElementKind::VoltageSource(SourceSpec::Pulse {
                 v1, v2, delay, rise, fall, width, ..
             }) if v1.to_bits() == 0.0f64.to_bits()
@@ -380,7 +372,7 @@ impl XyceTestRunner {
                 && width.to_bits() == 1.0e-6f64.to_bits())
             || transistor.provenance != ElementProvenance::Authored
             || !transistor.name.eq_ignore_ascii_case("q1")
-            || !Self::bug306_nodes_match(&transistor.nodes, &["3", "2", "1"])
+            || !Self::nodes_match(&transistor.nodes, &["3", "2", "1"])
             || !matches!(&transistor.kind, ElementKind::Bjt {
                 model,
                 bjt_type: rspice_core::netlist::BjtType::Npn,

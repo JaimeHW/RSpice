@@ -53,14 +53,6 @@ struct Bug412Crossing {
 }
 
 impl XyceTestRunner {
-    fn bug412_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug412_measure(
         statement: &MeasureStatement,
         expected_name: &str,
@@ -253,7 +245,7 @@ impl XyceTestRunner {
         };
         if resistor.provenance != ElementProvenance::Authored
             || !resistor.name.eq_ignore_ascii_case("R1")
-            || !Self::bug412_nodes_match(&resistor.nodes, &["1", "0"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "0"])
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,
                 value_expr: None,
@@ -265,7 +257,7 @@ impl XyceTestRunner {
                 && deferred_params.is_empty())
             || source.provenance != ElementProvenance::Authored
             || !source.name.eq_ignore_ascii_case("V1")
-            || !Self::bug412_nodes_match(&source.nodes, &["1", "0"])
+            || !Self::nodes_match(&source.nodes, &["1", "0"])
             || !matches!(&source.kind, ElementKind::VoltageSource(SourceSpec::Sin {
                 offset,
                 amplitude,

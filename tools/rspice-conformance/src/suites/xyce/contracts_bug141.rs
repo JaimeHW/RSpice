@@ -77,14 +77,6 @@ impl Bug141Role {
 }
 
 impl XyceTestRunner {
-    fn bug141_schema_matches(columns: &[String], expected: &[&str]) -> bool {
-        columns.len() == expected.len()
-            && columns
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn bug141_dc_diagnostics_match(
         role: Bug141Role,
         diagnostics: &[rspice_core::netlist::ParseDiagnostic],
@@ -135,7 +127,7 @@ impl XyceTestRunner {
             || plan.dc.stop.to_bits() != expected_stop.to_bits()
             || plan.dc.step.to_bits() != expected_step.to_bits()
             || plan.dc.sweep2.is_some()
-            || !Self::bug141_schema_matches(&plan.print.probes, expected_probes)
+            || !Self::nodes_match(&plan.print.probes, expected_probes)
         {
             return Err(format!(
                 "{LABEL} {} DC plan changed: {plan:?}",
@@ -273,7 +265,7 @@ impl XyceTestRunner {
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
             || plan.tran.uic
-            || !Self::bug141_schema_matches(&print.probes, &expected_probes)
+            || !Self::nodes_match(&print.probes, &expected_probes)
         {
             return Err(format!(
                 "{LABEL} digital-counter transient plan changed: {plan:?}"
@@ -320,7 +312,7 @@ impl XyceTestRunner {
         expected_rows: Option<usize>,
     ) -> Result<(), String> {
         if table.columns.first().is_none_or(|column| column != "Index")
-            || !Self::bug141_schema_matches(&table.columns[1..], expected_columns)
+            || !Self::nodes_match(&table.columns[1..], expected_columns)
             || table.rows.is_empty()
             || expected_rows.is_some_and(|expected| table.rows.len() != expected)
             || table.rows.iter().enumerate().any(|(index, row)| {

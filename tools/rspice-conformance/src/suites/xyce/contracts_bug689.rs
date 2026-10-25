@@ -126,17 +126,9 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn bug689_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug689_subcircuit(subcircuit: &SubcircuitDef) -> Result<(), String> {
         if !subcircuit.name.eq_ignore_ascii_case("dSUB")
-            || !Self::bug689_nodes_match(&subcircuit.ports, &["a", "b"])
+            || !Self::nodes_match(&subcircuit.ports, &["a", "b"])
             || subcircuit.elements.len() != 1
             || !subcircuit.initial_conditions.is_empty()
             || !subcircuit.node_sets.is_empty()
@@ -156,7 +148,7 @@ impl XyceTestRunner {
         let diode = &subcircuit.elements[0];
         if diode.provenance != ElementProvenance::Authored
             || !diode.name.eq_ignore_ascii_case("D1")
-            || !Self::bug689_nodes_match(&diode.nodes, &["a", "b"])
+            || !Self::nodes_match(&diode.nodes, &["a", "b"])
             || !matches!(&diode.kind, ElementKind::Diode { model, instance_params, deferred_params }
                 if model.eq_ignore_ascii_case("DMOD")
                     && instance_params.is_empty()
@@ -231,7 +223,7 @@ impl XyceTestRunner {
         }
         let vin = elements["vin"];
         if vin.provenance != ElementProvenance::Authored
-            || !Self::bug689_nodes_match(&vin.nodes, &["1", "0"])
+            || !Self::nodes_match(&vin.nodes, &["1", "0"])
             || !matches!(vin.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                 if value.to_bits() == 5.0f64.to_bits())
         {
@@ -239,7 +231,7 @@ impl XyceTestRunner {
         }
         let resistor = elements["r1"];
         if resistor.provenance != ElementProvenance::Authored
-            || !Self::bug689_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,
                 value_expr: None,
@@ -254,7 +246,7 @@ impl XyceTestRunner {
         }
         let instance = elements["xdos"];
         if instance.provenance != ElementProvenance::Authored
-            || !Self::bug689_nodes_match(&instance.nodes, &["3", "0"])
+            || !Self::nodes_match(&instance.nodes, &["3", "0"])
             || !matches!(&instance.kind, ElementKind::Subcircuit { subckt_name, params }
                 if subckt_name.eq_ignore_ascii_case("dSUB") && params.is_empty())
         {
@@ -262,7 +254,7 @@ impl XyceTestRunner {
         }
         let monitor = elements["vmon"];
         if monitor.provenance != ElementProvenance::Authored
-            || !Self::bug689_nodes_match(&monitor.nodes, &["2", "3"])
+            || !Self::nodes_match(&monitor.nodes, &["2", "3"])
             || !matches!(monitor.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                 if value.to_bits() == 0.0f64.to_bits())
         {

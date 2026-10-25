@@ -117,14 +117,6 @@ impl XyceTestRunner {
             .collect()
     }
 
-    fn bug907_nodes(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(a, e)| a.eq_ignore_ascii_case(e))
-    }
-
     fn validate_bug907_worker(
         &self,
         role: Bug907SonRole,
@@ -227,12 +219,12 @@ impl XyceTestRunner {
         };
         let voltage = |name: &str, nodes: &[&str], value: Value| {
             find(name).is_some_and(|element|
-            element.provenance == ElementProvenance::Authored && Self::bug907_nodes(&element.nodes, nodes)
+            element.provenance == ElementProvenance::Authored && Self::nodes_match(&element.nodes, nodes)
                 && matches!(&element.kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(actual)) if actual.to_bits() == value.to_bits()))
         };
         let resistor = |name: &str, nodes: &[&str], value: Value| {
             find(name).is_some_and(|element|
-            element.provenance == ElementProvenance::Authored && Self::bug907_nodes(&element.nodes, nodes)
+            element.provenance == ElementProvenance::Authored && Self::nodes_match(&element.nodes, nodes)
                 && matches!(&element.kind, ElementKind::Resistor { value: actual, value_expr: None, model: None, instance_params, deferred_params }
                     if actual.to_bits() == value.to_bits() && instance_params.is_empty() && deferred_params.is_empty()))
         };

@@ -126,18 +126,10 @@ impl XyceTestRunner {
         }
     }
 
-    fn legacy_device_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn legacy_device_pwl_ramp_source_matches(element: &rspice_core::netlist::Element) -> bool {
         element.name.eq_ignore_ascii_case("V1")
             && element.provenance == ElementProvenance::Authored
-            && Self::legacy_device_nodes_match(&element.nodes, &["1", "0"])
+            && Self::nodes_match(&element.nodes, &["1", "0"])
             && matches!(&element.kind,
                 ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::DcTransient {
                     dc_value,
@@ -275,10 +267,7 @@ impl XyceTestRunner {
                     || !Self::legacy_device_pwl_ramp_source_matches(&netlist.elements[0])
                     || !netlist.elements[1].name.eq_ignore_ascii_case("Q1")
                     || netlist.elements[1].provenance != ElementProvenance::Authored
-                    || !Self::legacy_device_nodes_match(
-                        &netlist.elements[1].nodes,
-                        &["1", "1", "0"],
-                    )
+                    || !Self::nodes_match(&netlist.elements[1].nodes, &["1", "1", "0"])
                     || !matches!(&netlist.elements[1].kind, ElementKind::Bjt {
                         model,
                         bjt_type: rspice_core::netlist::BjtType::Npn,
@@ -306,17 +295,17 @@ impl XyceTestRunner {
                 };
                 if !gate.name.eq_ignore_ascii_case("V1")
                     || gate.provenance != ElementProvenance::Authored
-                    || !Self::legacy_device_nodes_match(&gate.nodes, &["1", "0"])
+                    || !Self::nodes_match(&gate.nodes, &["1", "0"])
                     || !matches!(&gate.kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)) if value.to_bits() == 2.0f64.to_bits())
                     || !mosfet.name.eq_ignore_ascii_case("M1")
                     || mosfet.provenance != ElementProvenance::Authored
-                    || !Self::legacy_device_nodes_match(&mosfet.nodes, &["2", "1", "0", "0"])
+                    || !Self::nodes_match(&mosfet.nodes, &["2", "1", "0", "0"])
                     || !Self::netlist_element_is_legacy_device_analytic_oracle_candidate(
                         netlist, mosfet,
                     )
                     || !capacitor.name.eq_ignore_ascii_case("C1")
                     || capacitor.provenance != ElementProvenance::Authored
-                    || !Self::legacy_device_nodes_match(&capacitor.nodes, &["2", "3"])
+                    || !Self::nodes_match(&capacitor.nodes, &["2", "3"])
                     || !matches!(&capacitor.kind, ElementKind::Capacitor {
                         value,
                         value_expr: None,
@@ -330,7 +319,7 @@ impl XyceTestRunner {
                         && deferred_params.is_empty())
                     || !supply.name.eq_ignore_ascii_case("VCC")
                     || supply.provenance != ElementProvenance::Authored
-                    || !Self::legacy_device_nodes_match(&supply.nodes, &["3", "0"])
+                    || !Self::nodes_match(&supply.nodes, &["3", "0"])
                     || !matches!(&supply.kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)) if value.to_bits() == 5.0f64.to_bits())
                 {
                     return Err(format!("{} exact MOS topology changed", kind.label()));

@@ -77,14 +77,6 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn bug1455_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn exact_params(actual: &[(String, Value)], expected: &[(&str, Value)]) -> bool {
         if actual.len() != expected.len() {
             return false;
@@ -104,7 +96,7 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         if element.provenance != ElementProvenance::Authored
             || !element.name.eq_ignore_ascii_case(name)
-            || !Self::bug1455_nodes_match(&element.nodes, &nodes)
+            || !Self::nodes_match(&element.nodes, &nodes)
             || !matches!(&element.kind, ElementKind::Resistor {
                 value,
                 value_expr: None,
@@ -188,7 +180,7 @@ impl XyceTestRunner {
         for (name, nodes, expected) in [("vdd", ["2", "0"], 5.0f64), ("vmon", ["3", "4"], 0.0f64)] {
             let source = elements[name];
             if source.provenance != ElementProvenance::Authored
-                || !Self::bug1455_nodes_match(&source.nodes, &nodes)
+                || !Self::nodes_match(&source.nodes, &nodes)
                 || !matches!(source.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                     if value.to_bits() == expected.to_bits())
             {
@@ -207,7 +199,7 @@ impl XyceTestRunner {
             return Err(format!("{LABEL} M1 kind changed: {mosfet:?}"));
         };
         if mosfet.provenance != ElementProvenance::Authored
-            || !Self::bug1455_nodes_match(&mosfet.nodes, &["3", "1", "2", "2"])
+            || !Self::nodes_match(&mosfet.nodes, &["3", "1", "2", "2"])
             || !model.eq_ignore_ascii_case("PFET")
             || !Self::exact_params(instance_params, &[("L", 10.0e-6), ("W", 160.0e-6)])
             || !deferred_params.is_empty()

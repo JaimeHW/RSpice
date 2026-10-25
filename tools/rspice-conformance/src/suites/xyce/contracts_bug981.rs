@@ -64,14 +64,6 @@ impl Bug981Role {
 }
 
 impl XyceTestRunner {
-    fn bug981_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug981_worker(
         &self,
         role: Bug981Role,
@@ -181,13 +173,13 @@ impl XyceTestRunner {
         };
         if offset.provenance != ElementProvenance::Authored
             || !offset.name.eq_ignore_ascii_case("VOFF")
-            || !Self::bug981_nodes_match(&offset.nodes, &["A", "0"])
+            || !Self::nodes_match(&offset.nodes, &["A", "0"])
             || !matches!(&offset.kind, ElementKind::VoltageSource(
                 rspice_core::netlist::SourceSpec::Dc(value)
             ) if value.to_bits() == 2.0f64.to_bits())
             || exponential.provenance != ElementProvenance::Authored
             || !exponential.name.eq_ignore_ascii_case("VEXP")
-            || !Self::bug981_nodes_match(&exponential.nodes, &["1", "A"])
+            || !Self::nodes_match(&exponential.nodes, &["1", "A"])
             || !matches!(&exponential.kind, ElementKind::VoltageSource(
                 rspice_core::netlist::SourceSpec::Exp { v1, v2, td1, tau1, td2, tau2 }
             ) if v1.to_bits() == 0.0f64.to_bits()
@@ -198,7 +190,7 @@ impl XyceTestRunner {
                 && tau2.is_nan())
             || resistor.provenance != ElementProvenance::Authored
             || !resistor.name.eq_ignore_ascii_case("R1")
-            || !Self::bug981_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,
                 value_expr: None,
@@ -210,7 +202,7 @@ impl XyceTestRunner {
                 && deferred_params.is_empty())
             || capacitor.provenance != ElementProvenance::Authored
             || !capacitor.name.eq_ignore_ascii_case("C1")
-            || !Self::bug981_nodes_match(&capacitor.nodes, &["2", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["2", "0"])
             || !matches!(&capacitor.kind, ElementKind::Capacitor {
                 value,
                 value_expr: None,

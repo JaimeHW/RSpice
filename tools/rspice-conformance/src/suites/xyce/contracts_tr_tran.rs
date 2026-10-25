@@ -50,14 +50,6 @@ impl TrTranRole {
 }
 
 impl XyceTestRunner {
-    fn tr_tran_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_tr_tran_typed_contract(
         &self,
         role: TrTranRole,
@@ -144,7 +136,7 @@ impl XyceTestRunner {
         };
         if !capacitor.name.eq_ignore_ascii_case("C1")
             || capacitor.provenance != ElementProvenance::Authored
-            || !Self::tr_tran_nodes_match(&capacitor.nodes, &["1", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["1", "0"])
             || !matches!(&capacitor.kind, ElementKind::Capacitor {
                 value, value_expr: None, initial_voltage: Some(initial_voltage), model: None,
                 instance_params, deferred_params,
@@ -153,14 +145,14 @@ impl XyceTestRunner {
                 && instance_params.is_empty() && deferred_params.is_empty())
             || !resistor.name.eq_ignore_ascii_case("R1")
             || resistor.provenance != ElementProvenance::Authored
-            || !Self::tr_tran_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value, value_expr: None, model: None, instance_params, deferred_params,
             } if value.to_bits() == 1.0e3f64.to_bits()
                 && instance_params.is_empty() && deferred_params.is_empty())
             || !voltage.name.eq_ignore_ascii_case("V1")
             || voltage.provenance != ElementProvenance::Authored
-            || !Self::tr_tran_nodes_match(&voltage.nodes, &["2", "0"])
+            || !Self::nodes_match(&voltage.nodes, &["2", "0"])
             || !matches!(&voltage.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                 if value.to_bits() == 0.0f64.to_bits())
         {

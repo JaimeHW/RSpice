@@ -67,14 +67,6 @@ impl Bug1152Role {
 }
 
 impl XyceTestRunner {
-    fn bug1152_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug1152_rlc_plan(
         &self,
         source: &str,
@@ -139,22 +131,22 @@ impl XyceTestRunner {
         let inductor = find("L1").ok_or_else(|| format!("{LABEL} lost L1"))?;
         let capacitor = find("C1").ok_or_else(|| format!("{LABEL} lost C1"))?;
         let source_element = find("VIN").ok_or_else(|| format!("{LABEL} lost VIN source"))?;
-        if !Self::bug1152_nodes_match(&resistor.nodes, &["vin", "2"])
+        if !Self::nodes_match(&resistor.nodes, &["vin", "2"])
             || !matches!(&resistor.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params }
                 if value.to_bits() == 3.0f64.to_bits()
                     && instance_params.is_empty() && deferred_params.is_empty())
-            || !Self::bug1152_nodes_match(&inductor.nodes, &["2", "3"])
+            || !Self::nodes_match(&inductor.nodes, &["2", "3"])
             || !matches!(&inductor.kind, ElementKind::Inductor { value, value_expr: None, initial_current: None, model: None, instance_params, deferred_params }
                 if value.to_bits() == 1.0f64.to_bits()
                     && instance_params.is_empty() && deferred_params.is_empty())
-            || !Self::bug1152_nodes_match(&capacitor.nodes, &["3", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["3", "0"])
             || !matches!(&capacitor.kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
                 if value.to_bits() == 0.5f64.to_bits()
                     && instance_params.is_empty() && deferred_params.is_empty())
             || !source_element
                 .name
                 .eq_ignore_ascii_case(&source_element.nodes[0])
-            || !Self::bug1152_nodes_match(&source_element.nodes, &["vin", "0"])
+            || !Self::nodes_match(&source_element.nodes, &["vin", "0"])
         {
             return Err(format!(
                 "{LABEL} RLC topology changed: {:?}",
@@ -322,7 +314,7 @@ impl XyceTestRunner {
             || netlist.output_requests.len() != 1
             || !netlist.diagnostics.is_empty()
             || !subcircuit.name.eq_ignore_ascii_case("OPAMP#0")
-            || !Self::bug1152_nodes_match(&subcircuit.ports, &["2", "3", "6", "7", "4"])
+            || !Self::nodes_match(&subcircuit.ports, &["2", "3", "6", "7", "4"])
             || subcircuit.elements.len() != 28
         {
             return Err(format!(
@@ -339,7 +331,7 @@ impl XyceTestRunner {
             .iter()
             .find(|element| element.name.eq_ignore_ascii_case("R1"))
             .ok_or_else(|| format!("{LABEL} {} lost internal resistor R1", role.label()))?;
-        if !Self::bug1152_nodes_match(&resistor.nodes, &["11", "12"])
+        if !Self::nodes_match(&resistor.nodes, &["11", "12"])
             || !matches!(&resistor.kind, ElementKind::Resistor { value, .. }
                 if value.to_bits() == 5_000.0f64.to_bits())
         {

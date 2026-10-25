@@ -134,14 +134,6 @@ impl Bug805Role {
 }
 
 impl XyceTestRunner {
-    fn bug805_nodes_match(nodes: &[String], expected: &[&str]) -> bool {
-        nodes.len() == expected.len()
-            && nodes
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn bug805_canonical_param_name(name: &str) -> Option<&'static str> {
         Some(match name.to_ascii_uppercase().as_str() {
             "BF" | "BFM" => "BF",
@@ -295,7 +287,7 @@ impl XyceTestRunner {
         };
         if !element.name.eq_ignore_ascii_case(name)
             || element.provenance != ElementProvenance::Authored
-            || !Self::bug805_nodes_match(&element.nodes, &nodes)
+            || !Self::nodes_match(&element.nodes, &nodes)
             || !matches_kind
         {
             return Err(format!("{LABEL} passive {name} changed: {element:?}"));
@@ -410,7 +402,7 @@ impl XyceTestRunner {
             .ok_or_else(|| format!("{LABEL} lost V2"))?;
         let expected_points: [(Value, Value); 2] = [(0.0, 0.0), (5.0e-9, 7.4)];
         if source.provenance != ElementProvenance::Authored
-            || !Self::bug805_nodes_match(&source.nodes, &["q2c", "0"])
+            || !Self::nodes_match(&source.nodes, &["q2c", "0"])
             || !matches!(&source.kind, ElementKind::VoltageSource(SourceSpec::Pwl {
                 points, delay, repeat_from,
             }) if points.len() == expected_points.len()
@@ -426,7 +418,7 @@ impl XyceTestRunner {
             .get("q2")
             .ok_or_else(|| format!("{LABEL} lost Q2"))?;
         if transistor.provenance != ElementProvenance::Authored
-            || !Self::bug805_nodes_match(&transistor.nodes, &["q2c", "q2b", "q2e"])
+            || !Self::nodes_match(&transistor.nodes, &["q2c", "q2b", "q2e"])
             || !matches!(&transistor.kind, ElementKind::Bjt {
                 model, bjt_type: BjtType::Npn, instance_params, deferred_params,
             } if model.eq_ignore_ascii_case("Q222200")

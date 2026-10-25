@@ -108,14 +108,6 @@ impl MosfetParamAliasRole {
 }
 
 impl XyceTestRunner {
-    fn mosfet_param_alias_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(left, right)| left.eq_ignore_ascii_case(right))
-    }
-
     fn mosfet_param_alias_exact_params(
         actual: &[(String, Value)],
         expected: &[(&str, Value)],
@@ -284,14 +276,14 @@ impl XyceTestRunner {
         }
         let voltage = elements["vdddev"];
         if voltage.provenance != ElementProvenance::Authored
-            || !Self::mosfet_param_alias_nodes_match(&voltage.nodes, &["VDD", "0"])
+            || !Self::nodes_match(&voltage.nodes, &["VDD", "0"])
             || !matches!(voltage.kind, ElementKind::VoltageSource(SourceSpec::Dc(value)) if value.to_bits() == 5.0f64.to_bits())
         {
             return Err(format!("{LABEL} VDD source changed"));
         }
         let pulse = elements["vin1"];
         if pulse.provenance != ElementProvenance::Authored
-            || !Self::mosfet_param_alias_nodes_match(&pulse.nodes, &["1", "0"])
+            || !Self::nodes_match(&pulse.nodes, &["1", "0"])
             || !matches!(&pulse.kind, ElementKind::VoltageSource(SourceSpec::DcTransient { dc_value, transient }) if dc_value.to_bits() == 5.0f64.to_bits() && matches!(transient.as_ref(), SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero } if v1.to_bits() == 5.0f64.to_bits() && v2.to_bits() == 0.0f64.to_bits() && delay.to_bits() == 1.5e-6f64.to_bits() && rise.to_bits() == 5.0e-9f64.to_bits() && fall.to_bits() == 5.0e-9f64.to_bits() && width.to_bits() == 1.5e-6f64.to_bits() && period.to_bits() == 3.0e-6f64.to_bits() && pulse_count.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero))
         {
             return Err(format!("{LABEL} pulse source changed: {:?}", pulse.kind));
@@ -302,7 +294,7 @@ impl XyceTestRunner {
         ] {
             let element = elements[key];
             if element.provenance != ElementProvenance::Authored
-                || !Self::mosfet_param_alias_nodes_match(&element.nodes, &nodes)
+                || !Self::nodes_match(&element.nodes, &nodes)
                 || !matches!(&element.kind, ElementKind::Resistor { value: actual, value_expr: None, model: None, instance_params, deferred_params } if actual.to_bits() == value.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             {
                 return Err(format!("{LABEL} resistor {key} changed"));
@@ -310,7 +302,7 @@ impl XyceTestRunner {
         }
         let capacitor = elements["c2"];
         if capacitor.provenance != ElementProvenance::Authored
-            || !Self::mosfet_param_alias_nodes_match(&capacitor.nodes, &["VOUT", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["VOUT", "0"])
             || !matches!(&capacitor.kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params } if value.to_bits() == 0.1e-12f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
         {
             return Err(format!("{LABEL} output capacitor changed"));
@@ -343,7 +335,7 @@ impl XyceTestRunner {
                 return Err(format!("{LABEL} MOSFET {key} changed"));
             };
             if element.provenance != ElementProvenance::Authored
-                || !Self::mosfet_param_alias_nodes_match(&element.nodes, &nodes)
+                || !Self::nodes_match(&element.nodes, &nodes)
                 || !actual_model.eq_ignore_ascii_case(model)
                 || !Self::mosfet_param_alias_exact_params(instance_params, &[("L", l), ("W", w)])
                 || !deferred_params.is_empty()

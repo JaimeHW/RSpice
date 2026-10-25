@@ -31,14 +31,6 @@ impl Bug1040Worker {
 }
 
 impl XyceTestRunner {
-    fn bug1040_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug1040_model(model: &rspice_core::netlist::ModelDef) -> bool {
         let expected: [(&str, Value); 14] = [
             ("IS", 4.0e-10),
@@ -148,7 +140,7 @@ impl XyceTestRunner {
             unreachable!("BUG1040 element count was checked")
         };
         if !resistor.name.eq_ignore_ascii_case("R1")
-            || !Self::bug1040_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || resistor.provenance != ElementProvenance::Authored
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,
@@ -160,7 +152,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
             || !diode.name.eq_ignore_ascii_case("D1")
-            || !Self::bug1040_nodes_match(&diode.nodes, &["2", "0"])
+            || !Self::nodes_match(&diode.nodes, &["2", "0"])
             || diode.provenance != ElementProvenance::Authored
             || !matches!(&diode.kind, ElementKind::Diode {
                 model,
@@ -170,7 +162,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
             || !capacitor.name.eq_ignore_ascii_case("C1")
-            || !Self::bug1040_nodes_match(&capacitor.nodes, &["1", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["1", "0"])
             || capacitor.provenance != ElementProvenance::Authored
             || !matches!(&capacitor.kind, ElementKind::Capacitor {
                 value,

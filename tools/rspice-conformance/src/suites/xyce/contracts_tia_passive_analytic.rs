@@ -47,14 +47,6 @@ impl XyceTiaPassiveAnalyticKind {
 }
 
 impl XyceTestRunner {
-    fn tia_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_tia_passive_analytic_typed_contract(
         &self,
         kind: XyceTiaPassiveAnalyticKind,
@@ -131,7 +123,7 @@ impl XyceTestRunner {
         };
         if !capacitor.name.eq_ignore_ascii_case("C1")
             || capacitor.provenance != ElementProvenance::Authored
-            || !Self::tia_nodes_match(&capacitor.nodes, &["1", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["1", "0"])
             || !matches!(&capacitor.kind, ElementKind::Capacitor {
                 value,
                 value_expr: None,
@@ -148,7 +140,7 @@ impl XyceTestRunner {
                 && deferred_params.is_empty())
             || !resistor.name.eq_ignore_ascii_case("R1")
             || resistor.provenance != ElementProvenance::Authored
-            || !Self::tia_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,
                 value_expr: None,
@@ -160,7 +152,7 @@ impl XyceTestRunner {
                 && deferred_params.is_empty())
             || !voltage.name.eq_ignore_ascii_case("V1")
             || voltage.provenance != ElementProvenance::Authored
-            || !Self::tia_nodes_match(&voltage.nodes, &["2", "0"])
+            || !Self::nodes_match(&voltage.nodes, &["2", "0"])
             || !matches!(&voltage.kind, ElementKind::VoltageSource(
                 rspice_core::netlist::SourceSpec::Dc(value)
             ) if value.to_bits() == 0.0f64.to_bits())

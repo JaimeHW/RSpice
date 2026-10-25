@@ -143,14 +143,6 @@ struct Bug372Run {
 }
 
 impl XyceTestRunner {
-    fn bug372_nodes(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn bug372_param(params: &[(String, Value)], name: &str) -> Option<Value> {
         let values = params
             .iter()
@@ -367,7 +359,7 @@ impl XyceTestRunner {
         let mos_elements = if hierarchical {
             let subckt = &netlist.subcircuits[0];
             if !subckt.name.eq_ignore_ascii_case("INVERTER")
-                || !Self::bug372_nodes(&subckt.ports, &["IN", "OUT", "VDD", "GND"])
+                || !Self::nodes_match(&subckt.ports, &["IN", "OUT", "VDD", "GND"])
                 || subckt.elements.len() != representation.expected_mos(role)
                 || !subckt.initial_conditions.is_empty()
                 || !subckt.node_sets.is_empty()
@@ -428,7 +420,7 @@ impl XyceTestRunner {
                 || *compact_syntax
                 || !deferred_params.is_empty()
                 || !(is_n ^ is_p)
-                || !Self::bug372_nodes(&element.nodes, expected_nodes)
+                || !Self::nodes_match(&element.nodes, expected_nodes)
                 || m.map(Value::to_bits) != representation.expected_m(role).map(Value::to_bits)
                 || instance_params.iter().any(|(_, value)| !value.is_finite())
             {
@@ -458,20 +450,20 @@ impl XyceTestRunner {
         let r1 = find("R1")?;
         let c2 = find("C2")?;
         let xinv = hierarchical.then(|| find("XINV1")).transpose()?;
-        if !Self::bug372_nodes(&vdd.nodes, &["VDD", "0"])
+        if !Self::nodes_match(&vdd.nodes, &["VDD", "0"])
             || !matches!(vdd.kind, ElementKind::VoltageSource(SourceSpec::Dc(value)) if value.to_bits() == supply.to_bits())
-            || !Self::bug372_nodes(&rin.nodes, &["IN", "1"])
+            || !Self::nodes_match(&rin.nodes, &["IN", "1"])
             || !matches!(&rin.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params }
                 if value.to_bits() == 1_000.0f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
-            || !Self::bug372_nodes(&vin.nodes, &["1", "0"])
-            || !Self::bug372_nodes(&r1.nodes, &["VOUT", "0"])
+            || !Self::nodes_match(&vin.nodes, &["1", "0"])
+            || !Self::nodes_match(&r1.nodes, &["VOUT", "0"])
             || !matches!(&r1.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params }
                 if value.to_bits() == 10_000.0f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
-            || !Self::bug372_nodes(&c2.nodes, &["VOUT", "0"])
+            || !Self::nodes_match(&c2.nodes, &["VOUT", "0"])
             || !matches!(&c2.kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
                 if value.to_bits() == 0.1e-12f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             || xinv.is_some_and(|xinv| {
-                !Self::bug372_nodes(&xinv.nodes, &["IN", "VOUT", "VDD", "0"])
+                !Self::nodes_match(&xinv.nodes, &["IN", "VOUT", "VDD", "0"])
                     || !matches!(&xinv.kind, ElementKind::Subcircuit { subckt_name, params }
                         if subckt_name.eq_ignore_ascii_case("INVERTER") && params.is_empty())
             })

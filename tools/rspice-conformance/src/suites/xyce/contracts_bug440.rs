@@ -230,14 +230,6 @@ impl XyceTestRunner {
         Ok((plan, netlist))
     }
 
-    fn bug440_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn bug440_resistor_matches(
         element: &rspice_core::netlist::Element,
         name: &str,
@@ -246,7 +238,7 @@ impl XyceTestRunner {
     ) -> bool {
         element.provenance == ElementProvenance::Authored
             && element.name.eq_ignore_ascii_case(name)
-            && Self::bug440_nodes_match(&element.nodes, nodes)
+            && Self::nodes_match(&element.nodes, nodes)
             && matches!(&element.kind, ElementKind::Resistor {
                 value: actual,
                 value_expr: None,
@@ -263,12 +255,12 @@ impl XyceTestRunner {
             (Bug440Role::Resistor, [vdc, vcos, rtest]) => {
                 vdc.provenance == ElementProvenance::Authored
                     && vdc.name.eq_ignore_ascii_case("VDC")
-                    && Self::bug440_nodes_match(&vdc.nodes, &["1a", "0"])
+                    && Self::nodes_match(&vdc.nodes, &["1a", "0"])
                     && matches!(&vdc.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                         if value.to_bits() == 1.0f64.to_bits())
                     && vcos.provenance == ElementProvenance::Authored
                     && vcos.name.eq_ignore_ascii_case("VCOS")
-                    && Self::bug440_nodes_match(&vcos.nodes, &["1", "1a"])
+                    && Self::nodes_match(&vcos.nodes, &["1", "1a"])
                     && matches!(&vcos.kind, ElementKind::VoltageSource(SourceSpec::Sin {
                         offset, amplitude, frequency, delay, damping, phase,
                     }) if offset.to_bits() == 0.0f64.to_bits()
@@ -285,7 +277,7 @@ impl XyceTestRunner {
                     .collect::<Vec<_>>();
                 vs.provenance == ElementProvenance::Authored
                     && vs.name.eq_ignore_ascii_case("VS")
-                    && Self::bug440_nodes_match(&vs.nodes, &["1", "0"])
+                    && Self::nodes_match(&vs.nodes, &["1", "0"])
                     && matches!(&vs.kind, ElementKind::VoltageSource(SourceSpec::Pwl {
                         points,
                         delay,
@@ -294,7 +286,7 @@ impl XyceTestRunner {
                     && Self::bug440_resistor_matches(r1, "R1", &["0", "1"], 1.0)
                     && b2.provenance == ElementProvenance::Authored
                     && b2.name.eq_ignore_ascii_case("B2")
-                    && Self::bug440_nodes_match(&b2.nodes, &["2", "0"])
+                    && Self::nodes_match(&b2.nodes, &["2", "0"])
                     && matches!(&b2.kind, ElementKind::BehavioralVoltage {
                         expression,
                         tc1,

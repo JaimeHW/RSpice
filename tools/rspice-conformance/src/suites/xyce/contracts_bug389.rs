@@ -168,13 +168,6 @@ impl XyceTestRunner {
                 .iter()
                 .find(|element| element.name.eq_ignore_ascii_case(name))
         };
-        let nodes_match = |actual: &[String], expected: &[&str]| {
-            actual.len() == expected.len()
-                && actual
-                    .iter()
-                    .zip(expected)
-                    .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-        };
         let source = element("VsigGen").ok_or_else(|| format!("{LABEL} lost VsigGen"))?;
         let source_resistor = element("RsigGen").ok_or_else(|| format!("{LABEL} lost RsigGen"))?;
         let cable_resistor =
@@ -183,7 +176,7 @@ impl XyceTestRunner {
             element("X_bigline.C1").ok_or_else(|| format!("{LABEL} lost cable C1"))?;
         let cable_inductor =
             element("X_bigline.L1").ok_or_else(|| format!("{LABEL} lost cable L1"))?;
-        if !nodes_match(&source.nodes, &["1", "0"])
+        if !Self::nodes_match(&source.nodes, &["1", "0"])
             || !matches!(&source.kind, ElementKind::VoltageSource(SourceSpec::Pulse {
                 v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero,
             }) if v1.to_bits() == 0.0f64.to_bits()
@@ -195,16 +188,16 @@ impl XyceTestRunner {
                 && period.to_bits() == 1.0e-6f64.to_bits()
                 && pulse_count.to_bits() == 0.0f64.to_bits()
                 && !width_defaults_to_zero)
-            || !nodes_match(&source_resistor.nodes, &["1", "1b"])
+            || !Self::nodes_match(&source_resistor.nodes, &["1", "1b"])
             || !matches!(&source_resistor.kind, ElementKind::Resistor { value, .. }
                 if value.to_bits() == SOURCE_RESISTANCE.to_bits())
-            || !nodes_match(&cable_resistor.nodes, &["X_bigline.3", "1b"])
+            || !Self::nodes_match(&cable_resistor.nodes, &["X_bigline.3", "1b"])
             || !matches!(&cable_resistor.kind, ElementKind::Resistor { value, .. }
                 if value.to_bits() == CABLE_RESISTANCE.to_bits())
-            || !nodes_match(&cable_capacitor.nodes, &["1b", "0"])
+            || !Self::nodes_match(&cable_capacitor.nodes, &["1b", "0"])
             || !matches!(&cable_capacitor.kind, ElementKind::Capacitor { value, .. }
                 if value.to_bits() == CABLE_CAPACITANCE.to_bits())
-            || !nodes_match(&cable_inductor.nodes, &["DUT", "X_bigline.3"])
+            || !Self::nodes_match(&cable_inductor.nodes, &["DUT", "X_bigline.3"])
             || !matches!(&cable_inductor.kind, ElementKind::Inductor { value, .. }
                 if value.to_bits() == CABLE_INDUCTANCE.to_bits())
         {

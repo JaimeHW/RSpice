@@ -72,14 +72,6 @@ impl Bug113Role {
 }
 
 impl XyceTestRunner {
-    fn bug113_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug113_worker(
         &self,
         role: Bug113Role,
@@ -143,7 +135,7 @@ impl XyceTestRunner {
                                     expected: Value|
          -> bool {
             element.name.eq_ignore_ascii_case(name)
-                && Self::bug113_nodes_match(&element.nodes, nodes)
+                && Self::nodes_match(&element.nodes, nodes)
                 && element.provenance == ElementProvenance::Authored
                 && matches!(
                     &element.kind,
@@ -157,7 +149,7 @@ impl XyceTestRunner {
                               expected: Value|
          -> bool {
             element.name.eq_ignore_ascii_case(name)
-                && Self::bug113_nodes_match(&element.nodes, nodes)
+                && Self::nodes_match(&element.nodes, nodes)
                 && element.provenance == ElementProvenance::Authored
                 && matches!(
                     &element.kind,
@@ -174,7 +166,7 @@ impl XyceTestRunner {
         };
         if !exact_voltage_source(&netlist.elements[0], "V1", &["1", "0"], 5.0)
             || !netlist.elements[1].name.eq_ignore_ascii_case("S1")
-            || !Self::bug113_nodes_match(&netlist.elements[1].nodes, &["1", "2"])
+            || !Self::nodes_match(&netlist.elements[1].nodes, &["1", "2"])
             || netlist.elements[1].provenance != ElementProvenance::Authored
             || !matches!(
                 &netlist.elements[1].kind,

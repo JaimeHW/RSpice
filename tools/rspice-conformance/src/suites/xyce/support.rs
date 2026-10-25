@@ -45,6 +45,15 @@ impl XyceTestRunner {
         &self.config
     }
 
+    /// Whether `actual` names exactly `expected`, in order, ignoring ASCII case.
+    pub(super) fn nodes_match(actual: &[String], expected: &[&str]) -> bool {
+        actual.len() == expected.len()
+            && actual
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+    }
+
     pub(super) fn blank_wrapper_directive_matches(line: &str, directives: &[&str]) -> bool {
         let stripped = Self::strip_netlist_comment(line);
         let mut fields = stripped.split_whitespace();

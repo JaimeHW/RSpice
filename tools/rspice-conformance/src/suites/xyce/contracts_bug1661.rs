@@ -3,14 +3,6 @@ use super::*;
 const BUG1661_LABEL: &str = "BUG_1661 top-level global-node expression wrapper";
 
 impl XyceTestRunner {
-    fn bug1661_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug1661_typed_contract(
         &self,
         source: &str,
@@ -79,7 +71,7 @@ impl XyceTestRunner {
             (3.0e-3, 9.0e-3),
         ];
         if !voltage.name.eq_ignore_ascii_case("V1")
-            || !Self::bug1661_nodes_match(&voltage.nodes, &["$g_1", "0"])
+            || !Self::nodes_match(&voltage.nodes, &["$g_1", "0"])
             || voltage.provenance != ElementProvenance::Authored
             || !matches!(&voltage.kind, ElementKind::VoltageSource(
                 rspice_core::netlist::SourceSpec::Pwl { points, delay, repeat_from }
@@ -90,7 +82,7 @@ impl XyceTestRunner {
                 && delay.to_bits() == 0.0f64.to_bits()
                 && repeat_from.is_none())
             || !resistor_global.name.eq_ignore_ascii_case("R1")
-            || !Self::bug1661_nodes_match(&resistor_global.nodes, &["$g_1", "0"])
+            || !Self::nodes_match(&resistor_global.nodes, &["$g_1", "0"])
             || resistor_global.provenance != ElementProvenance::Authored
             || !matches!(&resistor_global.kind, ElementKind::Resistor {
                 value,
@@ -102,7 +94,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
             || !behavioral.name.eq_ignore_ascii_case("B1")
-            || !Self::bug1661_nodes_match(&behavioral.nodes, &["1", "0"])
+            || !Self::nodes_match(&behavioral.nodes, &["1", "0"])
             || behavioral.provenance != ElementProvenance::Authored
             || !matches!(&behavioral.kind, ElementKind::BehavioralVoltage {
                 expression,
@@ -117,7 +109,7 @@ impl XyceTestRunner {
                 && multiplicity.value_expr.is_none()
                 && !multiplicity.given)
             || !resistor_local.name.eq_ignore_ascii_case("R2")
-            || !Self::bug1661_nodes_match(&resistor_local.nodes, &["1", "0"])
+            || !Self::nodes_match(&resistor_local.nodes, &["1", "0"])
             || resistor_local.provenance != ElementProvenance::Authored
             || !matches!(&resistor_local.kind, ElementKind::Resistor {
                 value,

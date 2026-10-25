@@ -53,14 +53,6 @@ impl Bug1398Role {
 }
 
 impl XyceTestRunner {
-    fn bug1398_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug1398_model(model: &rspice_core::netlist::ModelDef) -> bool {
         if !model.model_type.eq_ignore_ascii_case("L")
             || !model.expr_params.is_empty()
@@ -219,10 +211,7 @@ impl XyceTestRunner {
             let node_one = format!("1{suffix}");
             let node_two = format!("2{suffix}");
             if !source.name.eq_ignore_ascii_case(&source_name)
-                || !Self::bug1398_nodes_match(
-                    &source.nodes,
-                    &[node_two.as_str(), node_one.as_str()],
-                )
+                || !Self::nodes_match(&source.nodes, &[node_two.as_str(), node_one.as_str()])
                 || source.provenance != ElementProvenance::Authored
                 || !matches!(&source.kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse {
                     v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero,
@@ -236,7 +225,7 @@ impl XyceTestRunner {
                     && pulse_count.to_bits() == 0.0f64.to_bits()
                     && !width_defaults_to_zero)
                 || !resistor.name.eq_ignore_ascii_case(&format!("R1{suffix}"))
-                || !Self::bug1398_nodes_match(&resistor.nodes, &[node_one.as_str(), "0"])
+                || !Self::nodes_match(&resistor.nodes, &[node_one.as_str(), "0"])
                 || resistor.provenance != ElementProvenance::Authored
                 || !matches!(&resistor.kind, ElementKind::Resistor {
                     value,
@@ -248,7 +237,7 @@ impl XyceTestRunner {
                     && instance_params.is_empty()
                     && deferred_params.is_empty())
                 || !capacitor.name.eq_ignore_ascii_case(&format!("C1{suffix}"))
-                || !Self::bug1398_nodes_match(&capacitor.nodes, &[node_one.as_str(), "0"])
+                || !Self::nodes_match(&capacitor.nodes, &[node_one.as_str(), "0"])
                 || capacitor.provenance != ElementProvenance::Authored
                 || !matches!(&capacitor.kind, ElementKind::Capacitor {
                     value,
@@ -282,7 +271,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
                 || !element.name.eq_ignore_ascii_case(name)
-                || !Self::bug1398_nodes_match(&element.nodes, &[node_two.as_str(), "0"])
+                || !Self::nodes_match(&element.nodes, &[node_two.as_str(), "0"])
                 || element.provenance != ElementProvenance::Authored
             {
                 return Err(format!(

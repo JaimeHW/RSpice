@@ -82,7 +82,7 @@ impl XyceTestRunner {
         nodes: [&str; 2],
     ) -> Result<(), String> {
         if element.provenance != ElementProvenance::Authored
-            || !Self::issue451_nodes_match(&element.nodes, &nodes)
+            || !Self::nodes_match(&element.nodes, &nodes)
             || !matches!(&element.kind, ElementKind::Resistor {
                 value,
                 value_expr: None,
@@ -103,7 +103,7 @@ impl XyceTestRunner {
         nodes: [&str; 2],
     ) -> Result<(), String> {
         if element.provenance != ElementProvenance::Authored
-            || !Self::issue451_nodes_match(&element.nodes, &nodes)
+            || !Self::nodes_match(&element.nodes, &nodes)
             || !matches!(element.kind, ElementKind::CurrentSource(SourceSpec::Dc(value))
                 if value.to_bits() == 1.0f64.to_bits())
         {
@@ -117,7 +117,7 @@ impl XyceTestRunner {
         nodes: [&str; 2],
     ) -> Result<(), String> {
         if element.provenance != ElementProvenance::Authored
-            || !Self::issue451_nodes_match(&element.nodes, &nodes)
+            || !Self::nodes_match(&element.nodes, &nodes)
             || !matches!(&element.kind, ElementKind::CurrentSourceDeferred(expression)
                 if expression.trim() == "1.0")
         {
@@ -126,14 +126,6 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
-    }
-
-    fn issue451_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
     }
 
     fn validate_issue451_subcircuit(
@@ -145,7 +137,7 @@ impl XyceTestRunner {
             Issue451Role::ExplicitReference => 5,
         };
         if !subcircuit.name.eq_ignore_ascii_case("test")
-            || !Self::issue451_nodes_match(&subcircuit.ports, &["A", "B"])
+            || !Self::nodes_match(&subcircuit.ports, &["A", "B"])
             || subcircuit.elements.len() != expected_count
             || !subcircuit.initial_conditions.is_empty()
             || !subcircuit.node_sets.is_empty()
@@ -236,7 +228,7 @@ impl XyceTestRunner {
 
         let vin = elements["vin"];
         if vin.provenance != ElementProvenance::Authored
-            || !Self::issue451_nodes_match(&vin.nodes, &["1", "0"])
+            || !Self::nodes_match(&vin.nodes, &["1", "0"])
             || !matches!(vin.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                 if value.to_bits() == 1.0f64.to_bits())
         {
@@ -248,7 +240,7 @@ impl XyceTestRunner {
 
         let instance = elements["x1"];
         if instance.provenance != ElementProvenance::Authored
-            || !Self::issue451_nodes_match(&instance.nodes, &["2", "3"])
+            || !Self::nodes_match(&instance.nodes, &["2", "3"])
             || !matches!(&instance.kind, ElementKind::Subcircuit { subckt_name, params }
                 if subckt_name.eq_ignore_ascii_case("test") && params.is_empty())
         {
@@ -265,7 +257,7 @@ impl XyceTestRunner {
             .collect::<String>()
             .to_ascii_lowercase();
         if behavioral.provenance != ElementProvenance::Authored
-            || !Self::issue451_nodes_match(&behavioral.nodes, &["eric", "0"])
+            || !Self::nodes_match(&behavioral.nodes, &["eric", "0"])
             || normalized_expression != "v(x1:testnode)"
         {
             return Err(format!("{LABEL} Btest1 hierarchy reference changed"));

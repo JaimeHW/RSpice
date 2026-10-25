@@ -67,14 +67,6 @@ struct Bug325Run {
 }
 
 impl XyceTestRunner {
-    fn bug325_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug325_model(model: &rspice_core::netlist::ModelDef) -> bool {
         let expected: [(&str, Value); 10] = [
             ("LEVEL", 11.0),
@@ -170,7 +162,7 @@ impl XyceTestRunner {
         ];
         for (element, (name, nodes)) in netlist.elements.iter().take(4).zip(sources) {
             if !element.name.eq_ignore_ascii_case(name)
-                || !Self::bug325_nodes_match(&element.nodes, &nodes)
+                || !Self::nodes_match(&element.nodes, &nodes)
                 || element.provenance != ElementProvenance::Authored
                 || !matches!(&element.kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                     if value.to_bits() == 0.0f64.to_bits())
@@ -189,7 +181,7 @@ impl XyceTestRunner {
         for (element, expected_name) in netlist.elements.iter().skip(4).zip(expected_names) {
             let expected_m = role.expected_m();
             if !element.name.eq_ignore_ascii_case(expected_name)
-                || !Self::bug325_nodes_match(&element.nodes, &["c", "b", "0"])
+                || !Self::nodes_match(&element.nodes, &["c", "b", "0"])
                 || element.provenance != ElementProvenance::Authored
                 || !matches!(&element.kind, ElementKind::Bjt {
                     model,

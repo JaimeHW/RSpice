@@ -123,14 +123,6 @@ impl XyceTestRunner {
         }
     }
 
-    fn nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug28_worker(
         &self,
         role: Bug28Role,

@@ -113,14 +113,6 @@ impl XyceTestRunner {
             .map_err(|error| format!("{LABEL} cannot read {:?}: {error}", role.file_name()))
     }
 
-    fn bug308_nodes(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn bug308_param(params: &[(String, Value)], name: &str) -> Option<Value> {
         let values = params
             .iter()
@@ -171,7 +163,7 @@ impl XyceTestRunner {
             };
             if element.provenance != ElementProvenance::Authored
                 || !element.name.eq_ignore_ascii_case(name)
-                || !Self::bug308_nodes(&element.nodes, &nodes)
+                || !Self::nodes_match(&element.nodes, &nodes)
                 || !model.eq_ignore_ascii_case(model_name)
                 || *compact_syntax
                 || instance_params.len() != 2
@@ -191,10 +183,10 @@ impl XyceTestRunner {
             .collect::<Vec<_>>();
         if capacitors.len() != 2
             || !matches!(&capacitors[0].kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
-                if capacitors[0].name.eq_ignore_ascii_case("CQ") && Self::bug308_nodes(&capacitors[0].nodes, &["Qnot", "0"])
+                if capacitors[0].name.eq_ignore_ascii_case("CQ") && Self::nodes_match(&capacitors[0].nodes, &["Qnot", "0"])
                     && value.to_bits() == 30.0e-15f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             || !matches!(&capacitors[1].kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
-                if capacitors[1].name.eq_ignore_ascii_case("CL") && Self::bug308_nodes(&capacitors[1].nodes, &["Lnot", "0"])
+                if capacitors[1].name.eq_ignore_ascii_case("CL") && Self::nodes_match(&capacitors[1].nodes, &["Lnot", "0"])
                     && value.to_bits() == 10.0e-15f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
         {
             return Err(format!(
@@ -208,17 +200,17 @@ impl XyceTestRunner {
             .collect::<Vec<_>>();
         if sources.len() != 3
             || !matches!(&sources[0].kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
-                if sources[0].name.eq_ignore_ascii_case("Vdd") && Self::bug308_nodes(&sources[0].nodes, &["E1", "0"])
+                if sources[0].name.eq_ignore_ascii_case("Vdd") && Self::nodes_match(&sources[0].nodes, &["E1", "0"])
                     && value.to_bits() == 5.0f64.to_bits())
             || !matches!(&sources[1].kind, ElementKind::VoltageSource(SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero })
-                if sources[1].name.eq_ignore_ascii_case("Va") && Self::bug308_nodes(&sources[1].nodes, &["A", "0"])
+                if sources[1].name.eq_ignore_ascii_case("Va") && Self::nodes_match(&sources[1].nodes, &["A", "0"])
                     && v1.to_bits() == 0.0f64.to_bits() && v2.to_bits() == 5.0f64.to_bits()
                     && delay.to_bits() == 0.0f64.to_bits() && rise.to_bits() == 0.1e-9f64.to_bits()
                     && fall.to_bits() == 0.1e-9f64.to_bits() && width.to_bits() == 15.0e-9f64.to_bits()
                     && period.to_bits() == 30.0e-9f64.to_bits() && pulse_count.to_bits() == 0.0f64.to_bits()
                     && !width_defaults_to_zero)
             || !matches!(&sources[2].kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
-                if sources[2].name.eq_ignore_ascii_case("Vb") && Self::bug308_nodes(&sources[2].nodes, &["B", "0"])
+                if sources[2].name.eq_ignore_ascii_case("Vb") && Self::nodes_match(&sources[2].nodes, &["B", "0"])
                     && value.to_bits() == 0.0f64.to_bits())
         {
             return Err(format!("{LABEL} source topology changed: {sources:?}"));

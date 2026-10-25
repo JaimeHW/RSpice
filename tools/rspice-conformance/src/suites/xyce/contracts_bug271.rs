@@ -3,14 +3,6 @@ use super::*;
 const BUG271_LABEL: &str = "BUG_271_SON tab-comment RLC success wrapper";
 
 impl XyceTestRunner {
-    fn bug271_nodes_match(actual: &[String], expected: &[&str]) -> bool {
-        actual.len() == expected.len()
-            && actual
-                .iter()
-                .zip(expected)
-                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
     fn validate_bug271_typed_contract(
         &self,
         source: &str,
@@ -72,7 +64,7 @@ impl XyceTestRunner {
             unreachable!("BUG271 typed element count was checked");
         };
         if !resistor.name.eq_ignore_ascii_case("R1")
-            || !Self::bug271_nodes_match(&resistor.nodes, &["1", "2"])
+            || !Self::nodes_match(&resistor.nodes, &["1", "2"])
             || resistor.provenance != ElementProvenance::Authored
             || !matches!(&resistor.kind, ElementKind::Resistor {
                 value,
@@ -84,7 +76,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
             || !inductor.name.eq_ignore_ascii_case("L1")
-            || !Self::bug271_nodes_match(&inductor.nodes, &["2", "3"])
+            || !Self::nodes_match(&inductor.nodes, &["2", "3"])
             || inductor.provenance != ElementProvenance::Authored
             || !matches!(&inductor.kind, ElementKind::Inductor {
                 value,
@@ -97,7 +89,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
             || !capacitor.name.eq_ignore_ascii_case("C1")
-            || !Self::bug271_nodes_match(&capacitor.nodes, &["3", "0"])
+            || !Self::nodes_match(&capacitor.nodes, &["3", "0"])
             || capacitor.provenance != ElementProvenance::Authored
             || !matches!(&capacitor.kind, ElementKind::Capacitor {
                 value,
@@ -110,7 +102,7 @@ impl XyceTestRunner {
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
             || !voltage.name.eq_ignore_ascii_case("V1")
-            || !Self::bug271_nodes_match(&voltage.nodes, &["1", "0"])
+            || !Self::nodes_match(&voltage.nodes, &["1", "0"])
             || voltage.provenance != ElementProvenance::Authored
             || !matches!(&voltage.kind, ElementKind::VoltageSource(
                 rspice_core::netlist::SourceSpec::DcTransient { dc_value, transient }
