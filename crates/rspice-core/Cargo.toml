@@ -12,7 +12,7 @@ rust-version.workspace = true
 [features]
 # parallel ships in the default set so the CLI, Python bindings,
 # and the default test configuration all exercise the fast paths;
-# rspice-wasm opts out via default-features = false.
+# the browser builds opt out via default-features = false.
 default = ["faer-parallel", "parallel"]
 wasm = [
     "rspice-core-base/wasm",

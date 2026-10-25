@@ -35,9 +35,8 @@ modules simulate alongside the analog solve, with connect modules inserted
 automatically where a deck node joins analog and discrete ports.
 
 RSpice has one engine behind every interface. The command line, the desktop
-and browser application, the Python bindings and the WebAssembly build all run
-the same `rspice-core` code, so a result never depends on how the run was
-launched. Where a deck needs physics RSpice does not have, the answer is a
+and browser application and the Python bindings all run the same
+`rspice-core` code, so a result never depends on how the run was launched. Where a deck needs physics RSpice does not have, the answer is a
 typed error naming the parameter or model level responsible, never a silent
 approximation.
 
@@ -342,13 +341,6 @@ assert_eq!(result.voltage(1), 10.0);
 Entry points, device routing and the feature-flag table:
 [crates/rspice-core/README.md](crates/rspice-core/README.md).
 
-### WebAssembly
-
-`rspice-wasm` exposes netlist summaries and authored-deck execution to
-JavaScript through `wasm-bindgen`, returning the same typed result document the
-other frontends publish, under configurable resource limits and cooperative
-deadlines: [crates/rspice-wasm/README.md](crates/rspice-wasm/README.md).
-
 ### Verilog-AMS
 
 Verilog-A is the analog subset of Verilog-AMS, and RSpice treats them as the
@@ -458,7 +450,6 @@ use faer.
 | [`rspice-cli`](crates/rspice-cli) | The `rspice` command-line simulator |
 | [`rspice-app`](crates/rspice-app) | The desktop and browser application |
 | [`rspice-python`](crates/rspice-python) | Python bindings built with PyO3 |
-| [`rspice-wasm`](crates/rspice-wasm) | WebAssembly bindings and the browser playground |
 
 **Application libraries**
 

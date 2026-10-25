@@ -99,7 +99,7 @@ use rspice_core::analysis::harmonic_balance::{
 // stops reaching up into `execution`) keeps every public name and adds two
 // statements: the re-export under `execution::result_document`, which
 // rspice-cli (compare determinations, control output, Monte Carlo waveform
-// IO), rspice-wasm (control handles and deck runners) and the engine-adapter
+// IO) and the engine-adapter
 // tests import through, and `ResultScalarError`, the error
 // `ResultScalar::new` returns now that the constructor cannot name a
 // result-document error. The census was 5,661, with no slack.

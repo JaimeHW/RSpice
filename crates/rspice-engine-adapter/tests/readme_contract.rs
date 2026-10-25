@@ -153,14 +153,6 @@ fn the_documented_result_document_version_is_the_one_the_adapter_writes() {
         )),
         "the adapter README no longer names the shared result document's schema and version"
     );
-
-    let wasm_readme = read_readme("rspice-wasm");
-    assert!(
-        wasm_readme.contains(&format!(
-            "`{ANALYSIS_RESULT_DOCUMENT_SCHEMA}` version {ANALYSIS_RESULT_DOCUMENT_VERSION}"
-        )),
-        "the WASM README documents a different shared result document version"
-    );
 }
 
 #[test]

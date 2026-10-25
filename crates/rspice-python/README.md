@@ -26,8 +26,8 @@ application's own Python automation is a separate surface.
 
 - Analyses, devices and netlist dialects belong to `rspice-core`; the analysis
   and device tables are in the root `README.md`.
-- The command-line simulator is `rspice-cli` and the browser module is
-  `rspice-wasm`; all three publish the same `rspice-analysis-result` document.
+- The command-line simulator is `rspice-cli`; both publish the same
+  `rspice-analysis-result` document.
 
 ## Installation
 

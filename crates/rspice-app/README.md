@@ -171,9 +171,7 @@ and `build.rs` exports the 9-character git hash the About dialog shows
 
 The `/ide/` route is an experimental browser IDE requiring a WebGPU-capable
 browser, which runs simulations through the module worker guarded by
-`tools/ci/test_ide_worker.py`; the narrower
-[rspice-wasm](../rspice-wasm/README.md) `/play/` playground is the lightweight
-OP/AC/TRAN engine demo. Both are assembled and published by the separate
+`tools/ci/test_ide_worker.py`. It is assembled and published by the separate
 RSpice-Site repository, whose packaged tree
 `tools/ci/check_browser_release.py` qualifies.
 

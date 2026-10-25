@@ -37,8 +37,6 @@ Everything except the empty native `main` compiles only for `wasm32`.
 - Request preparation, the worker transport protocol and execution belong to
   `rspice-simulation`; this crate only carries requests across the JavaScript
   boundary.
-- The standalone browser playground uses `rspice-wasm`, a separate and smaller
-  engine API.
 
 ## Entry points
 
