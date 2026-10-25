@@ -29,7 +29,10 @@ fn the_analyses_route_expands_the_declared_space_once_a_frame() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
     app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
     for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
@@ -75,7 +78,10 @@ fn derivations_for_route(page: crate::workbench::state::SimulationPage) -> (usiz
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
     app.state.simulate.simulation_page = page;
     // A declared axis, so the space is a matrix rather than a single point and

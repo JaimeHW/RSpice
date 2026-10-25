@@ -286,7 +286,10 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
     app.state.model.workspace.content.project_sources = Default::default();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     let variable_id = add_tuning_variable(&mut app);
     let plan_id = app
         .state
@@ -337,7 +340,10 @@ fn an_edit_after_a_tuning_commit_refuses_its_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
     app.state.model.workspace.content.project_sources = Default::default();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     add_tuning_variable(&mut app);
     sync_tuning_session(&mut app);
     app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
@@ -434,7 +440,10 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
     app.state.model.workspace.content.project_sources = Default::default();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     let component_id = app
         .state
         .model
@@ -531,7 +540,10 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
 fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.workspace.content.project_sources = Default::default();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     let component_id = app
         .state
         .model

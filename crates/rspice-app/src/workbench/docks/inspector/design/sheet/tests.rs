@@ -645,7 +645,10 @@ fn a_read_only_sheet_states_its_properties_without_controls() {
 #[test]
 fn checks_appear_only_for_findings_on_this_sheet() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut app.state.model.schematic,
+    );
     Command::CheckCellview.execute(&mut app);
     let clean = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(!clean.contains("Checks"), "{clean}");

@@ -168,7 +168,10 @@ fn creating_and_deleting_sheets_run_their_real_transactions() {
 #[test]
 fn sheet_properties_open_the_inspector_on_the_sheet() {
     let mut state = project_open();
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut state.model.schematic,
+    );
     state.select_all_schematic_objects();
     state.workbench.inspector_visible = false;
     let mut sheets = sheets_over(state);

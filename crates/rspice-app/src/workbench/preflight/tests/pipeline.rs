@@ -632,7 +632,10 @@ fn rc_lowpass() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     enable_only(&mut app.state, &[]);
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut app.state.model.schematic,
+    );
     app
 }
 
@@ -994,7 +997,7 @@ fn a_run_prepared_off_the_ui_thread_is_the_one_the_frame_would_have_prepared() {
     let mut lowpass = RSpiceApp::test_instance();
     lowpass.state.open_project_session();
     enable_only(&mut lowpass.state, &[]);
-    crate::workbench::examples::load_example(
+    rspice_app_state::workbench::examples::load_example(
         "RC Lowpass Filter",
         &mut lowpass.state.model.schematic,
     );

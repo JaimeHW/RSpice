@@ -20,7 +20,10 @@ use super::page_runset::{exact_plan_task_count, worst_point_task_cost};
 /// plan holds exactly the requested analyses.
 pub(super) fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     let mut drc = DrcResult::new();
     drc.completed = true;
     app.state.model.design_checks.drc_results = Some(drc);

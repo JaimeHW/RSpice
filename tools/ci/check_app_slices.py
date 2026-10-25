@@ -226,7 +226,7 @@ SLICE_RULES = [
     (W + r"preferences", "settings"),
     (W + r"(account_organization|live_session|user_identity|publication_snapshot)\.rs$", "cloud"),
     (W + r"cross_probe\.rs$", "design"),
-    (W + r"examples", "project"),
+    (W + r"examples/", "shell"),
     (W + r"preflight", "run"),
     (W + r"simulation_analysis_tabs", "simulate"),
     # Top-level modules.

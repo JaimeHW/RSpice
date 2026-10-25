@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::workbench::{
     FolderListPreference, documents::code_workspace::compile_project_bundle_receipt,
-    examples::load_example, lifecycle::project_lifecycle,
-    workflows::netlist_workflow::apply_imported_netlist,
+    lifecycle::project_lifecycle, workflows::netlist_workflow::apply_imported_netlist,
 };
+use rspice_app_state::workbench::examples::load_example;
 use rspice_design::drc::DrcResult;
 
 mod campaign;

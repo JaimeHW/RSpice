@@ -1161,7 +1161,7 @@ mod tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        crate::workbench::examples::load_example(
+        rspice_app_state::workbench::examples::load_example(
             "RC Lowpass Filter",
             &mut app.state.model.schematic,
         );

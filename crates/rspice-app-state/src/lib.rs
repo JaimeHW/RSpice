@@ -53,6 +53,7 @@ pub mod workbench {
         pub mod symbol_contract;
         pub mod waivers;
     }
+    pub mod examples;
     pub mod preferences;
     pub mod workspace;
 }

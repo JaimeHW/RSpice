@@ -70,7 +70,10 @@ pub(super) fn add_operating_point(state: &mut AppState) {
 pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "CMOS Inverter",
+        &mut app.state.model.schematic,
+    );
     add_operating_point(&mut app.state);
     app.state
         .provision_test_project_technology_with_models(models);

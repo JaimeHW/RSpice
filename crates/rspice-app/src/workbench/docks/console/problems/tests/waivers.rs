@@ -272,7 +272,10 @@ fn runnable_colliding_app() -> crate::workbench::RSpiceApp {
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.provision_test_project_technology_contract();
     app.state
         .model

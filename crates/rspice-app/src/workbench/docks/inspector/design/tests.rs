@@ -1656,7 +1656,10 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
 #[test]
 fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
     let mut state = AppState::default();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "CMOS Inverter",
+        &mut state.model.schematic,
+    );
     let mut component = state
         .model
         .schematic
@@ -2111,7 +2114,10 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
 #[test]
 fn the_cmos_inverter_example_binds_models_the_library_resolves() {
     let mut state = AppState::default();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "CMOS Inverter",
+        &mut state.model.schematic,
+    );
     for (name, model) in [("MP", "RSPICE_PMOS"), ("MN", "RSPICE_NMOS")] {
         let component = state
             .model

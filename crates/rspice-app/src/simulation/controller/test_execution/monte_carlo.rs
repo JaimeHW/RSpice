@@ -23,7 +23,10 @@ pub(crate) fn checkpoint_state() -> AppState {
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("Voltage Divider", &mut state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut state.model.schematic,
+    );
     for component in &mut state.model.schematic.document_mut_for_test().components {
         match component.name.as_str() {
             "VCC" => component.value = "1".into(),

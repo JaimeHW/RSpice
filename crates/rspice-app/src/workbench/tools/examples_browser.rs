@@ -14,10 +14,10 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 use crate::workbench::app_state::AppState;
-use crate::workbench::examples::{EXAMPLES, Example, load_example};
 use crate::workbench::workflows::project_workflow::{
     NewProjectParams, create_new_project_with, save_project_as,
 };
+use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 
 /// The name column every row shares.
 const NAME_COLUMN: f32 = 220.0;

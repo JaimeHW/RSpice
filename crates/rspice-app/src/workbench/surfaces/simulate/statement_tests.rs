@@ -20,7 +20,10 @@ use crate::workbench::RSpiceApp;
 #[test]
 fn the_displayed_statement_is_the_directive_the_controller_emits() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
 
     for kind in [
@@ -56,7 +59,10 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
 #[test]
 fn a_displayed_statement_is_a_directive_the_engine_accepts() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
 
     // A deck the directive can be appended to. Deliberately the smallest thing
@@ -119,7 +125,10 @@ fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts()
     );
 
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
     const DECK: &str = "* statement fixture\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n";
     let mut checked = 0_usize;
@@ -144,7 +153,10 @@ fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts()
 #[test]
 fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
 
     // The helper projects the draft into the live setup view and restores it,
@@ -199,7 +211,10 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
     use crate::simulation::config::NoiseSweepType;
 
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
 
     let (ac, noise) = {

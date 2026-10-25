@@ -135,7 +135,10 @@ fn envelope_source_catalog_rejects_unknown_and_dc_only_selections() {
 fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "CMOS Inverter",
+        &mut app.state.model.schematic,
+    );
     app.state.model.simulation.source.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 

@@ -3,12 +3,12 @@
 //! The workbench owns the authored example; its netlist assertions belong here
 //! rather than making the lower simulation module depend on the workbench.
 
-use super::load_example;
 use crate::simulation::netlist_gen::generate_netlist;
 use crate::state::{
     DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Point,
     SchematicState,
 };
+use rspice_app_state::workbench::examples::load_example;
 
 /// A label sitting on a wire names that net in the generated netlist.
 #[test]

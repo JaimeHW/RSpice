@@ -37,7 +37,10 @@ fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::pa
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("CMOS Inverter", &mut state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "CMOS Inverter",
+        &mut state.model.schematic,
+    );
     let library = state
         .model
         .model_library_manager

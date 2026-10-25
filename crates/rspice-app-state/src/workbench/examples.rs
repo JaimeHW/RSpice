@@ -35,16 +35,6 @@
 //!   `(x+20, y∓10)`; netlists as `E out+ out− in+ in−`. `mirror_h` puts the
 //!   output on the right.
 
-/// The one hierarchical project the hierarchy suites build from. It is a
-/// fixture like the flat circuits above, but a whole project rather than a
-/// schematic, so it is authored through the application's own APIs instead of
-/// being drawn here.
-#[cfg(test)]
-pub(crate) mod hierarchy_reference;
-
-#[cfg(test)]
-mod netlist_integration_tests;
-
 use rspice_design::schematic::document::SchematicDocument;
 
 use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
@@ -56,13 +46,13 @@ use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wi
 /// One demonstration circuit: the name [`load_example`] draws it by, and
 /// what it is, in a line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Example {
-    pub(crate) name: &'static str,
-    pub(crate) summary: &'static str,
+pub struct Example {
+    pub name: &'static str,
+    pub summary: &'static str,
 }
 
 /// Every demonstration circuit, in the order the Examples dialog lists them.
-pub(crate) const EXAMPLES: [Example; 6] = [
+pub const EXAMPLES: [Example; 6] = [
     Example {
         name: "RC Lowpass Filter",
         summary: "R1 1k into C1 159n: a first-order low-pass with its corner at 1 kHz.",

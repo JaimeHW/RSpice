@@ -1397,7 +1397,10 @@ fn the_simulation_rail_derives_what_it_states_once_a_frame() {
     use crate::simulation::cost_probe::{Derivation, count, reset};
 
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.sync_active_schematic_to_workspace();
     app.state.workbench.activate(Workspace::Simulate);
 

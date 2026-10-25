@@ -15,7 +15,10 @@ const REASON: &str = "sense is tied to SENSE on purpose";
 fn colliding_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     disable_global_process_axis(&mut app.state);
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
+    rspice_app_state::workbench::examples::load_example(
+        "Voltage Divider",
+        &mut app.state.model.schematic,
+    );
     app.state.provision_test_project_technology_contract();
     app.state
         .model

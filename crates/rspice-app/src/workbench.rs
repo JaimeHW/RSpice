@@ -43,9 +43,19 @@ pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
 mod docks;
 pub(crate) mod documents;
-// The bundled circuits Help's Examples dialog opens as projects, which the
-// tests also build from.
-pub(crate) mod examples;
+// The bundled circuits Help's Examples dialog opens as projects are model
+// logic in `rspice_app_state::workbench::examples`. The test fixtures beside
+// them build through the application's own APIs, so they stay here.
+#[cfg(test)]
+pub(crate) mod examples {
+    /// The one hierarchical project the hierarchy suites build from. It is a
+    /// fixture like the flat example circuits, but a whole project rather
+    /// than a schematic, so it is authored through the application's own APIs
+    /// instead of being drawn.
+    pub(crate) mod hierarchy_reference;
+
+    mod netlist_integration_tests;
+}
 mod features;
 pub(crate) mod frame;
 pub(crate) mod framework;
