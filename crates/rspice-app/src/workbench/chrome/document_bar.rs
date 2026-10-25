@@ -13,9 +13,8 @@ use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::AppState;
 use crate::workbench::framework::host::DocumentHost;
-use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 
 use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
@@ -36,11 +35,37 @@ const HIDDEN_BUTTON_WIDTH: f32 = 40.0;
 /// Past this many hidden tabs, their menu offers a filter.
 const HIDDEN_MENU_FILTER_THRESHOLD: usize = 8;
 
-pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
+/// The session the bar and its commands are handed: the workbench session's
+/// record of the open documents, and the shell's answers for the documents
+/// each workspace offers. Any session that is both is one.
+pub(crate) trait DocumentSession:
+    ConsoleHost
+    + DocumentHost<
+        WorkspaceKey = Workspace,
+        DocumentId = WorkspaceDocumentId,
+        Document = WorkspaceDocument,
+    >
+{
+}
+
+impl<S> DocumentSession for S where
+    S: ConsoleHost
+        + DocumentHost<
+            WorkspaceKey = Workspace,
+            DocumentId = WorkspaceDocumentId,
+            Document = WorkspaceDocument,
+        >
+{
+}
+
+pub fn show<H>(root: &mut Ui, app: &mut H, layout: LayoutSpec)
+where
+    H: WorkbenchHost<Session: DocumentSession>,
+{
     let ctx = root.ctx().clone();
     let ctx = &ctx;
-    reconcile_document_registry(app.state_mut());
-    let documents = visible_documents(app.state());
+    reconcile_document_registry(app.session_mut());
+    let documents = visible_documents(app.session());
     if !document_strip_visible(app.workbench().workspace, documents.len()) {
         return;
     }
@@ -69,7 +94,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                         ui.painter(),
                         &document.label,
                         document.dirty,
-                        document_is_closable(app.state(), &document.id),
+                        document_is_closable(app.session(), &document.id),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -93,7 +118,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                     let tabs = ui.horizontal(|ui| {
                                         document_tabs(
                                             ui,
-                                            app.state_mut(),
+                                            app.session_mut(),
                                             &documents,
                                             height,
                                             fit.cap,
@@ -118,7 +143,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                         .collect::<Vec<_>>();
                     hidden_documents_button(
                         ui,
-                        app.state_mut(),
+                        app.session_mut(),
                         &hidden,
                         Vec2::new(hidden_button_width, height),
                     );
@@ -223,7 +248,7 @@ fn paint_horizontal_fade(
 /// its tab into view.
 fn hidden_documents_button(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut impl DocumentSession,
     hidden: &[&WorkspaceDocument],
     size: Vec2,
 ) {
@@ -318,10 +343,10 @@ fn hidden_documents_button(
     response.on_hover_text(description);
 }
 
-pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost) -> bool {
+pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost<Session: DocumentSession>) -> bool {
     document_strip_visible(
         app.workbench().workspace,
-        visible_documents(app.state()).len(),
+        visible_documents(app.session()).len(),
     )
 }
 
@@ -360,7 +385,9 @@ pub(crate) struct WorkspaceDocumentDescriptor {
     pub(crate) owner: crate::workbench::lifecycle::window_session::ApplicationWindowId,
 }
 
-pub(crate) fn document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDescriptor> {
+pub(crate) fn document_descriptors(
+    state: &impl DocumentSession,
+) -> Vec<WorkspaceDocumentDescriptor> {
     let available = available_documents(state);
     let active = authoritative_active_document(state, &available);
     available
@@ -368,11 +395,11 @@ pub(crate) fn document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDes
         .enumerate()
         .map(|(index, document)| WorkspaceDocumentDescriptor {
             open: index == 0
-                || !state.workbench.documents.is_closed(&document.id)
+                || !state.workbench().documents.is_closed(&document.id)
                 || active.as_ref() == Some(&document.id),
             active: active.as_ref() == Some(&document.id),
             closable: index > 0,
-            owner: state.workbench.window_session.owner(&document.id),
+            owner: state.workbench().window_session.owner(&document.id),
             id: document.id,
             label: document.label,
             dirty: document.dirty,
@@ -380,7 +407,9 @@ pub(crate) fn document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDes
         .collect()
 }
 
-pub(crate) fn all_document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDescriptor> {
+pub(crate) fn all_document_descriptors(
+    state: &impl DocumentSession,
+) -> Vec<WorkspaceDocumentDescriptor> {
     Workspace::ALL
         .into_iter()
         .flat_map(|workspace| {
@@ -388,16 +417,16 @@ pub(crate) fn all_document_descriptors(state: &AppState) -> Vec<WorkspaceDocumen
                 .into_iter()
                 .enumerate()
                 .map(move |(index, document)| {
-                    let owner = state.workbench.window_session.owner(&document.id);
+                    let owner = state.workbench().window_session.owner(&document.id);
                     let active = state
-                        .workbench
+                        .workbench()
                         .window_session
                         .state(owner)
                         .and_then(|window| window.active_document.as_ref())
                         == Some(&document.id);
                     WorkspaceDocumentDescriptor {
                         open: index == 0
-                            || !state.workbench.documents.is_closed(&document.id)
+                            || !state.workbench().documents.is_closed(&document.id)
                             || active,
                         active,
                         closable: index > 0,
@@ -411,19 +440,19 @@ pub(crate) fn all_document_descriptors(state: &AppState) -> Vec<WorkspaceDocumen
         .collect()
 }
 
-pub(crate) fn active_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
+pub(crate) fn active_document_id(state: &impl DocumentSession) -> Option<WorkspaceDocumentId> {
     let available = owned_available_documents(state);
     authoritative_active_document(state, &available)
 }
 
 pub(crate) fn activate_document_by_id(
-    state: &mut AppState,
+    state: &mut impl DocumentSession,
     document: &WorkspaceDocumentId,
 ) -> bool {
     activate_document(state, document)
 }
 
-pub(crate) fn cycle_document(state: &mut AppState, previous: bool) -> bool {
+pub(crate) fn cycle_document(state: &mut impl DocumentSession, previous: bool) -> bool {
     reconcile_document_registry(state);
     let documents = visible_documents(state);
     if documents.len() < 2 {
@@ -442,23 +471,23 @@ pub(crate) fn cycle_document(state: &mut AppState, previous: bool) -> bool {
     activate_document(state, &documents[next].id)
 }
 
-pub(crate) fn close_other_documents(state: &mut AppState) -> usize {
+pub(crate) fn close_other_documents(state: &mut impl DocumentSession) -> usize {
     reconcile_document_registry(state);
     let documents = owned_available_documents(state);
     let active = authoritative_active_document(state, &documents);
     let mut closed = 0;
     for document in &documents {
         if document_is_closable(state, &document.id) && active.as_ref() != Some(&document.id) {
-            let was_closed = state.workbench.documents.is_closed(&document.id);
-            state.workbench.documents.close(&document.id);
+            let was_closed = state.workbench().documents.is_closed(&document.id);
+            state.workbench_mut().documents.close(&document.id);
             closed += usize::from(!was_closed);
         }
     }
     closed
 }
 
-pub(crate) fn close_all_documents(state: &mut AppState) -> usize {
-    if !state.commit_pending_inspector_edit() {
+pub(crate) fn close_all_documents(state: &mut impl DocumentSession) -> usize {
+    if !state.commit_pending_edit() {
         return 0;
     }
     reconcile_document_registry(state);
@@ -479,28 +508,28 @@ pub(crate) fn close_all_documents(state: &mut AppState) -> usize {
         if !document_is_closable(state, &document.id) {
             continue;
         }
-        let was_closed = state.workbench.documents.is_closed(&document.id);
-        state.workbench.documents.close(&document.id);
+        let was_closed = state.workbench().documents.is_closed(&document.id);
+        state.workbench_mut().documents.close(&document.id);
         closed += usize::from(!was_closed);
     }
     closed
 }
 
-fn available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    available_documents_for_workspace(state, state.workbench.workspace)
+fn available_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
+    available_documents_for_workspace(state, state.workbench().workspace)
 }
 
 fn available_documents_for_workspace(
-    state: &AppState,
+    state: &impl DocumentSession,
     workspace: Workspace,
 ) -> Vec<WorkspaceDocument> {
     state.workspace_documents(workspace)
 }
 
-fn owned_available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    let current = state.workbench.window_session.current();
+fn owned_available_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
+    let current = state.workbench().window_session.current();
     let order = state
-        .workbench
+        .workbench()
         .window_session
         .state(current)
         .map(|window| window.documents.clone())
@@ -509,7 +538,7 @@ fn owned_available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
         .into_iter()
         .filter(|document| {
             state
-                .workbench
+                .workbench()
                 .window_session
                 .belongs_to_current(&document.id)
         })
@@ -523,60 +552,60 @@ fn owned_available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     documents
 }
 
-fn document_is_closable(state: &AppState, document: &WorkspaceDocumentId) -> bool {
+fn document_is_closable(state: &impl DocumentSession, document: &WorkspaceDocumentId) -> bool {
     available_documents_for_workspace(state, document.workspace())
         .first()
         .is_some_and(|root| root.id != *document)
 }
 
 fn authoritative_active_document(
-    state: &AppState,
+    state: &impl DocumentSession,
     available: &[WorkspaceDocument],
 ) -> Option<WorkspaceDocumentId> {
-    if let Some(document) = state.page_document(state.workbench.workspace)
+    if let Some(document) = state.page_document(state.workbench().workspace)
         && available.iter().any(|candidate| candidate.id == document)
     {
         return Some(document);
     }
-    let current_window = state.workbench.window_session.current();
+    let current_window = state.workbench().window_session.current();
     if let Some(document) = state
-        .workbench
+        .workbench()
         .window_session
-        .active_document(current_window, state.workbench.workspace)
+        .active_document(current_window, state.workbench().workspace)
         .filter(|document| {
             available.iter().any(|candidate| candidate.id == **document)
-                && state.workbench.window_session.owner(document) == current_window
+                && state.workbench().window_session.owner(document) == current_window
         })
     {
         return Some(document.clone());
     }
-    let candidate = match state.workbench.workspace {
+    let candidate = match state.workbench().workspace {
         Workspace::Design => Some(WorkspaceDocumentId::CellView(
-            state.model.workspace.content.active_view.clone(),
+            state.model().workspace.content.active_view.clone(),
         )),
         Workspace::Results => state
-            .model
+            .model()
             .simulation
             .active_run()
             .map(|run| WorkspaceDocumentId::ResultDataset(run.dataset_id)),
-        workspace => state.workbench.documents.active(workspace).cloned(),
+        workspace => state.workbench().documents.active(workspace).cloned(),
     };
     candidate
         .filter(|candidate| {
             available.iter().any(|document| document.id == *candidate)
-                && state.workbench.window_session.owner(candidate) == current_window
+                && state.workbench().window_session.owner(candidate) == current_window
         })
         .or_else(|| {
             available
                 .iter()
                 .find(|document| {
-                    state.workbench.window_session.owner(&document.id) == current_window
+                    state.workbench().window_session.owner(&document.id) == current_window
                 })
                 .map(|document| document.id.clone())
         })
 }
 
-fn visible_documents(state: &AppState) -> Vec<WorkspaceDocument> {
+fn visible_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
     let available = owned_available_documents(state);
     let active = authoritative_active_document(state, &available);
     available
@@ -584,22 +613,22 @@ fn visible_documents(state: &AppState) -> Vec<WorkspaceDocument> {
         .enumerate()
         .filter(|(index, document)| {
             *index == 0
-                || !state.workbench.documents.is_closed(&document.id)
+                || !state.workbench().documents.is_closed(&document.id)
                 || active.as_ref() == Some(&document.id)
         })
         .map(|(_, document)| document)
         .collect()
 }
 
-fn reconcile_document_registry(state: &mut AppState) {
+fn reconcile_document_registry(state: &mut impl DocumentSession) {
     let available = available_documents(state);
-    let workspace = state.workbench.workspace;
-    state.workbench.documents.retain_available(
+    let workspace = state.workbench().workspace;
+    state.workbench_mut().documents.retain_available(
         workspace,
         available.iter().map(|document| document.id.clone()),
     );
     if let Some(active) = authoritative_active_document(state, &available) {
-        state.workbench.documents.activate(active);
+        state.workbench_mut().documents.activate(active);
     }
     let all_available = Workspace::ALL
         .into_iter()
@@ -607,7 +636,7 @@ fn reconcile_document_registry(state: &mut AppState) {
         .map(|document| document.id)
         .collect::<Vec<_>>();
     state
-        .workbench
+        .workbench_mut()
         .window_session
         .retain_documents(all_available);
 }
@@ -621,7 +650,7 @@ fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
 /// share it, and return where each one went, in document order.
 fn document_tabs(
     ui: &mut egui::Ui,
-    state: &mut AppState,
+    state: &mut impl DocumentSession,
     documents: &[WorkspaceDocument],
     height: f32,
     cap: Option<f32>,
@@ -740,16 +769,16 @@ fn in_view(viewport: Rect, tab: Rect) -> bool {
     tab.left() >= viewport.left() - 0.5 && tab.right() <= viewport.right() + 0.5
 }
 
-fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bool {
-    if document.workspace() != state.workbench.workspace {
+fn activate_document(state: &mut impl DocumentSession, document: &WorkspaceDocumentId) -> bool {
+    if document.workspace() != state.workbench().workspace {
         return false;
     }
     let activated = state.activate_owned_document(document);
     if activated {
-        state.workbench.documents.activate(document.clone());
-        let window = state.workbench.window_session.current();
+        state.workbench_mut().documents.activate(document.clone());
+        let window = state.workbench().window_session.current();
         let _ = state
-            .workbench
+            .workbench_mut()
             .window_session
             .set_active_document(window, document.clone());
     }
@@ -757,7 +786,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
 }
 
 fn close_document(
-    state: &mut AppState,
+    state: &mut impl DocumentSession,
     document: &WorkspaceDocumentId,
     documents: &[WorkspaceDocument],
 ) -> bool {
@@ -767,10 +796,11 @@ fn close_document(
     else {
         return false;
     };
-    if !document_is_closable(state, document) || document.workspace() != state.workbench.workspace {
+    if !document_is_closable(state, document) || document.workspace() != state.workbench().workspace
+    {
         return false;
     }
-    if !state.commit_pending_inspector_edit() {
+    if !state.commit_pending_edit() {
         return false;
     }
     let was_active = authoritative_active_document(state, documents).as_ref() == Some(document);
@@ -780,20 +810,21 @@ fn close_document(
         .map(|document| document.id.clone());
 
     let closed = state.close_owned_document(document).unwrap_or_else(|| {
-        state.workbench.documents.close(document);
+        state.workbench_mut().documents.close(document);
         true
     });
     if closed
         && (was_active || matches!(document, WorkspaceDocumentId::CellView(_)))
         && let Some(fallback) = fallback
     {
-        let source = state.workbench.window_session.owner(document);
-        let primary = state.workbench.window_session.primary();
+        let source = state.workbench().window_session.owner(document);
+        let primary = state.workbench().window_session.primary();
         if source != primary {
-            let _ = state
-                .workbench
-                .window_session
-                .move_document(document.clone(), source, primary);
+            let _ = state.workbench_mut().window_session.move_document(
+                document.clone(),
+                source,
+                primary,
+            );
         }
         activate_document(state, &fallback);
     }
@@ -1029,7 +1060,7 @@ mod tests {
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
         NetlistDocument, NetlistDocumentId, SimulationRun, SourceLocator,
     };
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::{AppState, RSpiceApp};
 
     fn multi_document_netlist_state() -> AppState {
         const ROOT: &str = "tabs\n.include \"models/resistor.inc\"\n.end\n";

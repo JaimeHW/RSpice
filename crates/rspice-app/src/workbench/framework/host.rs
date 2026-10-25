@@ -370,4 +370,9 @@ pub(crate) trait DocumentHost {
     /// closed, when the owner closes the document itself; `None` when the bar
     /// is to close the tab.
     fn close_owned_document(&mut self, document: &Self::DocumentId) -> Option<bool>;
+
+    /// Apply the edit the inspector still holds before a document closes
+    /// under it. Returns false when the edit was refused, which the host has
+    /// said; the document then stays.
+    fn commit_pending_edit(&mut self) -> bool;
 }

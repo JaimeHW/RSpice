@@ -625,6 +625,10 @@ impl ConsoleHost for AppState {
         &mut self.model
     }
 
+    fn workbench(&self) -> &WorkbenchSession {
+        &self.workbench
+    }
+
     fn workbench_mut(&mut self) -> &mut WorkbenchSession {
         &mut self.workbench
     }
@@ -818,6 +822,10 @@ impl DocumentHost for AppState {
             }
             _ => None,
         }
+    }
+
+    fn commit_pending_edit(&mut self) -> bool {
+        self.commit_pending_inspector_edit()
     }
 }
 

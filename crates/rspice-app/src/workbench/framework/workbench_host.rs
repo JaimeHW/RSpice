@@ -58,7 +58,11 @@ pub(crate) trait ConsoleHost: ProblemsHost + ListingSource {
     /// The engineering model, to change.
     fn model_mut(&mut self) -> &mut Model;
 
-    /// The workbench session: the console's views, the prompt and the toasts.
+    /// The workbench session: the console's views, the open documents, the
+    /// prompt and the toasts.
+    fn workbench(&self) -> &WorkbenchSession;
+
+    /// The workbench session, to change.
     fn workbench_mut(&mut self) -> &mut WorkbenchSession;
 
     /// The Problems page's filters, columns and waiver draft.
