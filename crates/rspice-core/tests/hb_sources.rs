@@ -7,7 +7,7 @@
 //! must appear in-phase at the driven node. A mirrored constraint produces an
 //! inverted bias that a symmetric-drive rectifier test can never catch.
 
-use rspice_core::analysis::harmonic_balance::HbConfig;
+use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -144,6 +144,38 @@ c1 b 0 1p
         a_fund.im.abs() < 0.002,
         "driven node fundamental must be nearly real, got {a_fund}"
     );
+}
+
+#[test]
+fn multi_tone_hb_maps_each_tone_to_its_source() {
+    // Theory: each source drives its own resistor, so V1 (AC 1) appears only
+    // at F0 and V2 (AC 2) only at its tone, the second harmonic of F0.
+    let f0 = 1.0e6;
+    let netlist = Netlist::parse(
+        "multi-tone sources\nV1 n1 0 AC 1\nR1 n1 0 1k\nV2 n2 0 AC 2\nR2 n2 0 1k\n.end\n",
+    )
+    .expect("deck parses");
+    let config = HbConfig::multi_tone(vec![
+        HbTone::new(f0, 2).with_source("V1"),
+        HbTone::new(2.0 * f0, 2).with_source("V2"),
+    ]);
+    let result = Engine::default()
+        .run_hb(&netlist, config)
+        .expect("HB completes");
+    assert!((result.fundamental_freq - f0).abs() <= 1e-6 * f0);
+    assert_eq!(result.num_harmonics, 4);
+    for (node, k, expected, tolerance) in [
+        ("n1", 1, 1.0, 2e-3),
+        ("n1", 2, 0.0, 1e-12),
+        ("n2", 1, 0.0, 1e-12),
+        ("n2", 2, 2.0, 4e-3),
+    ] {
+        let magnitude = coefficient(&result, node, k).norm();
+        assert!(
+            (magnitude - expected).abs() < tolerance,
+            "|{node}[{k}]| = {magnitude}, expected {expected}"
+        );
+    }
 }
 
 #[test]

@@ -270,6 +270,59 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
 }
 
 #[test]
+fn deck_pnoise_around_an_autonomous_pss_card_reports_phase_noise() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::netlist::AnalysisCommand;
+    // Demir theory: an autonomous carrier yields phase noise, not a driven
+    // output density, falling 20 dB per decade in the white region.
+    let netlist = Netlist::parse(
+        "autonomous carrier pnoise\nL1 osc 0 1u\nC1 osc 0 1u\nR1 osc 0 1k\n\
+         B1 osc 0 I=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)\nI1 0 osc PULSE(0 1 10u 10n 10n 1u 1)\n\
+         .PSS AUTONOMOUS=TRUE PERIODGUESS=6.3u TSTABPERIODS=30 MAXITER=60 DAMPING=0.8 MAXPERIODCHANGE=0.05\n\
+         .PNOISE DEC 1 1k 100k OUT=V(osc)\n.end\n",
+    )
+    .expect("deck parses");
+    let pss_card = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Pss(card) => Some(card),
+            _ => None,
+        })
+        .expect(".PSS card present");
+    let pnoise_card = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Pnoise(card) => Some(card),
+            _ => None,
+        })
+        .expect(".PNOISE card present");
+    let engine = Engine::default().resolved_for_netlist(&netlist);
+    let pss = engine
+        .run_pss_operating_point_with_abort(&netlist, PssConfig::from(pss_card.as_ref()), &NoAbort)
+        .expect("autonomous PSS converges");
+    let noise = engine
+        .run_pnoise_card_from_pss_with_abort(&netlist, pnoise_card, &pss, &NoAbort)
+        .expect("PNOISE completes");
+    let rspice_core::engine::PeriodicNoiseResult::Oscillator { result, .. } = noise else {
+        panic!("an autonomous carrier must report phase noise, got {noise:?}");
+    };
+    let carrier = 1.0 / result.period;
+    assert!(
+        (carrier / 159.155e3 - 1.0).abs() < 5e-3,
+        "carrier {carrier} Hz"
+    );
+    assert!(result.diffusion_constant > 0.0);
+    assert!(result.corner_hz > 0.0);
+    assert_eq!(result.phase_noise_dbc.len(), 3);
+    for pair in result.phase_noise_dbc.windows(2) {
+        let step = pair[1] - pair[0];
+        assert!((step + 20.0).abs() < 0.5, "decade step {step} dB");
+    }
+}
+
+#[test]
 fn oscillator_phase_noise_honors_quiet_resistors() {
     let deck = "\
 * quiet tank resistor must not generate noise
