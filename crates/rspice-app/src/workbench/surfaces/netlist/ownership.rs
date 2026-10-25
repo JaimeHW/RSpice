@@ -226,7 +226,7 @@ pub(super) fn create_owned_source(
     state.code.netlist.externally_saved_content_digest = None;
     state.model.simulation.source.netlist_content = source;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     Ok(())
 }
 
@@ -412,6 +412,6 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     true
 }

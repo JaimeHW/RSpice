@@ -8,7 +8,7 @@
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::{ActiveNetlistDocument, AppState, invalidate_source_evidence};
+use super::{ActiveNetlistDocument, AppState};
 
 /// Reopen the already-materialized comparison document. Creating a new
 /// comparison remains an explicit revision workflow; a tab switch is only a
@@ -26,7 +26,7 @@ pub(crate) fn open_netlist_comparison(state: &mut AppState) -> bool {
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     true
 }
 
@@ -65,7 +65,7 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
         state.code.netlist.generated_diff_source.clone();
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     state.code.netlist.completion_open = false;
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     Ok(())
 }
 
@@ -113,7 +113,7 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         state.code.netlist.generated_diff_source.clone();
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     state.code.netlist.completion_open = false;
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     Ok(())
 }
 
@@ -184,7 +184,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     candidate.model.simulation.source.netlist_content = snapshot.source;
     candidate.code.netlist.generated_diff_source.clear();
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     candidate
         .model
         .workspace
@@ -217,7 +217,7 @@ fn return_to_working_deck(state: &mut AppState, root: ActiveNetlistDocument) {
     state.code.netlist.active_document_initialized = true;
     state.code.netlist.completion_open = false;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
 }
 
 pub fn close_revision_comparison(state: &mut AppState) -> bool {
@@ -359,7 +359,7 @@ fn project_run_snapshot(state: &mut AppState) {
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
 }
 
 /// Leave the run snapshot for the working deck it was opened from.
@@ -452,6 +452,6 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
         state.code.netlist.generated_diff_source.clone();
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     state.code.netlist.completion_open = false;
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     Ok(())
 }

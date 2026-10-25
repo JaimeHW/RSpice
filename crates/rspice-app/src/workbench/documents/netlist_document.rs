@@ -122,12 +122,6 @@ pub(crate) fn owned_netlist_publication_state(
     }
 }
 
-/// Invalidate byte-bound review evidence after any ownership or source edit.
-pub fn invalidate_source_evidence(state: &mut AppState) {
-    state.model.netlist_artifacts.validation = None;
-    state.code.netlist.validation_error = None;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum OwnedNetlistReplacementTarget {
     Root,
@@ -576,7 +570,7 @@ fn replace_owned_sources_atomically_impl(
             .unwrap_or(next_root_source);
     }
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     candidate
         .model
         .workspace
@@ -793,7 +787,7 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
         candidate.code.netlist.owned_document = Some(document);
     }
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     if candidate
         .model
@@ -846,7 +840,7 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
         candidate.code.netlist.owned_document = Some(document);
     }
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     let Err(error) = candidate
         .model
@@ -1009,7 +1003,7 @@ pub(crate) fn open_netlist_dependency_from_root(
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     Ok(())
 }
 
@@ -1037,7 +1031,7 @@ pub fn close_active_dependency(state: &mut AppState) -> bool {
     state.code.netlist.cursor_line = 0;
     state.code.netlist.completion_open = false;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     refresh_diff_pips_from_baseline(state);
     true
 }
@@ -1088,7 +1082,7 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
         .map_err(|error| error.to_string())?;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     candidate.code.netlist.completion_open = false;
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     state.commit_candidate(candidate);
     Ok(document_id)
 }
@@ -1128,7 +1122,7 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
     candidate.model.workspace.content.netlist_source_dirty = true;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     candidate.code.netlist.completion_open = false;
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
@@ -1208,7 +1202,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     candidate.code.netlist.owned_document = Some(next_document);
     candidate.model.simulation.source.netlist_content = source;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     if candidate
         .model
@@ -1263,7 +1257,7 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     true
 }
 
@@ -1300,7 +1294,7 @@ pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
     state.code.netlist.completion_open = false;
     state.code.netlist.completion_dismissed_at = None;
     state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(state);
+    state.model.invalidate_source_evidence();
     true
 }
 
@@ -1539,7 +1533,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     candidate.code.netlist.active_dependency_identity = Some(proposed.clone());
     candidate.code.netlist.lifecycle_dialog.include_transaction = None;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
@@ -1798,7 +1792,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     candidate.code.netlist.completion_open = false;
     candidate.code.netlist.selected_byte_range = None;
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
@@ -1839,7 +1833,7 @@ pub(crate) fn select_retained_top_deck(
     candidate.model.workspace.content.netlist_source_dirty = true;
     candidate.code.netlist.lifecycle_dialog.transaction = None;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
@@ -2158,9 +2152,6 @@ pub struct NetlistDocumentState {
     /// fail the same way, so they are not rebuilt, and the failure is not
     /// recorded again, until one of them changes.
     pub failed_generation_input_digest: Option<crate::product::ContentDigest>,
-    /// Exact validation failure retained until the bytes change or validation
-    /// succeeds.
-    pub validation_error: Option<String>,
     /// Content digest most recently published through Save Source/Save As.
     pub externally_saved_content_digest: Option<crate::product::ContentDigest>,
     /// Find/replace surface and selection state.

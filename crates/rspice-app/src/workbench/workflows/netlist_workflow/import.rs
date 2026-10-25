@@ -164,7 +164,7 @@ fn install_imported_netlist(
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     candidate.code.netlist.active_document_initialized = true;
     candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut candidate);
+    candidate.model.invalidate_source_evidence();
     candidate
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);

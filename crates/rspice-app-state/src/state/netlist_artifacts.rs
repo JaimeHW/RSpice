@@ -1,7 +1,8 @@
 //! What generation and validation established about the project's deck.
 //!
-//! The generated deck, the inputs it was generated from, and the receipt for
-//! the latest validation of the visible source are facts about the design.
+//! The generated deck, the inputs it was generated from, and the receipt or
+//! failure of the latest validation of the visible source are facts about
+//! the design.
 //! The netlist editor shows them, and run readiness, export, cross-probe, the
 //! document bar and the inspector read them, so they are kept apart from the
 //! editor's own interaction state.
@@ -45,4 +46,7 @@ pub struct NetlistArtifacts {
     pub generation_error: Option<String>,
     /// Receipt for the latest exact visible source validation.
     pub validation: Option<NetlistValidationReceipt>,
+    /// Exact validation failure retained until the bytes change or validation
+    /// succeeds.
+    pub validation_error: Option<String>,
 }

@@ -157,6 +157,13 @@ impl Model {
             .folders(crate::workbench::preferences::FolderListPreference::LibraryFolders)
     }
 
+    /// Invalidate byte-bound review evidence after any ownership or source
+    /// edit: the latest validation's receipt and its failure.
+    pub fn invalidate_source_evidence(&mut self) {
+        self.netlist_artifacts.validation = None;
+        self.netlist_artifacts.validation_error = None;
+    }
+
     /// Report a failure of something the user asked for, as
     /// [`AppState::report_failure`](super::AppState::report_failure) states it.
     pub fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {

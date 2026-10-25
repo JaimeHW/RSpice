@@ -75,7 +75,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             .unwrap_or_else(|| "Generated netlist is stale.".to_owned());
         app.state.model.netlist_artifacts.validation = None;
         record_validation_failure(&mut app.state, &error);
-        app.state.code.netlist.validation_error = Some(error);
+        app.state.model.netlist_artifacts.validation_error = Some(error);
         return false;
     }
 
@@ -93,14 +93,14 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 app.invalidate_simulation_preflight();
                 app.state.model.netlist_artifacts.validation = None;
                 record_validation_failure(&mut app.state, &error);
-                app.state.code.netlist.validation_error = Some(error);
+                app.state.model.netlist_artifacts.validation_error = Some(error);
                 return false;
             }
             if let Err(error) = acknowledge_canonical_validation(&mut app.state) {
                 app.invalidate_simulation_preflight();
                 app.state.model.netlist_artifacts.validation = None;
                 record_validation_failure(&mut app.state, &error);
-                app.state.code.netlist.validation_error = Some(error);
+                app.state.model.netlist_artifacts.validation_error = Some(error);
                 return false;
             }
             app.state.model.netlist_artifacts.validation = Some(NetlistValidationReceipt {
@@ -111,7 +111,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 task_count: metadata.task_count,
                 advisory_count: metadata.advisories.len(),
             });
-            app.state.code.netlist.validation_error = None;
+            app.state.model.netlist_artifacts.validation_error = None;
             app.state.record(
                 LogSeverity::Info,
                 LogSource::Netlist,
@@ -128,7 +128,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             invalidate_canonical_validation(&mut app.state);
             app.state.model.netlist_artifacts.validation = None;
             record_validation_failure(&mut app.state, &message);
-            app.state.code.netlist.validation_error = Some(message);
+            app.state.model.netlist_artifacts.validation_error = Some(message);
             false
         }
     }

@@ -283,7 +283,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                     .validation
                     .as_ref()
                     .map_or(0, |receipt| receipt.advisory_count)
-                + usize::from(app.state.code.netlist.validation_error.is_some())
+                + usize::from(app.state.model.netlist_artifacts.validation_error.is_some())
         })
         .filter(|count| *count > 0);
     let mut action = None;

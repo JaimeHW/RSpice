@@ -70,7 +70,7 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
     {
         app.state.model.simulation.source.netlist_content = projected;
         app.state.code.netlist.revision = app.state.code.netlist.revision.wrapping_add(1);
-        crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state);
+        app.state.model.invalidate_source_evidence();
     }
 }
 
@@ -101,7 +101,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         .current_generation_input_digest = Some(input_digest);
     if authoritative_input_changed {
         app.invalidate_simulation_preflight();
-        crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state);
+        app.state.model.invalidate_source_evidence();
         if let Some(document) = app
             .state
             .model

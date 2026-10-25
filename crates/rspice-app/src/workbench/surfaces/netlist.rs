@@ -926,8 +926,8 @@ fn format_owned_netlist(app: &mut RSpiceApp) {
     if !validation_current {
         let message = app
             .state
-            .code
-            .netlist
+            .model
+            .netlist_artifacts
             .validation_error
             .clone()
             .unwrap_or_else(|| "the netlist does not validate".to_owned());

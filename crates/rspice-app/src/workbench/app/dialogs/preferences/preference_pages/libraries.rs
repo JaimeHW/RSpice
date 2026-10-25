@@ -14,7 +14,6 @@ use crate::ui::widgets::{
     Button, PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark,
 };
 use crate::workbench::FolderListPreference;
-use crate::workbench::documents::netlist_document::invalidate_source_evidence;
 
 use super::super::preferences_shell::{searchable_row, section_heading, value_column};
 use super::AppState;
@@ -84,7 +83,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
                     // A validated deck was validated through the folders
                     // that were, the way a change to a project's own search
                     // paths leaves its validation behind.
-                    Ok(()) => invalidate_source_evidence(state),
+                    Ok(()) => state.model.invalidate_source_evidence(),
                     Err(refusal) => {
                         state.prompt(format!("The library folders were not changed: {refusal}."));
                     }

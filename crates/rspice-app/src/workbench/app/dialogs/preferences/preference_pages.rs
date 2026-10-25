@@ -1012,7 +1012,7 @@ pub(super) fn restore_defaults(
                 .is_empty();
             preferences.restore_folder_defaults(&[FolderListPreference::LibraryFolders]);
             if had_library_folders {
-                crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
+                state.model.invalidate_source_evidence();
             }
             state.trim_recent_files();
         }
