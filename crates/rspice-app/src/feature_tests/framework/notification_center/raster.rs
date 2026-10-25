@@ -114,7 +114,7 @@ fn raster(case: &Case) -> Canvas {
         ui.ctx()
             .global_style_mut(|style| style.animation_time = 0.0);
         if !seeded {
-            super::tests::seed_session(ui.ctx(), &mut app.state.workbench.toasts);
+            super::seed_session(ui.ctx(), &mut app.state.workbench.toasts);
             seeded = true;
         }
         let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
@@ -139,7 +139,7 @@ fn raster(case: &Case) -> Canvas {
     };
     // The earlier rows tell the time of day, so the clock and its zone are
     // pinned: a render reviewed in one zone is the render every machine draws.
-    super::tests::with_pinned_clock(|| {
+    super::with_pinned_clock(|| {
         if scene == Scene::PanelHover {
             crate::ui::raster::render_with_pointer(size, FIRST_ROW, pass)
         } else {

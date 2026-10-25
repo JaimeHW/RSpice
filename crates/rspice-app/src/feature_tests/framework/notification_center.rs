@@ -5,25 +5,25 @@
 //! announced to AccessKit — so a control that reaches nobody cannot be pressed
 //! here either.
 
-use egui::{Rect, pos2, vec2};
+use egui::{Pos2, Rect, Vec2, ViewportId, pos2, vec2};
 
-use super::*;
-use crate::ui::widgets::{MirroredEntry, ToastKind};
-use crate::workbench::state::ConsolePage;
+use crate::ui::tokens;
+use crate::ui::widgets::{
+    MirroredEntry, NotificationAction, NotificationCategory, ToastKind, Toasts,
+};
+use crate::workbench::browser::background_alerts::BackgroundAlerts;
+use crate::workbench::chrome::title_bar;
+use crate::workbench::state::{ConsolePage, NotificationFilter};
+use crate::workbench::tools::notification_center::*;
 use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+
+mod raster;
 
 const TITLE_BAR: f32 = 35.0;
 const DESKTOP: (f32, f32) = (1280.0, 760.0);
 const TABLET: (f32, f32) = (820.0, 640.0);
 const PHONE: (f32, f32) = (390.0, 780.0);
-
-thread_local! {
-    /// The zone the panel reads wall times in under test; see
-    /// [`super::local_date_time`].
-    pub(super) static PINNED_ZONE: std::cell::Cell<Option<time::UtcOffset>> =
-        const { std::cell::Cell::new(None) };
-}
 
 /// The wall clock while a pass is drawn: 15:00:30 UTC on 18 October 2026.
 /// The half minute absorbs the fraction of a second egui's clock has run by

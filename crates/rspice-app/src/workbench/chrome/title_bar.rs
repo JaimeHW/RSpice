@@ -962,7 +962,7 @@ fn account_action(ui: &mut Ui, initials: Option<&str>, large_target: bool) -> bo
 /// no bell — a phone-width shell, full-screen presentation — and the panel
 /// then anchors itself to the shell's trailing edge. Each window has its own
 /// bell, so it is the bell of the window `ctx` is drawing.
-pub(in crate::workbench) fn notification_anchor(ctx: &egui::Context) -> Option<(Rect, egui::Id)> {
+pub(crate) fn notification_anchor(ctx: &egui::Context) -> Option<(Rect, egui::Id)> {
     let anchor_id = notification_anchor_id(ctx);
     let (pass, rect, id) = ctx.data(|data| data.get_temp::<(u64, Rect, egui::Id)>(anchor_id))?;
     // A rectangle from an older pass is a bell that is no longer on screen.
@@ -992,7 +992,7 @@ fn panel_hangs_here(ctx: &egui::Context, workbench: &WorkbenchSession) -> bool {
 /// The bell of the window `ctx` is drawing was pressed. The panel opens under
 /// it, comes to it from another window's bell, or, hanging here already, goes
 /// away.
-pub(in crate::workbench) fn press_bell(ctx: &egui::Context, workbench: &mut WorkbenchSession) {
+pub(crate) fn press_bell(ctx: &egui::Context, workbench: &mut WorkbenchSession) {
     let here = ctx.viewport_id();
     if !workbench.notification_center_showing() || panel_hangs_here(ctx, workbench) {
         workbench.toggle_notification_center();

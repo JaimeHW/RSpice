@@ -5,4 +5,5 @@
 mod command_palette;
 mod inspector;
 mod measurement_rows;
+mod notification_center;
 mod toolbar;
