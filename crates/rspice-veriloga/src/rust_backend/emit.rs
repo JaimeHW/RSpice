@@ -54,7 +54,7 @@ use crate::canonical_ir::cfg::{
     CfgBinaryOp, CfgFunction, CfgIntegerBitwiseOp, CfgTerminator, CfgUnaryOp, CfgValueKind,
     CfgValueType,
 };
-use crate::canonical_ir::schedule::{intersect, reverse_postorder};
+use crate::canonical_ir::schedule::immediate_post_dominators;
 use crate::canonical_ir::{BlockId, ValueId};
 
 /// Compact lexical indentation in generated code whose string literals escape
@@ -2700,71 +2700,6 @@ fn predecessor_counts(function: &CfgFunction) -> Vec<usize> {
         }
     }
     counts
-}
-
-/// Immediate post-dominators, by the same iteration a compiler uses for
-/// dominators, run on the reversed graph.
-///
-/// The lowering leaves exactly one `Return`, so the reversed graph has a single
-/// entry and needs no synthetic exit.
-fn immediate_post_dominators(function: &CfgFunction) -> Vec<Option<BlockId>> {
-    let Some(exit) = function
-        .blocks
-        .iter()
-        .find(|block| matches!(block.terminator, CfgTerminator::Return))
-        .map(|block| block.id)
-    else {
-        return vec![None; function.blocks.len()];
-    };
-
-    let mut successors: Vec<Vec<BlockId>> = vec![Vec::new(); function.blocks.len()];
-    for block in &function.blocks {
-        for successor in block.successors() {
-            // Reversed: a successor's predecessor list is its successor list here.
-            successors[usize::from(successor)].push(block.id);
-        }
-    }
-
-    let order = reverse_postorder(&successors, exit, function.blocks.len());
-    let mut position = vec![usize::MAX; function.blocks.len()];
-    for (index, block) in order.iter().enumerate() {
-        position[usize::from(*block)] = index;
-    }
-
-    let mut predecessors: Vec<Vec<BlockId>> = vec![Vec::new(); function.blocks.len()];
-    for (block, targets) in successors.iter().enumerate() {
-        for target in targets {
-            predecessors[usize::from(*target)].push(BlockId::from(block));
-        }
-    }
-
-    let mut ipdom: Vec<Option<BlockId>> = vec![None; function.blocks.len()];
-    ipdom[usize::from(exit)] = Some(exit);
-    loop {
-        let mut changed = false;
-        for block in &order {
-            if *block == exit {
-                continue;
-            }
-            let mut candidate: Option<BlockId> = None;
-            for predecessor in &predecessors[usize::from(*block)] {
-                if ipdom[usize::from(*predecessor)].is_none() {
-                    continue;
-                }
-                candidate = Some(match candidate {
-                    Some(current) => intersect(&ipdom, &position, *predecessor, current, exit),
-                    None => *predecessor,
-                });
-            }
-            if candidate.is_some() && ipdom[usize::from(*block)] != candidate {
-                ipdom[usize::from(*block)] = candidate;
-                changed = true;
-            }
-        }
-        if !changed {
-            return ipdom;
-        }
-    }
 }
 
 /// Blocks that some edge jumps backwards into.

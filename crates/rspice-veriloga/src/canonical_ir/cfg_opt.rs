@@ -38,6 +38,7 @@ use super::cfg::{
     CfgValueKind, CfgValueType, is_leaf_kind,
 };
 use super::cfg_eval::{apply_binary, apply_unary};
+use super::schedule::intersect;
 use super::{BlockId, ShapeId, ValueId};
 
 /// Keep the entries `kept` marks, positionally.
@@ -1027,31 +1028,6 @@ fn reverse_postorder(blocks: &[CfgBlock], entry: BlockId) -> Vec<BlockId> {
     }
     postorder.reverse();
     postorder
-}
-
-/// The nearest block that dominates both, walking up the partial tree.
-fn intersect(
-    idom: &[Option<BlockId>],
-    position: &[usize],
-    mut left: BlockId,
-    mut right: BlockId,
-    entry: BlockId,
-) -> BlockId {
-    while left != right {
-        while position[usize::from(left)] > position[usize::from(right)] {
-            match idom[usize::from(left)] {
-                Some(next) if next != left => left = next,
-                _ => return entry,
-            }
-        }
-        while position[usize::from(right)] > position[usize::from(left)] {
-            match idom[usize::from(right)] {
-                Some(next) if next != right => right = next,
-                _ => return entry,
-            }
-        }
-    }
-    left
 }
 
 fn dominates(idom: &[Option<BlockId>], candidate: BlockId, block: BlockId) -> bool {

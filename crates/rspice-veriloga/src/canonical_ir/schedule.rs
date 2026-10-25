@@ -2021,8 +2021,12 @@ fn control_dependence(function: &CfgFunction) -> Vec<Vec<BlockId>> {
         .collect()
 }
 
-/// Immediate post-dominators, by the usual iteration on the reversed graph.
-fn immediate_post_dominators(function: &CfgFunction) -> Vec<Option<BlockId>> {
+/// Immediate post-dominators, by the same iteration a compiler uses for
+/// dominators, run on the reversed graph.
+///
+/// The lowering leaves exactly one `Return`, so the reversed graph has a single
+/// entry and needs no synthetic exit.
+pub(crate) fn immediate_post_dominators(function: &CfgFunction) -> Vec<Option<BlockId>> {
     let Some(exit) = function
         .blocks
         .iter()
@@ -2107,25 +2111,27 @@ pub(crate) fn reverse_postorder(
     postorder
 }
 
-/// The nearest block that post-dominates both, walking up the partial tree.
+/// The nearest common ancestor of two blocks in a partial (post-)dominator
+/// tree, walking up by reverse-postorder `position`; `root` when a walk leaves
+/// the tree.
 pub(crate) fn intersect(
-    ipdom: &[Option<BlockId>],
+    tree: &[Option<BlockId>],
     position: &[usize],
     mut left: BlockId,
     mut right: BlockId,
-    exit: BlockId,
+    root: BlockId,
 ) -> BlockId {
     while left != right {
         while position[usize::from(left)] > position[usize::from(right)] {
-            match ipdom[usize::from(left)] {
+            match tree[usize::from(left)] {
                 Some(next) if next != left => left = next,
-                _ => return exit,
+                _ => return root,
             }
         }
         while position[usize::from(right)] > position[usize::from(left)] {
-            match ipdom[usize::from(right)] {
+            match tree[usize::from(right)] {
                 Some(next) if next != right => right = next,
-                _ => return exit,
+                _ => return root,
             }
         }
     }

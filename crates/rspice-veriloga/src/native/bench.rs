@@ -619,7 +619,7 @@ fn resolve_native_defaults(
     context: &mut VmContext,
 ) -> Result<(), String> {
     for index in 0..model.parameters.len() {
-        let mut ctx = eval_context_from_vm_context(context);
+        let mut ctx = EvalContext::from_vm_context(context);
         let value = native.run_parameter_default(index, &ctx, context.variables.as_ptr());
         take_native_error(&mut ctx, "parameter defaults")?;
         if let Some(value) = value {
@@ -951,7 +951,7 @@ fn run_native_sweep(
     // The sweep only updates values in these preallocated buffers. Reuse the
     // pointer view as the public device path does; rebuilding it for every
     // entrypoint measures repeated host context assembly instead of JIT work.
-    let mut ctx = eval_context_from_vm_context(context);
+    let mut ctx = EvalContext::from_vm_context(context);
     ctx.prelude_slots = prelude_slots.as_mut_ptr();
     ctx.prelude_slots_len = prelude_slots.len();
     native.run_assignments(&ctx, context.variables.as_mut_ptr());
@@ -1269,134 +1269,6 @@ fn scan_assignment_steps(
 
 fn update_max_slot(slot: &mut Option<usize>, index: usize) {
     *slot = Some(slot.map_or(index, |current| current.max(index)));
-}
-
-fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
-    let integration = context.integration_coefficients();
-    EvalContext {
-        voltages: context.voltages.as_ptr(),
-        internal_voltages: context.internal_voltages.as_ptr(),
-        params: context.parameters.as_ptr(),
-        branch_currents: context.terminal_pair_currents_ptr(),
-        branch_currents_len: context.terminal_pair_currents_len(),
-        currents: context.currents.as_ptr(),
-        currents_len: context.currents.len(),
-        num_terminals: context.terminal_count(),
-        port_connected: context.port_connected.as_ptr(),
-        port_connected_len: context.port_connected.len(),
-        temperature: context.temperature,
-        time: context.time,
-        timestep: context.timestep(),
-        state_prev: if context.state_values_prev.is_empty() {
-            std::ptr::null()
-        } else {
-            context.state_values_prev.as_ptr()
-        },
-        state_values: if context.state_values.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.state_values.as_mut_ptr()
-        },
-        state_initialized: if context.state_initialized.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.state_initialized.as_mut_ptr() as *mut u8
-        },
-        state_initialized_len: context.state_initialized.len(),
-        lookup_tables: if context.lookup_tables.is_empty() {
-            std::ptr::null()
-        } else {
-            context.lookup_tables.as_ptr()
-        },
-        lookup_tables_len: context.lookup_tables.len(),
-        laplace_filters: if context.laplace_filters.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.laplace_filters.as_mut_ptr()
-        },
-        laplace_filters_len: context.laplace_filters.len(),
-        param_given: context.param_given.as_ptr(),
-        param_given_len: context.param_given.len(),
-        branch_unknowns: if context.branch_current_values.is_empty() {
-            std::ptr::null()
-        } else {
-            context.branch_current_values.as_ptr()
-        },
-        analysis_type: context.analysis_type,
-        analysis_phase: context.analysis_phase,
-        multiplicity: context.multiplicity,
-        zi_filters: if context.zi_filters.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.zi_filters.as_mut_ptr()
-        },
-        zi_filters_len: context.zi_filters.len(),
-        transition_filters: if context.transition_filters.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.transition_filters.as_mut_ptr()
-        },
-        transition_filters_len: context.transition_filters.len(),
-        slew_filters: if context.slew_filters.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.slew_filters.as_mut_ptr()
-        },
-        slew_filters_len: context.slew_filters.len(),
-        delay_buffers: if context.delay_buffers.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.delay_buffers.as_mut_ptr()
-        },
-        delay_buffers_len: context.delay_buffers.len(),
-        cross_detectors: if context.cross_detectors.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.cross_detectors.as_mut_ptr()
-        },
-        cross_detectors_len: context.cross_detectors.len(),
-        state_prev_len: context.state_values_prev.len(),
-        state_values_len: context.state_values.len(),
-        timer_event_bound: &mut context.timer_event_bound,
-        analysis_initial_step: u8::from(context.analysis_initial_step),
-        analysis_final_step: u8::from(context.analysis_final_step),
-        state_older: context.state_values_older.as_ptr(),
-        state_older_len: context.state_values_older.len(),
-        state_derivatives: context.state_derivatives.as_mut_ptr(),
-        state_derivatives_len: context.state_derivatives.len(),
-        state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
-        state_derivatives_prev_len: context.state_derivatives_prev.len(),
-        integration_derivative_scale: integration.derivative_scale,
-        integration_previous_value_scale: integration.previous_value_scale,
-        integration_older_value_scale: integration.older_value_scale,
-        integration_previous_derivative_scale: integration.previous_derivative_scale,
-        integration_active: u8::from(integration.active),
-        limiter_active: &mut context.limiter_active,
-        limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
-        runtime_status: Default::default(),
-        state_candidate_valid: if context.state_candidate_valid.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.state_candidate_valid.as_mut_ptr()
-        },
-        state_candidate_valid_len: context.state_candidate_valid.len(),
-        state_older_candidate: if context.state_older_candidate.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            context.state_older_candidate.as_mut_ptr()
-        },
-        state_older_candidate_len: context.state_older_candidate.len(),
-        idtmod_origins: &mut context.idtmod_origins,
-        state_integration: context.state_integration_coefficients_ref(),
-        evaluation_state_inputs: context.evaluation_state_inputs().as_ptr(),
-        evaluation_state_inputs_len: context.evaluation_state_inputs().len(),
-        analog_occurrences: context.analog_occurrences_ptr(),
-        prelude_slots: std::ptr::null_mut(),
-        prelude_slots_len: 0,
-        analog_effects: context.analog_effects_ptr(),
-        simulation_parameters: &context.simulation_parameters,
-        static_dae_probe: u8::from(!context.evaluation_mode.dynamic_operators_enabled()),
-    }
 }
 
 fn benchmark_failures(
