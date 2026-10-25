@@ -75,7 +75,7 @@ mod operating_point_conversion_tests {
     fn branch_current_is_wrapped_exactly_once_in_retained_results() {
         let sim_result = crate::simulation::SimulationResult::DcOp(Box::new(
             rspice_simulation::results::DcOpResult {
-                configuration: crate::simulation::dialog::OpConfig::default(),
+                configuration: rspice_simulation_contract::config::OpConfig::default(),
                 branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
                 ..Default::default()
             },

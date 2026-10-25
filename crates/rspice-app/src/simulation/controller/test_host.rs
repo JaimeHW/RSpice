@@ -18,10 +18,9 @@ use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 use crate::simulation::{NetlistShown, RunHost, ViewerReading};
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{CellViewRef, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
-use crate::workbench::{
-    app_state::{Model, SlotFacts, design_checks::CheckScope},
-    slots::runs::RunsState,
-};
+use crate::workbench::slots::runs::RunsState;
+use rspice_app_state::workbench::app_state::design_checks::CheckScope;
+use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 
 /// The shared model and the runs' slot, under the names `AppState` gives
 /// them.

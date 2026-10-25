@@ -41,7 +41,7 @@ mod tests {
     }
 
     fn scratch_folder(purpose: &str) -> std::path::PathBuf {
-        let folder = crate::fixture_root::canonical_temp_dir()
+        let folder = rspice_app_state::fixture_root::canonical_temp_dir()
             .join(format!("rspice-netlist-{purpose}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&folder).expect("a scratch folder");
         folder

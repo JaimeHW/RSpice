@@ -38,7 +38,7 @@ use serde_json::{Map, Value};
 use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::model_library::ModelLibraryManager;
-use crate::workbench::app_state::SimSetupState;
+use rspice_app_state::workbench::app_state::sim_setup::SimSetupState;
 
 use super::{SimulationController, analysis_inputs};
 

@@ -217,11 +217,9 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
 
 #[test]
 fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
-    use crate::simulation::dialog::{
-        McDialogState,
-        mc::{McConfig, checkpoint::McCheckpointConfig},
-    };
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_simulation_contract::mc_checkpoint::McCheckpointConfig;
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     let (request, bytes, _) = completed_checkpoint_fixture();
     let (mut controller, mut state) = controller_fixture(request);
     controller.accept_monte_carlo_checkpoint(&mut state.model, bytes.clone());

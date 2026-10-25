@@ -39,10 +39,11 @@ fn touchstone_auto_export_uses_export_workflow_io() {
     // the prepared automatic export.
     state.model.schematic.session.current_file =
         Some(PathBuf::from("changed").join("redirect.sch"));
-    let mut changed = crate::simulation::dialog::SpConfig::default();
+    let mut changed = rspice_simulation_contract::sp_config::SpConfig::default();
     changed.touchstone_export = false;
     changed.touchstone_version = 1;
-    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&changed);
+    state.model.sim_setup.sp =
+        rspice_simulation_contract::sp_draft::SpDialogState::from_config(&changed);
 
     let export_io = MockExportWorkflowIo::default();
     let prepared = controller
@@ -71,7 +72,8 @@ fn touchstone_auto_export_uses_export_workflow_io() {
 /// the whole of what a consumer uses to tell the two apart.
 #[test]
 fn the_exported_file_is_the_version_that_was_chosen() {
-    use crate::simulation::dialog::{SpConfig, SpDialogState, TOUCHSTONE_VERSIONS};
+    use rspice_simulation_contract::sp_config::SpConfig;
+    use rspice_simulation_contract::sp_draft::{SpDialogState, TOUCHSTONE_VERSIONS};
 
     for (index, version) in TOUCHSTONE_VERSIONS.iter().copied().enumerate() {
         let mut authored = SpConfig::default();
@@ -664,9 +666,10 @@ fn incomplete_soa_results_fail_closed_without_retained_payloads() {
 #[test]
 fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
     let mut state = RunTestHost::default();
-    state.model.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
-        &rspice_simulation_contract::sens_draft::SensConfig::default(),
-    );
+    state.model.sim_setup.sens =
+        rspice_simulation_contract::sens_draft::SensDialogState::from_config(
+            &rspice_simulation_contract::sens_draft::SensConfig::default(),
+        );
     state.model.sim_setup.sens.ac_freq = "invalid".to_owned();
     assert!(matches!(
         rspice_simulation::analysis_preparation::build_sensitivity_spec(

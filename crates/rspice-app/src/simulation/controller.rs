@@ -39,9 +39,9 @@ use crate::state::{
     AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
     RealEventTraceEvidence, RetainedTrace, RunEvent, SimulationRunIntent, SimulationRunLifecycle,
 };
-use crate::workbench::app_state::Model;
-use crate::workbench::platform::spawn_or_inline;
-use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
+use rspice_app_services::workbench::platform::spawn_or_inline;
+use rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo;
+use rspice_app_state::workbench::app_state::model::Model;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
 use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;

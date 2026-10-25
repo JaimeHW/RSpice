@@ -427,8 +427,8 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
 #[test]
 fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     let mut state = RunTestHost::default();
-    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
-        &crate::simulation::dialog::SpConfig::default(),
+    state.model.sim_setup.sp = rspice_simulation_contract::sp_draft::SpDialogState::from_config(
+        &rspice_simulation_contract::sp_config::SpConfig::default(),
     );
     state.model.schematic.session.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
     let tasks = vec![QueuedAnalysis {
@@ -461,9 +461,10 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
 
     state.model.schematic.session.current_file =
         Some(PathBuf::from("redirect").join("changed.rsch"));
-    let mut disabled = crate::simulation::dialog::SpConfig::default();
+    let mut disabled = rspice_simulation_contract::sp_config::SpConfig::default();
     disabled.touchstone_export = false;
-    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&disabled);
+    state.model.sim_setup.sp =
+        rspice_simulation_contract::sp_draft::SpDialogState::from_config(&disabled);
     let current = touchstone_export_policy(
         &state.model,
         &tasks,
@@ -487,8 +488,8 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
             "deck\nV2 out 0 dc 0 ac 1 portnum 2 z0 75\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 100\n.sp lin 3 1Meg 3Meg\n.end\n"
                 .to_owned(),
         );
-    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
-        &crate::simulation::dialog::SpConfig::default(),
+    state.model.sim_setup.sp = rspice_simulation_contract::sp_draft::SpDialogState::from_config(
+        &rspice_simulation_contract::sp_config::SpConfig::default(),
     );
 
     let mut controller = SimulationController::new();

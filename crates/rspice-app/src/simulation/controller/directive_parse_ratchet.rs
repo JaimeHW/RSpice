@@ -645,9 +645,9 @@ fn a_periodic_small_signal_card_names_the_carrier_it_linearizes_around() {
 /// the form had no field for one.
 #[test]
 fn the_pss_directive_carries_every_shooting_control_it_was_given() {
-    use crate::simulation::dialog::IntegrationMethod;
     use crate::simulation::plan::AnalysisDraft;
     use rspice_core::netlist::{AnalysisCommand, Netlist};
+    use rspice_simulation_contract::options::IntegrationMethod;
 
     let mut draft = fixture_draft(AnalysisKind::Pss);
     let AnalysisDraft::Pss(pss) = &mut draft else {
@@ -901,7 +901,7 @@ fn a_swept_sensitivity_card_carries_its_sweep() {
     use crate::simulation::plan::AnalysisDraft;
     use rspice_core::netlist::{AnalysisCommand, FreqVariation, parse_netlist};
 
-    let card_of = |edit: &dyn Fn(&mut crate::simulation::dialog::SensDialogState)| {
+    let card_of = |edit: &dyn Fn(&mut rspice_simulation_contract::sens_draft::SensDialogState)| {
         let mut draft = fixture_draft(AnalysisKind::Sensitivity);
         let AnalysisDraft::Sensitivity(sens) = &mut draft else {
             panic!("the sensitivity kind carries a sensitivity draft");

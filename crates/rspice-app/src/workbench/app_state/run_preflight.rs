@@ -15,7 +15,7 @@
 
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{PreflightReport, ProjectWorkspace, SchematicState};
-use crate::workbench::app_state::SimSetupState;
+use rspice_app_state::workbench::app_state::sim_setup::SimSetupState;
 use rspice_design::drc::DrcResult;
 use rspice_simulation::preparation::technology_demand;
 

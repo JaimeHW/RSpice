@@ -328,13 +328,16 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                 CornerBaseMode::ConfiguredOp(config) => {
                     assert_eq!(
                         config.node_initialization,
-                        crate::simulation::dialog::OpNodeInitialization::ForceIcValues
+                        rspice_simulation_contract::config::OpNodeInitialization::ForceIcValues
                     );
                     assert_eq!(
                         config.initial_guess,
-                        crate::simulation::dialog::OpInitialGuess::UserNodeVoltages
+                        rspice_simulation_contract::config::OpInitialGuess::UserNodeVoltages
                     );
-                    assert_eq!(config.homotopy, crate::simulation::dialog::OpHomotopy::None);
+                    assert_eq!(
+                        config.homotopy,
+                        rspice_simulation_contract::config::OpHomotopy::None
+                    );
                 }
                 CornerBaseMode::TransientWindow {
                     stop_time,
@@ -402,9 +405,9 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
 
 #[test]
 fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use crate::simulation::plan::{QpnoiseOutputDraft, QpssDraft};
     use rspice_simulation::study::StudyAnalysis;
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     for kind in [
         AnalysisKind::Qpss,
         AnalysisKind::Qpac,
@@ -588,7 +591,7 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
                     4 => config.operating_point.config.temperature_celsius += 10.0,
                     _ => {
                         config.operating_point.config.node_initialization =
-                            crate::simulation::dialog::OpNodeInitialization::IgnoreIcAndNodeset
+                            rspice_simulation_contract::config::OpNodeInitialization::IgnoreIcAndNodeset
                     }
                 }
             } else if change == 0 || base.postprocess.is_none() {
@@ -616,9 +619,9 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
 
 #[test]
 fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
     use rspice_simulation::study::StudyPeriodicOptions;
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     for kind in [
         AnalysisKind::Pac,
         AnalysisKind::Pxf,
@@ -800,8 +803,8 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
 
 #[test]
 fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyPeriodicOptions;
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
 
     let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
@@ -874,8 +877,8 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
 
 #[test]
 fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (first, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -967,9 +970,10 @@ fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration()
 
 #[test]
 fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings() {
-    use crate::simulation::dialog::{HbDialogState, McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
+    use rspice_simulation_contract::hb_draft::HbDialogState;
     use rspice_simulation_contract::hb_draft::{HbConfig, HbSolverType, HbToneConfig};
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -1063,8 +1067,8 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
 
 #[test]
 fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
         let mut state = RunTestHost::default();
         let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
@@ -1248,7 +1252,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
                         6 => config.operating_point.config.temperature_celsius += 10.0,
                         _ => {
                             config.operating_point.config.node_initialization =
-                                crate::simulation::dialog::OpNodeInitialization::IgnoreIcAndNodeset
+                                rspice_simulation_contract::config::OpNodeInitialization::IgnoreIcAndNodeset
                         }
                     }
                 }
@@ -1260,7 +1264,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
 
 #[test]
 fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     for kind in [AnalysisKind::Fourier, AnalysisKind::Fft] {
         let mut state = RunTestHost::default();
         let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
@@ -1290,7 +1294,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
         let (spectrum, _) = plan.insert(kind).unwrap();
         plan.edit(spectrum, |draft| match draft {
             AnalysisDraft::Fourier(draft) => {
-                *draft = crate::simulation::dialog::FourierDialogState::from_config(
+                *draft = rspice_simulation_contract::fourier_draft::FourierDialogState::from_config(
                     &rspice_simulation_contract::fourier_draft::FourierConfig {
                         fundamental_freq: 1000.0,
                         num_harmonics: 5,
@@ -1383,7 +1387,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
 
 #[test]
 fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
-    use crate::simulation::dialog::{McDialogState, mc::McConfig};
+    use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -1416,11 +1420,11 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
     plan.set_numeric_override(ac, Some(numerics)).unwrap();
     let draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
         statistics: Some(
-            crate::simulation::dialog::mc::statistics::McStatisticsConfig {
+            rspice_simulation_contract::mc_statistics::McStatisticsConfig {
                 variations: vec![
-                    crate::simulation::dialog::mc::statistics::McParameterVariation {
+                    rspice_simulation_contract::mc_statistics::McParameterVariation {
                         bounds: Some(
-                            crate::simulation::dialog::mc::statistics::McParameterBounds {
+                            rspice_simulation_contract::mc_statistics::McParameterBounds {
                                 lower: Some(900.0),
                                 upper: Some(1100.0),
                                 sigma_cutoff: Some(3.0),
@@ -1428,8 +1432,8 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
                             },
                         ),
                         parameter: "rval".into(),
-                        scope: crate::simulation::dialog::mc::statistics::McScope::Process,
-                        distribution: crate::simulation::dialog::mc::statistics::McShape::Gaussian,
+                        scope: rspice_simulation_contract::mc_statistics::McScope::Process,
+                        distribution: rspice_simulation_contract::mc_statistics::McShape::Gaussian,
                         spread: 10.0,
                         percent: true,
                     },
@@ -1437,7 +1441,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
                 correlations: Vec::new(),
             },
         ),
-        variation_source: crate::simulation::dialog::McVariationSource::DeckStatistics,
+        variation_source: rspice_simulation_contract::mc_draft::McVariationSource::DeckStatistics,
         base_analysis: Some(ac),
         measurements: vec!["gain".into(), "last:V(out)".into()],
         histogram_bins: 7,
@@ -1517,7 +1521,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
                 config.stop_freq = 2000.0;
             }
             _ => {
-                use crate::simulation::dialog::mc::statistics::{McScope, McShape};
+                use rspice_simulation_contract::mc_statistics::{McScope, McShape};
                 let row = &mut queued
                     .spec_options
                     .mc_statistics
@@ -1555,8 +1559,10 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
 
 #[test]
 fn configured_optimization_base_persists_and_freezes_before_live_edits() {
-    use crate::simulation::dialog::optimization::{OptimizationConfig, OptimizationDialogState};
     use rspice_results::optimization::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
+    use rspice_simulation_contract::optimization_draft::{
+        OptimizationConfig, OptimizationDialogState,
+    };
     let objectives = vec![OptimizationObjectiveTerm {
         measurement: "gain".into(),
         unit: "mV".into(),

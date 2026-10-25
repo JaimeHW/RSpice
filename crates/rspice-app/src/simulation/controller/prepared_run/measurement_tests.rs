@@ -26,7 +26,7 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
     let base = AnalysisInstanceId::new();
     let study = AnalysisInstanceId::new();
     let ac = AnalysisDraft::for_kind(AnalysisKind::Ac);
-    let mut mc = crate::simulation::dialog::McDialogState::default();
+    let mut mc = rspice_simulation_contract::mc_draft::McDialogState::default();
     mc.base_analysis = Some(base);
     let mc = AnalysisDraft::MonteCarlo(mc);
     let drafts = HashMap::from([(base, &ac), (study, &mc)]);

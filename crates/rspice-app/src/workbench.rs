@@ -104,7 +104,6 @@ pub(crate) mod live_session;
 pub(crate) mod localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) use rspice_app_services::workbench::platform;
 pub(crate) use rspice_app_state::workbench::preferences;
 pub(crate) mod preflight;
 pub(crate) mod publication_snapshot;

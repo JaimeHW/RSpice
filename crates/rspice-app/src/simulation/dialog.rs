@@ -29,8 +29,6 @@ pub(crate) mod options;
 
 #[cfg(test)]
 pub use rspice_simulation_contract::config::OpHomotopy;
-#[cfg(test)]
-pub use rspice_simulation_contract::config::{OpConfig, OpInitialGuess, OpNodeInitialization};
 pub use rspice_simulation_contract::op_draft::OpDialogState;
 
 // Re-exports. Each analysis re-exports the dialog state its panel owns. The
@@ -49,10 +47,6 @@ pub use rspice_simulation_contract::pstb_draft::PstbDialogState;
 pub use rspice_simulation_contract::pxf_draft::PxfDialogState;
 
 // Re-exports - RF/Microwave
-#[cfg(test)]
-pub use sp::SpConfig;
-#[cfg(test)]
-pub use sp::TOUCHSTONE_VERSIONS;
 pub use sp::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS};
 
 // Re-exports - Transfer Function
@@ -65,8 +59,6 @@ pub use rspice_simulation_contract::stb_draft::{StbDialogState, StbProbeReferenc
 
 // Re-exports - Statistical/Parametric
 pub use mc::McDialogState;
-#[cfg(test)]
-pub use mc::McVariationSource;
 
 // Re-exports - Temperature
 

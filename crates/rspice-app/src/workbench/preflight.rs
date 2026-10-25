@@ -30,8 +30,8 @@ use crate::state::{
     ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation, PreflightReport,
     PreparedPreflightContract,
 };
-use crate::workbench::app_state::Model;
-use crate::workbench::app_state::design_checks::CheckScope;
+use rspice_app_state::workbench::app_state::design_checks::CheckScope;
+use rspice_app_state::workbench::app_state::model::Model;
 
 use super::app_state::run_preflight::PreflightCheck;
 

@@ -12,8 +12,8 @@ use rspice_results_ui::fft::FftInputOptions;
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 use crate::state::{CellViewRef, RunEventSink, SpecializedViewerCacheProvenance};
-use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::slots::runs::RunsState;
+use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 
 /// The application, as the run tier sees it.
 ///
