@@ -71,9 +71,7 @@ impl CanonicalStateOperator {
             ) => Some(*slot),
             (
                 Self::TableLookup,
-                Instruction::TableLookup(slot)
-                | Instruction::TableDerivative(slot)
-                | Instruction::TableDerivativeApply(slot),
+                Instruction::TableLookup(slot) | Instruction::TableDerivativeApply(slot),
             ) => Some(*slot),
             _ => None,
         }
@@ -125,9 +123,7 @@ impl CanonicalStateOperator {
             )
             | (
                 Self::TableLookup,
-                Instruction::TableLookup(held)
-                | Instruction::TableDerivative(held)
-                | Instruction::TableDerivativeApply(held),
+                Instruction::TableLookup(held) | Instruction::TableDerivativeApply(held),
             ) => {
                 *held = slot;
                 true

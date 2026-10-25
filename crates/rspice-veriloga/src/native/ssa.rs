@@ -3971,7 +3971,6 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::IntegerShiftConst(_, _)
             | NativeOp::IntegerBinaryConst(_, _)
             | NativeOp::TableLookup(_)
-            | NativeOp::TableDerivative(_)
             | NativeOp::TableDerivativeApply(_)
             | NativeOp::LimiterPrevious(_)
             | NativeOp::LimiterStore(_)
@@ -4180,7 +4179,6 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::LoadDiscreteVariableDyn { .. }
             | NativeOp::LoadPackedVariableDyn { .. }
             | NativeOp::TableLookup(_)
-            | NativeOp::TableDerivative(_)
             | NativeOp::TableDerivativeApply(_)
             | NativeOp::LimiterPrevious(_)
             | NativeOp::LimiterStore(_)

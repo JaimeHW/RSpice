@@ -166,9 +166,9 @@ fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
         NativeOp::AboveState(slot) => (CanonicalStateOperator::Above, slot),
         NativeOp::TimerState(slot) => (CanonicalStateOperator::Timer, slot),
         NativeOp::LimitState(slot) => (CanonicalStateOperator::Limit, slot),
-        NativeOp::TableLookup(slot)
-        | NativeOp::TableDerivative(slot)
-        | NativeOp::TableDerivativeApply(slot) => (CanonicalStateOperator::TableLookup, slot),
+        NativeOp::TableLookup(slot) | NativeOp::TableDerivativeApply(slot) => {
+            (CanonicalStateOperator::TableLookup, slot)
+        }
         _ => return None,
     };
     Some((operator.family(), slot))

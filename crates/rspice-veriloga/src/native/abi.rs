@@ -1478,50 +1478,6 @@ pub unsafe extern "C" fn rspice_table_lookup_native(
     }
 }
 
-/// External helper function for native x64 table-model derivatives.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_table_derivative_native")]
-pub unsafe extern "C" fn rspice_table_derivative_native(
-    input: f64,
-    ctx: *const EvalContext,
-    table_id: usize,
-) -> f64 {
-    if ctx.is_null() {
-        set_native_context_error_ptr(
-            ctx,
-            format!(
-                "native table derivative helper missing EvalContext for table {table_id}; no interpreter fallback"
-            ),
-        );
-        return 0.0;
-    }
-    let ctx = unsafe { &*ctx };
-    if ctx.lookup_tables.is_null() {
-        set_native_context_error(
-            ctx,
-            format!(
-                "native table derivative helper missing table storage for table {table_id}; no interpreter fallback"
-            ),
-        );
-        return 0.0;
-    }
-    if table_id >= ctx.lookup_tables_len {
-        set_native_context_error(
-            ctx,
-            format!(
-                "native table derivative helper table {table_id} outside table length {}; no interpreter fallback",
-                ctx.lookup_tables_len
-            ),
-        );
-        return 0.0;
-    }
-
-    let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
-    tables[table_id].derivative(input)
-}
-
 /// Apply a table slope to a payload before final rounding.
 ///
 /// # Safety
@@ -3806,9 +3762,9 @@ mod tests {
         rspice_integer_operation_native, rspice_laplace_derivative_native,
         rspice_laplace_step_native, rspice_last_crossing_state_native,
         rspice_limiter_previous_native, rspice_limiter_store_native,
-        rspice_native_dynamic_variable_error, rspice_slew_state_native,
-        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
-        rspice_transition_derivative_native, rspice_transition_state_native, rspice_zi_step_native,
+        rspice_native_dynamic_variable_error, rspice_slew_state_native, rspice_table_lookup_native,
+        rspice_timer_state_native, rspice_transition_derivative_native,
+        rspice_transition_state_native, rspice_zi_step_native,
     };
     use crate::codegen::LookupTable;
     use crate::integer_runtime::IntegerBinaryOperation;
@@ -4159,52 +4115,32 @@ mod tests {
     }
 
     #[test]
-    fn table_native_helpers_record_runtime_error_for_missing_storage() {
-        for (name, helper) in [
-            (
-                "lookup",
-                rspice_table_lookup_native
-                    as unsafe extern "C" fn(f64, *const EvalContext, usize) -> f64,
-            ),
-            ("derivative", rspice_table_derivative_native),
-        ] {
-            let ctx = empty_eval_context();
-            ctx.clear_runtime_error();
-            let value = unsafe { helper(1.0, &ctx, 0) };
-            assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = ctx
-                .take_runtime_error()
-                .unwrap_or_else(|| panic!("{name} missing table storage must hard-fail"));
-            assert!(error.contains("table"), "{name}: {error}");
-            assert!(error.contains("table storage"), "{name}: {error}");
-            assert!(error.contains("no interpreter fallback"), "{name}: {error}");
-        }
+    fn table_lookup_helper_records_runtime_error_for_missing_storage() {
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
+        let value = unsafe { rspice_table_lookup_native(1.0, &ctx, 0) };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing table storage must hard-fail");
+        assert!(error.contains("table storage"), "{error}");
+        assert!(error.contains("no interpreter fallback"), "{error}");
     }
 
     #[test]
-    fn table_native_helpers_record_runtime_error_for_out_of_range_table_id() {
+    fn table_lookup_helper_records_runtime_error_for_out_of_range_table_id() {
         let table = [LookupTable::from_data(vec![0.0, 1.0], vec![2.0, 4.0])];
-        for (name, helper) in [
-            (
-                "lookup",
-                rspice_table_lookup_native
-                    as unsafe extern "C" fn(f64, *const EvalContext, usize) -> f64,
-            ),
-            ("derivative", rspice_table_derivative_native),
-        ] {
-            let mut ctx = empty_eval_context();
-            ctx.lookup_tables = table.as_ptr();
-            ctx.lookup_tables_len = table.len();
-            ctx.clear_runtime_error();
-            let value = unsafe { helper(1.0, &ctx, 1) };
-            assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = ctx
-                .take_runtime_error()
-                .unwrap_or_else(|| panic!("{name} out-of-range table id must hard-fail"));
-            assert!(error.contains("table"), "{name}: {error}");
-            assert!(error.contains("outside table length"), "{name}: {error}");
-            assert!(error.contains("no interpreter fallback"), "{name}: {error}");
-        }
+        let mut ctx = empty_eval_context();
+        ctx.lookup_tables = table.as_ptr();
+        ctx.lookup_tables_len = table.len();
+        ctx.clear_runtime_error();
+        let value = unsafe { rspice_table_lookup_native(1.0, &ctx, 1) };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = ctx
+            .take_runtime_error()
+            .expect("out-of-range table id must hard-fail");
+        assert!(error.contains("outside table length"), "{error}");
+        assert!(error.contains("no interpreter fallback"), "{error}");
     }
 
     #[test]

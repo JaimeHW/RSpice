@@ -2311,7 +2311,6 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
             set_index(&mut descriptor, 471, parameter as usize)?
         }
         NativeOp::TableLookup(index) => set_index(&mut descriptor, 400, index)?,
-        NativeOp::TableDerivative(index) => set_index(&mut descriptor, 401, index)?,
         NativeOp::TableDerivativeApply(index) => set_index(&mut descriptor, 402, index)?,
         NativeOp::LimitState(index) => set_index(&mut descriptor, 410, index)?,
         NativeOp::LimiterPrevious(index) => set_index(&mut descriptor, 411, index)?,
@@ -4105,7 +4104,6 @@ endmodule
             NativeOp::IfElse,
             NativeOp::IntegerCast,
             NativeOp::TableLookup(0),
-            NativeOp::TableDerivative(0),
             NativeOp::TableDerivativeApply(0),
             NativeOp::LimitState(0),
             NativeOp::LimiterPrevious(0),

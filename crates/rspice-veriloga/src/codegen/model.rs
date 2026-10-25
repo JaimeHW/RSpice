@@ -931,9 +931,6 @@ pub enum Instruction {
     IdtModDerivativeState(usize),
     /// Companion Jacobian factor for idt: top-of-stack * dt (0 at DC)
     IdtJacobian,
-    /// Slope of lookup table at the input point
-    /// Stack: `[input] -> [dy/dx]`
-    TableDerivative(usize),
     /// $limit function: bounds value change per iteration for convergence
     /// Uses state index to track previous value
     LimitState(usize),

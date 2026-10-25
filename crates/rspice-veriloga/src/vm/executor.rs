@@ -959,17 +959,6 @@ impl<'a> Vm<'a> {
                 })?
             }
 
-            // Slope of a lookup table at the input point
-            Instruction::TableDerivative(table_id) => {
-                let input = self.pop()?;
-                let table = self
-                    .context
-                    .lookup_tables
-                    .get(*table_id)
-                    .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
-                let result = table.derivative(input);
-                self.stack.push(result);
-            }
             Instruction::TableDerivativeApply(table_id) => {
                 let derivative = self.pop()?;
                 let input = self.pop()?;
@@ -2217,20 +2206,6 @@ mod tests {
             Instruction::TableLookup(0),
         ])
         .expect_err("missing lookup table must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_table_derivative_is_a_vm_error() {
-        let err = execute(vec![
-            Instruction::PushConst(0.5),
-            Instruction::TableDerivative(0),
-        ])
-        .expect_err("missing table derivative must not evaluate as zero");
 
         assert!(
             matches!(err, VmError::InvalidInstruction(_)),

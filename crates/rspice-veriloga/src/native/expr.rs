@@ -212,7 +212,6 @@ pub(crate) enum NativeOp {
     IntegerShiftConst(IntegerBinaryOp, u8),
     IntegerBinaryConst(IntegerBinaryOp, i64),
     TableLookup(usize),
-    TableDerivative(usize),
     TableDerivativeApply(usize),
     LimitState(usize),
     LimiterPrevious(usize),
@@ -1473,22 +1472,6 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::TableLookup(*table_id));
-                }
-                Instruction::TableDerivative(table_id) => {
-                    validate_index(
-                        model.clone(),
-                        "TableDerivative table",
-                        *table_id,
-                        limits.lookup_table_count,
-                    )?;
-                    require_stack(
-                        model.clone(),
-                        entry_kind,
-                        instruction_name(instruction),
-                        depth,
-                        1,
-                    )?;
-                    ops.push(NativeOp::TableDerivative(*table_id));
                 }
                 Instruction::TableDerivativeApply(table_id) => {
                     validate_index(
@@ -8102,7 +8085,6 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
         NativeOp::IntegerBinaryConst(_, _) => "IntegerBinaryConst",
         NativeOp::TableLookup(_) => "TableLookup",
-        NativeOp::TableDerivative(_) => "TableDerivative",
         NativeOp::TableDerivativeApply(_) => "TableDerivativeApply",
         NativeOp::LimitState(_) => "LimitState",
         NativeOp::LimiterPrevious(_) => "LimiterPrevious",
@@ -9097,7 +9079,6 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::Logical(LogicalOp::Not)
         | NativeOp::UnaryMath(_)
         | NativeOp::TableLookup(_)
-        | NativeOp::TableDerivative(_)
         | NativeOp::LimiterPrevious(_)
         | NativeOp::LaplaceState(_)
         | NativeOp::LaplaceStateDerivative(_)
@@ -9348,7 +9329,6 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::IdtModDerivativeState(_) => "IdtModDerivativeState",
         Instruction::DdtDerivativeState(_) => "DdtDerivativeState",
         Instruction::IdtJacobian => "IdtJacobian",
-        Instruction::TableDerivative(_) => "TableDerivative",
         Instruction::TableDerivativeApply(_) => "TableDerivativeApply",
         Instruction::LimitState(_) => "LimitState",
         Instruction::NamedLimiterPrevious(_) => "NamedLimiterPrevious",
@@ -13853,13 +13833,7 @@ endmodule
 
     #[test]
     fn lowers_table_model_ops_as_native_table_ops() {
-        let cases = [
-            (Instruction::TableLookup(2), NativeOp::TableLookup(2)),
-            (
-                Instruction::TableDerivative(3),
-                NativeOp::TableDerivative(3),
-            ),
-        ];
+        let cases = [(Instruction::TableLookup(2), NativeOp::TableLookup(2))];
 
         for (instruction, expected) in cases {
             let program = BytecodeProgram {
@@ -14675,18 +14649,11 @@ endmodule
 
     #[test]
     fn lowering_rejects_table_model_ops_outside_known_tables() {
-        let cases = [
-            (
-                "TableLookup",
-                Instruction::TableLookup(1),
-                "TableLookup table 1",
-            ),
-            (
-                "TableDerivative",
-                Instruction::TableDerivative(1),
-                "TableDerivative table 1",
-            ),
-        ];
+        let cases = [(
+            "TableLookup",
+            Instruction::TableLookup(1),
+            "TableLookup table 1",
+        )];
 
         for (name, instruction, expected) in cases {
             let program = BytecodeProgram {

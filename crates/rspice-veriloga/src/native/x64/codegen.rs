@@ -45,9 +45,9 @@ use crate::native::abi::{
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_derivative_native, rspice_transition_state_native,
+    rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_derivative_native,
+    rspice_transition_state_native,
 };
 use crate::native::abi::{NativeRuntimeStatus, OperandArrayCall, operand_array_call};
 use crate::native::abi::{
@@ -1271,9 +1271,6 @@ impl FunctionCompiler {
                         }
                         NativeOp::TableLookup(table_id) => {
                             self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
-                        }
-                        NativeOp::TableDerivative(table_id) => {
-                            self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
                         }
                         NativeOp::TableDerivativeApply(table_id) => self
                             .emit_state_operand_helper(
@@ -6567,7 +6564,6 @@ mod tests {
                 false,
             ),
             ("table-lookup", NativeOp::TableLookup(0), true),
-            ("table-derivative", NativeOp::TableDerivative(0), true),
             ("laplace", NativeOp::LaplaceState(0), true),
             (
                 "laplace-derivative",
@@ -6650,7 +6646,6 @@ mod tests {
             ("load-param", NativeOp::LoadParam(0)),
             ("load-var", NativeOp::LoadVariable(0)),
             ("table-lookup", NativeOp::TableLookup(0)),
-            ("table-derivative", NativeOp::TableDerivative(0)),
             ("laplace", NativeOp::LaplaceState(0)),
             ("laplace-derivative", NativeOp::LaplaceStateDerivative(0)),
             (
@@ -12092,24 +12087,6 @@ mod tests {
                 Instruction::TableLookup(1),
                 1.5,
                 13.0_f64,
-            ),
-            (
-                "derivative-interpolate",
-                Instruction::TableDerivative(0),
-                1.5,
-                6.0_f64,
-            ),
-            (
-                "derivative-extrapolate",
-                Instruction::TableDerivative(0),
-                -0.5,
-                2.0_f64,
-            ),
-            (
-                "derivative-second-table",
-                Instruction::TableDerivative(1),
-                1.5,
-                4.0_f64,
             ),
         ];
 

@@ -1447,15 +1447,6 @@ impl<V: DynamicOperators> SmallSignalEngine<'_, V> {
             Instruction::IdtJacobian => V::idt_jacobian(self)?,
             Instruction::IdtDerivativeState(slot) => V::integral_derivative(self, *slot, false)?,
             Instruction::IdtModDerivativeState(slot) => V::integral_derivative(self, *slot, true)?,
-            Instruction::TableDerivative(table_id) => {
-                let input = self.pop_real("TableDerivative")?;
-                let table = self
-                    .context
-                    .lookup_tables
-                    .get(*table_id)
-                    .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
-                self.stack.push(V::constant(table.derivative(input)));
-            }
             Instruction::TableDerivativeApply(table_id) => {
                 let derivative = self.pop("TableDerivativeApply payload")?;
                 let input = self.pop_real("TableDerivativeApply input")?;

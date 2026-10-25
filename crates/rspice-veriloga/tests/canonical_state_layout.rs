@@ -51,9 +51,9 @@ fn bytecode_family(instruction: &Instruction) -> Option<(CanonicalStateFamily, u
         Instruction::LaplaceState(slot) | Instruction::LaplaceStateDerivative(slot) => {
             (CanonicalStateFamily::LaplaceFilter, *slot)
         }
-        Instruction::TableLookup(slot)
-        | Instruction::TableDerivative(slot)
-        | Instruction::TableDerivativeApply(slot) => (CanonicalStateFamily::LookupTable, *slot),
+        Instruction::TableLookup(slot) | Instruction::TableDerivativeApply(slot) => {
+            (CanonicalStateFamily::LookupTable, *slot)
+        }
         _ => return None,
     };
     Some(entry)
