@@ -51,7 +51,7 @@ use crate::product::ContentDigest;
 use crate::state::project_snapshot::SnapshotSessionCapture;
 use crate::state::{CellViewRef, ProjectOpenFact};
 // The lower-tier state the lifecycle and its sibling services work on.
-pub(in crate::workbench) use crate::workbench::slots::platform::PlatformState;
+pub use crate::workbench::slots::platform::PlatformState;
 pub(in crate::workbench) use rspice_app_state::workbench::app_state::{
     model::Model, sim_setup::SimSetupState,
 };
