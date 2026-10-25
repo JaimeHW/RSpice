@@ -47,7 +47,7 @@ impl EngineBridge {
             .map_err(|e| self.translate_error(e))?;
         ensure_not_aborted(abort)?;
         let circuit = engine
-            .build_circuit(netlist)
+            .build_circuit_with_abort(netlist, abort)
             .map_err(|e| self.translate_error(e))?;
         ensure_not_aborted(abort)?;
         let output_spec = parse_output_spec(&config.output_var, &dc_result.node_names, &circuit);
