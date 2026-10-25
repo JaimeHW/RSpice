@@ -292,7 +292,7 @@ fn menus(
             node.set_role(egui::accesskit::Role::Menu);
             node.set_label("Application menu");
         });
-    handle_menu_bar_keyboard(ui.ctx(), &triggers, !app.state().application_modal_open());
+    handle_menu_bar_keyboard(ui.ctx(), &triggers, !app.application_modal_open());
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -542,7 +542,7 @@ fn paint_title_context(
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let dirty = app.state().platform.project_lifecycle.is_open()
+    let dirty = app.platform().project_lifecycle.is_open()
         && (app.model().schematic.session.is_dirty || app.model().workspace.any_dirty());
     let cell = active_title_cell(app);
     let full = title_context_text(app, compact);
@@ -595,7 +595,7 @@ fn paint_title_context(
     );
     ui.ctx().accesskit_node_builder(status.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        if app.state().platform.project_lifecycle.is_open() {
+        if app.platform().project_lifecycle.is_open() {
             node.set_label(format!(
                 "Active project: {}; {}; {}",
                 app.model().workspace.content.project.display_name(),
@@ -622,7 +622,7 @@ const UNSAVED_TITLE_MARKER: &str = "*";
 /// against a function the application never called and the shipped title read
 /// "Untitled Project" with nothing open.
 fn title_context_text(app: &impl WorkbenchHost, compact: bool) -> String {
-    if !app.state().platform.project_lifecycle.is_open() {
+    if !app.platform().project_lifecycle.is_open() {
         return if compact {
             "No project open"
         } else {
@@ -689,7 +689,7 @@ fn ellipsize_to_width(
 }
 
 fn active_title_cell(app: &impl WorkbenchHost) -> String {
-    if !app.state().platform.project_lifecycle.is_open() {
+    if !app.platform().project_lifecycle.is_open() {
         return "No project open".to_owned();
     }
     app.title_cell(app.workbench().workspace)

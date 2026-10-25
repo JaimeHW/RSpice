@@ -57,7 +57,7 @@ fn show_primary(ui: &mut Ui, app: &mut impl WorkbenchHost) {
 
 fn split_results_is_visible(app: &impl WorkbenchHost) -> bool {
     app.workbench().results_split_visible(
-        app.state().platform.project_lifecycle.is_open(),
+        app.platform().project_lifecycle.is_open(),
         app.model()
             .simulation
             .retained

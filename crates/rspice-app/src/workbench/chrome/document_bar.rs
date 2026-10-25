@@ -59,10 +59,7 @@ impl<S> DocumentSession for S where
 {
 }
 
-pub fn show<H>(root: &mut Ui, app: &mut H, layout: LayoutSpec)
-where
-    H: WorkbenchHost<Session: DocumentSession>,
-{
+pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     reconcile_document_registry(app.session_mut());
@@ -344,7 +341,7 @@ fn hidden_documents_button(
     response.on_hover_text(description);
 }
 
-pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost<Session: DocumentSession>) -> bool {
+pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost) -> bool {
     document_strip_visible(
         app.workbench().workspace,
         visible_documents(app.session()).len(),

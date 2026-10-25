@@ -120,7 +120,7 @@ enum WindowSessionAction {
 
 pub(crate) fn open_window_workflow(app: &mut impl WorkbenchHost, workflow: WindowWorkflow) {
     let source_window = app.workbench().window_session.current();
-    let active = crate::workbench::chrome::document_bar::document_descriptors(app.state())
+    let active = crate::workbench::chrome::document_bar::document_descriptors(app.session())
         .into_iter()
         .find(|document| document.active && document.open);
     let workbench = app.workbench_mut();
@@ -171,7 +171,7 @@ pub(in crate::workbench) fn render_window_session_dialog(
 }
 
 fn render_window_manager(app: &mut impl WorkbenchHost, ctx: &Context) {
-    let documents = crate::workbench::chrome::document_bar::all_document_descriptors(app.state());
+    let documents = crate::workbench::chrome::document_bar::all_document_descriptors(app.session());
     let open_count = documents.iter().filter(|document| document.open).count();
     let dirty_count = documents.iter().filter(|document| document.dirty).count();
     let mut page = app.workbench().window_session_dialog.page;
@@ -225,7 +225,7 @@ fn commit_window_manager_action(
             if owner.is_primary() {
                 app.workbench_mut().activate(document.workspace());
                 let _ = crate::workbench::chrome::document_bar::activate_document_by_id(
-                    app.state_mut(),
+                    app.session_mut(),
                     &document,
                 );
             } else {
@@ -233,16 +233,16 @@ fn commit_window_manager_action(
             }
         }
         WindowSessionAction::Previous => {
-            crate::workbench::chrome::document_bar::cycle_document(app.state_mut(), true);
+            crate::workbench::chrome::document_bar::cycle_document(app.session_mut(), true);
         }
         WindowSessionAction::Next => {
-            crate::workbench::chrome::document_bar::cycle_document(app.state_mut(), false);
+            crate::workbench::chrome::document_bar::cycle_document(app.session_mut(), false);
         }
         WindowSessionAction::CloseOthers => {
-            crate::workbench::chrome::document_bar::close_other_documents(app.state_mut());
+            crate::workbench::chrome::document_bar::close_other_documents(app.session_mut());
         }
         WindowSessionAction::CloseAll => {
-            crate::workbench::chrome::document_bar::close_all_documents(app.state_mut());
+            crate::workbench::chrome::document_bar::close_all_documents(app.session_mut());
         }
         WindowSessionAction::WorkspaceLayouts => {
             app.workbench_mut().window_session_dialog.close();
@@ -263,7 +263,7 @@ fn commit_window_manager_action(
         }
         WindowSessionAction::CloseWindow(window) => {
             if let Ok(documents) = app.workbench_mut().window_session.close_window(window) {
-                app.state_mut().prompt(match documents.len() {
+                app.workbench_mut().prompt(match documents.len() {
                     0 => format!("Closed window {}.", window.value()),
                     1 => format!(
                         "Closed window {}; its document returned to the main window.",
@@ -716,7 +716,7 @@ fn render_session_page(
             ui.label(dirty_count.to_string());
             ui.end_row();
             ui.label("Autosave checkpoint");
-            ui.label(match app.state().platform.autosave_minutes {
+            ui.label(match app.platform().autosave_minutes {
                 0 => "Disabled".to_owned(),
                 minutes => format!("Every {minutes} minutes while modified"),
             });

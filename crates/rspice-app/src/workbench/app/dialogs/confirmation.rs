@@ -186,11 +186,11 @@ fn render_close_project_review(
     ctx: &Context,
     destination: ProjectCloseDestination,
 ) {
-    let documents = crate::workbench::lifecycle::project_lifecycle::dirty_documents(app.state());
+    let documents = crate::workbench::lifecycle::project_lifecycle::dirty_documents(app.session());
     // A never-saved project has no baseline to compare against, so all of
     // it is unsaved: the summary says that once, rather than listing the
     // configuration record that stands in for the whole project.
-    let never_saved = app.state().platform.project_lifecycle.accepted().is_none();
+    let never_saved = app.platform().project_lifecycle.accepted().is_none();
     let mut unsaved: Vec<(WorkbenchIcon, String)> = if never_saved {
         Vec::new()
     } else {
@@ -199,14 +199,14 @@ fn render_close_project_review(
             .map(|document| (document_icon(document), document.label()))
             .collect()
     };
-    if app.state().models.model_editor_has_unsaved_changes() {
+    if app.model_draft_unsaved() {
         unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
     }
     // A stimulus draft is runtime-only, so it is not an unsaved document
     // and saving the project would not publish it. Naming it is the only
     // honest thing to do: closing discards it, and nothing offered here
     // can apply a draft the audit strip may be refusing.
-    for definition in app.state().design.stimulus_editor.dirty_definitions() {
+    for definition in app.unapplied_stimulus_drafts() {
         unsaved.push((
             WorkbenchIcon::Source,
             format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
@@ -302,9 +302,9 @@ fn render_close_blocked_by_run(
     });
     match choice {
         DialogChoice::Primary if can_stop => {
-            let state = app.state_mut();
-            if let Err(error) = state.model.simulation.request_abort_active_run() {
-                state.prompt(format!("The run was not stopped: {error}."));
+            if let Err(error) = app.model_mut().simulation.request_abort_active_run() {
+                app.workbench_mut()
+                    .prompt(format!("The run was not stopped: {error}."));
             }
         }
         DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {

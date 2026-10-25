@@ -18,15 +18,15 @@ use egui::Ui;
 use egui::os::OperatingSystem;
 
 use crate::diagnostics::LogAnchor;
-use crate::state::ViewType;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
+use crate::state::{CellViewRef, ViewType};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
-use crate::workbench::app_state::Model;
 use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 use crate::workbench::commands::vocabulary::{
@@ -681,12 +681,74 @@ impl WorkbenchHost for RSpiceApp {
         &self.state.model
     }
 
-    fn state(&self) -> &AppState {
-        &self.state
+    fn model_mut(&mut self) -> &mut Model {
+        &mut self.state.model
     }
 
-    fn state_mut(&mut self) -> &mut AppState {
-        &mut self.state
+    fn platform(&self) -> &PlatformState {
+        &self.state.platform
+    }
+
+    fn run_preflight_checking(&self) -> bool {
+        self.state.runs.preflight.checking.is_some()
+    }
+
+    fn application_modal_open(&self) -> bool {
+        self.state.application_modal_open()
+    }
+
+    fn model_draft_unsaved(&self) -> bool {
+        self.state.models.model_editor_has_unsaved_changes()
+    }
+
+    fn unapplied_stimulus_drafts(&self) -> Vec<String> {
+        self.state.design.stimulus_editor.dirty_definitions()
+    }
+
+    fn open_cell_view(&mut self, reference: CellViewRef) {
+        self.state.open_workspace_view(reference);
+    }
+
+    fn show_catalog_model(&mut self, library: &str, model: String) {
+        let state = &mut self.state;
+        state.select_model_library(library);
+        state.model.model_library_manager.filter_text = model.clone();
+        state.model.model_library_manager.filter_type = None;
+        state.models.selected_model = Some(model);
+        state.models.models_page = crate::state::ModelsPage::Models;
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Models);
+    }
+
+    fn show_signal(&mut self, run_index: usize, analysis_index: usize, waveform_index: usize) {
+        let state = &mut self.state;
+        state.model.simulation.select_run(run_index);
+        state.model.simulation.select_analysis(analysis_index);
+        state.model.simulation.retained.runs[run_index].analyses[analysis_index].waveforms
+            [waveform_index]
+            .visible = true;
+        if let Some(waveform) = state
+            .model
+            .simulation
+            .view
+            .waveforms
+            .get_mut(waveform_index)
+        {
+            waveform.visible = true;
+        }
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
+        state.results.results.session.viewer =
+            rspice_results::result_presentation::ResultViewer::Waves;
+        state
+            .results
+            .results
+            .restore_analysis_strip(&state.model.simulation, analysis_index);
+        state.results.results.session.maximized_strip = None;
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
     }
 }
 

@@ -6,14 +6,17 @@
 //! name it by the workbench's own keys, and they read and change the session
 //! through it rather than through the application that holds the session.
 
-use super::host::{Host, ProblemsHost};
+use super::host::{DocumentHost, Host, ProblemsHost};
 use crate::diagnostics::LogAnchor;
+use crate::state::CellViewRef;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::diagnostic_store::listing::ListingSource;
 use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
-use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::layout::LayoutSpec;
-use crate::workbench::state::{WorkbenchSession, Workspace};
+use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, PlatformState};
+use crate::workbench::state::workbench_session::WorkspaceDocument;
+use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 
 /// A [`Host`] keyed by the workbench's own types, and the session it holds.
 ///
@@ -21,8 +24,15 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 /// this trait, so the title bar names them where it draws them.
 pub(crate) trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
     /// The session a container is handed whole, for the pages that draw from
-    /// it and change it in the same pass.
-    type Session: ConsoleHost + 'static;
+    /// it and change it in the same pass: the console's host, the documents'
+    /// host and the project lifecycle's source.
+    type Session: ConsoleHost
+        + DocumentHost<
+            WorkspaceKey = Workspace,
+            DocumentId = WorkspaceDocumentId,
+            Document = WorkspaceDocument,
+        > + LifecycleSource
+        + 'static;
 
     /// The session, for a page drawn from it.
     fn session(&self) -> &Self::Session;
@@ -41,11 +51,36 @@ pub(crate) trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSp
     /// the simulation.
     fn model(&self) -> &Model;
 
-    /// The whole session, for a container that reads many of its parts.
-    fn state(&self) -> &AppState;
+    /// The engineering model, to change.
+    fn model_mut(&mut self) -> &mut Model;
 
-    /// The whole session, to change.
-    fn state_mut(&mut self) -> &mut AppState;
+    /// The platform's record: the project lifecycle and the autosave
+    /// preference.
+    fn platform(&self) -> &PlatformState;
+
+    /// Whether a run's preflight check is under way, which the run control
+    /// offers to stop.
+    fn run_preflight_checking(&self) -> bool;
+
+    /// Whether anything modal the shell lists is open, which owns the
+    /// keyboard and the pointer for the frame.
+    fn application_modal_open(&self) -> bool;
+
+    /// Whether the device-model editor holds a draft with unsaved changes.
+    fn model_draft_unsaved(&self) -> bool;
+
+    /// The stimulus definitions whose drafts are not applied, by name.
+    fn unapplied_stimulus_drafts(&self) -> Vec<String>;
+
+    /// Open `reference` as the design's active view.
+    fn open_cell_view(&mut self, reference: CellViewRef);
+
+    /// Show `model` from `library` in the Models workspace's catalog.
+    fn show_catalog_model(&mut self, library: &str, model: String);
+
+    /// Show the waveform `waveform` of analysis `analysis` of retained run
+    /// `run` in the Results workspace.
+    fn show_signal(&mut self, run: usize, analysis: usize, waveform: usize);
 }
 
 /// The session the console's pages draw from: the model and the workbench

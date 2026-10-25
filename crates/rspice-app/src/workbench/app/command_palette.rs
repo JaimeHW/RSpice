@@ -517,7 +517,7 @@ impl PaletteEntry {
                         entry.reference.display_path()
                     ));
                 }
-                app.state_mut().open_workspace_view(entry.reference);
+                app.open_cell_view(entry.reference);
                 app.workbench_mut()
                     .activate(crate::workbench::state::Workspace::Design);
                 Ok(())
@@ -534,15 +534,7 @@ impl PaletteEntry {
                         entry.library, entry.model
                     ));
                 }
-                let state = app.state_mut();
-                state.select_model_library(&entry.library);
-                state.model.model_library_manager.filter_text = entry.model.clone();
-                state.model.model_library_manager.filter_type = None;
-                state.models.selected_model = Some(entry.model);
-                state.models.models_page = crate::state::ModelsPage::Models;
-                state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Models);
+                app.show_catalog_model(&entry.library, entry.model);
                 Ok(())
             }
             Self::Signal(entry) => {
@@ -578,33 +570,7 @@ impl PaletteEntry {
                     ));
                 }
 
-                let state = app.state_mut();
-                state.model.simulation.select_run(run_index);
-                state.model.simulation.select_analysis(analysis_index);
-                state.model.simulation.retained.runs[run_index].analyses[analysis_index]
-                    .waveforms[entry.waveform_index]
-                    .visible = true;
-                if let Some(waveform) = state
-                    .model
-                    .simulation
-                    .view
-                    .waveforms
-                    .get_mut(entry.waveform_index)
-                {
-                    waveform.visible = true;
-                }
-                state.model.simulation.view.data_version =
-                    state.model.simulation.view.data_version.wrapping_add(1);
-                state.results.results.session.viewer =
-                    rspice_results::result_presentation::ResultViewer::Waves;
-                state
-                    .results
-                    .results
-                    .restore_analysis_strip(&state.model.simulation, analysis_index);
-                state.results.results.session.maximized_strip = None;
-                state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Results);
+                app.show_signal(run_index, analysis_index, entry.waveform_index);
                 Ok(())
             }
         }

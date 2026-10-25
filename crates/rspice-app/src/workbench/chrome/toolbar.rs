@@ -34,7 +34,7 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
     let viewport_width = ctx.content_rect().width();
     let padding = toolbar_horizontal_padding(viewport_width);
     let outer_gap = toolbar_outer_gap(viewport_width);
-    let show_simulation_context = app.state().platform.project_lifecycle.is_open()
+    let show_simulation_context = app.platform().project_lifecycle.is_open()
         && matches!(
             app.workbench().workspace,
             Workspace::Design | Workspace::Simulate
@@ -73,7 +73,7 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
                         app.workbench_mut().toggle_drawer(Drawer::Navigator);
                     }
                 }
-                if app.state().platform.project_lifecycle.is_open() {
+                if app.platform().project_lifecycle.is_open() {
                     global_document_tools(ui, app, layout);
                 }
 
@@ -152,7 +152,7 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
 /// workspace. Keep it outside the horizontally scrolling context-tool lane so
 /// it remains reachable even when a dense engineering toolbar overflows.
 fn global_document_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
-    let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(app.state());
+    let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(app.session());
     let shortcut = app.shortcut_label(
         ids::SAVE,
         crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
@@ -237,7 +237,7 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
 }
 
 fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
-    if app.state().runs.preflight.checking.is_some() {
+    if app.run_preflight_checking() {
         "Stop".to_owned()
     } else if app.model().simulation.cancellation_is_pending() {
         "Stopping…".to_owned()
