@@ -925,6 +925,52 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
     }
 }
 
+/// A sheet switch that interrupts a drag lets go of it before it writes the
+/// drawing back: the buffer of the sheet left holds the geometry it had
+/// before the press, and nothing is left to undo.
+#[test]
+fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag() {
+    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    let mut fixture = Fixture::new(false);
+    let key = fixture
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let id = fixture.app.state.model.schematic.document().components[0].id;
+    let designs = &mut fixture.app.state.model.workspace.content.design_management;
+    let first = designs
+        .bootstrap_for_cell_view(&key, "Sheet 1", [id])
+        .unwrap();
+    let catalog = designs.sheet_catalog_mut(&key).unwrap();
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Sheet 2".into(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .unwrap();
+    catalog.set_active(first).unwrap();
+    fixture.drag(DragType::MoveSelection);
+
+    let state = &mut fixture.app.state;
+    crate::workbench::app::sheets::activate_sheet(&mut state.model, &mut state.workbench, second)
+        .expect("the switch publishes");
+
+    assert!(!state.schematic_drag_in_progress());
+    assert!(!state.model.schematic.has_pending_operation());
+    assert!(!state.model.schematic.can_undo());
+    let buffer = state.model.workspace.schematic_editor(&key).unwrap();
+    assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
+}
+
 #[test]
 fn conductor_routes_validate_source_before_finishing() {
     use crate::workbench::state::WorkspaceDocumentId;

@@ -53,6 +53,15 @@ pub(crate) trait CloudPort {
     fn license_dialog_open(&self) -> bool;
 }
 
+/// What another feature may ask of the gesture under way on design's canvas:
+/// to let go of it. Letting go rolls back only the operation the gesture
+/// holds, in whichever buffer holds it, so a sheet switch or a drawing sync
+/// asks first, inside the same call, and the gesture's partial edit never
+/// reaches the project.
+pub(crate) trait CanvasGesturePort {
+    fn let_go_of_canvas_gesture(&mut self, model: &mut Model);
+}
+
 /// Read-only views of the other features a feature reads: live references,
 /// never a copy taken earlier.
 #[derive(Clone, Copy)]

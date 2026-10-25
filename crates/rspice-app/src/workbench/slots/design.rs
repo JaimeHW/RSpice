@@ -11,7 +11,9 @@ use crate::workbench::app::{
     DesignReviewCommentsDialogState, SelectionBulkEditDialogState, SymbolImportDialogState,
     SymbolParameterFormDialogState,
 };
-use crate::workbench::framework::feature::DesignPort;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
+use crate::workbench::state::WorkbenchSession;
 
 /// What the design feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -261,6 +263,13 @@ impl DesignState {
         self.selected_stimulus_definition = None;
         self.stimulus_editor.clear();
         self.stimulus_browser.clear();
+    }
+}
+
+/// The session still holds design's canvas gesture, its drag.
+impl CanvasGesturePort for WorkbenchSession {
+    fn let_go_of_canvas_gesture(&mut self, model: &mut Model) {
+        self.interaction.drag.cancel_schematic_drag(model);
     }
 }
 

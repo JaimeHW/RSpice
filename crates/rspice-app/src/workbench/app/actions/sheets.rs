@@ -18,6 +18,7 @@ use crate::state::{
 };
 use crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete;
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::CanvasGesturePort;
 use crate::workbench::state::WorkbenchSession;
 
 /// One sheet as the navigation surfaces present it.
@@ -108,7 +109,7 @@ pub(crate) fn activate_sheet(
     workbench: &mut WorkbenchSession,
     id: SheetId,
 ) -> Result<String, String> {
-    let outcome = model.activate_sheet(id, workbench.interaction.drag.let_go());
+    let outcome = model.activate_sheet(id, |model| workbench.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
@@ -116,7 +117,7 @@ pub(in crate::workbench) fn next_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
 ) -> Result<String, String> {
-    let outcome = model.step_sheet(1, workbench.interaction.drag.let_go());
+    let outcome = model.step_sheet(1, |model| workbench.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
@@ -124,7 +125,7 @@ pub(in crate::workbench) fn previous_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
 ) -> Result<String, String> {
-    let outcome = model.step_sheet(-1, workbench.interaction.drag.let_go());
+    let outcome = model.step_sheet(-1, |model| workbench.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
@@ -136,7 +137,7 @@ fn go_to_sheet(
     workbench: &mut WorkbenchSession,
     index: usize,
 ) -> Result<String, String> {
-    let outcome = model.go_to_sheet(index, workbench.interaction.drag.let_go());
+    let outcome = model.go_to_sheet(index, |model| workbench.let_go_of_canvas_gesture(model));
     workbench.report(outcome)
 }
 
@@ -161,7 +162,7 @@ pub(in crate::workbench) fn new_sheet_after(
     }
     match create(model, after) {
         Ok((id, name)) => {
-            let _ = model.activate_sheet(id, workbench.interaction.drag.let_go());
+            let _ = model.activate_sheet(id, |model| workbench.let_go_of_canvas_gesture(model));
             workbench.report(Ok(format!("Created sheet `{name}`.")))
         }
         Err(error) => workbench.report(Err(error)),
@@ -171,7 +172,7 @@ pub(in crate::workbench) fn new_sheet_after(
 /// Let go of any gesture under way and write the open drawing back to the
 /// project, before an edit of the catalog reads it.
 fn settle_drawing(model: &mut Model, workbench: &mut WorkbenchSession) {
-    workbench.interaction.drag.cancel_schematic_drag(model);
+    workbench.let_go_of_canvas_gesture(model);
     if let Some(prompt) = model.sync_active_schematic_to_workspace() {
         workbench.prompt(prompt);
     }
