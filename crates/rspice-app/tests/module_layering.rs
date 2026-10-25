@@ -668,7 +668,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The publication snapshot builder: reads the session aggregate and the
     // hardcopy adapters' resolved scenes to produce the sealed interchange
     // snapshot. It mutates nothing, but it reads the whole session.
-    "publication_snapshot",
+    "hardcopy_adapters/publication_snapshot",
     // Demonstration circuits and the shared hierarchy reference populate
     // AppState through its APIs. They do not depend on the application root;
     // application validation tests can use the same authored projects.

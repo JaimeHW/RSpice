@@ -97,11 +97,15 @@ pub(super) fn action_export_publication_snapshot_with_io(
             .unwrap_or_else(|| "Untitled project".to_string()),
         description: String::new(),
         author_display: "Local export".to_string(),
-        created_utc: crate::workbench::publication_snapshot::publication_timestamp_utc(),
+        created_utc:
+            crate::workbench::hardcopy_adapters::publication_snapshot::publication_timestamp_utc(),
         license: rspice_publication_contract::ContentLicense::AllRightsReserved,
         ..Default::default()
     };
-    let built = crate::workbench::publication_snapshot::build_publication_snapshot(state, &draft)
+    let built =
+        crate::workbench::hardcopy_adapters::publication_snapshot::build_publication_snapshot(
+            state, &draft,
+        )
         .map_err(|error| error.to_string())
         .and_then(|snapshot| {
             snapshot

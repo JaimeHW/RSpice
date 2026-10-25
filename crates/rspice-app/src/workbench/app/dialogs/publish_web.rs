@@ -21,7 +21,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::PublicationDraft;
-use crate::workbench::publication_snapshot::{
+use crate::workbench::hardcopy_adapters::publication_snapshot::{
     build_publication_snapshot, publication_timestamp_utc,
 };
 
