@@ -1213,18 +1213,15 @@ mod b3soi_derivatives {
         tied
     }
 
-    /// FD's static stamp. Its charge companion is not yet the derivative of its
-    /// charges, so the integration gains are not swept here.
     #[test]
-    fn fd_static_stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
+    fn fd_stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
         let bodies = [
             Body("floating", "d g s e", false),
             Body("contact", "d g s e p", false),
         ];
-        let gains = &AG0[..1];
         report(&[
-            sweep_soi::<B3SoiFd>("B3SOIFD", FD_N1_CARD, "n", &bodies, gains),
-            sweep_soi::<B3SoiFd>("B3SOIFD", FD_P1_CARD, "p", &bodies, gains),
+            sweep_soi::<B3SoiFd>("B3SOIFD", FD_N1_CARD, "n", &bodies, AG0),
+            sweep_soi::<B3SoiFd>("B3SOIFD", FD_P1_CARD, "p", &bodies, AG0),
         ]);
     }
 

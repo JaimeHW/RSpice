@@ -1494,8 +1494,9 @@ fn eval_charges(p: &B3SoiFdSized, m: &ModelConsts, mode: i32, i: &ChargeInputs) 
     let abulk_cv = i.abulk0 * p.abulk_cv_factor;
     let dabulk_cv_dvb = p.abulk_cv_factor * i.dabulk0_dvb;
 
-    let mut vdsat_cv = vgsteff / abulk_cv;
-    vdsat_cv += 1.0e-5;
+    let vdsat_cv_base = vgsteff / abulk_cv;
+    let dvdsat_cv_dvb = -vdsat_cv_base * dabulk_cv_dvb / abulk_cv;
+    let vdsat_cv = vdsat_cv_base + 1.0e-5;
     let vds_mode = if mode > 0 { i.vds_raw } else { -i.vds_raw };
     let v4 = vdsat_cv - vds_mode - DELTA_4;
     let t0v = (v4 * v4 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
@@ -1505,25 +1506,36 @@ fn eval_charges(p: &B3SoiFdSized, m: &ModelConsts, mode: i32, i: &ChargeInputs) 
     let t3v = (1.0 - t1v - t2v) / abulk_cv;
     let dvdseff_cv_dvg = t3v;
     let dvdseff_cv_dvd = t1v;
-    let dvdseff_cv_dvb = -t3v * vdsat_cv * dabulk_cv_dvb;
+    // ngspice writes dVdseffCV_dVb as -T3*VdsatCV*dAbulkCV_dVb after VdsatCV
+    // has taken its +1e-5 offset (b3soifdld.c:2322-2335), a 10% error where
+    // Vgsteff ~ 1e-4; the offset is a constant, so the chain is dVdsatCV_dVb.
+    let dvdseff_cv_dvb = (1.0 - t1v - t2v) * dvdsat_cv_dvb;
 
-    let (vds_cv, dvds_cv_dvg, dvds_cv_dvd, dvds_cv_dvb) = if m.cap_mod == 2 {
-        (vdseff_cv, dvdseff_cv_dvg, dvdseff_cv_dvd, dvdseff_cv_dvb)
+    // VdsCV and its partials along (CV Vgsteff, IV Vgsteff, Vbseff, Vds).
+    let (vds_cv, dvds_cv) = if m.cap_mod == 2 {
+        (
+            vdseff_cv,
+            [dvdseff_cv_dvg, 0.0, dvdseff_cv_dvb, dvdseff_cv_dvd],
+        )
     } else {
         capmod3_vds_cv(i, vgsteff)
     };
+    // VdsCV's derivative along one node from that node's CV Vgsteff, IV
+    // Vgsteff, Vbseff and Vds derivatives. `Vcs = Vbsdio - Vbs0eff` is
+    // identically zero in FD, so ngspice's `dVdsCV_dVc * dVcs_dV*` terms vanish.
+    let dvds_cv_along = |dcv: Value, div: Value, dvbseff: Value, dvds: Value| {
+        dvds_cv[0] * dcv + dvds_cv[1] * div + dvds_cv[2] * dvbseff + dvds_cv[3] * dvds
+    };
 
-    // `Vcs = Vbsdio - Vbs0eff` is identically zero in FD, so ngspice's
-    // `dVdsCV_dVc * dVcs_dV*` terms vanish.
     let cbox_wl = p.kb3 * cbox * p.weff_cv * p.leff_cv;
     let qe1_scale = -0.5 * m.cboxt * p.weff_cv * p.leff_cv;
     let qe1 = qe1_scale * vds_cv - cbox_wl * (i.vbs0eff - i.vesfb);
-    let ce1g = qe1_scale * (dvds_cv_dvg * dvgsteff_dvg + dvds_cv_dvb * i.dvbseff_dvg)
+    let ce1g = qe1_scale * dvds_cv_along(dvgsteff_dvg, i.dvgsteff_dvg, i.dvbseff_dvg, 0.0)
         - cbox_wl * i.dvbs0eff_dvg;
-    let ce1d = qe1_scale * (dvds_cv_dvg * dvgsteff_dvd + dvds_cv_dvb * i.dvbseff_dvd + dvds_cv_dvd)
+    let ce1d = qe1_scale * dvds_cv_along(dvgsteff_dvd, i.dvgsteff_dvd, i.dvbseff_dvd, 1.0)
         - cbox_wl * i.dvbs0eff_dvd;
     let ce1b = 0.0;
-    let ce1e = qe1_scale * (dvds_cv_dvg * dvgsteff_dve + dvds_cv_dvb * i.dvbseff_dve)
+    let ce1e = qe1_scale * dvds_cv_along(dvgsteff_dve, i.dvgsteff_dve, i.dvbseff_dve, 0.0)
         - cbox_wl * (i.dvbs0eff_dve - 1.0);
 
     let t0 = abulk_cv * vdseff_cv;
@@ -1714,8 +1726,13 @@ fn eval_charges(p: &B3SoiFdSized, m: &ModelConsts, mode: i32, i: &ChargeInputs) 
 /// CAPMOD 3's VdsCV (b3soifdld.c:2345-2443): the IV `Vdsat`/`Vdseff` bent
 /// toward the CAPMOD 3 `VdsatCV`, floored at 0, offset by 1e-4 and capped at
 /// `VdsatCV - 1e-7`. `vgsteff` is the CV Vgsteff, offset included. Returns
-/// `(VdsCV, dVdsCV_dVg, dVdsCV_dVd, dVdsCV_dVb)`.
-fn capmod3_vds_cv(i: &ChargeInputs, vgsteff: Value) -> (Value, Value, Value, Value) {
+/// VdsCV and its partials along (CV Vgsteff, IV Vgsteff, Vbseff, Vds).
+///
+/// ngspice chains the IV Vdsat's and Vdseff's Vgsteff derivatives through the
+/// CV Vgsteff (its comment at b3soifdld.c:2230-2236 concedes it); here they
+/// keep their own direction. ngspice also keeps the unclamped derivatives of a
+/// clamped VdsCV; a clamped VdsCV is the constant 0 or VdsatCV and has theirs.
+fn capmod3_vds_cv(i: &ChargeInputs, vgsteff: Value) -> (Value, [Value; 4]) {
     let k1 = i.k1;
     // VdsatCV redefined for capMod 3 (b3soifdld.c:2350-2361); dPhis_dVb = -1.
     let t1 = vgsteff + k1 * i.sqrt_phis + 0.5 * k1 * k1;
@@ -1726,12 +1743,16 @@ fn capmod3_vds_cv(i: &ChargeInputs, vgsteff: Value) -> (Value, Value, Value, Val
     let dvdsat_cv_dvb = dt1_dvb - k1 / 2.0 / t2.sqrt() * dt2_dvb;
     let dvdsat_cv_dvg = 1.0 - k1 / 2.0 / t2.sqrt();
 
+    // Each direction's (dVdsatCV, dVdsat, dVdseff).
+    let directions = [
+        (dvdsat_cv_dvg, 0.0, 0.0),
+        (0.0, i.dvdsat_dvg, i.dvdseff_dvg),
+        (dvdsat_cv_dvb, i.dvdsat_dvb, i.dvdseff_dvb),
+        (0.0, i.dvdsat_dvd, i.dvdseff_dvd),
+    ];
     let t1 = vdsat_cv - i.vdsat;
-    let dt1_dvg = dvdsat_cv_dvg - i.dvdsat_dvg;
-    let dt1_dvb = dvdsat_cv_dvb - i.dvdsat_dvb;
-    let dt1_dvd = -i.dvdsat_dvd;
-
-    let (mut vds_cv, dvds_cv_dvg, dvds_cv_dvd, dvds_cv_dvb);
+    let mut vds_cv;
+    let mut dvds_cv: [Value; 4];
     if t1 != 0.0 {
         let t3 = -0.5 * i.vdsat / t1; // Vdsmax
         let t2 = t3 * i.vdsat;
@@ -1739,44 +1760,34 @@ fn capmod3_vds_cv(i: &ChargeInputs, vgsteff: Value) -> (Value, Value, Value, Val
         if i.vdseff > t2 && t1 < 0.0 {
             vds_cv = t4;
             let t5 = -0.5 / (t1 * t1);
-            let dt3_dvg = t5 * (t1 * i.dvdsat_dvg - i.vdsat * dt1_dvg);
-            let dt3_dvb = t5 * (t1 * i.dvdsat_dvb - i.vdsat * dt1_dvb);
-            let dt3_dvd = t5 * (t1 * i.dvdsat_dvd - i.vdsat * dt1_dvd);
-            dvds_cv_dvd =
-                t3 * i.dvdsat_dvd + i.vdsat * dt3_dvd + t3 * (2.0 * t1 * dt3_dvd + t3 * dt1_dvd);
-            dvds_cv_dvg =
-                t3 * i.dvdsat_dvg + i.vdsat * dt3_dvg + t3 * (2.0 * t1 * dt3_dvg + t3 * dt1_dvg);
-            dvds_cv_dvb =
-                t3 * i.dvdsat_dvb + i.vdsat * dt3_dvb + t3 * (2.0 * t1 * dt3_dvb + t3 * dt1_dvb);
+            dvds_cv = directions.map(|(dsat_cv, dsat, _)| {
+                let dt1 = dsat_cv - dsat;
+                let dt3 = t5 * (t1 * dsat - i.vdsat * dt1);
+                t3 * dsat + i.vdsat * dt3 + t3 * (2.0 * t1 * dt3 + t3 * dt1)
+            });
         } else {
             let t5 = i.vdseff / i.vdsat;
             let t6 = t5 * t5;
             let t8 = 2.0 * t1 * t5 / i.vdsat / i.vdsat;
             vds_cv = i.vdseff + t1 * t6;
-            dvds_cv_dvd = i.dvdseff_dvd
-                + t8 * (i.vdsat * i.dvdseff_dvd - i.vdseff * i.dvdsat_dvd)
-                + t6 * dt1_dvd;
-            dvds_cv_dvb = i.dvdseff_dvb
-                + t8 * (i.vdsat * i.dvdseff_dvb - i.vdseff * i.dvdsat_dvb)
-                + t6 * dt1_dvb;
-            dvds_cv_dvg = i.dvdseff_dvg
-                + t8 * (i.vdsat * i.dvdseff_dvg - i.vdseff * i.dvdsat_dvg)
-                + t6 * dt1_dvg;
+            dvds_cv = directions.map(|(dsat_cv, dsat, deff)| {
+                deff + t8 * (i.vdsat * deff - i.vdseff * dsat) + t6 * (dsat_cv - dsat)
+            });
         }
     } else {
         vds_cv = i.vdseff;
-        dvds_cv_dvb = i.dvdseff_dvb;
-        dvds_cv_dvd = i.dvdseff_dvd;
-        dvds_cv_dvg = i.dvdseff_dvg;
+        dvds_cv = directions.map(|(_, _, deff)| deff);
     }
     if vds_cv < 0.0 {
         vds_cv = 0.0;
+        dvds_cv = [0.0; 4];
     }
     vds_cv += 1e-4;
     if vds_cv > vdsat_cv - 1e-7 {
         vds_cv = vdsat_cv - 1e-7;
+        dvds_cv = directions.map(|(dsat_cv, _, _)| dsat_cv);
     }
-    (vds_cv, dvds_cv_dvg, dvds_cv_dvd, dvds_cv_dvb)
+    (vds_cv, dvds_cv)
 }
 
 /// Extrinsic bottom S/D-to-substrate depletion charge spline

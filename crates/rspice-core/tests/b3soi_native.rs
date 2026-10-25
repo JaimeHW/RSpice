@@ -993,13 +993,17 @@ fn charge_moved(time: &[Value], current: &[Value], from: Value, to: Value) -> Va
     sum + 0.5 * (to - prev.0) * (interpolate(time, current, to) + prev.1)
 }
 
-/// The charge each window of `windows` moved through each named source.
+/// The charge each window of `windows` moved through each named source. With
+/// `held_ends`, each window starts and ends on a held bias with the ramp
+/// between, and the conduction current, linear in a small ramp, is taken out
+/// as the trapezoid of its end values.
 fn fd_charges_moved(
     deck: &str,
     tstop: Value,
     step: Value,
     sources: &[&str],
     windows: &[(Value, Value)],
+    held_ends: bool,
 ) -> Vec<Vec<Value>> {
     let netlist = Netlist::parse(deck).expect("deck parses");
     let result = engine()
@@ -1016,7 +1020,16 @@ fn fd_charges_moved(
             let current = &result.branch_currents[branch];
             windows
                 .iter()
-                .map(|&(from, to)| charge_moved(&result.time, current, from, to))
+                .map(|&(from, to)| {
+                    let conduction = if held_ends {
+                        0.5 * (to - from)
+                            * (interpolate(&result.time, current, from)
+                                + interpolate(&result.time, current, to))
+                    } else {
+                        0.0
+                    };
+                    charge_moved(&result.time, current, from, to) - conduction
+                })
                 .collect()
         })
         .collect()
@@ -1059,7 +1072,7 @@ fn native_soi_fd_capmod3_charges_match_ngspice46_along_a_gate_ramp() {
             [8.473586e-16, 2.028175e-16, 1.250468e-16, 1.249793e-16],
         ),
     ];
-    let moved = fd_charges_moved(&deck, 16.0e-12, 0.01e-12, &["vg", "ve"], &windows);
+    let moved = fd_charges_moved(&deck, 16.0e-12, 0.01e-12, &["vg", "ve"], &windows, false);
     for ((source, expected), got) in ngspice.iter().zip(&moved) {
         for (k, (&want, &q)) in expected.iter().zip(got).enumerate() {
             let rel = (q - want).abs() / want.abs();
@@ -1068,6 +1081,78 @@ fn native_soi_fd_capmod3_charges_match_ngspice46_along_a_gate_ramp() {
                 "{source} window {k}: rspice {q:.6e} C vs ngspice {want:.6e} C (rel {rel:.2e})"
             );
         }
+    }
+}
+
+/// ngspice-46's FD capacitances are not all the derivatives of its charges. It
+/// chains dVdseffCV/dVb through a VdsatCV that already carries its +1e-5 offset,
+/// a 10% error where Vgsteff ~ 1e-4. In forward subthreshold (VD = 1.5 V,
+/// VG = VS = VE = 0) a 2 mV back-gate ramp moves 1.25967e-20, -1.23327e-20 and
+/// -2.640e-22 C/V through the gate, drain and source in ngspice-46
+/// (`tran 0.005p 2p 0 0.005p`, `method=trap`, `meas integ`; Gear-1 agrees to
+/// 7e-6), while its 1 MHz back-gate capacitances there are 1.14843e-20,
+/// -1.14700e-20 and -1.4395e-23 F. RSpice keeps those charges and stamps their
+/// derivatives, so its AC capacitances are its own charge differences.
+#[test]
+fn native_soi_fd_back_gate_capacitance_is_the_derivative_of_its_charge() {
+    let deck = |ve: &str| {
+        format!(
+            "* B3SOIFD forward subthreshold, back gate driven\n\
+             vd d 0 1.5\n\
+             vg g 0 0\n\
+             vs s 0 0\n\
+             ve e 0 {ve}\n\
+             m1 d g s e n1 w=10u l=0.25u\n\
+             .option gmin=1e-25\n\
+             {}\n\
+             .end\n",
+            fd_n1_model_card()
+        )
+    };
+    let sources = ["vg", "vd", "vs"];
+    let ramp = 2.0e-3;
+    let moved = fd_charges_moved(
+        &deck("pwl(0 -1m 0.5p -1m 1.5p 1m)"),
+        2.0e-12,
+        0.005e-12,
+        &sources,
+        &[(0.0, 2.0e-12)],
+        true,
+    );
+    let freq = 1.0e6;
+    let omega = 2.0 * std::f64::consts::PI * freq;
+    let netlist = Netlist::parse(&deck("dc 0 ac 1")).expect("AC deck parses");
+    let ac = engine().run_ac(&netlist, &[freq]).expect("FD AC runs");
+    let ngspice_charge = [1.2596715e-20, -1.23326905e-20, -2.64004e-22];
+    let ngspice_ac = [
+        7.21581641769e-14 / omega,
+        -7.206771919635e-14 / omega,
+        -9.044497846428e-17 / omega,
+    ];
+    let scale = ngspice_charge[0];
+    assert!(
+        (ngspice_ac[0] - ngspice_charge[0]).abs() > 0.05 * scale,
+        "the ngspice-46 evidence: its gate capacitance is not its charge derivative"
+    );
+    for (k, name) in sources.iter().enumerate() {
+        let branch = ac[0]
+            .branch_names
+            .iter()
+            .position(|branch| branch.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("missing branch {name} in {:?}", ac[0].branch_names));
+        let capacitance = -ac[0].currents[branch].im / omega;
+        let charge_slope = -moved[k][0] / ramp;
+        assert!(
+            (charge_slope - ngspice_charge[k]).abs() < 1.0e-3 * scale,
+            "{name}: charge slope {charge_slope:.6e} vs ngspice-46 {:.6e}",
+            ngspice_charge[k]
+        );
+        assert!(
+            (capacitance - charge_slope).abs() < 2.0e-4 * scale,
+            "{name}: AC capacitance {capacitance:.6e} F vs its charge slope {charge_slope:.6e} \
+             (ngspice-46 AC {:.6e})",
+            ngspice_ac[k]
+        );
     }
 }
 
