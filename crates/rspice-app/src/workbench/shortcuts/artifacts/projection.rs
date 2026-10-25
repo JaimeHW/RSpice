@@ -415,48 +415,6 @@ fn sort_rows(rows: &mut [ShortcutReferenceRow]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::shortcuts::{ShortcutSequence, ShortcutStroke};
-    use crate::workbench::commands::vocabulary::Command;
-
-    #[test]
-    fn user_override_json_is_deterministic_private_and_platform_sliced() {
-        let mut profile = ShortcutPreferences::default();
-        profile
-            .set_binding(
-                &CommandRegistry,
-                Command::ToggleNavigator.key(),
-                ShortcutBindingSlot::Primary,
-                CommandPlatform::ALL.to_vec(),
-                Some(ShortcutSequence::single(ShortcutStroke::new(
-                    egui::Key::F6,
-                    false,
-                    false,
-                    false,
-                ))),
-            )
-            .unwrap();
-        profile.acknowledge_protected_override(Command::Save.key());
-        let request = ShortcutExportRequest {
-            scope: ShortcutExportScope::UserOverrides,
-            include_platform_mappings: false,
-            runtime_platform: CommandPlatform::Browser,
-            operating_system: OperatingSystem::Windows,
-            current_contexts: Vec::new(),
-        };
-        let model = build_shortcut_reference_model(&profile, &request).unwrap();
-        let first = serialize_shortcut_reference_json(&model).unwrap();
-        let second = serialize_shortcut_reference_json(&model).unwrap();
-        assert_eq!(first, second);
-        assert!(!first.contains("protected-override-acknowledgements"));
-        assert_eq!(
-            model.manifest().coverage.platforms,
-            [CommandPlatform::Browser]
-        );
-        let value: Value = serde_json::from_str(&first).unwrap();
-        let platforms =
-            &value["profile"]["commands"]["toggle-navigator"]["bindings"][0]["platforms"];
-        assert_eq!(platforms, &serde_json::json!(["browser"]));
-    }
 
     #[test]
     fn resolved_export_materializes_defaults_and_current_workspace_filters_contexts() {

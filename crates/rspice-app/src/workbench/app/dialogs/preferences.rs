@@ -1,9 +1,9 @@
 //! Preferences — canonical mockup shell with durable, validated settings.
 
-mod preference_pages;
-mod preferences_shell;
+pub(crate) mod preference_pages;
+pub(crate) mod preferences_shell;
 pub(crate) mod shortcut_portability_dialogs;
-pub(in crate::workbench) mod shortcut_preferences;
+pub(crate) mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;
 
 use egui::{Context, Id};
@@ -38,11 +38,11 @@ const SETTINGS_EXPORT_ID: &str = "rspice.preferences.settings-file.export";
 const PENDING_RESTORE_ID: &str = "rspice.preferences.pending-restore";
 
 /// The page whose Restore defaults is waiting on the reader's answer.
-fn pending_restore(ctx: &Context) -> Option<PreferenceCategory> {
+pub(crate) fn pending_restore(ctx: &Context) -> Option<PreferenceCategory> {
     ctx.data(|data| data.get_temp::<PreferenceCategory>(Id::new(PENDING_RESTORE_ID)))
 }
 
-fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
+pub(crate) fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
     let id = Id::new(PENDING_RESTORE_ID);
     ctx.data_mut(|data| match category {
         Some(category) => {
@@ -55,15 +55,14 @@ fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
 }
 
 #[derive(Debug, Default)]
-pub(in crate::workbench) struct PreferencePageActions {
-    pub(in crate::workbench) open_shortcut_editor: bool,
-    pub(in crate::workbench) open_shortcut_import: bool,
-    pub(in crate::workbench) open_shortcut_export: bool,
-    pub(in crate::workbench) import_settings_file: bool,
-    pub(in crate::workbench) export_settings_file: bool,
-    pub(in crate::workbench) show_settings_file: bool,
-    pub(in crate::workbench) shortcut_policy_candidate:
-        Option<crate::state::shortcuts::ShortcutPreferences>,
+pub(crate) struct PreferencePageActions {
+    pub(crate) open_shortcut_editor: bool,
+    pub(crate) open_shortcut_import: bool,
+    pub(crate) open_shortcut_export: bool,
+    pub(crate) import_settings_file: bool,
+    pub(crate) export_settings_file: bool,
+    pub(crate) show_settings_file: bool,
+    pub(crate) shortcut_policy_candidate: Option<crate::state::shortcuts::ShortcutPreferences>,
 }
 
 /// What Preferences and the windows it opens read and write: the settings
@@ -93,7 +92,7 @@ pub(crate) struct PreferencesDialogs<'a> {
 /// Preferences and the windows it opens, over the application state's
 /// parts, for a test that draws them without the feature's context.
 #[cfg(test)]
-fn preferences_dialogs(state: &mut AppState) -> PreferencesDialogs<'_> {
+pub(crate) fn preferences_dialogs(state: &mut AppState) -> PreferencesDialogs<'_> {
     PreferencesDialogs {
         preferences_open: &mut state.settings.preferences_open,
         workspace_layout_manager: &mut state.settings.workspace_layout_manager,
@@ -250,7 +249,11 @@ impl PreferencesDialogs<'_> {
         self.render_shortcut_portability_dialogs(ctx);
     }
 
-    fn execute_preference_page_actions(&mut self, ctx: &Context, actions: PreferencePageActions) {
+    pub(crate) fn execute_preference_page_actions(
+        &mut self,
+        ctx: &Context,
+        actions: PreferencePageActions,
+    ) {
         if actions.open_shortcut_editor {
             let profile = self.model.preferences.shortcuts().clone();
             self.shortcut_editor.open(&profile);
@@ -695,17 +698,17 @@ pub(in crate::workbench) fn normalize_autosave_minutes(minutes: u8) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
     use crate::workbench::{BrowserHistoryEffect, ChoicePreference, TogglePreference};
 
-    fn preferences_route() -> SurfaceRoute {
+    pub(crate) fn preferences_route() -> SurfaceRoute {
         SurfaceRoute::surface(SurfaceId::Preferences)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn test_app() -> RSpiceApp {
+    pub(crate) fn test_app() -> RSpiceApp {
         RSpiceApp::test_instance()
     }
 
@@ -1201,61 +1204,6 @@ mod tests {
         assert!(
             app.state.settings.preferences_open,
             "Escape answers the question; it does not also close Preferences"
-        );
-    }
-
-    /// Restoring Results and precision starts the open waveform view from
-    /// the restored defaults in the frame the reader confirms it, as a new
-    /// view would start: wrapped, and without the minor grid.
-    #[test]
-    fn restored_waveform_defaults_reach_the_open_view_in_the_same_frame() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = test_app();
-        app.state
-            .workbench
-            .navigate(preferences_route(), RouteTransitionSource::User)
-            .unwrap();
-        app.state.settings.preferences_open = true;
-        app.state.results.results.session.phase_continuous = true;
-        app.state.results.results.session.show_minor_grid = true;
-        set_pending_restore(&ctx, Some(PreferenceCategory::Results));
-
-        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            preferences_dialogs(&mut app.state).render(ctx);
-            app.after_contribution();
-        });
-        assert!(
-            app.state.results.results.session.phase_continuous,
-            "nothing is restored until the reader confirms"
-        );
-
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                events: vec![egui::Event::Key {
-                    key: egui::Key::Enter,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
-                ..egui::RawInput::default()
-            },
-            |ctx| {
-                preferences_dialogs(&mut app.state).render(ctx);
-                app.after_contribution();
-            },
-        );
-        assert!(pending_restore(&ctx).is_none());
-        assert!(!app.state.results.results.session.phase_continuous);
-        assert!(!app.state.results.results.session.show_minor_grid);
-        assert!(
-            app.state
-                .workbench
-                .outbox
-                .peek::<crate::workbench::framework::requests::ApplyWaveformDefaults>()
-                .is_none(),
-            "the dialog takes the request it raised before it returns"
         );
     }
 

@@ -1422,4 +1422,4 @@ pub fn apply_shortcut_import(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

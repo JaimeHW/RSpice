@@ -159,7 +159,7 @@ impl CategoryGroup {
 /// that leads to an absence advertises the absence; these come back when a
 /// credential store, an extension loader or an execution service does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum PreferenceCategory {
+pub(crate) enum PreferenceCategory {
     #[default]
     Appearance,
     Accessibility,

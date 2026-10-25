@@ -8,3 +8,4 @@ mod framework;
 mod model;
 mod run;
 mod services;
+mod settings;

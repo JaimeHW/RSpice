@@ -303,33 +303,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_import_never_trusts_transferred_protected_acknowledgements() {
-        let staged = stage_shortcut_profile_json(
-            r#"{
-                "format":"rspice.shortcuts/1",
-                "profile":{
-                    "protected-override-acknowledgements":["save-project"],
-                    "commands":{}
-                }
-            }"#,
-        )
-        .unwrap();
-
-        assert!(!staged.candidate().protected_override_acknowledged(
-            crate::workbench::commands::vocabulary::Command::Save.key()
-        ));
-        // The scrub happens before decoding, so the transferred entry cannot
-        // reappear through the candidate's own serialization either.
-        let reencoded = serde_json::to_value(staged.candidate()).unwrap();
-        assert_eq!(
-            reencoded["protected-override-acknowledgements"]
-                .as_array()
-                .map(Vec::len),
-            Some(0)
-        );
-    }
-
-    #[test]
     fn syntax_envelope_and_sequence_errors_have_stable_paths() {
         let syntax = stage_shortcut_profile_json("{").unwrap_err();
         assert_eq!(syntax.json_path(), "$");

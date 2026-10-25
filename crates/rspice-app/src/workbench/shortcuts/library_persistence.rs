@@ -207,7 +207,7 @@ fn retained(
     }
 }
 
-fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
+pub(crate) fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
     if bytes.len() > MAX_SHORTCUT_LIBRARY_STORE_BYTES {
         return ShortcutProfileLibraryRestore::Corrupt(retained(
             bytes,
@@ -443,7 +443,7 @@ fn validate_device_local_privacy(value: &Value) -> Result<(), String> {
     walk(value, None, &mut Vec::new())
 }
 
-fn encode_store_bytes(
+pub(crate) fn encode_store_bytes(
     library: &ShortcutProfileLibrary,
     generation: u64,
 ) -> Result<Vec<u8>, ShortcutLibraryPersistenceError> {
@@ -1539,26 +1539,6 @@ mod tests {
             "protected-override-acknowledgements": ["save-project"]
         });
         validate_device_local_privacy(&allowed).unwrap();
-    }
-
-    #[test]
-    fn protected_override_acknowledgements_round_trip_in_device_local_store() {
-        let library: ShortcutProfileLibrary = serde_json::from_value(serde_json::json!({
-            "library-version": 1,
-            "active": {
-                "protected-override-acknowledgements": ["save-project"]
-            },
-            "named-presets": {},
-            "revision": 0
-        }))
-        .unwrap();
-        let bytes = encode_store_bytes(&library, 1).unwrap();
-        let ShortcutProfileLibraryRestore::Compatible(restored) = decode_store_bytes(&bytes) else {
-            panic!("protected acknowledgement store did not restore");
-        };
-        assert!(restored.library().active().protected_override_acknowledged(
-            crate::workbench::commands::vocabulary::Command::Save.key()
-        ));
     }
 
     #[test]

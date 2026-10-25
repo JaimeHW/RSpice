@@ -912,7 +912,7 @@ impl AppState {
 
     /// What the shortcut library's persistence reads and writes, borrowed
     /// from this state.
-    pub(in crate::workbench) fn shortcut_library_parts(
+    pub(crate) fn shortcut_library_parts(
         &mut self,
     ) -> crate::workbench::app_state::session::shortcut_library::ShortcutLibraryParts<'_> {
         crate::workbench::app_state::session::shortcut_library::ShortcutLibraryParts {

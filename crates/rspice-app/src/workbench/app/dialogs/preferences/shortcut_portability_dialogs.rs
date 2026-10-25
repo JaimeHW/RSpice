@@ -106,9 +106,9 @@ pub(crate) struct ShortcutImportDialogState {
     open: bool,
     artifact: Option<DecodedShortcutArtifact>,
     vscode_report: Option<VscodeImportReport>,
-    options: ShortcutImportOptions,
-    plan: Option<ShortcutImportPlan>,
-    plan_dirty: bool,
+    pub(crate) options: ShortcutImportOptions,
+    pub(crate) plan: Option<ShortcutImportPlan>,
+    pub(crate) plan_dirty: bool,
     pending: ImportPending,
     cancel_requested: bool,
     discard_confirmation: bool,
@@ -209,7 +209,7 @@ impl ShortcutImportDialogState {
         }
     }
 
-    fn accept_detected(
+    pub(crate) fn accept_detected(
         &mut self,
         base: &ShortcutProfileLibrary,
         detected: DetectedShortcutArtifact,
@@ -258,7 +258,7 @@ impl ShortcutImportDialogState {
         self.plan_dirty = false;
     }
 
-    fn synchronize_plan(&mut self, base: &ShortcutProfileLibrary) {
+    pub(crate) fn synchronize_plan(&mut self, base: &ShortcutProfileLibrary) {
         if self.pending != ImportPending::None || self.artifact.is_none() {
             return;
         }
@@ -1300,18 +1300,16 @@ fn vscode_blocking_message(report: &VscodeImportReport) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::state::shortcuts::{
-        ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutSequence, ShortcutStroke,
-    };
+    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
     use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::shortcuts::artifacts::{
         apply_shortcut_import, decode_shortcut_artifact_json, detect_shortcut_artifact,
         serialize_shortcut_reference_json,
     };
 
-    fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
+    pub(crate) fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
         let model = build_shortcut_reference_model(
             profile,
             &ShortcutExportRequest {
@@ -1330,7 +1328,7 @@ mod tests {
         .unwrap()
     }
 
-    fn detected(profile: &ShortcutPreferences) -> DetectedShortcutArtifact {
+    pub(crate) fn detected(profile: &ShortcutPreferences) -> DetectedShortcutArtifact {
         let model = build_shortcut_reference_model(
             profile,
             &ShortcutExportRequest::user_overrides(
@@ -1348,7 +1346,7 @@ mod tests {
         .unwrap()
     }
 
-    fn open_with_artifact(
+    pub(crate) fn open_with_artifact(
         state: &mut ShortcutImportDialogState,
         base: &ShortcutProfileLibrary,
         artifact: DecodedShortcutArtifact,
@@ -1488,65 +1486,6 @@ mod tests {
             state.plan.as_ref().unwrap().base_revision(),
             base.revision()
         );
-    }
-
-    #[test]
-    fn protected_binding_requires_fresh_explicit_confirmation() {
-        let mut imported = ShortcutPreferences::default();
-        imported
-            .policies_mut()
-            .set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
-        imported
-            .set_binding(
-                &crate::workbench::commands::vocabulary::CommandRegistry,
-                Command::Save.key(),
-                ShortcutBindingSlot::Alternate,
-                vec![
-                    CommandPlatform::Browser,
-                    CommandPlatform::Tablet,
-                    CommandPlatform::Phone,
-                ],
-                None,
-            )
-            .unwrap();
-        imported.acknowledge_protected_override(Command::Save.key());
-        let artifact = exported_artifact(&imported);
-        let base = ShortcutProfileLibrary::default();
-        let mut state = ShortcutImportDialogState::default();
-        open_with_artifact(&mut state, &base, artifact);
-        state.options.conflict_policy = ShortcutConflictPolicy::UseImportedBinding;
-        state.plan_dirty = true;
-        state.synchronize_plan(&base);
-        let command_id = Command::Save.stable_id().to_owned();
-        assert!(
-            state
-                .plan
-                .as_ref()
-                .unwrap()
-                .required_protected_confirmations()
-                .contains(&command_id)
-        );
-        assert!(!state.plan.as_ref().unwrap().can_apply());
-
-        state.options.protected_confirmations.insert(command_id);
-        state.plan_dirty = true;
-        state.synchronize_plan(&base);
-        assert!(state.plan.as_ref().unwrap().can_apply());
-    }
-
-    #[test]
-    fn replacing_source_clears_digest_specific_protected_consent() {
-        let base = ShortcutProfileLibrary::default();
-        let mut state = ShortcutImportDialogState::default();
-        state.open();
-        state
-            .options
-            .protected_confirmations
-            .insert(Command::Save.stable_id().to_owned());
-
-        state.accept_detected(&base, detected(&ShortcutPreferences::default()));
-
-        assert!(state.options.protected_confirmations.is_empty());
     }
 
     #[test]

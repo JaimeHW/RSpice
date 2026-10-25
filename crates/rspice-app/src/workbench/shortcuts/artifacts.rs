@@ -7,11 +7,11 @@
 mod import_io;
 mod io;
 mod markdown;
-mod merge;
-mod pdf;
-mod projection;
-mod schema;
-mod vscode;
+pub(crate) mod merge;
+pub(crate) mod pdf;
+pub(crate) mod projection;
+pub(crate) mod schema;
+pub(crate) mod vscode;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use import_io::import_shortcut_artifact_source;
