@@ -39,7 +39,6 @@ impl CodeDiagnosticSummary {
 
 #[derive(Debug, Clone, Default)]
 struct DocumentDiagnosticIndex {
-    summary: CodeDiagnosticSummary,
     severity_by_line: HashMap<usize, CodeEditorSeverity>,
 }
 
@@ -131,7 +130,6 @@ impl CodeDiagnosticCollection {
                 .or_default(),
             None => &mut self.global,
         };
-        target.summary.record(record.severity);
         if let Some(line) = line {
             target
                 .severity_by_line
