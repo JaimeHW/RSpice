@@ -323,3 +323,7 @@ mod manager;
 pub use manager::{YieldAnalysisManager, YieldInput};
 mod evidence;
 pub use evidence::YieldEvidence;
+#[cfg(feature = "engine-evidence")]
+mod judge;
+#[cfg(feature = "engine-evidence")]
+pub use judge::{YieldBasis, judge_monte_carlo, monte_carlo_provenance};

@@ -190,6 +190,41 @@ impl PreparedSpecification {
         signed_margin(self.entry().min, self.entry().max, value)
             .map(|margin| margin - self.guard_band())
     }
+
+    /// Every trial of one Monte Carlo analysis that answers this requirement,
+    /// in retained order, judged as the yield gate counts it.
+    ///
+    /// The same candidates and the same passing rule as
+    /// [`acceptance_is_blocked`], so a yield stated from these cannot differ
+    /// from the population the sign-off divides: a trial that did not converge
+    /// is a failing trial with no value, a guard band narrows what passes, the
+    /// value is in the requirement's unit, and a trial outside the
+    /// requirement's scope or producing analysis is not one of its trials.
+    #[must_use]
+    pub fn judge_trials<'a, W: AsRef<RetainedWaveform> + 'a>(
+        &self,
+        analysis: &'a AnalysisResult<W>,
+    ) -> Vec<TrialJudgment> {
+        if analysis.analysis_type != AnalysisType::MonteCarlo {
+            return Vec::new();
+        }
+        candidates_for(self, std::iter::once(analysis))
+            .iter()
+            .map(|candidate| TrialJudgment {
+                value: candidate.value,
+                passing: candidate_is_passing(candidate),
+            })
+            .collect()
+    }
+}
+
+/// One Monte Carlo trial, as one requirement judged it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrialJudgment {
+    /// The trial's finite value in the requirement's unit; `None` when the
+    /// trial produced none.
+    pub value: Option<f64>,
+    pub passing: bool,
 }
 
 fn evaluate_specifications<'a, W: AsRef<RetainedWaveform> + 'a>(
