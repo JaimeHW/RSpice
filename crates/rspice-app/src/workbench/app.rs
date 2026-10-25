@@ -125,8 +125,7 @@ pub(crate) use dialogs::drawing_sheet_defaults::{
     DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
 };
 pub(crate) use dialogs::drawing_sheet_presets::{
-    DrawingSheetPresetDialogsState, capture_personal_preset_into_project,
-    open_custom_sheet_size_library,
+    DrawingSheetPresetDialogsState, open_custom_sheet_size_library,
 };
 pub(crate) use dialogs::drawing_sheet_support::{
     DrawingSheetSupportState, open_sheet_format_manager,

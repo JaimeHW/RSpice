@@ -768,10 +768,7 @@ fn capture_selected_personal_preset(
             source.name
         ));
     }
-    let captured =
-        crate::workbench::app::dialogs::drawing_sheet_presets::capture_personal_preset_into_project(
-            candidate, source,
-        )?;
+    let captured = Model::capture_personal_preset_into_project(candidate, source)?;
     *sheet_format = attach_project_preset(sheet_format, &captured)?;
     Ok(())
 }
@@ -845,10 +842,7 @@ fn save_one_off_custom_preset(
             };
             personal.presets.push(source.clone());
             personal.validate()?;
-            let captured =
-                crate::workbench::app::dialogs::drawing_sheet_presets::capture_personal_preset_into_project(
-                    candidate, &source,
-                )?;
+            let captured = Model::capture_personal_preset_into_project(candidate, &source)?;
             *sheet_format = attach_project_preset(sheet_format, &captured)?;
             Ok(())
         }

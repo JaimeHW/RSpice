@@ -9,6 +9,7 @@
 //! before these fields were gathered here.
 
 mod drawing_sheet;
+mod drawing_sheet_presets;
 mod schematic_sync;
 mod sheet_catalog;
 mod sheet_move;

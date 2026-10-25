@@ -26,8 +26,6 @@ use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
-pub(crate) use model::capture_personal_preset_into_project;
-
 use rspice_design_model::sheet_package::{
     build_package_with_options, encode_package_with_format, parse_package,
 };
@@ -36,7 +34,7 @@ use model::{
     ImportResolution, PendingExport, PresetEditorDraft, PresetEditorMode, PresetEditorUnit,
     PresetPackageFormat, PresetTransferState, StartingFrame, TransferMode, all_visible_presets,
     imported_project_preset, prepare_import_candidates, preset_from_editor, unavailable,
-    unique_copy_name, unsigned_exportable, validate_preset_name,
+    unsigned_exportable, validate_preset_name,
 };
 use render::{EditorBodyAction, LibraryBodyAction, PresetKey, TransferBodyAction};
 
@@ -261,7 +259,7 @@ impl PresetDialogs<'_> {
         let visible =
             all_visible_presets(&self.model.workspace.content.design_management, &personal);
         let id = format!("custom-{}", uuid::Uuid::new_v4().simple());
-        let name = unique_copy_name(&format!("{} copy", source.name), &visible);
+        let name = Model::unique_preset_copy_name(&format!("{} copy", source.name), &visible);
         let format = source
             .format
             .try_update(|draft| {

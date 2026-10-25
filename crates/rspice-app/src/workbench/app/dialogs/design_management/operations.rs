@@ -91,12 +91,13 @@ impl RSpiceApp {
                             .find(|preset| preset.id.eq_ignore_ascii_case(id))
                     })
                 {
-                    page_format = crate::workbench::app::capture_personal_preset_into_project(
-                        draft,
-                        personal_preset,
-                    )?
-                    .format
-                    .without_project_owned_title_values();
+                    page_format =
+                        crate::workbench::app_state::Model::capture_personal_preset_into_project(
+                            draft,
+                            personal_preset,
+                        )?
+                        .format
+                        .without_project_owned_title_values();
                 }
                 let settings = draft.drawing_sheet_settings().clone();
                 if settings.new_sheet_policy == DrawingSheetNewSheetPolicy::Ask

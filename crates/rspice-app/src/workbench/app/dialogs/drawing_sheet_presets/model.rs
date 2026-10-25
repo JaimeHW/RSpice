@@ -22,6 +22,7 @@ use crate::state::{
     DrawingSheetTitleBlockTemplate, MAX_DRAWING_SHEET_PRESET_NAME_CHARS, SchematicSheetFormat,
 };
 use crate::workbench::DrawingSheetPersonalPreferences;
+use crate::workbench::app_state::Model;
 
 pub(super) const MAX_PACKAGE_BYTES: usize = DRAWING_SHEET_PACKAGE_MAX_BYTES;
 
@@ -399,7 +400,7 @@ pub(super) fn imported_project_preset(
             .any(|preset| preset.name.eq_ignore_ascii_case(&name))
     {
         id = format!("custom-{}", Uuid::new_v4().simple());
-        name = unique_copy_name(&format!("{name} imported"), visible);
+        name = Model::unique_preset_copy_name(&format!("{name} imported"), visible);
     }
     let mut format = candidate.portable.format.clone();
     format = format
@@ -428,88 +429,6 @@ pub(super) fn imported_project_preset(
         scope: DrawingSheetPresetScope::Project,
         format: format.as_reusable_drawing_sheet_preset(),
     }))
-}
-
-pub(super) fn unique_copy_name(base: &str, visible: &[DrawingSheetPreset]) -> String {
-    if !visible
-        .iter()
-        .any(|preset| preset.name.eq_ignore_ascii_case(base))
-    {
-        return base.to_owned();
-    }
-    (2_u32..)
-        .map(|suffix| format!("{base} {suffix}"))
-        .find(|candidate| {
-            !visible
-                .iter()
-                .any(|preset| preset.name.eq_ignore_ascii_case(candidate))
-        })
-        .expect("a bounded preset catalog always has a free display suffix")
-}
-
-pub(crate) fn capture_personal_preset_into_project(
-    candidate: &mut DesignManagementCatalog,
-    personal: &DrawingSheetPreset,
-) -> Result<DrawingSheetPreset, String> {
-    if personal.scope != DrawingSheetPresetScope::User {
-        return Err("Only a personal preset requires project capture.".to_owned());
-    }
-    if let Some(existing) = candidate
-        .drawing_sheet_settings()
-        .presets
-        .iter()
-        .find(|preset| same_preset_content(&preset.format, &personal.format))
-    {
-        return Ok(existing.clone());
-    }
-    let visible = candidate.drawing_sheet_settings().presets.clone();
-    let id = if visible
-        .iter()
-        .any(|preset| preset.id.eq_ignore_ascii_case(&personal.id))
-    {
-        format!("custom-{}", Uuid::new_v4().simple())
-    } else {
-        personal.id.clone()
-    };
-    let name = unique_copy_name(&personal.name, &visible);
-    let mut format = personal
-        .format
-        .try_update(|draft| {
-            draft.inheritance = DrawingSheetInheritance::Explicit;
-            if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
-                snapshot.preset_id = Some(id.clone());
-                snapshot.name.clone_from(&name);
-                snapshot.source_preset_unavailable = false;
-            }
-        })
-        .map_err(|error| error.to_string())?;
-    format.inheritance = DrawingSheetInheritance::Explicit;
-    let captured = DrawingSheetPreset {
-        id,
-        name,
-        scope: DrawingSheetPresetScope::Project,
-        format: format.as_reusable_drawing_sheet_preset(),
-    };
-    candidate
-        .publish_drawing_sheet_preset(candidate.revision(), captured.clone())
-        .map_err(|error| error.to_string())?;
-    Ok(captured)
-}
-
-fn same_preset_content(left: &SchematicSheetFormat, right: &SchematicSheetFormat) -> bool {
-    let normalize = |format: &SchematicSheetFormat| {
-        format
-            .try_update(|draft| {
-                draft.inheritance = DrawingSheetInheritance::Explicit;
-                if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
-                    snapshot.preset_id = None;
-                    snapshot.name = "content comparison".to_owned();
-                    snapshot.source_preset_unavailable = false;
-                }
-            })
-            .ok()
-    };
-    normalize(left) == normalize(right)
 }
 
 pub(super) fn all_visible_presets(
@@ -579,7 +498,8 @@ mod tests {
             format: custom_format("Review strip", 210_000, 594_000, StartingFrame::IsoA).unwrap(),
         };
         let mut project = DesignManagementCatalog::default();
-        let captured = capture_personal_preset_into_project(&mut project, &personal).unwrap();
+        let captured =
+            Model::capture_personal_preset_into_project(&mut project, &personal).unwrap();
         assert_eq!(captured.scope, DrawingSheetPresetScope::Project);
         assert_eq!(
             project.drawing_sheet_settings().find_preset("review-strip"),
