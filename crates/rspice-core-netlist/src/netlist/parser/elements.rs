@@ -521,20 +521,9 @@ fn upsert_passive_scalar_tc(
     name: &str,
     value: DeferrableValue,
 ) {
-    let ElementParamSink {
-        instance_params,
-        deferred_params,
-    } = sink;
     let index = usize::from(name.eq_ignore_ascii_case("TC2"));
     if !vector_given[index] {
-        upsert_instance_param(
-            ElementParamSink {
-                instance_params,
-                deferred_params,
-            },
-            name,
-            value,
-        );
+        upsert_instance_param(sink, name, value);
     }
 }
 
