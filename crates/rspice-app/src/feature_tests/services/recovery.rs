@@ -4,7 +4,7 @@
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::recovery::recovery_replacement_block_reason;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::lifecycle::recovery::tests::unique_temp_dir;
+use crate::workbench::lifecycle::recovery::unique_temp_dir;
 
 #[test]
 fn replacement_guard_compares_initial_plan_draft_to_the_documented_default() {

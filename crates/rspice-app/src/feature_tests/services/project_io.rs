@@ -5,7 +5,7 @@
 //! session, a session restored from its own serialization, or a Monte Carlo
 //! checkpoint a run completed.
 
-use crate::io::project_io::tests::{project_with_execution_context, seal_prepared_run};
+use crate::io::project_io::fixtures::{project_with_execution_context, seal_prepared_run};
 use crate::io::project_io::*;
 use crate::product::ObjectRevision;
 use crate::state::{

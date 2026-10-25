@@ -1057,8 +1057,21 @@ pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
         .map_err(|error| format!("The desktop file manager could not be started: {error}"))
 }
 
+/// A new directory under the system temporary directory, named for `label`,
+/// this process and this moment, for a test that writes recovery files.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub fn unique_temp_dir(label: &str) -> PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("rspice-{label}-{}-{nonce}", std::process::id()));
+    std::fs::create_dir_all(&path).expect("create fixture directory");
+    path
+}
+
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunProvenance};
     #[cfg(not(target_arch = "wasm32"))]
@@ -1327,17 +1340,5 @@ pub(crate) mod tests {
         );
 
         std::fs::remove_dir_all(root).expect("remove fixture");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn unique_temp_dir(label: &str) -> PathBuf {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("rspice-{label}-{}-{nonce}", std::process::id()));
-        std::fs::create_dir_all(&path).expect("create fixture directory");
-        path
     }
 }
