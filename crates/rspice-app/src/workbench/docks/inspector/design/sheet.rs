@@ -30,17 +30,33 @@ use crate::state::{
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
     NetNamingPolicy, SchematicGridPitch, SchematicSheetFormat, SheetId, drawing_sheet_title_layout,
 };
-use crate::workbench::AppState;
 use crate::workbench::app::drawing_sheet_edit::{
-    DrawingSheetEdit, apply_drawing_sheet_edit, drawing_sheet_editable, format_sheet_length,
+    DrawingSheetEdit, apply_drawing_sheet_edit_on, drawing_sheet_editable, format_sheet_length,
     parse_sheet_length,
 };
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::schematic_preferences::NET_NAME_CHARACTERS;
 use crate::workbench::design_system::{
     Problem, problem_line, property_row_combo, property_row_input_with_hint,
     schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
 };
+use crate::workbench::framework::requests::FollowSchematicGrid;
+use crate::workbench::state::WorkbenchSession;
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_ui_kit::panels::{section_header, section_header_explained};
+
+/// The sheet's inspector section over the parts it reads and writes: the
+/// model it inspects and edits, the session it reports to, and two of the
+/// sheets slot's own: the one-shot request to bring the Sheet section into
+/// view, and whether the overflow review is open. `review_markers` are the
+/// ones the drawing shows, which the overflow advisories are found through.
+pub(crate) struct SheetInspector<'a> {
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) reveal_sheet_section: &'a mut bool,
+    pub(crate) overflow_review_open: &'a mut bool,
+    pub(crate) review_markers: SchematicReviewMarkerVisibility,
+}
 
 /// An edit the panel asks for this frame, or why what was typed is refused.
 type PanelEdit = Result<DrawingSheetEdit, String>;
@@ -65,34 +81,44 @@ fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlock
     .collect()
 }
 
-pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
-    let sheet = state.model.active_drawing_sheet();
-    let identity = sheet_identity(state);
-    let editable = drawing_sheet_editable(&state.workbench, &state.model);
-    let cut = cut_fields(state, &sheet);
+/// Draw the sheet's section: the inspector with nothing selected.
+pub(crate) fn sheet_panel(ui: &mut Ui, mut panel: SheetInspector<'_>) {
+    let sheet = panel.model.active_drawing_sheet();
+    let identity = sheet_identity(panel.model);
+    let editable = drawing_sheet_editable(panel.workbench, panel.model);
+    let cut = cut_fields(panel.model, &sheet);
     let mut edit = None;
     let mut schematic_edit = None;
-    format::sheet_section(ui, state, &sheet, &identity, editable, &mut edit);
+    format::sheet_section(ui, &mut panel, &sheet, &identity, editable, &mut edit);
     title_block_section(ui, &sheet, &identity, editable, &cut, &mut edit);
-    document_section(ui, state, &sheet, &identity, editable, &cut, &mut edit);
-    schematic_section(ui, state, editable, &mut schematic_edit);
-    checks_section(ui, state);
+    document_section(
+        ui,
+        panel.model,
+        &sheet,
+        &identity,
+        editable,
+        &cut,
+        &mut edit,
+    );
+    schematic_section(ui, panel.model, editable, &mut schematic_edit);
+    checks_section(ui, panel.model);
     if let Some(edit) = edit
-        && let Err(error) = edit.and_then(|edit| apply_drawing_sheet_edit(state, edit))
+        && let Err(error) =
+            edit.and_then(|edit| apply_drawing_sheet_edit_on(panel.model, panel.workbench, edit))
     {
-        state.prompt(error);
+        panel.workbench.prompt(error);
     }
     if let Some(edit) = schematic_edit {
-        apply_schematic_edit(state, edit);
+        apply_schematic_edit(panel.model, panel.workbench, edit);
     }
 }
 
 /// The title fields the sheet's block cuts short, as the sheet prints them:
 /// lettering never shrinks to fit, so each prints with an ellipsis.
-fn cut_fields(state: &AppState, sheet: &ActiveDrawingSheet) -> Vec<DrawingSheetTitleFieldId> {
+fn cut_fields(model: &Model, sheet: &ActiveDrawingSheet) -> Vec<DrawingSheetTitleFieldId> {
     drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
         .map_or_else(Vec::new, |layout| {
-            layout.cut_fields(&state.model.title_block_fields(sheet))
+            layout.cut_fields(&model.title_block_fields(sheet))
         })
 }
 
@@ -146,14 +172,9 @@ enum SchematicEdit {
 
 /// The grid and net-name characters of the open schematic. Preferences only
 /// seeds them for new schematics, so this is where an open one changes.
-fn schematic_section(
-    ui: &mut Ui,
-    state: &AppState,
-    editable: bool,
-    edit: &mut Option<SchematicEdit>,
-) {
+fn schematic_section(ui: &mut Ui, model: &Model, editable: bool, edit: &mut Option<SchematicEdit>) {
     section_header(ui, "Schematic", None);
-    let policy = &state.model.schematic.document().document_policy;
+    let policy = &model.schematic.document().document_policy;
     let grids = SchematicGridPitch::ALL.map(|pitch| (pitch, grid_pitch_label(pitch)));
     if let Some(pitch) = choice_row(
         ui,
@@ -179,22 +200,22 @@ fn schematic_section(
 }
 
 /// Apply a schematic-wide change as one undo step. A new grid moves the
-/// editor's snap with it, as Grid, snap and wire routing does.
-fn apply_schematic_edit(state: &mut AppState, edit: SchematicEdit) {
+/// editor's snap with it, as Grid, snap and wire routing does, and asks that
+/// design's snap follow it.
+fn apply_schematic_edit(model: &mut Model, workbench: &mut WorkbenchSession, edit: SchematicEdit) {
     let changed = match edit {
         SchematicEdit::Grid(pitch) => {
-            let changed = state.model.schematic.change_grid_pitch(pitch);
+            let changed = model.schematic.change_grid_pitch(pitch);
             if changed {
-                state.model.schematic.reconcile_grid_pitch_runtime();
-                state.design.schematic_snap.grid_size =
-                    state.model.schematic.session.editor.snap_engine.grid_size;
+                model.schematic.reconcile_grid_pitch_runtime();
+                workbench.outbox.push(FollowSchematicGrid);
             }
             changed
         }
-        SchematicEdit::NetNameCharacters(policy) => state.model.schematic.change_net_naming(policy),
+        SchematicEdit::NetNameCharacters(policy) => model.schematic.change_net_naming(policy),
     };
-    if changed {
-        state.sync_active_schematic_to_workspace();
+    if changed && let Some(prompt) = model.sync_active_schematic_to_workspace() {
+        workbench.prompt(prompt);
     }
 }
 
@@ -355,7 +376,7 @@ fn optional_boxes_row(
 /// values, so the header says a change here changes them all.
 fn document_section(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     sheet: &ActiveDrawingSheet,
     identity: &SheetIdentity,
     editable: bool,
@@ -372,8 +393,7 @@ fn document_section(
         "All sheets",
         "Every sheet in the project letters these values, so a change here changes them all.",
     );
-    let control = &state
-        .model
+    let control = &model
         .workspace
         .content
         .design_management
@@ -412,7 +432,7 @@ fn document_section(
             cut_advisory(ui, cut, field);
             continue;
         }
-        let stored = stored_title_value(state, format, field);
+        let stored = stored_title_value(model, format, field);
         if writable {
             // The date is refused unless it is written the one way the
             // document control reads it.
@@ -505,12 +525,11 @@ fn locked_by_organization(format: &SchematicSheetFormat, field: DrawingSheetTitl
 /// What `field` holds where it is kept — the document control, the project,
 /// or this sheet — as the panel edits it.
 fn stored_title_value(
-    state: &AppState,
+    model: &Model,
     format: &SchematicSheetFormat,
     field: DrawingSheetTitleFieldId,
 ) -> String {
-    let settings = state
-        .model
+    let settings = model
         .workspace
         .content
         .design_management
@@ -579,18 +598,17 @@ impl SheetText {
     }
 
     /// What the value holds now, as the panel shows it for editing.
-    fn stored(self, state: &AppState, format: &SchematicSheetFormat) -> String {
+    fn stored(self, model: &Model, format: &SchematicSheetFormat) -> String {
         let (width_um, height_um) = format.oriented_dimensions_um();
         match self {
-            Self::Field(field) => stored_title_value(state, format, field),
+            Self::Field(field) => stored_title_value(model, format, field),
             Self::Width => format_sheet_length(width_um, format.display_unit),
             Self::Height => format_sheet_length(height_um, format.display_unit),
             Self::SizeName => match &format.authored_size {
                 AuthoredDrawingSheetSize::Custom { snapshot } => snapshot.name.clone(),
                 AuthoredDrawingSheetSize::Standard { .. } => String::new(),
             },
-            Self::ChangeReference => state
-                .model
+            Self::ChangeReference => model
                 .workspace
                 .content
                 .design_management
@@ -632,10 +650,9 @@ struct TextDraft {
 /// The cell view and governed sheet the inspector is editing.
 type SheetIdentity = (String, Option<SheetId>);
 
-fn sheet_identity(state: &AppState) -> SheetIdentity {
-    let key = state.model.workspace.content.active_key();
-    let sheet = state
-        .model
+fn sheet_identity(model: &Model) -> SheetIdentity {
+    let key = model.workspace.content.active_key();
+    let sheet = model
         .workspace
         .content
         .design_management
@@ -690,8 +707,12 @@ fn text_row(
 /// field's focus, and leaving the field must not lose what was typed. A value
 /// typed on another sheet than the active one is dropped rather than written
 /// to the wrong sheet.
-pub(super) fn commit_pending_sheet_text(ctx: &egui::Context, state: &mut AppState) {
-    let sheet = sheet_identity(state);
+pub(crate) fn commit_pending_sheet_text(
+    ctx: &egui::Context,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) {
+    let sheet = sheet_identity(model);
     for text in SheetText::all() {
         let Some(draft) = ctx.data_mut(|data| take_text_draft(data, text)) else {
             continue;
@@ -699,28 +720,28 @@ pub(super) fn commit_pending_sheet_text(ctx: &egui::Context, state: &mut AppStat
         if draft.sheet != sheet {
             continue;
         }
-        let format = state.model.active_drawing_sheet().format;
-        if draft.text.trim() == text.stored(state, &format) {
+        let format = model.active_drawing_sheet().format;
+        if draft.text.trim() == text.stored(model, &format) {
             continue;
         }
         if let Err(error) = text
             .edit(&format, draft.text.trim().to_owned())
-            .and_then(|edit| apply_drawing_sheet_edit(state, edit))
+            .and_then(|edit| apply_drawing_sheet_edit_on(model, workbench, edit))
         {
-            state.prompt(error);
+            workbench.prompt(error);
         }
     }
 }
 
 /// This sheet's open pins and floating nets from the last check, when it
 /// found any. The header says whether that check still describes the drawing.
-fn checks_section(ui: &mut Ui, state: &AppState) {
-    let open_pins = sheet_open_pin_findings(&state.model);
-    let floating_nets = sheet_floating_net_findings(&state.model);
+fn checks_section(ui: &mut Ui, model: &Model) {
+    let open_pins = sheet_open_pin_findings(model);
+    let floating_nets = sheet_floating_net_findings(model);
     if open_pins.is_empty() && floating_nets.is_empty() {
         return;
     }
-    section_header(ui, "Checks", checks_status(&state.model).as_deref());
+    section_header(ui, "Checks", checks_status(model).as_deref());
     if !open_pins.is_empty() {
         property_row_problem(
             ui,

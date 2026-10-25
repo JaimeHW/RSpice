@@ -230,6 +230,12 @@ impl DesignState {
         }
     }
 
+    /// Move the snap onto the grid the open schematic's editor snaps to, once
+    /// the schematic's grid changed.
+    pub(crate) fn follow_schematic_grid(&mut self, model: &crate::workbench::app_state::Model) {
+        self.schematic_snap.grid_size = model.schematic.session.editor.snap_engine.grid_size;
+    }
+
     /// Cycle the upgraded toolbar's exact presentation order.
     pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
         let next = match self.grid {

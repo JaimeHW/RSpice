@@ -16,7 +16,7 @@ use crate::state::{DrawingSheetDisplayUnit, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 
 const TITLE: &str = "Content outside the drawing sheet";
 const DESCRIPTION: &str = "Every object that falls outside the authored drawing area of this sheet, with its sheet coordinates and a way to reach it.";
@@ -31,17 +31,18 @@ enum OverflowReviewAction {
     Hardcopy,
 }
 
-/// Open the live, itemized outside-sheet review from the inspector.
-pub(crate) fn open_drawing_sheet_overflow_review(state: &mut AppState) -> bool {
-    if state.sheets.drawing_sheet_overflow_open
+/// Open the live, itemized outside-sheet review from the inspector: `open`
+/// says whether it is open, over the drawing `model` has open.
+pub(crate) fn open_drawing_sheet_overflow_review(open: &mut bool, model: &Model) -> bool {
+    if *open
         || !matches!(
-            state.model.workspace.content.active_view_type(),
+            model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
     {
         return false;
     }
-    state.sheets.drawing_sheet_overflow_open = true;
+    *open = true;
     true
 }
 
@@ -462,12 +463,14 @@ fn resolution_card(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn review_opener_is_modal_and_idempotent_for_schematic_views() {
         let mut state = AppState::default();
-        assert!(open_drawing_sheet_overflow_review(&mut state));
-        assert!(!open_drawing_sheet_overflow_review(&mut state));
+        let open = &mut state.sheets.drawing_sheet_overflow_open;
+        assert!(open_drawing_sheet_overflow_review(open, &state.model));
+        assert!(!open_drawing_sheet_overflow_review(open, &state.model));
         assert!(state.sheets.drawing_sheet_overflow_open);
         assert!(state.dialog_modal_open());
     }

@@ -1,7 +1,7 @@
 //! Resolve drawing-sheet project inputs and coordinate current overflow navigation.
 
 use super::viewport::Viewport;
-use super::{AppState, SchematicSymbolContext, schematic_symbol_context};
+use super::{AppState, SchematicSymbolContext};
 use crate::state::overflow_memo::OverflowKey;
 use crate::workbench::app_state::{Model, model_design_view};
 use egui::{Painter, Rect};
@@ -135,9 +135,8 @@ fn hold_overflow_summary(
         .store(key, summary);
 }
 
-/// The sheet's overflow advisories: the ones the canvas holds while the
-/// drawing and sheet stand still, so the inspector and the canvas report one
-/// answer and only one of them pays for it.
+/// [`overflow_summary`] through the drawing as `state` shows it.
+#[cfg(test)]
 pub(crate) fn drawing_sheet_overflow_summary(
     state: &AppState,
     symbol_context: &SchematicSymbolContext,
@@ -146,8 +145,10 @@ pub(crate) fn drawing_sheet_overflow_summary(
     overflow_summary(&state.model, review_markers(state), symbol_context, sheet)
 }
 
-/// [`drawing_sheet_overflow_summary`], through the drawing as it shows
-/// `review_markers`.
+/// The sheet's overflow advisories: the ones the canvas holds while the
+/// drawing and sheet stand still, so the inspector and the canvas report one
+/// answer and only one of them pays for it. Read through the drawing as it
+/// shows `review_markers`.
 pub(crate) fn overflow_summary(
     model: &Model,
     review_markers: SchematicReviewMarkerVisibility,
@@ -171,21 +172,18 @@ pub(crate) fn drawing_sheet_printable_preview(
     )
 }
 
-/// Recompute at invocation time before selecting and centering a current item.
-pub(crate) fn show_first_drawing_sheet_overflow(state: &mut AppState) -> bool {
-    let first_target = {
-        let symbol_context = schematic_symbol_context(state);
-        let sheet = state.model.active_drawing_sheet();
-        drawing_sheet_overflow_summary(state, &symbol_context, &sheet).first_target
-    };
-    first_target.is_some_and(|target| show_drawing_sheet_overflow_target(state, target))
-}
-pub(crate) fn show_drawing_sheet_overflow_target(
-    state: &mut AppState,
-    target: DrawingSheetOverflowTarget,
+/// Recompute at invocation time before selecting and centering a current
+/// item, as the drawing shows `review_markers`.
+pub(crate) fn show_first_drawing_sheet_overflow(
+    model: &mut Model,
+    review_markers: SchematicReviewMarkerVisibility,
 ) -> bool {
-    let review_markers = review_markers(state);
-    show_overflow_target(&mut state.model, review_markers, target)
+    let first_target = {
+        let symbol_context = model.schematic_symbol_context();
+        let sheet = model.active_drawing_sheet();
+        overflow_summary(model, review_markers, &symbol_context, &sheet).first_target
+    };
+    first_target.is_some_and(|target| show_overflow_target(model, review_markers, target))
 }
 
 /// Select `target` and center the canvas on it, as the advisories the
@@ -284,6 +282,7 @@ pub(crate) fn show_overflow_target(
 
 #[cfg(test)]
 mod tests {
+    use super::super::schematic_symbol_context;
     use super::*;
     use crate::state::{Point, Wire};
     use rspice_schematic_editor::view::drawing_sheet::DrawingSheetGeometry;
@@ -351,7 +350,8 @@ mod tests {
             drawing_sheet_overflow_summary(&state, &symbol_context, &sheet).items[0].center()
         };
 
-        assert!(show_first_drawing_sheet_overflow(&mut state));
+        let markers = review_markers(&state);
+        assert!(show_first_drawing_sheet_overflow(&mut state.model, markers));
         assert_eq!(
             state.model.schematic.session.editor.selection.single_wire(),
             Some(41)
@@ -360,8 +360,9 @@ mod tests {
             state.model.schematic.session.editor.center_request,
             Some(expected_center)
         );
-        assert!(!show_drawing_sheet_overflow_target(
-            &mut state,
+        assert!(!show_overflow_target(
+            &mut state.model,
+            markers,
             DrawingSheetOverflowTarget::Wire(404)
         ));
     }

@@ -1030,7 +1030,10 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         // The conductor resolved to a net connectivity no longer reports.
         // Fall back to the sheet rather than narrate a phantom object.
-        super::sheet::sheet_panel(ui, &mut app.state);
+        app.contribute(
+            Point::Inspector(InspectorScope::Document(Workspace::Design)),
+            ui,
+        );
         return;
     };
     let class = net.class;

@@ -24,7 +24,10 @@ pub(super) fn component_panel(
         .find(|component| component.id == id)
         .cloned()
     else {
-        super::sheet::sheet_panel(ui, &mut app.state);
+        app.contribute(
+            Point::Inspector(InspectorScope::Document(Workspace::Design)),
+            ui,
+        );
         return;
     };
     let evidence = component_model_evidence(&app.state, &component);

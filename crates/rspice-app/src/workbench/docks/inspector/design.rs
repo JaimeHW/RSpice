@@ -36,6 +36,7 @@ use crate::workbench::design_system::{
     schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
 };
 use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::host::{Host, InspectorScope, Point};
 use crate::workbench::state::{InlineEditField, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
@@ -369,7 +370,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     if inspected != DesignSubject::Sheet {
-        sheet::commit_pending_sheet_text(ui.ctx(), &mut app.state);
+        app.commit_inspector_section(InspectorScope::Document(Workspace::Design), ui.ctx());
     }
 
     match inspected {
@@ -379,7 +380,10 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         DesignSubject::Shape(id) => shape_panel(ui, app, id),
         DesignSubject::Probe(id) => probe_panel(ui, app, id),
         DesignSubject::Multi => multi_panel(ui, app),
-        DesignSubject::Sheet => sheet::sheet_panel(ui, &mut app.state),
+        DesignSubject::Sheet => app.contribute(
+            Point::Inspector(InspectorScope::Document(Workspace::Design)),
+            ui,
+        ),
     }
 }
 
@@ -604,7 +608,7 @@ mod inline_instance;
 use inline_instance::*;
 
 // The sheet inspector, shown with nothing selected, lives in `design/sheet.rs`.
-mod sheet;
+pub(in crate::workbench) mod sheet;
 
 // =============================================================================
 // Multi-selection inspector

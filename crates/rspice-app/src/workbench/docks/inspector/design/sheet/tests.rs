@@ -8,7 +8,25 @@ use crate::state::{
     DrawingSheetStandard, SchematicPageOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::drawing_sheet_edit::apply_drawing_sheet_edit;
+use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
+
+/// The sheet's section over `state`'s parts, as the sheets feature hands
+/// them to it.
+fn sheet_panel(ui: &mut egui::Ui, state: &mut AppState) {
+    let review_markers = state.design.schematic_visibility.review_markers;
+    super::sheet_panel(
+        ui,
+        SheetInspector {
+            model: &mut state.model,
+            workbench: &mut state.workbench,
+            reveal_sheet_section: &mut state.sheets.reveal_sheet_section,
+            overflow_review_open: &mut state.sheets.drawing_sheet_overflow_open,
+            review_markers,
+        },
+    );
+}
 
 /// The sheet panel rendered at the dock's width, driven by real input.
 struct SheetPanel {
@@ -112,7 +130,7 @@ impl SheetPanel {
 
     fn document_value(&self, field: DrawingSheetTitleFieldId) -> String {
         let format = self.app.state.model.active_drawing_sheet().format;
-        stored_title_value(&self.app.state, &format, field)
+        stored_title_value(&self.app.state.model, &format, field)
     }
 }
 
@@ -455,13 +473,17 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
 
     let mut app = RSpiceApp::test_instance();
     apply_schematic_edit(
-        &mut app.state,
+        &mut app.state.model,
+        &mut app.state.workbench,
         SchematicEdit::Grid(SchematicGridPitch::Mil25),
     );
     apply_schematic_edit(
-        &mut app.state,
+        &mut app.state.model,
+        &mut app.state.workbench,
         SchematicEdit::NetNameCharacters(NetNamingPolicy::SpiceCompatibleRelaxed),
     );
+    // What the edits raised is answered as the shell answers a contribution.
+    app.after_contribution();
     let schematic = &app.state.model.schematic;
     let policy = &schematic.document().document_policy;
     assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
@@ -517,7 +539,11 @@ fn escape_abandons_a_typed_title_value() {
 fn a_value_still_being_typed_lands_when_the_panel_moves_on() {
     let mut panel = SheetPanel::new();
     panel.type_into("Created by", "J. Whitfield");
-    commit_pending_sheet_text(&panel.ctx, &mut panel.app.state);
+    commit_pending_sheet_text(
+        &panel.ctx,
+        &mut panel.app.state.model,
+        &mut panel.app.state.workbench,
+    );
     assert_eq!(
         panel.title_value(DrawingSheetTitleFieldId::DrawnBy),
         "J. Whitfield"
@@ -560,7 +586,11 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
         .unwrap()
         .set_active(second)
         .unwrap();
-    commit_pending_sheet_text(&panel.ctx, &mut panel.app.state);
+    commit_pending_sheet_text(
+        &panel.ctx,
+        &mut panel.app.state.model,
+        &mut panel.app.state.workbench,
+    );
 
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
     assert!(!panel.app.state.model.can_undo_project_design());

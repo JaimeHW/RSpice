@@ -31,6 +31,7 @@ use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::features;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::host::{
@@ -40,6 +41,7 @@ use crate::workbench::framework::host::{
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
+use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::{
     ProjectPage, VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId,
 };
@@ -232,6 +234,13 @@ impl Host for RSpiceApp {
                     Workspace::Netlist => code_workspace_inspector(ui, app),
                 }
             }
+            // The section that inspects a workspace's document itself: the
+            // drawing sheet, which the sheets feature draws.
+            Point::Inspector(InspectorScope::Document(Workspace::Design)) => {
+                features::show_inspector::<SheetsFeature>(&mut app.state, ui);
+                app.after_contribution();
+            }
+            Point::Inspector(InspectorScope::Document(_)) => {}
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use crate::workbench::chrome::toolbar::code::{netlist_tools, veriloga_tools};
@@ -368,6 +377,13 @@ impl Host for RSpiceApp {
         }
     }
 
+    fn commit_inspector_section(&mut self, scope: InspectorScope<Workspace>, ctx: &egui::Context) {
+        if scope == InspectorScope::Document(Workspace::Design) {
+            features::commit_inspector::<SheetsFeature>(&mut self.state, ctx);
+            self.after_contribution();
+        }
+    }
+
     fn inspector_scope(&self, workspace: Workspace) -> InspectorScope<Workspace> {
         if split_selected_trace_is_inspected(self) {
             InspectorScope::AnyWorkspace
@@ -378,8 +394,9 @@ impl Host for RSpiceApp {
 
     fn inspector_title(&self, scope: InspectorScope<Workspace>) -> String {
         let app = self;
-        let InspectorScope::Workspace(workspace) = scope else {
-            return "Result details".to_owned();
+        let workspace = match scope {
+            InspectorScope::AnyWorkspace => return "Result details".to_owned(),
+            InspectorScope::Workspace(workspace) | InspectorScope::Document(workspace) => workspace,
         };
         let messages = app.state.workbench.messages();
         match workspace {

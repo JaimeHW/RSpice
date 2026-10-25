@@ -186,6 +186,16 @@ impl Request for PrintActiveView {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Move design's snap onto the open schematic's grid. Raised by a feature
+/// that changes the grid the schematic is drawn on, so the snap follows the
+/// grid in the same frame, as it does when design changes the grid itself.
+#[derive(Clone, Debug)]
+pub(crate) struct FollowSchematicGrid;
+
+impl Request for FollowSchematicGrid {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Put this text on the platform clipboard.
 #[derive(Clone, Debug)]
 pub(crate) struct ClipboardText(pub(crate) String);

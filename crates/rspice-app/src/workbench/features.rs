@@ -27,7 +27,7 @@ impl Session for WorkbenchSession {
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application state.
-trait Registered: Feature {
+pub(super) trait Registered: Feature {
     /// Everything the feature registered, built on first use.
     fn registry() -> &'static FeatureRegistry<Self>;
 
@@ -137,6 +137,22 @@ macro_rules! features {
 
 features! {
     sheets: SheetsFeature,
+}
+
+/// Draw `F`'s inspector section in the container's `ui`. The caller answers
+/// what it raised straight after.
+pub(super) fn show_inspector<F: Registered>(state: &mut AppState, ui: &mut egui::Ui) {
+    if let Some(inspector) = F::registry().inspector_section() {
+        (inspector.show)(&mut F::cx(state), ui);
+    }
+}
+
+/// Commit what `F`'s inspector section holds typed and not yet committed.
+/// The caller answers what that raised straight after.
+pub(super) fn commit_inspector<F: Registered>(state: &mut AppState, ctx: &egui::Context) {
+    if let Some(inspector) = F::registry().inspector_section() {
+        (inspector.commit_pending_edit)(&mut F::cx(state), ctx);
+    }
 }
 
 #[cfg(test)]

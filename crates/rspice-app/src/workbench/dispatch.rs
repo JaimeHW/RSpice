@@ -31,7 +31,7 @@ use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec,
 };
 use crate::workbench::framework::feature::Execute;
-use crate::workbench::framework::requests::{self, PrintActiveView};
+use crate::workbench::framework::requests::{self, FollowSchematicGrid, PrintActiveView};
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
 /// The dispatcher by key: where a key becomes the command it names, a
@@ -107,7 +107,8 @@ impl RSpiceApp {
     }
 
     /// Answer what a feature's call raised for straight after it: the
-    /// commands it ran next, and the print workflow it opened.
+    /// commands it ran next, the print workflow it opened, and the snap that
+    /// follows a new schematic grid.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -122,6 +123,14 @@ impl RSpiceApp {
                     app,
                     crate::workbench::app::HardcopyWorkflow::Print,
                 );
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, FollowSchematicGrid| {
+                let state = &mut app.state;
+                state.design.follow_schematic_grid(&state.model);
             },
         );
     }

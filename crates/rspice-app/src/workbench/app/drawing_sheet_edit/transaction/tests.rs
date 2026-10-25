@@ -564,7 +564,7 @@ fn an_asme_schematic_on_mixed_sizes_is_advised_against() {
         )
     };
     put_format(&mut app, &key, ids[1], on(DrawingSheetStandard::AnsiD));
-    let advisory = |app: &RSpiceApp, standard| mixed_size_advisory(&app.state, &on(standard));
+    let advisory = |app: &RSpiceApp, standard| mixed_size_advisory(&app.state.model, &on(standard));
     assert_eq!(
         advisory(&app, DrawingSheetStandard::AnsiB),
         Some(DRAWING_SHEET_MIXED_SIZES_ADVISORY)

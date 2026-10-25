@@ -63,6 +63,10 @@ pub(crate) enum InspectorScope<W> {
     AnyWorkspace,
     /// The workspace's own section.
     Workspace(W),
+    /// The section that inspects the workspace's document itself, which the
+    /// workspace's own section hands its `Ui` to while nothing in the
+    /// document is selected.
+    Document(W),
 }
 
 /// A slot of the context toolbar.
@@ -232,6 +236,14 @@ pub(crate) trait Host: 'static {
 
     /// The heading the inspector container draws above the section `scope`.
     fn inspector_title(&self, scope: InspectorScope<Self::WorkspaceKey>) -> String;
+
+    /// Commit what the inspector section `scope` holds typed and not yet
+    /// committed, because another section shows in its place.
+    fn commit_inspector_section(
+        &mut self,
+        scope: InspectorScope<Self::WorkspaceKey>,
+        ctx: &egui::Context,
+    );
 
     /// Whose tools the toolbar's lane shows while `workspace` is showing.
     fn toolbar_scope(

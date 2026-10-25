@@ -27,10 +27,13 @@ use crate::workbench::app::{
     open_custom_sheet_size_library, open_drawing_sheet_defaults, open_sheet_format_manager,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::docks::inspector::design::sheet::{
+    SheetInspector, commit_pending_sheet_text, sheet_panel,
+};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, Reads, Session,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureRegistry, Reads, Session,
 };
 use crate::workbench::framework::requests::PrintActiveView;
 use crate::workbench::slots::SheetsState;
@@ -48,6 +51,22 @@ impl Feature for SheetsFeature {
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SheetsCommand>();
         registry.dialogs(DIALOGS);
+        registry.inspector(FeatureInspector {
+            show: |cx, ui| {
+                let review_markers = cx.peers.design().review_markers();
+                sheet_panel(
+                    ui,
+                    SheetInspector {
+                        model: cx.model,
+                        workbench: cx.wb,
+                        reveal_sheet_section: &mut cx.state.reveal_sheet_section,
+                        overflow_review_open: &mut cx.state.drawing_sheet_overflow_open,
+                        review_markers,
+                    },
+                );
+            },
+            commit_pending_edit: |cx, ctx| commit_pending_sheet_text(ctx, cx.model, cx.wb),
+        });
     }
 }
 

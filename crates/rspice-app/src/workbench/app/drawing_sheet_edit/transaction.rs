@@ -12,7 +12,7 @@ use crate::state::{
     drawing_sheet_sizes_mixed,
 };
 use crate::workbench::SurfaceId;
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model};
+use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
 use crate::workbench::state::{WorkbenchSession, Workspace};
 
 use super::draft::{DrawingSheetDraft, SheetSizeChoice};
@@ -77,21 +77,22 @@ pub(crate) enum DrawingSheetEdit {
     ChangeReference(String),
 }
 
-/// Apply one property of the active sheet as one transaction.
-///
-/// The sheet's draft is taken from what it draws, the edit is staged into
-/// it, the draft is validated whole, and the result is published with one
-/// undo entry. Nothing is left behind when the edit is refused.
+/// [`apply_drawing_sheet_edit_on`] over the whole state, as tests hold it.
+#[cfg(test)]
 pub(crate) fn apply_drawing_sheet_edit(
-    state: &mut AppState,
+    state: &mut crate::workbench::app_state::AppState,
     edit: DrawingSheetEdit,
 ) -> Result<String, String> {
     apply_drawing_sheet_edit_on(&mut state.model, &state.workbench, edit)
 }
 
-/// [`apply_drawing_sheet_edit`] over the parts it reads and writes: the model
-/// the sheet is published into, and the session that says whether the sheet
-/// can be edited at all.
+/// Apply one property of the active sheet as one transaction, over the parts
+/// it reads and writes: the model the sheet is published into, and the
+/// session that says whether the sheet can be edited at all.
+///
+/// The sheet's draft is taken from what it draws, the edit is staged into
+/// it, the draft is validated whole, and the result is published with one
+/// undo entry. Nothing is left behind when the edit is refused.
 pub(crate) fn apply_drawing_sheet_edit_on(
     model: &mut Model,
     workbench: &WorkbenchSession,
@@ -407,12 +408,12 @@ fn other_sheet_sizes(model: &Model) -> Vec<AuthoredDrawingSheetSize> {
 /// ANSI or ARCH schematic's sheets on more than one size. ISO 5457 makes no
 /// such recommendation.
 pub(crate) fn mixed_size_advisory(
-    state: &AppState,
+    model: &Model,
     format: &SchematicSheetFormat,
 ) -> Option<&'static str> {
     (format.frame_convention() == DrawingSheetFrameConvention::AsmeY141
         && drawing_sheet_sizes_mixed(
-            std::iter::once(&format.authored_size).chain(&other_sheet_sizes(&state.model)),
+            std::iter::once(&format.authored_size).chain(&other_sheet_sizes(model)),
         ))
     .then_some(DRAWING_SHEET_MIXED_SIZES_ADVISORY)
 }

@@ -5,9 +5,9 @@
 use egui::Ui;
 
 use super::super::super::shared::{action_stack, count_label};
-use super::{PanelEdit, SheetIdentity, SheetText, choice_row, text_row};
+use super::{PanelEdit, SheetIdentity, SheetInspector, SheetText, choice_row, text_row};
 use crate::schematic::view::drawing_sheet::{
-    ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
+    ActiveDrawingSheet, DrawingSheetOverflowSummary, overflow_summary,
     show_first_drawing_sheet_overflow,
 };
 use crate::state::{
@@ -18,12 +18,12 @@ use crate::state::{
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
-use crate::workbench::AppState;
 use crate::workbench::app::drawing_sheet_edit::{
     DrawingSheetEdit, current_size_choice_label, mixed_size_advisory, sheet_unit_suffix,
     standard_orientation_advisory, standard_size_choice_label,
 };
 use crate::workbench::app::open_drawing_sheet_overflow_review;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{Problem, problem_line};
 use rspice_ui_kit::panels::section_header;
 
@@ -41,7 +41,7 @@ enum SizeChoice {
 /// the unit, and what does not fit on the sheet they make.
 pub(super) fn sheet_section(
     ui: &mut Ui,
-    state: &mut AppState,
+    panel: &mut SheetInspector<'_>,
     sheet: &ActiveDrawingSheet,
     identity: &SheetIdentity,
     editable: bool,
@@ -50,16 +50,16 @@ pub(super) fn sheet_section(
     let top = ui.cursor().min;
     section_header(ui, "Sheet", None);
     // Sheet properties asks for this section; bring it to the top once.
-    if std::mem::take(&mut state.sheets.reveal_sheet_section) {
+    if std::mem::take(panel.reveal_sheet_section) {
         ui.scroll_to_rect(
             egui::Rect::from_min_max(top, ui.cursor().min),
             Some(egui::Align::TOP),
         );
     }
     let format = &sheet.format;
-    size_rows(ui, state, format, identity, editable, edit);
-    overflow_rows(ui, state, sheet);
-    if let Some(advisory) = mixed_size_advisory(state, format) {
+    size_rows(ui, panel.model, format, identity, editable, edit);
+    overflow_rows(ui, panel, sheet);
+    if let Some(advisory) = mixed_size_advisory(panel.model, format) {
         problem_line(ui, Problem::Warning, advisory);
     }
 
@@ -133,13 +133,13 @@ pub(super) fn sheet_section(
 /// places it can be saved to.
 fn size_rows(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     format: &SchematicSheetFormat,
     identity: &SheetIdentity,
     editable: bool,
     edit: &mut Option<PanelEdit>,
 ) {
-    let saved = saved_sizes(ui, state);
+    let saved = saved_sizes(ui, model);
     let one_off = match &format.authored_size {
         AuthoredDrawingSheetSize::Standard { .. } => false,
         AuthoredDrawingSheetSize::Custom { snapshot } => !saved.iter().any(|preset| {
@@ -229,7 +229,7 @@ fn size_rows(
             SheetText::SizeName => text.label().to_owned(),
             _ => format!("{} ({unit})", text.label()),
         };
-        if let Some(typed) = text_row(ui, identity, text, &label, &text.stored(state, format), "") {
+        if let Some(typed) = text_row(ui, identity, text, &label, &text.stored(model, format), "") {
             *edit = Some(text.edit(format, typed));
         }
     }
@@ -250,9 +250,8 @@ fn size_rows(
 /// The saved custom sizes the Size menu offers: the project's, and the
 /// person's own while a menu is open to show them. Reading the personal ones
 /// parses preferences, which a closed menu has no use for every frame.
-fn saved_sizes(ui: &Ui, state: &AppState) -> Vec<DrawingSheetPreset> {
-    let mut saved = state
-        .model
+fn saved_sizes(ui: &Ui, model: &Model) -> Vec<DrawingSheetPreset> {
+    let mut saved = model
         .workspace
         .content
         .design_management
@@ -261,8 +260,7 @@ fn saved_sizes(ui: &Ui, state: &AppState) -> Vec<DrawingSheetPreset> {
         .clone();
     if egui::Popup::is_any_open(ui.ctx()) {
         saved.extend(
-            state
-                .model
+            model
                 .preferences
                 .drawing_sheet_personal_preferences()
                 .presets,
@@ -280,10 +278,10 @@ fn saved_sizes(ui: &Ui, state: &AppState) -> Vec<DrawingSheetPreset> {
 /// How much stands outside the drawing area of the sheet as it is, said
 /// under the size that decides it, with the way to the first object and to
 /// the review of them all.
-fn overflow_rows(ui: &mut Ui, state: &mut AppState, sheet: &ActiveDrawingSheet) {
+fn overflow_rows(ui: &mut Ui, panel: &mut SheetInspector<'_>, sheet: &ActiveDrawingSheet) {
     // The canvas's own cached context: the inspector resolves nothing.
-    let symbol_context = state.model.frame_symbol_context();
-    let overflow = drawing_sheet_overflow_summary(state, &symbol_context, sheet);
+    let symbol_context = panel.model.frame_symbol_context();
+    let overflow = overflow_summary(panel.model, panel.review_markers, &symbol_context, sheet);
     if overflow.is_clear() {
         return;
     }
@@ -298,10 +296,10 @@ fn overflow_rows(ui: &mut Ui, state: &mut AppState, sheet: &ActiveDrawingSheet) 
             .show(ui)
             .clicked()
         {
-            show_first_drawing_sheet_overflow(state);
+            show_first_drawing_sheet_overflow(panel.model, panel.review_markers);
         }
         if Button::new("Review all\u{2026}").show(ui).clicked() {
-            open_drawing_sheet_overflow_review(state);
+            open_drawing_sheet_overflow_review(panel.overflow_review_open, panel.model);
         }
     });
 }

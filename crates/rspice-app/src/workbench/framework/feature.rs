@@ -165,10 +165,21 @@ pub(crate) struct FeatureDialog<F: Feature> {
     pub(crate) render: fn(&mut Cx<'_, F>, &egui::Context),
 }
 
+/// The inspector section a feature draws in its context, in the body the
+/// inspector container keeps for the section the shell resolves to it.
+pub(crate) struct FeatureInspector<F: Feature> {
+    /// Draw the section in the container's `Ui`.
+    pub(crate) show: fn(&mut Cx<'_, F>, &mut egui::Ui),
+    /// Commit what the section holds typed and not yet committed, because
+    /// another section shows in its place.
+    pub(crate) commit_pending_edit: fn(&mut Cx<'_, F>, &egui::Context),
+}
+
 /// Everything one feature registered, built once.
 pub(crate) struct FeatureRegistry<F: Feature> {
     commands: Vec<FeatureCommand<F>>,
     dialogs: &'static [FeatureDialog<F>],
+    inspector: Option<FeatureInspector<F>>,
 }
 
 impl<F: Feature> FeatureRegistry<F> {
@@ -177,6 +188,7 @@ impl<F: Feature> FeatureRegistry<F> {
         let mut registry = Self {
             commands: Vec::new(),
             dialogs: &[],
+            inspector: None,
         };
         F::register(&mut registry);
         registry
@@ -185,6 +197,16 @@ impl<F: Feature> FeatureRegistry<F> {
     /// Register the feature's dialog steps.
     pub(crate) fn dialogs(&mut self, dialogs: &'static [FeatureDialog<F>]) {
         self.dialogs = dialogs;
+    }
+
+    /// Register the feature's inspector section.
+    pub(crate) fn inspector(&mut self, inspector: FeatureInspector<F>) {
+        self.inspector = Some(inspector);
+    }
+
+    /// The inspector section the feature registered, if it draws one.
+    pub(crate) fn inspector_section(&self) -> Option<&FeatureInspector<F>> {
+        self.inspector.as_ref()
     }
 
     /// The registered dialog step `key` names, if the feature draws one.
