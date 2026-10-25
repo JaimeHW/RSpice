@@ -152,6 +152,9 @@ pub struct B3SoiFd {
     /// The previous full evaluation engaged a limiter (ngspice `Check != 0`),
     /// which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
+    /// The operating-point startup holds the temperature-rise node at zero
+    /// before the self-heated solve.
+    self_heating_startup_disabled: std::cell::Cell<bool>,
     /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
     /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
     /// zero before the companion assembly, so the device contributes no
@@ -233,6 +236,7 @@ impl B3SoiFd {
             initial_off: false,
             startup_seed_pending: std::cell::Cell::new(false),
             last_limited: std::cell::Cell::new(false),
+            self_heating_startup_disabled: std::cell::Cell::new(false),
             charges_suppressed: false,
             instance_ic: super::common::B3SoiInstanceIc::new(),
         })
@@ -316,7 +320,77 @@ impl B3SoiFd {
     }
 
     pub fn self_heating_active(&self) -> bool {
+        !self.self_heating_startup_disabled.get() && self.has_self_heating_node()
+    }
+
+    #[doc(hidden)]
+    pub fn has_self_heating_node(&self) -> bool {
         self.node_temp != 0 && self.sized.rth.is_finite() && self.sized.rth > 0.0
+    }
+
+    /// Hold the temperature-rise node at zero (`true`) for the isothermal
+    /// operating-point startup, or release it.
+    #[doc(hidden)]
+    pub fn set_self_heating_startup_disabled(&self, disabled: bool) {
+        self.self_heating_startup_disabled.set(disabled);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.last_limited.set(false);
+    }
+
+    /// Seed the temperature-rise node from the isothermal dissipation
+    /// `Ids * Vds * Rth` at `solution`.
+    #[doc(hidden)]
+    pub fn seed_self_heating_temperature_from_power(&self, solution: &mut [Value]) {
+        if !self.has_self_heating_node() {
+            return;
+        }
+        let mut bias = self.raw_branch_voltages(solution);
+        bias.del_temp = 0.0;
+        let sized = self.sized_for_bias(bias);
+        let op = eval::eval_dc(&sized, &self.consts, bias, self.mtype);
+        let vds = if op.mode >= 0 { bias.vds } else { -bias.vds };
+        let delta_temp = (op.ids * vds * self.sized.rth).clamp(0.0, 1.0e3);
+        if delta_temp.is_finite()
+            && let Some(slot) = solution.get_mut(self.node_temp - 1)
+        {
+            *slot = delta_temp;
+        }
+    }
+
+    /// Clear the cached operating-point linearization before a fresh DC path.
+    #[doc(hidden)]
+    pub fn reset_operating_point_history(&mut self) {
+        self.op = B3SoiFdOp::default();
+        self.bias = B3SoiFdBias::default();
+        self.converged_ref = B3SoiFdBias::default();
+        self.has_history = false;
+        self.del_temp_limit_anchor = 0.0;
+        self.terminal_limit_anchor = [0.0; 4];
+        self.dc_mode.set(true);
+        self.limit_anchor_valid.set(false);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.last_limited.set(false);
+    }
+
+    /// Linearize at `solution` and anchor the limiters there, so Newton
+    /// continues from a solution found by a startup aid.
+    #[doc(hidden)]
+    pub fn prime_operating_point_from_solution(&mut self, solution: &[Value]) {
+        let bias = self.raw_branch_voltages(solution);
+        self.converged_ref = bias;
+        self.bias = bias;
+        self.op = self.eval_op_for_bias(bias);
+        self.has_history = true;
+        self.del_temp_limit_anchor = bias.del_temp;
+        self.terminal_limit_anchor = self.raw_terminals(solution);
+        self.limit_anchor_valid.set(true);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        self.last_limited.set(false);
     }
 
     pub fn thermal_capacitance(&self) -> Value {
@@ -1072,6 +1146,9 @@ impl B3SoiFd {
 
     fn stamp_thermal_matrix(&self, op: &B3SoiFdOp, matrix: &mut impl MatrixStamper) {
         if !self.self_heating_active() {
+            if self.self_heating_startup_disabled.get() && self.has_self_heating_node() {
+                stamp(matrix, self.node_temp, self.node_temp, 1.0);
+            }
             return;
         }
 

@@ -639,3 +639,53 @@ fn update_limits_each_terminal_to_three_volts_like_ngspice() {
     at_limit.stamp_nonlinear(&near, &mut expected, &mut []);
     assert_same_stamps(&limited, &expected, 4);
 }
+
+/// The isothermal startup holds the temperature-rise node at zero; the power
+/// seed and the prime then hand Newton a self-heated start anchored where it
+/// was primed, and a reset forgets that anchor.
+#[test]
+fn electrothermal_startup_aids_pin_seed_prime_and_reset() {
+    let mut dev = self_heating_device_for_stamp_test();
+    let mut x = [1.5, 1.5, 0.0, 0.0, 0.0];
+    dev.set_self_heating_startup_disabled(true);
+    assert!(!dev.self_heating_active() && dev.has_self_heating_node());
+    dev.update(&x);
+    let mut pinned = RecordingStamper::default();
+    dev.stamp_nonlinear(&x, &mut pinned, &mut []);
+    assert_eq!(
+        pinned.matrix_at(5, 5),
+        1.0,
+        "the temperature node is pinned"
+    );
+    assert_eq!(pinned.rhs_at(5), 0.0, "to zero");
+    for node in 1..=4 {
+        assert_eq!(
+            pinned.matrix_at(node, 5),
+            0.0,
+            "no thermal coupling into {node}"
+        );
+    }
+
+    dev.set_self_heating_startup_disabled(false);
+    assert!(dev.self_heating_active());
+    dev.seed_self_heating_temperature_from_power(&mut x);
+    let bias = dev.raw_branch_voltages(&[1.5, 1.5, 0.0, 0.0, 0.0]);
+    // The seed evaluates in the load's self-heated forms, even at zero rise.
+    let op = eval::eval_dc(&dev.sized_for_bias(bias), &dev.consts, bias, dev.mtype);
+    let expected = op.ids * bias.vds * dev.sized.rth;
+    assert!(expected > 0.0);
+    assert!(
+        (x[4] - expected).abs() <= 1e-12 * expected,
+        "seeded {} vs {expected}",
+        x[4]
+    );
+
+    dev.prime_operating_point_from_solution(&x);
+    assert_eq!(dev.bias.del_temp, x[4]);
+    dev.update(&[1.5, 5.5, 0.0, 0.0, x[4]]);
+    assert_eq!(dev.bias.vgs, 4.5, "limited 3 V from the primed gate");
+
+    dev.reset_operating_point_history();
+    dev.update(&[1.5, 5.5, 0.0, 0.0, x[4]]);
+    assert_eq!(dev.bias.vgs, 5.5, "a reset leaves no anchor");
+}

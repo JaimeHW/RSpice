@@ -598,6 +598,9 @@ impl CircuitData {
         for dev in &mut self.b3soi.devices {
             dev.reset_operating_point_history();
         }
+        for dev in &mut self.b3soi_fd.devices {
+            dev.reset_operating_point_history();
+        }
         for dev in &mut self.b3soi_pd.devices {
             dev.reset_operating_point_history();
         }
@@ -613,6 +616,9 @@ impl CircuitData {
         for dev in &self.b3soi.devices {
             dev.seed_self_heating_temperature_from_power(solution);
         }
+        for dev in &self.b3soi_fd.devices {
+            dev.seed_self_heating_temperature_from_power(solution);
+        }
         for dev in &self.b3soi_pd.devices {
             dev.seed_self_heating_temperature_from_power(solution);
         }
@@ -625,6 +631,13 @@ impl CircuitData {
             .iter()
             .filter(|dev| dev.has_self_heating_node())
             .map(|dev| dev.node_temp)
+            .chain(
+                self.b3soi_fd
+                    .devices
+                    .iter()
+                    .filter(|dev| dev.has_self_heating_node())
+                    .map(|dev| dev.node_temp),
+            )
             .chain(
                 self.b3soi_pd
                     .devices
@@ -643,6 +656,9 @@ impl CircuitData {
         for dev in &mut self.b3soi.devices {
             dev.prime_operating_point_from_solution(solution);
         }
+        for dev in &mut self.b3soi_fd.devices {
+            dev.prime_operating_point_from_solution(solution);
+        }
         for dev in &mut self.b3soi_pd.devices {
             dev.prime_operating_point_from_solution(solution);
         }
@@ -653,6 +669,11 @@ impl CircuitData {
             .devices
             .iter()
             .any(|dev| dev.has_self_heating_node())
+            || self
+                .b3soi_fd
+                .devices
+                .iter()
+                .any(|dev| dev.has_self_heating_node())
             || self
                 .b3soi_pd
                 .devices
@@ -694,6 +715,9 @@ impl CircuitData {
 
     pub(crate) fn set_b3soi_self_heating_startup_disabled(&self, disabled: bool) {
         for dev in &self.b3soi.devices {
+            dev.set_self_heating_startup_disabled(disabled);
+        }
+        for dev in &self.b3soi_fd.devices {
             dev.set_self_heating_startup_disabled(disabled);
         }
         for dev in &self.b3soi_pd.devices {

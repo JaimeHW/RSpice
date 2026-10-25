@@ -485,7 +485,12 @@ const MAX_PUBLIC_ITEMS: usize = 5278;
 // the stamp-derivative check reads the built B3SOIFD and B3SOIPD instances
 // back through them, as it reads B3SOIDD's. The census is 1,600, with no
 // slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1600;
+// B3SOIFD's `has_self_heating_node`, `set_self_heating_startup_disabled`,
+// `seed_self_heating_temperature_from_power`, `reset_operating_point_history`
+// and `prime_operating_point_from_solution` add five: the circuit store's
+// operating-point startup (`rspice-core` circuit/nonlinear.rs) drives them, as
+// it drives B3SOIDD's and B3SOIPD's. The census is 1,605, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1605;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
