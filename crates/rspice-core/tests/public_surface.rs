@@ -364,8 +364,9 @@ use rspice_core::analysis::harmonic_balance::{
 // census is 5,463, with no slack.
 // Deleting public items nothing used brings it to 5,313, with no slack.
 // Deleting dead device, netlist and parameter-scope types brings it to
-// 5,296, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5296;
+// 5,296, with no slack. Sharing one method set across the voltage and
+// current source stores brings it to 5,292, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5292;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
