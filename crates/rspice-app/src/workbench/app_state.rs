@@ -870,25 +870,7 @@ impl AppState {
         surface: crate::workbench::SurfaceId,
         label: &str,
     ) {
-        if self.workbench.current_route().surface_id() != surface {
-            return;
-        }
-        if self
-            .workbench
-            .navigate_back(crate::workbench::RouteTransitionSource::User)
-            .is_some()
-        {
-            return;
-        }
-        let fallback = crate::workbench::SurfaceRoute::surface(
-            crate::workbench::SurfaceId::from_workspace(self.workbench.workspace),
-        );
-        if let Err(error) = self
-            .workbench
-            .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
-        {
-            self.prompt(format!("Could not close {label}: {error}"));
-        }
+        self.workbench.close_route_owned_transient(surface, label);
     }
 
     /// The prompt on the status bar, if one is showing.

@@ -608,6 +608,22 @@ impl WorkbenchSession {
         }
     }
 
+    /// Close a route-owned transient surface without stranding its canonical
+    /// URL. Ordinary opens return to their exact source; a direct deep link
+    /// replaces itself with the currently projected primary workspace.
+    pub(crate) fn close_route_owned_transient(&mut self, surface: SurfaceId, label: &str) {
+        if self.current_route().surface_id() != surface {
+            return;
+        }
+        if self.navigate_back(RouteTransitionSource::User).is_some() {
+            return;
+        }
+        let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(self.workspace));
+        if let Err(error) = self.replace_route(fallback, RouteTransitionSource::User) {
+            self.prompt(format!("Could not close {label}: {error}"));
+        }
+    }
+
     pub fn activate(&mut self, workspace: Workspace) {
         if let Err(error) = self.navigate(
             SurfaceRoute::surface(SurfaceId::from_workspace(workspace)),

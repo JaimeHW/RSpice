@@ -1148,7 +1148,7 @@ pub(in crate::workbench) fn render_command_palette(app: &mut impl WorkbenchHost,
         });
         restore_focus(ctx, focus_state_id, search_id(), modal_layer);
         if route_owned {
-            app.state_mut().close_route_owned_transient(
+            app.workbench_mut().close_route_owned_transient(
                 crate::workbench::routing::surface_catalog::SurfaceId::CommandPalette,
                 "Command Palette",
             );
@@ -1163,7 +1163,7 @@ pub(in crate::workbench) fn render_command_palette(app: &mut impl WorkbenchHost,
             recent.truncate(MAX_RECENT);
         }
         if let Err(error) = entry.execute(app) {
-            app.state_mut().prompt(error);
+            app.workbench_mut().prompt(error);
         }
     }
 }
