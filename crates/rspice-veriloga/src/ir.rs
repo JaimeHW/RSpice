@@ -1586,9 +1586,7 @@ impl DeviceIR {
                         contains_ddt(arena, condition) || contains_ddt(arena, then_expr)
                     }) || contains_ddt(arena, tail)
                 }
-                Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => {
-                    contains_ddt(arena, input)
-                }
+                Node::TableLookup { input, .. } => contains_ddt(arena, input),
                 Node::TableDerivativeApply {
                     input,
                     input_derivative,
@@ -2489,7 +2487,7 @@ pub mod autodiff {
                         axes | recurse(then_expr)
                     })
             }
-            Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => recurse(input),
+            Node::TableLookup { input, .. } => recurse(input),
             Node::TableDerivativeApply {
                 input_derivative, ..
             } => recurse(input_derivative),
@@ -3786,8 +3784,7 @@ pub mod autodiff {
             | Node::PortConnected(_)
             | Node::LastCrossing { .. }
             | Node::Analysis(_)
-            | Node::IdtCompanion(_)
-            | Node::TableDerivative { .. } => {}
+            | Node::IdtCompanion(_) => {}
         }
     }
 

@@ -190,23 +190,6 @@ pub enum TokenKind {
     Forever,
     Disable,
 
-    // === Keywords - Analog Operators ===
-    Ddt,        // ddt(x)
-    Idt,        // idt(x, ic)
-    Idtmod,     // idtmod(x, ic, modulus)
-    Ddx,        // ddx(f, x) partial derivative
-    Limexp,     // limexp(x)
-    Absdelay,   // absdelay(x, delay)
-    Transition, // transition(x, td, rise, fall)
-    Slew,       // slew(x, max_pos_rate, max_neg_rate)
-    Laplace,    // Laplace transform operators
-    Zi,         // z-transform operators
-
-    // === Keywords - Noise Functions ===
-    WhiteNoise,   // white_noise(pwr)
-    FlickerNoise, // flicker_noise(pwr, exp)
-    NoiseTable,   // noise_table(table)
-
     // === Keywords - Events ===
     Posedge,
     Negedge,
@@ -576,19 +559,6 @@ impl TokenKind {
             TokenKind::Repeat => "'repeat'",
             TokenKind::Forever => "'forever'",
             TokenKind::Disable => "'disable'",
-            TokenKind::Ddt => "'ddt'",
-            TokenKind::Idt => "'idt'",
-            TokenKind::Idtmod => "'idtmod'",
-            TokenKind::Ddx => "'ddx'",
-            TokenKind::Limexp => "'limexp'",
-            TokenKind::Absdelay => "'absdelay'",
-            TokenKind::Transition => "'transition'",
-            TokenKind::Slew => "'slew'",
-            TokenKind::Laplace => "a Laplace operator",
-            TokenKind::Zi => "a Z-transform operator",
-            TokenKind::WhiteNoise => "'white_noise'",
-            TokenKind::FlickerNoise => "'flicker_noise'",
-            TokenKind::NoiseTable => "'noise_table'",
             TokenKind::Posedge => "'posedge'",
             TokenKind::Negedge => "'negedge'",
             TokenKind::Cross => "'cross'",

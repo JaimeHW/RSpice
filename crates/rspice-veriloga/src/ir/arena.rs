@@ -363,13 +363,6 @@ pub enum Node {
         /// Index of the `(x, y)` data in the arena's table list.
         table: TableId,
     },
-    /// Slope of a lookup table at the input point.
-    TableDerivative {
-        /// Input expression.
-        input: NodeId,
-        /// Index of the `(x, y)` data in the arena's table list.
-        table: TableId,
-    },
     /// Local table slope applied to a derivative payload before final rounding.
     TableDerivativeApply {
         input: NodeId,
@@ -1147,8 +1140,7 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         | Node::PortConnected(_)
         | Node::Analysis(_)
         | Node::LastCrossing { .. }
-        | Node::IdtCompanion(_)
-        | Node::TableDerivative { .. } => {}
+        | Node::IdtCompanion(_) => {}
     }
 }
 
@@ -1660,8 +1652,7 @@ pub fn rebuild_children(
         | Node::PortConnected(_)
         | Node::Analysis(_)
         | Node::LastCrossing { .. }
-        | Node::IdtCompanion(_)
-        | Node::TableDerivative { .. } => id,
+        | Node::IdtCompanion(_) => id,
     }
 }
 
@@ -2026,7 +2017,6 @@ mod tests {
         }));
         out.push(arena.push(Node::LimiterPrevious(one)));
         out.push(arena.push(Node::TableLookup { input: one, table }));
-        out.push(arena.push(Node::TableDerivative { input: one, table }));
         out.push(arena.push(Node::TableDerivativeApply {
             input: one,
             input_derivative: two,

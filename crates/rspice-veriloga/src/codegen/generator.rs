@@ -1533,13 +1533,6 @@ impl CodeGenerator {
                     self.emit_expr(arena, inner, emit_ctx, program)?;
                     program.instructions.push(Instruction::IdtJacobian);
                 }
-                Node::TableDerivative { input, table } => {
-                    self.emit_expr(arena, input, emit_ctx, program)?;
-                    let table_id = self.register_lookup_table(arena.table(table))?;
-                    program
-                        .instructions
-                        .push(Instruction::TableDerivative(table_id));
-                }
                 Node::TableDerivativeApply {
                     input,
                     input_derivative,
