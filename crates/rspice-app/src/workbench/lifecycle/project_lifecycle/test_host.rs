@@ -6,6 +6,7 @@
 //! here reaches a feature: a test that needs one, or the application's design
 //! checks, runs against the whole application in the shell's feature tests.
 
+use rspice_app_state::workbench::workspace::restore_model_library_manager;
 use rspice_design::drc::DrcResult;
 
 use super::{
@@ -13,6 +14,7 @@ use super::{
     PlatformState, ResultPresentationSource,
 };
 use crate::state::SimulationState;
+use crate::state::pdk_config::PdkConfig;
 use crate::state::result_presentation::ResultPresentation;
 use crate::workbench::state::Workspace;
 
@@ -37,14 +39,14 @@ impl HostWorkbench {
 }
 
 impl Default for ServicesHost {
-    /// The model, platform slot and workspace a new session starts with.
+    /// The model, platform slot and workspace a new session starts with, over
+    /// the empty PDK configuration a test session reads.
     fn default() -> Self {
-        let session = crate::workbench::app_state::AppState::default();
         Self {
-            model: session.model,
-            platform: session.platform,
+            model: Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
+            platform: Box::default(),
             workbench: HostWorkbench {
-                workspace: session.workbench.workspace,
+                workspace: Workspace::Design,
             },
         }
     }

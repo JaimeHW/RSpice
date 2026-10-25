@@ -6,6 +6,7 @@
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 pub(crate) use rspice_app_state::workbench::workspace::default_model_library_manager;
+use rspice_app_state::workbench::workspace::restore_model_library_manager;
 
 /// Rebuild the application-scoped model catalog from durable PDK settings.
 ///
@@ -16,14 +17,11 @@ pub(crate) use rspice_app_state::workbench::workspace::default_model_library_man
 pub(crate) fn restore_session_model_library_manager(
     config: &mut crate::state::pdk_config::PdkConfig,
 ) -> Result<(crate::state::model_library::ModelLibraryManager, usize), Vec<String>> {
-    let previous = config.clone();
-    let previous_managed = previous.managed_model_sources.clone();
-    let mut next = previous.clone();
-    let mut manager = default_model_library_manager();
-    let loaded = manager.replace_from_pdk_config(Some(&previous), &mut next)?;
+    let mut next = config.clone();
+    let restored = restore_model_library_manager(&mut next)?;
 
     #[cfg(all(not(test), not(target_arch = "wasm32")))]
-    if next.managed_model_sources != previous_managed {
+    if next.managed_model_sources != config.managed_model_sources {
         crate::state::pdk_config::save(&next).map_err(|error| {
             vec![format!(
                 "Configured PDK sources were validated but their ownership could not be persisted: {error}"
@@ -31,11 +29,8 @@ pub(crate) fn restore_session_model_library_manager(
         })?;
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
-    let _ = previous_managed;
-
     *config = next;
-    Ok((manager, loaded))
+    Ok(restored)
 }
 
 pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {
@@ -52,18 +47,38 @@ pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState
 
 pub(in crate::workbench) fn default_app_state() -> AppState {
     let analysis = default_analysis_viewers();
-    let mut library_manager = crate::state::LibraryManager::with_primitives();
-    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
-    let schematic = workspace
-        .active_schematic()
-        .map(|source| source.clone_editor())
-        .unwrap_or_default();
-    workspace.save_active_schematic(&schematic);
-    let sim_setup = crate::workbench::app_state::SimSetupState::new();
-    if let Ok(plan) = sim_setup.stable_analysis_plan() {
-        workspace.content.migrate_active_plan_data(plan.id());
-    }
-    let snap_grid_size = schematic
+    #[cfg(all(not(test), not(target_arch = "wasm32")))]
+    let (pdk_config, pdk_load_error) = match crate::state::pdk_config::load() {
+        Ok(config) => (config, None),
+        Err(error) => (
+            crate::state::pdk_config::PdkConfig::default(),
+            Some(error.to_string()),
+        ),
+    };
+    // Browser PDK state is hydrated asynchronously from IndexedDB by the
+    // application persistence owner. Until that exact read completes, no
+    // persisted trust or package authority is present in the live state.
+    #[cfg(all(not(test), target_arch = "wasm32"))]
+    let (pdk_config, pdk_load_error) = (
+        crate::state::pdk_config::PdkConfig::default(),
+        None::<String>,
+    );
+    // Unit tests must never inherit user- or machine-owned trust state. Apart
+    // from making tests nondeterministic, doing so could grant a fixture
+    // authority it did not explicitly provision.
+    #[cfg(test)]
+    let (pdk_config, pdk_load_error) = (
+        crate::state::pdk_config::PdkConfig::default(),
+        None::<String>,
+    );
+    let model = crate::workbench::app_state::Model::session_start(
+        pdk_config,
+        pdk_load_error,
+        restore_session_model_library_manager,
+    );
+    let workspace = &model.workspace;
+    let snap_grid_size = model
+        .schematic
         .document()
         .document_policy
         .grid_pitch
@@ -126,65 +141,9 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         // runtime creates the validation receipt after authoritative CPython
         // compilation.
     }
-    #[cfg(all(not(test), not(target_arch = "wasm32")))]
-    let (mut pdk_config, pdk_load_error) = match crate::state::pdk_config::load() {
-        Ok(config) => (config, None),
-        Err(error) => (
-            crate::state::pdk_config::PdkConfig::default(),
-            Some(error.to_string()),
-        ),
-    };
-    // Browser PDK state is hydrated asynchronously from IndexedDB by the
-    // application persistence owner. Until that exact read completes, no
-    // persisted trust or package authority is present in the live state.
-    #[cfg(all(not(test), target_arch = "wasm32"))]
-    let (mut pdk_config, pdk_load_error) = (
-        crate::state::pdk_config::PdkConfig::default(),
-        None::<String>,
-    );
-    // Unit tests must never inherit user- or machine-owned trust state. Apart
-    // from making tests nondeterministic, doing so could grant a fixture
-    // authority it did not explicitly provision.
-    #[cfg(test)]
-    let (mut pdk_config, pdk_load_error) = (
-        crate::state::pdk_config::PdkConfig::default(),
-        None::<String>,
-    );
-    let trust_store = pdk_config.publisher_trust_store.clone();
-    let _ = pdk_config
-        .technology_registry
-        .revalidate_installed(&trust_store);
-    let pdk_validation_errors = pdk_config.technology_registry.validation_errors().to_vec();
-    let (model_library_manager, pdk_model_restore_errors) =
-        match restore_session_model_library_manager(&mut pdk_config) {
-            Ok((manager, _loaded)) => (manager, Vec::new()),
-            Err(errors) => (default_model_library_manager(), errors),
-        };
 
     let mut state = AppState {
-        model: crate::workbench::app_state::Model {
-            schematic,
-            simulation: crate::state::SimulationState::default(),
-            design_execution_epoch: 0,
-            active_schematic_epoch: 0,
-            project_design_history: Default::default(),
-            design_checks: Default::default(),
-            diagnostics: Default::default(),
-            sim_setup,
-            log_buffer: crate::diagnostics::LogBuffer::default(),
-            notices: Default::default(),
-            netlist_artifacts: Box::default(),
-            library_manager,
-            library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
-            workspace,
-            project_open: Default::default(),
-            pdk_config,
-            model_library_manager,
-            preferences: Default::default(),
-            safe_mode: crate::state::write_policy::LocalSafeModeState::default(),
-            live_write_locks: crate::state::write_policy::LiveWriteLocks::default(),
-            recorded_sync_failures: Default::default(),
-        },
+        model,
         problems_view: crate::workbench::app_state::problems_view::ProblemsView::default(),
         shell: Default::default(),
         platform: Box::default(),
@@ -213,30 +172,6 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     if let Some((manifest, runtime_snapshot)) = automation {
         state.code.code_workspace.automation.manifest = Some(manifest);
         state.code.code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
-    }
-    let startup_errors = pdk_load_error
-        .map(|error| {
-            format!(
-                "PDK configuration could not be loaded; the session started without a PDK: {error}"
-            )
-        })
-        .into_iter()
-        .chain(
-            pdk_validation_errors
-                .into_iter()
-                .map(|error| format!("A PDK was not trusted at startup: {error}")),
-        )
-        .chain(pdk_model_restore_errors.into_iter().map(|error| {
-            format!(
-                "Configured PDK model catalog could not be restored; the session is using built-in models only: {error}"
-            )
-        }));
-    for error in startup_errors {
-        state.record(
-            crate::diagnostics::LogSeverity::Error,
-            crate::diagnostics::LogSource::Studio,
-            error,
-        );
     }
     state
 }

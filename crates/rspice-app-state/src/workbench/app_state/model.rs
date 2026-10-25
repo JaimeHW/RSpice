@@ -12,6 +12,7 @@ mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod schematic_sync;
+mod session_start;
 mod sheet_catalog;
 mod sheet_move;
 mod symbol_context;
