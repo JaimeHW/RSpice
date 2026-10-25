@@ -49,13 +49,12 @@ use std::borrow::Cow;
 use egui::{Key, Modifiers, Ui, Vec2};
 
 use super::{
-    AppState, CONSOLE_BODY_PADDING_X, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted, padded,
-    toolbar,
+    CONSOLE_BODY_PADDING_X, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted, padded, toolbar,
 };
 use crate::diagnostics::LogAnchor;
 use crate::ui::theme::{self, FontWeight};
 use crate::workbench::app_state::diagnostic_store::listing::{
-    DiagnosticListing, DiagnosticRow, EmptyReason, RowStanding, listing_in_pass,
+    DiagnosticListing, DiagnosticRow, EmptyReason, ListingSource, RowStanding, listing_in_pass,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
 use crate::workbench::app_state::problems_view::{ProblemsView, WaiverDraft};
@@ -63,7 +62,7 @@ use crate::workbench::app_state::session::shortcuts::{
     report_escape_owner, request_engineering_canvas_focus,
 };
 use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
-use crate::workbench::framework::host::ProblemsHost;
+use crate::workbench::framework::workbench_host::ConsoleHost;
 
 use crate::ui::widgets::{Problem, StatusMark};
 use arrange::{Arrangement, Line};
@@ -102,7 +101,10 @@ impl ProblemCount {
 /// The counts behind the tab strip's badge. Derived from exactly the rows the
 /// page lists, read once for the pass the page reads them in, so the badge can
 /// never disagree with the body under it.
-pub(in crate::workbench) fn active_problem_count(state: &AppState, pass: u64) -> ProblemCount {
+pub(in crate::workbench) fn active_problem_count(
+    state: &impl ListingSource,
+    pass: u64,
+) -> ProblemCount {
     let counts = listing_in_pass(state, pass).counts();
     ProblemCount {
         errors: counts.errors,
@@ -187,11 +189,11 @@ impl BodyMemory {
 /// Draw the page. Returns whether the reader recorded or took away a waiver:
 /// that changes what refuses a run, so the caller drops whatever run was
 /// prepared or checked under the waivers as they stood.
-pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
-    let mut view = state.problems_view.clone();
+pub(super) fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
+    let mut view = state.problems_view().clone();
     let mut selection = Selection {
         listed: None,
-        finding: state.model.diagnostics.current_finding(),
+        finding: state.model().diagnostics.current_finding(),
     };
     let mut intent = PageIntent::default();
     {
@@ -302,9 +304,11 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
                 .route
                 .as_ref()
                 .and_then(|route| route_refusal(state, route));
-            let waiver_refusal = row
-                .waiver_action
-                .and_then(|action| state.model.waiver_edit_refusal(&action.target().cell_view));
+            let waiver_refusal = row.waiver_action.and_then(|action| {
+                state
+                    .model()
+                    .waiver_edit_refusal(&action.target().cell_view)
+            });
             // A finding can stop being waivable while its reason is being
             // typed — waived from elsewhere, or gone stale under a re-check —
             // and the reason then has nothing left to be recorded against.
@@ -389,23 +393,23 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
     {
         view.waiving = None;
     }
-    state.problems_view = view;
+    *state.problems_view_mut() = view;
     state
-        .model
+        .model_mut()
         .diagnostics
         .set_current_finding(selection.finding);
     if let Some(route) = intent.route {
         if lands_on_canvas(&route) {
             request_engineering_canvas_focus(ui.ctx());
         }
-        state.model.diagnostics.request_route(route);
+        state.model_mut().diagnostics.request_route(route);
     }
     if let Some(text) = intent.clipboard {
         ui.ctx().copy_text(text);
     }
     if let Some(finding) = intent.fix {
         match state.apply_quick_fix(finding) {
-            Ok(text) | Err(text) => state.prompt(text),
+            Ok(text) | Err(text) => state.workbench_mut().prompt(text),
         }
     }
     intent
@@ -419,14 +423,16 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
 /// A recorded waiver closes the reason it was written in. A refused one keeps
 /// it, so what the reader typed is not lost to a refusal they can repair —
 /// a read-only project made writable, a cellview opened.
-fn apply_waiver_edit(state: &mut AppState, edit: WaiverEdit) -> bool {
+fn apply_waiver_edit(state: &mut impl ConsoleHost, edit: WaiverEdit) -> bool {
     let outcome = match edit {
         WaiverEdit::Record { target, reason } => state
             .waive_finding(&target, &reason)
-            .map(|()| state.problems_view.waiving = None),
+            .map(|()| state.problems_view_mut().waiving = None),
         WaiverEdit::Remove(target) => state.remove_finding_waiver(&target),
     };
-    outcome.map_err(|refused| state.prompt(refused)).is_ok()
+    outcome
+        .map_err(|refused| state.workbench_mut().prompt(refused))
+        .is_ok()
 }
 
 /// Everything the table needs to draw itself, so the row loop takes one
@@ -455,7 +461,7 @@ fn table(
     view: &mut ProblemsView,
     selection: &mut Selection,
     intent: &mut PageIntent,
-    state: &AppState,
+    state: &impl ConsoleHost,
 ) {
     // The pitch the body lays rows out at, which is the row height plus
     // whatever the enclosing dock spaces its rows by — the same arithmetic
@@ -633,7 +639,7 @@ fn finding_row(
     view: &mut ProblemsView,
     selection: &mut Selection,
     intent: &mut PageIntent,
-    state: &AppState,
+    state: &impl ConsoleHost,
 ) -> Option<(egui::Id, egui::Rect, Option<Press>)> {
     let row = table.listed.row(index)?;
     // Asked before the row is drawn: a finding whose object the drawing no
@@ -674,7 +680,9 @@ fn finding_row(
     if let Some(action) = row.waiver_action {
         // Disabled, saying why, where the document that stores the waiver
         // cannot be edited here: the edit would refuse for that reason.
-        let refusal = state.model.waiver_edit_refusal(&action.target().cell_view);
+        let refusal = state
+            .model()
+            .waiver_edit_refusal(&action.target().cell_view);
         response.context_menu(|ui| {
             let verb = ui.add_enabled(
                 refusal.is_none(),
@@ -749,7 +757,7 @@ fn keyboard(
     ui: &Ui,
     listed: &DiagnosticListing<'_>,
     arrangement: &Arrangement,
-    state: &AppState,
+    state: &impl ConsoleHost,
     body: &BodyMemory,
     view: &mut ProblemsView,
     selection: &mut Selection,
@@ -905,7 +913,7 @@ const fn lands_on_canvas(route: &DiagnosticRoute) -> bool {
 /// Only an anchor resolved by name can have lost its target since the finding
 /// was made; the rest address a document or a workspace destination that the
 /// route itself re-resolves when it is applied.
-fn route_refusal(state: &AppState, route: &DiagnosticRoute) -> Option<String> {
+fn route_refusal(state: &impl ConsoleHost, route: &DiagnosticRoute) -> Option<String> {
     match route {
         DiagnosticRoute::Anchor(anchor) => state.log_anchor_refusal(anchor),
         DiagnosticRoute::NetlistDiagnostic(_)

@@ -17,6 +17,7 @@ mod status_order;
 use egui::Ui;
 use egui::os::OperatingSystem;
 
+use crate::diagnostics::LogAnchor;
 use crate::state::ViewType;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
@@ -24,6 +25,8 @@ use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::problems_view::ProblemsView;
+use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::chrome::document_bar::WorkspaceDocument;
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
@@ -38,7 +41,7 @@ use crate::workbench::framework::host::{
     DocumentHost, Host, InspectorScope, NavigatorSection, Point, ProblemsHost, RailEntry,
     StatusCell, ToolbarScope, ToolbarSlot,
 };
-use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
 use crate::workbench::sheets::SheetsFeature;
@@ -613,7 +616,55 @@ impl ProblemsHost for AppState {
     }
 }
 
+impl ConsoleHost for AppState {
+    fn model(&self) -> &Model {
+        &self.model
+    }
+
+    fn model_mut(&mut self) -> &mut Model {
+        &mut self.model
+    }
+
+    fn workbench_mut(&mut self) -> &mut WorkbenchSession {
+        &mut self.workbench
+    }
+
+    fn problems_view(&self) -> &ProblemsView {
+        &self.problems_view
+    }
+
+    fn problems_view_mut(&mut self) -> &mut ProblemsView {
+        &mut self.problems_view
+    }
+
+    fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
+        AppState::jump_to_log_anchor(self, anchor);
+    }
+
+    fn log_anchor_refusal(&self, anchor: &LogAnchor) -> Option<String> {
+        AppState::log_anchor_refusal(self, anchor)
+    }
+
+    fn waive_finding(&mut self, target: &WaiverTarget, reason: &str) -> Result<(), String> {
+        AppState::waive_finding(self, target, reason)
+    }
+
+    fn remove_finding_waiver(&mut self, target: &WaiverTarget) -> Result<(), String> {
+        AppState::remove_finding_waiver(self, target)
+    }
+}
+
 impl WorkbenchHost for RSpiceApp {
+    type Session = AppState;
+
+    fn session(&self) -> &AppState {
+        &self.state
+    }
+
+    fn session_mut(&mut self) -> &mut AppState {
+        &mut self.state
+    }
+
     fn workbench(&self) -> &WorkbenchSession {
         &self.state.workbench
     }

@@ -11,8 +11,8 @@ use crate::state::SimulationRun;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, select_mono_with_response};
-use crate::workbench::AppState;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
+use crate::workbench::framework::workbench_host::ConsoleHost;
 use crate::workbench::state::{ConsoleChannel, ConsoleSeverity, ConsoleView};
 
 /// What the channel selector calls the session's log.
@@ -28,8 +28,8 @@ const FIND_MIN_CHARACTERS: f32 = 10.0;
 /// Every severity keeps its toggle whatever its count: a log grows while it
 /// is read, and a toggle that came and went with its first line would move
 /// the controls beside it under the pointer.
-pub(in crate::workbench::docks) fn toolbar(ui: &mut Ui, state: &mut AppState) {
-    let mut view = std::mem::take(&mut state.workbench.console_view);
+pub(in crate::workbench::docks) fn toolbar(ui: &mut Ui, state: &mut impl ConsoleHost) {
+    let mut view = std::mem::take(&mut state.workbench_mut().console_view);
     let counts = {
         let source = source(state, &mut view);
         let mut rows = Rows::take(ui.ctx());
@@ -48,12 +48,12 @@ pub(in crate::workbench::docks) fn toolbar(ui: &mut Ui, state: &mut AppState) {
     }
     channel(
         ui,
-        &state.model.simulation.retained.runs,
+        &state.model().simulation.retained.runs,
         &mut view,
         advance,
     );
     find(ui, &mut view, advance);
-    state.workbench.console_view = view;
+    state.workbench_mut().console_view = view;
 }
 
 /// The channel selector: the session's log first, then each run the session

@@ -26,8 +26,8 @@ use crate::diagnostics::{LogAnchor, LogSeverity};
 use crate::io::file_exchange::{self, FileKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::workbench::AppState;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
+use crate::workbench::framework::workbench_host::ConsoleHost;
 use crate::workbench::state::{ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleView};
 use lines::{Line, Metrics, Rows, Source};
 
@@ -63,15 +63,16 @@ fn row_font() -> egui::FontId {
 
 /// The log `view` reads, falling back to the session's when the run it was
 /// reading is no longer held.
-fn source<'a>(state: &'a AppState, view: &mut ConsoleView) -> Source<'a> {
+fn source<'a>(state: &'a impl ConsoleHost, view: &mut ConsoleView) -> Source<'a> {
+    let model = state.model();
     Source::of(
-        &state.model.log_buffer,
-        &state.model.simulation.retained.runs,
+        &model.log_buffer,
+        &model.simulation.retained.runs,
         view.channel,
     )
     .unwrap_or_else(|| {
         view.open(ConsoleChannel::Session);
-        Source::Session(&state.model.log_buffer)
+        Source::Session(&model.log_buffer)
     })
 }
 
@@ -85,10 +86,10 @@ struct Intent {
     save: Option<(String, String)>,
 }
 
-pub(super) fn console(ui: &mut Ui, state: &mut AppState) {
-    let mut view = std::mem::take(&mut state.workbench.console_view);
+pub(super) fn console(ui: &mut Ui, state: &mut impl ConsoleHost) {
+    let mut view = std::mem::take(&mut state.workbench_mut().console_view);
     let intent = body(ui, state, &mut view);
-    state.workbench.console_view = view;
+    state.workbench_mut().console_view = view;
     if let Some(text) = intent.clipboard {
         ui.ctx().copy_text(text);
     }
@@ -96,7 +97,7 @@ pub(super) fn console(ui: &mut Ui, state: &mut AppState) {
         && let Err(error) =
             file_exchange::save_file(ui.ctx(), save_id(), LOG_FILE, name, text.into_bytes())
     {
-        state.prompt(error);
+        state.workbench_mut().prompt(error);
     }
     if let Some(anchor) = intent.follow {
         state.jump_to_log_anchor(anchor);
@@ -104,15 +105,17 @@ pub(super) fn console(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Say how a save the page started went, once the picker has answered.
-pub(super) fn collect_save(ctx: &egui::Context, state: &mut AppState) {
+pub(super) fn collect_save(ctx: &egui::Context, state: &mut impl ConsoleHost) {
     let Some(outcome) = file_exchange::take_saved(ctx, save_id()) else {
         return;
     };
     match outcome {
-        Ok(Some(file)) => state.prompt(format!("Saved {}.", file.name)),
+        Ok(Some(file)) => state
+            .workbench_mut()
+            .prompt(format!("Saved {}.", file.name)),
         Ok(None) => {}
         Err(error) => state
-            .workbench
+            .workbench_mut()
             .toasts
             .error_with_title(ctx, "Log not saved", error),
     }
@@ -151,7 +154,7 @@ impl Columns {
     }
 }
 
-fn body(ui: &mut Ui, state: &AppState, view: &mut ConsoleView) -> Intent {
+fn body(ui: &mut Ui, state: &impl ConsoleHost, view: &mut ConsoleView) -> Intent {
     let mut intent = Intent::default();
     let source = source(state, view);
     let mut rows = Rows::take(ui.ctx());
@@ -354,8 +357,8 @@ fn focus_stop(ui: &mut Ui, rect: Rect, cursor: Option<(egui::Id, Rect)>) -> egui
 }
 
 /// What a row reads beyond its own line.
-struct RowContext<'a, 'b> {
-    state: &'a AppState,
+struct RowContext<'a, 'b, S> {
+    state: &'a S,
     source: Source<'a>,
     rows: &'b Rows,
     columns: &'b Columns,
@@ -374,7 +377,7 @@ struct RowOutcome {
 
 fn row(
     ui: &mut Ui,
-    context: &RowContext<'_, '_>,
+    context: &RowContext<'_, '_, impl ConsoleHost>,
     line: &Line<'_>,
     galley: Arc<egui::Galley>,
     rect: Rect,
@@ -519,7 +522,7 @@ struct Keys {
 /// than read, so nothing behind the dock acts on them too.
 fn keyboard(
     ui: &Ui,
-    state: &AppState,
+    state: &impl ConsoleHost,
     source: Source<'_>,
     rows: &Rows,
     view: &mut ConsoleView,

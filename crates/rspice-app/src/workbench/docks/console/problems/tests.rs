@@ -14,6 +14,7 @@ use super::super::{CONSOLE_CELL_INSET, CONSOLE_MARK_GUTTER};
 use super::*;
 use crate::state::netlist_diagnostics::{Diagnostic, DiagnosticFix, NetlistDiagnosticCollection};
 use crate::state::{ComponentType, Point};
+use crate::workbench::AppState;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticSubject,

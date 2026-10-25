@@ -17,8 +17,7 @@ use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
-use crate::workbench::AppState;
-use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 
 use super::super::layout::LayoutSpec;
 use super::super::state::{ConsoleChannel, ConsolePage};
@@ -57,7 +56,7 @@ use crate::ui::widgets::{
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
-    transcript::collect_save(ui.ctx(), app.state_mut());
+    transcript::collect_save(ui.ctx(), app.session_mut());
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app, layout);
     if !layout.show_console_body {
@@ -88,20 +87,22 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 // clearing; the toolbar only offers it.
                 let clear = clear_is_offered(layout, app.workbench().console_view.channel)
                     .then(|| console_clear_action(app.is_enabled(ids::CLEAR_CONSOLE)));
-                if toolbar(ui, |ui| console_toolbar(ui, app.state_mut(), layout, clear)) {
+                if toolbar(ui, |ui| {
+                    console_toolbar(ui, app.session_mut(), layout, clear)
+                }) {
                     app.execute(ids::CLEAR_CONSOLE);
                 }
                 // The transcript is prose, and keeps the inset on every side.
                 ui.add_space(CONSOLE_BODY_PADDING_TOP);
                 if prose_fits(ui) {
-                    padded(ui, |ui| transcript::console(ui, app.state_mut()));
+                    padded(ui, |ui| transcript::console(ui, app.session_mut()));
                 }
             }
             ConsolePage::Problems => {
                 // A waiver changes what refuses a run, as the rule deck does,
                 // so a run prepared or checked before it is not authorized
                 // after it.
-                if problems(ui, app.state_mut()) {
+                if problems(ui, app.session_mut()) {
                     app.simulation_input_changed();
                 }
             }
@@ -117,7 +118,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
 
 fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
-    let problems = active_problem_count(app.state(), ui.ctx().cumulative_pass_nr());
+    let problems = active_problem_count(app.session(), ui.ctx().cumulative_pass_nr());
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
     let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
@@ -205,7 +206,7 @@ fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
 /// line and offers no Clear.
 fn console_toolbar(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut impl ConsoleHost,
     layout: LayoutSpec,
     clear: Option<ConsoleClearAction>,
 ) -> bool {

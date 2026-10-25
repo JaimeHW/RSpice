@@ -8,8 +8,8 @@
 
 use egui::Ui;
 
-use super::AppState;
 use crate::diagnostics::LogAnchor;
+use crate::workbench::framework::workbench_host::ConsoleHost;
 use crate::workbench::state::{ConsoleChannel, ConsoleView};
 
 /// Follow `anchor`, from a double-click, Enter or the context menu.
@@ -19,7 +19,7 @@ use crate::workbench::state::{ConsoleChannel, ConsoleView};
 /// leaves the page. An anchor whose target is gone does nothing; the line said
 /// so under the pointer before the reader committed.
 pub(super) fn follow(
-    state: &AppState,
+    state: &impl ConsoleHost,
     view: &mut ConsoleView,
     anchor: &LogAnchor,
     jump: &mut Option<LogAnchor>,
@@ -43,7 +43,7 @@ pub(super) fn follow(
 /// leaves the page.
 pub(super) fn menu(
     ui: &mut Ui,
-    state: &AppState,
+    state: &impl ConsoleHost,
     view: &mut ConsoleView,
     anchor: &LogAnchor,
     jump: &mut Option<LogAnchor>,
@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::LogSource;
     use crate::state::SimulationRun;
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::{AppState, RSpiceApp};
     use egui::Vec2;
 
     /// Where the console painted the row whose message contains `needle`.
