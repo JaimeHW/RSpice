@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::state::ComponentType;
+use crate::workbench::app_state::AppState;
 use rspice_design::drc::DrcResult;
 use std::fs;
 

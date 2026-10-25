@@ -308,6 +308,7 @@ fn grouped(count: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn counts_group_their_thousands() {

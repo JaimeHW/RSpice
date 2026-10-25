@@ -28,6 +28,7 @@ mod manifest_tests {
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     };
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn single_frequency_noise_stb_and_disto_drafts_reach_valid_worker_specs() {

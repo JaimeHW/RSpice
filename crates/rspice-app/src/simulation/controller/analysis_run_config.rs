@@ -1,10 +1,8 @@
 //! Application-to-worker PVT configuration regression.
 
-use super::*;
-
 #[cfg(test)]
 mod pvt_base_tests {
-    use super::*;
+    use crate::workbench::app_state::AppState;
     use rspice_simulation::sweeps::CornerBaseMode;
     use rspice_simulation_contract::worker_run_config::WorkerCornerBaseMode;
 

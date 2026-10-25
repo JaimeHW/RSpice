@@ -7,6 +7,7 @@
 use super::*;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use std::cell::RefCell;

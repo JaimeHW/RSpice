@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+use crate::workbench::app_state::AppState;
 
 #[test]
 fn study_options_and_commands_read_the_exact_authored_draft() {

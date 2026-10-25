@@ -285,6 +285,7 @@ struct ParsedFftSourceName {
 mod nyquist_scope_tests {
     use super::*;
     use crate::simulation::SampledWaveform;
+    use crate::workbench::app_state::AppState;
     use std::collections::HashMap;
 
     fn stb_spec() -> AnalysisSpec {

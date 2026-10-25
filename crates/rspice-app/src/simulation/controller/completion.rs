@@ -550,6 +550,7 @@ fn testbench_errors(result: &crate::simulation::SimulationResult) -> Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     /// An analysis the engine failed reaches the Problems page through the
     /// controller's own failure path: one finding, about that analysis in

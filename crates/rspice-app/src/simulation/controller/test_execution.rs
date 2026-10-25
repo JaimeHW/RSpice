@@ -1,6 +1,7 @@
 //! App integration fixtures run through the same preparation and authorization as Run.
 
-use super::{AppState, SimulationController, SimulationRunIntent, SimulationRunner};
+use super::{SimulationController, SimulationRunIntent, SimulationRunner};
+use crate::workbench::app_state::AppState;
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_simulation::results::SimulationResult;
 use std::time::{Duration, Instant};

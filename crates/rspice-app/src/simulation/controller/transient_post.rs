@@ -588,6 +588,7 @@ mod tests {
     use super::*;
     use crate::product::{AnalysisInstanceId, DatasetId};
     use crate::state::{AnalysisResult, SimulationRun};
+    use crate::workbench::app_state::AppState;
     use rspice_results_ui::fft::{
         FftFailure, WindowFunction,
         data::{FftBuildError, SpectrumAnalysisError},

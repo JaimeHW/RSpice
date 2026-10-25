@@ -39,8 +39,7 @@
     "simulate->results": 9
   },
   "lower->upper": {
-    "framework->session": 3,
-    "run->session": 1
+    "framework->session": 3
   },
   "whole-app": {
     "&RSpiceApp params outside shell": 283,

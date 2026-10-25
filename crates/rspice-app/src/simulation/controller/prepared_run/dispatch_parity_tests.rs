@@ -15,6 +15,7 @@ mod multirate_envelope;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisKind, SimulationPlan};
 use crate::state::{CanonicalAnalysisKind, PreparedRunTaskReceipt};
+use crate::workbench::app_state::AppState;
 
 use super::tests::runnable_state as preflight_ready_state;
 

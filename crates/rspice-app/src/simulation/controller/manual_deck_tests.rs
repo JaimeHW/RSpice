@@ -1,6 +1,7 @@
 //! Manual-deck integration with application forms and engine services.
 
-use super::{AnalysisSpec, AppState, NoiseSweepType, analysis_inputs};
+use super::{AnalysisSpec, NoiseSweepType, analysis_inputs};
+use crate::workbench::app_state::AppState;
 use rspice_simulation::manual_deck::build_manual_deck_queue;
 
 #[test]

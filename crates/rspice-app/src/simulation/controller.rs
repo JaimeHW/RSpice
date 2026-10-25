@@ -39,8 +39,6 @@ use crate::state::{
     AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
     RealEventTraceEvidence, RetainedTrace, RunEvent, SimulationRunIntent, SimulationRunLifecycle,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::platform::spawn_or_inline;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
