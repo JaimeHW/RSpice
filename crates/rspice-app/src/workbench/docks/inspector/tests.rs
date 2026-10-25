@@ -64,7 +64,7 @@ fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
         .schematic
         .add_component(ComponentType::Pmos, crate::state::Point::new(200, 0));
 
-    let refusal = validate_component_model_catalog_binding(&app.state, pmos, "kit", "nch")
+    let refusal = validate_component_model_catalog_binding(&app.state.model, pmos, "kit", "nch")
         .expect_err("an NMOS family does not suit a PMOS instance");
     assert!(!refusal.contains("no longer present"), "{refusal}");
     bind_component_model_from_catalog(&mut app, nmos, "kit", "nch").expect("bind the family");

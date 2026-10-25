@@ -19,7 +19,6 @@ use crate::ui::{
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize},
 };
-use crate::workbench::AppState;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use crate::ui::panels::WorkbenchIcon;
@@ -27,7 +26,9 @@ use crate::workbench::routing::availability::{SurfaceExecutionAvailability, surf
 use crate::workbench::routing::navigation::RouteTransitionSource;
 use crate::workbench::routing::surface_catalog::SurfaceId;
 use crate::workbench::routing::surface_route::SurfaceRoute;
-use crate::workbench::state::{SpecialistToolBrowserState, SpecialistToolFilter, Workspace};
+use crate::workbench::state::{
+    SpecialistToolBrowserState, SpecialistToolFilter, WorkbenchSession, Workspace,
+};
 
 mod workspace_rows;
 
@@ -69,7 +70,7 @@ pub(crate) fn open(app: &mut impl WorkbenchHost) {
         .workbench_mut()
         .navigate(route, RouteTransitionSource::User)
     {
-        app.state_mut().prompt(error.to_string());
+        app.workbench_mut().prompt(error.to_string());
     }
 }
 
@@ -103,7 +104,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost) {
         choice,
         DialogChoice::Primary | DialogChoice::Cancelled | DialogChoice::Ghost
     ) {
-        close_to_source(app.state_mut());
+        close_to_source(app.workbench_mut());
     }
 }
 
@@ -116,7 +117,7 @@ fn execute_action(app: &mut impl WorkbenchHost, action: BrowserAction) {
                     "This specialist workspace is not currently available."
                 }
             };
-            app.state_mut().prompt(format!(
+            app.workbench_mut().prompt(format!(
                 "{} is unavailable: {reason}",
                 surface.metadata().label
             ));
@@ -139,26 +140,22 @@ fn execute_action(app: &mut impl WorkbenchHost, action: BrowserAction) {
                     .workbench_mut()
                     .specialist_tool_browser
                     .record_recent(surface),
-                Err(error) => app.state_mut().prompt(error.to_string()),
+                Err(error) => app.workbench_mut().prompt(error.to_string()),
             }
         }
     }
 }
 
-fn close_to_source(state: &mut AppState) {
-    if state
-        .workbench
+fn close_to_source(workbench: &mut WorkbenchSession) {
+    if workbench
         .navigate_back(RouteTransitionSource::User)
         .is_some()
     {
         return;
     }
-    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(state.workbench.workspace));
-    if let Err(error) = state
-        .workbench
-        .replace_route(fallback, RouteTransitionSource::User)
-    {
-        state.prompt(format!("Could not close Specialist tool browser: {error}"));
+    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(workbench.workspace));
+    if let Err(error) = workbench.replace_route(fallback, RouteTransitionSource::User) {
+        workbench.prompt(format!("Could not close Specialist tool browser: {error}"));
     }
 }
 

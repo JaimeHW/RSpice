@@ -9,8 +9,8 @@ use egui::{Rect, pos2, vec2};
 
 use super::*;
 use crate::ui::widgets::{MirroredEntry, ToastKind};
-use crate::workbench::RSpiceApp;
 use crate::workbench::state::ConsolePage;
+use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const TITLE_BAR: f32 = 35.0;
@@ -1004,7 +1004,7 @@ fn responsive_target_size_follows_the_shell_the_bell_is_in() {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 700.0))),
                 ..Default::default()
             },
-            |ui| large = large_targets(ui.ctx(), state),
+            |ui| large = large_targets(ui.ctx(), &state.workbench),
         );
         large
     };

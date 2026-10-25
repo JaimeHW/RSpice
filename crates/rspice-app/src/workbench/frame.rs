@@ -199,11 +199,11 @@ fn show_toasts(
 ) -> Option<crate::ui::widgets::NotificationAction> {
     state.drain_notices(ctx);
     if tools::notification_center::focused_window(ctx) != ctx.viewport_id()
-        || tools::notification_center::showing_here(ctx, state)
+        || tools::notification_center::showing_here(ctx, &state.workbench)
     {
         return None;
     }
-    let large_targets = tools::notification_center::large_targets(ctx, state);
+    let large_targets = tools::notification_center::large_targets(ctx, &state.workbench);
     state.workbench.toasts.show(
         ctx,
         layout.title_bar_height,
@@ -652,7 +652,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
     app.state.drain_notices(ctx);
     // A detached window with the keyboard draws the toasts instead.
     if tools::notification_center::focused_window(ctx) == ctx.viewport_id() {
-        let large_targets = tools::notification_center::large_targets(ctx, &app.state);
+        let large_targets = tools::notification_center::large_targets(ctx, &app.state.workbench);
         if let Some(action) = app
             .state
             .workbench

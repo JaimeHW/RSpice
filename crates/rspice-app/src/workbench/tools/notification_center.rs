@@ -29,11 +29,10 @@ use crate::ui::widgets::{
     NotificationAction, NotificationCategory, NotificationRecord, SWITCH_WIDTH, Toasts,
     mark_response_disabled, paint_switch,
 };
-use crate::workbench::AppState;
 use crate::workbench::browser::background_alerts::{self, BackgroundAlerts};
 use crate::workbench::chrome::title_bar;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
-use crate::workbench::state::NotificationFilter;
+use crate::workbench::state::{NotificationFilter, WorkbenchSession};
 
 const PANEL_WIDTH: f32 = 420.0;
 const PANEL_MAX_HEIGHT: f32 = 560.0;
@@ -102,8 +101,11 @@ const AGE_REFRESH: Duration = Duration::from_secs(20);
 
 /// Whether the notification surfaces raise their controls to touch size. The
 /// rule the title bar applies to the bell they hang from.
-pub(in crate::workbench) fn large_targets(ctx: &egui::Context, state: &AppState) -> bool {
-    ctx.content_rect().width() <= LARGE_TARGET_MAX_WIDTH || state.workbench.coarse_pointer
+pub(in crate::workbench) fn large_targets(
+    ctx: &egui::Context,
+    workbench: &WorkbenchSession,
+) -> bool {
+    ctx.content_rect().width() <= LARGE_TARGET_MAX_WIDTH || workbench.coarse_pointer
 }
 
 /// What the reader asked for during one pass. Collected while the records are
@@ -160,8 +162,11 @@ fn owner(ctx: &egui::Context) -> ViewportId {
 
 /// Whether the panel is on screen in the window this pass draws. It is
 /// drawn in one window only, whichever bell it hangs from.
-pub(in crate::workbench) fn showing_here(ctx: &egui::Context, state: &AppState) -> bool {
-    state.workbench.notification_center_showing() && owner(ctx) == ctx.viewport_id()
+pub(in crate::workbench) fn showing_here(
+    ctx: &egui::Context,
+    workbench: &WorkbenchSession,
+) -> bool {
+    workbench.notification_center_showing() && owner(ctx) == ctx.viewport_id()
 }
 
 pub(in crate::workbench) fn show(
@@ -200,7 +205,7 @@ pub(in crate::workbench) fn show(
         return;
     }
 
-    let large = large_targets(ctx, app.state());
+    let large = large_targets(ctx, app.workbench());
     let placement = PanelPlacement::resolve(
         ctx.content_rect(),
         anchor.map(|(rect, _)| rect),

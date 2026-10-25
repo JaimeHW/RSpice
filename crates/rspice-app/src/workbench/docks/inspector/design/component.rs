@@ -502,7 +502,7 @@ pub(crate) fn bind_component_model_from_catalog(
 ) -> Result<(), String> {
     app.state.commit_inline_component_edit()?;
     super::super::validate_component_model_catalog_binding(
-        &app.state,
+        &app.state.model,
         component_id,
         library_name,
         model_name,
@@ -585,7 +585,7 @@ pub(crate) fn apply_bound_model_choice(
         .clone();
 
     super::super::validate_component_model_catalog_binding(
-        &app.state,
+        &app.state.model,
         component_id,
         &library_name,
         selected_model,

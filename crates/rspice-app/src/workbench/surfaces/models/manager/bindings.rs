@@ -314,7 +314,7 @@ fn unresolved_row(
                 }
                 Some((library, model)) => {
                     crate::workbench::docks::validate_component_model_catalog_binding(
-                        app.state,
+                        &app.state.model,
                         diagnostic.component_id,
                         library,
                         model,

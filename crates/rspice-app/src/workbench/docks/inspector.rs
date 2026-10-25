@@ -31,7 +31,6 @@ use egui::{ScrollArea, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::AppState;
 use crate::workbench::framework::host::Point;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
@@ -86,21 +85,19 @@ fn inspector_scroll_memory_id() -> egui::Id {
 /// repeats it immediately before mutation, so presentation and execution
 /// cannot disagree about model family, polarity, or provider authority.
 pub(crate) fn validate_component_model_catalog_binding(
-    state: &AppState,
+    model: &rspice_app_state::workbench::app_state::model::Model,
     component_id: u64,
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
-    let component = state
-        .model
+    let component = model
         .schematic
         .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
         .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
-    let library = state
-        .model
+    let library = model
         .model_library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
@@ -149,13 +146,10 @@ pub(crate) fn validate_component_model_catalog_binding(
             candidate,
         )?;
     }
-    let effective = state
-        .model
-        .model_library_manager
-        .effective_definition_provider(
-            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
-            model_name,
-        )?;
+    let effective = model.model_library_manager.effective_definition_provider(
+        crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+        model_name,
+    )?;
     let effective = effective
         .ok_or_else(|| format!("Model '{model_name}' has no executable catalog provider."))?;
     if !effective.library.eq_ignore_ascii_case(library_name) {

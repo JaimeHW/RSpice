@@ -186,7 +186,7 @@ fn project_selection<'a>(
         || Some("Select exactly one compatible schematic instance first.".to_owned()),
         |component_id| {
             crate::workbench::docks::validate_component_model_catalog_binding(
-                app.state,
+                &app.state.model,
                 component_id,
                 &library.name,
                 &binding,

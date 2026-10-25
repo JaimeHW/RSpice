@@ -124,7 +124,7 @@ fn raster(case: &Case) -> Canvas {
             .show(ui, |_| {});
         super::show(ui.ctx(), &mut app, layout.title_bar_height);
         if scene == Scene::Toasts {
-            let large = super::large_targets(ui.ctx(), &app.state);
+            let large = super::large_targets(ui.ctx(), &app.state.workbench);
             let _ = app.state.workbench.toasts.show(
                 ui.ctx(),
                 layout.title_bar_height,
