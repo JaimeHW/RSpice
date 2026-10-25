@@ -20,8 +20,9 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::feature::PublicationDraft;
 use crate::workbench::publication_snapshot::{
-    PublicationDraft, build_publication_snapshot, publication_timestamp_utc,
+    build_publication_snapshot, publication_timestamp_utc,
 };
 
 /// What the open-time snapshot build proved about the publish scope.

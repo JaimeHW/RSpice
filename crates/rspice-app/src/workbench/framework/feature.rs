@@ -69,6 +69,47 @@ pub(crate) trait DesignPeer: DesignPort + CanvasGesturePort {}
 
 impl<T: DesignPort + CanvasGesturePort> DesignPeer for T {}
 
+/// Everything the caller decides about a publication snapshot; the snapshot
+/// builder derives the rest from project state. `created_utc` is supplied
+/// here so the builder itself stays clock-free and deterministic. A feature
+/// that asks another to build a snapshot names it, so it sits below both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PublicationDraft {
+    pub title: String,
+    pub description: String,
+    pub author_display: String,
+    pub created_utc: String,
+    pub license: rspice_publication_contract::ContentLicense,
+    pub overview_narrative: String,
+    pub specification_label: String,
+    pub specification_value: String,
+    pub specification_unit: String,
+    pub include_schematic: bool,
+    pub include_results: bool,
+    pub include_netlist: bool,
+    pub activate_featured: bool,
+}
+
+impl Default for PublicationDraft {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            description: String::new(),
+            author_display: String::new(),
+            created_utc: String::new(),
+            license: rspice_publication_contract::ContentLicense::default(),
+            overview_narrative: String::new(),
+            specification_label: String::new(),
+            specification_value: String::new(),
+            specification_unit: String::new(),
+            include_schematic: true,
+            include_results: true,
+            include_netlist: true,
+            activate_featured: false,
+        }
+    }
+}
+
 /// The other features a feature reads, as live references, never a copy
 /// taken earlier; and the one thing it may ask of one, letting go of
 /// design's canvas gesture.

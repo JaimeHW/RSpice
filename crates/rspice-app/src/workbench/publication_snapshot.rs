@@ -23,6 +23,7 @@ use rspice_publication_contract::{
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::feature::PublicationDraft;
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
@@ -37,46 +38,6 @@ use rspice_hardcopy::render::{
     scene_from_resolved,
 };
 use rspice_hardcopy_contract::{ContentExtent, HardcopyScope};
-
-/// Everything the caller decides about the publication; the builder derives
-/// the rest from project state. `created_utc` is supplied here so the
-/// builder itself stays clock-free and deterministic.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PublicationDraft {
-    pub title: String,
-    pub description: String,
-    pub author_display: String,
-    pub created_utc: String,
-    pub license: rspice_publication_contract::ContentLicense,
-    pub overview_narrative: String,
-    pub specification_label: String,
-    pub specification_value: String,
-    pub specification_unit: String,
-    pub include_schematic: bool,
-    pub include_results: bool,
-    pub include_netlist: bool,
-    pub activate_featured: bool,
-}
-
-impl Default for PublicationDraft {
-    fn default() -> Self {
-        Self {
-            title: String::new(),
-            description: String::new(),
-            author_display: String::new(),
-            created_utc: String::new(),
-            license: rspice_publication_contract::ContentLicense::default(),
-            overview_narrative: String::new(),
-            specification_label: String::new(),
-            specification_value: String::new(),
-            specification_unit: String::new(),
-            include_schematic: true,
-            include_results: true,
-            include_netlist: true,
-            activate_featured: false,
-        }
-    }
-}
 
 /// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
 /// the hardcopy pipeline's exact civil-date transform.

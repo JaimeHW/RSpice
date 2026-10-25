@@ -91,7 +91,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
         .as_ref()
         .and_then(|p| p.file_stem())
         .map(|s| s.to_string_lossy().into_owned());
-    let draft = crate::workbench::publication_snapshot::PublicationDraft {
+    let draft = crate::workbench::framework::feature::PublicationDraft {
         title: stem
             .clone()
             .unwrap_or_else(|| "Untitled project".to_string()),
