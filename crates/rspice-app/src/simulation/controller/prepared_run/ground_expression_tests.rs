@@ -6,13 +6,13 @@
 //! `0`, and one naming a node the deck lacks is still refused.
 
 use crate::simulation::controller::test_execution::{run_generated_batch, run_manual_deck};
+use crate::simulation::controller::tests::AppState;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
     ComponentType, OutputSelectionMode, Point, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
     SavedOutputStreaming, SimulationRun, SpecEntry, SpecPointScope, SpecificationDefinition,
 };
-use crate::workbench::app_state::AppState;
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_results::specification::SpecificationComparison;
 use rspice_results::specification_verdict::SpecificationVerdictStatus;

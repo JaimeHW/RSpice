@@ -5,8 +5,8 @@ use super::*;
 use crate::simulation::controller::test_execution::monte_carlo::{
     checkpoint_state, completed_checkpoint_fixture,
 };
+use crate::simulation::controller::tests::AppState;
 use crate::state::{MonteCarloCheckpointEvidence, SimulationRun};
-use crate::workbench::app_state::AppState;
 use rspice_simulation_contract::mc_draft::McDialogState;
 
 /// The input a run is refused for when what a checkpoint resumes from moved.

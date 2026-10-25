@@ -7,8 +7,8 @@
 //! and W, or refuses an instance no bin holds.
 
 use super::*;
+use crate::simulation::controller::tests::AppState;
 use crate::state::ComponentType;
-use crate::workbench::app_state::AppState;
 use rspice_design::drc::DrcResult;
 use std::fs;
 

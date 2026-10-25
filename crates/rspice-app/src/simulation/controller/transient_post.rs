@@ -587,8 +587,8 @@ fn build_fft_prepared_input(
 mod tests {
     use super::*;
     use crate::product::{AnalysisInstanceId, DatasetId};
+    use crate::simulation::controller::tests::AppState;
     use crate::state::{AnalysisResult, SimulationRun};
-    use crate::workbench::app_state::AppState;
     use rspice_results_ui::fft::{
         FftFailure, WindowFunction,
         data::{FftBuildError, SpectrumAnalysisError},

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod pvt_base_tests {
-    use crate::workbench::app_state::AppState;
+    use crate::simulation::controller::tests::AppState;
     use rspice_simulation::sweeps::CornerBaseMode;
     use rspice_simulation_contract::worker_run_config::WorkerCornerBaseMode;
 

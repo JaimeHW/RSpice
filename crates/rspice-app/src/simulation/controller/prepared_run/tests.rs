@@ -8,7 +8,7 @@ use super::*;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::workbench::app_state::AppState;
+use crate::simulation::controller::tests::AppState;
 use crate::workbench::{
     FolderListPreference, documents::code_workspace::compile_project_bundle_receipt,
     lifecycle::project_lifecycle, workflows::netlist_workflow::apply_imported_netlist,

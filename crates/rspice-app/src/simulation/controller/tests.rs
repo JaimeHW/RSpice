@@ -7,8 +7,11 @@
 use super::*;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
-use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+
+// The application the controller's tests build. The controller itself never
+// names it; its test modules import it from here.
+pub(in crate::simulation::controller) use crate::workbench::app_state::AppState;
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use std::cell::RefCell;
 use std::path::Path;

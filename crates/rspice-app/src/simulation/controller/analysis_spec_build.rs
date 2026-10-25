@@ -24,11 +24,11 @@ pub(super) fn analysis_inputs(model: &Model) -> AnalysisInputs<'_> {
 #[cfg(test)]
 mod manifest_tests {
     use super::*;
+    use crate::simulation::controller::tests::AppState;
     use crate::simulation::multi_run::{
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     };
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-    use crate::workbench::app_state::AppState;
 
     #[test]
     fn single_frequency_noise_stb_and_disto_drafts_reach_valid_worker_specs() {
