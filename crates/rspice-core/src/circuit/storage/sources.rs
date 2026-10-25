@@ -385,24 +385,8 @@ impl VoltageSources {
         branch_idx: NodeId,
         excitation: SourceExcitation,
     ) {
-        let SourceExcitation {
-            dc_value,
-            ac_magnitude,
-            ac_phase,
-            source_spec,
-        } = excitation;
         self.add_with_ac_spec_and_pwl_waveform(
-            name,
-            node_pos,
-            node_neg,
-            branch_idx,
-            SourceExcitation {
-                dc_value,
-                ac_magnitude,
-                ac_phase,
-                source_spec,
-            },
-            None,
+            name, node_pos, node_neg, branch_idx, excitation, None,
         );
     }
 
