@@ -13,7 +13,7 @@ use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 use crate::state::{CellViewRef, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::app_state::{Model, SlotFacts};
-use crate::workbench::slots::RunsState;
+use crate::workbench::slots::runs::RunsState;
 
 /// The application, as the run tier sees it.
 ///

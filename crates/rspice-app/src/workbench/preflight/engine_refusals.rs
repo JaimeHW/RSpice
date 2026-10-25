@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use rspice_design::connectivity::summary::DesignNet;
 use rspice_simulation::execution::{EngineRefusal, EngineRefusalKind, RefusedTask};
+use rspice_simulation_contract::options::SimulationOptions;
 use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 
-use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::NumericOverrideOption;
 use crate::state::{CellViewRef, Component, ViewType};
 use crate::state::{DrawnObject, PreflightIssue, PreflightRemediation};

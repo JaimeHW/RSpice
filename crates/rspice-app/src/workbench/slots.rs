@@ -16,7 +16,7 @@ mod models;
 pub(in crate::workbench) mod platform;
 mod project;
 mod results;
-mod runs;
+pub(crate) mod runs;
 mod settings;
 mod sheets;
 mod shell;

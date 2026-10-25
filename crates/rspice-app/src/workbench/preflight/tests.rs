@@ -846,7 +846,7 @@ fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
         "{island:?}"
     );
 
-    let options = crate::simulation::dialog::SimulationOptions {
+    let options = rspice_simulation_contract::options::SimulationOptions {
         rshunt: Some(1.0e9),
         ..app.state.model.sim_setup.options.clone()
     };

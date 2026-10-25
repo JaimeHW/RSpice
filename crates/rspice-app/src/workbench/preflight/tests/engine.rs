@@ -444,7 +444,7 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
         .expect("the design netlists");
     assert!(!unnamed_deck.contains("CONNECTRULES"), "{unnamed_deck}");
 
-    let options = crate::simulation::dialog::SimulationOptions {
+    let options = rspice_simulation_contract::options::SimulationOptions {
         connect_rules: Some("High".to_owned()),
         ..app.state.model.sim_setup.options.clone()
     };

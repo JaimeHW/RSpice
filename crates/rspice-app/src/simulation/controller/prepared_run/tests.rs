@@ -1837,7 +1837,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
             .contains("RSpice execution profile: spice3-ngspice/2")
     );
     let parsed = rspice_core::Netlist::parse(dispatch.executable_netlist()).unwrap();
-    let config = crate::simulation::dialog::SimulationOptions::default()
+    let config = rspice_simulation_contract::options::SimulationOptions::default()
         .resolve_simulation_config(Some(&parsed.options));
     assert_eq!(config.spice_dialect, rspice_core::SpiceDialect::Ngspice);
     assert_eq!(
