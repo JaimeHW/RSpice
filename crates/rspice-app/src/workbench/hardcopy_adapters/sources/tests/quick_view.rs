@@ -66,7 +66,7 @@ fn zero_noise_density_remains_available_in_results_and_hardcopy() {
                         .with_unit(unit),
                 ]);
             // The screen's offering gate is also the hardcopy's offering gate.
-            assert!(ordinary_noise_spectrum_is_renderable(&analysis));
+            assert!(ordinary_noise_spectrum_is_renderable(&analysis, |_| {}));
             let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
             let resolved = resolve_quick_view(&state).unwrap();
             let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {

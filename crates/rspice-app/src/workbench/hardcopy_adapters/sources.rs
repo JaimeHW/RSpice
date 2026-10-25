@@ -7,7 +7,6 @@
 //! No type in this module contains pixels, an egui paint command, or a screen
 //! rectangle.
 
-mod noise;
 mod quick_view_overlay;
 mod report_inventory;
 
@@ -15,7 +14,6 @@ pub(crate) use rspice_hardcopy::sources::*;
 // Module-private: `noise` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
-use noise::*;
 use quick_view_overlay::*;
 
 #[cfg(test)]
@@ -44,6 +42,12 @@ use crate::workbench::AppState;
 
 use crate::workbench::SurfaceId;
 use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+use rspice_results::renderability::{
+    analysis_supports_viewer, bode_analysis_is_renderable, harmonic_spectrum_is_renderable,
+    ordinary_noise_spectrum_is_renderable, phase_noise_is_renderable,
+    qpnoise_spectrum_is_renderable, selected_noise_analysis_index, smith_analysis_is_renderable,
+    transient_waveform_is_renderable,
+};
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
 use crate::workbench::documents::result_document::ResultViewer;
@@ -570,7 +574,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 // Dataset-native report sheets judge the complete immutable
                 // run, including missing rows and cross-analysis worst cases.
                 run.clone()
-            } else if crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer) {
+            } else if rspice_results::result_presentation::viewer_uses_wave_stack(viewer) {
                 if displayed.analysis_indices.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS {
                     return Err(HardcopySourceError::InvalidVisualizationSource(format!(
                         "{} displays {} analyses, exceeding the {}-sheet hardcopy limit; maximize one strip before exporting",
@@ -832,16 +836,8 @@ fn quick_result_availability(
             waveform.x.len() >= rspice_results_ui::fft::MIN_FFT_SAMPLES
                 && waveform.x.len() == waveform.y.len()
         }),
-        ResultViewer::HarmonicBalance => {
-            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
-                analysis,
-            )
-        }
-        ResultViewer::PhaseNoise => {
-            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
-                analysis,
-            )
-        }
+        ResultViewer::HarmonicBalance => harmonic_spectrum_is_renderable(analysis, |_| {}),
+        ResultViewer::PhaseNoise => phase_noise_is_renderable(analysis, |_| {}),
         ResultViewer::Eye => visible_waveforms()
             .any(|waveform| waveform.x.len() >= 8 && waveform.x.len() == waveform.y.len()),
         ResultViewer::Hist => matches!(
@@ -858,14 +854,8 @@ fn quick_result_availability(
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()
             })
         }),
-        ResultViewer::Smith => {
-            crate::workbench::documents::result_document::smith_analysis_is_renderable(analysis)
-        }
-        ResultViewer::NetworkMatrix => {
-            crate::workbench::documents::result_document::view_context::analysis_supports_viewer(
-                viewer, analysis,
-            )
-        }
+        ResultViewer::Smith => smith_analysis_is_renderable(analysis, |_| {}),
+        ResultViewer::NetworkMatrix => analysis_supports_viewer(viewer, analysis, |_| {}),
         ResultViewer::Polar => visible_waveforms().any(|waveform| {
             waveform.complex.as_ref().is_some_and(|complex| {
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()
@@ -891,10 +881,8 @@ fn quick_result_availability(
                 )
         }
         ResultViewer::NoiseContrib => {
-            ordinary_noise_spectrum_is_renderable(analysis)
-                || crate::workbench::documents::result_document::qpnoise_spectrum_is_renderable(
-                    analysis,
-                )
+            ordinary_noise_spectrum_is_renderable(analysis, |_| {})
+                || qpnoise_spectrum_is_renderable(analysis)
         }
         // Two families rank contributions to one number, and both have an
         // exact semantic table to print.
@@ -964,18 +952,6 @@ fn quick_result_availability(
     }
 }
 
-fn transient_waveform_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && analysis.analysis_type.is_time_domain()
-        && analysis.waveforms.iter().any(|waveform| {
-            waveform.visible && !waveform.x.is_empty() && waveform.x.len() == waveform.y.len()
-        })
-}
-
-fn bode_response_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    crate::workbench::documents::result_document::bode_analysis_is_renderable(analysis)
-}
-
 fn quick_result_analysis_index(
     state: &AppState,
     run: &SimulationRun,
@@ -996,19 +972,21 @@ fn quick_result_analysis_index(
             .filter(|&index| {
                 run.analyses
                     .get(index)
-                    .is_some_and(transient_waveform_analysis_is_renderable)
+                    .is_some_and(|analysis| transient_waveform_is_renderable(analysis))
             })
             .or_else(|| {
                 run.analyses
                     .iter()
-                    .position(transient_waveform_analysis_is_renderable)
+                    .position(|analysis| transient_waveform_is_renderable(analysis))
             }),
         // The one binding the sheet uses, so the page and the screen name the
         // same analysis. `filter` + `or_else` is not that binding: it steps to
         // the next renderable result whenever the reader's own selection is a
         // noise analysis that carries no ordinary spectrum, and prints another
         // analysis's contributors under the selected one's name.
-        ResultViewer::NoiseContrib => selected_noise_analysis_index(globally_selected, run),
+        ResultViewer::NoiseContrib => {
+            selected_noise_analysis_index(globally_selected, &run.analyses, |_| {})
+        }
         ResultViewer::DcSweep => globally_selected
             .filter(|&index| {
                 run.analyses
@@ -1024,57 +1002,45 @@ fn quick_result_analysis_index(
             .filter(|&index| {
                 run.analyses
                     .get(index)
-                    .is_some_and(bode_response_analysis_is_renderable)
+                    .is_some_and(|analysis| bode_analysis_is_renderable(analysis, |_| {}))
             })
             .or_else(|| {
                 run.analyses
                     .iter()
-                    .position(bode_response_analysis_is_renderable)
+                    .position(|analysis| bode_analysis_is_renderable(analysis, |_| {}))
             }),
         ResultViewer::PhaseNoise => globally_selected
             .filter(|&index| {
-                run.analyses.get(index).is_some_and(|analysis| {
-                    crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
-                        analysis,
-                    )
-                })
+                run.analyses
+                    .get(index)
+                    .is_some_and(|analysis| phase_noise_is_renderable(analysis, |_| {}))
             })
             .or_else(|| {
-                run.analyses.iter().position(|analysis| {
-                    crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
-                        analysis,
-                    )
-                })
+                run.analyses
+                    .iter()
+                    .position(|analysis| phase_noise_is_renderable(analysis, |_| {}))
             }),
         ResultViewer::HarmonicBalance => globally_selected
             .filter(|&index| {
-                run.analyses.get(index).is_some_and(|analysis| {
-                    crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
-                        analysis,
-                    )
-                })
+                run.analyses
+                    .get(index)
+                    .is_some_and(|analysis| harmonic_spectrum_is_renderable(analysis, |_| {}))
             })
             .or_else(|| {
-                run.analyses.iter().position(|analysis| {
-                    crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
-                        analysis,
-                    )
-                })
+                run.analyses
+                    .iter()
+                    .position(|analysis| harmonic_spectrum_is_renderable(analysis, |_| {}))
             }),
         _ => globally_selected
             .filter(|&index| {
-                run.analyses.get(index).is_some_and(|analysis| {
-                    crate::workbench::documents::result_document::view_context::analysis_supports_viewer(
-                        viewer, analysis,
-                    )
-                })
+                run.analyses
+                    .get(index)
+                    .is_some_and(|analysis| analysis_supports_viewer(viewer, analysis, |_| {}))
             })
             .or_else(|| {
-                run.analyses.iter().position(|analysis| {
-                    crate::workbench::documents::result_document::view_context::analysis_supports_viewer(
-                        viewer, analysis,
-                    )
-                })
+                run.analyses
+                    .iter()
+                    .position(|analysis| analysis_supports_viewer(viewer, analysis, |_| {}))
             }),
     }
 }

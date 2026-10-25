@@ -1,10 +1,10 @@
 //! Event source validation, history cache lifetime and selection recovery.
 
 use super::{AnalysisPresentationKey, SheetContext};
+#[cfg(test)]
+use crate::state::{AnalysisType, RetainedTrace};
 use crate::{
-    state::{
-        AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, RunHistoryRevision,
-    },
+    state::{AnalysisResult, AnalysisResultPayload, RunHistoryRevision},
     workbench::AppState,
 };
 use egui::Ui;
@@ -82,23 +82,11 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
     });
     Some(order)
 }
-fn waveform_is_event(waveform: &RetainedTrace) -> bool {
-    rspice_results::events::projection::waveform_is_event(waveform, || {
-        super::frame_work::note(super::frame_work::DatasetWalk::EventProjectionScan);
-    })
-}
 pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    (analysis.success || analysis.is_live_partial())
-        && analysis.analysis_type == AnalysisType::Transient
-        && (matches!(
-            analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::TransientEvents {
-                digital_traces,
-                real_traces,
-                current_impulses,
-                ..
-            }) if !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
-        ) || analysis.waveforms.iter().any(waveform_is_event))
+    rspice_results::renderability::event_history_is_renderable(
+        analysis,
+        super::frame_work::note_scan,
+    )
 }
 pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
     let Some(run) = state.model.simulation.active_run() else {

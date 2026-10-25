@@ -102,100 +102,13 @@ pub(crate) fn phase_noise_analysis_is_renderable(analysis: &AnalysisResult) -> b
     phase_noise::phase_noise_is_renderable(analysis)
 }
 
-pub(crate) fn smith_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    smith::analysis_is_renderable(analysis)
-}
-
-/// Whether one analysis carries an ordinary-noise spectrum a reader may see.
+/// Whether the tab strip offers a frequency-response sheet for one analysis,
+/// counting the walk the distortion branch performs.
 ///
-/// Exposed to the crate because the printed page has to make the same
-/// offering the sheet does — it used to keep its own copy of this predicate
-/// and of the binding below, with a comment saying they mirrored these.
-pub(crate) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    bode::ordinary_noise_spectrum_is_renderable(analysis)
-}
-
-pub(crate) fn qpnoise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
-        && analysis.validate_retained_evidence().is_ok()
-}
-
-/// The one noise analysis a run's noise surfaces bind to.
-pub(crate) fn selected_noise_analysis_index(
-    globally_selected: Option<usize>,
-    run: &SimulationRun,
-) -> Option<usize> {
-    if let Some(index) = globally_selected
-        && let Some(analysis) = run.analyses.get(index)
-        && analysis.analysis_type == crate::state::AnalysisType::Qpnoise
-    {
-        return qpnoise_spectrum_is_renderable(analysis).then_some(index);
-    }
-    bode::selected_noise_analysis_index_in(globally_selected, run).or_else(|| {
-        // A failed explicitly selected noise analysis must remain selected.
-        if globally_selected
-            .and_then(|i| run.analyses.get(i))
-            .is_some_and(|a| {
-                matches!(
-                    a.analysis_type,
-                    crate::state::AnalysisType::Noise
-                        | crate::state::AnalysisType::Hbnoise
-                        | crate::state::AnalysisType::Pnoise
-                )
-            })
-        {
-            None
-        } else {
-            run.analyses.iter().position(qpnoise_spectrum_is_renderable)
-        }
-    })
-}
-
-/// Whether the tab strip offers a frequency-response sheet for one analysis.
-///
-/// The success gate belongs to both branches. A Bode summary resolves off the
-/// retained magnitude and phase vectors alone, so a failed AC solve still
-/// produces one — and the sheet behind this offering refuses a failed solve
-/// outright, because margins read off vectors the engine emitted before
-/// giving up are not measurements. Only the raw-curve branch was checking.
-///
-/// The question is one of shape — are the traces a Bode sheet needs present?
-/// — so it is asked of [`crate::state::ac_bode_shape_for_analysis`] and not
-/// of the summary. The summary answers the same shape question by measuring
-/// the response first: a decibel conversion of the whole magnitude vector,
-/// an unwrapped copy of the phase, and every crossing search over both. The
-/// tab strip asks this about every analysis in the run, on every frame,
-/// whichever sheet is open.
-/// Only the magnitude/phase branch is a shape question. The distortion
-/// family retains plain frequency curves with no `|…|`/`phase(…)` pairing to
-/// resolve, so its branch has to prove the curve itself is well formed —
-/// which is a walk of every retained sample, and the reason this whole
-/// predicate is asked through [`analysis_answers_structural_gate`] rather
-/// than directly.
+/// That walk is the reason per-frame callers ask this through
+/// [`analysis_answers_structural_gate`] rather than directly.
 pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && (crate::state::ac_bode_shape_for_analysis(analysis, 0).is_some()
-            || (analysis.analysis_type.is_raw_frequency_curve()
-                && analysis
-                    .waveforms
-                    .iter()
-                    .any(raw_frequency_curve_is_renderable)))
-}
-
-/// Whether one retained distortion curve is drawable: paired coordinates, a
-/// positive finite abscissa at every sample, and a strictly ascending sweep.
-fn raw_frequency_curve_is_renderable(waveform: &RetainedTrace) -> bool {
-    if !waveform.visible || waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
-        return false;
-    }
-    frame_work::note(frame_work::DatasetWalk::RawFrequencyCurveScan);
-    waveform
-        .x
-        .iter()
-        .zip(waveform.y.iter())
-        .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
-        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
+    rspice_results::renderability::bode_analysis_is_renderable(analysis, frame_work::note_scan)
 }
 
 /// Open the dataset/manifest browser in its canonical Results frame.
@@ -1234,36 +1147,7 @@ pub(crate) fn retained_evidence_is_valid(
         })
 }
 
-/// A structural question a tab strip asks about a retained analysis whose
-/// answer costs a walk of every retained sample.
-///
-/// Every one of these is a *shape* question — can this sheet draw this
-/// evidence? — that the retained vectors alone can answer, and every one of
-/// them was asked directly by the availability gates, about every analysis in
-/// the run, on every frame. The magnitude/phase half of the Bode question is
-/// genuinely cheap and is answered without coming here; the rest are not, so
-/// they come here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum StructuralGate {
-    /// A frequency response or a raw distortion curve the Bode sheet can
-    /// draw; see [`bode_analysis_is_renderable`].
-    BodeResponse,
-    /// An ordinary-noise spectrum; see
-    /// [`bode::ordinary_noise_spectrum_is_renderable`].
-    OrdinaryNoiseSpectrum,
-    /// A discrete complex coefficient spectrum; see
-    /// [`harmonic_balance::analysis_is_renderable`].
-    HarmonicSpectrum,
-    /// An explicitly-labelled phase-noise trace with a retained carrier; see
-    /// [`phase_noise::phase_noise_is_renderable`].
-    PhaseNoiseSpectrum,
-    /// S-parameter traces with per-port reference impedances; see
-    /// [`smith::structure_is_renderable`].
-    SParameterStructure,
-    NetworkMatrix,
-    /// Exact event histories or validated legacy event projections.
-    EventHistory,
-}
+pub(crate) use rspice_results::renderability::StructuralGate;
 
 /// One structural gate answered by walking the evidence, for callers that
 /// hold a run without a session to memoize against — the printed page, the
@@ -1272,17 +1156,11 @@ pub(crate) fn structural_gate_is_answered_directly(
     gate: StructuralGate,
     analysis: &AnalysisResult,
 ) -> bool {
-    match gate {
-        StructuralGate::BodeResponse => bode_analysis_is_renderable(analysis),
-        StructuralGate::OrdinaryNoiseSpectrum => {
-            bode::ordinary_noise_spectrum_is_renderable(analysis)
-        }
-        StructuralGate::HarmonicSpectrum => harmonic_balance::analysis_is_renderable(analysis),
-        StructuralGate::PhaseNoiseSpectrum => phase_noise::phase_noise_is_renderable(analysis),
-        StructuralGate::SParameterStructure => smith::structure_is_renderable(analysis),
-        StructuralGate::NetworkMatrix => network_matrix::structure_is_renderable(analysis),
-        StructuralGate::EventHistory => events::analysis_is_renderable(analysis),
-    }
+    rspice_results::renderability::structural_gate_is_answered(
+        gate,
+        analysis,
+        frame_work::note_scan,
+    )
 }
 
 /// Whether one retained analysis answers a structural gate, resolved once per

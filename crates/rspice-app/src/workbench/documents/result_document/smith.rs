@@ -8,35 +8,11 @@ use crate::state::{
 };
 use crate::workbench::AppState;
 
-use super::frame_work::{self, DatasetWalk};
+use super::frame_work;
 use rspice_results_ui::smith_chart::view::{self, SmithPlotTrace};
 
-fn trace_is_well_formed(waveform: &crate::state::RetainedTrace) -> bool {
-    let Some(complex) = waveform.complex.as_ref() else {
-        return false;
-    };
-    if waveform.x.is_empty()
-        || waveform.x.len() != complex.real.len()
-        || waveform.x.len() != complex.imag.len()
-    {
-        return false;
-    }
-    frame_work::note(DatasetWalk::SParameterTraceScan);
-    waveform
-        .x
-        .iter()
-        .all(|frequency| frequency.is_finite() && *frequency > 0.0)
-        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
-        && complex
-            .real
-            .iter()
-            .chain(complex.imag.iter())
-            .all(|value| value.is_finite())
-}
-
 pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
-    frame_work::note(DatasetWalk::EvidenceValidation);
-    analysis.validate_retained_evidence().is_ok() && structure_is_renderable(analysis)
+    rspice_results::renderability::smith_analysis_is_renderable(analysis, frame_work::note_scan)
 }
 
 /// What the tab strip says about this sheet, in the sheet's own words.
@@ -75,38 +51,7 @@ pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
 /// gate and the cache synchronizer — take that verdict from the workspace
 /// memo instead of walking every retained complex sample again.
 pub(super) fn structure_is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
-    if !analysis.success
-        || !matches!(
-            analysis.analysis_type,
-            crate::state::AnalysisType::SParameter
-                | crate::state::AnalysisType::Psp
-                | crate::state::AnalysisType::Hbsp
-        )
-    {
-        return false;
-    }
-    let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
-        reference_impedances_ohm,
-        ..
-    }) = analysis.family_metadata.as_ref()
-    else {
-        return false;
-    };
-    analysis.waveforms.iter().any(|waveform| {
-        let Some(identity) = trace_identity(&waveform.name) else {
-            return false;
-        };
-        let port_count = if identity.physical_ports {
-            reference_impedances_ohm.len()
-        } else if reference_impedances_ohm.len().is_multiple_of(2) {
-            reference_impedances_ohm.len() / 2
-        } else {
-            return false;
-        };
-        identity.output_port <= port_count
-            && identity.input_port <= port_count
-            && trace_is_well_formed(waveform)
-    })
+    rspice_results::renderability::smith_structure_is_renderable(analysis, frame_work::note_scan)
 }
 
 /// Rebuild the mutable drawing cache solely from the selected immutable

@@ -8,10 +8,7 @@
 
 use crate::product::{ContentDigest, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{PageId, PaneId};
-use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
-    SimulationRun,
-};
+use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
@@ -289,12 +286,11 @@ const fn viewer_uses_analysis_stack(viewer: ResultViewer) -> bool {
 /// operations. It answers whether this retained analysis can be the evidence
 /// behind the named viewer; it never mutates global selection to make it so.
 pub(crate) fn analysis_supports_viewer(viewer: ResultViewer, analysis: &AnalysisResult) -> bool {
-    if !analysis.success || analysis.validate_retained_evidence().is_err() {
-        return false;
-    }
-    viewer_can_render(viewer, analysis, |gate, analysis| {
-        super::structural_gate_is_answered_directly(gate, analysis)
-    })
+    rspice_results::renderability::analysis_supports_viewer(
+        viewer,
+        analysis,
+        super::frame_work::note_scan,
+    )
 }
 
 /// The same predicate, with the retained-evidence verdict and every
@@ -315,154 +311,17 @@ pub(crate) fn analysis_supports_viewer_memoized(
 ) -> bool {
     analysis.success
         && super::analysis_evidence_is_valid(state, dataset_id, analysis)
-        && viewer_can_render(viewer, analysis, |gate, analysis| {
+        && rspice_results::renderability::viewer_can_render(viewer, analysis, |gate| {
             super::analysis_answers_structural_gate(state, dataset_id, analysis, gate)
         })
-}
-
-/// Whether this viewer has anything to draw from the shape of the retained
-/// result.
-///
-/// Most arms cost nothing — a payload discriminant, a non-empty vector. The
-/// five that do not are asked through `structural`, so the caller decides
-/// whether they are walked or read from the workspace memo; see
-/// [`super::StructuralGate`].
-fn viewer_can_render(
-    viewer: ResultViewer,
-    analysis: &AnalysisResult,
-    structural: impl Fn(super::StructuralGate, &AnalysisResult) -> bool,
-) -> bool {
-    match viewer {
-        ResultViewer::Waves => {
-            analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
-        }
-        ResultViewer::DcSweep => {
-            analysis.analysis_type == AnalysisType::DcSweep && !analysis.waveforms.is_empty()
-        }
-        ResultViewer::Bode => structural(super::StructuralGate::BodeResponse, analysis),
-        ResultViewer::NoiseContrib => {
-            rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
-                || structural(super::StructuralGate::OrdinaryNoiseSpectrum, analysis)
-        }
-        ResultViewer::Fft | ResultViewer::Eye => {
-            analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
-        }
-        ResultViewer::HarmonicBalance => {
-            structural(super::StructuralGate::HarmonicSpectrum, analysis)
-        }
-        ResultViewer::PhaseNoise => structural(super::StructuralGate::PhaseNoiseSpectrum, analysis),
-        ResultViewer::Nyquist => analysis.waveforms.iter().any(|waveform| {
-            waveform.complex.as_ref().is_some_and(|complex| {
-                !complex.real.is_empty()
-                    && complex.real.len() == complex.imag.len()
-                    && complex.real.len() == waveform.x.len()
-            })
-        }),
-        ResultViewer::Smith => structural(super::StructuralGate::SParameterStructure, analysis),
-        // The polar sheet draws any retained complex response, so its shape
-        // question is the same one Nyquist asks — the analysis kind decides
-        // which quantities it can name, not whether it can draw at all.
-        ResultViewer::Polar => !super::polar::quantities(analysis).is_empty(),
-        ResultViewer::NetworkMatrix => structural(super::StructuralGate::NetworkMatrix, analysis),
-        ResultViewer::Scatter | ResultViewer::BoxViolin => matches!(
-            analysis.family_metadata,
-            Some(AnalysisResultFamilyMetadata::MonteCarlo { ref variables, ref member_measurements, .. })
-                if variables.iter().any(|variable| variable.samples.len() >= 2)
-                    || member_measurements.len() >= 2
-        ),
-        // The analysis kind is part of the question, exactly as it is in the
-        // tab strip's own gate: `op_inspector` renders nothing for an
-        // analysis that is not a DC operating point, so a transient that
-        // retained its bias solution must not be bindable to the OP sheet
-        // from a persistent document either.
-        ResultViewer::Op => {
-            analysis.analysis_type == AnalysisType::DcOp
-                && operating_point_evidence_is_renderable(analysis)
-        }
-        // Two families rank contributions to one number, and this sheet
-        // serves both: a sensitivity report and a DC mismatch spread.
-        ResultViewer::Contribution => {
-            matches!(
-                analysis.result_payload,
-                Some(
-                    AnalysisResultPayload::Sensitivity { .. }
-                        | AnalysisResultPayload::SensitivityStudy { .. }
-                        | AnalysisResultPayload::DcMismatch { .. }
-                )
-            )
-        }
-        ResultViewer::TransferFunction => {
-            matches!(
-                analysis.result_payload,
-                Some(AnalysisResultPayload::TransferFunction { .. })
-            )
-        }
-        ResultViewer::Specs => {
-            !analysis.measurements.is_empty()
-                || matches!(
-                    analysis.result_payload,
-                    Some(AnalysisResultPayload::ScalarMeasurements { .. })
-                )
-        }
-        ResultViewer::Table => {
-            !analysis.waveforms.is_empty()
-                || operating_point_evidence_is_renderable(analysis)
-                || matches!(
-                    analysis.result_payload,
-                    Some(
-                        AnalysisResultPayload::PssFloquet { .. }
-                            | AnalysisResultPayload::Pstb { .. }
-                    )
-                )
-        }
-        ResultViewer::Hist => matches!(
-            analysis.family_metadata,
-            Some(AnalysisResultFamilyMetadata::MonteCarlo { ref variables, .. })
-                if variables.iter().any(|variable| !variable.samples.is_empty())
-        ),
-        ResultViewer::PoleZero => {
-            matches!(
-                analysis.result_payload,
-                Some(AnalysisResultPayload::PoleZero { .. })
-            )
-        }
-        ResultViewer::Events => matches!(
-            analysis.result_payload,
-            Some(AnalysisResultPayload::TransientEvents {
-                ref digital_traces,
-                ref real_traces,
-                ref current_impulses,
-                ..
-            }) if !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
-        ),
-        ResultViewer::Soa => matches!(
-            analysis.result_payload,
-            Some(AnalysisResultPayload::Soa { ref evaluations, .. }) if !evaluations.is_empty()
-        ),
-        ResultViewer::Optimization => matches!(
-            analysis.family_metadata,
-            Some(AnalysisResultFamilyMetadata::Optimization { ref iterations, .. }) if !iterations.is_empty()
-        ),
-        ResultViewer::Manifest => false,
-    }
-}
-
-fn operating_point_evidence_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.dc_op.is_some()
-        || analysis
-            .device_op
-            .as_ref()
-            .is_some_and(|report| !report.is_empty())
-        || matches!(
-            analysis.result_payload,
-            Some(AnalysisResultPayload::OperatingPoint { .. })
-        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, RetainedTrace, SimulationRun};
+    use crate::state::{
+        AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
+    };
 
     fn waveform(name: &str) -> RetainedTrace {
         RetainedTrace::new(name, vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff")

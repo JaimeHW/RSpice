@@ -16,8 +16,10 @@ use std::sync::Arc;
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
+use rspice_results::renderability::{
+    PolarQuantitySource, polar_quantity_source, polar_reference_impedances,
+};
 use rspice_results::waveform::RetainedTrace;
-use rspice_results::{analysis_type::AnalysisType, family_metadata::AnalysisResultFamilyMetadata};
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si;
@@ -91,20 +93,6 @@ pub struct PolarQuantity {
     unit: String,
 }
 
-/// Whether a retained waveform carries a complex series this sheet can draw.
-///
-/// Deliberately O(1): the deep finite/ordering check is
-/// [`AnalysisResult::validate_retained_evidence`], which the availability gate
-/// resolves through the workspace memo once per dataset generation. Repeating
-/// it here would walk every sample of every trace on every frame.
-fn complex_is_plottable(waveform: &RetainedTrace) -> bool {
-    waveform.complex.as_ref().is_some_and(|complex| {
-        !complex.real.is_empty()
-            && complex.real.len() == complex.imag.len()
-            && complex.real.len() == waveform.x.len()
-    })
-}
-
 /// The mixed-mode prefix of an S-parameter trace name, as the engine spelled
 /// it. `None` is a physical term.
 fn mixed_mode_prefix(name: &str) -> Option<(char, char)> {
@@ -157,46 +145,21 @@ pub fn quantities(analysis: &AnalysisResult) -> Vec<PolarQuantity> {
     if !analysis.success {
         return Vec::new();
     }
-    let network = match (&analysis.analysis_type, analysis.family_metadata.as_ref()) {
-        (
-            AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp,
-            Some(AnalysisResultFamilyMetadata::SParameter {
-                reference_impedances_ohm,
-                ..
-            }),
-        ) => Some(reference_impedances_ohm.clone()),
-        _ => None,
-    };
+    let network = polar_reference_impedances(analysis);
     let mut resolved = Vec::new();
     for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
-        if !complex_is_plottable(waveform) {
+        let Some(source) = polar_quantity_source(analysis.analysis_type, network, waveform) else {
             continue;
-        }
+        };
         let complex = waveform
             .complex
             .as_ref()
             .expect("plottability checked the complex components");
-        match network.as_ref() {
-            Some(reference_impedances_ohm) => {
-                let Some(identity) =
-                    rspice_results::network_matrix::trace_identity(&complex.source_name)
-                        .or_else(|| rspice_results::network_matrix::trace_identity(&waveform.name))
-                else {
-                    continue;
-                };
-                // Mixed-mode terms are indexed over half as many logical
-                // ports as the run declares physical ones, exactly as the
-                // Smith sheet reads them.
-                let port_count = if identity.physical_ports {
-                    reference_impedances_ohm.len()
-                } else if reference_impedances_ohm.len().is_multiple_of(2) {
-                    reference_impedances_ohm.len() / 2
-                } else {
-                    continue;
-                };
-                if identity.output_port > port_count || identity.input_port > port_count {
-                    continue;
-                }
+        match source {
+            PolarQuantitySource::NetworkTerm {
+                identity,
+                reference_impedances_ohm,
+            } => {
                 let term = if complex.source_name.trim().is_empty() {
                     waveform.name.as_str()
                 } else {
@@ -218,13 +181,7 @@ pub fn quantities(analysis: &AnalysisResult) -> Vec<PolarQuantity> {
                     unit: waveform.unit.clone().unwrap_or_default(),
                 });
             }
-            None => {
-                if !matches!(
-                    analysis.analysis_type,
-                    AnalysisType::Ac | AnalysisType::HarmonicBalance
-                ) {
-                    continue;
-                }
+            PolarQuantitySource::Response => {
                 let label = if complex.source_name.trim().is_empty() {
                     waveform.name.clone()
                 } else {
@@ -1155,6 +1112,9 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_results::{
+        analysis_type::AnalysisType, family_metadata::AnalysisResultFamilyMetadata,
+    };
 
     /// A four-port S-parameter result carrying both the mixed-mode terms the
     /// engine retained and the physical ones.

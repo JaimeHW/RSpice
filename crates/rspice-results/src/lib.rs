@@ -59,6 +59,8 @@ pub mod pole_zero;
 #[cfg(feature = "engine-evidence")]
 pub mod population;
 pub mod provenance;
+#[cfg(feature = "engine-evidence")]
+pub mod renderability;
 pub mod report_document;
 #[cfg(feature = "engine-evidence")]
 pub mod result_digest;

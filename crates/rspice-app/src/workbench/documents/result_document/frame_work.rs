@@ -122,6 +122,22 @@ pub(crate) fn note(_walk: DatasetWalk) {
     COUNTS.with(|counts| counts.borrow_mut()[_walk as usize] += 1);
 }
 
+/// Report a walk that a renderability question in `rspice-results` is about
+/// to perform, under the walk class that names it here.
+#[inline]
+pub(crate) fn note_scan(scan: rspice_results::renderability::EvidenceScan) {
+    use rspice_results::renderability::EvidenceScan;
+    note(match scan {
+        EvidenceScan::EvidenceValidation => DatasetWalk::EvidenceValidation,
+        EvidenceScan::NoiseSpectrum => DatasetWalk::NoiseSpectrumScan,
+        EvidenceScan::RawFrequencyCurve => DatasetWalk::RawFrequencyCurveScan,
+        EvidenceScan::HarmonicSpectrum => DatasetWalk::HarmonicSpectrumScan,
+        EvidenceScan::PhaseNoiseSpectrum => DatasetWalk::PhaseNoiseSpectrumScan,
+        EvidenceScan::SParameterTrace => DatasetWalk::SParameterTraceScan,
+        EvidenceScan::EventProjection => DatasetWalk::EventProjectionScan,
+    });
+}
+
 /// One class of per-frame painting work that reads retained samples.
 ///
 /// [`DatasetWalk`] counts work that must not happen at all in a steady frame.

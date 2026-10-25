@@ -164,16 +164,6 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     })
 }
 
-/// Analyses whose selection states which noise result the reader means. A
-/// selection outside this family — a transient carried over from another
-/// viewer — says nothing about noise at all.
-fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
-    matches!(
-        analysis_type,
-        AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
-    )
-}
-
 /// The one noise analysis both halves of the ordinary-noise sheet read.
 ///
 /// A selected noise analysis binds strictly. If it carries no renderable
@@ -184,49 +174,11 @@ fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
 /// no noise intent for the binding to honour.
 pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.model.simulation.active_run()?;
-    selected_noise_analysis_index_with(
+    rspice_results::renderability::select_ordinary_noise_analysis(
         state.model.simulation.view.active_analysis_idx,
-        run,
+        &run.analyses,
         |analysis| ordinary_noise_spectrum_is_renderable_in(state, run.dataset_id, analysis),
     )
-}
-
-/// The same binding, from the selection and the run rather than the session.
-///
-/// The printed page resolves the analysis it prints from a run and a selection
-/// it already holds, and it must reach the same one the sheet did — a page
-/// that steps to a neighbouring result puts another analysis' contributors
-/// under the selected one's name, on paper.
-pub(super) fn selected_noise_analysis_index_in(
-    globally_selected: Option<usize>,
-    run: &crate::state::SimulationRun,
-) -> Option<usize> {
-    selected_noise_analysis_index_with(
-        globally_selected,
-        run,
-        ordinary_noise_spectrum_is_renderable,
-    )
-}
-
-/// The binding rule itself, stated once.
-///
-/// The sheet resolves renderability through the workspace memo and the
-/// printed page resolves it directly, but they must reach the same analysis:
-/// a page that steps to a neighbouring result puts another analysis'
-/// contributors under the selected one's name, on paper. So the rule takes
-/// the oracle as a parameter rather than being written out twice.
-fn selected_noise_analysis_index_with(
-    globally_selected: Option<usize>,
-    run: &crate::state::SimulationRun,
-    renderable: impl Fn(&AnalysisResult) -> bool,
-) -> Option<usize> {
-    if let Some(selected) = globally_selected
-        && let Some(analysis) = run.analyses.get(selected)
-        && is_noise_analysis(analysis.analysis_type)
-    {
-        return renderable(analysis).then_some(selected);
-    }
-    run.analyses.iter().position(renderable)
 }
 
 fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)> {

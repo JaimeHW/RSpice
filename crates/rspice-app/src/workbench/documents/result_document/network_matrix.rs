@@ -64,11 +64,10 @@ impl NetworkMatrixState {
 }
 
 pub(super) fn structure_is_renderable(analysis: &AnalysisResult) -> bool {
-    let Some(matrix) = resolve(analysis) else {
-        return false;
-    };
-    super::frame_work::note(super::frame_work::DatasetWalk::SParameterTraceScan);
-    matrix.samples_are_finite_and_aligned(analysis)
+    rspice_results::renderability::network_matrix_structure_is_renderable(
+        analysis,
+        super::frame_work::note_scan,
+    )
 }
 
 /// What the tab strip says about this sheet, in the sheet's own words.
