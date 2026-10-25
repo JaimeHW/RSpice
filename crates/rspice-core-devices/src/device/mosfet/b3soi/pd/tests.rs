@@ -214,7 +214,7 @@ fn update_applies_body_limit_after_branch_limit() {
     let limited_bias = dev.bias;
     dev.update(&limited_input);
     assert!(
-        pd_biases_match(dev.bias, limited_bias),
+        biases_match(dev.bias, limited_bias),
         "revisiting one DC candidate must not advance the limiter twice"
     );
 

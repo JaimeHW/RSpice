@@ -369,7 +369,8 @@ use rspice_core::analysis::harmonic_balance::{
 // Deleting the test-only `SpiceLibraryIndex::search_parts` brings it to 5,291.
 // Deleting the undriven VDMOS recovery and thermal models brings it to
 // 5,278, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5278;
+// B3SOI's shared `SoiCharge`, `SoiBias` and `SoiGeometry` bring it to 5,281.
+const MAX_PUBLIC_ITEMS: usize = 5281;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

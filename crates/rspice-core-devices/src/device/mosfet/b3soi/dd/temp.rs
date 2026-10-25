@@ -231,23 +231,8 @@ pub struct B3SoiDdSized {
     pub grgeltd: Value,
 }
 
-/// Instance geometry inputs needed by the sizing pass.
-#[derive(Debug, Clone, Copy)]
-pub struct B3SoiDdGeometry {
-    pub l: Value,
-    pub w: Value,
-    pub drain_area: Value,
-    pub source_area: Value,
-    pub drain_squares: Value,
-    pub source_squares: Value,
-    pub drain_perimeter: Value,
-    pub source_perimeter: Value,
-    pub body_squares: Value,
-    pub rth0: Value,
-    pub cth0: Value,
-    pub nseg: Value,
-    pub frbody: Value,
-}
+/// Instance geometry inputs needed by the B3SOIDD sizing pass.
+pub type B3SoiDdGeometry = super::super::common::SoiGeometry;
 
 impl B3SoiDdSized {
     /// Port of `B3SOIDDtemp` (b3soiddtemp.c lines 38-813).

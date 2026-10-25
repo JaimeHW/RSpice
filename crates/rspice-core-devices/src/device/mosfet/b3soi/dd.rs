@@ -71,7 +71,7 @@ pub mod params;
 pub mod temp;
 
 use crate::device::mosfet::b3soi::common::{
-    SoiCompanionCurrents, stamp, stamp_conductance, stamp_rhs,
+    SoiCompanionCurrents, biases_match, stamp, stamp_conductance, stamp_rhs,
 };
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
@@ -1660,16 +1660,6 @@ impl B3SoiDd {
         stamp(matrix, t, dp, gtemp_dp);
         stamp(matrix, t, sp, gtemp_sp);
     }
-}
-
-#[inline]
-fn biases_match(a: B3SoiDdBias, b: B3SoiDdBias) -> bool {
-    a.vbs == b.vbs
-        && a.vgs == b.vgs
-        && a.vds == b.vds
-        && a.ves == b.ves
-        && a.vps == b.vps
-        && a.del_temp == b.del_temp
 }
 
 #[inline]

@@ -66,7 +66,7 @@ pub mod params;
 pub mod temp;
 
 use crate::device::mosfet::b3soi::common::{
-    SoiCompanionCurrents, stamp, stamp_conductance, stamp_rhs,
+    SoiCompanionCurrents, biases_match, stamp, stamp_conductance, stamp_rhs,
 };
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
@@ -1014,7 +1014,7 @@ impl NonlinearDevice for B3SoiPd {
             && self
                 .last_dc_update_bias
                 .get()
-                .is_some_and(|last| pd_biases_match(last, raw_bias))
+                .is_some_and(|last| biases_match(last, raw_bias))
             && self.dc_stamp_reuse_pending.replace(false)
         {
             self.converged_ref = self.bias;
@@ -1102,16 +1102,6 @@ impl NonlinearDevice for B3SoiPd {
             && cmp(self.bias.vps, self.converged_ref.vps)
             && (!self.self_heating_active() || cmp(self.bias.del_temp, self.converged_ref.del_temp))
     }
-}
-
-#[inline]
-fn pd_biases_match(a: B3SoiPdBias, b: B3SoiPdBias) -> bool {
-    a.vbs == b.vbs
-        && a.vgs == b.vgs
-        && a.vds == b.vds
-        && a.ves == b.ves
-        && a.vps == b.vps
-        && a.del_temp == b.del_temp
 }
 
 impl B3SoiPd {

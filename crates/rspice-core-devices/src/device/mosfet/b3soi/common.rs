@@ -21,6 +21,109 @@ pub struct SoiCompanionCurrents {
     pub cqth: Value,
 }
 
+/// Charge-model output for one B3SOI instance (DD, FD or PD).
+///
+/// Mirrors the `here->B3SOI*q*` node charges and the `here->B3SOI*c*` intrinsic
+/// capacitance matrix that ngspice fills at the end of `B3SOI*load`
+/// (b3soi*ld.c:3387-3429) plus the extrinsic S/D-to-substrate spline charges
+/// (b3soi*ld.c:3438-3609) and the gate overlap charges (b3soi*ld.c:3655-3784).
+///
+/// The electrical node charges (`qg/qb/qd/qe`) include the overlap and extrinsic
+/// lumps exactly as ngspice does in the `mode>0` branch at b3soi*ld.c:3722-3729,
+/// so `qg+qb+qd+qe+qs == 0`. `qth` is the optional self-heating temperature
+/// charge (`Cth * delTemp`) filled by the device wrapper. Capacitances are the
+/// `gc**b`-style derivatives *before* multiplication by the integration
+/// coefficient `ag0` (the device applies `ag0` when it forms the transient
+/// companion). All quantities are in device polarity with `mtype` already folded
+/// in where ngspice folds it.
+#[derive(Debug, Clone, Default)]
+pub struct SoiCharge {
+    /// Channel direction at evaluation (`here->B3SOI*mode`).
+    pub mode: i32,
+
+    // Node charges (after overlap + extrinsic lumping, b3soi*ld.c:3722-3729).
+    pub qg: Value,
+    pub qb: Value,
+    pub qd: Value,
+    pub qe: Value,
+    pub qth: Value,
+
+    // Intrinsic + overlap capacitance matrix (the `gc**`/ag0 coefficients).
+    // Row = charge node, col = controlling node. Drain/source are the *primes*
+    // (== external in the supported decks). Already includes overlap and
+    // extrinsic S/D-substrate derivatives, matching b3soi*ld.c:3680-3766.
+    pub gcggb: Value,
+    pub gcgdb: Value,
+    pub gcgsb: Value,
+    pub gcgeb: Value,
+    pub gcbgb: Value,
+    pub gcbdb: Value,
+    pub gcbsb: Value,
+    pub gcbeb: Value,
+    pub gcdgb: Value,
+    pub gcddb: Value,
+    pub gcdsb: Value,
+    pub gcdeb: Value,
+    pub gcsgb: Value,
+    pub gcsdb: Value,
+    pub gcssb: Value,
+    pub gcseb: Value,
+    pub gcegb: Value,
+    pub gcedb: Value,
+    pub gcesb: Value,
+    pub gceeb: Value,
+
+    // Self-heating charge derivatives with respect to the temperature-rise node.
+    pub gcg_t: Value,
+    pub gcb_t: Value,
+    pub gcd_t: Value,
+    pub gce_t: Value,
+}
+
+/// Input branch voltages for the DC eval, already in device polarity
+/// (`mtype` folded in by the caller) and *before* the normal/inverse swap.
+///
+/// `vbs`,`vgs`,`vds`,`ves`,`vps` correspond to the ngspice `vbs`/`vgs`/`vds`/
+/// `ves`/`vps` after limiting (b3soi*ld.c:836).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SoiBias {
+    pub vbs: Value,
+    pub vgs: Value,
+    pub vds: Value,
+    pub ves: Value,
+    pub vps: Value,
+    pub del_temp: Value,
+}
+
+/// Whether two biases are the same point, field for field.
+#[inline]
+pub(crate) fn biases_match(a: SoiBias, b: SoiBias) -> bool {
+    a.vbs == b.vbs
+        && a.vgs == b.vgs
+        && a.vds == b.vds
+        && a.ves == b.ves
+        && a.vps == b.vps
+        && a.del_temp == b.del_temp
+}
+
+/// Instance geometry inputs needed by the B3SOIDD and B3SOIPD sizing passes.
+#[derive(Debug, Clone, Copy)]
+pub struct SoiGeometry {
+    pub l: Value,
+    pub w: Value,
+    pub drain_area: Value,
+    pub source_area: Value,
+    pub drain_squares: Value,
+    pub source_squares: Value,
+    pub drain_perimeter: Value,
+    pub source_perimeter: Value,
+    pub body_squares: Value,
+    pub rth0: Value,
+    pub cth0: Value,
+    pub nseg: Value,
+    pub frbody: Value,
+}
+
 pub(crate) const B3SOI_MOBMOD_VALUES: &[i32] = &[0, 1, 2, 3];
 pub(crate) const B3SOI_CAPMOD_VALUES: &[i32] = &[0, 1, 2, 3];
 pub(crate) const B3SOI_SHMOD_VALUES: &[i32] = &[0, 1];

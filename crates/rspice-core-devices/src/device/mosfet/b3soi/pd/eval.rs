@@ -112,76 +112,10 @@ pub struct B3SoiPdOp {
 }
 
 /// Charge-model output for one B3SOIPD instance.
-///
-/// Mirrors the `here->B3SOIPDq*` node charges and the `here->B3SOIPDc*` intrinsic
-/// capacitance matrix that ngspice fills at the end of `B3SOIPDload`
-/// (b3soipdld.c:3387-3429) plus the extrinsic S/D-to-substrate spline charges
-/// (b3soipdld.c:3438-3609) and the gate overlap charges (b3soipdld.c:3655-3784).
-///
-/// The four node charges (`qg/qb/qd/qe`) include the overlap and extrinsic lumps
-/// exactly as ngspice does in the `mode>0` branch at b3soipdld.c:3722-3729, so
-/// `qg+qb+qd+qe+qs == 0`. Capacitances are the `gc**b`-style derivatives *before*
-/// multiplication by the integration coefficient `ag0` (the device applies `ag0`
-/// when it forms the transient companion). All quantities are in device polarity
-/// with `mtype` already folded in where ngspice folds it.
-#[derive(Debug, Clone, Default)]
-pub struct B3SoiPdCharge {
-    /// Channel direction at evaluation (`here->B3SOIPDmode`).
-    pub mode: i32,
+pub type B3SoiPdCharge = super::super::common::SoiCharge;
 
-    // Node charges (after overlap + extrinsic lumping, b3soipdld.c:3722-3729).
-    pub qg: Value,
-    pub qb: Value,
-    pub qd: Value,
-    pub qe: Value,
-    pub qth: Value,
-
-    // Intrinsic + overlap capacitance matrix (the `gc**`/ag0 coefficients).
-    // Row = charge node, col = controlling node. Drain/source are the *primes*
-    // (== external in the supported decks). Already includes overlap and
-    // extrinsic S/D-substrate derivatives, matching b3soipdld.c:3680-3766.
-    pub gcggb: Value,
-    pub gcgdb: Value,
-    pub gcgsb: Value,
-    pub gcgeb: Value,
-    pub gcbgb: Value,
-    pub gcbdb: Value,
-    pub gcbsb: Value,
-    pub gcbeb: Value,
-    pub gcdgb: Value,
-    pub gcddb: Value,
-    pub gcdsb: Value,
-    pub gcdeb: Value,
-    pub gcsgb: Value,
-    pub gcsdb: Value,
-    pub gcssb: Value,
-    pub gcseb: Value,
-    pub gcegb: Value,
-    pub gcedb: Value,
-    pub gcesb: Value,
-    pub gceeb: Value,
-
-    // Self-heating charge derivatives with respect to the temperature-rise node.
-    pub gcg_t: Value,
-    pub gcb_t: Value,
-    pub gcd_t: Value,
-    pub gce_t: Value,
-}
-
-/// Input branch voltages for the DC eval, already in device polarity
-/// (`mtype` folded in by the caller) and *before* the normal/inverse swap.
-///
-/// `vbs`,`vgs`,`vds`,`ves`,`vps` correspond to the ngspice `vbs`/`vgs`/`vds`/
-/// `ves`/`vps` after limiting (b3soipdld.c:836).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct B3SoiPdBias {
-    pub vbs: Value,
-    pub vgs: Value,
-    pub vds: Value,
-    pub ves: Value,
-    pub vps: Value,
-    pub del_temp: Value,
-}
+/// Input branch voltages for the B3SOIPD DC eval.
+pub type B3SoiPdBias = super::super::common::SoiBias;
 
 /// Evaluate the B3SOIPD DC operating point.
 ///
