@@ -23,6 +23,7 @@ pub use headless::{
 };
 pub(crate) use headless_tasks::small_signal_state_keyword;
 pub use headless_tasks::{HeadlessTaskRequest, prepare_headless_tasks};
+pub use snapshot::PreparedRunMetadata;
 pub(crate) use snapshot::bound_cards::BoundStateReader;
 pub use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, DeckBuildProgress, EngineRefusal,
@@ -34,7 +35,6 @@ pub(crate) use snapshot::{
     CornerVerilogARuntimes, ModelSourceIdentity, PreparedRunSet, RunSourceReceipt, RunnerParts,
     SnapshotParts, TaskSourcePolicy,
 };
-pub use snapshot::{PreparedRunMetadata, execution_target_supports_cancellation};
 pub(crate) use task_preparation::{attach_saved_output_contracts, prepare_manual_tasks};
 
 pub use task_preparation::prepare_plan_tasks;

@@ -1096,12 +1096,6 @@ impl Command {
             }
             Self::NewVerilogADevice => "no library can be written",
             Self::NewView => "select a cell in a writable library",
-            Self::StopSimulation
-                if app.state.model.simulation.execution.has_active_execution()
-                    && !crate::simulation::execution::execution_target_supports_cancellation() =>
-            {
-                "cancellation is unavailable for the current execution target"
-            }
             Self::StopSimulation if app.state.model.simulation.cancellation_is_pending() => {
                 "simulation cancellation is already in progress"
             }

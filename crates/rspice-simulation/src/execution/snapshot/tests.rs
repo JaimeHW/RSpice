@@ -1282,13 +1282,6 @@ fn target_capability_change_changes_snapshot_identity() {
 }
 
 #[test]
-fn every_execution_target_advertises_verified_cancellation() {
-    let target = ExecutionTargetCapabilities::current();
-    assert!(target.cancellable);
-    assert_eq!(execution_target_supports_cancellation(), target.cancellable);
-}
-
-#[test]
 fn automatic_export_policy_is_authenticated_by_snapshot_identity() {
     let first = PreparedRunSnapshot::new(parts()).expect("disabled export snapshot");
     let mut changed = parts();

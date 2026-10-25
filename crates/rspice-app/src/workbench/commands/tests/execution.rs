@@ -54,7 +54,7 @@ fn clear_results_cannot_remove_the_executor_owned_run() {
 }
 
 #[test]
-fn stop_command_follows_the_execution_target_capability() {
+fn stop_command_is_enabled_only_while_an_abort_can_be_requested() {
     let mut simulation = crate::state::SimulationState::default();
     assert!(!stop_simulation_enabled(&simulation));
     let identity = simulation
@@ -63,10 +63,7 @@ fn stop_command_follows_the_execution_target_capability() {
         .expect("current run has execution identity");
     simulation.execution.active_execution = Some(identity);
     simulation.execution.is_running = false;
-    assert_eq!(
-        stop_simulation_enabled(&simulation),
-        crate::simulation::execution::execution_target_supports_cancellation()
-    );
+    assert!(stop_simulation_enabled(&simulation));
 
     simulation.request_abort_active_run().unwrap();
     assert!(!stop_simulation_enabled(&simulation));

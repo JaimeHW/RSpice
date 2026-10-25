@@ -204,7 +204,7 @@ impl ExecutionTargetCapabilities {
             // Browser workers are terminated synchronously. Native execution
             // cooperatively polls the same typed abort signal through every
             // analysis service and core long-running loop.
-            cancellable: execution_target_supports_cancellation(),
+            cancellable: true,
             sealed_netlist_input: true,
             // The controller intentionally preserves ordered task semantics.
             max_parallel_tasks: 1,
@@ -223,10 +223,6 @@ impl ExecutionTargetCapabilities {
         writer.bool(self.sealed_netlist_input);
         writer.u64(self.max_parallel_tasks);
     }
-}
-
-pub const fn execution_target_supports_cancellation() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

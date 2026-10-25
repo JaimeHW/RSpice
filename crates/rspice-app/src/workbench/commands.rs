@@ -67,7 +67,6 @@ pub(crate) mod dispatch_probe {
 
 fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
     simulation.can_request_abort_active_run()
-        && crate::simulation::execution::execution_target_supports_cancellation()
 }
 
 fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
