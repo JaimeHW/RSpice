@@ -1178,25 +1178,6 @@ impl AppState {
         });
     }
 
-    /// Change a project pin without changing its recency or file identity.
-    #[cfg(test)]
-    pub(crate) fn set_recent_project_pinned(
-        &mut self,
-        path: &std::path::Path,
-        pinned: bool,
-    ) -> bool {
-        let Some(recent) = self
-            .platform
-            .recent_files
-            .iter_mut()
-            .find(|recent| recent.kind == RecentKind::Project && recent.path == path)
-        else {
-            return false;
-        };
-        recent.pinned = pinned;
-        true
-    }
-
     /// Where a paste should land, snapped to the schematic grid: under the
     /// cursor when it hovers the canvas, otherwise the center of the visible
     /// canvas (menu-driven paste), otherwise a sane fixed spot.
@@ -1314,21 +1295,6 @@ mod tests {
         assert_eq!(recent.owner.as_deref(), Some("Analog Design"));
         assert_eq!(recent.tags, ["afe", "release"]);
         assert!(recent.opened_at_unix_ms >= first_timestamp);
-    }
-
-    #[test]
-    fn pinning_is_project_only_and_does_not_reorder_recents() {
-        let mut state = AppState::default();
-        let project = std::path::Path::new("C:/Engineering/afe.rspiceproj");
-        let schematic = std::path::Path::new("C:/Engineering/standalone.rsch");
-        state.remember_recent_file(RecentKind::Project, project);
-        state.remember_recent_file(RecentKind::Schematic, schematic);
-
-        assert!(state.set_recent_project_pinned(project, true));
-        assert!(!state.set_recent_project_pinned(schematic, true));
-        assert_eq!(state.platform.recent_files[0].path, schematic);
-        assert_eq!(state.platform.recent_files[1].path, project);
-        assert!(state.platform.recent_files[1].pinned);
     }
 
     /// The list keeps as many projects as Recent projects listed asks,
