@@ -868,7 +868,8 @@ impl NonlinearDevice for B3SoiFd {
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        if !self.has_history {
+        // An iterate the limiter moved is not converged (b3soifdld.c:2745-2747).
+        if !self.has_history || self.last_limited.get() {
             return false;
         }
         let reltol = criteria.relative_tolerance();

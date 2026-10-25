@@ -338,6 +338,28 @@ fn self_heating_update_limits_del_temp_step_like_ngspice() {
 }
 
 #[test]
+fn self_heating_limited_iterate_is_not_converged() {
+    let mut dev = self_heating_device_for_stamp_test();
+    let at = [0.5, 1.2, 0.0, 0.0, 0.0];
+    dev.update(&at);
+    dev.update(&at);
+    assert!(
+        dev.is_converged(NonlinearConvergenceCriteria::default()),
+        "a repeated iterate converges"
+    );
+
+    // The limiter resets a NaN temperature to 0 K, the previous value, and
+    // flags the iterate; ngspice counts it as non-convergence
+    // (b3soifdld.c:2745-2747).
+    dev.update(&[0.5, 1.2, 0.0, 0.0, Value::NAN]);
+    assert_eq!(dev.bias.del_temp, 0.0);
+    assert!(
+        !dev.is_converged(NonlinearConvergenceCriteria::default()),
+        "a limited iterate must not report convergence"
+    );
+}
+
+#[test]
 fn capmod3_fd_dynamic_charges_ignore_intrinsic_source_drain_junction_storage() {
     let mut no_junction = n1_params();
     no_junction.insert("CAPMOD".to_string(), 3.0);
