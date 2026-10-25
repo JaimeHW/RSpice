@@ -1,5 +1,8 @@
-use rspice_veriloga::{CompilerOptions, NoPipelineControl, SourceProviderLimits, VerilogACompiler};
-use std::path::PathBuf;
+use rspice_veriloga::{
+    CompileResult, CompilerOptions, NoPipelineControl, PreparedRuntimeSource, SourceProviderLimits,
+    VerilogACompiler,
+};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -25,6 +28,15 @@ impl Drop for Sources {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// The whole source closure of `root`, unbounded and never cancelled.
+fn prepare(compiler: &VerilogACompiler, root: &Path) -> CompileResult<PreparedRuntimeSource> {
+    compiler.prepare_file_runtime_source_with_limits_and_control(
+        root,
+        SourceProviderLimits::UNBOUNDED,
+        &NoPipelineControl,
+    )
 }
 
 #[test]
@@ -296,7 +308,7 @@ fn post_preparation_errors_keep_frozen_include_locations() {
         );
         let child = files.write("child.va", &source).canonicalize().unwrap();
         let compiler = VerilogACompiler::default();
-        let prepared = compiler.prepare_file_runtime_source(&root).unwrap();
+        let prepared = prepare(&compiler, &root).unwrap();
         // A later edit must not redefine the bytes the compiler consumed.
         files.write("child.va", "this is a different document\n");
         let error = prepared.compile_runtime(None).unwrap_err();
@@ -347,9 +359,7 @@ fn post_preparation_errors_without_spans_do_not_invent_locations() {
         "root.va",
         "module first; endmodule\nmodule second; endmodule\n",
     );
-    let prepared = VerilogACompiler::default()
-        .prepare_file_runtime_source(&root)
-        .unwrap();
+    let prepared = prepare(&VerilogACompiler::default(), &root).unwrap();
     let error = prepared.compile_runtime(None).unwrap_err();
     let diagnostics = prepared.diagnostics_for_error(&error);
     assert_eq!(diagnostics.len(), 1);
@@ -509,7 +519,7 @@ fn file_and_provider_compilation_retain_warnings_in_original_includes() {
         )
         .unwrap();
     assert_eq!(from_file.diagnostics, from_provider.diagnostics);
-    let prepared = compiler.prepare_file_runtime_source(&root).unwrap();
+    let prepared = prepare(&compiler, &root).unwrap();
     assert_eq!(prepared.diagnostics(), from_file.diagnostics);
     let runtime = prepared.compile_runtime(None).unwrap();
     assert_eq!(runtime.diagnostics, from_file.diagnostics);
@@ -620,7 +630,7 @@ fn multiple_modules_compile_from_one_frozen_source_and_dependency_identity() {
     let header = files.write("gain.vh", "`define GAIN 2\n");
     let root = files.write("models.va", "`include \"gain.vh\"\nmodule first(p,n); inout p,n; electrical p,n; parameter real gain=`GAIN; analog I(p,n)<+gain*V(p,n); endmodule\nmodule second(p,n); inout p,n; electrical p,n; parameter real gain=`GAIN; analog I(p,n)<+gain*V(p,n); endmodule\n");
     let compiler = VerilogACompiler::default();
-    let prepared = compiler.prepare_file_runtime_source(&root).unwrap();
+    let prepared = prepare(&compiler, &root).unwrap();
     assert_eq!(
         prepared.module_names().collect::<Vec<_>>(),
         ["first", "second"]
@@ -644,7 +654,7 @@ fn multiple_modules_compile_from_one_frozen_source_and_dependency_identity() {
         assert!(built.source_dependencies.contains(&original_header));
     }
     files.write("gain.vh", "`define GAIN 7\n");
-    let changed = compiler.prepare_file_runtime_source(&root).unwrap();
+    let changed = prepare(&compiler, &root).unwrap();
     assert_eq!(
         changed
             .compile_runtime(Some("second"))
@@ -805,8 +815,7 @@ fn a_replay_places_processes_and_system_calls_where_they_were_written() {
         enable_ams: true,
         ..Default::default()
     });
-    let original = compiler
-        .prepare_file_runtime_source(&root)
+    let original = prepare(&compiler, &root)
         .unwrap()
         .compile_runtime(Some("top"))
         .unwrap();
@@ -884,8 +893,7 @@ fn a_signal_is_placed_on_the_line_of_the_included_file_that_declares_it() {
         enable_ams: true,
         ..Default::default()
     });
-    let original = compiler
-        .prepare_file_runtime_source(&root)
+    let original = prepare(&compiler, &root)
         .unwrap()
         .compile_runtime(Some("top"))
         .unwrap();
@@ -935,7 +943,7 @@ fn standalone_connect_library_is_prepared_without_a_device_module() {
         enable_ams: true,
         ..Default::default()
     });
-    let prepared = compiler.prepare_file_runtime_source(&root).unwrap();
+    let prepared = prepare(&compiler, &root).unwrap();
     assert_eq!(prepared.module_names().count(), 0);
     let specification = prepared.connect_specification();
     assert!(!specification.declares_module);
@@ -953,10 +961,7 @@ fn named_connection_configurations_preserve_alternatives_and_reject_duplicate_de
     source.push_str("\nconnectrules Low; connect d2a #(.vsup(1.0)); endconnectrules\nconnectrules High; connect d2a #(.vsup(5.0)); endconnectrules\nconnectrules Empty; endconnectrules\n");
     let root = files.write("alternatives.vams", &source);
     let compiler = VerilogACompiler::default();
-    let specification = compiler
-        .prepare_file_runtime_source(&root)
-        .unwrap()
-        .connect_specification();
+    let specification = prepare(&compiler, &root).unwrap().connect_specification();
     assert_eq!(
         specification
             .rules
@@ -997,10 +1002,7 @@ fn named_connection_configurations_preserve_alternatives_and_reject_duplicate_de
         ),
     ] {
         files.write("alternatives.vams", &format!("{source}\n{duplicate}\n"));
-        let error = compiler
-            .prepare_file_runtime_source(&root)
-            .unwrap_err()
-            .to_string();
+        let error = prepare(&compiler, &root).unwrap_err().to_string();
         assert!(
             error.contains(expected) && error.contains("more than once"),
             "{error}"
@@ -1043,8 +1045,7 @@ fn prepared_virtual_source_shares_front_end_and_transports_standalone_connection
         enable_ams: true,
         ..Default::default()
     });
-    let file_artifact = compiler
-        .prepare_file_runtime_source(&root)
+    let file_artifact = prepare(&compiler, &root)
         .unwrap()
         .connection_artifact()
         .unwrap();

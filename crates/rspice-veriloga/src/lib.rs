@@ -2163,21 +2163,9 @@ impl VerilogACompiler {
         .compile_runtime_with_control(module_name, control)
     }
 
-    /// Prepare one complete active source closure without selecting a module.
+    /// Prepare one complete active source closure without selecting a module,
+    /// with bounded preprocessing, retaining exactly the document bytes used.
     /// Standalone connect libraries and multi-module files share this path.
-    pub fn prepare_file_runtime_source(
-        &self,
-        path: &std::path::Path,
-    ) -> CompileResult<PreparedRuntimeSource> {
-        self.prepare_file_runtime_source_with_limits_and_control(
-            path,
-            preprocessor::SourceProviderLimits::UNBOUNDED,
-            &NoPipelineControl,
-        )
-    }
-
-    /// Bound preprocessing of the complete source closure and retain exactly
-    /// the document bytes used, before any module is compiled.
     pub fn prepare_file_runtime_source_with_limits_and_control(
         &self,
         path: &std::path::Path,

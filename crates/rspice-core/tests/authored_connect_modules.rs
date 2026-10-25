@@ -18,6 +18,19 @@ impl Source {
     fn path(&self) -> String {
         self.0.to_string_lossy().replace('\\', "/")
     }
+    /// The whole source closure, unbounded and never cancelled.
+    fn prepare(
+        &self,
+        compiler: &rspice_veriloga::VerilogACompiler,
+    ) -> rspice_veriloga::PreparedRuntimeSource {
+        compiler
+            .prepare_file_runtime_source_with_limits_and_control(
+                &self.0,
+                rspice_veriloga::SourceProviderLimits::UNBOUNDED,
+                &rspice_veriloga::NoPipelineControl,
+            )
+            .unwrap()
+    }
 }
 impl Drop for Source {
     fn drop(&mut self) {
@@ -694,8 +707,8 @@ endconnectrules
             format!("{DEVICE}\n`default_transition 1n\n{LIBRARY}")
         });
         let library = Source::new(LIBRARY);
-        let prepared = compiler.prepare_file_runtime_source(&device.0).unwrap();
-        let library_prepared = compiler.prepare_file_runtime_source(&library.0).unwrap();
+        let prepared = device.prepare(&compiler);
+        let library_prepared = library.prepare(&compiler);
         let mut identities = Vec::new();
         for (block, expected) in [("low", 2.0 / 3.0), ("high", 2.0)] {
             let configuration = if external {
@@ -782,8 +795,8 @@ endmodule
 connectrules chosen; connect drive; endconnectrules
 "#
         ));
-        let prepared = compiler.prepare_file_runtime_source(&device.0).unwrap();
-        let library_prepared = compiler.prepare_file_runtime_source(&library.0).unwrap();
+        let prepared = device.prepare(&compiler);
+        let library_prepared = library.prepare(&compiler);
         assert!(
             library_prepared
                 .connection_configuration("missing")
@@ -874,7 +887,7 @@ fn deck_reconfigures_registered_specializations_without_resetting_root_assignmen
         enable_ams: true,
         ..Default::default()
     });
-    let prepared = compiler.prepare_file_runtime_source(&source.0).unwrap();
+    let prepared = source.prepare(&compiler);
     let low = prepared.connection_configuration("low").unwrap();
     let original = prepared
         .compile_runtime_with_connections(Some("top"), &low, &NoPipelineControl)
