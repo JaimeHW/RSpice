@@ -122,8 +122,6 @@ fn waveform_operands(statement: &MeasureStatement) -> Vec<&str> {
         | MeasureType::PeakToPeak { signal, .. }
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
-        | MeasureType::RiseTime { signal, .. }
-        | MeasureType::FallTime { signal, .. }
         | MeasureType::Integ { signal, .. } => operands.push(signal),
         MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
     }
@@ -756,12 +754,6 @@ impl Evaluation<'_, '_, '_> {
             } => self.extremum(signal, *from, *to, *output, true),
             MeasureType::PeakToPeak { signal, from, to } => self.peak_to_peak(signal, *from, *to),
             MeasureType::Derivative { .. } => self.shapeless("DERIV", "a step has no derivative"),
-            MeasureType::RiseTime { .. } => {
-                self.shapeless("RISE_TIME", "a step has no edge to time between two levels")
-            }
-            MeasureType::FallTime { .. } => {
-                self.shapeless("FALL_TIME", "a step has no edge to time between two levels")
-            }
             MeasureType::ErrorFunction { .. } | MeasureType::FileError { .. } => self.shapeless(
                 "ERR",
                 "the error compares sampled values point by point, and a step function has no \

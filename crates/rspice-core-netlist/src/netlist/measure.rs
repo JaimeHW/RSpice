@@ -457,22 +457,6 @@ pub enum MeasureType {
         to: Option<Value>,
     },
 
-    /// Rise time (10% to 90% by default)
-    RiseTime {
-        signal: String,
-        from_pct: Value, // e.g., 0.1 for 10%
-        to_pct: Value,   // e.g., 0.9 for 90%
-        number: usize,   // Which transition
-    },
-
-    /// Fall time (90% to 10% by default)
-    FallTime {
-        signal: String,
-        from_pct: Value,
-        to_pct: Value,
-        number: usize,
-    },
-
     /// Integral of signal over range
     Integ {
         signal: String,
@@ -579,8 +563,6 @@ impl MeasureStatement {
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::RiseTime { signal, .. }
-            | MeasureType::FallTime { signal, .. }
             | MeasureType::Integ { signal, .. } => rewrite(signal, policy),
         }
     }

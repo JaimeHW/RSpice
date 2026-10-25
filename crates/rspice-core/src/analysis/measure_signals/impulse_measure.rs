@@ -343,7 +343,7 @@ pub(super) fn compile<'a>(
             regular(&measured.authored, window)?;
             regular(&comparison.authored, window)?;
         }
-        LiveMeasureState::RiseFall { signal, .. } | LiveMeasureState::FileError { signal, .. } => {
+        LiveMeasureState::FileError { signal, .. } => {
             regular(&signal.authored, Some((first.next_down(), last)))?
         }
         LiveMeasureState::Equation { .. } | LiveMeasureState::Param { .. } => {

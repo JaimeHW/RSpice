@@ -73,16 +73,6 @@ struct ExtremaRequest {
     is_max: bool,
 }
 
-/// A `RISE_TIME`/`FALL_TIME` request: the two percentage thresholds the edge
-/// is measured between, which occurrence to take, and which direction it runs.
-#[derive(Clone, Copy)]
-struct RiseFallRequest {
-    from_pct: Value,
-    to_pct: Value,
-    number: usize,
-    is_rise: bool,
-}
-
 #[derive(Clone, Copy)]
 pub(crate) struct MeasureData<'a, 'b> {
     pub(crate) axis: &'a [Value],
@@ -1134,38 +1124,6 @@ impl MeasureEngine {
             MeasureType::Rms { signal, from, to } => {
                 self.eval_rms(&measurement.name, signal, *from, *to, data)
             }
-            MeasureType::RiseTime {
-                signal,
-                from_pct,
-                to_pct,
-                number,
-            } => self.eval_rise_fall(
-                &measurement.name,
-                signal,
-                RiseFallRequest {
-                    from_pct: *from_pct,
-                    to_pct: *to_pct,
-                    number: *number,
-                    is_rise: true,
-                },
-                data,
-            ),
-            MeasureType::FallTime {
-                signal,
-                from_pct,
-                to_pct,
-                number,
-            } => self.eval_rise_fall(
-                &measurement.name,
-                signal,
-                RiseFallRequest {
-                    from_pct: *from_pct,
-                    to_pct: *to_pct,
-                    number: *number,
-                    is_rise: false,
-                },
-                data,
-            ),
             MeasureType::Find {
                 signal,
                 at,
@@ -1765,37 +1723,6 @@ impl MeasureEngine {
                 MeasureResult::success(name, (integral / width).sqrt())
             }
             _ => MeasureResult::failed(name, "Empty range"),
-        }
-    }
-
-    fn eval_rise_fall(
-        &self,
-        name: &str,
-        signal_name: &str,
-        request: RiseFallRequest,
-        data: MeasureData<'_, '_>,
-    ) -> MeasureResult {
-        let RiseFallRequest {
-            from_pct,
-            to_pct,
-            number,
-            is_rise,
-        } = request;
-        let MeasureData {
-            axis: time,
-            signals,
-            ..
-        } = data;
-        let signal = match lookup_signal(signals, signal_name) {
-            Some(s) => s,
-            None => {
-                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
-            }
-        };
-
-        match rise_fall_duration(time, signal, from_pct, to_pct, number, is_rise) {
-            Some(duration) => MeasureResult::success(name, duration),
-            _ => MeasureResult::failed(name, "Rise/fall transition not found"),
         }
     }
 
@@ -3164,57 +3091,6 @@ fn measurement_condition_crossings(
         .filter(|(_, crossing)| edge_matches_measure_condition(edge, crossing.direction))
         .map(|(segment, crossing)| (segment, crossing.fraction))
         .collect()
-}
-
-/// Compute the legacy percentage-threshold rise/fall duration over a complete
-/// accepted-point waveform. The live runtime deliberately calls this only at
-/// the final point because both thresholds depend on the waveform's global
-/// extrema.
-pub(crate) fn rise_fall_duration(
-    axis: &[Value],
-    signal: &[Value],
-    from_pct: Value,
-    to_pct: Value,
-    number: usize,
-    is_rise: bool,
-) -> Option<Value> {
-    let minimum = signal.iter().copied().fold(Value::INFINITY, Value::min);
-    let maximum = signal.iter().copied().fold(Value::NEG_INFINITY, Value::max);
-    let range = maximum - minimum;
-    let (lower_threshold, upper_threshold) = if is_rise {
-        (minimum + from_pct * range, minimum + to_pct * range)
-    } else {
-        (minimum + to_pct * range, minimum + from_pct * range)
-    };
-    let edge = if is_rise {
-        EdgeType::Rise
-    } else {
-        EdgeType::Fall
-    };
-    let crossing = |threshold: Value| {
-        let mut count = 0usize;
-        for (segment, samples) in signal.windows(2).enumerate() {
-            let previous = samples[0];
-            let current = samples[1];
-            let crossed = match edge {
-                EdgeType::Rise => previous < threshold && current >= threshold,
-                EdgeType::Fall => previous > threshold && current <= threshold,
-                EdgeType::Cross => unreachable!("rise/fall duration selects a directional edge"),
-            };
-            if !crossed {
-                continue;
-            }
-            count += 1;
-            if count == number {
-                let fraction = (threshold - previous) / (current - previous);
-                return Some(axis[segment] + fraction * (axis[segment + 1] - axis[segment]));
-            }
-        }
-        None
-    };
-    crossing(lower_threshold)
-        .zip(crossing(upper_threshold))
-        .map(|(lower, upper)| (upper - lower).abs())
 }
 
 pub(crate) fn measure_condition_crossing(

@@ -87,9 +87,7 @@ impl Inference<'_> {
         });
         let raw_value = match &statement.measure_type {
             MeasureType::When { .. } => axis.clone(),
-            MeasureType::Delay { .. }
-            | MeasureType::RiseTime { .. }
-            | MeasureType::FallTime { .. } => axis.interval(),
+            MeasureType::Delay { .. } => axis.interval(),
             MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
             | MeasureType::Avg { signal, .. }

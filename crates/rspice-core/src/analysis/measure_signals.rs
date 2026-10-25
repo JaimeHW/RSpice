@@ -1159,14 +1159,6 @@ enum LiveMeasureState {
         complete: bool,
     },
     Delay(Box<LiveDelayState>),
-    RiseFall {
-        signal: LiveMeasureOperand,
-        samples: Vec<Value>,
-        from_pct: Value,
-        to_pct: Value,
-        number: usize,
-        is_rise: bool,
-    },
     FileError {
         signal: LiveMeasureOperand,
         samples: Vec<Value>,
@@ -3655,25 +3647,6 @@ fn compile_live_measure_state(
                 axis_maximum,
             }))
         }
-        MeasureType::RiseTime {
-            signal,
-            from_pct,
-            to_pct,
-            number,
-        }
-        | MeasureType::FallTime {
-            signal,
-            from_pct,
-            to_pct,
-            number,
-        } => LiveMeasureState::RiseFall {
-            signal: LiveMeasureOperand::compile(signal, params)?,
-            samples: Vec::new(),
-            from_pct: *from_pct,
-            to_pct: *to_pct,
-            number: *number,
-            is_rise: matches!(statement.measure_type, MeasureType::RiseTime { .. }),
-        },
         MeasureType::FileError { signal, .. } => LiveMeasureState::FileError {
             signal: LiveMeasureOperand::compile(signal, params)?,
             samples: Vec::new(),
@@ -4104,7 +4077,6 @@ impl LiveMeasureState {
             Self::Extremum { signal, .. }
             | Self::PeakToPeak { signal, .. }
             | Self::IntegralStatistic { signal, .. }
-            | Self::RiseFall { signal, .. }
             | Self::FileError { signal, .. } => {
                 names.extend(signal.dependencies.iter().cloned());
             }
@@ -4583,22 +4555,6 @@ impl LiveMeasureState {
                     .selected
                     .zip(target.selected)
                     .map(|(trigger, target)| target - trigger))
-            }
-            Self::RiseFall {
-                signal,
-                samples,
-                from_pct,
-                to_pct,
-                number,
-                is_rise,
-            } => {
-                samples.push(signal.value(row, signals, reads, params)?);
-                if row + 1 != axis.len() {
-                    return Ok(None);
-                }
-                Ok(super::measure::rise_fall_duration(
-                    axis, samples, *from_pct, *to_pct, *number, *is_rise,
-                ))
             }
             Self::FileError {
                 signal,
@@ -6019,8 +5975,6 @@ fn statement_live_dependencies(
         | MeasureType::PeakToPeak { signal, .. }
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
-        | MeasureType::RiseTime { signal, .. }
-        | MeasureType::FallTime { signal, .. }
         | MeasureType::Integ { signal, .. } => {
             add_live_operand_dependencies(signal, &mut names, params)
         }
@@ -6178,8 +6132,6 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::RiseTime { signal, .. }
-            | MeasureType::FallTime { signal, .. }
             | MeasureType::Integ { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
@@ -6314,8 +6266,6 @@ fn materialize_differential_voltage_signals(
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::RiseTime { signal, .. }
-            | MeasureType::FallTime { signal, .. }
             | MeasureType::Integ { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
@@ -7075,8 +7025,6 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         MeasureType::Delay { .. }
         | MeasureType::FileError { .. }
         | MeasureType::Param { .. }
-        | MeasureType::RiseTime { .. }
-        | MeasureType::FallTime { .. }
         | MeasureType::Integ { .. } => None,
     };
     if let Some((Some(from), Some(to))) = bounds
@@ -9538,15 +9486,6 @@ mod tests {
         assert_point_bound(&find_state, 1);
         assert_point_bound(&derivative_state, 2);
 
-        let rise = statement(
-            "unused_rise",
-            MeasureType::RiseTime {
-                signal: "V(out)".to_string(),
-                from_pct: 0.1,
-                to_pct: 0.9,
-                number: 1,
-            },
-        );
         let file_error = statement(
             "unused_file_error",
             MeasureType::FileError {
@@ -9557,15 +9496,6 @@ mod tests {
                 dependent_column: 2,
             },
         );
-        match compile_live_measure_state(&rise, "TRAN", &axis, None, false, &params)
-            .expect("unreferenced RiseFall state compiles")
-        {
-            LiveMeasureState::RiseFall { samples, .. } => {
-                assert!(samples.is_empty());
-                assert_eq!(samples.capacity(), 0);
-            }
-            _ => panic!("expected RiseFall state"),
-        }
         match compile_live_measure_state(&file_error, "TRAN", &axis, None, false, &params)
             .expect("unreferenced FileError state compiles")
         {
@@ -9586,7 +9516,7 @@ mod tests {
         .expect("large selective-state deck parses");
         netlist
             .measurements
-            .splice(0..0, [find.clone(), rise.clone(), file_error.clone()]);
+            .splice(0..0, [find.clone(), file_error.clone()]);
         let internal =
             evaluate_equation_measurements(&netlist, "TRAN", &axis, &signals, -1.0, None)
                 .expect("large selective live state evaluates");
