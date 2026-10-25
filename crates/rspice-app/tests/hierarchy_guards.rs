@@ -97,7 +97,13 @@ impl Source {
                     .take_while(|c| c.is_alphanumeric() || *c == '_')
                     .collect();
                 if !name.is_empty() {
-                    test_only_modules.push(name);
+                    // Only later items have been cut so far, so everything
+                    // before this one still reads as written.
+                    let before =
+                        std::str::from_utf8(&code[..*start]).expect("blanking preserves UTF-8");
+                    let mut path = enclosing_inline_modules(before);
+                    path.push(name);
+                    test_only_modules.push(path.join("/"));
                 }
             }
             production.drain(*start..*end);
@@ -266,6 +272,36 @@ fn test_only_ranges(code: &str) -> Vec<(usize, usize)> {
         from = index;
     }
     ranges
+}
+
+/// The inline modules (`mod name { .. }`) still open at the end of `code`,
+/// outermost first. A file module declared inside one lives in the directory
+/// its name gives, so `mod services { #[cfg(test)] mod drc_tests; }` in the
+/// crate root is `services/drc_tests.rs`.
+fn enclosing_inline_modules(code: &str) -> Vec<String> {
+    let mut open: Vec<Option<String>> = Vec::new();
+    for (index, byte) in code.bytes().enumerate() {
+        match byte {
+            b'{' => {
+                let before = code[..index].trim_end();
+                let name_start = before
+                    .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .map_or(0, |at| at + 1);
+                let name = &before[name_start..];
+                let head = before[..name_start].trim_end();
+                let is_module = !name.is_empty()
+                    && head
+                        .strip_suffix("mod")
+                        .is_some_and(|rest| rest.is_empty() || rest.ends_with(char::is_whitespace));
+                open.push(is_module.then(|| name.to_owned()));
+            }
+            b'}' => {
+                open.pop();
+            }
+            _ => {}
+        }
+    }
+    open.into_iter().flatten().collect()
 }
 
 // =============================================================================

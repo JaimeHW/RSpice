@@ -34,7 +34,28 @@
 pub(crate) mod account_organization;
 pub(crate) mod app;
 pub(crate) mod app_state;
-pub(crate) mod browser;
+pub(crate) mod browser {
+    //! What the browser build has to do differently.
+    //!
+    //! Navigation, file import, and download are the three places where the web
+    //! platform refuses to behave like the desktop: history is a shared mutable
+    //! stack, a file picker is asynchronous and user-gestured, and saving is a
+    //! synthesized anchor click. Each is `#[cfg]`-gated to wasm32 except the
+    //! import token, which the tests exercise on both. A tab also has no taskbar
+    //! to mark when a run ends out of sight, so it asks to notify instead; the
+    //! desktop's answer to that is always "unavailable".
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) mod accessibility;
+    pub(crate) mod background_alerts;
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) mod download;
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) mod file_import;
+    pub(crate) mod navigation;
+    #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
+    pub(crate) mod qualification;
+}
 pub(crate) mod chrome;
 pub(crate) mod commands;
 mod cross_probe;
@@ -61,7 +82,24 @@ pub(crate) mod frame;
 pub(crate) mod framework;
 pub(crate) mod hardcopy_adapters;
 mod layout;
-pub(crate) mod lifecycle;
+pub(crate) mod lifecycle {
+    //! Opening, checkpointing, and recovering a working session.
+    //!
+    //! `project_lifecycle` owns the transactional document registry and the
+    //! accepted baseline; `project_checkpoint` and `recovery_checkpoint` write
+    //! the crash-recovery record; `recovery` reads it back. `session` and
+    //! `window_session` are the runtime state a restart has to reconstruct — open
+    //! views, selection, symbol editor, window bounds — none of which the project
+    //! file itself persists.
+
+    pub(crate) mod project_checkpoint;
+    pub(crate) mod project_lifecycle;
+    pub(crate) mod recovery;
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) mod recovery_checkpoint;
+    pub(crate) mod session;
+    pub(crate) mod window_session;
+}
 pub(crate) mod live_session;
 pub(crate) mod localization;
 pub(crate) mod logging;
