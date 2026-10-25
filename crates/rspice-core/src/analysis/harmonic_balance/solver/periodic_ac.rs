@@ -1485,21 +1485,7 @@ impl HbSolver {
         window: PeriodicSidebandWindow,
         excitations: &[PeriodicAcExcitation],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
-        let PeriodicSidebandWindow {
-            offset_hz,
-            sideband_min,
-            sideband_max,
-        } = window;
-        self.solve_periodic_ac_with_branch_voltages(
-            state,
-            PeriodicSidebandWindow {
-                offset_hz,
-                sideband_min,
-                sideband_max,
-            },
-            excitations,
-            &[],
-        )
+        self.solve_periodic_ac_with_branch_voltages(state, window, excitations, &[])
     }
 
     #[cfg(test)]
@@ -1510,11 +1496,6 @@ impl HbSolver {
         excitations: &[PeriodicAcExcitation],
         branch_voltages: &[&[(usize, Complex64)]],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
-        let PeriodicSidebandWindow {
-            offset_hz,
-            sideband_min,
-            sideband_max,
-        } = window;
         let num_nodes = self.num_nodes;
         let num_unknowns = num_nodes
             .checked_add(self.periodic_mna_branches.len())
@@ -1526,8 +1507,8 @@ impl HbSolver {
         let (num_sidebands, expected_size, _) = periodic_sideband_geometry(
             "PAC result reshape",
             num_unknowns,
-            sideband_min,
-            sideband_max,
+            window.sideband_min,
+            window.sideband_max,
         )?;
         let mut results = Vec::new();
         results
@@ -1537,11 +1518,7 @@ impl HbSolver {
             })?;
         self.solve_periodic_ac_each_with_branch_voltages(
             state,
-            PeriodicSidebandWindow {
-                offset_hz,
-                sideband_min,
-                sideband_max,
-            },
+            window,
             excitations,
             branch_voltages,
             |_, solution| {
@@ -1588,22 +1565,7 @@ impl HbSolver {
         excitations: &[PeriodicAcExcitation],
         consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
-        let PeriodicSidebandWindow {
-            offset_hz,
-            sideband_min,
-            sideband_max,
-        } = window;
-        self.solve_periodic_ac_each_with_branch_voltages(
-            state,
-            PeriodicSidebandWindow {
-                offset_hz,
-                sideband_min,
-                sideband_max,
-            },
-            excitations,
-            &[],
-            consume,
-        )
+        self.solve_periodic_ac_each_with_branch_voltages(state, window, excitations, &[], consume)
     }
 
     pub(crate) fn solve_periodic_ac_each_with_branch_voltages(
@@ -1652,14 +1614,7 @@ impl HbSolver {
         let dense = if try_krylov {
             None
         } else {
-            Some(self.assemble_conversion_matrix(
-                state,
-                PeriodicSidebandWindow {
-                    offset_hz,
-                    sideband_min,
-                    sideband_max,
-                },
-            )?)
+            Some(self.assemble_conversion_matrix(state, window)?)
         };
 
         let (spectra, cap_spectra) = if try_krylov && self.has_nonlinear_devices() {
