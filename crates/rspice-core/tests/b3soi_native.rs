@@ -75,6 +75,10 @@ fn pd_p1_model_card() -> &'static str {
     include_str!("../../../tests/ngspice/bsim3soipd/pmospd.mod")
 }
 
+fn fd_n1_model_card() -> &'static str {
+    include_str!("../../../tests/ngspice/bsim3soifd/nmosfd.mod")
+}
+
 fn xyce_bsim3soi_self_heating_model_card() -> &'static str {
     include_str!("testdata/xyce_bsim3soi_nmos_3_2.mod")
 }
@@ -1233,6 +1237,89 @@ fn native_soi_pd_self_heating_drain_current_matches_ngspice46_in_both_modes() {
         assert_rel(&format!("PD {model} inverse i(vs)"), is, current, SH_REL);
         assert_rel(&format!("PD {model} inverse i(vd)"), id, -current, SH_REL);
         assert_rel(&format!("PD {model} inverse rise"), temp, rise, SH_REL);
+    }
+}
+
+/// A complementary pair of cards, `(n1, p1)`: the corpus N1 card with
+/// `nsub` replaced so that NSUB = NCH, which zeroes the type-signed back-gate
+/// flatband `vfbb`, and its twin with the type flipped and `vth0` replaced
+/// (U0 is given; VTH0 and U0 are the only polarity-dependent DC and charge
+/// defaults).
+fn complementary_cards(card: &str, nsub: [&str; 2], vth0: [&str; 2]) -> (String, String) {
+    let nmos = card.replace(nsub[0], nsub[1]);
+    let pmos = nmos
+        .replace("N1  NMOS", "P1  PMOS")
+        .replace(vth0[0], vth0[1]);
+    assert!(nmos.contains(nsub[1]) && pmos.contains("P1  PMOS") && pmos.contains(vth0[1]));
+    (nmos, pmos)
+}
+
+fn fd_complementary_cards() -> (String, String) {
+    complementary_cards(
+        fd_n1_model_card(),
+        ["NSUB = 1E+15", "NSUB = 3.3E+17"],
+        ["VTH0 = .52", "VTH0 = -.52"],
+    )
+}
+
+/// ngspice-46 FD (BSIMSOI 2.1) keeps the self-heating term of the equivalent
+/// drain current inside the type factor (b3soifdld.c:3017-3018, 3072-3073),
+/// so its PMOS answer cannot be the reference. The complementary FD pair
+/// (NSUB = NCH = 3.3e17, VTH0 = -0.52) is. With self-heating off, ngspice-46
+/// (`.option gmin=1e-25 itl1=500`, `op`, `set numdgt=15`, `print all`)
+/// negates the NMOS currents into the PMOS ones to 14 digits at every point
+/// below. With SHMOD = 1 the two temperature rises still agree to 13 digits,
+/// yet ngspice's PMOS i(vd) reads 2.399540695105298e-3 against the NMOS
+/// -2.43347664893755e-3. NMOS is untouched by the type factor, so the PMOS
+/// twin must equal its NMOS mirror.
+#[test]
+fn native_soi_fd_pmos_self_heating_mirrors_its_nmos_complement() {
+    let (nmos, pmos) = fd_complementary_cards();
+    // NMOS `[vd, vg, vs, ve]` -> ngspice-46 NMOS self-heated (i(vd), rise).
+    for (v, current, rise) in [
+        (
+            [1.5, 1.5, 0.0, 0.0],
+            -2.43347664893755e-03,
+            2.770318383651581,
+        ),
+        (
+            [0.1, 1.0, 0.0, 0.0],
+            -2.72435701406877e-04,
+            2.067641597739049e-02,
+        ),
+        (
+            [1.0, 0.4, 0.0, 0.0],
+            -3.49161780157905e-06,
+            2.649951593227028e-03,
+        ),
+        (
+            [1.5, 1.2, 0.0, 1.0],
+            -1.68654009529990e-03,
+            1.919990903884244,
+        ),
+        (
+            [0.0, 1.5, 1.5, 0.0],
+            2.433476648937546e-03,
+            2.770318383651581,
+        ),
+    ] {
+        for self_heating in [false, true] {
+            let n = soi_op(&nmos, "n1", self_heating, v);
+            let p = soi_op(&pmos, "p1", self_heating, v.map(|x| -x));
+            let at = format!("v={v:?} sh={self_heating}");
+            assert_rel(&format!("{at} i(vd)"), p[0], -n[0], 1.0e-9);
+            assert_rel(&format!("{at} i(vs)"), p[1], -n[1], 1.0e-9);
+            assert!(
+                (p[2] - n[2]).abs() <= 1.0e-9 * n[2].abs(),
+                "{at}: PMOS rise {:.12e} K, NMOS {:.12e} K",
+                p[2],
+                n[2]
+            );
+            if self_heating {
+                assert_rel(&format!("{at} NMOS i(vd)"), n[0], current, SH_REL);
+                assert_rel(&format!("{at} NMOS rise"), n[2], rise, SH_REL);
+            }
+        }
     }
 }
 

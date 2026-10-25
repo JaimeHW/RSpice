@@ -900,13 +900,19 @@ impl B3SoiFd {
             gm_t = mt * op.gm_t;
             fwd_sum = gm + gmbs + gme;
             rev_sum = 0.0;
+            // `gm_t` already carries the type sign, so its term stays outside
+            // the type factor. ngspice-46 FD (BSIMSOI 2.1) keeps it inside
+            // (b3soifdld.c:3017-3018), which leaves a PMOS drain current off
+            // the device's by 2*gm_t*delTemp; BSIMSOI fixed it in PD
+            // (b3soipdld.c:3872-3874, "v2.2.2 bug fix") and B4SOI
+            // (b4soild.c:9953-9956).
             cdreq = mt
                 * (op.cdrain
                     - op.gds * bias.vds
                     - gm * bias.vgs
                     - gmbs * bias.vbs
-                    - gme * bias.ves
-                    - gm_t * bias.del_temp);
+                    - gme * bias.ves)
+                - gm_t * bias.del_temp;
             ceqbs = op.cjs - op.gjs_t * bias.del_temp;
             ceqbd = op.cjd - op.gjd_t * bias.del_temp;
 
@@ -932,13 +938,16 @@ impl B3SoiFd {
             rev_sum = -(gm + gmbs + gme);
             let vgd = bias.vgs - bias.vds;
             let vbd = bias.vbs - bias.vds;
+            // As in normal mode, the `gm_t` term is subtracted outside the type
+            // factor (ngspice-46 FD keeps it inside, b3soifdld.c:3072-3073;
+            // B4SOI's form, b4soild.c:10104-10107).
             cdreq = -mt
                 * (op.cdrain
                     + op.gds * bias.vds
                     + gm * vgd
                     + gmbs * vbd
-                    + gme * (bias.ves - bias.vds)
-                    + gm_t * bias.del_temp);
+                    + gme * (bias.ves - bias.vds))
+                - gm_t * bias.del_temp;
             ceqbs = op.cjd - op.gjd_t * bias.del_temp;
             ceqbd = op.cjs - op.gjs_t * bias.del_temp;
 
