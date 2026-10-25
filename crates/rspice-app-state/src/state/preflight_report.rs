@@ -243,7 +243,7 @@ impl PreflightReport {
     /// A retained report with no findings and no authorization, for the tests
     /// that only need preflight evidence to exist so they can watch a plan
     /// mutation drop it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn retained_for_test(project_revision: u64) -> Self {
         Self {
             project_revision,

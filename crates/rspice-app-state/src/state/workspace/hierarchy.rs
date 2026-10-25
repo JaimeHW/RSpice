@@ -7,7 +7,7 @@ pub use hierarchy_core::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationVerilogABinding,
     HierarchyResolution, ResolvedHierarchyBinding,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use hierarchy_core::{HierarchyBindingStatus, MasterRecord};
 
 #[cfg(test)]

@@ -32,7 +32,7 @@ use rspice_model_library::{
     ModelValidationReceipt, ModelValidationReceiptInput, SimulationPlanModelBinding,
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use super::ProjectModelDefinition;
 use super::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
@@ -805,7 +805,7 @@ impl ModelLibraryManager {
     }
 
     /// Clear all
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn clear(&mut self) {
         self.catalog.clear();
         self.resolution_records = ModelResolutionRecords::default();
@@ -850,7 +850,7 @@ impl ModelLibraryManager {
     }
 
     /// Import one self-contained model source from authenticated bytes.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn load_library_bytes(
         &mut self,
         file_name: &str,
@@ -865,7 +865,7 @@ impl ModelLibraryManager {
     /// resolved relative to its owner; unreachable uploads are ignored. If a
     /// tree has multiple possible roots, callers must use
     /// [`Self::load_library_bundle_from_root`] to make the choice explicit.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn load_library_bundle(
         &mut self,
         display_name: &str,

@@ -1,7 +1,7 @@
 //! Editor activation of generated model-bound symbol fixtures.
 
 use super::SchematicState;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_design::model_bound_symbol::store_model_bound_symbol;
 pub use rspice_design::model_bound_symbol::{
     SymbolDefinitionImport, load_model_bound_symbol, materialize_symbol_document,

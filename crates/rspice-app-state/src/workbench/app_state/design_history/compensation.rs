@@ -58,7 +58,7 @@ impl DocumentCompensation {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn reference(&self) -> &CellViewRef {
         &self.reference
     }

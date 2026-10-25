@@ -55,23 +55,15 @@ use std::sync::OnceLock;
 /// The ordering encodes the target architecture, not today's reality —
 /// [`ALLOWED_VIOLATIONS`] carries the gap between the two.
 const LAYERS: &[(&str, u32)] = &[
-    // Framework-independent contracts. These depend on nothing.
-    ("product", 0),
-    ("quantity", 0),
-    ("time_compat", 0),
-    // Mutation identity shared by source owners and low-level display caches.
-    ("source_revision", 0),
-    // Test-only: the real on-disk identity of the temporary directory, for
-    // fixtures anywhere in the crate. It reads `std::env` and `std::fs` and
-    // nothing of ours, so it sits at the bottom with the other contracts.
-    ("fixture_root", 0),
+    // The persisted model, its contracts and its diagnostics live in
+    // `rspice-app-state`, below every module here; each may reference them.
+    //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_runtime`, `automation_workflow`,
     // `simulation` and `workbench` all reference it, so the bottom layer is
     // the only position that clears every inbound edge at once.
     ("source_guard", 0),
-    // Presentation-independent result contracts, and the design system.
-    ("results", 1),
+    // The design system.
     ("ui", 1),
     // Managed-runtime ownership for the Automation workspace: the native
     // supervisor and its browser twin, which `lib.rs` selects between by
@@ -83,15 +75,9 @@ const LAYERS: &[(&str, u32)] = &[
     // The twins share a layer because they are one module to the compiler.
     ("automation_runtime", 1),
     ("automation_runtime_browser", 1),
-    // The persisted design and project model.
-    ("state", 3),
     // Domain services over the persisted model.
     ("analysis", 4),
     ("automation_workflow", 4),
-    // What the application reports about itself. It is a value model and
-    // would sit lower, but a log entry may anchor to a schematic object, so
-    // it cannot sit below `state`.
-    ("diagnostics", 4),
     ("io", 4),
     ("services", 5),
     ("simulation", 6),
@@ -193,8 +179,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // project I/O no longer imports its keys, markers, or expression types
     // from the Results renderer. Simulation-plan ownership remains open.
     ("io", "workbench", 15),
-    // The persisted model reaching up into orchestration and editors.
-    ("state", "simulation", 7),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Project I/O now imports the lower-owned analysis kind directly; its
@@ -659,7 +643,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // runs it, which is up at `commands`.
     "commands/vocabulary",
     "shortcuts",
-    "preferences",
     "design_system",
     // The text model and editing commands the source editors share, and the
     // virtualized editor drawn over them.
@@ -888,7 +871,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // what a surface is showing instead of the surface deriving it.
     ("state", "routing/availability", 4),
     ("state", "lifecycle/window_session", 2),
-    ("state", "preferences", 1),
     // The framework dialogs the workbench holds: the window-session manager,
     // the command palette, the confirmation and project-review dialogs, and
     // pointer interaction. Their types still live with the application root
@@ -1898,6 +1880,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
 /// workspace's `crates/` directory.
 const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app/src",
+    "rspice-app-state/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",

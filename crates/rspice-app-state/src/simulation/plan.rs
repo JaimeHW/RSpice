@@ -19,13 +19,13 @@ pub use config::{
 };
 pub use options_draft::OptionsDialogState;
 pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation_contract::numeric_override::OverrideValue;
 pub use rspice_simulation_contract::numeric_override::{
     AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValueKind,
     SolverOwnership,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation_contract::plan_model::FrozenAnalysisInstance;
 pub use rspice_simulation_contract::plan_model::{
     AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,

@@ -150,7 +150,7 @@ pub fn install_studio_logger(inner: env_logger::Logger) {
 /// environment tests in `workbench::logging` mutate that variable: whichever
 /// test installed the logger first would otherwise decide what every other
 /// test's stderr half does.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub fn studio_logger_for_tests() -> &'static StudioLogger {
     static LOGGER: std::sync::OnceLock<&'static StudioLogger> = std::sync::OnceLock::new();
     LOGGER.get_or_init(|| {
@@ -168,7 +168,7 @@ pub fn studio_logger_for_tests() -> &'static StudioLogger {
 }
 
 /// The filter the test logger's stderr half is held to.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub const TEST_STDERR_FILTER: &str = "warn,rspice_core=warn";
 
 #[cfg(test)]

@@ -49,6 +49,14 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-ui-kit", "rspice-simulation-contract",
     },
     "rspice-results-ui": {"rspice-vocabulary", "rspice-results", "rspice-ui-kit"},
+    # The persisted model: every lower crate the application's state is made of,
+    # and no host or window crate.
+    "rspice-app-state": {
+        "rspice-vocabulary", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui",
+        "rspice-design", "rspice-project", "rspice-results", "rspice-hardcopy-contract",
+        "rspice-model-library", "rspice-formats", "rspice-simulation-contract",
+        "rspice-simulation",
+    },
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -56,7 +64,7 @@ ALLOWED: dict[str, set[str]] = {
     },
 }
 HEADLESS = set(ALLOWED) - {
-    "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui",
+    "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {
@@ -82,8 +90,12 @@ def violations(
         for dep in sorted(unexpected):
             issues.append(f"{name} has forbidden application dependency {dep}")
     for name, closure in sorted(closures.items()):
-        if name == "rspice-worker" and "rspice-app" in closure:
-            issues.append("rspice-worker reaches application package rspice-app")
+        if name == "rspice-worker":
+            for dep in sorted(closure & {"rspice-app", "rspice-app-state"}):
+                issues.append(f"rspice-worker reaches application package {dep}")
+        if name == "rspice-app-state":
+            for dep in sorted(closure & ({"rspice-app", "rspice-worker"} | GUI_PACKAGES)):
+                issues.append(f"rspice-app-state reaches application or host package {dep}")
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")
@@ -97,7 +109,7 @@ def violations(
                 issues.append(f"{name} reaches simulator package {dep}")
         if name in {"rspice-schematic-editor", "rspice-results-ui"}:
             forbidden = {
-                "rspice-app", "rspice-project", "rspice-project-contract",
+                "rspice-app", "rspice-app-state", "rspice-project", "rspice-project-contract",
                 "rspice-worker", "rspice-simulation",
             } | GUI_PACKAGES
             for dep in sorted(closure & forbidden):

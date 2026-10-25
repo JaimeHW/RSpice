@@ -13,33 +13,31 @@
 //! `workflows::project_workflow`). Only accessors over this struct's own
 //! fields are defined here.
 
-pub(crate) mod cell_usage;
-pub(crate) mod design_checks;
-pub(crate) mod design_history;
-pub(crate) mod diagnostic_store;
+pub(crate) use rspice_app_state::workbench::app_state::cell_usage;
+pub(crate) use rspice_app_state::workbench::app_state::design_checks;
+pub(crate) use rspice_app_state::workbench::app_state::design_history;
+pub(crate) use rspice_app_state::workbench::app_state::diagnostic_store;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 #[cfg(test)]
 mod modal_gate_tests;
-pub(in crate::workbench) mod model;
+pub(in crate::workbench) use rspice_app_state::workbench::app_state::model;
 mod model_access;
 pub(in crate::workbench) mod problems_view;
-pub(crate) mod rule_deck;
 mod run_access;
-pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
-pub(crate) mod schematic_preferences;
+pub(crate) use rspice_app_state::workbench::app_state::schematic_preferences;
 pub(crate) mod services_access;
 pub(in crate::workbench) mod session;
-pub(in crate::workbench) mod sim_setup;
+pub(in crate::workbench) use rspice_app_state::workbench::app_state::sim_setup;
 #[cfg(test)]
 mod stack_budget;
-pub(in crate::workbench) mod symbol_contract;
+pub(in crate::workbench) use rspice_app_state::workbench::app_state::symbol_contract;
 #[cfg(test)]
 mod technology_demand_tests;
 mod transaction;
 pub(in crate::workbench) mod viewer_capabilities;
-pub(crate) mod waivers;
+pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::NoticeKind;

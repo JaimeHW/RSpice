@@ -478,6 +478,7 @@ class CiConfigurationTests(unittest.TestCase):
         shipping = (
             "rspice-cli",
             "rspice-app",
+            "rspice-app-state",
             "rspice-python",
             "rspice-core",
             "rspice-core-base",
@@ -642,7 +643,7 @@ class CiConfigurationTests(unittest.TestCase):
         # The engine's lane also runs the crates of its family below it.
         for packages, job in (
             ("-p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices", "test-linux"),
-            ("-p rspice-app", "test-ui"),
+            ("-p rspice-app -p rspice-app-state", "test-ui"),
         ):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
@@ -660,6 +661,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-core-netlist",
             "rspice-core-devices",
             "rspice-app",
+            "rspice-app-state",
             "rspice-python",
             "rspice-conformance",
         }
@@ -2035,9 +2037,9 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: macos-latest", workflow)
-        self.assertIn("cargo check --locked -p rspice-cli -p rspice-app", workflow)
+        self.assertIn("cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state", workflow)
         self.assertIn("cargo test --locked -p rspice-cli --tests", workflow)
-        self.assertIn("cargo test --locked -p rspice-app --lib", workflow)
+        self.assertIn("cargo test --locked -p rspice-app -p rspice-app-state --lib", workflow)
         # The desktop claim includes reclaiming a killed run's staging files,
         # whose liveness answer is per-host and pinned in `rspice-output`. The
         # job checked and tested the two crates above and never built that one.
@@ -2158,7 +2160,7 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-simulation/src/manual_deck.rs",
             "crates/rspice-simulation/src/runner/wasm_worker.rs",
             "crates/rspice-simulation/src/runner/worker_contract.rs",
-            "crates/rspice-app/src/state/simulation/ac_bode.rs",
+            "crates/rspice-app-state/src/state/simulation/ac_bode.rs",
             "crates/rspice-veriloga/tests/support/mod.rs",
         ]
 
@@ -2189,7 +2191,11 @@ class CiConfigurationTests(unittest.TestCase):
         )
         offenders = []
 
-        for path in sorted((ROOT / "crates" / "rspice-app" / "src").rglob("*.rs")):
+        for path in sorted(
+            path
+            for crate in ("rspice-app", "rspice-app-state")
+            for path in (ROOT / "crates" / crate / "src").rglob("*.rs")
+        ):
             source = path.read_text(encoding="utf-8")
             custom_clicks = len(click_pattern.findall(source))
             if custom_clicks == 0:

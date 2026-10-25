@@ -1,0 +1,113 @@
+[package]
+name = "rspice-app-state"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's shared persisted model and the pure logic over it"
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# The model's test helpers and fixtures, for the application's own tests.
+# Enabled only through rspice-app's dev-dependency.
+test-support = [
+    "dep:base64",
+    "dep:ed25519-dalek",
+    "rspice-design/schematic-test-fixtures",
+    "rspice-design/symbol-test-observation",
+    "rspice-model-library/catalog-test-observation",
+    "rspice-simulation/pdk-test-fixtures",
+    "rspice-simulation-contract/derivation-test-observation",
+]
+
+[dependencies]
+rspice-design-model = { workspace = true }
+rspice-vocabulary.workspace = true
+rspice-ui-kit = { workspace = true, features = ["plot"] }
+rspice-schematic-editor.workspace = true
+rspice-results-ui.workspace = true
+rspice-design = { workspace = true, features = ["symbol-artwork"] }
+rspice-project.workspace = true
+rspice-results = { workspace = true, features = ["engine-evidence"] }
+rspice-hardcopy-contract.workspace = true
+rspice-model-library.workspace = true
+rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "project-results", "result-csv", "result-digital", "result-hdf5", "result-vcd", "result-waveform", "spice-raw", "table-schema", "xlsx"] }
+rspice-simulation-contract.workspace = true
+rspice-simulation.workspace = true
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+thiserror.workspace = true
+sha2 = "0.10"
+log = "0.4"
+web-time.workspace = true
+base64 = { version = "0.23", optional = true }
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+unicode-normalization.workspace = true
+egui = { version = "0.35.0", default-features = false }
+dirs = "7.0"
+
+[dev-dependencies]
+rspice-results-ui = { workspace = true, features = ["test-support"] }
+rspice-schematic-editor = { workspace = true, features = ["test-support"] }
+rspice-ui-kit = { workspace = true, features = ["test-support"] }
+rspice-formats = { workspace = true, features = ["result-validation-observation"] }
+rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
+rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
+rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
+rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
+rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
+base64 = "0.23"
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
+num-complex = "0.4"
+ron = { version = "0.12.2", features = ["integer128"] }
+wat = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rspice-output = { workspace = true, features = ["durable-file"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"], optional = true }
+env_logger = "0.11"
+getrandom = { workspace = true }
+time = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rspice-pack = { workspace = true }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Xps",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"], optional = true }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+wasm-bindgen = "0.2"
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+js-sys = "0.3"
+rspice-pack = { workspace = true }
+time = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.76"
+
+[lints]
+workspace = true

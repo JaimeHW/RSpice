@@ -44,7 +44,7 @@ impl SchematicState {
     /// Call this after any structural change to invalidate caches.
     /// This is automatically called by mutation methods like add_component,
     /// add_wire, move_component_with_wires_resolved, etc.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn bump_topology_version(&mut self) {
         self.design.invalidate_topology();
     }

@@ -99,7 +99,7 @@ impl ModelLibraryManager {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl ModelLibraryManager {
     /// Seed a sectionless test model through the production revision transaction.
     pub fn create_project_model(

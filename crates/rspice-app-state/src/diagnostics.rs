@@ -6,7 +6,7 @@
 //! `state`, which a log entry may anchor to, so the simulation and schematic
 //! layers report about their own work without reaching up through the shell.
 
-pub(crate) mod engine_log;
+pub mod engine_log;
 mod log;
 mod redaction;
 

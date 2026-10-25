@@ -191,23 +191,23 @@ impl DigestMemo {
 
 // Count of batch digests computed rather than remembered, so a test can assert
 // that a frame with no edit computes none.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static COMPUTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(super) fn count_computed() {
     COMPUTED.with(|count| count.set(count.get().wrapping_add(1)));
 }
 
 /// Batch digests computed on this thread since the last reset.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn computed_digests() -> u64 {
     COMPUTED.with(std::cell::Cell::get)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn reset_computed_digests() {
     COMPUTED.with(|count| count.set(0));
 }

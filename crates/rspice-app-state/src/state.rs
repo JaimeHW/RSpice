@@ -4,22 +4,22 @@
 //! Core data structures that are shared across multiple modules.
 
 mod active_viewer;
-pub(crate) mod command_catalog;
+pub mod command_catalog;
 use rspice_design::configuration_set;
-pub(crate) mod code_diagnostics;
+pub mod code_diagnostics;
 use rspice_design::connectivity_contract;
-pub(crate) mod engineering_table;
+pub mod engineering_table;
 mod events;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
-pub(crate) mod model_hub;
-pub(crate) mod model_library;
+pub mod model_hub;
+pub mod model_library;
 mod netlist_artifacts;
 pub use rspice_design::netlist_document;
-pub(crate) mod netlist_diagnostics;
-pub(crate) mod notices;
+pub mod netlist_diagnostics;
+pub mod notices;
 pub use rspice_design::parameters as params_string;
-pub(crate) mod pdk_config;
+pub mod pdk_config;
 use rspice_design::physical_layout;
 mod preflight_report;
 mod project_open;
@@ -27,19 +27,19 @@ pub use rspice_design::project_sources;
 pub use rspice_design::properties as property_types;
 pub use rspice_results::result_presentation;
 mod schematic;
-pub(crate) mod shortcuts;
+pub mod shortcuts;
 mod simulation;
-pub(crate) mod stimulus_library;
+pub mod stimulus_library;
 use rspice_design::symbol;
 pub(crate) mod symbol_resolver;
 mod viewer_cache;
-pub(crate) mod workspace;
-pub(crate) mod write_policy;
+pub mod workspace;
+pub mod write_policy;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_design::symbol::SYMBOL_VIEW_PARSES;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::CATALOG_LIBRARY_SERIALIZATIONS;
 
 pub use active_viewer::ActiveViewer;
@@ -54,7 +54,7 @@ pub use connectivity_contract::{
 };
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use connectivity_contract::{
     ConnectivityAliasGroup, DialectAliasCatalog, TechnologyGlobalNetCatalog,
 };
@@ -68,7 +68,7 @@ pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
     View, ViewType, library_cell_placement_candidates,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use model_bound_symbol::store_model_bound_symbol;
 pub use model_bound_symbol::{
     GeneratedSymbolViews, MODEL_BOUND_SYMBOL_METADATA_KEY, MODEL_BOUND_SYMBOL_SCHEMA_VERSION,
@@ -82,7 +82,7 @@ pub use model_bound_symbol::{
 pub use model_library::ModelLibraryManager;
 pub(crate) use netlist_artifacts::NetlistArtifacts;
 pub use netlist_artifacts::NetlistValidationReceipt;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use netlist_document::DocumentOwnership;
 pub use netlist_document::{
     BoundedFindMatches, DependencyMetadata, DependencyResolution, DependencySourceAuthority,
@@ -101,7 +101,7 @@ pub use physical_layout::{
     LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId, LayoutPoint, LayoutShape,
     LayoutTechnologyBinding, PhysicalLayoutDocument,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use physical_layout::{LayoutInstance, LayoutOrientation, LayoutTransform};
 pub use preflight_report::{
     DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
@@ -140,39 +140,39 @@ pub use rspice_vocabulary::hierarchy_path::{
 // re-exported here because it is still the application's state authority and
 // every caller names it through `crate::state`.
 pub use rspice_design_model::design_management::*;
-pub(crate) use schematic::bulk_edit;
-pub(crate) use schematic::named_net;
-pub(crate) use schematic::overflow_memo;
-pub(crate) use schematic::policy_labels;
-pub(crate) use schematic::symbol_context_cache;
-pub(crate) use schematic::transform_preview_memo;
+pub use schematic::bulk_edit;
+pub use schematic::named_net;
+pub use schematic::overflow_memo;
+pub use schematic::policy_labels;
+pub use schematic::symbol_context_cache;
+pub use schematic::transform_preview_memo;
 pub use schematic::*;
 pub use simulation::CampaignMemberRefusal;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::CanonicalAnalysisKind;
 
 pub use rspice_model_library::sealed_model_sources;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::DcMismatchEvidence;
 pub use simulation::DcSweepFamily;
 // Only the tests name the spectrum's qualification: the data browser used to
 // spell it out on a Floquet row, where it was the engine's own bookkeeping.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::FloquetSpectrumEvidence;
 pub use simulation::RunHistoryRevision;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::SensitivityBasisEvidence;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::SensitivityStudyEvidence;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::SensitivityStudyRow;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::TransientConvergenceEvidence;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::current_impulse_history_fixture;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
@@ -192,7 +192,7 @@ pub use simulation::{
     SpecificationVerdictStatus, absent_deck_reason, ac_bode_shape_for_analysis,
     ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::{
     AnalysisResultPvtPoint, ComplexResultValue, FamilyMeasurementEvidence,
     FamilyMemberMeasurements, HierarchyMapRow, NoiseContributorRow,
@@ -204,13 +204,13 @@ pub use simulation::{
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use simulation::{ConvergenceReport, PeriodicInitializationMethod};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::{DcCurveSelection, DcMismatchContributorEvidence, DcMismatchScopeEvidence};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::{DcSweepDirection, DcSweepQuantity};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::{DcSweepEvidence, SavedOutputDcMember};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::{
     FloquetSpectrumCertificateEvidence, OperatingPointAccuracyEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
@@ -219,7 +219,7 @@ pub use simulation::{
     OperatingPointTemperatureEvidence, PeriodicNoiseOutputQuantity, PssFloquetMultiplierEvidence,
     PstbFloquetModeEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
@@ -258,7 +258,7 @@ pub use workspace::{
 };
 
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use workspace::{SavedOutputDisplayIntent, SpecificationComparison};
 
 #[cfg(test)]
@@ -372,4 +372,4 @@ mod symbol_document_tests {
     }
 }
 
-pub(crate) mod project_snapshot;
+pub mod project_snapshot;

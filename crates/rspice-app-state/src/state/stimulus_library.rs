@@ -4,8 +4,8 @@ pub use rspice_design::stimulus_library::{definition, draft, provenance};
 pub(crate) mod library;
 
 /// The authored library the stimulus surfaces are gated and rendered against.
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 
 /// Wall-clock milliseconds, through the shim the browser build needs.
 pub fn now_unix_ms() -> u64 {

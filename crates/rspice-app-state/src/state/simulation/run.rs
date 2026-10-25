@@ -171,12 +171,12 @@ impl SimulationRun {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_elapsed_time(&mut self, elapsed: f64) {
         self.elapsed_time = elapsed;
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn find_analysis(&self, analysis_type: AnalysisType) -> Option<&AnalysisResult> {
         self.analyses
             .iter()

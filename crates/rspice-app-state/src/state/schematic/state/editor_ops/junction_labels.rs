@@ -39,7 +39,7 @@ impl SchematicState {
     }
 
     /// Add a net label at the given position
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn add_net_label(&mut self, pos: Point, name: String) -> u64 {
         let id = self.design.add_net_label(pos, name);
         self.session.is_dirty = true;

@@ -47,7 +47,7 @@ pub use rspice_project::*;
 use materialize::*;
 pub use materialize::{metadata_value, project_veriloga_binding_for_view};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation_contract::saved_output::SavedOutputDisplayIntent;
 pub use rspice_simulation_contract::saved_output::{
     ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,
@@ -162,7 +162,7 @@ impl ProjectWorkspace {
     ) -> Self {
         Self { content, session }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn into_parts(self) -> (rspice_project::ProjectWorkspace, WorkspaceSession) {
         (self.content, self.session)
     }

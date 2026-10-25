@@ -57,7 +57,7 @@ pub(crate) mod localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) mod platform;
-pub(crate) mod preferences;
+pub(crate) use rspice_app_state::workbench::preferences;
 mod preflight;
 pub(crate) mod publication_snapshot;
 pub(crate) mod routing;

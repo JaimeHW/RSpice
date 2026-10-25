@@ -319,7 +319,7 @@ pub fn placed_sources(
     stimulus_library: &StimulusLibrary,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     rspice_simulation_contract::cost_probe::record(
         rspice_simulation_contract::cost_probe::Derivation::PlacedSources,
     );
@@ -612,7 +612,7 @@ fn walk_design(
     stimulus_library: &StimulusLibrary,
     projection: &Arc<DesignProjection>,
 ) -> DesignExcitations {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     rspice_simulation_contract::cost_probe::record(
         rspice_simulation_contract::cost_probe::Derivation::PlacedSources,
     );

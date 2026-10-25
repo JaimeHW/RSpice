@@ -214,7 +214,7 @@ impl NetlistDiagnosticSummary {
     /// made the tab strip claim findings about a design that no longer
     /// existed.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn total(self) -> usize {
         self.current_errors
             + self.current_warnings

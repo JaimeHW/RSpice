@@ -49,7 +49,7 @@ pub use rspice_model_library::ProjectModelRevisionDefinition;
 pub use rspice_model_library::first_unreachable_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub use rspice_model_library::is_foreign_platform_absolute_path;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::is_portable_absolute_path;
 pub use rspice_model_library::qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
@@ -63,7 +63,7 @@ pub use rspice_model_library::qualification::{
     QualificationVectorDispositionCause, QualificationVectorOutcome,
     QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
@@ -76,10 +76,10 @@ pub use rspice_model_library::{
 };
 pub use rspice_model_library::{ModelLevel, ModelType};
 pub use rspice_model_library::{ModelLibrary, ModelSourceAuthority, PackPartPin};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::{
     ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelSubcircuitInterface,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinition};
 pub use source_label::short_digest;

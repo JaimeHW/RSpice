@@ -70,7 +70,7 @@ use std::sync::Mutex;
 #[cfg(any(test, target_arch = "wasm32"))]
 use rspice_pack::{VerifiedPack, sha256_hex};
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 use super::ModelHubError;
 #[cfg(any(test, target_arch = "wasm32"))]
 use super::store::StagedPack;
@@ -103,7 +103,7 @@ mod tests;
 /// the test asserting which rung it reaches — which is in the shell, because
 /// that is where the ladder is — reads the same bytes the browser will, rather
 /// than a copy of them that can drift.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub const UNAVAILABLE_AT_OPEN: &str = "Storage for model packs is unavailable in this browser, so installed packs last only as long \
      as this tab.";
 
@@ -113,7 +113,7 @@ pub const UNAVAILABLE_AT_OPEN: &str = "Storage for model packs is unavailable in
 /// pack and goes on having it, and only the copy that would have outlived the
 /// tab was lost. Both land on the same rung, whose consequence — nothing on
 /// this machine changed — is exactly true of both.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub const UNAVAILABLE_AFTER_WRITE: &str = "Durable storage for model packs became unavailable in this browser, so packs installed now \
      last only as long as this tab.";
 
@@ -155,7 +155,7 @@ pub(crate) struct StoredArchive {
 
 /// One restored archive that no longer proves, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub struct RejectedArchive {
     /// The digest the bytes actually hash to, which is the key they are stored
     /// under and therefore the one a caller deletes them by.
@@ -171,13 +171,13 @@ pub struct RejectedArchive {
 /// ledger *cannot* show, because the bytes are gone — the archives that were
 /// discarded, and the digests to delete them by.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub struct HydrationReport {
     pub restored: usize,
     pub rejected: Vec<RejectedArchive>,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 impl HydrationReport {
     /// Whether this session recovered nothing and had nothing to recover.
     pub fn is_empty(&self) -> bool {

@@ -12,7 +12,7 @@ pub use web_time::Instant;
 /// Read wall time without trapping or accepting an invalid browser timestamp.
 /// Evidence producers can propagate the failure instead of fabricating a date.
 pub fn checked_unix_epoch() -> Result<std::time::Duration, &'static str> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(epoch) = tests::TEST_EPOCH.with(std::cell::Cell::get) {
         return epoch;
     }
@@ -174,11 +174,11 @@ fn zone_offset_seconds(unix_seconds: i64) -> i32 {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use tests::with_unix_epoch;
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     #[cfg(test)]
     use super::*;
     use std::time::Duration;

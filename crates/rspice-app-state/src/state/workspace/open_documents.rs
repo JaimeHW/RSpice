@@ -291,7 +291,7 @@ impl ProjectWorkspace {
     }
 
     /// Pop one hierarchy level (the U gesture). Returns the new focus.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn ascend_one(&mut self) -> Option<CellViewRef> {
         let depth = self.content.occurrence_depth();
         if depth < 2 {

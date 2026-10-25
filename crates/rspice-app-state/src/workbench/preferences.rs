@@ -14,7 +14,7 @@ use crate::quantity::{QuantityPresentationPolicy, UnitsPreferences};
 mod drawing_sheet;
 pub use drawing_sheet::DrawingSheetPersonalPreferences;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use crate::state::shortcuts::ShortcutProfileLibraryError;
 use crate::state::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary};
 #[cfg(test)]
@@ -955,7 +955,7 @@ pub enum FolderListPreference {
 }
 
 impl FolderListPreference {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const ALL: [Self; 1] = [Self::LibraryFolders];
 
     pub const fn stable_id(self) -> &'static str {
@@ -1107,7 +1107,7 @@ impl UserPreferences {
         self.shortcuts.active()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn shortcuts_mut(
         &mut self,
     ) -> Result<&mut ShortcutPreferences, ShortcutProfileLibraryError> {
@@ -1164,7 +1164,7 @@ impl UserPreferences {
         self.choice(ChoicePreference::SchematicCursor) == 1
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn choose_schematic_full_crosshair(&mut self, on: bool) {
         self.set_choice(ChoicePreference::SchematicCursor, usize::from(on))
             .expect("the cursor choice has two options");
@@ -1597,7 +1597,7 @@ impl UserPreferences {
         self.choice(ChoicePreference::AcPhase) == 1
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn choose_right_button_pan(&mut self) {
         self.set_choice(ChoicePreference::CanvasPanButton, 1)
             .expect("the right button is a pan button");

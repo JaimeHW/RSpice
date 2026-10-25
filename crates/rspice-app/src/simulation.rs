@@ -15,18 +15,18 @@ pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;
 pub(crate) mod output_contract;
-pub(crate) mod placed_sources;
-pub(crate) mod plan;
+pub(crate) use rspice_app_state::simulation::placed_sources;
+pub(crate) use rspice_app_state::simulation::plan;
 pub(crate) use rspice_simulation::point_family;
 #[cfg(test)]
 pub(crate) mod results;
 mod run_host;
 #[cfg(test)]
 pub(crate) mod run_set_tests;
+pub(crate) use rspice_app_state::simulation::stimulus_realize;
+pub(crate) use rspice_app_state::simulation::table_route;
 pub(crate) use rspice_simulation::runner;
 pub(crate) use rspice_simulation::status;
-pub(crate) mod stimulus_realize;
-pub(crate) mod table_route;
 #[cfg(test)]
 pub(crate) mod veriloga_tests;
 

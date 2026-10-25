@@ -839,7 +839,7 @@ impl ShortcutProfileAudit {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn binding_count(&self) -> usize {
         self.binding_count
     }

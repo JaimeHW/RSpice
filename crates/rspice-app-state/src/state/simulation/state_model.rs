@@ -230,14 +230,14 @@ impl RetainedSimulationState {
     }
 
     /// Get count of runs in history
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn run_count(&self) -> usize {
         self.runs.len()
     }
 
     /// How many retained datasets are pinned as golden baselines.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn pinned_run_count(&self) -> usize {
         self.runs
             .iter()

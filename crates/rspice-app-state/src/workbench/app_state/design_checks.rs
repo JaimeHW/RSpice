@@ -359,7 +359,7 @@ impl Model {
 
     /// Publish `result` as Check Design's findings about the configured
     /// simulation root, for a test that needs findings no drawing produces.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn publish_configured_root_design_check_result(
         &mut self,
         result: DrcResult,
@@ -450,7 +450,7 @@ impl Model {
     ///
     /// The canvas names its markers by [`Self::canvas_finding_identities`],
     /// since they may be two passes' findings; this names one pass's.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
         let Some(receipt) = self.design_checks.receipt(subject) else {
             return Vec::new();

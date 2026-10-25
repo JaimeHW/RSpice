@@ -1,15 +1,15 @@
 //! In-memory project snapshots retain editor state outside the canonical file.
 
 use super::SchematicState;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use super::schematic::SchematicEditorMut;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use super::schematic::SchematicEditorRef;
 use super::workspace::WorkspaceSession;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use super::{LibraryManager, ProjectWorkspace};
 use rspice_project::ProjectFile;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use rspice_project::{ProjectExecutionContext, results::ProjectSimulationResults};
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +34,7 @@ impl<'de> Deserialize<'de> for ProjectSnapshot {
 }
 
 impl ProjectSnapshot {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn new(workspace: ProjectWorkspace, libraries: LibraryManager) -> Self {
         let (content, workspace_session) = workspace.into_parts();
         Self {
@@ -42,7 +42,7 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn new_with_simulation_results(
         workspace: ProjectWorkspace,
         libraries: LibraryManager,
@@ -54,7 +54,7 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn new_with_execution_context(
         workspace: ProjectWorkspace,
         libraries: LibraryManager,
@@ -67,7 +67,7 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_result_presentation(
         mut self,
@@ -103,7 +103,7 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn schematic_editor(&self, key: &str) -> Option<SchematicEditorRef<'_>> {
         self.workspace_session
             .schematic_editor(&self.file.workspace, key)
@@ -112,12 +112,12 @@ impl ProjectSnapshot {
         self.workspace_session
             .clone_schematic_editor(&self.file.workspace, key)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn schematic_editor_mut(&mut self, key: &str) -> Option<SchematicEditorMut<'_>> {
         self.workspace_session
             .schematic_editor_mut(&mut self.file.workspace, key)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn insert_schematic_editor(
         &mut self,
         key: String,
@@ -126,7 +126,7 @@ impl ProjectSnapshot {
         self.workspace_session
             .insert_schematic_editor(&mut self.file.workspace, key, editor)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
         self.workspace_session
             .remove_schematic_editor(&mut self.file.workspace, key)
@@ -135,7 +135,7 @@ impl ProjectSnapshot {
         self.workspace_session
             .ensure_library_model(&mut self.file.workspace, &mut self.file.libraries)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn restore_pending_annotation(&mut self) -> Result<usize, String> {
         self.workspace_session
             .restore_pending_annotation(&mut self.file.workspace, &self.file.libraries)

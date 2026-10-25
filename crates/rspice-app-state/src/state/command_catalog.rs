@@ -180,7 +180,7 @@ pub struct ShortcutBinding {
 }
 
 impl ShortcutBinding {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn supports(self, platform: CommandPlatform) -> bool {
         let mut index = 0;
         while index < self.platforms.len() {

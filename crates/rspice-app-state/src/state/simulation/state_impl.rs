@@ -257,7 +257,7 @@ impl SimulationState {
     // =========================================================================
 
     /// Allocate a fixture run without preparing a simulation.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn start_run(&mut self) -> &mut SimulationRun {
         self.start_run_with_receipt(None)
             .expect("fixture run sequence is available")
@@ -372,7 +372,7 @@ impl SimulationState {
         false
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn select_latest_analysis(&mut self) -> bool {
         let Some(run_idx) = self.view.active_run_idx else {
             return false;
@@ -507,7 +507,7 @@ impl SimulationState {
     }
 
     /// Get mutable reference to the currently active run
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn active_run_mut(&mut self) -> Option<&mut SimulationRun> {
         self.view
             .active_run_idx

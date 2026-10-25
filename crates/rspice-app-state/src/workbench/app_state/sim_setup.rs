@@ -8,7 +8,7 @@
 //! set and `analysis_order` is its stable execution order.
 
 pub(in crate::workbench) mod analysis_drafts;
-pub(in crate::workbench) mod plan_catalog;
+pub mod plan_catalog;
 
 use rspice_simulation_contract::run_set::ReferencePoint;
 
@@ -432,7 +432,7 @@ impl SimSetupState {
 
     /// Fill defaults into any analysis state still at its blank
     /// `Default` (each guards on its own `initialized` flag).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn ensure_initialized(&mut self) {
         self.op.ensure_initialized();
         self.pz.ensure_initialized();

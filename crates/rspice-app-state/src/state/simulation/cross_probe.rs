@@ -122,7 +122,7 @@ impl CrossProbeMapping {
 
     /// [`Self::install`] for a cell view with no sheet catalog, whose one
     /// drawing is the whole geometry.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn update(
         &mut self,
         source_reference: CellViewRef,

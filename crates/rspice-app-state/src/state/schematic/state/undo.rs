@@ -225,13 +225,13 @@ impl SchematicState {
     }
 
     /// Get description of the next undo operation
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn undo_description(&self) -> Option<&str> {
         self.history().undo_description()
     }
 
     /// Clear undo history
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn clear_undo_history(&mut self) {
         self.design.clear_history();
         self.session.operation_cancel = None;

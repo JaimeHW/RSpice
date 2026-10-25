@@ -193,7 +193,7 @@ impl LogBuffer {
     }
 
     /// Convenience: Log a warning
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn warning(&mut self, source: LogSource, message: impl Into<String>) {
         self.log(LogSeverity::Warning, source, message);
     }
@@ -238,7 +238,7 @@ impl LogBuffer {
     }
 
     /// Count entries of one severity.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
         self.entries
             .iter()

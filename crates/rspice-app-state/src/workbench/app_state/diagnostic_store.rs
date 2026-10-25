@@ -22,10 +22,10 @@
 //! [`listing`] reads them in place.
 
 pub(crate) mod current;
-pub(in crate::workbench) mod digest_memo;
-pub(crate) mod listing;
-pub(crate) mod producers;
-pub(crate) mod run_notices;
+pub mod digest_memo;
+pub mod listing;
+pub mod producers;
+pub mod run_notices;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -663,7 +663,7 @@ impl DiagnosticInputs {
     /// told in the producer's own words rather than having findings silently
     /// dropped or silently kept.
     fn digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         digest_memo::count_computed();
         let model = scope.model;
         match self {
@@ -1046,7 +1046,7 @@ impl DiagnosticStore {
     /// Drop the pass memo. A test that draws the same session in a second
     /// egui context counts passes from zero again, and would otherwise read
     /// the first context's memo for a pass of the same number.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn forget_pass(&self) {
         *self
             .pass_memo
@@ -1066,7 +1066,7 @@ impl DiagnosticStore {
     /// What the store holds for one run's failures, as (subject, message),
     /// for the controller's tests: the controller sits below the shell and
     /// cannot name a batch.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn published_run_failures(&self, run_sequence: u64) -> Vec<(String, String)> {
         self.batches
             .values()
@@ -1078,7 +1078,7 @@ impl DiagnosticStore {
 
     /// The campaign members the store holds as refused, as (the place each
     /// stands in, subject, message), for the controller's tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn published_member_refusals(&self) -> Vec<(String, String, String)> {
         self.batches
             .values()

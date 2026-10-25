@@ -276,6 +276,12 @@ fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
+/// The application's persisted model. Its files keep the paths they had in
+/// this crate, so they are named here exactly as before.
+fn app_state_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-state/src")
+}
+
 fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
@@ -452,6 +458,7 @@ fn path_grammar_is_owned_by_one_module() {
     let mut root_literals = 0usize;
     for (prefix, root) in [
         ("", src_dir()),
+        ("", app_state_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
     ] {
@@ -570,7 +577,6 @@ const RAW_BUFFER_READERS: &[(&str, usize)] = &[
 
 #[test]
 fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
-    let root = src_dir();
     let allowed: BTreeMap<&str, usize> = RAW_BUFFER_READERS.iter().copied().collect();
     assert_eq!(
         allowed.len(),
@@ -579,14 +585,16 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
     );
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
-    for (path, file) in production_files(&root) {
-        let code = Source::read(&file).code;
-        let count: usize = RAW_BUFFER_CONSTRUCTORS
-            .iter()
-            .map(|constructor| count_occurrences(&code, constructor))
-            .sum();
-        if count > 0 {
-            measured.insert(path, count);
+    for root in [src_dir(), app_state_src_dir()] {
+        for (path, file) in production_files(&root) {
+            let code = Source::read(&file).code;
+            let count: usize = RAW_BUFFER_CONSTRUCTORS
+                .iter()
+                .map(|constructor| count_occurrences(&code, constructor))
+                .sum();
+            if count > 0 {
+                measured.insert(path, count);
+            }
         }
     }
 
@@ -1291,6 +1299,7 @@ fn persisted_policies_reach_a_projection() {
     let mut projections: Vec<(String, String, String)> = Vec::new();
     for (prefix, root) in [
         ("", src_dir()),
+        ("", app_state_src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),

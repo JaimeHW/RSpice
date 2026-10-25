@@ -6,7 +6,7 @@
 mod command;
 
 pub use command::CommandId;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_vocabulary::product::DerivedAnalysisIdentity;
 pub use rspice_vocabulary::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DatasetBinding, DatasetId, DesignVariableId,

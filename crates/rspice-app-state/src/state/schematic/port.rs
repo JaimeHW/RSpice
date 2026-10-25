@@ -13,7 +13,7 @@ use super::component::Component;
 use super::component_type::ComponentType;
 use super::state::SchematicState;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_design::schematic::port::PortDirectionType;
 pub use rspice_design::schematic::port::{PortContract, PortDiscipline, PortSignalType};
 

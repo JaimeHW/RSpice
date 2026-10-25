@@ -26,7 +26,7 @@ pub use persistence::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::pdk::PdkPublisherTrustStore;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use rspice_model_library::pdk::contracts::MAX_PDK_ARCHIVE_BYTES;
@@ -48,9 +48,9 @@ pub use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry};
 pub use rspice_model_library::pdk::{
     PdkAdministrativeAuthority, PdkTrustAuditAction, PdkTrustAuditReceipt, TrustedPdkPublisherKey,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation::pdk::PdkTechnologyRegistry;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation::pdk::test_fixtures::{
     fixture_archive as signed_technology_test_fixture,
     fixture_archive_with_models as signed_technology_test_fixture_with_models,
@@ -62,7 +62,7 @@ pub use rspice_simulation::pdk::{
     PdkConfig, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, ValidatedPdkTechnologyPackage,
 };
 pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use technology_diff::tests::fixture_revision_archives as signed_technology_diff_test_fixture;
 pub use technology_diff::{
     PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,

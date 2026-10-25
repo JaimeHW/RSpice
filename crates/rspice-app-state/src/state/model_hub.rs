@@ -43,16 +43,16 @@
 //! and nothing else. [`ModelHub::open`] sweeps those, which makes recovery a
 //! consequence of starting up rather than a repair anyone has to run.
 
-pub(crate) mod durable;
+pub mod durable;
 pub(crate) mod placement;
-pub(crate) mod provider;
+pub mod provider;
 pub(crate) mod release_diff;
 pub(crate) mod store;
-pub(crate) mod transport;
+pub mod transport;
 pub(crate) mod trust;
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;
 
 use std::collections::BTreeMap;
 

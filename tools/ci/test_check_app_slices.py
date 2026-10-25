@@ -22,13 +22,16 @@ from check_app_slices import (  # noqa: E402
 )
 
 
-def measure_tree(files: dict[str, str]):
+def measure_tree(files: dict[str, str], lower_model: dict[str, str] | None = None):
     with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        for path, text in files.items():
-            (root / path).parent.mkdir(parents=True, exist_ok=True)
-            (root / path).write_text(text, encoding="utf-8")
-        return measure(root)
+        trees = {"app": files, "state": lower_model or {}}
+        for tree, contents in trees.items():
+            for path, text in contents.items():
+                target = Path(directory) / tree / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+        lower_crates = {"model": Path(directory) / "state"} if lower_model else None
+        return measure(Path(directory) / "app", lower_crates)
 
 
 PROJECT = "pub fn project_title() {}\n"
@@ -136,6 +139,32 @@ class MeasurementTests(unittest.TestCase):
             ),
         })
         self.assertEqual(values["lower->upper"], {})
+
+    def test_a_name_the_lower_crate_defines_never_resolves_to_a_feature_item(self) -> None:
+        app = {
+            "lib.rs": "pub use rspice_app_state::{simulation, state};\nmod analysis;\nmod workbench;\n",
+            "analysis.rs": "pub fn plan() {}\npub fn run_label() {}\n",
+            "workbench/surfaces/verify.rs": (
+                "use crate::analysis::*;\n"
+                "pub fn show() {\n"
+                "    let _ = crate::simulation::plan::SimulationPlan;\n"
+                "    run_label();\n"
+                "}\n"
+            ),
+        }
+        state = {
+            "lib.rs": "pub mod simulation;\npub mod state;\n",
+            "simulation.rs": "pub mod plan;\n",
+            "simulation/plan.rs": "pub struct SimulationPlan;\n",
+            "state.rs": "pub fn run_label() {}\n",
+        }
+        # Read alone, the shell's tree takes the moved `plan` module for the
+        # results function and the moved `run_label` for the results one.
+        self.assertEqual(measure_tree(app)[0]["feature->feature"], {"simulate->results": 3})
+        values, _, stats = measure_tree(app, state)
+        # Only the glob import is a reference to results; the lower crate's files are not measured.
+        self.assertEqual(values["feature->feature"], {"simulate->results": 1})
+        self.assertEqual(stats["files"], 3)
 
     def test_whole_app_methods_and_parameters_outside_their_home_are_counted(self) -> None:
         values, _, _ = measure_tree({

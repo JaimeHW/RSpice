@@ -18,7 +18,7 @@
 
 use rspice_design::schematic::array;
 use rspice_design::schematic::array_edit;
-pub(crate) mod bulk_edit;
+pub mod bulk_edit;
 mod bus;
 mod canvas_cache;
 use rspice_design::schematic::clipboard;
@@ -40,11 +40,11 @@ use rspice_design::schematic::generated_veriloga_catalog;
 mod ground_names;
 mod hierarchy;
 use rspice_design::schematic::hierarchy as hierarchy_edit;
-pub(crate) mod named_net;
+pub mod named_net;
 use rspice_design::schematic::net_label;
 use rspice_schematic_editor::session::net_highlight;
 use rspice_schematic_editor::session::placement_authority;
-pub(crate) mod policy_labels;
+pub mod policy_labels;
 mod port;
 use rspice_design::schematic::probe;
 use rspice_design::schematic::replacement;
@@ -52,10 +52,10 @@ use rspice_design::schematic::rotation;
 use rspice_schematic_editor::session::selection;
 use rspice_schematic_editor::session::snap;
 pub(crate) mod operating_point_memo;
-pub(crate) mod overflow_memo;
+pub mod overflow_memo;
 mod state;
-pub(crate) mod symbol_context_cache;
-pub(crate) mod transform_preview_memo;
+pub mod symbol_context_cache;
+pub mod transform_preview_memo;
 use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;
@@ -106,11 +106,11 @@ pub use hierarchy::{
     hierarchy_terminal_direction, hierarchy_terminal_discipline,
 };
 pub use net_highlight::NetHighlightState;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use net_label::Junction;
 pub use net_label::{NetLabel, NetLabelKind};
 pub use placement_authority::PlacementAuthority;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use port::{PendingPortPlacement, PortDirectionType, PortSignalType};
 pub use port::{PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSpec};
 pub use probe::SchematicProbe;
@@ -121,7 +121,7 @@ pub use replacement::{
     SchematicReplacementTerminal,
 };
 pub use rotation::Rotation;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_design::schematic::wire::WireConnection;
 pub use rspice_design_model::Point;
 pub use selection::{

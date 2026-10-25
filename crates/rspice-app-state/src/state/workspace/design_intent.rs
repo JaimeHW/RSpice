@@ -1,6 +1,6 @@
 //! App-facing reexports of authored design variables and specifications.
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::specification::SpecificationComparison;
 pub use rspice_results::specification::{
     MeasurementReferenceSource, MissingMeasurementPolicy, MonteCarloSpecificationGate,

@@ -75,7 +75,7 @@ pub enum ShortcutProfileLibraryError {
     InvalidName(String),
     DuplicateName(String),
     /// Raised by `remove_named_preset`, which only the tests call.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     MissingPreset(String),
     IncompatibleLibrary,
     RevisionExhausted,
@@ -90,7 +90,7 @@ impl fmt::Display for ShortcutProfileLibraryError {
             Self::DuplicateName(name) => {
                 write!(formatter, "shortcut preset '{name}' already exists")
             }
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             Self::MissingPreset(name) => {
                 write!(formatter, "shortcut preset '{name}' does not exist")
             }
@@ -271,7 +271,7 @@ impl ShortcutProfileLibrary {
     /// Revision advances on mutable borrow, even when the caller performs no
     /// edit; this conservative rule ensures no direct mutation can bypass CAS
     /// invalidation. Incompatible raw libraries always fail closed.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn active_mut(&mut self) -> Result<&mut ShortcutPreferences, ShortcutProfileLibraryError> {
         self.ensure_compatible()?;
         self.bump_revision()?;
@@ -283,7 +283,7 @@ impl ShortcutProfileLibrary {
         self.revision.get()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn edit_active<R>(
         &mut self,
         edit: impl FnOnce(&mut ShortcutPreferences) -> R,
@@ -320,7 +320,7 @@ impl ShortcutProfileLibrary {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn named_preset(&self, name: &str) -> Option<NamedShortcutPreset> {
         let folded = case_fold_name(name);
         self.named_presets
@@ -362,7 +362,7 @@ impl ShortcutProfileLibrary {
         Ok(name)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn remove_named_preset(
         &mut self,
         name: &str,

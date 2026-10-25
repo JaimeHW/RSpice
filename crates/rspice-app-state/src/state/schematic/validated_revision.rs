@@ -28,7 +28,7 @@ impl SchematicState {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn append_validated_revision(
         &mut self,
         request: ValidatedRevisionRequest,

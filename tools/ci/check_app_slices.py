@@ -17,7 +17,9 @@ leaves included, resolved through module files and `use` re-exports to its
 defining file; or a use of a public free item name of 4+ characters that one
 slice alone defines, where the file imports it, globs it in, or qualifies it
 by a crate path. A token found both ways counts once. Macro bodies and trait
-calls are opaque, so a count is a floor that moves only with the source.
+calls are opaque, so a count is a floor that moves only with the source. A
+slice already moved into a lower crate (LOWER_CRATES) is no longer measured,
+but its definitions and module names still count as that slice's.
 
 app_slice_ceilings.json holds every non-zero measurement, and each must equal
 its ceiling: above it, or an edge with no entry, is new coupling; below it, the
@@ -39,6 +41,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "crates" / "rspice-app" / "src"
 CEILINGS = Path(__file__).resolve().with_name("app_slice_ceilings.json")
+# Slice -> the src directory of the lower crate its files were moved into.
+LOWER_CRATES = {"model": ROOT / "crates" / "rspice-app-state" / "src"}
 
 LOWER = ("model", "services", "run", "framework")
 FEATURES = (
@@ -646,8 +650,13 @@ def count_whole_app_signatures(tokens, fn) -> set[str]:
     return found
 
 
-def measure(source_root: Path):
-    """Measure a source tree. Returns (values, contributors, stats)."""
+def measure(source_root: Path, lower_crates: dict[str, Path] | None = None):
+    """Measure a source tree. Returns (values, contributors, stats).
+
+    `lower_crates` maps a slice to the src directory of a crate its files moved
+    into. Only that crate's item definitions and module names are read, as the
+    slice's own; its files are not measured.
+    """
     paths = sorted(p.relative_to(source_root).as_posix() for p in source_root.rglob("*.rs"))
     sources = {p: (source_root / p).read_text(encoding="utf-8", errors="replace") for p in paths}
     unassigned = [p for p in paths if slice_of(p) is None]
@@ -659,19 +668,30 @@ def measure(source_root: Path):
     tokens = {p: lex(sources[p]) for p in paths}
     scans = {p: scan(tokens[p], is_test[p]) for p in paths}
 
+    # A moved slice's items and module names are still its own: a bare name or a
+    # module segment shared with a moved file never resolves to a feature's item.
+    definitions = [(owner[p], scans[p]["defs"]) for p in paths]
+    lower_modules = set()
+    for slice_name, lower_root in (lower_crates or {}).items():
+        lower = {p.relative_to(lower_root).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+                 for p in sorted(lower_root.rglob("*.rs"))}
+        lower_is_test = test_files(lower)
+        definitions += [(slice_name, scan(lex(text), lower_is_test[p])["defs"]) for p, text in lower.items()]
+        lower_modules |= {module_path(p) for p in lower}
+
     module_file = {module_path(p): p for p in paths}
     prefixes = {m[:length] for m in module_file for length in range(len(m) + 1)}
-    stems = {m[-1] for m in module_file if m}
+    stems = {m[-1] for m in (*module_file, *lower_modules) if m}
 
     # Public free items whose name only one slice defines, at any visibility.
     defined_in, public_in, kinds = (collections.defaultdict(set) for _ in range(3))
-    for p in paths:
-        for d in scans[p]["defs"]:
+    for slice_name, defs in definitions:
+        for d in defs:
             if d["scope"] in ("file", "mod") and d["kind"] != "mod" and not d["test"]:
-                defined_in[d["name"]].add(owner[p])
+                defined_in[d["name"]].add(slice_name)
                 kinds[d["name"]].add(d["kind"])
                 if d["public"]:
-                    public_in[d["name"]].add(owner[p])
+                    public_in[d["name"]].add(slice_name)
     # Names other code also spells as an enum variant (`TransferFailure::Request`,
     # `SheetText::Field`, `SessionKept::WithoutRuns`), as a test-only item of its
     # own (`thread_preparations::record` under `#[cfg(test)]`), or as an item
@@ -934,7 +954,8 @@ def main(argv: list[str] | None = None) -> int:
     if not (SOURCE / "lib.rs").is_file():
         print(f"{SOURCE / 'lib.rs'} is missing; the ratchet would measure nothing")
         return 1
-    values, contributors, stats = measure(SOURCE)
+    values, contributors, stats = measure(SOURCE, {slice_name: root for slice_name, root in LOWER_CRATES.items()
+                                                   if root.is_dir()})
     print("\n".join(summary(values, stats, time.perf_counter() - started)))
     if args.write_ceilings:
         ordered = {group: dict(sorted(values[group].items())) for group in GROUPS}

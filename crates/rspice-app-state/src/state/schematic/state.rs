@@ -214,7 +214,7 @@ impl SchematicState {
 
     /// Fixtures can model invalid or externally changed content without a
     /// mutable document accessor in production.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
         self.design.document_mut_for_test()
     }

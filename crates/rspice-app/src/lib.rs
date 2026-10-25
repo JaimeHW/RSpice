@@ -63,10 +63,10 @@ pub(crate) mod ui;
 pub(crate) mod workbench;
 
 /// Result document exports and application integration fixtures.
-pub(crate) mod results;
+pub(crate) use rspice_app_state::results;
 
 /// Shared product identity and outcome vocabulary.
-pub(crate) mod product;
+pub(crate) use rspice_app_state::product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
@@ -88,21 +88,21 @@ pub(crate) mod services;
 pub(crate) mod io;
 
 /// Application-held domain owners and session adapters.
-pub(crate) mod state;
+pub(crate) use rspice_app_state::state;
 
 /// Unit-safe user presentation and UI quantity-input policy. Values entering
 /// or leaving this module are always expressed in their documented SI base
 /// units; deck dialect and PDK database-unit semantics live elsewhere.
-pub(crate) mod quantity;
+pub(crate) use rspice_app_state::quantity;
 
 /// Diagnostics the application reports about itself: the console message
 /// model and the structured, filterable application log.
-pub(crate) mod diagnostics;
+pub(crate) use rspice_app_state::diagnostics;
 
-pub(crate) mod source_revision;
+pub(crate) use rspice_app_state::source_revision;
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
-pub(crate) mod time_compat;
+pub(crate) use rspice_app_state::time_compat;
 
 /// Locating the production half of a source file that inspects itself, for the
 /// guards that assert their own shipped code takes no panic shortcuts.
@@ -112,7 +112,7 @@ mod source_guard;
 /// The real on-disk identity of the temporary directory, for fixtures that
 /// hand paths to a subject which records them through `std::fs::canonicalize`.
 #[cfg(test)]
-mod fixture_root;
+use rspice_app_state::fixture_root;
 
 /// Tests that construct the whole application to observe one slice's
 /// behaviour, kept in the shell because only the shell can build it.

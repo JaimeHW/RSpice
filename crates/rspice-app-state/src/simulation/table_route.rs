@@ -300,7 +300,7 @@ fn publish(_path: &Path, _bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// Flat generation for application integration fixtures through the real file host.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn generate_netlist(
     schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
 ) -> rspice_simulation::netlist_gen::NetlistResult {

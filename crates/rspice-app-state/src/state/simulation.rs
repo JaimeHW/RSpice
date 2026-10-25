@@ -8,18 +8,18 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::dc_mismatch::DcMismatchEvidence;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::dc_mismatch::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::dc_sweep::DcSweepEvidence;
 pub use rspice_results::dc_sweep::DcSweepFamily;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::dc_sweep::{DcCurveSelection, DcSweepDirection, DcSweepQuantity};
 mod cross_probe;
 mod result_digest;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::noise::{
     NoiseContributorRow, NoiseSummary, PeriodicNoiseConversionEvidence,
 };
@@ -35,28 +35,28 @@ pub use rspice_results::yield_analysis::YieldEvidence;
 
 pub const MAX_RUN_HISTORY: usize = 20;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 mod current_impulses;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use current_impulses::current_impulse_history_fixture;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::sensitivity::{
     SensitivityBasisEvidence, SensitivityResultMode, SensitivityResultRow,
     SensitivityStudyEvidence, SensitivityStudyRow,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::simulation_values::ComplexResultValue;
 
 pub use rspice_results::floquet::{
     FloquetOrbitKindEvidence, FloquetStabilityVerdictEvidence, PstbStabilityClassificationEvidence,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::floquet::{
     FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence, PssFloquetMultiplierEvidence,
     PstbFloquetModeEvidence,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
 
 pub use ac_bode::{
@@ -65,18 +65,18 @@ pub use ac_bode::{
 };
 pub use analysis_result::AnalysisResult;
 pub use rspice_results::analysis_payload::AnalysisResultPayload;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::analysis_tag::CanonicalAnalysisKind;
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::convergence_quality::TransientConvergenceEvidence;
 pub use rspice_results::convergence_quality::{ConvergenceReport, PeriodicInitializationMethod};
 pub use rspice_results::events::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::family_metadata::PeriodicNoiseOutputQuantity;
 pub use rspice_results::family_metadata::{
     AnalysisResultFamilyMetadata, MonteCarloVariableMetadata,
@@ -84,7 +84,7 @@ pub use rspice_results::family_metadata::{
 pub use rspice_results::operating_point::{
     DcOpResult, OperatingPointAnnotationEvidence, OperatingPointValue,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::operating_point::{
     OperatingPointAccuracyEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
@@ -92,17 +92,17 @@ pub use rspice_results::operating_point::{
     OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
     OperatingPointTemperatureEvidence,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::provenance::AnalysisResultPvtPoint;
 pub use rspice_results::provenance::{AnalysisResultProvenance, AnalysisResultSourceDomain};
 pub use rspice_results::soa_evidence::{
     SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::soa_evidence::{SoaViolationEvidence, SoaViolationSeverityEvidence};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::soa_source::{SoaSourceHistory, SoaSourceWaveform};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
@@ -114,7 +114,7 @@ pub use rspice_results::executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason,
 };
 pub use rspice_results::family_measurements::FamilyMemberId;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberMeasurements,
 };
@@ -122,21 +122,21 @@ pub use rspice_results::run::{
     EvidenceDomain, ExecutionTarget, RunRetention, SimulationCampaignMembership,
     SimulationExecutionIdentity, SimulationRunLifecycle,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::run_receipt::{
     HierarchyMapRow, PreparedModelSourceIdentity, PreparedRunReceiptInput, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt,
 };
 pub use rspice_results::run_receipt::{PreparedRunReceipt, SimulationRunProvenance};
 pub use rspice_results::saved_output::SavedOutputMaterializationStatus;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::saved_output::SavedOutputReceipt;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::saved_output::{
     SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputSourceBindings,
 };
 pub use rspice_results::specification::PreparedSpecification;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_results::specification::PreparedSpecificationPolicy;
 pub use rspice_results::specification_verdict::SpecificationVerdictStatus;
 pub use rspice_results::waveform::SharedWaveformValues;
