@@ -31,12 +31,12 @@ jobs:
           - group: core
             packages: -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices
           - group: ui
-            packages: -p rspice-app -p rspice-app-state
+            packages: -p rspice-app -p rspice-app-state -p rspice-app-services
           - group: libraries
             packages: >-
               --workspace --exclude rspice-core --exclude rspice-core-base
               --exclude rspice-core-netlist --exclude rspice-core-devices --exclude rspice-app --exclude rspice-app-state
-              --exclude rspice-python --exclude rspice-conformance
+              --exclude rspice-app-services --exclude rspice-python --exclude rspice-conformance
               --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
     env:
       CARGO_BUILD_JOBS: "2"

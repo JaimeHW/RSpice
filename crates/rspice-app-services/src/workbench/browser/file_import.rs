@@ -13,7 +13,7 @@ pub struct PickedTextFile {
     pub original_bytes: Option<Vec<u8>>,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserTextImportKind {
     Netlist,
@@ -21,17 +21,20 @@ pub enum BrowserTextImportKind {
     ResultDataset,
     Schematic,
     ShortcutProfile,
-    #[cfg_attr(test, allow(dead_code))]
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     EngineeringTableView,
     SymbolDefinition,
     VerilogA,
     // This module is compiled on desktop only to exercise browser contracts;
     // Automation imports themselves are a browser production route.
-    #[cfg_attr(all(test, not(target_arch = "wasm32")), allow(dead_code))]
+    #[cfg_attr(
+        all(any(test, feature = "test-support"), not(target_arch = "wasm32")),
+        allow(dead_code)
+    )]
     Automation,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 impl BrowserTextImportKind {
     pub fn label(self) -> &'static str {
         match self {
@@ -64,14 +67,14 @@ impl BrowserTextImportKind {
 /// Exact authority for one browser text-picker invocation. JavaScript picker
 /// promises are not reliably abortable, so every completion must present this
 /// lease before it can mutate application state or release the shared gate.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextImportToken {
     generation: u64,
     kind: BrowserTextImportKind,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 impl TextImportToken {
     #[cfg(target_arch = "wasm32")]
     pub(crate) const fn kind(self) -> BrowserTextImportKind {
@@ -79,7 +82,7 @@ impl TextImportToken {
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 thread_local! {
     static ACTIVE_TEXT_IMPORT: std::cell::Cell<Option<TextImportToken>> =
         const { std::cell::Cell::new(None) };
@@ -88,7 +91,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn try_begin_text_import(kind: BrowserTextImportKind) -> Result<TextImportToken, String> {
     ACTIVE_TEXT_IMPORT.with(|active| match active.get() {
         Some(current) if current.kind == kind => Err(format!(
@@ -109,7 +112,7 @@ pub fn try_begin_text_import(kind: BrowserTextImportKind) -> Result<TextImportTo
     })
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn finish_text_import(token: TextImportToken) -> bool {
     ACTIVE_TEXT_IMPORT.with(|active| {
         if active.get() == Some(token) {
@@ -121,12 +124,12 @@ pub fn finish_text_import(token: TextImportToken) -> bool {
     })
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn text_import_is_current(token: TextImportToken) -> bool {
     ACTIVE_TEXT_IMPORT.with(|active| active.get() == Some(token))
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn cancel_active_text_import() -> Option<TextImportToken> {
     ACTIVE_TEXT_IMPORT.with(std::cell::Cell::take)
 }

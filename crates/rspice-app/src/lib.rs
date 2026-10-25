@@ -70,11 +70,7 @@ pub(crate) use rspice_app_state::product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
-#[cfg(not(target_arch = "wasm32"))]
-mod automation_runtime;
-#[cfg(target_arch = "wasm32")]
-#[path = "automation_runtime_browser.rs"]
-mod automation_runtime;
+use rspice_app_services::automation_runtime;
 pub(crate) mod automation_workflow;
 
 // =============================================================================
@@ -95,18 +91,18 @@ pub(crate) mod services {
     #[cfg(test)]
     mod drc_tests;
     pub(crate) mod license;
-    pub(crate) mod live_protocol;
-    pub(crate) mod model_hub;
+    pub(crate) use rspice_app_services::services::live_protocol;
+    pub(crate) use rspice_app_services::services::model_hub;
     pub(crate) mod model_qualification;
-    pub(crate) mod recent_files;
-    pub(crate) mod session;
+    pub(crate) use rspice_app_services::services::recent_files;
+    pub(crate) use rspice_app_services::services::session;
 
     // No flattening re-exports: every consumer of a service type names the module
     // that defines it, so the owner of a name is readable at the use site.
 }
 
 /// Application file workflows and platform I/O adapters.
-pub(crate) mod io;
+pub(crate) use rspice_app_services::io;
 
 /// Application-held domain owners and session adapters.
 pub(crate) use rspice_app_state::state;
@@ -122,7 +118,7 @@ pub(crate) use rspice_app_state::diagnostics;
 
 /// The build this process runs, installed by the shell at startup for the
 /// layers below it.
-pub(crate) mod build_identity;
+pub(crate) use rspice_app_services::build_identity;
 pub(crate) use rspice_app_state::source_revision;
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.

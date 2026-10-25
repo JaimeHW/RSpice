@@ -14,22 +14,22 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use rspice_output::durable_file;
-pub(crate) mod file_exchange;
-pub(crate) mod generated_bundle;
-pub(crate) mod netlist_export;
+pub mod file_exchange;
+pub mod generated_bundle;
+pub mod netlist_export;
 mod project_execution;
-pub(crate) mod project_io;
+pub mod project_io;
 mod project_results;
-pub(crate) mod schematic_io;
+pub mod schematic_io;
 
-pub(crate) mod waveform_io;
+pub mod waveform_io;
 
 // Re-exports
 pub use generated_bundle::build_generated_bundle;
 pub use netlist_export::NetlistFormat;
 pub use project_execution::{capture_execution_context, restore_execution_context};
 pub use project_io::{ProjectSimulationResults, ProjectSnapshot, load_project_file};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use project_results::simulation_state_from_results;
 pub use project_results::{
     capture_simulation_results, capture_simulation_results_without_runs, restore_simulation_results,
@@ -38,7 +38,7 @@ pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecut
 // The run's own corner-expansion entry point, so the Corners page's tests can
 // assert that the page and the run reach the same verdict rather than that
 // they read alike. Nothing outside a test may reach past the context type.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_project::{ProjectModelLibrary, persisted_active_model_section_names};
 pub use schematic_io::{FileWorkflowIo, NativeFileWorkflowIo};
 pub use schematic_io::{load_schematic, save_schematic, show_save_dialog};

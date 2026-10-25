@@ -1,0 +1,90 @@
+[package]
+name = "rspice-app-services"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's platform services: project lifecycle, persistence, recovery and file I/O"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[lib]
+doctest = false
+
+[features]
+# The services' test helpers and fixtures, for the application's own tests.
+# Enabled only through rspice-app's dev-dependency.
+test-support = ["rspice-app-state/test-support", "dep:rspice-simulation-contract"]
+# The project format's generated Verilog-A binding test, as rspice-app's
+# feature of the same name runs it.
+generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog", "rspice-simulation/generated-veriloga-catalog"]
+# The browser qualification harness's rendered-control observation, forwarded
+# from rspice-app's feature of the same name. It publishes the AccessKit tree
+# as JSON, which takes egui's serde support.
+browser-qualification = ["egui/serde"]
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
+rspice-vocabulary.workspace = true
+rspice-design = { workspace = true, features = ["symbol-artwork"] }
+rspice-project.workspace = true
+rspice-results = { workspace = true, features = ["engine-evidence"] }
+rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "project-results", "result-csv", "result-digital", "result-hdf5", "result-vcd", "result-waveform", "spice-raw", "table-schema", "xlsx"] }
+rspice-simulation-contract = { workspace = true, optional = true }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+semver.workspace = true
+sha2 = "0.10"
+log = "0.4"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+egui = { version = "0.35.0", default-features = false }
+rfd = { version = "0.17", features = ["file-handle-inner"] }
+
+[dev-dependencies]
+rspice-app-state = { workspace = true, features = ["test-support"] }
+rspice-ui-kit = { workspace = true, features = ["test-support"] }
+rspice-formats = { workspace = true, features = ["result-validation-observation"] }
+rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
+rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
+rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
+rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
+rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
+rspice-pack = { workspace = true }
+ron = { version = "0.12.2", features = ["integer128"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rspice-ui-kit = { workspace = true, features = ["plot"] }
+rspice-output = { workspace = true, features = ["durable-file"] }
+rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "0.1.0" }
+dirs = "7.0"
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dev-dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dev-dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Xps",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+js-sys = "0.3"
+
+[lints]
+workspace = true

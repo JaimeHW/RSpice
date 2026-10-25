@@ -46,15 +46,15 @@ pub(crate) mod browser {
     //! desktop's answer to that is always "unavailable".
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) mod accessibility;
-    pub(crate) mod background_alerts;
+    pub(crate) use rspice_app_services::workbench::browser::accessibility;
+    pub(crate) use rspice_app_services::workbench::browser::background_alerts;
     #[cfg(target_arch = "wasm32")]
-    pub(crate) mod download;
+    pub(crate) use rspice_app_services::workbench::browser::download;
     #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) mod file_import;
+    pub(crate) use rspice_app_services::workbench::browser::file_import;
     pub(crate) mod navigation;
     #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
-    pub(crate) mod qualification;
+    pub(crate) use rspice_app_services::workbench::browser::qualification;
 }
 pub(crate) mod chrome;
 pub(crate) mod commands;
@@ -92,11 +92,11 @@ pub(crate) mod lifecycle {
     //! views, selection, symbol editor, window bounds — none of which the project
     //! file itself persists.
 
-    pub(crate) mod project_checkpoint;
-    pub(crate) mod project_lifecycle;
-    pub(crate) mod recovery;
+    pub(crate) use rspice_app_services::workbench::lifecycle::project_checkpoint;
+    pub(crate) use rspice_app_services::workbench::lifecycle::project_lifecycle;
+    pub(crate) use rspice_app_services::workbench::lifecycle::recovery;
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) mod recovery_checkpoint;
+    pub(crate) use rspice_app_services::workbench::lifecycle::recovery_checkpoint;
     pub(crate) mod session;
     pub(crate) mod window_session;
 }
@@ -104,7 +104,7 @@ pub(crate) mod live_session;
 pub(crate) mod localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) mod platform;
+pub(crate) use rspice_app_services::workbench::platform;
 pub(crate) use rspice_app_state::workbench::preferences;
 pub(crate) mod preflight;
 pub(crate) mod publication_snapshot;

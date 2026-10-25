@@ -431,6 +431,13 @@ mod tests {
         }
     }
 
+    /// The platform services' sources. They compile as their own crate, but the
+    /// rules the scans of this crate's `src` hold are the application's, so
+    /// each of those scans reads these too.
+    fn services_source_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-services/src")
+    }
+
     /// Every authored `.rs` file in the workspace, sorted, with the floors the
     /// whole-workspace scans rest on.
     ///
@@ -517,6 +524,7 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        rust_sources(&services_source_root(), &mut paths);
         paths.push(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results/src/executed_deck.rs"),
         );
@@ -586,6 +594,7 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        rust_sources(&services_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -658,6 +667,7 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        rust_sources(&services_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -1060,6 +1070,7 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        rust_sources(&services_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1245,6 +1256,7 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        rust_sources(&services_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1324,6 +1336,7 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        rust_sources(&services_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()

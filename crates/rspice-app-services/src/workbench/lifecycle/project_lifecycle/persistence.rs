@@ -15,7 +15,7 @@ pub use rspice_project::persistence::native::{
 #[cfg(target_arch = "wasm32")]
 pub(crate) use browser::*;
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub use rspice_project::persistence::BrowserBindingBackend;
 pub use rspice_project::persistence::{BrowserBindingReceipt, NativeBindingReceipt};
 

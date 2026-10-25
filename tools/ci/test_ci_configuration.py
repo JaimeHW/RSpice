@@ -479,6 +479,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-cli",
             "rspice-app",
             "rspice-app-state",
+            "rspice-app-services",
             "rspice-python",
             "rspice-core",
             "rspice-core-base",
@@ -643,7 +644,7 @@ class CiConfigurationTests(unittest.TestCase):
         # The engine's lane also runs the crates of its family below it.
         for packages, job in (
             ("-p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices", "test-linux"),
-            ("-p rspice-app -p rspice-app-state", "test-ui"),
+            ("-p rspice-app -p rspice-app-state -p rspice-app-services", "test-ui"),
         ):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
@@ -662,6 +663,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-core-devices",
             "rspice-app",
             "rspice-app-state",
+            "rspice-app-services",
             "rspice-python",
             "rspice-conformance",
         }
@@ -2037,9 +2039,14 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: macos-latest", workflow)
-        self.assertIn("cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state", workflow)
+        self.assertIn(
+            "cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state -p rspice-app-services",
+            workflow,
+        )
         self.assertIn("cargo test --locked -p rspice-cli --tests", workflow)
-        self.assertIn("cargo test --locked -p rspice-app -p rspice-app-state --lib", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-app -p rspice-app-state -p rspice-app-services --lib", workflow
+        )
         # The desktop claim includes reclaiming a killed run's staging files,
         # whose liveness answer is per-host and pinned in `rspice-output`. The
         # job checked and tested the two crates above and never built that one.
@@ -2151,8 +2158,8 @@ class CiConfigurationTests(unittest.TestCase):
             # dropped: each one was added here because it was once written but
             # never committed, and that is still worth guarding. `summary.rs`
             # left the list when the module was deleted as test-only.
-            "crates/rspice-app/src/workbench/browser/download.rs",
-            "crates/rspice-app/src/workbench/browser/file_import.rs",
+            "crates/rspice-app-services/src/workbench/browser/download.rs",
+            "crates/rspice-app-services/src/workbench/browser/file_import.rs",
             "crates/rspice-app/src/workbench/logging.rs",
             "crates/rspice-app/src/workbench/workflows/netlist_workflow.rs",
             "crates/rspice-app/src/workbench/documents/netlist_document/baseline.rs",
@@ -2193,7 +2200,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         for path in sorted(
             path
-            for crate in ("rspice-app", "rspice-app-state")
+            for crate in ("rspice-app", "rspice-app-state", "rspice-app-services")
             for path in (ROOT / "crates" / crate / "src").rglob("*.rs")
         ):
             source = path.read_text(encoding="utf-8")

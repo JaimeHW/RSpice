@@ -295,7 +295,7 @@ where
 // the production code path on both sides of the `cfg`.
 
 /// Ask the reader which file to read.
-#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+#[cfg(all(not(target_arch = "wasm32"), not(any(test, feature = "test-support"))))]
 fn chosen_source(kind: FileKind) -> Option<std::path::PathBuf> {
     rfd::FileDialog::new()
         .add_filter(kind.label, kind.extensions)
@@ -303,7 +303,7 @@ fn chosen_source(kind: FileKind) -> Option<std::path::PathBuf> {
 }
 
 /// Ask the reader where to write, opening on `file_name`.
-#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+#[cfg(all(not(target_arch = "wasm32"), not(any(test, feature = "test-support"))))]
 fn chosen_destination(kind: FileKind, file_name: &str) -> Option<std::path::PathBuf> {
     rfd::FileDialog::new()
         .add_filter(kind.label, kind.extensions)
@@ -318,7 +318,7 @@ fn chosen_destination(kind: FileKind, file_name: &str) -> Option<std::path::Path
 /// produce comes from what it does with the path afterwards. So a test that
 /// wants a refusal scripts a path that cannot be read, which is the failure a
 /// reader actually reaches.
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScriptedChoice {
     /// The reader chose this path.
@@ -327,7 +327,7 @@ pub enum ScriptedChoice {
     Cancelled,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 thread_local! {
     /// Answers waiting for the next pickers this thread opens, in order.
     ///
@@ -345,7 +345,7 @@ thread_local! {
 }
 
 /// Answer the next picker this thread opens with `choice`.
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 pub fn script_next_choice(choice: ScriptedChoice) {
     SCRIPTED_CHOICES.with_borrow_mut(|queue| queue.push_back(choice));
 }
@@ -354,14 +354,14 @@ pub fn script_next_choice(choice: ScriptedChoice) {
 ///
 /// A test that scripted a pick and finds one still queued pressed something
 /// that never opened a picker at all.
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 pub fn scripted_choices_remaining() -> usize {
     SCRIPTED_CHOICES.with_borrow(std::collections::VecDeque::len)
 }
 
 /// The pickers this thread has opened since this was last called, by the label
 /// their filter announces, and clear the record.
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 pub fn take_pickers_opened() -> Vec<&'static str> {
     PICKERS_OPENED.with_borrow_mut(std::mem::take)
 }
@@ -371,7 +371,7 @@ pub fn take_pickers_opened() -> Vec<&'static str> {
 /// Cancellation is the default because it is the one answer that leaves
 /// nothing behind: an unscripted picker in a test build reads exactly as a
 /// reader who opened the dialog and closed it again.
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 fn next_scripted_choice(kind: FileKind) -> Option<std::path::PathBuf> {
     PICKERS_OPENED.with_borrow_mut(|opened| opened.push(kind.label));
     match SCRIPTED_CHOICES.with_borrow_mut(std::collections::VecDeque::pop_front) {
@@ -380,12 +380,12 @@ fn next_scripted_choice(kind: FileKind) -> Option<std::path::PathBuf> {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 fn chosen_source(kind: FileKind) -> Option<std::path::PathBuf> {
     next_scripted_choice(kind)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 fn chosen_destination(kind: FileKind, _file_name: &str) -> Option<std::path::PathBuf> {
     next_scripted_choice(kind)
 }

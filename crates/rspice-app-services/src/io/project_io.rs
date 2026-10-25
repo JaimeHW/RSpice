@@ -81,7 +81,7 @@ pub(crate) fn read_project_bytes(path: &Path) -> Result<ProjectBytes, ProjectIoE
     ProjectBytes::read(file, advertised)
 }
 
-#[cfg(test)]
-pub(crate) mod fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures;
 #[cfg(test)]
 mod tests;

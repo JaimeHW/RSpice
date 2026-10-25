@@ -56,33 +56,20 @@ use std::sync::OnceLock;
 /// [`ALLOWED_VIOLATIONS`] carries the gap between the two.
 const LAYERS: &[(&str, u32)] = &[
     // The persisted model, its contracts and its diagnostics live in
-    // `rspice-app-state`, below every module here; each may reference them.
+    // `rspice-app-state`, and the platform services (project I/O, the
+    // lifecycle, recovery, the managed runtime and the build identity) in
+    // `rspice-app-services`, below every module here; each may reference them.
     //
     // Locating the production half of a source file that inspects itself.
-    // It references nothing, and `automation_runtime`, `automation_workflow`,
-    // `simulation` and `workbench` all reference it, so the bottom layer is
-    // the only position that clears every inbound edge at once.
+    // It references nothing, and `automation_workflow`, `simulation` and
+    // `workbench` all reference it, so the bottom layer is the only position
+    // that clears every inbound edge at once.
     ("source_guard", 0),
-    // The build this process runs, which the shell installs at startup. It
-    // references nothing, and `automation_runtime`, `simulation` and
-    // `workbench` all read it, so it sits at the bottom with `source_guard`.
-    ("build_identity", 0),
     // The design system.
     ("ui", 1),
-    // Managed-runtime ownership for the Automation workspace: the native
-    // supervisor and its browser twin, which `lib.rs` selects between by
-    // `cfg(target_arch)` under the single name `automation_runtime`. The
-    // native half references only `source_guard`; the browser half references
-    // nothing; `workbench` is the sole module that references either. That
-    // brackets them anywhere in 1..=8, and the floor is taken so a later
-    // reach for `state` or `simulation` fails rather than passing silently.
-    // The twins share a layer because they are one module to the compiler.
-    ("automation_runtime", 1),
-    ("automation_runtime_browser", 1),
     // Domain services over the persisted model.
     ("analysis", 4),
     ("automation_workflow", 4),
-    ("io", 4),
     ("services", 5),
     ("simulation", 6),
     // Editors and inspectors.
@@ -179,10 +166,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // — by moving the persisted contract down, not by narrowing a signature.
     ("schematic", "workbench", 108),
     ("simulation", "workbench", 25),
-    // 19 -> 15: result presentation now has one durable owner in state;
-    // project I/O no longer imports its keys, markers, or expression types
-    // from the Results renderer. Simulation-plan ownership remains open.
-    ("io", "workbench", 6),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Result aggregation, optimization execution, netlisting and materialized
@@ -615,20 +598,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "sheets/commands",
     // What the settings feature's commands declare, the same way.
     "settings/commands",
-    // Contracts, routes, and policy. These describe the shell without
-    // operating it.
-    "platform",
     // The documents module's own vocabulary: which Code page is showing and
     // what a source-file action is. Each document engine has its own entry;
     // a document file without one is owned here, where its first reach into
     // the shell fails the order.
     "documents",
-    // The browser's notification permission and the reader's choice about
-    // it: a host channel like `platform`, reaching nothing of the shell's.
-    "browser/background_alerts",
-    // Read-only observation of the browser workbench for qualification
-    // builds. It reaches nothing of the shell's; the application starts it.
-    "browser/qualification",
     "routing/surface_route",
     "routing/surface_catalog",
     "routing/availability",
@@ -663,12 +637,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "documents/model_editor",
     "documents/model_correlation",
     "lifecycle/window_session",
-    // Import, persistence, checkpointing, and recovery.
-    "browser/file_import",
-    "lifecycle/project_lifecycle",
-    "lifecycle/project_checkpoint",
-    "lifecycle/recovery",
-    "lifecycle/recovery_checkpoint",
+    // The shortcut libraries' persistence and the artifacts they write.
     "shortcuts/library_persistence",
     "shortcuts/artifacts",
     // Application hardcopy source resolution and host printing adapters.
@@ -713,7 +682,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // Workflows that mutate application state.
     "workflows/file_workflow",
     "workflows/project_workflow",
-    "workflows/export_workflow",
     "workflows/netlist_workflow",
     "shortcuts/profile_workflow",
     "workflows/file_actions",
@@ -756,8 +724,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "cross_probe",
     "account_organization",
     "browser/navigation",
-    "browser/download",
-    "browser/accessibility",
     // Opening an example replaces the session with a new project and saves
     // it, through the project workflow; its test runs the plan through the
     // preflight the frame runs.
@@ -827,13 +793,11 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // that the called module reads — the pattern `frame` already follows.
     ("app", "workflows/project_workflow", 45),
     ("app", "commands", 7),
-    ("app", "workflows/export_workflow", 16),
     ("app", "chrome", 12),
     ("app", "workflows/file_workflow", 2),
     ("app", "browser/navigation", 7),
     ("app", "workflows/file_actions", 2),
     ("app", "frame", 5),
-    ("app", "browser/accessibility", 3),
     ("app", "workflows/netlist_workflow", 3),
     ("app", "cross_probe", 1),
     // `AppState` is the session aggregate, so it inherits two problems from
@@ -888,28 +852,8 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // The design slot holds the schematic cross-probe runtime, whose type
     // lives with the frame pass that synchronizes it.
     ("slots", "cross_probe", 1),
-    // Browser import/download sitting above what needs it.
-    //
-    // `app -> browser/download` is retired. Its one reference was the custom
-    // sheet-size dialog's browser export, which reached the download helper
-    // because the shared file-exchange helper did not exist yet. That helper
-    // now saves through `rfd` on both platforms, which puts a card in front of
-    // the reader instead of synthesizing an anchor click, so the edge went
-    // with the duplication rather than being narrowed.
-    ("documents/code_workspace", "browser/file_import", 14),
-    ("workflows/export_workflow", "browser/download", 3),
-    ("shortcuts/artifacts", "browser/download", 1),
-    ("surfaces", "browser/download", 1),
-    ("workflows/project_workflow", "browser/download", 1),
-    // Recovery and checkpointing reaching sideways into the workflows.
+    // Artifacts reaching sideways into the workflows.
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
-    ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
-    // The platform slot holds the lifecycle's state, and the lifecycle and
-    // its sibling services work on that slot: one cycle inside the platform
-    // services. The lifecycle names the slot where it is defined, once, and
-    // its siblings take it from the lifecycle, rather than every one of them
-    // reaching it through the session aggregate's re-export.
-    ("lifecycle/project_lifecycle", "slots", 1),
     // The live-session engine closes the project through the project
     // workflow, which ranks above the application that owns the engine.
     ("live_session", "workflows/project_workflow", 5),
@@ -917,7 +861,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // bar, and the dispatcher that starts an import ranks below the bar.
     ("workflows/result_import_workflow", "chrome", 1),
     ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
-    ("documents/code_workspace", "workflows/export_workflow", 1),
     // Presentation reaching sideways into a peer surface.
     ("documents/result_document", "chrome", 1),
     // A route describing its own catalog and availability.
@@ -1135,14 +1078,23 @@ fn declares_only_submodules(file: &Path) -> bool {
         .all(|line| line.starts_with("#[") || is_module_declaration(line))
 }
 
-/// `mod x;` behind any visibility: `pub`, `pub(crate)`, `pub(in path)`.
+/// `mod x;` behind any visibility: `pub`, `pub(crate)`, `pub(in path)`. A
+/// module a lower application crate compiles, re-exported here at the path it
+/// had (`pub(crate) use rspice_app_services::workbench::workflows::x;`), is
+/// the same declaration.
 fn is_module_declaration(line: &str) -> bool {
     let Some(declaration) = line.strip_suffix(';') else {
         return false;
     };
     let words = declaration.split_whitespace().collect::<Vec<_>>();
-    let [visibility @ .., "mod", _] = words.as_slice() else {
-        return false;
+    let visibility = match words.as_slice() {
+        [visibility @ .., "mod", _] => visibility,
+        [visibility @ .., "use", path]
+            if path.starts_with("rspice_app_") && !path.contains(['{', '*']) =>
+        {
+            visibility
+        }
+        _ => return false,
     };
     visibility
         .iter()
@@ -1890,6 +1842,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
 const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app/src",
     "rspice-app-state/src",
+    "rspice-app-services/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",

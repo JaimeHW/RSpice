@@ -318,6 +318,11 @@ fn app_state_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-state/src")
 }
 
+/// The application's platform services, named the same way.
+fn app_services_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-services/src")
+}
+
 fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
@@ -495,6 +500,7 @@ fn path_grammar_is_owned_by_one_module() {
     for (prefix, root) in [
         ("", src_dir()),
         ("", app_state_src_dir()),
+        ("", app_services_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
     ] {
@@ -621,7 +627,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
     );
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
-    for root in [src_dir(), app_state_src_dir()] {
+    for root in [src_dir(), app_state_src_dir(), app_services_src_dir()] {
         for (path, file) in production_files(&root) {
             let code = Source::read(&file).code;
             let count: usize = RAW_BUFFER_CONSTRUCTORS
@@ -1339,6 +1345,7 @@ fn persisted_policies_reach_a_projection() {
     for (prefix, root) in [
         ("", src_dir()),
         ("", app_state_src_dir()),
+        ("", app_services_src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),

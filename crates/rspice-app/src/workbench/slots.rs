@@ -13,7 +13,7 @@ mod code;
 mod design;
 mod hardcopy;
 mod models;
-pub(in crate::workbench) mod platform;
+pub(in crate::workbench) use rspice_app_services::workbench::slots::platform;
 mod project;
 mod results;
 pub(crate) mod runs;

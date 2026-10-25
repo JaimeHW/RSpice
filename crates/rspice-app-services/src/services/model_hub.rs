@@ -50,7 +50,7 @@ pub enum ModelHubStoreHandle {
     /// The browser's store, and every test's. A desktop build never reaches
     /// it: a session whose filesystem store will not open has no hub at all
     /// rather than a silently non-durable one.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     Memory(std::sync::Arc<crate::state::model_hub::MemoryModelHubStore>),
     /// The browser's store once it has somewhere to keep a copy.
     ///
@@ -93,7 +93,7 @@ impl ModelHubStoreHandle {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::Filesystem { store, .. } => Box::new(store.clone()),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::Memory(store) => Box::new(std::sync::Arc::clone(store)),
             #[cfg(target_arch = "wasm32")]
             Self::Mirrored(store) => Box::new(std::sync::Arc::clone(store)),
@@ -104,7 +104,7 @@ impl ModelHubStoreHandle {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::Filesystem { root, .. } => Some(root.clone()),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::Memory(_) => None,
             #[cfg(target_arch = "wasm32")]
             Self::Mirrored(_) => None,
@@ -127,7 +127,7 @@ impl ModelHubStoreHandle {
             Self::Filesystem { .. } => {
                 crate::state::model_hub::durable::PackStorageStanding::NotApplicable
             }
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::Memory(_) => crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
             #[cfg(target_arch = "wasm32")]
             Self::Mirrored(store) => store.standing(),
@@ -190,7 +190,7 @@ impl ModelHubService {
     }
 
     /// A service with no hub at all, for tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn unavailable(reason: impl Into<String>) -> Self {
         Self {
             store: None,
@@ -202,7 +202,7 @@ impl ModelHubService {
 
     /// A service over an explicit store. Tests use this to drive the real
     /// pipeline against fixture bytes; nothing about verification changes.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_store(store: ModelHubStoreHandle, hub: ModelHub) -> Self {
         Self {
             store: Some(store),
@@ -402,11 +402,11 @@ fn unavailable_reason(error: &ModelHubError) -> String {
 /// a service built for one has no network to reach. It exists only in test
 /// builds, which leaves the shell's provider the only one a running
 /// application can hold.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug)]
 pub struct OfflineTransportProvider;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl ModelHubTransportProvider for OfflineTransportProvider {
     #[cfg(not(target_arch = "wasm32"))]
     fn open(

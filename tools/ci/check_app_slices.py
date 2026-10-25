@@ -42,7 +42,10 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "crates" / "rspice-app" / "src"
 CEILINGS = Path(__file__).resolve().with_name("app_slice_ceilings.json")
 # Slice -> the src directory of the lower crate its files were moved into.
-LOWER_CRATES = {"model": ROOT / "crates" / "rspice-app-state" / "src"}
+LOWER_CRATES = {
+    "model": ROOT / "crates" / "rspice-app-state" / "src",
+    "services": ROOT / "crates" / "rspice-app-services" / "src",
+}
 
 LOWER = ("model", "services", "run", "framework")
 FEATURES = (

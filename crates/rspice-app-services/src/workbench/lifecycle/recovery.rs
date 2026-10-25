@@ -1059,7 +1059,7 @@ pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
 
 /// A new directory under the system temporary directory, named for `label`,
 /// this process and this moment, for a test that writes recovery files.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub fn unique_temp_dir(label: &str) -> PathBuf {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

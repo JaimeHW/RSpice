@@ -308,7 +308,8 @@ jobs:
         run: >-
           cargo test --locked --workspace --no-fail-fast --features rspice-output/durable-file
           --exclude rspice-core --exclude rspice-core-base --exclude rspice-core-netlist
-          --exclude rspice-core-devices --exclude rspice-app --exclude rspice-app-state --exclude rspice-conformance
+          --exclude rspice-core-devices --exclude rspice-app --exclude rspice-app-state
+          --exclude rspice-app-services --exclude rspice-conformance
           --exclude rspice-python
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
 
@@ -324,10 +325,10 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test UI units and integration tests (Linux)
-        run: cargo test --locked -p rspice-app -p rspice-app-state --no-fail-fast
+        run: cargo test --locked -p rspice-app -p rspice-app-state -p rspice-app-services --no-fail-fast
       - name: Test generated Verilog-A GUI contracts
         run: >-
-          cargo test --locked -p rspice-app
+          cargo test --locked -p rspice-app -p rspice-app-services
           --features generated-veriloga-catalog
           --lib generated_veriloga
 
@@ -545,7 +546,7 @@ jobs:
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
-        run: cargo test --locked -p rspice-app -p rspice-app-state --lib
+        run: cargo test --locked -p rspice-app -p rspice-app-state -p rspice-app-services --lib
       - name: Callback host code generation regression
         run: cargo test --locked -p rspice-simulation --test wasmi_callback_codegen -- --test-threads=1
       - name: Verilog-A native JIT unit tests
@@ -702,7 +703,7 @@ jobs:
       - name: Check desktop crates
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state
+        run: cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state -p rspice-app-services
       - name: Qualify portable generated Verilog-A shard
         env:
           RUSTFLAGS: -D warnings
@@ -712,7 +713,7 @@ jobs:
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
-        run: cargo test --locked -p rspice-app -p rspice-app-state --lib
+        run: cargo test --locked -p rspice-app -p rspice-app-state -p rspice-app-services --lib
 
   wasm:
     name: Check (wasm32)
@@ -731,6 +732,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-app-state --target wasm32-unknown-unknown
+      - name: Check rspice-app-services
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p rspice-app-services --target wasm32-unknown-unknown
       - name: Check rspice-worker
         env:
           RUSTFLAGS: -D warnings

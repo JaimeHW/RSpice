@@ -151,7 +151,7 @@ impl ProjectCheckpointSummary {
 
 /// A catalog entry for a checkpoint that exists only in a test, so a surface
 /// can be drawn over a populated catalog without publishing one.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub fn fixture_summary(
     project_name: &str,
     project_revision: u64,
@@ -176,7 +176,7 @@ pub fn fixture_summary(
 }
 
 /// A set-aside artifact that exists only in a test.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpointQuarantine {
     ProjectCheckpointQuarantine {
         label: label.to_owned(),

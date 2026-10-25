@@ -5299,6 +5299,7 @@ dependencies = [
  "rfd",
  "ron",
  "ropey",
+ "rspice-app-services",
  "rspice-app-state",
  "rspice-automation-protocol",
  "rspice-automation-runtime",
@@ -5350,6 +5351,43 @@ dependencies = [
  "winit",
  "winresource",
  "zip",
+]
+
+[[package]]
+name = "rspice-app-services"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "egui",
+ "js-sys",
+ "log",
+ "rfd",
+ "ron",
+ "rspice-app-state",
+ "rspice-automation-protocol",
+ "rspice-automation-runtime",
+ "rspice-core",
+ "rspice-design",
+ "rspice-formats",
+ "rspice-model-library",
+ "rspice-output",
+ "rspice-pack",
+ "rspice-project",
+ "rspice-results",
+ "rspice-simulation",
+ "rspice-simulation-contract",
+ "rspice-ui-kit",
+ "rspice-vocabulary",
+ "semver",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

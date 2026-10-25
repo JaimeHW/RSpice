@@ -15,7 +15,8 @@ WORKER_CONTRACT = SIMULATION_SRC / "runner" / "worker_contract.rs"
 MAIN = UI_SRC / "main.rs"
 APP = UI_SRC / "workbench" / "app.rs"
 HARDCOPY_WORKER = UI_SRC / "workbench" / "app" / "dialogs" / "hardcopy" / "worker.rs"
-BROWSER_ACCESSIBILITY = UI_SRC / "workbench" / "browser" / "accessibility.rs"
+SERVICES_SRC = ROOT / "crates" / "rspice-app-services" / "src"
+BROWSER_ACCESSIBILITY = SERVICES_SRC / "workbench" / "browser" / "accessibility.rs"
 
 # These tests assert architectural properties that live in specific files, so
 # the paths above are part of the contract rather than an implementation

@@ -27,7 +27,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) use crate::product::TransactionId;
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub use persistence::BrowserBindingBackend;
 #[cfg(target_arch = "wasm32")]
 pub use persistence::BrowserWriteTarget;
@@ -783,7 +783,7 @@ pub fn canonical_native_path(platform: &PlatformState) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 pub fn normalize_native_path(path: &Path) -> Result<PathBuf, ProjectLifecycleError> {
     persistence::normalize_native_path(path).map_err(ProjectLifecycleError::from)
 }
@@ -1013,7 +1013,7 @@ pub fn prepare_browser_save(
 /// destructive action that requested it. Saving and continuing are separate:
 /// edits made while a browser surface is pending remain dirty and force a new
 /// review instead of being discarded.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(target_arch = "wasm32", test, feature = "test-support"))]
 pub fn saved_snapshot_authorizes_continuation(
     state: &dyn LifecycleSource,
     scope: SaveScope,
@@ -1920,7 +1920,7 @@ fn mark_all_library_views_clean(libraries: &mut crate::state::LibraryManager) {
 /// Test setters for whether a project is open, for every test in the crate.
 /// They move the lifecycle's authority exactly as a test needs it, with no
 /// baseline or binding, and publish the answer the way every transition does.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn open_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
     let parts = state.lifecycle_parts();
     parts.platform.project_lifecycle.authority.open_session();
@@ -1930,7 +1930,7 @@ pub fn open_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
         .publish_open(&mut parts.model.project_open);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn close_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
     let parts = state.lifecycle_parts();
     parts.platform.project_lifecycle.authority.close_project();

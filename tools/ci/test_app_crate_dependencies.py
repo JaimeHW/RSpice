@@ -120,6 +120,28 @@ class DependencyPolicyTests(unittest.TestCase):
             ],
         )
 
+        self.assertEqual(
+            violations(
+                {"rspice-app-services": {"rspice-app-state", "rspice-app"}},
+                {
+                    "rspice-app-services": {
+                        "rspice-app-services", "rspice-app-state", "egui", "rfd", "winit",
+                        "rspice-worker",
+                    },
+                    "rspice-schematic-editor": {"rspice-schematic-editor", "rspice-app-services"},
+                    "rspice-worker": {"rspice-worker", "rspice-app-services"},
+                },
+            ),
+            [
+                "rspice-app-services has forbidden application dependency rspice-app",
+                "rspice-app-services reaches application or host package rspice-worker",
+                "rspice-app-services reaches application or host package winit",
+                "rspice-schematic-editor reaches application service or host package "
+                "rspice-app-services",
+                "rspice-worker reaches application package rspice-app-services",
+            ],
+        )
+
         issues = violations(
             {
                 "rspice-formats": {"rspice-project"},

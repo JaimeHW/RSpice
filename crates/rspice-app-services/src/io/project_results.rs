@@ -64,7 +64,7 @@ fn next_run_id(state: &SimulationState) -> u64 {
         .unwrap_or(0);
     state.retained.next_run_id.max(max_run_id)
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn simulation_state_from_results(
     results: ProjectSimulationResults,
 ) -> Result<SimulationState, String> {

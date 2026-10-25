@@ -22,16 +22,27 @@ from check_app_slices import (  # noqa: E402
 )
 
 
-def measure_tree(files: dict[str, str], lower_model: dict[str, str] | None = None):
+def measure_tree(
+    files: dict[str, str],
+    lower_model: dict[str, str] | None = None,
+    lower_services: dict[str, str] | None = None,
+):
     with tempfile.TemporaryDirectory() as directory:
-        trees = {"app": files, "state": lower_model or {}}
+        trees = {"app": files, "state": lower_model or {}, "services": lower_services or {}}
         for tree, contents in trees.items():
             for path, text in contents.items():
                 target = Path(directory) / tree / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(text, encoding="utf-8")
-        lower_crates = {"model": Path(directory) / "state"} if lower_model else None
-        return measure(Path(directory) / "app", lower_crates)
+        lower_crates = {
+            slice_name: Path(directory) / tree
+            for slice_name, tree, contents in (
+                ("model", "state", lower_model),
+                ("services", "services", lower_services),
+            )
+            if contents
+        }
+        return measure(Path(directory) / "app", lower_crates or None)
 
 
 PROJECT = "pub fn project_title() {}\n"
@@ -194,6 +205,34 @@ class MeasurementTests(unittest.TestCase):
         })
         # The first path leaves the crate; the second ends in results, not the shell.
         self.assertEqual(values["lower->upper"], {"framework->results": 1})
+
+    def test_each_lower_crate_lends_its_names_to_its_own_slice(self) -> None:
+        app = {
+            "lib.rs": (
+                "pub use rspice_app_state::state;\npub use rspice_app_services::io;\n"
+                "mod analysis;\nmod workbench;\n"
+            ),
+            "analysis.rs": "pub fn run_label() {}\npub fn recent_label() {}\n",
+            "workbench/surfaces/verify.rs": (
+                "use crate::analysis::*;\n"
+                "pub fn show() {\n"
+                "    run_label();\n"
+                "    recent_label();\n"
+                "}\n"
+            ),
+        }
+        state = {"lib.rs": "pub mod state;\n", "state.rs": "pub fn run_label() {}\n"}
+        services = {
+            "lib.rs": "pub mod io;\n",
+            "io.rs": "pub mod project_io;\n",
+            "io/project_io.rs": "pub fn recent_label() {}\n",
+        }
+        self.assertEqual(measure_tree(app)[0]["feature->feature"], {"simulate->results": 3})
+        self.assertEqual(measure_tree(app, state)[0]["feature->feature"], {"simulate->results": 2})
+        values, _, stats = measure_tree(app, state, services)
+        # Each crate's definition takes its name from results; the glob import remains.
+        self.assertEqual(values["feature->feature"], {"simulate->results": 1})
+        self.assertEqual(stats["files"], 3)
 
     def test_whole_app_methods_and_parameters_outside_their_home_are_counted(self) -> None:
         values, _, _ = measure_tree({

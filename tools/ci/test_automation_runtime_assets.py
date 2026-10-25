@@ -21,8 +21,12 @@ MANIFEST = RUNTIME / "rspice-runtime-manifest.json"
 WORKER = WEB / "automation-worker.js"
 BOOTSTRAP = WEB / "python" / "rspice_browser_bootstrap.py"
 NATIVE_WORKER = ROOT / "crates" / "rspice-automation-runtime" / "worker" / "rspice_worker.py"
-RUST_BROWSER_RUNTIME = ROOT / "crates" / "rspice-app" / "src" / "automation_runtime_browser.rs"
-RUST_NATIVE_RUNTIME = ROOT / "crates" / "rspice-app" / "src" / "automation_runtime.rs"
+SERVICES_SRC = ROOT / "crates" / "rspice-app-services" / "src"
+RUST_BROWSER_RUNTIME = SERVICES_SRC / "automation_runtime_browser.rs"
+RUST_NATIVE_RUNTIME = SERVICES_SRC / "automation_runtime.rs"
+CODE_WORKSPACE_AUTOMATION = (
+    ROOT / "crates" / "rspice-app" / "src" / "workbench" / "documents" / "code_workspace" / "automation.rs"
+)
 NATIVE_RUNTIME_LIBRARY = ROOT / "crates" / "rspice-automation-runtime" / "src" / "lib.rs"
 NATIVE_RUNTIME_QUALIFIER = (
     ROOT
@@ -34,20 +38,9 @@ NATIVE_RUNTIME_QUALIFIER = (
 )
 NATIVE_RELEASE = ROOT / ".github" / "workflows" / "native-release.yml"
 DEBUGGER_HARNESS = ROOT / "tools" / "ci" / "automation_browser_debugger_harness.html"
-PROJECT_CHECKPOINT = (
-    ROOT
-    / "crates"
-    / "rspice-app"
-    / "src"
-    / "workbench"
-    / "lifecycle"
-    / "project_checkpoint.rs"
-)
+PROJECT_CHECKPOINT = SERVICES_SRC / "workbench" / "lifecycle" / "project_checkpoint.rs"
 BROWSER_PERSISTENCE = (
-    ROOT
-    / "crates"
-    / "rspice-app"
-    / "src"
+    SERVICES_SRC
     / "workbench"
     / "lifecycle"
     / "project_lifecycle"
@@ -347,9 +340,7 @@ class BrowserAutomationRuntimeAssets(unittest.TestCase):
         self.assertIn("sys.setrecursionlimit(min(max_stack_depth, 100_000))", bootstrap)
         self.assertIn("sys.setrecursionlimit(original_recursion_limit)", bootstrap)
 
-        source = RUST_BROWSER_RUNTIME.parent.joinpath(
-            "workbench", "documents", "code_workspace", "automation.rs"
-        ).read_text(encoding="utf-8")
+        source = CODE_WORKSPACE_AUTOMATION.read_text(encoding="utf-8")
         browser_validation = source.split(
             '#[cfg(target_arch = "wasm32")]\nfn begin_managed_python_validation', 1
         )[1]
@@ -374,9 +365,7 @@ class BrowserAutomationRuntimeAssets(unittest.TestCase):
 
     def test_browser_cancellation_has_cooperative_and_hard_termination_paths(self) -> None:
         runtime = RUST_BROWSER_RUNTIME.read_text(encoding="utf-8")
-        automation = RUST_BROWSER_RUNTIME.parent.joinpath(
-            "workbench", "documents", "code_workspace", "automation.rs"
-        ).read_text(encoding="utf-8")
+        automation = CODE_WORKSPACE_AUTOMATION.read_text(encoding="utf-8")
         self.assertIn("self.worker = None;", runtime)
         self.assertIn("self.active_limits = None;", runtime)
         self.assertIn("self.events.borrow_mut().clear();", runtime)
@@ -391,9 +380,7 @@ class BrowserAutomationRuntimeAssets(unittest.TestCase):
     def test_native_runtime_uses_one_fresh_resource_boundary_per_launch(self) -> None:
         transport = RUST_NATIVE_RUNTIME.read_text(encoding="utf-8")
         runtime = NATIVE_RUNTIME_LIBRARY.read_text(encoding="utf-8")
-        automation = RUST_BROWSER_RUNTIME.parent.joinpath(
-            "workbench", "documents", "code_workspace", "automation.rs"
-        ).read_text(encoding="utf-8")
+        automation = CODE_WORKSPACE_AUTOMATION.read_text(encoding="utf-8")
         qualifier = NATIVE_RUNTIME_QUALIFIER.read_text(encoding="utf-8")
         release = NATIVE_RELEASE.read_text(encoding="utf-8")
 
