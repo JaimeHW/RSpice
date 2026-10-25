@@ -8,6 +8,7 @@
 //! needs a feature to have acted on a report runs against the whole
 //! application in the shell's feature tests.
 
+use rspice_app_state::workbench::workspace::restore_model_library_manager;
 use rspice_design::drc::DrcResult;
 use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::fft::{FftInputOptions, FftState};
@@ -15,9 +16,10 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 use crate::simulation::{NetlistShown, RunHost, ViewerReading};
+use crate::state::pdk_config::PdkConfig;
 use crate::state::{CellViewRef, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::{
-    app_state::{AppState, Model, SlotFacts, design_checks::CheckScope},
+    app_state::{Model, SlotFacts, design_checks::CheckScope},
     slots::runs::RunsState,
 };
 
@@ -30,12 +32,12 @@ pub(crate) struct RunTestHost {
 }
 
 impl Default for RunTestHost {
-    /// The model and runs' slot a new session starts with.
+    /// The model and runs' slot a new session starts with, over the empty PDK
+    /// configuration a test session reads.
     fn default() -> Self {
-        let session = AppState::default();
         Self {
-            model: session.model,
-            runs: session.runs,
+            model: Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
+            runs: Box::default(),
         }
     }
 }
