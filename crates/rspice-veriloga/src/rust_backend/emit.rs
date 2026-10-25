@@ -395,11 +395,11 @@ pub(super) fn lane_runtime_types(function: &CfgFunction) -> BTreeSet<String> {
         .collect()
 }
 
-/// Standalone copy of the helpers emitted arithmetic calls.
+/// The helpers emitted arithmetic calls, for a direct-rustc emitter program.
 ///
-/// Generated model crates import the identical definitions from
-/// `rspice-veriloga-runtime`; this copy keeps direct-rustc emitter and benchmark
-/// programs self-contained.
+/// Generated model crates import these from `rspice-veriloga-runtime`. This
+/// includes the same runtime source, and stands in panicking forms for the
+/// checks a generated model reports through its evaluation context.
 pub const RUNTIME_PRELUDE: &str = concat!(
     "mod arithmetic {\n",
     include_str!("../../../rspice-veriloga-runtime/src/arithmetic/scalar.rs"),
@@ -408,7 +408,11 @@ pub const RUNTIME_PRELUDE: &str = concat!(
     include_str!("../../../rspice-veriloga-runtime/src/integer.rs"),
     "\n}\nmod array_index {\n",
     include_str!("../../../rspice-veriloga-runtime/src/array_index.rs"),
-    "\n}\n",
+    "\n}\nmod lanes {\n",
+    include_str!("../../../rspice-veriloga-runtime/src/lanes.rs"),
+    "\n}\nmod limexp {\n",
+    include_str!("../../../rspice-veriloga-runtime/src/limexp.rs"),
+    "\n}\n#[allow(unused_imports)] use lanes::*;\n#[allow(unused_imports)] use limexp::*;\n",
     r#"
 fn checked_derivative_value(primal: f64, derivative: f64) -> f64 {
     assert!(primal.is_finite(), "ddx operand is not finite");
@@ -431,183 +435,6 @@ fn checked_evaluation_input_indexed(inputs: &[f64], index: f64, base: usize, len
 fn integer_result(result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
     result.expect("standalone generated integer evaluation must be valid")
 }
-#[inline(always)]
-fn rspice_limexp(x: f64) -> f64 {
-    if x < 80.0 { x.exp() } else { (80.0f64).exp() * (x - 80.0 + 1.0) }
-}
-
-#[inline(always)]
-fn rspice_limited_exp(x: f64) -> f64 {
-    if x > 80.0 {
-        5.54062238439351e34 * (x - 80.0 + 1.0)
-    } else if x < -80.0 {
-        1.804851387e-35
-    } else {
-        x.exp()
-    }
-}
-
-#[inline(always)]
-fn rspice_limited_exp_derivative(x: f64) -> f64 {
-    if x > 80.0 {
-        5.54062238439351e34
-    } else if x < -80.0 {
-        0.0
-    } else {
-        x.exp()
-    }
-}
-
-/// A packed derivative: one partial per unknown the value can reach.
-///
-/// A newtype rather than a bare `[f64; N]` so the elementwise rules emit as
-/// `a + b` and `a * s` instead of named calls. That is not cosmetic — these
-/// operations are most of a large model's generated source, and an operator is
-/// a dozen characters shorter than a call at every one of them.
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-struct Lanes<const N: usize>([f64; N]);
-
-macro_rules! generic_lane_operator {
-    ($trait:ident, $method:ident, $operator:tt) => {
-        impl<const N: usize> core::ops::$trait for Lanes<N> {
-            type Output = Self;
-            #[inline(always)]
-            fn $method(self, rhs: Self) -> Self {
-                let mut out = self.0;
-                let mut i = 0;
-                while i < N {
-                    out[i] = self.0[i] $operator rhs.0[i];
-                    i += 1;
-                }
-                Self(out)
-            }
-        }
-    };
-}
-generic_lane_operator!(Add, add, +);
-generic_lane_operator!(Sub, sub, -);
-
-impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn mul(self, rhs: f64) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] * rhs;
-            i += 1;
-        }
-        Self(out)
-    }
-}
-
-impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn div(self, rhs: f64) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] / rhs;
-            i += 1;
-        }
-        Self(out)
-    }
-}
-
-impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
-    type Output = f64;
-    #[inline(always)]
-    fn index(&self, index: usize) -> &f64 { &self.0[index] }
-}
-
-macro_rules! define_fixed_lanes {
-    ($name:ident, $width:literal, [$($index:tt),+ $(,)?]) => {
-        #[repr(transparent)]
-        #[derive(Clone, Copy)]
-        struct $name([f64; $width]);
-
-        impl $name {
-            #[inline]
-            fn product_div(self, scalar: f64, divisor: f64) -> Self {
-                Self([$(arithmetic::product_div(self.0[$index], scalar, divisor)),+])
-            }
-            #[inline]
-            fn product_sum_div(self, scalar: f64, right: Self, right_scalar: f64, divisor: f64) -> Self {
-                Self([$(arithmetic::product_sum_div(
-                    self.0[$index], scalar, right.0[$index], right_scalar, divisor
-                )),+])
-            }
-        }
-
-        impl core::ops::Add for $name {
-            type Output = Self;
-            #[inline(always)]
-            fn add(self, rhs: Self) -> Self {
-                Self([$((self.0[$index] + rhs.0[$index])),+])
-            }
-        }
-        impl core::ops::Sub for $name {
-            type Output = Self;
-            #[inline(always)]
-            fn sub(self, rhs: Self) -> Self {
-                Self([$((self.0[$index] - rhs.0[$index])),+])
-            }
-        }
-        impl core::ops::Mul<f64> for $name {
-            type Output = Self;
-            #[inline(always)]
-            fn mul(self, rhs: f64) -> Self {
-                Self([$((self.0[$index] * rhs)),+])
-            }
-        }
-        impl core::ops::Div<f64> for $name {
-            type Output = Self;
-            #[inline(always)]
-            fn div(self, rhs: f64) -> Self {
-                Self([$((self.0[$index] / rhs)),+])
-            }
-        }
-        impl core::ops::Index<usize> for $name {
-            type Output = f64;
-            #[inline(always)]
-            fn index(&self, index: usize) -> &f64 { &self.0[index] }
-        }
-    };
-}
-
-define_fixed_lanes!(L2, 2, [0, 1]);
-define_fixed_lanes!(L3, 3, [0, 1, 2]);
-define_fixed_lanes!(L4, 4, [0, 1, 2, 3]);
-define_fixed_lanes!(L5, 5, [0, 1, 2, 3, 4]);
-define_fixed_lanes!(L6, 6, [0, 1, 2, 3, 4, 5]);
-define_fixed_lanes!(L7, 7, [0, 1, 2, 3, 4, 5, 6]);
-define_fixed_lanes!(L8, 8, [0, 1, 2, 3, 4, 5, 6, 7]);
-define_fixed_lanes!(L9, 9, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
-define_fixed_lanes!(L10, 10, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-define_fixed_lanes!(L11, 11, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-define_fixed_lanes!(L12, 12, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-define_fixed_lanes!(L13, 13, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-define_fixed_lanes!(L14, 14, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
-define_fixed_lanes!(L15, 15, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-define_fixed_lanes!(L16, 16, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
-define_fixed_lanes!(L17, 17, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-define_fixed_lanes!(L18, 18, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
-define_fixed_lanes!(L19, 19, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
-define_fixed_lanes!(L20, 20, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
-define_fixed_lanes!(L21, 21, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
-define_fixed_lanes!(L22, 22, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-define_fixed_lanes!(L23, 23, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
-define_fixed_lanes!(L24, 24, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
-define_fixed_lanes!(L25, 25, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
-define_fixed_lanes!(L26, 26, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
-define_fixed_lanes!(L27, 27, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
-define_fixed_lanes!(L28, 28, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
-define_fixed_lanes!(L29, 29, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]);
-define_fixed_lanes!(L30, 30, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
-define_fixed_lanes!(L31, 31, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
-define_fixed_lanes!(L32, 32, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
 "#
 );
 

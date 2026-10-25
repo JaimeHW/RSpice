@@ -202,7 +202,7 @@ fn generated_veriloga_devices_use_shared_hot_helpers() {
         generic_lane_fallback_consumers.join("\n")
     );
 
-    let runtime_path = workspace_root().join("crates/rspice-veriloga-runtime/src/lib.rs");
+    let runtime_path = workspace_root().join("crates/rspice-veriloga-runtime/src/lanes.rs");
     let runtime = fs::read_to_string(&runtime_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
     assert!(
