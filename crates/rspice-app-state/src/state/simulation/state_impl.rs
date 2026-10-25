@@ -104,6 +104,84 @@ impl SimulationState {
         })
     }
 
+    /// The Monte Carlo analysis whose trials the yield evidence judges: the
+    /// active analysis when it is one, otherwise the active run's last
+    /// successful one.
+    #[must_use]
+    pub fn yield_analysis(&self) -> Option<&AnalysisResult> {
+        let is_campaign = |analysis: &&AnalysisResult| {
+            analysis.success
+                && matches!(
+                    analysis.family_metadata,
+                    Some(
+                        rspice_results::family_metadata::AnalysisResultFamilyMetadata::MonteCarlo { .. }
+                    )
+                )
+        };
+        self.active_analysis()
+            .filter(is_campaign)
+            .or_else(|| self.active_run()?.analyses.iter().rev().find(is_campaign))
+    }
+
+    /// Judge the yield analysis's trials against the active plan's limits,
+    /// unless the held evidence was judged from exactly these.
+    ///
+    /// Yield is derived and never stored: the trials and the limits both
+    /// persist, so judging them again after a load, a finished run, a run
+    /// selection or a limit edited by any route gives every reader of the
+    /// evidence the yield of the limits as they stand. A run another plan owns,
+    /// or a manual deck, is judged against no limits, as every Verify page
+    /// judges it.
+    pub fn refresh_yield_evidence(
+        &mut self,
+        setup: &rspice_simulation_contract::setup_state::SimulationSetup,
+        workspace: &rspice_project::ProjectWorkspace,
+    ) {
+        let plan_id = setup.stable_analysis_plan().ok().map(|plan| plan.id());
+        let payload = plan_id.and_then(|plan_id| workspace.plan_data(plan_id));
+        let (specs, definitions) = if self.evidence_domain(plan_id).answers_a_plan_limit() {
+            payload.map_or((workspace.specs.as_slice(), &[][..]), |payload| {
+                (
+                    payload.specs.as_slice(),
+                    payload.specification_definitions.as_slice(),
+                )
+            })
+        } else {
+            (&[][..], &[][..])
+        };
+        let judged = self.active_run().zip(self.yield_analysis());
+        let key = judged.map(|(run, analysis)| (run.dataset_id, analysis.id));
+        if self
+            .retained
+            .yield_evidence
+            .is_judged_from(key, specs, definitions)
+        {
+            return;
+        }
+        let (results, provenance) = judged.map_or_else(
+            || (Vec::new(), None),
+            |(run, analysis)| {
+                (
+                    rspice_results::yield_analysis::judge_monte_carlo(
+                        &analysis.data,
+                        &prepared_limits(specs, definitions),
+                    ),
+                    rspice_results::yield_analysis::monte_carlo_provenance(
+                        run.run_id,
+                        run.dataset_id,
+                        &analysis.data,
+                    ),
+                )
+            },
+        );
+        self.retained.yield_evidence.replace_judged(
+            results,
+            provenance,
+            rspice_results::yield_analysis::YieldBasis::new(key, specs, definitions),
+        );
+        self.view.data_version = self.view.data_version.wrapping_add(1);
+    }
+
     /// Request cancellation of the exact execution active at this instant.
     /// Returns the bound identity on success; no unbound abort request is
     /// emitted when the controller has no authoritative active execution.
@@ -733,6 +811,29 @@ impl SimulationState {
         if self.retained.yield_provenance().is_some() && !is_retained {
             self.replace_yield_evidence(Vec::new(), None);
         }
+    }
+}
+
+/// A plan's limits as the judge holds them: its governed definitions when it
+/// has them, otherwise its legacy rows. A row that does not validate is
+/// judged by nothing, as the run that sealed it would refuse it.
+fn prepared_limits(
+    specs: &[rspice_results::specification::SpecEntry],
+    definitions: &[rspice_results::specification::SpecificationDefinition],
+) -> Vec<rspice_results::specification::PreparedSpecification> {
+    use rspice_results::specification::PreparedSpecification;
+    if definitions.is_empty() {
+        specs
+            .iter()
+            .filter_map(|entry| PreparedSpecification::new(entry.clone()).ok())
+            .collect()
+    } else {
+        definitions
+            .iter()
+            .filter_map(|definition| {
+                PreparedSpecification::from_definition(definition.clone()).ok()
+            })
+            .collect()
     }
 }
 
@@ -1467,6 +1568,152 @@ mod tests {
                 .retained
                 .yield_results_for_dataset(source_dataset_id)
                 .is_some()
+        );
+    }
+
+    /// A Monte Carlo analysis whose trials measured `gain`.
+    fn gain_trials(values: &[f64]) -> AnalysisResult {
+        use rspice_results::family_measurements::{
+            FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
+        };
+        let members = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                FamilyMemberMeasurements::new(
+                    FamilyMemberId::MonteCarloTrial {
+                        index,
+                        seed: 31 + index as u64,
+                    },
+                    vec![FamilyMeasurementEvidence {
+                        unit: None,
+                        name: "gain".to_owned(),
+                        value: Some(*value),
+                        passed: true,
+                        error: None,
+                    }],
+                )
+            })
+            .collect();
+        AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo")
+            .with_family_metadata(
+                rspice_results::family_metadata::AnalysisResultFamilyMetadata::MonteCarlo {
+                    seed: 31,
+                    runs_requested: values.len(),
+                    runs_completed: values.len(),
+                    failures: 0,
+                    all_converged: true,
+                    variables: Vec::new(),
+                    member_measurements: members,
+                },
+            )
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    crate::product::ContentDigest::from_bytes([0x31; 32]),
+                    Vec::new(),
+                )
+                .expect("valid provenance"),
+            )
+    }
+
+    fn gain_floor(minimum: f64) -> rspice_results::specification::SpecEntry {
+        rspice_results::specification::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: String::new(),
+            min: Some(minimum),
+            max: None,
+            unit: "dB".to_owned(),
+            scope: rspice_results::specification::SpecPointScope::AllPoints,
+        }
+    }
+
+    fn state_with(run: SimulationRun) -> SimulationState {
+        let mut state = SimulationState::default();
+        state.retained.runs = vec![run].into();
+        state.view.active_run_idx = Some(0);
+        state
+    }
+
+    /// A Monte Carlo run and the limits beside it are the yield: entering,
+    /// tightening or removing a limit re-judges the retained trials, and
+    /// asking again with nothing changed is not a new generation.
+    #[test]
+    fn monte_carlo_yield_follows_the_plans_limits() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(gain_trials(&[12.0, 8.5, 11.0, 10.5]));
+        let mut state = state_with(run);
+        let setup = rspice_simulation_contract::setup_state::SimulationSetup::default();
+        let mut workspace = rspice_project::ProjectWorkspace::default();
+        workspace.specs = vec![gain_floor(10.0)];
+
+        state.refresh_yield_evidence(&setup, &workspace);
+        let results = state
+            .yield_results_for_active_dataset()
+            .expect("the active run was judged");
+        assert_eq!(results.len(), 1);
+        assert_eq!((results[0].pass_count, results[0].total_runs), (3, 4));
+        assert_eq!(results[0].yield_percent, 75.0);
+        assert_eq!(results[0].trail, [true, false, true, true]);
+        let provenance = state.retained.yield_provenance().expect("provenance");
+        assert_eq!(provenance.seed, 31);
+        assert_eq!(
+            provenance.source_dataset_id,
+            state.retained.runs[0].dataset_id
+        );
+
+        let revision = state.retained.yield_evidence.revision();
+        let version = state.view.data_version;
+        state.refresh_yield_evidence(&setup, &workspace);
+        assert!(
+            state.retained.yield_evidence.revision() == revision
+                && state.view.data_version == version,
+            "nothing changed, so nothing was judged again"
+        );
+
+        workspace.specs = vec![gain_floor(11.0)];
+        state.refresh_yield_evidence(&setup, &workspace);
+        let results = state.yield_results_for_active_dataset().expect("judged");
+        assert_eq!((results[0].pass_count, results[0].total_runs), (2, 4));
+        assert_ne!(state.view.data_version, version);
+
+        workspace.specs.clear();
+        state.refresh_yield_evidence(&setup, &workspace);
+        assert_eq!(
+            state.yield_results_for_active_dataset().map(<[_]>::len),
+            Some(0),
+            "judged against no limits: the run still owns its (empty) evidence"
+        );
+    }
+
+    /// The controller's replacement at a run's end, and a run whose dataset
+    /// another plan owns, are each a reason to judge again, and the second
+    /// is judged against no limits at all.
+    #[test]
+    fn a_run_another_plan_owns_is_judged_against_no_limits() {
+        let mut run = SimulationRun::new_prepared(
+            1,
+            plan_receipt(crate::product::SimulationPlanId::new(), 41),
+        );
+        run.add_analysis(gain_trials(&[12.0, 8.5]));
+        let mut state = state_with(run);
+        let setup = rspice_simulation_contract::setup_state::SimulationSetup::default();
+        let mut workspace = rspice_project::ProjectWorkspace::default();
+        workspace.specs = vec![gain_floor(10.0)];
+
+        state.refresh_yield_evidence(&setup, &workspace);
+        assert_eq!(
+            state.yield_results_for_active_dataset().map(<[_]>::len),
+            Some(0)
+        );
+
+        let version = state.view.data_version;
+        state.replace_yield_evidence(Vec::new(), None);
+        state.refresh_yield_evidence(&setup, &workspace);
+        assert!(
+            state.view.data_version > version.wrapping_add(1),
+            "a replacement that did not state its basis is judged again"
         );
     }
 }

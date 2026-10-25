@@ -42,6 +42,8 @@ impl CachedResults {
                     retained_dataset_limit,
                     // Runtime: Preferences supplies it at each dispatch.
                     preferred_dataset_limit: _,
+                    // Derived: each frame judges it from the runs and the
+                    // plan's limits, both persisted, so it never is.
                     yield_evidence: _,
                 },
             view:

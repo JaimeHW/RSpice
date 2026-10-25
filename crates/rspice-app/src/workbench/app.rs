@@ -717,6 +717,12 @@ impl RSpiceApp {
         );
         self.simulation_controller
             .update(&mut self.state, self.export_workflow_io.as_ref());
+        // A finished run, a selected run or a limit edited by any route is
+        // judged here, once, before anything reads the yield.
+        let model = &mut self.state.model;
+        model
+            .simulation
+            .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),

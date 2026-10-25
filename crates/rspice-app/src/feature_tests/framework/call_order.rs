@@ -172,6 +172,10 @@ const PREPARE_FRAME: &[Step] = &[
         "5.29",
         &["self.simulation_controller.update(&mut self.state, self.export_workflow_io.as_ref())"],
     ),
+    (
+        "5.29.1",
+        &[".refresh_yield_evidence(&model.sim_setup, &model.workspace.content)"],
+    ),
     ("5.30", &["accessibility::publish_workspace_context("]),
     (
         "5.31",
