@@ -636,9 +636,9 @@ impl SimulationState {
     ///
     /// Two runs are never discarded: a golden baseline, and the newest run in
     /// the history. When those alone exceed the limit the history stays over
-    /// it — reported by [`Self::retention_limit_is_unenforceable`] — because
-    /// the alternative is destroying a signed-off baseline or the dataset a
-    /// run has just produced, and neither is what "retain fewer" asks for.
+    /// it, because the alternative is destroying a signed-off baseline or the
+    /// dataset a run has just produced, and neither is what "retain fewer"
+    /// asks for.
     fn prune_runs_history(&mut self) {
         let limit = self.retained.effective_retained_dataset_limit();
         let selected_run_id = self.active_run().map(|run| run.run_id);
@@ -680,17 +680,6 @@ impl SimulationState {
         self.prune_yield_evidence_provenance();
     }
 
-    /// Whether the retention limit can still be honoured at all.
-    ///
-    /// Baselines are exempt from pruning, so once they fill the limit the
-    /// history grows past it instead of holding at it. Surfaces report that
-    /// rather than a count that implies the limit is being enforced.
-    #[must_use]
-    #[cfg(test)]
-    pub fn retention_limit_is_unenforceable(&self) -> bool {
-        self.retained.pinned_run_count() >= self.retained.effective_retained_dataset_limit()
-    }
-
     /// Classify a retained run for retention.
     ///
     /// Returns whether the run is in the history. Deliberately does **not**
@@ -698,61 +687,10 @@ impl SimulationState {
     /// that it should be discarded now, and the oldest pruneable dataset is
     /// usually the one just released — so pruning here would destroy it on the
     /// same click, with no undo and no confirmation. It becomes eligible at the
-    /// next run, which is when retention discards anything else.
-    ///
-    /// This is not the rule [`Self::set_retained_dataset_limit`] follows, and
-    /// the difference is deliberate: lowering the limit is the project stating
-    /// how much it keeps, so it must take effect at once. Releasing one pin is
-    /// curation of a single dataset. Until the next run the project may hold
-    /// more than its limit; [`Self::retention_limit_is_unenforceable`] is how
-    /// the page says so rather than implying the limit is being enforced.
+    /// next run, which is when retention discards anything else. Until then
+    /// the project may hold more than its limit.
     pub fn set_run_retention(&mut self, run_id: RunId, retention: RunRetention) -> bool {
         self.retained.runs.set_run_retention(run_id, retention)
-    }
-
-    /// Set the retention limit and apply it immediately.
-    ///
-    /// Applying at once is deliberate: a limit that only takes effect on the
-    /// next run would report a policy the project is not actually under.
-    #[cfg(test)]
-    pub fn set_retained_dataset_limit(&mut self, limit: usize) {
-        self.retained.retained_dataset_limit = Some(limit.max(1));
-        self.prune_runs_history();
-    }
-
-    /// Delete a specific run by index
-    ///
-    /// Returns true if the run was deleted.
-    #[cfg(test)]
-    pub fn delete_run(&mut self, run_idx: usize) -> bool {
-        if run_idx < self.retained.runs.len() {
-            self.retained.runs.remove(run_idx);
-            self.prune_overlay_dataset_ids();
-            self.prune_executed_decks();
-            self.prune_yield_evidence_provenance();
-            self.view.data_version = self.view.data_version.wrapping_add(1);
-
-            // Adjust active indices
-            if let Some(active) = self.view.active_run_idx {
-                if active == run_idx {
-                    if self.retained.runs.is_empty() {
-                        // Deleted final run: clear active selection and displayed waveform data.
-                        self.view.active_run_idx = None;
-                        self.view.active_analysis_idx = None;
-                        self.sync_selected_analysis_waveforms();
-                    } else {
-                        // Deleted active run: select the new head run and synchronize displayed data.
-                        let _ = self.select_run(0);
-                    }
-                } else if active > run_idx {
-                    // Shift active index down
-                    self.view.active_run_idx = Some(active - 1);
-                }
-            }
-            true
-        } else {
-            false
-        }
     }
 
     fn sync_selected_analysis_waveforms(&mut self) {
@@ -1087,58 +1025,18 @@ mod tests {
     }
 
     #[test]
-    fn lowering_the_retention_limit_discards_the_oldest_datasets_at_once() {
-        let mut state = SimulationState::default();
-        for _ in 0..5 {
-            state.start_run();
-        }
-        assert_eq!(state.retained.runs.len(), 5);
-        let newest = state.retained.runs.first().expect("newest run").run_id;
-
-        state.set_retained_dataset_limit(2);
-
-        assert_eq!(
-            state.retained.runs.len(),
-            2,
-            "the limit applies immediately"
-        );
-        assert_eq!(
-            state.retained.runs.first().expect("newest run").run_id,
-            newest,
-            "pruning discards the oldest, never the newest"
-        );
-    }
-
-    #[test]
     fn a_retention_limit_of_zero_still_keeps_the_run_just_produced() {
         let mut state = SimulationState::default();
         state.start_run();
 
-        state.set_retained_dataset_limit(0);
+        state.retained.retained_dataset_limit = Some(0);
+        state.prune_runs_history();
 
         assert_eq!(state.retained.effective_retained_dataset_limit(), 1);
         assert_eq!(
             state.retained.runs.len(),
             1,
             "retaining nothing is never the intent"
-        );
-    }
-
-    #[test]
-    fn a_raised_limit_retains_more_without_recovering_what_was_discarded() {
-        let mut state = SimulationState::default();
-        for _ in 0..3 {
-            state.start_run();
-        }
-        state.set_retained_dataset_limit(1);
-        assert_eq!(state.retained.runs.len(), 1);
-
-        state.set_retained_dataset_limit(10);
-
-        assert_eq!(
-            state.retained.runs.len(),
-            1,
-            "raising the limit cannot bring back a discarded dataset"
         );
     }
 
@@ -1152,7 +1050,8 @@ mod tests {
         assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
         let newest = state.retained.runs.first().expect("newest run").run_id;
 
-        state.set_retained_dataset_limit(1);
+        state.retained.retained_dataset_limit = Some(1);
+        state.prune_runs_history();
 
         assert_eq!(
             state
@@ -1165,7 +1064,6 @@ mod tests {
             "pruning stops at the baseline and at the run just produced"
         );
         assert_eq!(state.retained.pinned_run_count(), 1);
-        assert!(state.retention_limit_is_unenforceable());
     }
 
     #[test]
@@ -1176,7 +1074,8 @@ mod tests {
         let newest = state.start_run().run_id;
         assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
 
-        state.set_retained_dataset_limit(2);
+        state.retained.retained_dataset_limit = Some(2);
+        state.prune_runs_history();
 
         assert_eq!(
             state
@@ -1202,7 +1101,8 @@ mod tests {
         let mut state = SimulationState::default();
         let first = state.start_run().run_id;
         let second = state.start_run().run_id;
-        state.set_retained_dataset_limit(2);
+        state.retained.retained_dataset_limit = Some(2);
+        state.prune_runs_history();
         for baseline in [first, second] {
             assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
         }
@@ -1219,7 +1119,6 @@ mod tests {
             vec![produced, second, first],
             "the dataset a run just produced is never the one discarded"
         );
-        assert!(state.retention_limit_is_unenforceable());
     }
 
     #[test]
@@ -1228,7 +1127,8 @@ mod tests {
         let baseline = state.start_run().run_id;
         state.start_run();
         assert!(state.set_run_retention(baseline, RunRetention::GoldenBaseline));
-        state.set_retained_dataset_limit(1);
+        state.retained.retained_dataset_limit = Some(1);
+        state.prune_runs_history();
         assert_eq!(
             state.retained.runs.len(),
             2,
@@ -1247,7 +1147,6 @@ mod tests {
             "releasing a pin must not destroy the dataset it released"
         );
         assert_eq!(state.retained.pinned_run_count(), 0);
-        assert!(!state.retention_limit_is_unenforceable());
 
         // It is merely eligible now: the next run collects it, which is when
         // retention discards anything else.
@@ -1279,7 +1178,8 @@ mod tests {
             "the baseline is selectable"
         );
 
-        state.set_retained_dataset_limit(3);
+        state.retained.retained_dataset_limit = Some(3);
+        state.prune_runs_history();
 
         assert_eq!(
             state.active_run().map(|run| run.run_id),
@@ -1568,8 +1468,5 @@ mod tests {
                 .yield_results_for_dataset(source_dataset_id)
                 .is_some()
         );
-        assert!(state.delete_run(0));
-        assert!(state.retained.yield_evidence.results().is_empty());
-        assert_eq!(state.retained.yield_provenance(), None);
     }
 }
