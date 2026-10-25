@@ -897,6 +897,19 @@ impl AppState {
         self.model.record(severity, source, text)
     }
 
+    /// What the preferences file reads and writes, borrowed from this state.
+    pub(in crate::workbench) fn preferences_file_parts(
+        &mut self,
+    ) -> crate::workbench::app_state::session::preferences_file::PreferencesFileParts<'_> {
+        crate::workbench::app_state::session::preferences_file::PreferencesFileParts {
+            file: &mut self.settings.preferences_file,
+            browser_spoken_feedback: &mut self.settings.browser_spoken_feedback,
+            model: &mut self.model,
+            workbench: &mut self.workbench,
+            platform: &mut self.platform,
+        }
+    }
+
     /// Report a failure of something the user asked for: a save, an open, an
     /// export. The Console keeps the line; the toast says it now and offers
     /// that line, so the mirrored copy of it is the same notice, not another.

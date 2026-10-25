@@ -20,7 +20,7 @@ use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::session::preferences_file::{
-    MAX_SETTINGS_FILE_BYTES, SETTINGS_FILE,
+    MAX_SETTINGS_FILE_BYTES, SETTINGS_FILE, stage_settings_import,
 };
 use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
@@ -186,7 +186,7 @@ impl RSpiceApp {
             self.begin_settings_export(ctx);
         }
         if actions.show_settings_file {
-            self.state.show_preferences_file();
+            self.state.preferences_file_parts().show_preferences_file();
         }
         if let Some(profile) = actions.shortcut_policy_candidate {
             self.begin_shortcut_policy_publication(ctx, profile);
@@ -489,15 +489,19 @@ impl RSpiceApp {
     }
 
     fn begin_settings_export(&mut self, ctx: &Context) {
-        let started = self.state.settings_file_bytes().and_then(|bytes| {
-            crate::io::file_exchange::save_file(
-                ctx,
-                Id::new(SETTINGS_EXPORT_ID),
-                SETTINGS_FILE,
-                SETTINGS_FILE.fallback_name.to_owned(),
-                bytes,
-            )
-        });
+        let started = self
+            .state
+            .preferences_file_parts()
+            .settings_file_bytes()
+            .and_then(|bytes| {
+                crate::io::file_exchange::save_file(
+                    ctx,
+                    Id::new(SETTINGS_EXPORT_ID),
+                    SETTINGS_FILE,
+                    SETTINGS_FILE.fallback_name.to_owned(),
+                    bytes,
+                )
+            });
         if let Err(refusal) = started {
             self.state
                 .prompt(format!("Settings were not exported: {refusal}"));
@@ -517,10 +521,7 @@ impl RSpiceApp {
         }
         match crate::io::file_exchange::take_opened(ctx, Id::new(SETTINGS_IMPORT_ID)) {
             Some(Ok(Some(file))) => {
-                match self
-                    .state
-                    .stage_settings_import(&file.name, file.text.as_bytes())
-                {
+                match stage_settings_import(&self.state.model, &file.name, file.text.as_bytes()) {
                     Ok((shortcuts, staged)) => self.publish_shortcut_candidate(
                         ctx,
                         &shortcuts,
@@ -626,7 +627,8 @@ impl AppState {
                     .complete_import(result.map(|()| *receipt));
             }
             ShortcutLibraryPublicationContinuation::SettingsImport(staged) => {
-                self.finish_settings_import(*staged, result);
+                self.preferences_file_parts()
+                    .finish_settings_import(*staged, result);
             }
         }
     }

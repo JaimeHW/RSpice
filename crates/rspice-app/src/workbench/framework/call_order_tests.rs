@@ -61,7 +61,12 @@ const UI: &[Step] = &[
     ("12", &["self.render_secondary_application_windows(&ctx)"]),
     ("13", &["self.refresh_live_checks(&ctx)"]),
     ("14", &["self.render_frame_dialogs(&ctx)"]),
-    ("15", &["self.state.persist_preferences_file(&ctx)"]),
+    (
+        "15",
+        &[
+            "SettingsFeature::persist_preferences_file(&mut SettingsFeature::cx(&mut self.state), &ctx)",
+        ],
+    ),
     ("16", &["self.end_frame(&simulation_input_before_frame)"]),
     (
         "17",

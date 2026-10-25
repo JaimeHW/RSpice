@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::ui::Mode;
+use crate::workbench::app_state::AppState;
 use crate::workbench::{
     ChoicePreference, FolderListPreference, ScalarPreference, TogglePreference,
 };
@@ -96,7 +97,9 @@ fn settings_of(state: &AppState) -> Value {
 
 fn bound(store: &PreferencesStore) -> AppState {
     let mut state = AppState::default();
-    state.bind_preferences_file(store.clone());
+    state
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
     state
 }
 
@@ -114,7 +117,9 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     let (path, store) = temp_store("round-trip");
     let mut first = AppState::default();
     customize(&mut first);
-    first.bind_preferences_file(store.clone());
+    first
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
 
     // Make it the file a newer build left behind: a later version, a key of
     // its own at the top, a theme field, a preference key, and a whole
@@ -140,7 +145,7 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
             .choice(ChoicePreference::InterfaceScale),
         2
     );
-    second.flush_preferences_file();
+    second.preferences_file_parts().flush_preferences_file();
     assert_eq!(
         std::fs::read(&path).unwrap(),
         newer,
@@ -148,7 +153,7 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     );
 
     second.workbench.theme.mode = Mode::Dark;
-    second.flush_preferences_file();
+    second.preferences_file_parts().flush_preferences_file();
     let rewritten = read_json(&path);
     assert_eq!(rewritten["version"], 7);
     assert_eq!(rewritten["future-sync"]["enabled"], true);
@@ -172,7 +177,9 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
     let (path, store) = temp_store("unread");
     let mut first = AppState::default();
     customize(&mut first);
-    first.bind_preferences_file(store.clone());
+    first
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
     let mut file = read_json(&path);
     file[THEME]["mode"] = json!("future-mode");
     file[THEME]["future-accent"] = json!("teal");
@@ -196,7 +203,7 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
         .model
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, false);
-    state.flush_preferences_file();
+    state.preferences_file_parts().flush_preferences_file();
     assert_eq!(
         read_json(&path)[THEME],
         file[THEME],
@@ -204,7 +211,7 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
     );
 
     state.workbench.theme.mode = Mode::Light;
-    state.flush_preferences_file();
+    state.preferences_file_parts().flush_preferences_file();
     let written = read_json(&path);
     assert_eq!(
         written[THEME]["mode"],
@@ -225,7 +232,9 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
         .model
         .preferences
         .restore_folder_defaults(&[FolderListPreference::LibraryFolders]);
-    first.bind_preferences_file(store.clone());
+    first
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
     let older = std::fs::read(&path).expect("the file was written");
     assert!(
         read_json(&path)[PREFERENCES].get("folders").is_none(),
@@ -240,7 +249,7 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
             .folders(FolderListPreference::LibraryFolders)
             .is_empty()
     );
-    state.flush_preferences_file();
+    state.preferences_file_parts().flush_preferences_file();
     assert_eq!(std::fs::read(&path).unwrap(), older);
 
     let mut file = read_json(&path);
@@ -263,7 +272,7 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
         "every other preference still loads"
     );
     state.workbench.theme.mode = Mode::Dark;
-    state.flush_preferences_file();
+    state.preferences_file_parts().flush_preferences_file();
     assert_eq!(
         read_json(&path)[PREFERENCES]["folders"]["library-folders"],
         "not a list"
@@ -275,7 +284,9 @@ fn a_session_that_will_not_decode_keeps_the_preferences() {
     let (_path, store) = temp_store("session-failure");
     let mut earlier = AppState::default();
     customize(&mut earlier);
-    earlier.bind_preferences_file(store.clone());
+    earlier
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
 
     let mut storage = MemoryStorage::default();
     eframe::Storage::set_string(&mut storage, eframe::APP_KEY, "(not a session".to_owned());
@@ -319,7 +330,7 @@ fn an_unreadable_file_is_set_aside_and_named() {
     let mut state = AppState::default();
     customize(&mut state);
 
-    state.bind_preferences_file(store);
+    state.preferences_file_parts().bind_preferences_file(store);
 
     assert_eq!(settings_of(&state), settings_of(&AppState::default()));
     let backups: Vec<PathBuf> = std::fs::read_dir(path.parent().unwrap())
@@ -368,7 +379,9 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
             .preferences
             .set_scalar(ScalarPreference::DisplayedSignificantDigits, digits)
             .unwrap();
-        let wait = state.persist_preferences_file_at(at(frame * 16), true);
+        let wait = state
+            .preferences_file_parts()
+            .persist_preferences_file_at(at(frame * 16), true);
         assert!(
             wait.is_some(),
             "frame {frame} waits for the change to settle"
@@ -382,7 +395,9 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
     // It settles: frames without input write it once.
     let mut written_at = None;
     for frame in 30..120_u64 {
-        let _ = state.persist_preferences_file_at(at(frame * 16), false);
+        let _ = state
+            .preferences_file_parts()
+            .persist_preferences_file_at(at(frame * 16), false);
         if written_at.is_none() && state.settings.preferences_file.writes == 2 {
             written_at = Some(frame);
         }
@@ -397,7 +412,9 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
 
     // Frames that change nothing write nothing, however many there are.
     for frame in 120..400_u64 {
-        let _ = state.persist_preferences_file_at(at(frame * 16), frame % 2 == 0);
+        let _ = state
+            .preferences_file_parts()
+            .persist_preferences_file_at(at(frame * 16), frame % 2 == 0);
     }
     assert_eq!(state.settings.preferences_file.writes, 2);
     assert!(path.exists());
@@ -409,7 +426,9 @@ fn pointer_movement_alone_never_hashes_the_settings() {
     let mut state = bound(&store);
     let start = Instant::now();
     let at = |ms: u64| start + Duration::from_millis(ms);
-    let _ = state.persist_preferences_file_at(at(0), false);
+    let _ = state
+        .preferences_file_parts()
+        .persist_preferences_file_at(at(0), false);
     let looks = state.settings.preferences_file.looks;
 
     // A canvas drag or a hover: nothing but movement, every frame, for
@@ -419,8 +438,9 @@ fn pointer_movement_alone_never_hashes_the_settings() {
         egui::Event::MouseMoved(egui::vec2(1.0, 0.0)),
     ];
     for frame in 1..60_u64 {
-        let _ =
-            state.persist_preferences_file_at(at(frame * 16), input_can_change_a_setting(&hover));
+        let _ = state
+            .preferences_file_parts()
+            .persist_preferences_file_at(at(frame * 16), input_can_change_a_setting(&hover));
     }
     assert_eq!(
         state.settings.preferences_file.looks, looks,
@@ -433,7 +453,9 @@ fn pointer_movement_alone_never_hashes_the_settings() {
         pressed: false,
         modifiers: egui::Modifiers::default(),
     }];
-    let _ = state.persist_preferences_file_at(at(960), input_can_change_a_setting(&release));
+    let _ = state
+        .preferences_file_parts()
+        .persist_preferences_file_at(at(960), input_can_change_a_setting(&release));
     assert_eq!(
         state.settings.preferences_file.looks,
         looks + 1,
@@ -481,8 +503,12 @@ fn a_failed_write_is_reported_once_and_retried_on_the_next_change() {
     for (step, minutes) in [2_u8, 10, 2].into_iter().enumerate() {
         state.platform.autosave_minutes = minutes;
         let base = u64::try_from(step).unwrap() * 2_000;
-        let _ = state.persist_preferences_file_at(start + Duration::from_millis(base), true);
-        let _ = state.persist_preferences_file_at(start + Duration::from_millis(base + 600), false);
+        let _ = state
+            .preferences_file_parts()
+            .persist_preferences_file_at(start + Duration::from_millis(base), true);
+        let _ = state
+            .preferences_file_parts()
+            .persist_preferences_file_at(start + Duration::from_millis(base + 600), false);
     }
     let errors: Vec<_> = console(&state)
         .into_iter()
@@ -497,8 +523,12 @@ fn a_failed_write_is_reported_once_and_retried_on_the_next_change() {
 
     std::fs::remove_dir(&path).unwrap();
     state.platform.autosave_minutes = 10;
-    let _ = state.persist_preferences_file_at(start + Duration::from_secs(10), true);
-    let _ = state.persist_preferences_file_at(start + Duration::from_secs(11), false);
+    let _ = state
+        .preferences_file_parts()
+        .persist_preferences_file_at(start + Duration::from_secs(10), true);
+    let _ = state
+        .preferences_file_parts()
+        .persist_preferences_file_at(start + Duration::from_secs(11), false);
     assert_eq!(read_json(&path)[AUTOSAVE], 10, "the next change is written");
 }
 
@@ -507,10 +537,12 @@ fn an_unbound_state_never_touches_the_disk() {
     let mut state = AppState::default();
     customize(&mut state);
     assert_eq!(
-        state.persist_preferences_file_at(Instant::now(), true),
+        state
+            .preferences_file_parts()
+            .persist_preferences_file_at(Instant::now(), true),
         None
     );
-    state.flush_preferences_file();
+    state.preferences_file_parts().flush_preferences_file();
     assert_eq!(state.settings.preferences_file.writes, 0);
 }
 
@@ -526,8 +558,11 @@ fn exported(label: &str) -> (AppState, Vec<u8>) {
         .policies_mut()
         .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     *source.model.preferences.shortcut_profiles_mut() = shortcuts;
-    source.bind_preferences_file(store);
-    let bytes = source.settings_file_bytes().expect("export");
+    source.preferences_file_parts().bind_preferences_file(store);
+    let bytes = source
+        .preferences_file_parts()
+        .settings_file_bytes()
+        .expect("export");
     (source, bytes)
 }
 
@@ -538,8 +573,7 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
     let mut target = bound(&store);
     target.enable_volatile_test_shortcut_persistence();
 
-    let (shortcuts, staged) = target
-        .stage_settings_import("rspice-settings.json", &bytes)
+    let (shortcuts, staged) = stage_settings_import(&target.model, "rspice-settings.json", &bytes)
         .expect("a file RSpice exported imports");
     assert_eq!(
         settings_of(&target),
@@ -554,7 +588,9 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
         target.publish_shortcut_library_candidate(&shortcuts, &ctx),
         Ok(super::super::shortcut_library::ShortcutLibraryPublication::Published)
     ));
-    target.finish_settings_import(staged, Ok(()));
+    target
+        .preferences_file_parts()
+        .finish_settings_import(staged, Ok(()));
 
     assert_eq!(settings_of(&target), settings_of(&source));
     assert_eq!(
@@ -575,7 +611,7 @@ fn a_malformed_settings_file_changes_nothing() {
     let (path, store) = temp_store("malformed");
     let mut state = AppState::default();
     customize(&mut state);
-    state.bind_preferences_file(store);
+    state.preferences_file_parts().bind_preferences_file(store);
     state.enable_volatile_test_shortcut_persistence();
     let before = settings_of(&state);
     let shortcuts_before = state.model.preferences.shortcut_profiles().clone();
@@ -613,9 +649,7 @@ fn a_malformed_settings_file_changes_nothing() {
             "keyboard shortcuts",
         ),
     ] {
-        let refusal = state
-            .stage_settings_import("bad.json", &bytes)
-            .expect_err(case);
+        let refusal = stage_settings_import(&state.model, "bad.json", &bytes).expect_err(case);
         assert!(refusal.contains(reason), "{case}: {refusal}");
     }
     assert_eq!(settings_of(&state), before);
@@ -634,10 +668,11 @@ fn an_import_whose_shortcuts_cannot_be_saved_changes_nothing() {
     let before = settings_of(&state);
     let file_before = std::fs::read(&path).unwrap();
 
-    let (_shortcuts, staged) = state
-        .stage_settings_import("rspice-settings.json", &bytes)
-        .unwrap();
-    state.finish_settings_import(staged, Err("the shortcut store is unavailable".to_owned()));
+    let (_shortcuts, staged) =
+        stage_settings_import(&state.model, "rspice-settings.json", &bytes).unwrap();
+    state
+        .preferences_file_parts()
+        .finish_settings_import(staged, Err("the shortcut store is unavailable".to_owned()));
 
     assert_eq!(settings_of(&state), before);
     assert_eq!(std::fs::read(&path).unwrap(), file_before);
@@ -655,14 +690,14 @@ fn show_file_opens_the_folder_that_holds_it() {
     let (path, store) = temp_store("show");
     let mut state = bound(&store);
     SHOWN_FOLDERS.with_borrow_mut(Vec::clear);
-    state.show_preferences_file();
+    state.preferences_file_parts().show_preferences_file();
     assert_eq!(
         SHOWN_FOLDERS.with_borrow(Clone::clone),
         vec![path.parent().unwrap().to_path_buf()]
     );
 
     let mut unbound = AppState::default();
-    unbound.show_preferences_file();
+    unbound.preferences_file_parts().show_preferences_file();
     assert_eq!(
         unbound.prompt_text(),
         Some("Preferences are not kept in a file on this machine.")

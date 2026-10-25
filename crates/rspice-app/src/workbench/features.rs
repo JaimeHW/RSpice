@@ -4,8 +4,9 @@
 //! [`features!`] lists every registered feature with the slot of the
 //! application state it owns. Each feature's registry is built once. A call
 //! into one of its commands borrows the feature's slot, the model, the
-//! session and the peers it reads from the application state for that one
-//! call: a context is references only, so building one allocates nothing.
+//! session, the platform services' state and the peers it reads from the
+//! application state for that one call: a context is references only, so
+//! building one allocates nothing.
 
 use std::sync::LazyLock;
 
@@ -60,6 +61,7 @@ macro_rules! features {
                         &mut *state.$slot,
                         &mut state.model,
                         &mut *state.workbench,
+                        &mut *state.platform,
                         Peers::new(&*state.design),
                     )
                 }

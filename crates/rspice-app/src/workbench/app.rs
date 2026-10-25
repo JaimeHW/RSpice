@@ -30,6 +30,8 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::veriloga_library::{
     VERILOGA_LIBRARY_NAME, restore_global_veriloga_library, save_global_veriloga_library,
 };
+use crate::workbench::features::Registered;
+use crate::workbench::settings::SettingsFeature;
 
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
 const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
@@ -1059,7 +1061,7 @@ impl eframe::App for RSpiceApp {
         self.render_secondary_application_windows(&ctx);
         self.refresh_live_checks(&ctx);
         self.render_frame_dialogs(&ctx);
-        self.state.persist_preferences_file(&ctx);
+        SettingsFeature::persist_preferences_file(&mut SettingsFeature::cx(&mut self.state), &ctx);
         self.end_frame(&simulation_input_before_frame);
         // A notice a dialog reported after the toasts is raised next frame.
         if !self.state.model.notices.is_empty() {
@@ -1080,7 +1082,7 @@ impl eframe::App for RSpiceApp {
     /// Save state on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         // Preferences belong to the device: saved even when a mirror skips the rest.
-        self.state.flush_preferences_file();
+        SettingsFeature::flush_preferences_file(&mut SettingsFeature::cx(&mut self.state));
         // A live mirror is streamed session data, not device-owned recovery
         // state. Never let eframe autosave, browser local storage, or the
         // global Verilog-A library silently retain it. The previously stored

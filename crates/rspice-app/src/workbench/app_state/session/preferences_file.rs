@@ -34,7 +34,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::time_compat::Instant;
 use crate::ui::Theme;
-use crate::workbench::app_state::{AppState, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::{UserPreferences, WorkbenchSession};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -371,7 +371,7 @@ pub(crate) enum PreferencesStore {
 }
 
 impl PreferencesStore {
-    fn production() -> Option<Self> {
+    pub(in crate::workbench) fn production() -> Option<Self> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             dirs::config_dir().map(|folder| Self::File(folder.join("rspice").join(FILE_NAME)))
@@ -514,58 +514,41 @@ pub(crate) struct StagedSettingsImport {
     settings: PersonalSettings,
 }
 
-impl AppState {
-    /// The state a launch starts from: the stored session, with the
-    /// preferences file read over it.
-    pub(in crate::workbench) fn restore_with_preferences_file(
-        storage: Option<&dyn eframe::Storage>,
-    ) -> Self {
-        Self::restore_with_store(storage, PreferencesStore::production())
-    }
+/// What the preferences file reads and writes, borrowed from the session:
+/// the theme, the autosave interval, spoken feedback and the preferences, with
+/// the file's own bookkeeping. Its failures go to the model's log, and its
+/// answers to the gesture to the session's prompt.
+pub(crate) struct PreferencesFileParts<'a> {
+    pub(crate) file: &'a mut PreferencesFileRuntime,
+    pub(crate) browser_spoken_feedback: &'a mut bool,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) platform: &'a mut PlatformState,
+}
 
-    fn restore_with_store(
-        storage: Option<&dyn eframe::Storage>,
-        store: Option<PreferencesStore>,
-    ) -> Self {
-        let mut state = storage
-            .and_then(Self::restore_eframe_session)
-            .unwrap_or_default();
-        match store {
-            Some(store) => state.bind_preferences_file(store),
-            None => {
-                state.record(
-                    LogSeverity::Warning,
-                    LogSource::Studio,
-                    "This system reports no folder for user settings, so preferences are kept \
-                     with the session only.",
-                );
-            }
-        }
-        state
-    }
-
+impl PreferencesFileParts<'_> {
     /// Read the preferences file over whatever the session restored, and keep
     /// it current from here on.
     ///
     /// With no file yet, what the session carried, or the shipped defaults
     /// when it carried nothing, is written as the first one.
-    fn bind_preferences_file(&mut self, store: PreferencesStore) {
+    pub(in crate::workbench) fn bind_preferences_file(&mut self, store: PreferencesStore) {
         let read = store.read();
-        self.settings.preferences_file.store = Some(store.clone());
+        self.file.store = Some(store.clone());
         match read {
             Ok(None) => self.write_preferences_file(),
             Ok(Some(bytes)) => {
                 match parse(&bytes, MAX_FILE_BYTES).and_then(|value| decode(value, false)) {
                     Ok(settings) => {
                         self.apply_personal_settings(settings);
-                        self.settings.preferences_file.written = encode_bytes(
+                        self.file.written = encode_bytes(
                             &Values::of(
                                 &self.workbench,
                                 &self.platform,
-                                self.settings.browser_spoken_feedback,
+                                *self.browser_spoken_feedback,
                                 &self.model.preferences,
                             ),
-                            &self.settings.preferences_file.envelope,
+                            &self.file.envelope,
                         )
                         .ok();
                     }
@@ -573,8 +556,8 @@ impl AppState {
                 }
             }
             Err(error) => {
-                self.settings.preferences_file.write_withheld = true;
-                self.record(
+                self.file.write_withheld = true;
+                self.model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
@@ -585,10 +568,10 @@ impl AppState {
                 );
             }
         }
-        self.settings.preferences_file.observed = fingerprint(
+        self.file.observed = fingerprint(
             &self.workbench,
             &self.platform,
-            self.settings.browser_spoken_feedback,
+            *self.browser_spoken_feedback,
             &mut self.model.preferences,
         );
     }
@@ -603,7 +586,7 @@ impl AppState {
                     preferences: UserPreferences::default(),
                     envelope: Envelope::default(),
                 });
-                self.record(
+                self.model.record(
                     LogSeverity::Warning,
                     LogSource::Studio,
                     format!(
@@ -614,8 +597,8 @@ impl AppState {
                 self.write_preferences_file();
             }
             Err(error) => {
-                self.settings.preferences_file.write_withheld = true;
-                self.record(
+                self.file.write_withheld = true;
+                self.model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
@@ -635,10 +618,10 @@ impl AppState {
         let shortcuts = std::mem::take(self.model.preferences.shortcut_profiles_mut());
         self.workbench.theme = settings.theme;
         self.platform.autosave_minutes = settings.autosave_minutes;
-        self.settings.browser_spoken_feedback = settings.browser_spoken_feedback;
+        *self.browser_spoken_feedback = settings.browser_spoken_feedback;
         *self.model.preferences = settings.preferences;
         *self.model.preferences.shortcut_profiles_mut() = shortcuts;
-        self.settings.preferences_file.envelope = settings.envelope;
+        self.file.envelope = settings.envelope;
     }
 
     /// Notice a preference change and write it once it settles.
@@ -656,7 +639,7 @@ impl AppState {
     /// [`Self::persist_preferences_file`] at `now`. Returns how long until a
     /// pending write is due.
     fn persist_preferences_file_at(&mut self, now: Instant, had_input: bool) -> Option<Duration> {
-        let runtime = &mut *self.settings.preferences_file;
+        let runtime = &mut *self.file;
         if runtime.store.is_none() || runtime.write_withheld {
             return None;
         }
@@ -674,7 +657,7 @@ impl AppState {
             let observed = fingerprint(
                 &self.workbench,
                 &self.platform,
-                self.settings.browser_spoken_feedback,
+                *self.browser_spoken_feedback,
                 &mut self.model.preferences,
             );
             if observed != runtime.observed {
@@ -693,18 +676,18 @@ impl AppState {
 
     /// Write any change not yet in the file now, rather than when it settles.
     pub(in crate::workbench) fn flush_preferences_file(&mut self) {
-        self.settings.preferences_file.write_due = None;
-        self.settings.preferences_file.observed = fingerprint(
+        self.file.write_due = None;
+        self.file.observed = fingerprint(
             &self.workbench,
             &self.platform,
-            self.settings.browser_spoken_feedback,
+            *self.browser_spoken_feedback,
             &mut self.model.preferences,
         );
         self.write_preferences_file();
     }
 
     fn write_preferences_file(&mut self) {
-        let runtime = &mut *self.settings.preferences_file;
+        let runtime = &mut *self.file;
         let Some(store) = runtime.store.as_ref() else {
             return;
         };
@@ -715,7 +698,7 @@ impl AppState {
             &Values::of(
                 &self.workbench,
                 &self.platform,
-                self.settings.browser_spoken_feedback,
+                *self.browser_spoken_feedback,
                 &self.model.preferences,
             ),
             &runtime.envelope,
@@ -736,7 +719,7 @@ impl AppState {
         runtime.failing = outcome.is_err();
         let location = store.describe();
         if let (Err(error), true) = (outcome, first_failure) {
-            self.record(
+            self.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!(
@@ -754,10 +737,10 @@ impl AppState {
             &Values::of(
                 &self.workbench,
                 &self.platform,
-                self.settings.browser_spoken_feedback,
+                *self.browser_spoken_feedback,
                 &self.model.preferences,
             ),
-            &self.settings.preferences_file.envelope,
+            &self.file.envelope,
         )?;
         let shortcuts = serde_json::to_value(self.model.preferences.shortcut_profiles())
             .map_err(|error| format!("the keyboard shortcuts could not be encoded: {error}"))?;
@@ -770,54 +753,6 @@ impl AppState {
         .map_err(|error| format!("the settings could not be encoded: {error}"))
     }
 
-    /// Check a settings file completely, changing nothing.
-    ///
-    /// Returns the shortcut library to save, which has to be in the store
-    /// before anything goes live, and the preferences that follow it.
-    pub(in crate::workbench) fn stage_settings_import(
-        &self,
-        source_name: &str,
-        bytes: &[u8],
-    ) -> Result<(ShortcutProfileLibrary, StagedSettingsImport), String> {
-        let Value::Object(mut file) = parse(bytes, MAX_SETTINGS_FILE_BYTES)? else {
-            return Err("it is not a JSON object".to_owned());
-        };
-        if file.get("format").and_then(Value::as_str) != Some(SETTINGS_FORMAT) {
-            return Err("it is not an RSpice settings file".to_owned());
-        }
-        if file
-            .get("version")
-            .and_then(Value::as_u64)
-            .is_none_or(|version| version < 1)
-        {
-            return Err("its version is missing or not a whole number".to_owned());
-        }
-        let settings = decode(
-            file.remove(PREFERENCES)
-                .ok_or_else(|| "it holds no preferences".to_owned())?,
-            true,
-        )
-        .map_err(|reason| format!("its preferences are not usable: {reason}"))?;
-        let imported: ShortcutProfileLibrary = serde_json::from_value(
-            file.remove(SHORTCUTS)
-                .ok_or_else(|| "it holds no keyboard shortcuts".to_owned())?,
-        )
-        .map_err(|error| format!("its keyboard shortcuts could not be read: {error}"))?;
-        crate::workbench::shortcuts::library_persistence::validate_library(&imported)
-            .map_err(|reason| format!("its keyboard shortcuts are not usable: {reason}"))?;
-        let mut shortcuts = self.model.preferences.shortcut_profiles().clone();
-        shortcuts
-            .replace_content_from(&imported)
-            .map_err(|error| format!("the shortcuts in use cannot be replaced: {error}"))?;
-        Ok((
-            shortcuts,
-            StagedSettingsImport {
-                source_name: source_name.to_owned(),
-                settings,
-            },
-        ))
-    }
-
     /// Put an imported settings file in force once its shortcut library has
     /// been saved, or say why nothing changed.
     pub(in crate::workbench) fn finish_settings_import(
@@ -826,7 +761,7 @@ impl AppState {
         shortcuts_saved: Result<(), String>,
     ) {
         if let Err(error) = shortcuts_saved {
-            self.prompt(format!(
+            self.workbench.prompt(format!(
                 "Settings were not imported from {}: {error}. Nothing was changed.",
                 staged.source_name
             ));
@@ -842,29 +777,80 @@ impl AppState {
         self.workbench.set_workspace_preset(preset);
         self.flush_preferences_file();
         let message = format!("Settings imported from {}.", staged.source_name);
-        self.record(LogSeverity::Info, LogSource::Studio, message.clone());
-        self.prompt(message);
+        self.model
+            .record(LogSeverity::Info, LogSource::Studio, message.clone());
+        self.workbench.prompt(message);
     }
 
     /// Open the folder that holds the preferences file.
     pub(in crate::workbench) fn show_preferences_file(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let folder = match self.settings.preferences_file.store.as_ref() {
+            let folder = match self.file.store.as_ref() {
                 Some(PreferencesStore::File(path)) => {
                     path.parent().map(std::path::Path::to_path_buf)
                 }
                 None => None,
             };
             let Some(folder) = folder else {
-                self.prompt("Preferences are not kept in a file on this machine.");
+                self.workbench
+                    .prompt("Preferences are not kept in a file on this machine.");
                 return;
             };
             if let Err(error) = show_folder(&folder) {
-                self.prompt(format!("The settings folder could not be shown: {error}"));
+                self.workbench
+                    .prompt(format!("The settings folder could not be shown: {error}"));
             }
         }
     }
+}
+
+/// Check a settings file completely, changing nothing.
+///
+/// Returns the shortcut library to save, which has to be in the store
+/// before anything goes live, and the preferences that follow it.
+pub(in crate::workbench) fn stage_settings_import(
+    model: &Model,
+    source_name: &str,
+    bytes: &[u8],
+) -> Result<(ShortcutProfileLibrary, StagedSettingsImport), String> {
+    let Value::Object(mut file) = parse(bytes, MAX_SETTINGS_FILE_BYTES)? else {
+        return Err("it is not a JSON object".to_owned());
+    };
+    if file.get("format").and_then(Value::as_str) != Some(SETTINGS_FORMAT) {
+        return Err("it is not an RSpice settings file".to_owned());
+    }
+    if file
+        .get("version")
+        .and_then(Value::as_u64)
+        .is_none_or(|version| version < 1)
+    {
+        return Err("its version is missing or not a whole number".to_owned());
+    }
+    let settings = decode(
+        file.remove(PREFERENCES)
+            .ok_or_else(|| "it holds no preferences".to_owned())?,
+        true,
+    )
+    .map_err(|reason| format!("its preferences are not usable: {reason}"))?;
+    let imported: ShortcutProfileLibrary = serde_json::from_value(
+        file.remove(SHORTCUTS)
+            .ok_or_else(|| "it holds no keyboard shortcuts".to_owned())?,
+    )
+    .map_err(|error| format!("its keyboard shortcuts could not be read: {error}"))?;
+    crate::workbench::shortcuts::library_persistence::validate_library(&imported)
+        .map_err(|reason| format!("its keyboard shortcuts are not usable: {reason}"))?;
+    let mut shortcuts = model.preferences.shortcut_profiles().clone();
+    shortcuts
+        .replace_content_from(&imported)
+        .map_err(|error| format!("the shortcuts in use cannot be replaced: {error}"))?;
+    Ok((
+        shortcuts,
+        StagedSettingsImport {
+            source_name: source_name.to_owned(),
+            settings,
+        },
+    ))
 }
 
 #[cfg(all(

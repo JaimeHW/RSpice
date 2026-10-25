@@ -1,12 +1,45 @@
 //! Building the default session.
 //!
 //! The initial [`AppState`], and the default model library and analysis
-//! viewers behind it.
+//! viewers behind it; and the state a launch starts from.
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::session::preferences_file::PreferencesStore;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 pub(crate) use rspice_app_state::workbench::workspace::default_model_library_manager;
 use rspice_app_state::workbench::workspace::restore_model_library_manager;
+
+impl AppState {
+    /// The state a launch starts from: the stored session, with the
+    /// preferences file read over it.
+    pub(in crate::workbench) fn restore_with_preferences_file(
+        storage: Option<&dyn eframe::Storage>,
+    ) -> Self {
+        Self::restore_with_store(storage, PreferencesStore::production())
+    }
+
+    pub(in crate::workbench) fn restore_with_store(
+        storage: Option<&dyn eframe::Storage>,
+        store: Option<PreferencesStore>,
+    ) -> Self {
+        let mut state = storage
+            .and_then(Self::restore_eframe_session)
+            .unwrap_or_default();
+        match store {
+            Some(store) => state.preferences_file_parts().bind_preferences_file(store),
+            None => {
+                state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    "This system reports no folder for user settings, so preferences are kept \
+                     with the session only.",
+                );
+            }
+        }
+        state
+    }
+}
 
 /// Rebuild the application-scoped model catalog from durable PDK settings.
 ///
