@@ -78,6 +78,22 @@ fn tied_current_terminals_cannot_erase_distortion_input_tones() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn two_tone_distortion_without_a_distof2_excitation_is_refused() {
+    let netlist = Netlist::parse(
+        "harmonic distortion oracle\nV1 out 0 DC 0.5 DISTOF1 1m 0\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n.end\n",
+    )
+    .unwrap();
+    let error = Engine::default()
+        .run_distortion(&netlist, &[1e3], Some(0.9))
+        .expect_err("a second tone with no DISTOF2 source must not solve");
+    assert!(
+        matches!(&error, rspice_core::SimulationError::Circuit(message) if message.contains("DISTOF2")),
+        "{error:?}"
+    );
+}
+
 fn run_diode(amplitude: f64, frequencies: &[f64]) -> DistortionAnalysisResult {
     let deck = format!(
         "diode distortion public oracle\n\

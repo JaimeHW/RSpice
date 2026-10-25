@@ -2,7 +2,7 @@
 //! (inner) source fully at every value of the second (outer) source,
 //! ngspice-style, with results concatenated in outer order.
 
-use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig};
+use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::{AnalysisCommand, DcSweepMode, Netlist};
 
 /// Equal 1k resistors from each source into `out`, 1k to ground:
@@ -44,6 +44,20 @@ fn single_source_dc_still_parses_without_sweep2() {
         .iter()
         .any(|analysis| matches!(analysis, AnalysisCommand::Dc { sweep2: None, .. }));
     assert!(has_plain_dc, "single-source .DC must carry no second sweep");
+}
+
+#[test]
+fn sweeping_an_unknown_source_is_a_circuit_error() {
+    let deck = "* divider\nV1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.end\n";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let error = Engine::default()
+        .run_dc_sweep(&netlist, "Vmissing", 0.0, 5.0, 1.0)
+        .expect_err("an unknown sweep source must not solve");
+    assert!(
+        matches!(&error, SimulationError::Circuit(message)
+            if message.contains("Source not found") && message.contains("Vmissing")),
+        "{error:?}"
+    );
 }
 
 #[test]
