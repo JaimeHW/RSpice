@@ -184,6 +184,7 @@ SLICE_RULES = [
     (W + r"menu_bar/export_actions", "hardcopy"),
     (W + r"menu_bar/waveform_export", "results"),
     (W + r"menu_bar/netlist_compat", "code"),
+    (W + r"menu_bar/netlist_export", "code"),
     (W + r"menu_bar", "shell"),
     (W + r"diagnostic_routes", "shell"),
     # Documents and surfaces.
