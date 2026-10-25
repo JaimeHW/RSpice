@@ -717,7 +717,6 @@ pub fn show(
             let points: Vec<Pos2> = match trace.cache_key {
                 Some(key) => cache
                     .series(
-                        spec.display_decimation,
                         key,
                         trace.x,
                         trace.y,

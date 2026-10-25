@@ -16,14 +16,6 @@ use super::scale::XScale;
 use rspice_results::sampling::sample_at_with;
 pub use rspice_results::sampling::{SampleInterpolation, sample_at};
 
-/// Viewer-only sampling policy. It never mutates or replaces the source
-/// waveform arrays.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum DisplayDecimation {
-    #[default]
-    EnvelopeExtrema,
-}
-
 /// Cache of decimated envelopes. Owned by the results workspace state;
 /// cleared wholesale when the data version changes.
 #[derive(Debug, Clone)]
@@ -49,7 +41,7 @@ struct Entry {
 }
 
 /// Which reduction produced an entry. Two of them answer different questions
-/// about the same trace, so it belongs in the key beside the mode.
+/// about the same trace, so it belongs in the key.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 enum Reduction {
     /// X-ordered, read in source order.
@@ -70,7 +62,6 @@ impl Reduction {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 struct CacheKey {
     trace: u64,
-    mode: DisplayDecimation,
     columns: u32,
     x0_bits: u64,
     x1_bits: u64,
@@ -191,12 +182,8 @@ impl DecimationCache {
     /// would be answering a question those curves have no single answer to.
     /// See [`decimate_pixel_cells`]. A trace that declares no shape is read as
     /// ascending, which is what every caller meant before shapes existed.
-    // Preserve the existing cache contract: source identity/data, projection,
-    // reduction mode and sweep classification are independently supplied.
-    #[expect(clippy::too_many_arguments)]
     pub fn series(
         &mut self,
-        mode: DisplayDecimation,
         trace_key: u64,
         x: &[f64],
         y: &[f64],
@@ -208,7 +195,6 @@ impl DecimationCache {
         let reads_y = reduction.reads_y();
         let key = CacheKey {
             trace: trace_key,
-            mode,
             columns: view.columns as u32,
             x0_bits: view.x0.to_bits(),
             x1_bits: view.x1.to_bits(),
@@ -231,17 +217,15 @@ impl DecimationCache {
                 } else {
                     XOrientation::Ascending
                 };
-                match mode {
-                    DisplayDecimation::EnvelopeExtrema => decimate_minmax(
-                        x,
-                        y,
-                        view.x0,
-                        view.x1,
-                        view.x_scale,
-                        view.columns,
-                        orientation,
-                    ),
-                }
+                decimate_minmax(
+                    x,
+                    y,
+                    view.x0,
+                    view.x1,
+                    view.x_scale,
+                    view.columns,
+                    orientation,
+                )
             }
         }
         .into();
@@ -830,28 +814,12 @@ mod tests {
         let mut cache = DecimationCache::default();
         let budget = cache.byte_capacity;
         let x = [0.0, 1.0, 2.0];
-        let first = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            1,
-            &x,
-            &[0.0, 0.0, 0.0],
-            sweep_view(0.0, 2.0),
-            false,
-            None,
-        );
+        let first = cache.series(1, &x, &[0.0, 0.0, 0.0], sweep_view(0.0, 2.0), false, None);
         assert!(cache.resident_bytes > 0);
         cache.invalidate();
         assert_eq!(cache.resident_bytes, 0);
         assert_eq!(cache.byte_capacity, budget);
-        let next = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            1,
-            &x,
-            &[0.0, 1.0, 0.0],
-            sweep_view(0.0, 2.0),
-            false,
-            None,
-        );
+        let next = cache.series(1, &x, &[0.0, 1.0, 0.0], sweep_view(0.0, 2.0), false, None);
         assert!(first.iter().all(|point| point[1] == 0.0));
         assert!(next.iter().any(|point| point[1] == 1.0));
         assert_eq!(cache.resident_bytes, next.len() * size_of::<[f64; 2]>());
@@ -867,15 +835,7 @@ mod tests {
         let shape = SweepShape::of(&x);
         assert_eq!(shape.class(), SweepClass::MultiBranch);
         let mut cache = DecimationCache::default();
-        let drawn = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            11,
-            &x,
-            &y,
-            sweep_view(0.3, 0.6),
-            false,
-            Some(&shape),
-        );
+        let drawn = cache.series(11, &x, &y, sweep_view(0.3, 0.6), false, Some(&shape));
         let lower = drawn
             .iter()
             .filter(|point| (0.3..=0.6).contains(&point[0]) && point[1] < 0.45)
@@ -903,15 +863,7 @@ mod tests {
         assert_eq!(shape.class(), SweepClass::Descending);
         let view = sweep_view(0.25, 0.35);
         let mut cache = DecimationCache::default();
-        let drawn = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            5,
-            &x,
-            &y,
-            view,
-            false,
-            Some(&shape),
-        );
+        let drawn = cache.series(5, &x, &y, view, false, Some(&shape));
 
         assert!(
             drawn.len() >= view.columns,
@@ -926,15 +878,7 @@ mod tests {
         );
         // The same data read as ascending is a different reduction, so it
         // must not be served from this entry.
-        let mistaken = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            5,
-            &x,
-            &y,
-            view,
-            false,
-            None,
-        );
+        let mistaken = cache.series(5, &x, &y, view, false, None);
         assert_ne!(drawn.as_ref(), mistaken.as_ref());
     }
 
@@ -950,24 +894,8 @@ mod tests {
             x_scale: XScale::Log10,
             ..linear
         };
-        let first = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            3,
-            &x,
-            &y,
-            linear,
-            false,
-            None,
-        );
-        let second = cache.series(
-            DisplayDecimation::EnvelopeExtrema,
-            3,
-            &x,
-            &y,
-            logarithmic,
-            false,
-            None,
-        );
+        let first = cache.series(3, &x, &y, linear, false, None);
+        let second = cache.series(3, &x, &y, logarithmic, false, None);
 
         assert_ne!(
             first.as_ref(),

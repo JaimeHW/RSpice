@@ -3,7 +3,6 @@
 
 use egui::Color32;
 
-use super::decimate::DisplayDecimation;
 use super::format::{offset_anchor_label, tick_label, tick_label_with_step, tick_offset_label};
 use super::sample::SweepShape;
 use super::scale::{TickSeries, XScale, anchor_label, decade_ticks, linear_ticks};
@@ -430,8 +429,6 @@ pub struct PlotSpec<'a> {
     pub y_scale: XScale,
     /// Traces, drawn in order (first = bottom).
     pub traces: Vec<Trace<'a>>,
-    /// Viewer-only trace sampling policy.
-    pub display_decimation: DisplayDecimation,
     /// Analysis markers, drawn above traces.
     pub markers: Vec<Marker>,
     /// Horizontal reference lines.
@@ -469,7 +466,6 @@ impl<'a> PlotSpec<'a> {
             y,
             y_scale: XScale::Linear,
             traces: Vec::new(),
-            display_decimation: DisplayDecimation::default(),
             markers: Vec::new(),
             ref_lines: Vec::new(),
             limit_lines: Vec::new(),

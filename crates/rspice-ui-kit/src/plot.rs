@@ -36,7 +36,7 @@ pub use rspice_results::sampling as sample;
 
 pub use cursor::CursorPair;
 pub use decimate::TraceView;
-pub use decimate::{DecimationCache, DisplayDecimation, SampleInterpolation, sample_at};
+pub use decimate::{DecimationCache, SampleInterpolation, sample_at};
 pub use format::{
     fmt_si, fmt_si_readout, fmt_si_significant, fmt_significant, si_tick_label, tick_with_unit,
 };

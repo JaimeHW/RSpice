@@ -13,8 +13,8 @@ use rspice_ui_kit::plot::sample::{
     BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
 };
 use rspice_ui_kit::plot::{
-    self, Axis, CursorPair, DisplayDecimation, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation,
-    Trace, XScale, fmt_si_significant,
+    self, Axis, CursorPair, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation, Trace, XScale,
+    fmt_si_significant,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
@@ -250,7 +250,6 @@ pub struct PanePlot<'a> {
     pub left_margin: f32,
     pub readout: ReadoutPolicy,
     pub quantity: QuantityPresentationPolicy,
-    pub display_decimation: DisplayDecimation,
     pub minor_grid: bool,
     /// Stroke of the active run's traces, in points. Overlays and
     /// expressions are drawn proportionally thinner.
@@ -349,7 +348,6 @@ pub fn show_plot<'a>(
     if log_y {
         spec = spec.with_log_y();
     }
-    spec.display_decimation = input.display_decimation;
     spec.limit_lines = input.specification_limits;
     spec.minor_grid = input.minor_grid;
     spec.horizontal_cursor = input.horizontal_cursor;

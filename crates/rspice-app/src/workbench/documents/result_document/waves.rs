@@ -58,7 +58,7 @@ use crate::state::{AnalysisResult, SimulationState};
 #[cfg(test)]
 use crate::ui::plot::Trace;
 use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
-use crate::ui::plot::{self, DisplayDecimation, XScale, fmt_si_significant};
+use crate::ui::plot::{self, XScale, fmt_si_significant};
 use crate::ui::tokens::Tokens;
 use crate::workbench::AppState;
 use crate::workbench::ComplexNumberDisplay;
@@ -479,9 +479,6 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
             pane_chrome,
             readout: presentation.readout(),
             quantity,
-            // Every pane keeps each pixel column's extremes: uniform sampling
-            // drops peaks, and drawing every point stalls on a long run.
-            display_decimation: DisplayDecimation::EnvelopeExtrema,
             trace_width,
         },
     );

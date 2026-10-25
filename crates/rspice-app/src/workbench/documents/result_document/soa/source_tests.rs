@@ -2,7 +2,7 @@
 
 use super::tests::{active_key, soa_state};
 use super::*;
-use crate::ui::plot::{DisplayDecimation, TraceView};
+use crate::ui::plot::TraceView;
 use std::sync::Arc;
 
 fn plan(state: &mut AppState) -> Arc<SoaPlan> {
@@ -92,7 +92,6 @@ fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
     let waveform = &state.model.simulation.retained.runs[0].analyses[0].waveforms
         [facts.stress_waveform.expect("verified stress history")];
     state.results.results.session.cache.series(
-        DisplayDecimation::EnvelopeExtrema,
         facts.stress_cache_key,
         &waveform.x,
         &waveform.y,

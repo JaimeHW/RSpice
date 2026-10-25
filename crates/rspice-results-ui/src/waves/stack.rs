@@ -20,7 +20,7 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
 use rspice_ui_kit::{
-    plot::{self, CursorPair, DisplayDecimation},
+    plot::{self, CursorPair},
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -32,7 +32,6 @@ pub struct StackOptions {
     pub pane_chrome: bool,
     pub readout: ReadoutPolicy,
     pub quantity: QuantityPresentationPolicy,
-    pub display_decimation: DisplayDecimation,
     /// Stroke of the active run's traces, in points.
     pub trace_width: f32,
 }
@@ -874,7 +873,6 @@ fn show_unit_pane(
         left_margin: wave_left_margin(host.session()),
         readout: presentation,
         quantity: quantity_policy,
-        display_decimation: options.display_decimation,
         minor_grid: host.session().show_minor_grid,
         trace_width: options.trace_width,
         horizontal_cursor: host
