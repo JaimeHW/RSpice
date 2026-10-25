@@ -827,20 +827,26 @@ impl B3SoiDd {
         let gcs_t = -(gcg_t + gcb_t + gcd_t + gce_t);
 
         // Equivalent charge currents (b3soiddld.c:3860-3867). type<0 flips sign.
-        let mut ceqqg =
-            cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb - gcg_t * bias.del_temp;
-        let mut ceqqb =
-            cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb - gcb_t * bias.del_temp;
-        let mut ceqqd =
-            cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb - gcd_t * bias.del_temp;
-        let mut ceqqe =
-            cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb - gce_t * bias.del_temp;
+        // A node charge is `type * q`, so its temperature column carries the
+        // type sign (`fill_charge_thermal_derivatives`), and its `delTemp` term
+        // is subtracted after the flip so that the right-hand side matches that
+        // column. ngspice-46 DD signs the column but subtracts it inside the
+        // flip (b3soiddld.c:3701, 3861, 4005), which leaves every PMOS charge
+        // current off by 2*gc_t*delTemp.
+        let mut ceqqg = cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb;
+        let mut ceqqb = cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb;
+        let mut ceqqd = cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb;
+        let mut ceqqe = cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb;
         if self.mtype < 0.0 {
             ceqqg = -ceqqg;
             ceqqb = -ceqqb;
             ceqqd = -ceqqd;
             ceqqe = -ceqqe;
         }
+        ceqqg -= gcg_t * bias.del_temp;
+        ceqqb -= gcb_t * bias.del_temp;
+        ceqqd -= gcd_t * bias.del_temp;
+        ceqqe -= gce_t * bias.del_temp;
         let gc_tt = self.thermal_capacitance() * ag0;
         let ceqqth = cqth - gc_tt * bias.del_temp;
 
