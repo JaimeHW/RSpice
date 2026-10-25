@@ -305,11 +305,11 @@ impl RSpiceApp {
         let filter = self.state.shell.shortcuts_filter.trim().to_lowercase();
         let total: usize = ShortcutCategory::ALL
             .iter()
-            .flat_map(|category| category.commands())
+            .flat_map(|category| category.commands(command_registry()))
             .count();
         let shown: usize = ShortcutCategory::ALL
             .iter()
-            .flat_map(|c| c.commands())
+            .flat_map(|c| c.commands(command_registry()))
             .filter(|c| shortcut_row_matches(&shortcuts, *c, &filter, platform, operating_system))
             .count();
         let hint = format!("{shown} of {total} commands");
@@ -337,7 +337,7 @@ impl RSpiceApp {
 
                 for category in ShortcutCategory::ALL {
                     let commands: Vec<_> = category
-                        .commands()
+                        .commands(command_registry())
                         .filter(|c| {
                             shortcut_row_matches(
                                 &shortcuts,
@@ -884,7 +884,7 @@ mod tests {
         let os = egui::os::OperatingSystem::Windows;
         let unbound = ShortcutCategory::ALL
             .iter()
-            .flat_map(|category| category.commands())
+            .flat_map(|category| category.commands(command_registry()))
             .find(|command| {
                 shortcuts
                     .resolved_label(&CommandRegistry, *command, CommandPlatform::Desktop, os)

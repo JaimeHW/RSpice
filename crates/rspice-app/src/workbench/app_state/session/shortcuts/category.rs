@@ -2,8 +2,7 @@
 //! keyboard reference.
 
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::framework::command_registry::{CommandFlags, Registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShortcutCategory {
@@ -48,8 +47,8 @@ impl ShortcutCategory {
     /// Lossless help projection from the canonical command metadata. Commands
     /// are categorized from `CommandSpec::group`; this deliberately avoids a
     /// second hand-maintained command inventory drifting from the registry.
-    pub(crate) fn commands(self) -> impl Iterator<Item = CommandKey> {
-        command_registry()
+    pub(crate) fn commands(self, registry: &Registry) -> impl Iterator<Item = CommandKey> {
+        registry
             .ordered()
             .filter(move |spec| {
                 spec.flags.contains(CommandFlags::PALETTE_VISIBLE) && self.matches_group(spec.group)
@@ -87,14 +86,14 @@ impl ShortcutCategory {
 mod tests {
     use super::*;
     use crate::state::command_catalog::CommandPlatform;
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::{Command, command_registry};
     use crate::workbench::framework::command_registry::CommandFlags;
 
     #[test]
     fn command_reference_is_a_lossless_projection_of_discoverable_commands() {
         let mut seen = Vec::new();
         for category in ShortcutCategory::ALL {
-            for command in category.commands() {
+            for command in category.commands(command_registry()) {
                 assert!(command_registry().order().contains(&command));
                 assert!(!seen.contains(&command), "duplicate help row: {command:?}");
                 seen.push(command);
