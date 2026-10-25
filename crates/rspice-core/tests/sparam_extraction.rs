@@ -10,7 +10,8 @@
 use rspice_core::Complex64;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::analysis::s_param::{
-    ExtractError, Port, PortError, collect_ports, declare_ports_with_abort, extract_s_matrix,
+    ExtractError, GainAnalysis, Port, PortError, StabilityAnalysis, collect_ports,
+    declare_ports_with_abort, extract_s_matrix,
 };
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
@@ -414,6 +415,98 @@ fn annotated_sources_produce_the_same_s_matrix_as_port_elements() {
          .end\n",
     );
     assert_series_resistor(&s, 50.0, 75.0, 50.0);
+}
+
+#[test]
+fn nonpositive_port_impedance_is_refused_while_parsing() {
+    let error = Netlist::parse(
+        "* nonpositive port impedance\nV1 a 0 AC 1 portnum 1 z0 -1\nR1 a 0 50\n.end",
+    )
+    .expect_err("a negative z0 cannot describe a reference plane");
+    assert!(error.to_string().contains("positive impedance"), "{error}");
+}
+
+#[test]
+fn reciprocal_three_port_stays_symmetric_under_unequal_references() {
+    // Theory: power-wave S and its transpose are both functions of D Y D, which
+    // is symmetric whenever Y is, so reciprocity survives unequal z0.
+    let netlist = Netlist::parse(
+        "* Three-port, non-uniform reference impedances\n\
+         V1 p1 0 DC 0 AC 1 portnum 1 z0 50\n\
+         V2 p2 0 DC 0 AC 0 portnum 2 z0 75\n\
+         V3 p3 0 DC 0 AC 0 portnum 3 z0 50\n\
+         R1 p1 mid 25\n\
+         R2 p2 mid 40\n\
+         R3 p3 mid 60\n\
+         C1 mid 0 1n\n\
+         L1 p1 lx 1u\n\
+         R4 lx p3 10\n\
+         .end\n",
+    )
+    .unwrap();
+    let frequencies = [1.0e6, 3.16e6, 1.0e7, 3.16e7, 1.0e8];
+    let run = Engine::default()
+        .run_sp_over_grid_with_abort(&netlist, &frequencies, false, &rspice_core::NoAbort)
+        .unwrap();
+    let z0: Vec<f64> = run.ports.iter().map(|port| port.z0).collect();
+    assert_eq!(z0, [50.0, 75.0, 50.0]);
+    assert_eq!(run.scattering.data.len(), frequencies.len());
+    for point in &run.scattering.data {
+        for output in 1..=3 {
+            for input in output + 1..=3 {
+                let forward = point.get(output, input);
+                let reverse = point.get(input, output);
+                assert!(
+                    (forward - reverse).norm() <= 1e-15 + 1e-12 * reverse.norm(),
+                    "S{output}{input} {forward} != S{input}{output} {reverse} at {} Hz",
+                    point.frequency
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn resistive_tee_stability_and_gain_match_their_closed_forms() {
+    // Theory: every S-parameter of this 50 Ohm tee is exactly 0.25, so
+    // Delta = 0, K = 7, mu = mu' = 3, MSG = 0 dB and MAG = 10 log10(7 - sqrt 48).
+    let netlist = Netlist::parse(
+        "* Resistive two-port\n\
+         V1 in 0 AC 0 portnum=1 z0=50\n\
+         V2 out 0 AC 0 portnum=2 z0=50\n\
+         R1 in mid 50\n\
+         R2 mid 0 50\n\
+         R3 mid out 50\n\
+         .end\n",
+    )
+    .unwrap();
+    let run = Engine::default()
+        .run_sp_over_grid_with_abort(&netlist, &[1e9, 2e9, 5e9], false, &rspice_core::NoAbort)
+        .unwrap();
+    let assert_rel = |label: &str, actual: f64, expected: f64| {
+        assert!(
+            (actual - expected).abs() <= 1e-9 * expected.abs(),
+            "{label}: {actual} != {expected}"
+        );
+    };
+    assert_eq!(run.scattering.data.len(), 3);
+    for point in &run.scattering.data {
+        let stability = StabilityAnalysis::from_s_matrix(point);
+        assert_rel("K", stability.k_factor, 7.0);
+        assert_rel("mu", stability.mu_factor, 3.0);
+        assert_rel("mu'", stability.mu_prime, 3.0);
+        assert!(stability.delta.norm() <= 1e-12, "Delta {}", stability.delta);
+        assert!(stability.unconditionally_stable);
+        let gain = GainAnalysis::from_s_matrix(point);
+        assert!(gain.msg_db.abs() <= 1e-9, "MSG {} dB", gain.msg_db);
+        assert_rel("MAG", gain.mag_db, 10.0 * (7.0 - 48.0_f64.sqrt()).log10());
+        assert_rel("|S21|^2", gain.s21_gain_db, 20.0 * 0.25_f64.log10());
+        assert_rel(
+            "|S21|^2 against S21",
+            gain.s21_gain_db,
+            20.0 * point.s21().norm().log10(),
+        );
+    }
 }
 
 #[test]
