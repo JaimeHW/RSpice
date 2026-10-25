@@ -842,7 +842,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/netlist_document", "app_state", 2),
     ("lifecycle/project_lifecycle", "app_state", 3),
     ("hardcopy_adapters/sources", "app_state", 2),
-    ("lifecycle/project_checkpoint", "app_state", 1),
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above; `-> app` also counts the
     // session wire naming the bulk-edit filters it keeps, which live with the

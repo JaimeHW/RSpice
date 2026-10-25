@@ -38,76 +38,11 @@ mod tests {
         DesignVariableSweepEligibility, DocumentationShape, DocumentationShapeGeometry, Point,
         SimulationPlanPayloadRecord,
     };
-    use crate::workbench::app_state::AppState;
-
-    #[test]
-    fn presentation_and_interaction_state_never_marks_engineering_documents_dirty() {
-        let mut state = AppState::default();
-        let component = state
-            .model
-            .schematic
-            .add_component(ComponentType::Resistor, Point::new(4, 6));
-        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        let active = state.model.workspace.content.active_view.clone();
-
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_component(component);
-        assert!(state.copy_active_schematic_selection());
-        state.model.schematic.session.editor.pan = (125.0, -40.0);
-        state.model.schematic.session.editor.zoom = 2.25;
-        state.model.schematic.session.current_file =
-            Some(std::path::PathBuf::from("presentation.rsch"));
-        state.model.workspace.content.open_views[0].dirty = true;
-        state.model.library_manager.filter_text = "presentation filter".to_owned();
-        state.model.library_manager.show_read_only = !state.model.library_manager.show_read_only;
-        state
-            .model
-            .library_manager
-            .select_view(&active.library, &active.cell, &active.view);
-        let view = state
-            .model
-            .library_manager
-            .get_library_mut(&active.library)
-            .and_then(|library| library.get_cell_mut(&active.cell))
-            .and_then(|cell| cell.get_view_mut(&active.view))
-            .expect("active view metadata");
-        view.is_open = true;
-        view.modified = true;
-        view.file_path = Some(std::path::PathBuf::from("presentation-only.sch"));
-        view.modified_time = Some(42);
-
-        let current = super::super::snapshot(&state).expect("current snapshot");
-        let mut registry = DocumentRegistry::default();
-        registry.rebuild_from_fingerprints(
-            &document_fingerprints(&current.file).unwrap(),
-            Some(&document_fingerprints(&baseline.file).unwrap()),
-        );
-        assert!(
-            registry.records().iter().all(|record| !record.dirty),
-            "selection, clipboard, viewport, open-state, and browser presentation are not engineering edits"
-        );
-
-        state
-            .model
-            .schematic
-            .add_component(ComponentType::Capacitor, Point::new(12, 9));
-        let edited = super::super::snapshot(&state).expect("edited snapshot");
-        registry.rebuild_from_fingerprints(
-            &document_fingerprints(&edited.file).unwrap(),
-            Some(&document_fingerprints(&baseline.file).unwrap()),
-        );
-        assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
-        assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
-    }
+    use crate::workbench::lifecycle::project_lifecycle::test_host::ServicesHost;
 
     #[test]
     fn typed_bus_and_tap_edits_mark_the_schematic_document_dirty() {
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         let active = state.model.workspace.content.active_view.clone();
         let empty = super::super::snapshot(&state).expect("empty baseline");
         let declaration = BusDeclaration::parse("DATA[15:0]").expect("valid declaration");
@@ -146,7 +81,7 @@ mod tests {
 
     #[test]
     fn design_note_edits_participate_in_the_schematic_document_digest() {
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         let active = state.model.workspace.content.active_view.clone();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         state
@@ -190,7 +125,7 @@ mod tests {
 
     #[test]
     fn documentation_shape_edits_participate_in_the_schematic_document_digest() {
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         let active = state.model.workspace.content.active_view.clone();
         state
             .model
@@ -236,7 +171,7 @@ mod tests {
 
     #[test]
     fn simulation_plan_payload_digest_is_owner_order_independent() {
-        let state = AppState::default();
+        let state = ServicesHost::default();
         let mut first = super::super::snapshot(&state).expect("first snapshot");
         let mut second = first.clone();
         first
@@ -269,7 +204,7 @@ mod tests {
 
     #[test]
     fn report_documents_participate_in_the_result_history_digest() {
-        let state = AppState::default();
+        let state = ServicesHost::default();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         let mut edited = baseline.clone();
         let mut report =
@@ -299,7 +234,7 @@ mod tests {
 
     #[test]
     fn result_owner_preserves_existing_fingerprint_encoding() {
-        let state = AppState::default();
+        let state = ServicesHost::default();
         let mut project = super::super::snapshot(&state).unwrap();
         for populated in [false, true] {
             if populated {
@@ -360,7 +295,7 @@ mod tests {
 
     #[test]
     fn design_variable_edit_marks_the_simulation_plan_document_dirty() {
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         state
             .model
             .schematic
@@ -398,7 +333,7 @@ mod tests {
 
     #[test]
     fn code_sources_participate_in_the_code_document_digest() {
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         assert!(
             state
                 .model
@@ -433,7 +368,7 @@ mod tests {
 
     #[test]
     fn cell_view_existence_and_owned_source_are_not_project_configuration_content() {
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         let reference = CellViewRef::new(
             state.model.workspace.content.active_view.library.clone(),

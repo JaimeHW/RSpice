@@ -26,25 +26,6 @@ mod result_cache;
 #[cfg(not(target_arch = "wasm32"))]
 mod save_acceptance;
 
-/// Test setters for whether a project is open, for every test in the crate.
-/// They move the lifecycle's authority exactly as a test needs it, with no
-/// baseline or binding, and publish the answer the way every transition does.
-impl AppState {
-    pub(crate) fn open_project_session(&mut self) {
-        self.platform.project_lifecycle.authority.open_session();
-        self.platform
-            .project_lifecycle
-            .publish_open(&mut self.model.project_open);
-    }
-
-    pub(crate) fn close_project_session(&mut self) {
-        self.platform.project_lifecycle.authority.close_project();
-        self.platform
-            .project_lifecycle
-            .publish_open(&mut self.model.project_open);
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {
     state

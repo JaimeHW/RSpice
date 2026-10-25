@@ -63,6 +63,18 @@ impl LifecycleHost for AppState {
     }
 }
 
+/// Test setters for whether a project is open, for every test in the crate.
+#[cfg(test)]
+impl AppState {
+    pub(crate) fn open_project_session(&mut self) {
+        project_lifecycle::open_project_session_for_test(self);
+    }
+
+    pub(crate) fn close_project_session(&mut self) {
+        project_lifecycle::close_project_session_for_test(self);
+    }
+}
+
 /// Restore the session's project. A session saved with no project open
 /// restores onto the no-project landing: its workspace is the placeholder
 /// Close Project left behind, and it is never bound or opened.

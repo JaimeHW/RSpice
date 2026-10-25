@@ -858,11 +858,11 @@ pub(crate) fn start_recovery_copy_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::lifecycle::project_lifecycle::test_host::ServicesHost;
 
     #[test]
     fn checkpoint_clock_failure_precedes_publication() {
-        let state = AppState::default();
+        let state = ServicesHost::default();
         for reason in [
             ProjectCheckpointReason::Manual,
             ProjectCheckpointReason::TechnologyAttachment,
@@ -899,7 +899,7 @@ mod tests {
 
     #[test]
     fn snapshot_integrity_rejects_any_byte_change() {
-        let state = AppState::default();
+        let state = ServicesHost::default();
         let project =
             crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("snapshot");
         let bytes = crate::io::project_io::serialize_project_file(&project)
@@ -1033,7 +1033,7 @@ mod tests {
         .expect("Automation source closure is valid");
         let automation_id = automation.id();
 
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         assert!(
             state
                 .model
@@ -1126,7 +1126,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rspice-project-checkpoint-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).expect("create fixture directory");
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         state
             .model
             .workspace
@@ -1191,7 +1191,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rspice-project-quarantine-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).expect("create fixture directory");
-        let mut state = AppState::default();
+        let mut state = ServicesHost::default();
         state
             .model
             .workspace

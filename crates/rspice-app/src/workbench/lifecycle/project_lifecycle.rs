@@ -1919,5 +1919,30 @@ fn mark_all_library_views_clean(libraries: &mut crate::state::LibraryManager) {
     libraries.mark_all_views_clean_runtime();
 }
 
+/// Test setters for whether a project is open, for every test in the crate.
+/// They move the lifecycle's authority exactly as a test needs it, with no
+/// baseline or binding, and publish the answer the way every transition does.
+#[cfg(test)]
+pub(crate) fn open_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
+    let parts = state.lifecycle_parts();
+    parts.platform.project_lifecycle.authority.open_session();
+    parts
+        .platform
+        .project_lifecycle
+        .publish_open(&mut parts.model.project_open);
+}
+
+#[cfg(test)]
+pub(crate) fn close_project_session_for_test(state: &mut dyn LifecycleSourceMut) {
+    let parts = state.lifecycle_parts();
+    parts.platform.project_lifecycle.authority.close_project();
+    parts
+        .platform
+        .project_lifecycle
+        .publish_open(&mut parts.model.project_open);
+}
+
+#[cfg(test)]
+pub(crate) mod test_host;
 #[cfg(test)]
 mod tests;
