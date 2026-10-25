@@ -28,7 +28,7 @@ mod run_access;
 pub(crate) mod run_preflight;
 pub(crate) use rspice_app_state::workbench::app_state::schematic_preferences;
 pub(crate) mod services_access;
-pub(in crate::workbench) mod session;
+pub(crate) mod session;
 pub(in crate::workbench) use rspice_app_state::workbench::app_state::sim_setup;
 #[cfg(test)]
 mod stack_budget;

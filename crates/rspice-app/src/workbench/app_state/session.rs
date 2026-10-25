@@ -1,6 +1,6 @@
 //! Session lifecycle: autosave, serialization, and device-local persistence.
 
-pub(in crate::workbench) mod autosave;
+pub(crate) mod autosave;
 pub(in crate::workbench) mod calculator;
 pub(in crate::workbench) mod pdk_settings;
 pub(in crate::workbench) mod preference_runtime;

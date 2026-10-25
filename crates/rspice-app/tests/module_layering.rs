@@ -849,7 +849,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // holds, the platform state it names for the services below it, and the
     // session wire reading what it keeps of them; slots rank with the dialog
     // types they name.
-    ("app_state", "app", 4),
+    ("app_state", "app", 3),
     ("app_state", "slots", 3),
     ("app_state", "workflows/file_workflow", 1),
     // What still reaches the application root rather than the session data.

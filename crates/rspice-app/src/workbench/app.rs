@@ -271,7 +271,7 @@ pub struct RSpiceApp {
     first_frame: bool,
     /// When the autosave timer was armed (first dirty frame) or last fired.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(in crate::workbench) autosave_last: Option<std::time::Instant>,
+    pub(crate) autosave_last: Option<std::time::Instant>,
     /// Theme last applied to the egui context (re-applied when the user
     /// changes the workbench theme).
     applied_theme: Option<crate::ui::Theme>,
