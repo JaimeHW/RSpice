@@ -38,7 +38,7 @@ pub(super) fn export_vcd(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
 ) {
-    let prepared = match displayed.primary_analysis(state) {
+    let prepared = match displayed.primary_analysis(state.results_reads()) {
         Some(analysis) => encode_result_vcd(analysis)
             .map_err(|error| error.to_string())
             .and_then(|mut prepared| {

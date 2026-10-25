@@ -83,7 +83,7 @@ pub(super) fn export_matlab(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
 ) {
-    let prepared = match displayed.primary_analysis(state) {
+    let prepared = match displayed.primary_analysis(state.results_reads()) {
         Some(analysis) => {
             let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
             if waveforms.is_empty() {

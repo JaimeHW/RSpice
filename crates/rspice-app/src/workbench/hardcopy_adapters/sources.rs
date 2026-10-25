@@ -557,13 +557,13 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
 
     if let Ok(displayed) =
         crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
-            state,
+            state.results_reads(),
         )
         && matches!(
             displayed.owner,
             crate::workbench::documents::result_document::view_context::ResultViewOwner::Dataset
         )
-        && let Some(run) = displayed.run(state)
+        && let Some(run) = displayed.run(state.results_reads())
     {
         let result_key = format!(
             "project:{}:result-dataset:{}",

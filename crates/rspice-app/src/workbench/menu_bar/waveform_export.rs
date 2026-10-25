@@ -234,7 +234,7 @@ pub(crate) fn action_export_csv_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    let displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state) {
+    let displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()) {
         Ok(displayed) => displayed,
         Err(message) => {
             state.prompt(message);
@@ -244,7 +244,7 @@ pub(crate) fn action_export_csv_with_io(
     // Viewer compatibility intentionally excludes quarantined analyses. Check
     // the retained dataset itself here so that filtering cannot turn corrupt
     // evidence into an apparently empty, exportable presentation.
-    if let Some(error) = displayed.run(state).and_then(|run| {
+    if let Some(error) = displayed.run(state.results_reads()).and_then(|run| {
         run.analyses
             .iter()
             .find_map(|analysis| analysis.validate_retained_evidence().err())
@@ -438,7 +438,7 @@ fn prepare_displayed_table(
         );
     }
     if let Some(typed) = displayed
-        .primary_analysis(state)
+        .primary_analysis(state.results_reads())
         .and_then(prepare_typed_result_csv)
     {
         return Some(Ok((typed, TYPED_RESULT_TOUCHSTONE_REFUSAL)));
@@ -475,7 +475,7 @@ fn prepare_active_sheet_csv(
     use crate::workbench::documents::result_document;
 
     if displayed.viewer == ResultViewer::NoiseContrib
-        && displayed.analyses(state).any(|analysis| {
+        && displayed.analyses(state.results_reads()).any(|analysis| {
             matches!(
                 analysis.result_payload,
                 Some(crate::state::AnalysisResultPayload::Qpnoise { .. })
@@ -483,12 +483,14 @@ fn prepare_active_sheet_csv(
         })
     {
         return Some(noise_stack::prepare(
-            displayed.run(state)?,
+            displayed.run(state.results_reads())?,
             &displayed.analysis_indices,
         ));
     }
     let sheet = match displayed.viewer {
-        ResultViewer::Manifest => Some(result_document::export_manifest_csv(displayed.run(state)?)),
+        ResultViewer::Manifest => Some(result_document::export_manifest_csv(
+            displayed.run(state.results_reads())?,
+        )),
         // The operating point is the one sheet whose refusal has to be
         // stated. Its export needs a successful DC solve, and the payload
         // router underneath it answers for an `OperatingPoint` payload with
@@ -496,7 +498,7 @@ fn prepare_active_sheet_csv(
         // transient carrying `dc_op` with that transient's event history —
         // both under a menu item the reader pressed on the OP sheet.
         ResultViewer::Op => {
-            let Some(analysis) = displayed.primary_analysis(state) else {
+            let Some(analysis) = displayed.primary_analysis(state.results_reads()) else {
                 // Nothing is bound to the sheet. A failed solve keeps the
                 // payload router's answer, which names the run and carries
                 // the engine's own reason. A *successful* result that simply
@@ -555,14 +557,14 @@ fn prepare_active_sheet_csv(
         // `export_specs_csv` resolves that itself so this arm cannot write a
         // bound the sheet never showed.
         ResultViewer::Specs => Some(result_document::export_specs_csv(
-            displayed.run(state)?,
+            displayed.run(state.results_reads())?,
             &state.model.workspace.content.specs,
         )),
-        ResultViewer::Optimization => {
-            result_document::export_optimization_csv(displayed.primary_analysis(state)?)
-        }
+        ResultViewer::Optimization => result_document::export_optimization_csv(
+            displayed.primary_analysis(state.results_reads())?,
+        ),
         ResultViewer::NoiseContrib => result_document::export_noise_contribution_csv(
-            displayed.run(state)?,
+            displayed.run(state.results_reads())?,
             &displayed.analysis_indices,
         ),
         _ => None,
@@ -606,7 +608,7 @@ fn fft_spectrum_csv(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Result<PreparedTypedResultCsv, String> {
-    let displayed_analysis = displayed.primary_analysis(state).ok_or_else(|| {
+    let displayed_analysis = displayed.primary_analysis(state.results_reads()).ok_or_else(|| {
         "FFT spectrum export is unavailable because the displayed analysis identity is no longer retained"
             .to_owned()
     })?;
@@ -810,7 +812,7 @@ fn export_native_result_bundle(
     use rspice_formats::native_bundle::encode_native_bundle;
     use rspice_formats::native_bundle::result::project_native_bundle;
 
-    let analysis = match displayed.primary_analysis(state) {
+    let analysis = match displayed.primary_analysis(state.results_reads()) {
         Some(analysis) => analysis,
         None => {
             state.prompt(NO_ACTIVE_ANALYSIS_MESSAGE);
@@ -1167,12 +1169,12 @@ fn prepare_waveform_dataset(
 ) -> Result<crate::io::WaveformDataset, String> {
     if displayed.analysis_indices.is_empty() {
         return Err(displayed
-            .run(state)
+            .run(state.results_reads())
             .and_then(failed_run_refusal)
             .unwrap_or_else(|| NO_SAMPLES_MESSAGE.to_owned()));
     }
     let analysis = displayed
-        .primary_analysis(state)
+        .primary_analysis(state.results_reads())
         .ok_or_else(|| NO_ACTIVE_ANALYSIS_MESSAGE.to_string())?;
     let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
     if waveforms.is_empty() && !analysis.waveforms.is_empty() {
@@ -1190,7 +1192,9 @@ fn prepare_displayed_analysis_stack_csv(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Result<PreparedTypedResultCsv, String> {
-    let analyses = displayed.analyses(state).collect::<Vec<_>>();
+    let analyses = displayed
+        .analyses(state.results_reads())
+        .collect::<Vec<_>>();
     if analyses.is_empty() {
         return Err(NO_SAMPLES_MESSAGE.to_owned());
     }

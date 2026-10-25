@@ -1271,11 +1271,11 @@ pub(crate) fn analysis_answers_structural_gate(
 /// changed content with the same dataset identity and display version cannot
 /// make an older view's immutable binding appear valid.
 pub(crate) fn retained_dataset_digest(
-    state: &AppState,
+    reads: ResultsReads<'_>,
     run: &SimulationRun,
 ) -> crate::product::ContentDigest {
-    state.results.results.dataset_digests.get_or_insert_with(
-        &state.model.simulation,
+    reads.results.dataset_digests.get_or_insert_with(
+        &reads.model.simulation,
         run.dataset_id,
         || {
             frame_work::note(frame_work::DatasetWalk::DatasetDigest);
@@ -2708,8 +2708,8 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
 
 /// Render the Results context right panel for the active viewer.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    if let Ok(view) = view_context::resolve_displayed_result_view(state)
-        && let Some(analysis) = view.primary_analysis(state)
+    if let Ok(view) = view_context::resolve_displayed_result_view(state.results_reads())
+        && let Some(analysis) = view.primary_analysis(state.results_reads())
         && let Some(crate::state::AnalysisResultPayload::Qpnoise { response }) =
             &analysis.result_payload
     {

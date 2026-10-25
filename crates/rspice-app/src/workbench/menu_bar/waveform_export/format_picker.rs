@@ -45,7 +45,7 @@ const ONE_ANALYSIS_REASON: &str = "Exports one analysis. Maximize one strip to u
 pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
     let displayed =
         match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
-            state,
+            state.results_reads(),
         ) {
             Ok(displayed) => displayed,
             Err(message) => {

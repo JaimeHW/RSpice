@@ -136,8 +136,8 @@ fn retained_memo_structural_gate_tracks_the_retained_frequency_grid() {
 #[test]
 fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
     let mut state = retained_state(AnalysisType::Transient, 3);
-    let old = view_context::resolve_displayed_result_view(&state).unwrap();
-    assert!(old.run(&state).is_some());
+    let old = view_context::resolve_displayed_result_view(state.results_reads()).unwrap();
+    assert!(old.run(state.results_reads()).is_some());
     let mut incoming = state.model.simulation.clone();
     Arc::make_mut(&mut incoming.retained.runs[0].analyses[0].waveforms[0].y).fill(2.0);
     let restored =
@@ -153,12 +153,12 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
     );
     state.model.simulation = restored;
     assert!(
-        old.run(&state).is_none(),
+        old.run(state.results_reads()).is_none(),
         "an old resolved view accepted changed retained content"
     );
-    let current = view_context::resolve_displayed_result_view(&state).unwrap();
+    let current = view_context::resolve_displayed_result_view(state.results_reads()).unwrap();
     assert_ne!(current.dataset_digest, old.dataset_digest);
-    assert!(current.run(&state).is_some());
+    assert!(current.run(state.results_reads()).is_some());
 }
 
 #[test]
@@ -177,20 +177,20 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
             validation_error: None,
         };
     let document = create_document::commit(&mut app).unwrap();
-    let bound = view_context::resolve_displayed_result_view(&app.state).unwrap();
+    let bound = view_context::resolve_displayed_result_view(app.state.results_reads()).unwrap();
     assert!(
         matches!(bound.owner, view_context::ResultViewOwner::VisualizationPane { document_id, .. } if document_id == document)
     );
     let version = app.state.model.simulation.view.data_version;
     Arc::make_mut(&mut app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
         .fill(2.0);
-    let error = view_context::resolve_displayed_result_view(&app.state)
+    let error = view_context::resolve_displayed_result_view(app.state.results_reads())
         .expect_err("the immutable pane must reject changed content even before the next frame");
     assert!(
         error.contains("no longer match the ones this pane was bound to"),
         "{error}"
     );
-    assert!(bound.run(&app.state).is_none());
+    assert!(bound.run(app.state.results_reads()).is_none());
     assert_eq!(app.state.model.simulation.view.data_version, version);
 }
 
@@ -200,7 +200,7 @@ fn read_all(state: &AppState) {
         state.results_reads(),
         key(state)
     ));
-    let _ = retained_dataset_digest(state, run);
+    let _ = retained_dataset_digest(state.results_reads(), run);
     assert!(analysis_answers_structural_gate(
         state.results_reads(),
         run.dataset_id,
@@ -233,15 +233,24 @@ fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
             read_all(&clone);
         }
         assert_eq!(work.since().total(), 0);
-        let digest = retained_dataset_digest(&state, &state.model.simulation.retained.runs[0]);
+        let digest = retained_dataset_digest(
+            state.results_reads(),
+            &state.model.simulation.retained.runs[0],
+        );
         Arc::make_mut(&mut clone.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
             .fill(2.0);
         assert_eq!(
-            retained_dataset_digest(&state, &state.model.simulation.retained.runs[0]),
+            retained_dataset_digest(
+                state.results_reads(),
+                &state.model.simulation.retained.runs[0]
+            ),
             digest
         );
         assert_ne!(
-            retained_dataset_digest(&clone, &clone.model.simulation.retained.runs[0]),
+            retained_dataset_digest(
+                clone.results_reads(),
+                &clone.model.simulation.retained.runs[0]
+            ),
             digest
         );
     }

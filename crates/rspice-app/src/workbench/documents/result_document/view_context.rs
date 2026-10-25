@@ -9,7 +9,6 @@
 use crate::product::{ContentDigest, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{PageId, PaneId};
 use crate::state::{AnalysisResult, SimulationRun};
-use crate::workbench::app_state::AppState;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use super::{AnalysisPresentationKey, ResultViewer, ResultsReads};
@@ -47,8 +46,8 @@ pub(crate) struct ResolvedResultView {
 impl ResolvedResultView {
     /// Resolve the retained run after state changes without trusting an old
     /// vector ordinal on its own.
-    pub(crate) fn run<'a>(&self, state: &'a AppState) -> Option<&'a SimulationRun> {
-        state
+    pub(crate) fn run<'a>(&self, reads: ResultsReads<'a>) -> Option<&'a SimulationRun> {
+        reads
             .model
             .simulation
             .retained
@@ -56,19 +55,22 @@ impl ResolvedResultView {
             .get(self.run_index)
             .filter(|run| {
                 run.dataset_id == self.dataset_id
-                    && super::retained_dataset_digest(state, run) == self.dataset_digest
+                    && super::retained_dataset_digest(reads, run) == self.dataset_digest
             })
     }
 
-    pub(crate) fn primary_analysis<'a>(&self, state: &'a AppState) -> Option<&'a AnalysisResult> {
-        self.run(state)?.analyses.get(self.primary_analysis_index?)
+    pub(crate) fn primary_analysis<'a>(
+        &self,
+        reads: ResultsReads<'a>,
+    ) -> Option<&'a AnalysisResult> {
+        self.run(reads)?.analyses.get(self.primary_analysis_index?)
     }
 
     pub(crate) fn analyses<'a>(
         &'a self,
-        state: &'a AppState,
+        reads: ResultsReads<'a>,
     ) -> impl Iterator<Item = &'a AnalysisResult> + 'a {
-        let run = self.run(state);
+        let run = self.run(reads);
         self.analysis_indices
             .iter()
             .filter_map(move |index| run.and_then(|run| run.analyses.get(*index)))
@@ -77,27 +79,27 @@ impl ResolvedResultView {
 
 /// Resolve the exact active Results document, viewer, and retained analyses.
 pub(crate) fn resolve_displayed_result_view(
-    state: &AppState,
+    reads: ResultsReads<'_>,
 ) -> Result<ResolvedResultView, String> {
-    let document = state
+    let document = reads
         .workbench
         .documents
         .active(Workspace::Results)
         .ok_or_else(|| "No active Results document is selected.".to_owned())?;
     match document {
-        WorkspaceDocumentId::ResultDataset(dataset_id) => resolve_dataset_view(state, *dataset_id),
+        WorkspaceDocumentId::ResultDataset(dataset_id) => resolve_dataset_view(reads, *dataset_id),
         WorkspaceDocumentId::VisualizationDocument(document_id) => {
-            resolve_visualization_pane(state, *document_id)
+            resolve_visualization_pane(reads, *document_id)
         }
         _ => Err("The active Results document is not a result presentation.".to_owned()),
     }
 }
 
 fn resolve_dataset_view(
-    state: &AppState,
+    reads: ResultsReads<'_>,
     dataset_id: DatasetId,
 ) -> Result<ResolvedResultView, String> {
-    let run_index = state
+    let run_index = reads
         .model
         .simulation
         .retained
@@ -105,24 +107,23 @@ fn resolve_dataset_view(
         .iter()
         .position(|run| run.dataset_id == dataset_id)
         .ok_or_else(|| "The active result dataset is no longer retained.".to_owned())?;
-    let run = &state.model.simulation.retained.runs[run_index];
-    let viewer = state.results.results.session.viewer;
+    let run = &reads.model.simulation.retained.runs[run_index];
+    let viewer = reads.results.session.viewer;
     let mut analysis_indices = run
         .analyses
         .iter()
         .enumerate()
         .filter_map(|(index, analysis)| {
-            analysis_supports_viewer_memoized(state.results_reads(), dataset_id, viewer, analysis)
-                .then_some(index)
+            analysis_supports_viewer_memoized(reads, dataset_id, viewer, analysis).then_some(index)
         })
         .collect::<Vec<_>>();
 
     if viewer_uses_analysis_stack(viewer) {
         analysis_indices.retain(|index| {
             let key = AnalysisPresentationKey::new(dataset_id, &run.analyses[*index]);
-            !state.results.results.session.hidden_strips.contains(&key)
+            !reads.results.session.hidden_strips.contains(&key)
         });
-        if let Some(maximized) = state.results.results.session.maximized_strip
+        if let Some(maximized) = reads.results.session.maximized_strip
             && let Some(index) = analysis_indices.iter().copied().find(|index| {
                 AnalysisPresentationKey::new(dataset_id, &run.analyses[*index]) == maximized
             })
@@ -131,16 +132,16 @@ fn resolve_dataset_view(
             analysis_indices.push(index);
         }
     } else {
-        let primary = selected_primary_index(state, run_index, run, &analysis_indices);
+        let primary = selected_primary_index(reads, run_index, run, &analysis_indices);
         analysis_indices.clear();
         analysis_indices.extend(primary);
     }
 
-    let primary_analysis_index = selected_primary_index(state, run_index, run, &analysis_indices);
+    let primary_analysis_index = selected_primary_index(reads, run_index, run, &analysis_indices);
     Ok(ResolvedResultView {
         owner: ResultViewOwner::Dataset,
         dataset_id,
-        dataset_digest: super::retained_dataset_digest(state, run),
+        dataset_digest: super::retained_dataset_digest(reads, run),
         run_index,
         viewer,
         analysis_indices,
@@ -149,13 +150,12 @@ fn resolve_dataset_view(
 }
 
 fn selected_primary_index(
-    state: &AppState,
+    reads: ResultsReads<'_>,
     run_index: usize,
     run: &SimulationRun,
     candidates: &[usize],
 ) -> Option<usize> {
-    state
-        .results
+    reads
         .results
         .session
         .active_wave_pane
@@ -164,8 +164,8 @@ fn selected_primary_index(
         .and_then(|key| key.resolve(run).map(|(index, _)| index))
         .filter(|index| candidates.contains(index))
         .or_else(|| {
-            (state.model.simulation.view.active_run_idx == Some(run_index))
-                .then_some(state.model.simulation.view.active_analysis_idx)
+            (reads.model.simulation.view.active_run_idx == Some(run_index))
+                .then_some(reads.model.simulation.view.active_analysis_idx)
                 .flatten()
                 .filter(|index| candidates.contains(index))
         })
@@ -173,25 +173,23 @@ fn selected_primary_index(
 }
 
 fn resolve_visualization_pane(
-    state: &AppState,
+    reads: ResultsReads<'_>,
     document_id: ResultDocumentId,
 ) -> Result<ResolvedResultView, String> {
-    let document = state
+    let document = reads
         .model
         .workspace
         .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active visualization document no longer exists.".to_owned())?;
-    let page_id = state
-        .results
+    let page_id = reads
         .results
         .session
         .persistent_document_page(document_id)
         .filter(|page_id| document.pages().iter().any(|page| page.id == *page_id))
         .or_else(|| document.pages().first().map(|page| page.id))
         .ok_or_else(|| "The active visualization document has no page.".to_owned())?;
-    let pane = state
-        .results
+    let pane = reads
         .results
         .session
         .persistent_document_pane(document_id)
@@ -212,7 +210,7 @@ fn resolve_visualization_pane(
     let binding = pane
         .binding
         .ok_or_else(|| "The selected result pane is not bound to a run.".to_owned())?;
-    let run_index = state
+    let run_index = reads
         .model
         .simulation
         .retained
@@ -220,8 +218,8 @@ fn resolve_visualization_pane(
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's run is no longer in the run history.".to_owned())?;
-    let run = &state.model.simulation.retained.runs[run_index];
-    if super::retained_dataset_digest(state, run) != binding.dataset.content_digest {
+    let run = &reads.model.simulation.retained.runs[run_index];
+    if super::retained_dataset_digest(reads, run) != binding.dataset.content_digest {
         return Err(
             "The run's results no longer match the ones this pane was bound to.".to_owned(),
         );
@@ -233,12 +231,12 @@ fn resolve_visualization_pane(
         .ok_or_else(|| "The pane's bound analysis is no longer retained.".to_owned())?;
     let analysis = &run.analyses[analysis_index];
     let viewer = analysis_supports_viewer_memoized(
-        state.results_reads(),
+        reads,
         run.dataset_id,
-        state.results.results.session.viewer,
+        reads.results.session.viewer,
         analysis,
     )
-    .then_some(state.results.results.session.viewer)
+    .then_some(reads.results.session.viewer)
     .or_else(|| ResultViewer::from_viewer_document_id(&pane.viewer_id))
     .ok_or_else(|| "The selected pane has no implemented viewer.".to_owned())?;
 
@@ -249,7 +247,7 @@ fn resolve_visualization_pane(
             pane_id: pane.id,
         },
         dataset_id: run.dataset_id,
-        dataset_digest: super::retained_dataset_digest(state, run),
+        dataset_digest: super::retained_dataset_digest(reads, run),
         run_index,
         viewer,
         analysis_indices: vec![analysis_index],
@@ -305,15 +303,15 @@ pub(crate) fn analysis_supports_viewer(viewer: ResultViewer, analysis: &Analysis
 /// would have. Every per-frame caller must use this one; the plain predicate
 /// above is for callers that hold a run without a session to memoize against.
 pub(crate) fn analysis_supports_viewer_memoized(
-    state: ResultsReads<'_>,
+    reads: ResultsReads<'_>,
     dataset_id: DatasetId,
     viewer: ResultViewer,
     analysis: &AnalysisResult,
 ) -> bool {
     analysis.success
-        && super::analysis_evidence_is_valid(state, dataset_id, analysis)
+        && super::analysis_evidence_is_valid(reads, dataset_id, analysis)
         && rspice_results::renderability::viewer_can_render(viewer, analysis, |gate| {
-            super::analysis_answers_structural_gate(state, dataset_id, analysis, gate)
+            super::analysis_answers_structural_gate(reads, dataset_id, analysis, gate)
         })
 }
 
@@ -323,6 +321,7 @@ mod tests {
     use crate::state::{
         AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
     };
+    use crate::workbench::app_state::AppState;
 
     fn waveform(name: &str) -> RetainedTrace {
         RetainedTrace::new(name, vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff")
@@ -353,11 +352,18 @@ mod tests {
         let mut state = state_with_run(vec![op, ac]);
         state.results.results.session.viewer = ResultViewer::Bode;
 
-        let resolved = resolve_displayed_result_view(&state).expect("displayed Bode context");
+        let resolved =
+            resolve_displayed_result_view(state.results_reads()).expect("displayed Bode context");
 
         assert_eq!(resolved.analysis_indices, vec![1]);
         assert_eq!(resolved.primary_analysis_index, Some(1));
-        assert_eq!(resolved.primary_analysis(&state).unwrap().label, "AC");
+        assert_eq!(
+            resolved
+                .primary_analysis(state.results_reads())
+                .unwrap()
+                .label,
+            "AC"
+        );
     }
 
     #[test]
@@ -369,7 +375,7 @@ mod tests {
         let mut state = state_with_run(vec![tran_a, tran_b]);
         state.results.results.session.viewer = ResultViewer::Waves;
 
-        let all = resolve_displayed_result_view(&state).expect("wave stack context");
+        let all = resolve_displayed_result_view(state.results_reads()).expect("wave stack context");
         assert_eq!(all.analysis_indices, vec![0, 1]);
 
         let run = state.model.simulation.active_run().unwrap();
@@ -377,7 +383,8 @@ mod tests {
             run.dataset_id,
             &run.analyses[1],
         ));
-        let maximized = resolve_displayed_result_view(&state).expect("maximized stack context");
+        let maximized =
+            resolve_displayed_result_view(state.results_reads()).expect("maximized stack context");
         assert_eq!(maximized.analysis_indices, vec![1]);
         assert_eq!(maximized.primary_analysis_index, Some(1));
     }
