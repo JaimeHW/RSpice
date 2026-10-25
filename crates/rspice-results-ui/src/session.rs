@@ -59,15 +59,6 @@ pub enum ViewGesture {
     ZoomIn,
     /// Double the visible interval about its centre.
     ZoomOut,
-    /// Pin one or both axes to exact data-space intervals.
-    ///
-    /// `None` leaves that axis unchanged. This is queued instead of writing a
-    /// viewport directly so the waveform stack can resolve the active stable
-    /// analysis and unit-pane identity inside its drawing pass.
-    SetRanges {
-        x: Option<(f64, f64)>,
-        y: Option<(f64, f64)>,
-    },
 }
 
 /// The A│B cursor tool: armed, a click on a plot places cursor A and then

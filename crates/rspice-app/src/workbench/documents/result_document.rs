@@ -618,19 +618,6 @@ pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
                 .results
                 .session
                 .reset_viewer_plot_views(viewer),
-            ViewGesture::SetRanges { x, y } => {
-                let view = state.results.results.session.plot_view_pane_mut_for(
-                    viewer,
-                    PlotPresentationKey::Global(0),
-                    0,
-                );
-                if let Some(x) = x {
-                    view.x = Some(x);
-                }
-                if let Some(y) = y {
-                    view.y = Some(y);
-                }
-            }
             ViewGesture::ZoomIn | ViewGesture::ZoomOut => {}
         }
         return;
@@ -639,15 +626,6 @@ pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
         ViewGesture::Fit => waves::fit_active_strip(state),
         ViewGesture::ZoomIn => waves::zoom_active_pane(state, &Tokens::get(ui.ctx()), 0.5),
         ViewGesture::ZoomOut => waves::zoom_active_pane(state, &Tokens::get(ui.ctx()), 2.0),
-        ViewGesture::SetRanges { x, y } => {
-            let tokens = Tokens::get(ui.ctx());
-            if let Some(x) = x {
-                waves::set_active_pane_axis_range(&tokens, state, PaneAxis::X, Some(x));
-            }
-            if let Some(y) = y {
-                waves::set_active_pane_axis_range(&tokens, state, PaneAxis::Y, Some(y));
-            }
-        }
     }
 }
 
@@ -1637,7 +1615,6 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         let permitted = match gesture {
             ViewGesture::Fit => fit_gesture_available(&app.state),
             ViewGesture::ZoomIn | ViewGesture::ZoomOut => zoom_gesture_available(&app.state),
-            ViewGesture::SetRanges { .. } => false,
         };
         if permitted && consume_command_key(ctx, &app.state, command) {
             request_view_gesture(&mut app.state, gesture);

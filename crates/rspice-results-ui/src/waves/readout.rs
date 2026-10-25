@@ -618,7 +618,6 @@ fn copied_trace_value(
 ) -> String {
     match kind {
         TraceKind::PhaseDeg => policy.copy_angle_degrees(value),
-        TraceKind::PhaseRad => policy.copy_angle(value),
         TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
         TraceKind::MagnitudeDb | TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
             policy.copy_si_value(value, unit)

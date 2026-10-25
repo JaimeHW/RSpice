@@ -287,13 +287,9 @@ fn append_projected_traces(
         let y = match kind {
             TraceKind::MagnitudeDb => derived.db(derived_key, &projection.y),
             TraceKind::NoiseDensity => derived.noise_density_nv(derived_key, &projection.y),
-            TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
-                derived,
-                derived_key,
-                &projection.y,
-                phase_continuous,
-                kind == TraceKind::PhaseRad,
-            ),
+            TraceKind::PhaseDeg => {
+                displayed_phase_series(derived, derived_key, &projection.y, phase_continuous)
+            }
             _ => projection.y,
         };
         let family_style = projection.group.map(|group| group.style);
@@ -695,12 +691,11 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     TraceKind::NoiseDensity => {
                         derived.noise_density_nv(derived_key, &overlay_waveform.y)
                     }
-                    TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
+                    TraceKind::PhaseDeg => displayed_phase_series(
                         derived,
                         derived_key,
                         &overlay_waveform.y,
                         phase_continuous,
-                        *signal_kind == TraceKind::PhaseRad,
                     ),
                     TraceKind::Real => {
                         let Some(complex) = &overlay_waveform.complex else {
@@ -834,24 +829,12 @@ fn displayed_phase_series(
     key: u64,
     phase_degrees: &SharedWaveformValues,
     continuous: bool,
-    radians: bool,
 ) -> SharedWaveformValues {
-    let degrees = if continuous {
+    if continuous {
         derived.unwrapped(key, phase_degrees)
     } else {
         Arc::clone(phase_degrees)
-    };
-    if !radians {
-        return degrees;
     }
-    // Radian conversion is a cached presentation series. Stored samples stay
-    // in their original degree representation for reproducibility/export.
-    const RADIANS_KEY_BIT: u64 = 1 << 61;
-    const CONTINUOUS_KEY_BIT: u64 = 1 << 60;
-    derived.get_or(
-        key ^ RADIANS_KEY_BIT ^ if continuous { CONTINUOUS_KEY_BIT } else { 0 },
-        || Arc::new(degrees.iter().map(|value| value.to_radians()).collect()),
-    )
 }
 
 /// Identity of one trace's X column for the sweep-shape memo.

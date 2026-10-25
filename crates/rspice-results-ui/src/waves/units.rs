@@ -105,7 +105,6 @@ pub(super) fn signal_unit<'a>(
         TraceKind::MagnitudeDb if retained_unit == Some("ratio") => "dBc",
         TraceKind::MagnitudeDb => "dB",
         TraceKind::PhaseDeg => "°",
-        TraceKind::PhaseRad => "rad",
         TraceKind::NoiseDensity => match retained_unit {
             Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
             Some("s²/Hz" | "s^2/Hz") => "ns/√Hz",

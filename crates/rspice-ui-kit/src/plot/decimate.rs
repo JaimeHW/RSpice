@@ -16,14 +16,12 @@ use super::scale::XScale;
 use rspice_results::sampling::sample_at_with;
 pub use rspice_results::sampling::{SampleInterpolation, sample_at};
 
-/// Viewer-only sampling policy. None of these modes mutate or replace the
-/// source waveform arrays.
+/// Viewer-only sampling policy. It never mutates or replaces the source
+/// waveform arrays.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum DisplayDecimation {
     #[default]
     EnvelopeExtrema,
-    Uniform,
-    FullResolution,
 }
 
 /// Cache of decimated envelopes. Owned by the results workspace state;
@@ -206,7 +204,6 @@ impl DecimationCache {
         parametric: bool,
         shape: Option<&SweepShape>,
     ) -> Arc<[[f64; 2]]> {
-        debug_assert!(!matches!(mode, DisplayDecimation::FullResolution));
         let reduction = reduction_for(parametric, shape);
         let reads_y = reduction.reads_y();
         let key = CacheKey {
@@ -244,12 +241,6 @@ impl DecimationCache {
                         view.columns,
                         orientation,
                     ),
-                    DisplayDecimation::Uniform => {
-                        decimate_uniform(x, y, view.x0, view.x1, view.columns, orientation)
-                    }
-                    DisplayDecimation::FullResolution => {
-                        unreachable!("full resolution bypasses cache")
-                    }
                 }
             }
         }
@@ -280,45 +271,6 @@ fn reduction_for(parametric: bool, shape: Option<&SweepShape>) -> Reduction {
         Some(SweepClass::Descending) => Reduction::OrderedReversed,
         Some(SweepClass::MultiBranch | SweepClass::NonSweep) => Reduction::PixelCells,
     }
-}
-
-/// Uniformly sample the visible source range to at most `columns` points,
-/// retaining both visible endpoints. This is intentionally a presentation
-/// alternative to the extrema-preserving envelope.
-///
-/// `orientation` states which end of the arrays the sweep started at; the
-/// window search and the output both run in ascending-X order either way.
-pub fn decimate_uniform(
-    x: &[f64],
-    y: &[f64],
-    x0: f64,
-    x1: f64,
-    columns: usize,
-    orientation: XOrientation,
-) -> Vec<[f64; 2]> {
-    let view = LogicalView::new(x, y, orientation == XOrientation::Descending);
-    let n = view.paired_len();
-    if n == 0 || columns == 0 || !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
-        return Vec::new();
-    }
-    let start = view.below(x0).saturating_sub(1);
-    let end = (view.at_or_below(x1) + 1).min(n);
-    let visible = end.saturating_sub(start);
-    if columns == 1 {
-        return vec![[view.x(start), view.y(start)]];
-    }
-    if visible <= columns {
-        return (start..end)
-            .map(|index| [view.x(index), view.y(index)])
-            .collect();
-    }
-    let last = visible - 1;
-    (0..columns)
-        .map(|slot| {
-            let index = start + slot * last / (columns - 1);
-            [view.x(index), view.y(index)]
-        })
-        .collect()
 }
 
 /// Reduce `(x, y)` to a per-column min/max envelope over `[x0, x1]` split
@@ -1021,20 +973,6 @@ mod tests {
             first.as_ref(),
             second.as_ref(),
             "a log reduction was served from the linear cache entry"
-        );
-    }
-
-    #[test]
-    fn uniform_decimation_retains_visible_endpoints() {
-        let x = (0..100).map(f64::from).collect::<Vec<_>>();
-        let y = x.iter().map(|value| value * value).collect::<Vec<_>>();
-        let points = decimate_uniform(&x, &y, 10.0, 89.0, 8, XOrientation::Ascending);
-        assert_eq!(points.len(), 8);
-        assert_eq!(points.first().copied(), Some([9.0, 81.0]));
-        assert_eq!(points.last().copied(), Some([90.0, 8100.0]));
-        assert_eq!(
-            decimate_uniform(&x, &y, 10.0, 89.0, 1, XOrientation::Ascending).len(),
-            1
         );
     }
 }

@@ -9,7 +9,7 @@ use crate::theme::{self, FontWeight};
 use crate::tokens::Tokens;
 
 use super::cursor::CursorPair;
-use super::decimate::{DecimationCache, DisplayDecimation};
+use super::decimate::DecimationCache;
 use super::scale::XScale;
 use super::spec::{MarkerShape, PlotSpec};
 
@@ -714,13 +714,10 @@ pub fn show(
                 continue;
             }
             let stroke = Stroke::new(trace.width, trace.color);
-            let points: Vec<Pos2> = match (trace.cache_key, spec.display_decimation) {
-                (
-                    Some(key),
-                    mode @ (DisplayDecimation::EnvelopeExtrema | DisplayDecimation::Uniform),
-                ) => cache
+            let points: Vec<Pos2> = match trace.cache_key {
+                Some(key) => cache
                     .series(
-                        mode,
+                        spec.display_decimation,
                         key,
                         trace.x,
                         trace.y,
@@ -740,7 +737,7 @@ pub fn show(
                     .iter()
                     .map(|p| pos2(mx(p[0]), my(p[1])))
                     .collect(),
-                _ => trace
+                None => trace
                     .x
                     .iter()
                     .zip(trace.y.iter())

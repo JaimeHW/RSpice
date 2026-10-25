@@ -36,22 +36,23 @@ pub use units::{
 };
 
 /// How a trace's Y values are interpreted.
+///
+/// The discriminants are saved: a marker's trace key stores `kind as u8`, so
+/// each kind keeps its number and a retired one's number is never reused.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TraceKind {
     /// Plain values (V, A, sweep output).
-    Value,
+    Value = 0,
     /// dB-converted AC magnitude.
-    MagnitudeDb,
+    MagnitudeDb = 1,
     /// Phase in degrees (dashed, own stacked pane).
-    PhaseDeg,
-    /// Phase in radians (dashed, own stacked pane).
-    PhaseRad,
+    PhaseDeg = 2,
     /// Original real component of a complex source quantity.
-    Real,
+    Real = 4,
     /// Original imaginary component of a complex source quantity.
-    Imaginary,
+    Imaginary = 5,
     /// nV/√Hz projection of a retained V²/Hz noise PSD.
-    NoiseDensity,
+    NoiseDensity = 6,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -85,7 +86,7 @@ impl FamilyTraceVisibilityKey {
 
 impl TraceKind {
     pub const fn is_phase(self) -> bool {
-        matches!(self, Self::PhaseDeg | Self::PhaseRad)
+        matches!(self, Self::PhaseDeg)
     }
 }
 
@@ -301,7 +302,6 @@ impl StripModel {
             TraceKind::PhaseDeg => {
                 phase_sample(value.to_radians(), significant_digits, quantity_policy)
             }
-            TraceKind::PhaseRad => phase_sample(value, significant_digits, quantity_policy),
             TraceKind::NoiseDensity => fmt_in_unit(value, NOISE_DENSITY_UNIT, significant_digits),
         }
     }
