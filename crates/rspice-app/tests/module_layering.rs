@@ -838,7 +838,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
     ("documents/result_document", "app_state", 36),
-    ("lifecycle/recovery", "app_state", 4),
+    ("lifecycle/recovery", "app_state", 3),
     ("documents/netlist_document", "app_state", 2),
     ("lifecycle/project_lifecycle", "app_state", 2),
     ("hardcopy_adapters/sources", "app_state", 2),
@@ -903,7 +903,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Recovery and checkpointing reaching sideways into the workflows.
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
-    ("lifecycle/recovery", "workflows/project_workflow", 1),
     // The platform slot holds the lifecycle's state, and the lifecycle and
     // its sibling services work on that slot: one cycle inside the platform
     // services. The lifecycle names the slot where it is defined, once, and

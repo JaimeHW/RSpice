@@ -57,6 +57,16 @@ impl ServicesHost {
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         let _ = self.model.sync_active_schematic_to_workspace();
     }
+
+    /// Record an event in the model's Console log, as the session does.
+    pub(crate) fn record(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+    ) -> u64 {
+        self.model.record(severity, source, text)
+    }
 }
 
 /// What a session that has presented no results saves: no markers, panes or

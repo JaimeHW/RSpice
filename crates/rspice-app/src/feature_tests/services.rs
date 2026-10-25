@@ -4,3 +4,4 @@
 
 mod document_registry;
 mod project_lifecycle;
+mod recovery;
