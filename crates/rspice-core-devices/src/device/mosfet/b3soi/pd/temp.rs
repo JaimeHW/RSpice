@@ -740,4 +740,47 @@ impl B3SoiPdSized {
 
         Ok(p)
     }
+
+    /// The values B3SOIPD's load re-evaluates at a self-heated temperature,
+    /// in the load's own forms (b3soipdld.c:592-733). Everything else keeps
+    /// its ambient value: the load takes `phi` from the instance, which the
+    /// operating point resets to the ambient one (b3soipdld.c:361, 629-634),
+    /// so `Xdep0` and all the temperature pass derives from `phi`, `vtm` or
+    /// `ni` stay as computed at the ambient temperature.
+    pub(crate) fn self_heated_at(&self, model: &B3SoiPdModel, temp: Value) -> Self {
+        use super::super::common::EG300;
+        let m = model;
+        let mut p = self.clone();
+        let temp_ratio = temp * (1.0 / p.tnom);
+        let t3 = temp_ratio - 1.0;
+
+        p.temp = temp;
+        p.vtm = KB_OVER_Q * temp;
+        let eg = 1.16 - 7.02e-4 * (temp * temp) / (1108.0 + temp);
+        let ni =
+            1.45e10 * temp * temp.sqrt() * 1.9230584e-4 * (21.5565981 - eg / (2.0 * p.vtm)).exp();
+        p.ni = ni;
+        p.vbi = p.vtm * (1.0e20 * p.npeak / (ni * ni)).ln();
+        p.vfbb = if p.nsub > 0.0 {
+            -m.mtype * p.vtm * (p.npeak / p.nsub).ln()
+        } else {
+            -m.mtype * p.vtm * (-p.npeak * p.nsub / ni / ni).ln()
+        };
+
+        let t4 = EG300 / p.vtm * t3;
+        let bjt_scale = (m.xbjt * t4 / p.ndiode).exp();
+        p.ahli0 = p.ahli * bjt_scale;
+        p.jbjt = p.isbjt * bjt_scale;
+        p.jdif = p.isdif * (m.xdif * t4 / p.ndiode).exp();
+        p.jrec = p.isrec * (m.xrec * t4 / p.nrecf0).exp();
+        p.jtun = p.istun * (m.xtun * t3).exp();
+
+        p.u0temp = p.u0 * temp_ratio.powf(p.ute);
+        p.vsattemp = p.vsat - p.at * t3;
+        p.rds0 = (p.rdsw + p.prt * t3) / p.rds0denom;
+        p.ua = p.uatemp + p.ua1 * t3;
+        p.ub = p.ubtemp + p.ub1 * t3;
+        p.uc = p.uctemp + p.uc1 * t3;
+        p
+    }
 }

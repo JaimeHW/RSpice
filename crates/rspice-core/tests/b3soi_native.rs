@@ -1149,10 +1149,10 @@ fn native_level57_pd_self_heating_inverse_mode_temp_rise_is_non_negative() {
     );
 }
 
-/// How far a self-heated operating point may sit from ngspice-46's. RSpice
-/// re-temps every parameter at the heated temperature, while ngspice-46's load
-/// keeps phi and what its temperature pass derives from it at ambient
-/// (b3soipdld.c:590-726, b3soifdld.c:672-800), up to 5.9e-4 apart at the card RTH0.
+/// How far a self-heated FD operating point may sit from ngspice-46's. RSpice
+/// re-temps every FD parameter at the heated temperature, while ngspice-46's
+/// load keeps phi and what its temperature pass derives from it at ambient
+/// (b3soifdld.c:672-800), up to 5.7e-4 apart at the card RTH0.
 const SH_REL: Value = 1.0e-3;
 
 /// One SOI device with its four terminals driven at `[vd, vg, vs, ve]`, solved
@@ -1209,8 +1209,14 @@ fn soi_op(card: &str, model: &str, self_heating: bool, v: [Value; 4]) -> [Value;
 /// i(vd) -3.18032170901e-3, and PMOS 1.356080474777e-3 against
 /// 1.367179065670e-3. The inverse-mode decks here are held to the forward
 /// references, mirrored.
+///
+/// The self-heated load re-evaluates only part of the temperature pass and
+/// keeps `phi` ambient (b3soipdld.c:590-733); a full re-evaluation at the
+/// heated temperature sits 5.9e-4 away. The NMOS floating body converges
+/// 7.5e-7 from ngspice-46's.
 #[test]
 fn native_soi_pd_self_heating_drain_current_matches_ngspice46_in_both_modes() {
+    const REL: Value = 1.0e-6;
     // (card, model, sign, i(vd) forward, temperature rise) from ngspice-46.
     for (card, model, sign, current, rise) in [
         (
@@ -1230,13 +1236,13 @@ fn native_soi_pd_self_heating_drain_current_matches_ngspice46_in_both_modes() {
     ] {
         let v = sign * 1.5;
         let [id, is, temp] = soi_op(card, model, true, [v, v, 0.0, 0.0]);
-        assert_rel(&format!("PD {model} forward i(vd)"), id, current, SH_REL);
-        assert_rel(&format!("PD {model} forward i(vs)"), is, -current, SH_REL);
-        assert_rel(&format!("PD {model} forward rise"), temp, rise, SH_REL);
+        assert_rel(&format!("PD {model} forward i(vd)"), id, current, REL);
+        assert_rel(&format!("PD {model} forward i(vs)"), is, -current, REL);
+        assert_rel(&format!("PD {model} forward rise"), temp, rise, REL);
         let [id, is, temp] = soi_op(card, model, true, [0.0, v, v, 0.0]);
-        assert_rel(&format!("PD {model} inverse i(vs)"), is, current, SH_REL);
-        assert_rel(&format!("PD {model} inverse i(vd)"), id, -current, SH_REL);
-        assert_rel(&format!("PD {model} inverse rise"), temp, rise, SH_REL);
+        assert_rel(&format!("PD {model} inverse i(vs)"), is, current, REL);
+        assert_rel(&format!("PD {model} inverse i(vd)"), id, -current, REL);
+        assert_rel(&format!("PD {model} inverse rise"), temp, rise, REL);
     }
 }
 
