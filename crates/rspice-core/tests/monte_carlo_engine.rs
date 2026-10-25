@@ -65,6 +65,38 @@ fn monte_carlo_with_zero_spread_matches_the_nominal_solution() {
 }
 
 #[test]
+fn default_gaussian_spread_matches_divider_theory() {
+    // Theory: each resistor moves V(out) by half its relative change, so two
+    // independent 1% (one-sigma, relative) Gaussians give 5 V * 0.01 * sqrt(2) / 2.
+    let netlist = Netlist::parse(
+        "Two-parameter divider\n.param r1v=1k\n.param r2v=1k\nV1 in 0 10\nR1 in out {r1v}\nR2 out 0 {r2v}\n.end\n",
+    )
+    .expect("fixture parses");
+    let result = Engine::default()
+        .run_monte_carlo(&netlist, 400, 7)
+        .expect("analysis completes");
+    assert_eq!(result.num_runs, 400);
+    assert_eq!(result.num_failures, 0);
+    let stats = &result.variables["V(OUT)"];
+    let sigma = 5.0 * 0.01 * std::f64::consts::SQRT_2 / 2.0;
+    // Four standard errors of the sample mean and of the sample deviation.
+    let mean_bound = 4.0 * sigma / 400.0_f64.sqrt();
+    let sigma_bound = 4.0 * sigma / (2.0 * 399.0_f64).sqrt();
+    assert!(
+        (stats.mean - 5.0).abs() < mean_bound,
+        "mean {} outside 5 V +- {mean_bound}",
+        stats.mean
+    );
+    assert!(
+        (stats.std_dev - sigma).abs() < sigma_bound,
+        "sigma {} outside {sigma} +- {sigma_bound}",
+        stats.std_dev
+    );
+    assert!(stats.min < stats.mean && stats.mean < stats.max);
+    assert!(stats.percentile(1.0) < stats.percentile(99.0));
+}
+
+#[test]
 fn monte_carlo_accepts_indirect_and_unused_defined_parameters() {
     let netlist = Netlist::parse("Declared parameters\n.param base=2 derived={3*base} unused=42\nV1 in 0 1\nE1 out 0 in 0 {derived}\n.end\n").unwrap();
     let engine = Engine::default();
