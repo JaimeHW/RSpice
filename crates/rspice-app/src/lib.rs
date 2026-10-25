@@ -49,8 +49,52 @@ pub(crate) mod analysis;
 /// Application binding for schematic and symbol editors.
 pub(crate) mod schematic;
 
-/// Application simulation setup, source preparation and dispatch coordination.
-pub(crate) mod simulation;
+pub(crate) mod simulation {
+    //! Application simulation setup, source preparation and dispatch
+    //! coordination.
+    //!
+    //! Commercial-grade simulation execution and configuration. Manages the
+    //! complete simulation workflow from netlist generation to result display.
+
+    pub(crate) use rspice_simulation_contract::accuracy;
+    pub(crate) use rspice_simulation_contract::config;
+    pub(crate) mod controller;
+    #[cfg(test)]
+    pub(crate) use rspice_simulation_contract::cost_probe;
+    pub(crate) mod dialog;
+    pub(crate) use rspice_simulation::execution;
+    pub(crate) mod manual_run;
+    pub(crate) mod multi_run;
+    #[cfg(test)]
+    pub(crate) mod netlist_gen;
+    pub(crate) mod output_contract;
+    pub(crate) use rspice_app_state::simulation::placed_sources;
+    pub(crate) use rspice_app_state::simulation::plan;
+    pub(crate) use rspice_simulation::point_family;
+    #[cfg(test)]
+    pub(crate) mod results;
+    mod run_host;
+    #[cfg(test)]
+    pub(crate) mod run_set_tests;
+    pub(crate) use rspice_app_state::simulation::stimulus_realize;
+    pub(crate) use rspice_app_state::simulation::table_route;
+    pub(crate) use rspice_simulation::runner;
+    pub(crate) mod status;
+    #[cfg(test)]
+    pub(crate) mod veriloga_tests;
+
+    // The netlist generator, options translator, and
+    // engine bridge are all reached through their own modules; flattening their
+    // types here duplicated the path without shortening any call site.
+    pub use config::AnalysisConfig;
+    pub use controller::SimulationController;
+    pub use rspice_simulation::results::{SampledWaveform, SimulationResult};
+    pub(crate) use run_host::{NetlistShown, RunHost, ViewerReading};
+    // Test-only aliases for private modules: execution reaches the bridge and
+    // these helpers through their module paths.
+    pub use runner::SimulationRunner;
+    pub use status::SimulationStatus;
+}
 
 /// Project-bound property editing workflows.
 pub(crate) mod properties;
