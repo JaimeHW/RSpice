@@ -289,22 +289,6 @@ pub struct Vdmos {
     pub is: Value,
     /// Ideality factor
     pub n: Value,
-    /// Transit time (s)
-    pub tt: Value,
-    /// Breakdown voltage (V)
-    pub bv: Value,
-
-    //=========================================================================
-    // Thermal Model (Self-Heating)
-    //=========================================================================
-    /// Thermal network for electro-thermal simulation
-    pub thermal: ThermalNetwork,
-
-    //=========================================================================
-    // Body Diode Reverse Recovery
-    //=========================================================================
-    /// Diode recovery model for switching transients
-    pub recovery: DiodeRecovery,
 
     //=========================================================================
     // Operating State
@@ -487,12 +471,6 @@ impl Vdmos {
 
             is: 1e-14,
             n: 1.5,
-            tt: 50e-9,
-            bv: 100.0,
-
-            // Thermal and recovery models (disabled by default)
-            thermal: ThermalNetwork::default(),
-            recovery: DiodeRecovery::default(),
 
             region: VdmosRegion::Cutoff,
             id: 0.0,
@@ -608,8 +586,6 @@ impl Vdmos {
 
             self.is = self.d1_is;
             self.n = self.d1_n;
-            self.tt = self.d1_tt;
-            self.bv = self.d1_bv;
         }
 
         if let Some(&v) = params.get("VTH") {
@@ -926,22 +902,16 @@ impl Vdmos {
                 self.d1_current_enabled = true;
             }
         }
-        if let Some(&v) = params.get("TT") {
-            self.tt = v;
-            if !is_xyce_level18 {
-                self.d1_tt = v;
-                if v != 0.0 {
-                    self.d1_current_enabled = true;
-                }
-            }
-        }
-        if let Some(&v) = params.get("BV") {
-            self.bv = v;
-            if !is_xyce_level18 {
-                self.d1_bv = v;
-                self.d1_bv_given = true;
+        if !is_xyce_level18 && let Some(&v) = params.get("TT") {
+            self.d1_tt = v;
+            if v != 0.0 {
                 self.d1_current_enabled = true;
             }
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("BV") {
+            self.d1_bv = v;
+            self.d1_bv_given = true;
+            self.d1_current_enabled = true;
         }
         if !is_xyce_level18 && let Some(&v) = params.get("IBV") {
             self.d1_ibv = v;
@@ -970,27 +940,6 @@ impl Vdmos {
             if let Some(&v) = params.get("FC") {
                 self.d1_fc = v.min(0.95);
             }
-        }
-
-        // Thermal model parameters
-        if let Some(&v) = params.get("RTH") {
-            self.thermal.rth = v;
-        }
-        if let Some(&v) = params.get("CTH") {
-            self.thermal.cth = v;
-        }
-        if let Some(&v) = params.get("TAMB") {
-            // Convert Celsius to Kelvin
-            self.thermal.t_ambient = v + 273.15;
-            self.thermal.t_junction = self.thermal.t_ambient;
-        }
-
-        // Body diode reverse recovery parameters
-        if let Some(&v) = params.get("QRR") {
-            self.recovery.qrr = v;
-        }
-        if let Some(&v) = params.get("TRR") {
-            self.recovery.trr = v;
         }
 
         self.ngspice_qs_given = params.contains_key("RQ") && params.contains_key("VQ");

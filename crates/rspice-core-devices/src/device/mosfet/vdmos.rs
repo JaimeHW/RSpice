@@ -26,8 +26,8 @@
 //! | CGD | Gate-drain (Miller) capacitance | 100pF |
 //! | IS | Body diode saturation current | 1e-14A |
 //! | N | Body diode ideality factor | 1.5 |
-//! | TT | Body diode transit time | 50ns |
-//! | BV | Breakdown voltage | 100V |
+//! | TT | Body diode transit time | 0 |
+//! | BV | Body diode breakdown voltage | 1e99V |
 
 use super::{dev_fetlim, dev_limvds};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
@@ -35,11 +35,7 @@ use crate::solver::{CscIndex, StaticMatrix};
 use crate::{NodeId, Value};
 
 mod device;
-mod recovery;
-mod thermal;
 mod types;
 
 pub use device::Vdmos;
-pub use recovery::DiodeRecovery;
-pub use thermal::ThermalNetwork;
 pub use types::{VdmosRegion, VdmosType};
