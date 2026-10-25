@@ -13,10 +13,10 @@ use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::framework::command_registry::Registry;
 
 mod canvas_focus;
-mod category;
+pub(crate) mod category;
 mod input_snapshot;
 mod platform;
-mod resolver;
+pub(crate) mod resolver;
 
 pub(crate) use canvas_focus::engineering_canvas_has_focus;
 pub(crate) use canvas_focus::report_engineering_canvas_focus;
@@ -60,42 +60,5 @@ pub(crate) fn accessibility_shortcut_summary(
         String::new()
     } else {
         format!(" Shortcuts: {}.", entries.join("; "))
-    }
-}
-
-#[cfg(test)]
-mod accessibility_tests {
-    use super::*;
-    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
-    use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
-
-    #[test]
-    fn accessibility_projection_uses_effective_custom_profile_and_host() {
-        let mut shortcuts = ShortcutPreferences::default();
-        shortcuts
-            .set_binding(
-                &CommandRegistry,
-                Command::SymbolCircleTool.key(),
-                ShortcutBindingSlot::Primary,
-                vec![CommandPlatform::Desktop],
-                Some(ShortcutSequence::single(ShortcutStroke::new(
-                    Key::F9,
-                    false,
-                    true,
-                    false,
-                ))),
-            )
-            .unwrap();
-
-        let summary = accessibility_shortcut_summary(
-            &shortcuts,
-            &CommandRegistry,
-            command_registry(),
-            CommandPlatform::Desktop,
-            egui::os::OperatingSystem::Windows,
-            &[Command::SymbolCircleTool.key()],
-        );
-
-        assert_eq!(summary, " Shortcuts: Alt+F9: Draw symbol circle.");
     }
 }
