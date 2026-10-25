@@ -35,7 +35,7 @@
 
 use egui::{FocusDirection, Id, Key, Modifiers, Rect, Response, Ui};
 
-use crate::workbench::state::NavigatorTreeNode;
+use crate::workbench::state::navigator_tree::NavigatorTreeNode;
 
 /// Where one row's fold position is kept, so a key can move it.
 ///

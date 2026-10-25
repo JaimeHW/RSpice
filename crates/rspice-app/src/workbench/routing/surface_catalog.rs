@@ -11,7 +11,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// Canonical composition family for a GUI surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

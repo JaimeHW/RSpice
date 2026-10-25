@@ -70,7 +70,6 @@ SLICE_RULES = [
     (W + r"app_state/session/(state_init|serialization)\.rs$", "session"),
     (W + r"app_state/stack_budget\.rs$", "session"),
     (W + r"state\.rs$", "session"),
-    (W + r"state/retired_documents\.rs$", "session"),
     (W + r"state/tests", "session"),
     (W + r"lifecycle/session\.rs$", "session"),
     (W + r"lifecycle/session/", "session"),
@@ -215,7 +214,9 @@ SLICE_RULES = [
     # The process logger is main's: env_logger and its native init.
     (W + r"logging\.rs$", "shell"),
     (W + r"(layout|localization)\.rs$", "framework"),
-    (W + r"state/navigator_tree", "framework"),
+    # The workbench's own session, the views over its records, and how a
+    # retired document identity reads back.
+    (W + r"state/(navigator_tree|workbench_session|console_views|retired_documents)", "framework"),
     (W + r"state/plan_provenance", "results"),
     (W + r"state/session_views", "session"),
     (W + r"state/stimulus_", "design"),

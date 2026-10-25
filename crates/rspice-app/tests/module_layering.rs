@@ -630,11 +630,14 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // Read-only observation of the browser workbench for qualification
     // builds. It reaches nothing of the shell's; the application starts it.
     "browser/qualification",
-    "state",
     "routing/surface_route",
     "routing/surface_catalog",
     "routing/availability",
     "routing/navigation",
+    // The workbench's session and the pages' persisted views. The session
+    // holds the route and its history, so it sits above routing; the routes
+    // name a workspace, which is the model's.
+    "state",
     "logging",
     "layout",
     // The interface text catalog and its locales. It names nothing of the
@@ -868,11 +871,10 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("commands", "tools/jobs_manager", 1),
     ("commands", "tools/specialist_tool_browser", 1),
     ("surfaces", "preflight", 1),
-    // The shell's own persisted state reaching up into routing, presentation,
-    // and the document engines. This is the same inversion the top-level
-    // `state -> *` entries describe, one layer down: `WorkbenchSession` stores
-    // what a surface is showing instead of the surface deriving it.
-    ("state", "routing/availability", 4),
+    // The shell's own persisted state reaching up into the window session.
+    // This is the same inversion the top-level `state -> *` entries describe,
+    // one layer down: `WorkbenchSession` stores what a surface is showing
+    // instead of the surface deriving it.
     ("state", "lifecycle/window_session", 2),
     // The framework dialogs the workbench holds: the window-session manager,
     // the command palette, the confirmation and project-review dialogs, and
@@ -880,10 +882,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // and the session aggregate.
     ("state", "app", 4),
     ("state", "app_state", 1),
-    // The text locale and the source-editor requests the workbench holds:
-    // their types live with the message catalog and the text editor commands.
+    // The text locale the workbench holds: its type lives with the message
+    // catalog.
     ("state", "localization", 1),
-    ("state", "documents/text_editor_commands", 1),
     // The design slot holds the schematic cross-probe runtime, whose type
     // lives with the frame pass that synchronizes it.
     ("slots", "cross_probe", 1),

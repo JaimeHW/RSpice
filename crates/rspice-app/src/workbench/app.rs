@@ -93,12 +93,9 @@ use browser_history::{
     initialize_browser_surface_navigation, synchronize_browser_surface_navigation,
 };
 
-pub(crate) use dialogs::confirmation_state::ProjectReviewDialogState;
 #[cfg(test)]
 pub(crate) use dialogs::confirmation_state::ProjectReviewRequest;
-pub use dialogs::confirmation_state::{
-    ConfirmationAction, ConfirmationDialogState, ConfirmationResponse,
-};
+pub use dialogs::confirmation_state::{ConfirmationAction, ConfirmationResponse};
 
 /// The Model Hub work vocabulary, named where surfaces can reach it.
 pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;

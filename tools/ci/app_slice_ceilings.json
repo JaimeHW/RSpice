@@ -39,7 +39,7 @@
     "simulate->results": 9
   },
   "lower->upper": {
-    "framework->session": 289,
+    "framework->session": 56,
     "run->session": 1
   },
   "whole-app": {

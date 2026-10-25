@@ -54,7 +54,7 @@ pub(crate) use design_history::{
     publish_symbol_definition_candidate_with_fixture,
 };
 pub(crate) use interaction_state::SchematicKeyboardFocus;
-pub use interaction_state::{ContextTarget, DragType, InteractionState};
+pub use interaction_state::{ContextTarget, DragType};
 pub(crate) use model::{Model, SlotFacts};
 // The platform services' own state, which they name beside the model.
 pub(in crate::workbench) use crate::workbench::slots::PlatformState;

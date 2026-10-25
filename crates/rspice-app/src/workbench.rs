@@ -93,10 +93,9 @@ pub use preferences::{
     EngineeringExportFormat, FolderListPreference, ScalarPreference, TogglePreference,
     UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
-pub use routing::availability::SurfaceRouteUnavailable;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use routing::navigation::BrowserHistoryEffect;
-pub use routing::navigation::{RouteTransition, RouteTransitionSource, SurfaceNavigation};
+pub use routing::navigation::{RouteTransitionSource, SurfaceNavigation};
 pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 pub use routing::surface_route::SurfaceRoute;
 pub use rspice_design::symbol::edit::{SymbolCommitIntent, SymbolDocumentSnapshot};

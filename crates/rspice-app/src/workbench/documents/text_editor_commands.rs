@@ -9,6 +9,9 @@ use std::ops::Range;
 use egui::text::{CCursor, CCursorRange};
 use egui::{Id, Key, KeyboardShortcut, Modifiers, Ui};
 
+// The workbench session records which source editor a page shows.
+pub(crate) use crate::workbench::state::ActiveSourceEditor;
+
 #[derive(Debug, Clone, Default)]
 struct GoToLineState {
     open: bool,
@@ -219,17 +222,6 @@ pub(crate) fn take_queued_standard_command(
     context.data_mut(|data| {
         data.remove_temp::<StandardCommand>(editor_id.with("pending-standard-command"))
     })
-}
-
-/// The source editor a page shows as its document, as the application's
-/// menus, palette and shortcuts address it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ActiveSourceEditor {
-    pub id: Id,
-    pub editable: bool,
-    /// Its language service answers go to definition, find references and
-    /// rename for this document.
-    pub navigable: bool,
 }
 
 /// What the application asks of the active source editor. Each one is
