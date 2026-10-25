@@ -25,15 +25,13 @@
     "project->models": 6,
     "project->results": 1,
     "project->simulate": 3,
-    "results->code": 2,
+    "results->code": 3,
     "results->design": 16,
-    "results->simulate": 2,
     "settings->code": 3,
-    "simulate->code": 1,
     "simulate->design": 4,
     "simulate->models": 19,
     "simulate->project": 2,
-    "simulate->results": 9
+    "simulate->results": 6
   },
   "lower->upper": {},
   "whole-app": {
