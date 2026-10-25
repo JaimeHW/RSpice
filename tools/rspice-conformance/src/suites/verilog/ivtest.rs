@@ -59,10 +59,15 @@ use std::path::PathBuf;
 /// holds `regress-vlg.list`, `ivltests/` and `gold/`.
 pub const IVTEST_DIR_ENV: &str = "RSPICE_IVTEST_DIR";
 
-/// Where the checkout is, or why it is absent. Its `work/` directory, where
-/// tests write their output files, is created when missing: a fresh
-/// checkout has none, and both Icarus Verilog and RSpice run the tests from
-/// the checkout.
+/// The checkout's directories that tests write into: `work/` for output
+/// files and `log/` for the files `$fmonitor` tests write and read back. The
+/// suite's repository ignores both, so a fresh checkout has neither; the
+/// suite's own runners create them, and so does [`ivtest_dir`], because both
+/// Icarus Verilog and RSpice run the tests from the checkout.
+const OUTPUT_DIRS: [&str; 2] = ["work", "log"];
+
+/// Where the checkout is, or why it is absent, with the directories its tests
+/// write into created when missing.
 pub fn ivtest_dir() -> Result<PathBuf, String> {
     let Some(value) = std::env::var_os(IVTEST_DIR_ENV).filter(|value| !value.is_empty()) else {
         return Err(format!(
@@ -71,7 +76,10 @@ pub fn ivtest_dir() -> Result<PathBuf, String> {
              (https://github.com/steveicarus/iverilog, tag v13_0)."
         ));
     };
-    let dir = PathBuf::from(value);
+    checkout(PathBuf::from(value))
+}
+
+fn checkout(dir: PathBuf) -> Result<PathBuf, String> {
     if !dir.join(list::SourceList::Vlg.file_name()).is_file() {
         return Err(format!(
             "ivtest oracle absent: {IVTEST_DIR_ENV}={} has no {}",
@@ -79,13 +87,33 @@ pub fn ivtest_dir() -> Result<PathBuf, String> {
             list::SourceList::Vlg.file_name()
         ));
     }
-    let work = dir.join("work");
-    std::fs::create_dir_all(&work)
-        .map_err(|error| format!("ivtest oracle: cannot create {}: {error}", work.display()))?;
+    for name in OUTPUT_DIRS {
+        let output = dir.join(name);
+        std::fs::create_dir_all(&output).map_err(|error| {
+            format!("ivtest oracle: cannot create {}: {error}", output.display())
+        })?;
+    }
     Ok(dir)
 }
 
 /// `tests/verilog/ivtest-manifest.tsv`.
 pub fn manifest_path() -> PathBuf {
     super::corpus_dir().join(manifest::FILE_NAME)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fresh_checkout_gets_every_directory_its_tests_write_into() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        std::fs::write(root.path().join(list::SourceList::Vlg.file_name()), "")
+            .expect("regression list");
+
+        let dir = checkout(root.path().to_path_buf()).expect("a checkout with its list");
+
+        assert!(dir.join("work").is_dir());
+        assert!(dir.join("log").is_dir());
+    }
 }
