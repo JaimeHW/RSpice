@@ -4,7 +4,7 @@
 //! construction. They preserve simulator-level device invariants by removing
 //! ideal topological shorts before individual device builders validate values.
 
-use super::flattener::extract_parenthesized;
+use super::flattener::{extract_parenthesized, is_ident_continue, is_ident_start};
 use super::{Element, ElementKind, XspiceDigitalNode, XspicePort};
 use crate::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -1376,14 +1376,6 @@ fn remap_probe_node(raw: &str, remap_node: &impl Fn(&str) -> String) -> String {
 fn is_simple_probe_name(raw: &str) -> bool {
     raw.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '$'))
-}
-
-fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
-}
-
-fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':'
 }
 
 #[cfg(test)]
