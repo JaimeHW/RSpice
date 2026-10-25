@@ -1227,25 +1227,7 @@ impl MeasureEngine {
         reference: FileErrorReference<'_>,
         data: MeasureData<'_, '_>,
     ) -> MeasureResult {
-        let FileErrorReference {
-            file,
-            reference_data,
-            norm,
-            independent_column,
-            dependent_column,
-        } = reference;
-        match self.file_error_value(
-            analysis,
-            signal_name,
-            FileErrorReference {
-                file,
-                reference_data,
-                norm,
-                independent_column,
-                dependent_column,
-            },
-            data,
-        ) {
+        match self.file_error_value(analysis, signal_name, reference, data) {
             Ok(value) => MeasureResult::success(name, value),
             Err(error) => MeasureResult::failed(name, &error),
         }
@@ -2262,10 +2244,9 @@ fn delay_clause_event(
     after: Option<Value>,
 ) -> Result<Option<Value>, String> {
     let MeasureWindow {
-        from,
-        to,
         td: effective_td,
         minval,
+        ..
     } = window;
     let MeasureData {
         axis,
@@ -2282,12 +2263,7 @@ fn delay_clause_event(
                     legacy_delay_accepts_sample(
                         *sample,
                         effective_td,
-                        MeasureWindow {
-                            from,
-                            to,
-                            td: None,
-                            minval,
-                        },
+                        MeasureWindow { td: None, ..window },
                     ) && *sample >= *target
                 }))
             } else {
@@ -2319,12 +2295,7 @@ fn delay_clause_event(
                     && !legacy_delay_accepts_sample(
                         axis[row],
                         effective_td,
-                        MeasureWindow {
-                            from,
-                            to,
-                            td: None,
-                            minval,
-                        },
+                        MeasureWindow { td: None, ..window },
                     )
                 {
                     continue;
@@ -2383,27 +2354,15 @@ fn eval_legacy_frac_delay(
     window: MeasureWindow,
     data: MeasureData<'_, '_>,
 ) -> Result<Option<(Value, Value)>, String> {
-    let MeasureWindow {
-        from, to, minval, ..
-    } = window;
     let MeasureData { axis, signals, .. } = data;
     let (trigger_signal, trigger_target) = resolve_legacy_frac_clause(trig, signals)?;
     let (Some(target_signal), target_target) = resolve_legacy_frac_clause(targ, signals)? else {
         return Ok(None);
     };
-    let mut tracker = LegacyFracDelayTracker::new(trig, targ, minval);
+    let mut tracker = LegacyFracDelayTracker::new(trig, targ, window.minval);
     let mut result = None;
     for row in 0..axis.len() {
-        if !legacy_delay_accepts_sample(
-            axis[row],
-            td,
-            MeasureWindow {
-                from,
-                to,
-                td: None,
-                minval,
-            },
-        ) {
+        if !legacy_delay_accepts_sample(axis[row], td, MeasureWindow { td: None, ..window }) {
             continue;
         }
         let trigger_value = trigger_signal.map_or(0.0, |signal| signal[row]);
