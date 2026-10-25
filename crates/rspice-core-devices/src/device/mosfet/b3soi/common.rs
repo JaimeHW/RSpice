@@ -6,6 +6,29 @@
 use crate::{NodeId, Value, device::traits::MatrixStamper};
 use std::collections::HashMap;
 
+pub mod params;
+
+/// `Deref`/`DerefMut` from a variant's card or size record to the core it
+/// embeds as `core`, so `p.field` reads the same for shared and own fields.
+macro_rules! deref_core {
+    ($outer:ty => $core:ty) => {
+        impl std::ops::Deref for $outer {
+            type Target = $core;
+            #[inline]
+            fn deref(&self) -> &$core {
+                &self.core
+            }
+        }
+        impl std::ops::DerefMut for $outer {
+            #[inline]
+            fn deref_mut(&mut self) -> &mut $core {
+                &mut self.core
+            }
+        }
+    };
+}
+pub(crate) use deref_core;
+
 /// The companion currents one SOI charge stamp injects at a time step: one per
 /// stored charge (gate, body, drain, back gate and the self-heating thermal
 /// node). The integrator produces them together and the stamp is only correct
