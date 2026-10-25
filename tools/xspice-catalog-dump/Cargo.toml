@@ -3,10 +3,8 @@ name = "rspice-xspice-catalog-dump"
 description = "Development utility for auditing the compiled RSpice XSPICE registry"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license-file.workspace = true
 publish = false
-repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]

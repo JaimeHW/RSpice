@@ -1,13 +1,10 @@
 [package]
 name = "rspice-matrix"
 description = "Sparse matrix storage and factorization for RSpice"
-readme = "README.md"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
-repository.workspace = true
 rust-version.workspace = true
 
 [features]

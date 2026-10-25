@@ -3,10 +3,8 @@ name = "rspice-core-base"
 description = "The vocabulary every crate of the RSpice engine reads: numerics, solver, expressions, configuration and IO"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
-repository.workspace = true
 rust-version.workspace = true
 
 # The feature set is rspice-core's, key for key, so that `family_features!`

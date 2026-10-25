@@ -156,7 +156,7 @@ const LONG_VERSION: &str = concat!(
 /// RSpice - High-performance SPICE circuit simulator
 #[derive(Parser, Debug)]
 #[command(name = "rspice")]
-#[command(author, version, about, long_about = None)]
+#[command(version, about, long_about = None)]
 #[command(long_version = LONG_VERSION)]
 #[command(propagate_version = true)]
 pub struct Cli {

@@ -676,7 +676,7 @@ fn validate_package_slug(slug: &str) -> BuiltinResult<()> {
 
 fn render_model_package_manifest(package: &GeneratedModelPackage) -> String {
     format!(
-        "[package]\nname = {:?}\ndescription = \"Precompiled RSpice Verilog-A model artifact\"\nversion.workspace = true\nedition.workspace = true\nauthors.workspace = true\nlicense-file.workspace = true\npublish.workspace = true\nrepository.workspace = true\nrust-version.workspace = true\n\n[features]\ndefault = []\nveriloga-builtins-noise = []\n\n[dependencies]\nrspice-veriloga-runtime.workspace = true\n\n[lib]\ndoctest = false\n\n[lints]\nworkspace = true\n",
+        "[package]\nname = {:?}\ndescription = \"Precompiled RSpice Verilog-A model artifact\"\nversion.workspace = true\nedition.workspace = true\nlicense-file.workspace = true\npublish.workspace = true\nrust-version.workspace = true\n\n[features]\ndefault = []\nveriloga-builtins-noise = []\n\n[dependencies]\nrspice-veriloga-runtime.workspace = true\n\n[lib]\ndoctest = false\n\n[lints]\nworkspace = true\n",
         package.package_name
     )
 }
@@ -691,7 +691,7 @@ fn render_model_package_lib(package: &GeneratedModelPackage) -> String {
 
 fn render_model_catalog_manifest(packages: &[GeneratedModelPackage]) -> String {
     let mut out = String::from(
-        "[package]\nname = \"rspice-veriloga-models\"\ndescription = \"Feature-selectable precompiled Verilog-A model catalog for RSpice\"\nversion.workspace = true\nedition.workspace = true\nauthors.workspace = true\nlicense-file.workspace = true\npublish.workspace = true\nrepository.workspace = true\nrust-version.workspace = true\n\n[features]\ndefault = []\n",
+        "[package]\nname = \"rspice-veriloga-models\"\ndescription = \"Feature-selectable precompiled Verilog-A model catalog for RSpice\"\nversion.workspace = true\nedition.workspace = true\nlicense-file.workspace = true\npublish.workspace = true\nrust-version.workspace = true\n\n[features]\ndefault = []\n",
     );
     for package in packages {
         let _ = writeln!(

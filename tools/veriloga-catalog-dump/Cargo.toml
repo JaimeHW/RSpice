@@ -3,10 +3,8 @@ name = "rspice-veriloga-catalog-dump"
 description = "Release utility for validating and auditing the compiled RSpice generated Verilog-A catalog"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license-file.workspace = true
 publish = false
-repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]

@@ -3,10 +3,8 @@ name = "rspice-app"
 version.workspace = true
 edition.workspace = true
 description = "Modern circuit simulator GUI for RSpice - Commercial-grade egui application"
-authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
-repository.workspace = true
 rust-version.workspace = true
 build = "build.rs"
 

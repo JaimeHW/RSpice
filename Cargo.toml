@@ -59,7 +59,6 @@ edition = "2024"
 authors = ["RSpice Contributors"]
 license-file = "LICENSE"
 publish = false
-repository = "https://github.com/JaimeHW/RSpice"
 rust-version = "1.94"
 
 [workspace.dependencies]

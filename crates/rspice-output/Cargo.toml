@@ -3,10 +3,8 @@ name = "rspice-output"
 description = "Transactional native artifact publication for RSpice"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
-repository.workspace = true
 rust-version.workspace = true
 
 [features]
