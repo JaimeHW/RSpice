@@ -683,7 +683,7 @@ fn specification_authoring_is_reachable_before_the_first_dataset() {
 
     let mut state = AppState::default();
     state.results.results.session.viewer = ResultViewer::Specs;
-    specs::open_editor(&mut state);
+    specs::open_editor(&mut state.results_parts());
     assert!(result_stage_bar_visible(&state));
 }
 

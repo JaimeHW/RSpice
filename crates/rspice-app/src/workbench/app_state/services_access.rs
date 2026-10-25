@@ -175,7 +175,7 @@ fn revert_document_in_place(
         }
         RevertFollowUp::ResultHistory(presentation) => {
             crate::workbench::documents::result_document::restore_presentation(state, presentation);
-            state.clear_specialized_viewer_data();
+            state.results.analysis.clear_specialized_viewer_data();
         }
         RevertFollowUp::StimulusLibrary => state.design.on_project_changed(),
         RevertFollowUp::NetlistSource => {

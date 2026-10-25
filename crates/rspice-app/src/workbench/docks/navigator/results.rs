@@ -947,7 +947,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             super::super::inspector::run_details::open(&mut app.state, run_id);
                         }
                         if log {
-                            open_run_log(&mut app.state, run_id);
+                            open_run_log(&app.state.model, &mut app.state.workbench, run_id);
                         }
                     }
                     if responses.overlay.is_some_and(|response| response.clicked()) {

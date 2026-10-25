@@ -43,7 +43,7 @@ pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::NoticeKind;
-use crate::workbench::documents::result_document::ResultsReads;
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
@@ -219,6 +219,22 @@ impl AppState {
             analysis: &self.results.analysis,
             model: &self.model,
             workbench: &self.workbench,
+        }
+    }
+
+    /// The parts the results workspace's commands write.
+    pub(crate) fn results_parts(&mut self) -> ResultsParts<'_> {
+        let results = &mut *self.results;
+        ResultsParts {
+            results: &mut results.results,
+            analysis: &mut results.analysis,
+            result_document_dialog: &mut results.result_document_dialog,
+            create_result_document: &mut results.create_result_document,
+            result_import: &mut results.result_import,
+            specification_editor_route_pending: &mut results.specification_editor_route_pending,
+            model: &mut self.model,
+            workbench: &mut self.workbench,
+            platform: &self.platform,
         }
     }
 

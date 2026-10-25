@@ -1122,18 +1122,24 @@ impl Command {
                 "no retained result dataset is available"
             }
             Self::OpenRunInResults => "the selected run has no retained dataset to open in Results",
-            Self::OpenProducingPlan => super::result_navigation::producing_plan_hop(app)
-                .err()
-                .unwrap_or("this dataset does not name a simulation plan that produced it"),
+            Self::OpenProducingPlan => {
+                super::result_navigation::producing_plan_hop(app.state.results_reads())
+                    .err()
+                    .unwrap_or("this dataset does not name a simulation plan that produced it")
+            }
             // Both refusals come from the resolver that would perform the hop,
             // so the reason a control is grey is the reason it would have
             // failed rather than a second account of it.
-            Self::OpenTaskDeck => super::result_navigation::task_deck_hop(app)
-                .err()
-                .unwrap_or("the selected run has no retained source to open"),
-            Self::RevealProducerLog => super::result_navigation::producer_log_hop(app)
-                .err()
-                .unwrap_or("no check-marked quantity names a producer"),
+            Self::OpenTaskDeck => {
+                super::result_navigation::task_deck_hop(app.state.results_reads())
+                    .err()
+                    .unwrap_or("the selected run has no retained source to open")
+            }
+            Self::RevealProducerLog => {
+                super::result_navigation::producer_log_hop(app.state.results_reads())
+                    .err()
+                    .unwrap_or("no check-marked quantity names a producer")
+            }
             Self::FamilySlicing
                 if app.state.workbench.current_route().surface_id()
                     == crate::workbench::SurfaceId::Results

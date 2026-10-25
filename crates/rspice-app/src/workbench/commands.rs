@@ -759,7 +759,7 @@ impl Command {
             Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
             Self::ImportResultDataset => {
                 crate::workbench::workflows::result_import_workflow::import_result_dataset(
-                    &mut app.state,
+                    &mut app.state.results_parts(),
                 );
             }
             Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
@@ -1551,24 +1551,32 @@ impl Command {
             // Disabled while a run is executing.
             Self::ClearResults => {
                 if !app.state.model.simulation.execution.has_active_execution() {
-                    app.state.clear_simulation_results();
+                    app.state.results_parts().clear_simulation_results();
                 }
             }
             Self::ToggleLinkedCursors => {
-                crate::workbench::documents::result_document::toggle_linked_cursors(&mut app.state);
+                crate::workbench::documents::result_document::toggle_linked_cursors(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::DatasetManifestBrowser => {
-                crate::workbench::documents::result_document::open_dataset_browser(app);
+                crate::workbench::documents::result_document::open_dataset_browser(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::CreateResultDocument => {
-                crate::workbench::documents::result_document::open_create_document(app);
+                crate::workbench::documents::result_document::open_create_document(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::WaveformCalculator => app.state.results.waveform_calculator_dialog = true,
             Self::ExpressionDiagnostics => {
                 app.state.results.expression_diagnostics_dialog = true;
             }
             Self::CompareResultDatasets => {
-                crate::workbench::documents::result_document::open_compare(&mut app.state);
+                crate::workbench::documents::result_document::open_compare(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::ResultViewer(viewer) => {
                 if viewer == crate::workbench::ResultViewer::Waves
@@ -1583,7 +1591,7 @@ impl Command {
             }
             Self::EditSpecifications => {
                 crate::workbench::documents::result_document::open_specification_editor(
-                    &mut app.state,
+                    &mut app.state.results_parts(),
                 );
             }
             Self::VerificationPage(page) => {
@@ -1760,44 +1768,53 @@ impl Command {
                 super::surfaces::report_authoring::open_page_properties(app);
             }
             Self::AddVisualizationPane => {
-                crate::workbench::documents::result_document::open_add_pane(&mut app.state);
+                crate::workbench::documents::result_document::open_add_pane(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::MeasurementLibrary => {
-                crate::workbench::documents::result_document::open_measurement(&mut app.state);
+                crate::workbench::documents::result_document::open_measurement(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::FamilySlicing => {
-                crate::workbench::documents::result_document::open_family(&mut app.state);
+                crate::workbench::documents::result_document::open_family(
+                    &mut app.state.results_parts(),
+                );
             }
             // The run is already the selected one: every affordance that hops
             // here selects it first, so this command carries the workspace
             // half of the destination and nothing else.
             Self::OpenRunInResults => activate_workspace(app, Workspace::Results),
-            Self::OpenProducingPlan => match result_navigation::producing_plan_hop(app) {
-                Ok(hop) => {
-                    // Written unconditionally, `None` included. A hop whose
-                    // producing instance is gone used to leave the previously
-                    // highlighted one selected, so the page arrived showing an
-                    // analysis that produced nothing the reader was looking at
-                    // — while the note said nothing had been selected.
-                    app.state.simulate.active_analysis_instance = hop.instance;
-                    let notes = [hop.selected_note, hop.instance_note]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>();
-                    if !notes.is_empty() {
-                        app.state.prompt(notes.join(" "));
+            Self::OpenProducingPlan => {
+                match result_navigation::producing_plan_hop(app.state.results_reads()) {
+                    Ok(hop) => {
+                        // Written unconditionally, `None` included. A hop whose
+                        // producing instance is gone used to leave the previously
+                        // highlighted one selected, so the page arrived showing an
+                        // analysis that produced nothing the reader was looking at
+                        // — while the note said nothing had been selected.
+                        app.state.simulate.active_analysis_instance = hop.instance;
+                        let notes = [hop.selected_note, hop.instance_note]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        if !notes.is_empty() {
+                            app.state.prompt(notes.join(" "));
+                        }
+                        Self::SimulationPage(super::state::SimulationPage::Analyses).execute(app);
                     }
-                    Self::SimulationPage(super::state::SimulationPage::Analyses).execute(app);
+                    Err(reason) => app.state.prompt(format!(
+                        "Could not open the producing simulation plan: {reason}."
+                    )),
                 }
-                Err(reason) => app.state.prompt(format!(
-                    "Could not open the producing simulation plan: {reason}."
-                )),
-            },
+            }
             // Both re-resolve rather than trusting the availability read that
             // drew the row: the palette is not modal, and a run can be pruned
             // or a check-mark cleared between the frame that greyed the row
             // and the keystroke that took it.
-            Self::OpenTaskDeck => match result_navigation::task_deck_hop(app) {
+            Self::OpenTaskDeck => match result_navigation::task_deck_hop(app.state.results_reads())
+            {
                 Ok(sequence) => {
                     result_navigation::open_task_deck(&mut app.state, sequence);
                 }
@@ -1805,14 +1822,22 @@ impl Command {
                     .state
                     .prompt(format!("Could not open the task deck: {reason}.")),
             },
-            Self::RevealProducerLog => match result_navigation::producer_log_hop(app) {
-                Ok(run_sequence) => result_navigation::open_run_log(&mut app.state, run_sequence),
-                Err(reason) => app
-                    .state
-                    .prompt(format!("Could not open the run log: {reason}.")),
-            },
+            Self::RevealProducerLog => {
+                match result_navigation::producer_log_hop(app.state.results_reads()) {
+                    Ok(run_sequence) => result_navigation::open_run_log(
+                        &app.state.model,
+                        &mut app.state.workbench,
+                        run_sequence,
+                    ),
+                    Err(reason) => app
+                        .state
+                        .prompt(format!("Could not open the run log: {reason}.")),
+                }
+            }
             Self::VisualizationDocumentProperties => {
-                crate::workbench::documents::result_document::open_properties(&mut app.state);
+                crate::workbench::documents::result_document::open_properties(
+                    &mut app.state.results_parts(),
+                );
             }
             Self::HelpCenter => {
                 open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)

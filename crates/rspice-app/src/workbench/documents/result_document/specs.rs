@@ -22,7 +22,7 @@ use crate::state::{SimulationRun, SpecEntry, SpecPointScope, SpecificationDefini
 use crate::workbench::AppState;
 use rspice_results_ui::specs::editor::{self, SpecDraft};
 
-use super::ResultViewer;
+use super::{ResultViewer, ResultsParts};
 
 /// Measurements present in the active dataset but not yet bound by the
 /// active requirement contract. The editor never discovers names from a
@@ -248,7 +248,7 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
 }
 
 /// Open the editor seeded from the current workspace specs.
-pub fn open_editor(state: &mut AppState) {
+pub fn open_editor(state: &mut ResultsParts<'_>) {
     let drafts = state
         .model
         .sim_setup
@@ -284,7 +284,7 @@ pub fn open_editor(state: &mut AppState) {
                         .collect()
                 })
         });
-    state.results.results.session.spec_drafts = Some(drafts);
+    state.results.session.spec_drafts = Some(drafts);
 }
 
 /// Right panel: the same active-dataset projection shown in the document.

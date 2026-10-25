@@ -715,7 +715,9 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         // The limits are plan-owned data with one editor; this page reads
         // them and hands off rather than giving the same records a second
         // author.
-        crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
+        crate::workbench::documents::result_document::open_specification_editor(
+            &mut app.state.results_parts(),
+        );
     }
     if let Some(index) = picked_class {
         app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];

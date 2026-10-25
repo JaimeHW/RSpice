@@ -12,7 +12,9 @@ use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
 use crate::workbench::app_state::{AppState, Model};
-use crate::workbench::documents::result_document::{ResultsReads, histogram_is_available};
+use crate::workbench::documents::result_document::{
+    ResultsParts, ResultsReads, histogram_is_available,
+};
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Provenance for the mutable specialized result caches.
@@ -54,6 +56,29 @@ pub struct ViewerCapability {
 }
 
 impl AnalysisWorkspaceState {
+    /// Clear transient-derived viewer caches without disturbing AC/RF state.
+    pub(crate) fn clear_transient_specialized_viewer_data(&mut self) {
+        self.fft_state.clear();
+        self.eye_diagram_state
+            .load_data(rspice_results_ui::eye_diagram::EyeData::default());
+        self.cache_authority.fft = None;
+        self.cache_authority.eye = None;
+    }
+
+    /// Clear all specialized (non-waveform) viewer data caches.
+    ///
+    /// Use when result selection changes in a way that can invalidate
+    /// cached analysis-specific visualizations.
+    pub(crate) fn clear_specialized_viewer_data(&mut self) {
+        self.clear_transient_specialized_viewer_data();
+        self.histogram_state.clear_selection();
+        self.bode_plot_state
+            .load_data(rspice_results_ui::bode::BodeData::new());
+        self.nyquist_state.clear();
+        self.smith_chart_state.clear_traces();
+        self.cache_authority = Default::default();
+    }
+
     /// The exact result that owns a viewer's mutable cache, for the viewers
     /// that keep one.
     fn cache_provenance(&self, viewer: ActiveViewer) -> Option<SpecializedViewerCacheProvenance> {
@@ -92,42 +117,6 @@ impl AppState {
         self.results.results.session.phase_continuous = self.model.preferences.unwrapped_phase();
         self.results
             .start_waveform_view_from_preferences(&self.model.preferences);
-    }
-
-    /// Clear user-visible simulation result history and derived result viewers.
-    pub(crate) fn clear_simulation_results(&mut self) {
-        if self.model.simulation.execution.has_active_execution() {
-            return;
-        }
-        self.model.simulation.clear_runs();
-        self.clear_specialized_viewer_data();
-    }
-
-    /// Clear transient-derived viewer caches without disturbing AC/RF state.
-    pub fn clear_transient_specialized_viewer_data(&mut self) {
-        self.results.analysis.fft_state.clear();
-        self.results
-            .analysis
-            .eye_diagram_state
-            .load_data(rspice_results_ui::eye_diagram::EyeData::default());
-        self.results.analysis.cache_authority.fft = None;
-        self.results.analysis.cache_authority.eye = None;
-    }
-
-    /// Clear all specialized (non-waveform) viewer data caches.
-    ///
-    /// Use when result selection changes in a way that can invalidate
-    /// cached analysis-specific visualizations.
-    pub fn clear_specialized_viewer_data(&mut self) {
-        self.clear_transient_specialized_viewer_data();
-        self.results.analysis.histogram_state.clear_selection();
-        self.results
-            .analysis
-            .bode_plot_state
-            .load_data(rspice_results_ui::bode::BodeData::new());
-        self.results.analysis.nyquist_state.clear();
-        self.results.analysis.smith_chart_state.clear_traces();
-        self.results.analysis.cache_authority = Default::default();
     }
 
     /// The bit period the eye folds this result at.
@@ -274,6 +263,17 @@ impl AppState {
     #[cfg(test)]
     pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
         self.results_reads().viewer_capability(viewer).available
+    }
+}
+
+impl ResultsParts<'_> {
+    /// Clear user-visible simulation result history and derived result viewers.
+    pub(crate) fn clear_simulation_results(&mut self) {
+        if self.model.simulation.execution.has_active_execution() {
+            return;
+        }
+        self.model.simulation.clear_runs();
+        self.analysis.clear_specialized_viewer_data();
     }
 }
 
@@ -542,7 +542,7 @@ mod tests {
         assert!(state.viewer_is_available(ActiveViewer::SmithChart));
         assert!(state.viewer_is_available(ActiveViewer::Fft));
 
-        state.clear_simulation_results();
+        state.results_parts().clear_simulation_results();
 
         assert!(!state.model.simulation.retained.has_results());
         for viewer in [

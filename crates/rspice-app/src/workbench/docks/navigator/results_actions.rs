@@ -505,7 +505,7 @@ pub(super) fn result_artifact_context_menu(
             artifact.identity.analysis().dataset_id(),
         ) && ui.button("Open run log").clicked()
         {
-            open_run_log(&mut app.state, run);
+            open_run_log(&app.state.model, &mut app.state.workbench, run);
             ui.close();
         }
     });
@@ -574,7 +574,7 @@ pub(super) fn result_signal_context_menu(
         }
         if create.clicked() {
             select_result_signal_by_key(app, &key);
-            crate::workbench::documents::result_document::open_create_document(app);
+            crate::workbench::documents::result_document::open_create_document(&mut app.state.results_parts());
             ui.close();
         }
         ui.separator();
@@ -698,7 +698,7 @@ pub(super) fn result_signal_context_menu(
             key.analysis().dataset_id(),
         ) && ui.button("Open run log").clicked()
         {
-            open_run_log(&mut app.state, run);
+            open_run_log(&app.state.model, &mut app.state.workbench, run);
             ui.close();
         }
     });

@@ -72,7 +72,7 @@ fn show_document(app: &mut RSpiceApp, document_id: ResultDocumentId) {
 }
 
 fn commit_add_pane(app: &mut RSpiceApp) {
-    open_add_pane(&mut app.state);
+    open_add_pane(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::AddPane(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {
@@ -127,7 +127,7 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
     app.state.model.simulation.retained.runs.push(second);
     show_document(&mut app, document_id);
 
-    open_add_pane(&mut app.state);
+    open_add_pane(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::AddPane(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {
@@ -160,7 +160,7 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
 fn the_add_pane_form_draws_over_the_document() {
     let (mut app, document_id) = document_fixture("two-linked-panes");
     show_document(&mut app, document_id);
-    open_add_pane(&mut app.state);
+    open_add_pane(&mut app.state.results_parts());
     drive_frame(|ui| show(ui.ctx(), &mut app));
     assert!(matches!(
         app.state.results.result_document_dialog,
@@ -173,7 +173,7 @@ fn add_pane_is_offered_only_over_a_project_result_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
     assert!(!add_pane_available(app.state.results_reads()));
-    open_add_pane(&mut app.state);
+    open_add_pane(&mut app.state.results_parts());
     assert!(app.state.results.result_document_dialog.is_none());
 }
 
@@ -237,7 +237,7 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
     let (mut app, document_id) = document_fixture("single-pane");
     let binding = fixture_binding(&app);
     transact(
-        &mut app.state,
+        &mut app.state.results_parts(),
         document_id,
         vec![DocumentEdit::AddPaneOnNewPage {
             page: NewPage {
@@ -348,7 +348,7 @@ fn run_comparison(
 ) -> rspice_results_ui::document_dialogs::compare::CompareOutcome {
     app.state.workbench.workspace = Workspace::Results;
     assert!(compare_available(app.state.results_reads()));
-    open_compare(&mut app.state);
+    open_compare(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Compare(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {
@@ -479,7 +479,7 @@ fn compare_is_refused_without_a_compatible_baseline() {
     app.state.workbench.workspace = Workspace::Results;
 
     assert!(!compare_available(app.state.results_reads()));
-    open_compare(&mut app.state);
+    open_compare(&mut app.state.results_parts());
     assert!(app.state.results.result_document_dialog.is_none());
 }
 
@@ -493,7 +493,7 @@ fn measurement_preview(
     expression: &str,
 ) -> rspice_results_ui::document_dialogs::measurement::MeasurementPreview {
     app.state.workbench.workspace = Workspace::Results;
-    open_measurement(&mut app.state);
+    open_measurement(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Measurement(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {
@@ -633,7 +633,7 @@ fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
     app.state.workbench.workspace = Workspace::Results;
     app.state.results.results.session.viewer = ResultViewer::Waves;
     assert!(family_available(app.state.results_reads()));
-    open_family(&mut app.state);
+    open_family(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Family(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {
@@ -806,7 +806,7 @@ fn drawing_a_pane_family_slice_keeps_the_pane_cursors() {
         (Some(0.25), Some(0.5)),
     )
     .expect("the pane keeps cursors on its X axis");
-    transact(&mut app.state, document_id, edits).expect("the cursors are kept");
+    transact(&mut app.state.results_parts(), document_id, edits).expect("the cursors are kept");
     app.state.results.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
 
@@ -848,7 +848,7 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
     let document_id = family_document(&mut app);
     app.state.results.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
-    open_family(&mut app.state);
+    open_family(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Family(mut draft)) =
         app.state.results.result_document_dialog.clone()
     else {

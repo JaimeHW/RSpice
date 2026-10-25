@@ -31,15 +31,13 @@ fn manifest(analysis: &AnalysisResult) -> Result<FamilyManifest, String> {
 }
 
 /// The scope a policy is kept in, with the result it slices.
-fn scope(state: &AppState) -> Result<(Scope, &SimulationRun, &AnalysisResult), String> {
-    let (run, analysis) = reading_analysis(state.results_reads())?;
-    let scope = match active_document_id(state.results_reads()) {
+fn scope(state: ResultsReads<'_>) -> Result<(Scope, &SimulationRun, &AnalysisResult), String> {
+    let (run, analysis) = reading_analysis(state)?;
+    let scope = match active_document_id(state) {
         Some(document_id) => {
-            let (_, pane_id) = super::super::persistent_document::reading_position(
-                state.results_reads(),
-                document_id,
-            )
-            .ok_or_else(|| "The result document has no pane.".to_owned())?;
+            let (_, pane_id) =
+                super::super::persistent_document::reading_position(state, document_id)
+                    .ok_or_else(|| "The result document has no pane.".to_owned())?;
             Scope::Pane(document_id, pane_id)
         }
         None => Scope::QuickView(super::super::AnalysisPresentationKey::new(
@@ -50,7 +48,7 @@ fn scope(state: &AppState) -> Result<(Scope, &SimulationRun, &AnalysisResult), S
     Ok((scope, run, analysis))
 }
 
-fn current_policy(state: &AppState, scope: Scope) -> Option<FamilyPresentationPolicy> {
+fn current_policy(state: ResultsReads<'_>, scope: Scope) -> Option<FamilyPresentationPolicy> {
     match scope {
         Scope::Pane(document_id, pane_id) => state
             .model
@@ -62,13 +60,7 @@ fn current_policy(state: &AppState, scope: Scope) -> Option<FamilyPresentationPo
             .find(|pane| pane.id == pane_id)?
             .family_policy
             .clone(),
-        Scope::QuickView(key) => state
-            .results
-            .results
-            .session
-            .family_policies
-            .get(&key)
-            .cloned(),
+        Scope::QuickView(key) => state.results.session.family_policies.get(&key).cloned(),
     }
 }
 
@@ -79,17 +71,17 @@ pub(crate) fn family_available(state: ResultsReads<'_>) -> bool {
 
 /// Open Family slicing on the result the reader is looking at, seeded with
 /// the policy already in force or, without one, the family's defaults.
-pub(crate) fn open_family(state: &mut AppState) {
-    let draft = scope(state).and_then(|(scope, _, analysis)| {
+pub(crate) fn open_family(state: &mut ResultsParts<'_>) {
+    let draft = scope(state.results_reads()).and_then(|(scope, _, analysis)| {
         let manifest = manifest(analysis)?;
         Ok(initial_draft(
             &manifest,
-            current_policy(state, scope).as_ref(),
+            current_policy(state.results_reads(), scope).as_ref(),
         ))
     });
     match draft {
         Ok(draft) => {
-            state.results.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
+            *state.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
         }
         Err(refusal) => state.prompt(refusal),
     }
@@ -112,7 +104,7 @@ pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
         points: Ok(String::new()),
         refusal: Some(refusal),
     };
-    let (scope, run, analysis) = match scope(state) {
+    let (scope, run, analysis) = match scope(state.results_reads()) {
         Ok(found) => found,
         Err(refusal) => return refused(refusal),
     };
@@ -197,7 +189,7 @@ pub(super) fn commit(
     draft: &FamilyDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
     let (scope, policy) = {
-        let (scope, run, analysis) = scope(state)?;
+        let (scope, run, analysis) = scope(state.results_reads())?;
         let manifest = manifest(analysis)?;
         let policy = policy(&manifest, draft)?;
         selection(run, analysis, &manifest, &policy)?;
@@ -206,7 +198,7 @@ pub(super) fn commit(
     match scope {
         Scope::Pane(document_id, pane_id) => {
             transact(
-                state,
+                &mut state.results_parts(),
                 document_id,
                 vec![DocumentEdit::SetPaneFamilyPresentation {
                     pane_id,

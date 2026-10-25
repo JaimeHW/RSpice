@@ -16,7 +16,10 @@ use crate::workbench::app_state::AppState;
 impl RunEventSink for AppState {
     fn apply_run_event(&mut self, event: RunEvent) {
         match event {
-            RunEvent::TransientResultReplaced => self.clear_transient_specialized_viewer_data(),
+            RunEvent::TransientResultReplaced => self
+                .results
+                .analysis
+                .clear_transient_specialized_viewer_data(),
             RunEvent::FftSourceChosen { source } => {
                 self.results
                     .analysis

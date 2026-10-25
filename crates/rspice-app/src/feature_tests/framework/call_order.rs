@@ -154,7 +154,7 @@ const PREPARE_FRAME: &[Step] = &[
         "5.26",
         &[
             "file_workflow::poll_browser_schematic_import(",
-            "self.state.clear_transient_specialized_viewer_data()",
+            "self.state.results.analysis.clear_transient_specialized_viewer_data()",
         ],
     ),
     (

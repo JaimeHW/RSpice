@@ -29,6 +29,8 @@ use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLif
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 
+use super::{ResultsParts, ResultsReads};
+
 const MAX_DOCUMENT_NAME_BYTES: usize = 120;
 
 #[derive(Debug, thiserror::Error)]
@@ -52,19 +54,18 @@ struct ResolvedDraft<'a> {
 }
 
 /// Open a fresh, dataset-aware transaction draft.
-pub(crate) fn open(app: &mut RSpiceApp) {
-    let dataset_id = app
-        .state
+pub(crate) fn open(state: &mut ResultsParts<'_>) {
+    let dataset_id = state
         .model
         .simulation
         .active_run()
-        .or_else(|| app.state.model.simulation.retained.runs.last())
+        .or_else(|| state.model.simulation.retained.runs.last())
         .map(|run| run.dataset_id);
     let family = ResultDocumentFamily::WaveformWorksheet;
-    let viewer_id =
-        first_compatible_viewer(&app.state, dataset_id, family).unwrap_or("viewer-waveform");
-    let name = next_document_name(&app.state, family);
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
+    let viewer_id = first_compatible_viewer(state.results_reads(), dataset_id, family)
+        .unwrap_or("viewer-waveform");
+    let name = next_document_name(state.results_reads(), family);
+    *state.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name,
         name_touched: false,
@@ -128,12 +129,13 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
     ) {
         draft.family_id = family.id().to_owned();
         if !draft.name_touched {
-            draft.name = next_document_name(self.0, family);
+            draft.name = next_document_name(self.0.results_reads(), family);
         }
         if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
-            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
-                .unwrap_or_default()
-                .to_owned();
+            draft.viewer_id =
+                first_compatible_viewer(self.0.results_reads(), draft.dataset_id, family)
+                    .unwrap_or_default()
+                    .to_owned();
         }
         draft.validation_error = None;
     }
@@ -143,16 +145,17 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
         let family = ResultDocumentFamily::from_id(&draft.family_id)
             .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
         if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
-            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
-                .unwrap_or_default()
-                .to_owned();
+            draft.viewer_id =
+                first_compatible_viewer(self.0.results_reads(), draft.dataset_id, family)
+                    .unwrap_or_default()
+                    .to_owned();
         }
         draft.validation_error = None;
     }
 
     fn dataset_label(&self, dataset_id: Option<DatasetId>) -> String {
         dataset_id
-            .and_then(|id| retained_run(self.0, id))
+            .and_then(|id| retained_run(self.0.results_reads(), id))
             .map_or_else(|| "Select retained dataset".to_owned(), dataset_label)
     }
 
@@ -168,7 +171,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
 
     fn viewer_catalog(&self, dataset_id: Option<DatasetId>) -> impl Iterator<Item = ViewerChoice> {
         let capabilities = dataset_id
-            .and_then(|id| retained_run(self.0, id))
+            .and_then(|id| retained_run(self.0.results_reads(), id))
             .map(run_analysis_ids)
             .unwrap_or_default();
         VIEWER_DOCUMENTS.iter().map(move |viewer| {
@@ -180,7 +183,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
                 },
             );
             let renderer_available = dataset_id
-                .and_then(|id| retained_run(self.0, id))
+                .and_then(|id| retained_run(self.0.results_reads(), id))
                 .is_some_and(|run| {
                     run.analyses.iter().any(|analysis| {
                         super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
@@ -195,7 +198,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
     }
 }
 
-fn retained_run(state: &AppState, dataset_id: DatasetId) -> Option<&SimulationRun> {
+fn retained_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<&SimulationRun> {
     state
         .model
         .simulation
@@ -290,7 +293,7 @@ pub(super) const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str
 }
 
 fn first_compatible_viewer(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: Option<DatasetId>,
     family: ResultDocumentFamily,
 ) -> Option<&'static str> {
@@ -308,7 +311,7 @@ fn viewer_is_creatable(
     family: ResultDocumentFamily,
     viewer_id: &str,
 ) -> bool {
-    let Some(run) = dataset_id.and_then(|id| retained_run(state, id)) else {
+    let Some(run) = dataset_id.and_then(|id| retained_run(state.results_reads(), id)) else {
         return false;
     };
     let Some(viewer) = viewer_document(viewer_id) else {
@@ -339,7 +342,7 @@ fn viewer_is_creatable_for_run(
         })
 }
 
-fn next_document_name(state: &AppState, family: ResultDocumentFamily) -> String {
+fn next_document_name(state: ResultsReads<'_>, family: ResultDocumentFamily) -> String {
     for sequence in 1..=u32::MAX {
         let candidate = format!("{} · {sequence:02}", family.label());
         if !state
@@ -407,7 +410,7 @@ fn resolve_draft<'a>(
     let dataset_id = draft.dataset_id.ok_or_else(|| {
         CreateResultDocumentError::InvalidDraft("Select a retained result dataset.".to_owned())
     })?;
-    let run = retained_run(state, dataset_id).ok_or_else(|| {
+    let run = retained_run(state.results_reads(), dataset_id).ok_or_else(|| {
         CreateResultDocumentError::InvalidDraft(
             "The selected result dataset is no longer retained.".to_owned(),
         )
@@ -1124,7 +1127,7 @@ mod tests {
 
         assert_eq!(
             first_compatible_viewer(
-                &app.state,
+                app.state.results_reads(),
                 Some(transient_id),
                 ResultDocumentFamily::WaveformWorksheet,
             ),
@@ -1132,7 +1135,7 @@ mod tests {
         );
         assert_eq!(
             first_compatible_viewer(
-                &app.state,
+                app.state.results_reads(),
                 Some(ac_id),
                 ResultDocumentFamily::FrequencyAndStability,
             ),
@@ -1172,7 +1175,7 @@ mod tests {
     #[test]
     fn untouched_default_name_follows_the_selected_family() {
         let mut app = RSpiceApp::test_instance();
-        open(&mut app);
+        open(&mut app.state.results_parts());
         let mut draft = app.state.results.create_result_document.clone();
         let family = ResultDocumentFamily::FrequencyAndStability;
 
@@ -1185,7 +1188,7 @@ mod tests {
     #[test]
     fn typed_name_survives_a_family_change() {
         let mut app = RSpiceApp::test_instance();
-        open(&mut app);
+        open(&mut app.state.results_parts());
         let mut draft = app.state.results.create_result_document.clone();
         draft.name = "Loop gain review".to_owned();
         draft.name_touched = true;

@@ -15,8 +15,8 @@ use crate::results::visualization_document::TraceId;
 const QUICK_VIEW: &str = "Create a result document to keep measurements.";
 
 /// Open Add measurement on the result the reader is looking at.
-pub(crate) fn open_measurement(state: &mut AppState) {
-    state.results.result_document_dialog = Some(ResultDocumentDialog::Measurement(
+pub(crate) fn open_measurement(state: &mut ResultsParts<'_>) {
+    *state.result_document_dialog = Some(ResultDocumentDialog::Measurement(
         MeasurementDraft::default(),
     ));
 }
@@ -90,7 +90,7 @@ pub(super) fn commit(
         &expression,
     )?;
     transact(
-        state,
+        &mut state.results_parts(),
         document_id,
         vec![DocumentEdit::AddScalarMeasurement {
             pane_id,

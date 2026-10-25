@@ -11,7 +11,7 @@ use crate::results::visualization_document::VisualizationPresentationPolicy;
 use crate::workbench::ScalarPreference;
 
 /// Open Plot properties on what the Results workspace is showing.
-pub(crate) fn open_properties(state: &mut AppState) {
+pub(crate) fn open_properties(state: &mut ResultsParts<'_>) {
     let draft = match active_document_id(state.results_reads()).and_then(|document_id| {
         state
             .model
@@ -33,10 +33,10 @@ pub(crate) fn open_properties(state: &mut AppState) {
                 .result_presentation_policy()
                 .displayed_significant_digits()
                 .get(),
-            phase_continuous: state.results.results.session.phase_continuous,
+            phase_continuous: state.results.session.phase_continuous,
         },
     };
-    state.results.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
+    *state.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
 }
 
 /// What the properties apply to: the open document, or every quick view.
@@ -63,7 +63,7 @@ pub(super) fn commit(
 ) -> Result<Option<ResultDocumentDialog>, String> {
     if let Some(document_id) = active_document_id(state.results_reads()) {
         transact(
-            state,
+            &mut state.results_parts(),
             document_id,
             vec![DocumentEdit::SetPresentation(
                 VisualizationPresentationPolicy {

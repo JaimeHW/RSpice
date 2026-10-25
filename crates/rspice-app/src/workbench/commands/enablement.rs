@@ -705,11 +705,11 @@ impl Command {
                         .active_run()
                         .is_some_and(|run| !run.analyses.is_empty())
             }
-            Self::OpenProducingPlan => result_navigation::producing_plan_hop(app).is_ok(),
-            Self::OpenTaskDeck => result_navigation::task_deck_hop(app).is_ok(),
-            Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
+            Self::OpenProducingPlan => result_navigation::producing_plan_hop(app.state.results_reads()).is_ok(),
+            Self::OpenTaskDeck => result_navigation::task_deck_hop(app.state.results_reads()).is_ok(),
+            Self::RevealProducerLog => result_navigation::producer_log_hop(app.state.results_reads()).is_ok(),
             Self::ExpressionDiagnostics => state.model.simulation.retained.has_results(),
-            Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
+            Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state.results_reads()),
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {

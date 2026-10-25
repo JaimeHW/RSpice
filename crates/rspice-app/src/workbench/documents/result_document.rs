@@ -67,13 +67,13 @@ pub(crate) use specs::export_csv as export_specs_csv;
 /// surface nobody is looking at. Three call sites had written those three
 /// steps out identically, which is three places for the route to drift from
 /// the one editor it is supposed to protect.
-pub(crate) fn open_specification_editor(state: &mut AppState) {
+pub(crate) fn open_specification_editor(state: &mut ResultsParts<'_>) {
     // Route transitions and persistent-document activation are reconciled at
     // frame boundaries. Carry a one-shot intent separately from `viewer` and
     // the draft rows so those projections cannot erase the requested editor
     // before the Results destination gets its first frame.
-    state.results.specification_editor_route_pending = true;
-    state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;
+    *state.specification_editor_route_pending = true;
+    state.results.session.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     state
         .workbench
@@ -90,7 +90,7 @@ pub(crate) fn consume_pending_specification_editor(state: &mut AppState) -> bool
         return false;
     }
     state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;
-    specs::open_editor(state);
+    specs::open_editor(&mut state.results_parts());
     true
 }
 
@@ -115,29 +115,29 @@ pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
 ///
 /// The navigator and inspector are parts of that frame; this command exposes
 /// them instead of creating a second dataset browser with independent state.
-pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
-    app.state.workbench.activate(Workspace::Results);
-    app.state.workbench.navigator_visible = true;
-    app.state.workbench.inspector_visible = true;
-    app.state
+pub(crate) fn open_dataset_browser(state: &mut ResultsParts<'_>) {
+    state.workbench.activate(Workspace::Results);
+    state.workbench.navigator_visible = true;
+    state.workbench.inspector_visible = true;
+    state
         .workbench
         .outbox
         .push(crate::workbench::framework::requests::FocusNavigatorSearch);
-    app.state.results.results.session.viewer = ResultViewer::Manifest;
+    state.results.session.viewer = ResultViewer::Manifest;
 }
 
 /// Open a fresh immutable-dataset-bound result-document transaction.
-pub(crate) fn open_create_document(app: &mut RSpiceApp) {
-    create_document::open(app);
+pub(crate) fn open_create_document(state: &mut ResultsParts<'_>) {
+    create_document::open(state);
 }
 
 /// Add the selected result as a pane: to the open result document after its
 /// selected pane, or, over a quick view, to a new result document.
 pub(crate) fn add_selected_result_as_pane(app: &mut RSpiceApp) {
     if add_pane_available(app.state.results_reads()) {
-        open_add_pane(&mut app.state);
+        open_add_pane(&mut app.state.results_parts());
     } else {
-        create_document::open(app);
+        create_document::open(&mut app.state.results_parts());
     }
 }
 
@@ -188,7 +188,7 @@ use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::{
-    Model, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
+    Model, PlatformState, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
 };
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
@@ -201,6 +201,8 @@ use rspice_results_ui::chrome::bars::viewer_has_sheet_bar;
 #[cfg(test)]
 use rspice_results_ui::chrome::bars::viewer_has_structured_strip;
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
+use rspice_results_ui::create_document::CreateResultDocumentDialogState;
+use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 use rspice_results_ui::presentation::{PlotView, well_hint};
 use rspice_results_ui::selection::{
     ResultBrowserSelectionKey, ResultExpressionPresentationKey, SelectedResultTrace,
@@ -605,6 +607,54 @@ pub(crate) struct ResultsReads<'a> {
     pub(crate) analysis: &'a AnalysisWorkspaceState,
     pub(crate) model: &'a Model,
     pub(crate) workbench: &'a WorkbenchSession,
+}
+
+/// What the results workspace's commands write: its viewer state, the
+/// specialized viewers' state, the drafts of its forms, the result import
+/// and the specification route, the model, the session, and the platform
+/// services' state, which says whether a project is open.
+///
+/// Opening a form, importing a dataset or linking cursors reads and writes
+/// those parts alone, so the operations take them rather than the
+/// application state, and a feature's command can run them in its context.
+pub(crate) struct ResultsParts<'a> {
+    pub(crate) results: &'a mut ResultsState,
+    pub(crate) analysis: &'a mut AnalysisWorkspaceState,
+    pub(crate) result_document_dialog: &'a mut Option<ResultDocumentDialog>,
+    pub(crate) create_result_document: &'a mut CreateResultDocumentDialogState,
+    pub(crate) result_import: &'a mut import::ResultImportDialogState,
+    pub(crate) specification_editor_route_pending: &'a mut bool,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) platform: &'a PlatformState,
+}
+
+impl ResultsParts<'_> {
+    /// What the results workspace's predicates read of these parts.
+    pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
+        ResultsReads {
+            results: &*self.results,
+            analysis: &*self.analysis,
+            model: &*self.model,
+            workbench: &*self.workbench,
+        }
+    }
+
+    /// Answer the gesture just made, on the status bar, as
+    /// [`AppState::prompt`] does.
+    pub(crate) fn prompt(&mut self, text: impl Into<String>) {
+        self.workbench.prompt(text);
+    }
+
+    /// Record an event in the Console, as [`AppState::record`] does.
+    pub(crate) fn record(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+    ) -> u64 {
+        self.model.record(severity, source, text)
+    }
 }
 
 /// How a retained plot-marker kind reads as a Results marker kind.
@@ -2142,11 +2192,11 @@ fn show_docbar_for_family(
         app.state.results.results.session.viewer = viewer;
     }
     if actions.create_document {
-        create_document::open(app);
+        create_document::open(&mut app.state.results_parts());
     } else if actions.add_pane {
-        document_edit::open_add_pane(&mut app.state);
+        document_edit::open_add_pane(&mut app.state.results_parts());
     } else if actions.open_properties {
-        document_edit::open_properties(&mut app.state);
+        document_edit::open_properties(&mut app.state.results_parts());
     }
     actions.page
 }

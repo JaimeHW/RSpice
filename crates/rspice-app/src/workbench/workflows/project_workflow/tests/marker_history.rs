@@ -260,7 +260,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         if replace_drawing {
             crate::workbench::workflows::file_workflow::create_new_schematic(&mut state);
         } else {
-            state.clear_simulation_results();
+            state.results_parts().clear_simulation_results();
         }
         state
             .results

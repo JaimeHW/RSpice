@@ -71,6 +71,6 @@ impl AppState {
         // filter carried into another design hides conditions nobody there
         // chose to hide.
         self.problems_view = Default::default();
-        self.clear_specialized_viewer_data();
+        self.results.analysis.clear_specialized_viewer_data();
     }
 }

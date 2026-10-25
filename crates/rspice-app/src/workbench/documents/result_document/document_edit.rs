@@ -24,7 +24,7 @@ use crate::results::visualization_document::{
 use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-use super::{AppState, RSpiceApp, ResultViewer, ResultsReads};
+use super::{AppState, RSpiceApp, ResultViewer, ResultsParts, ResultsReads};
 
 /// The project result document the Results workspace is showing, if any.
 pub(super) fn active_document_id(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
@@ -48,7 +48,7 @@ fn project_document(
 
 /// Commit `edits` against the document's current revision.
 fn transact(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     edits: Vec<DocumentEdit>,
 ) -> Result<VisualizationTransactionReceipt, String> {
@@ -100,7 +100,7 @@ fn reading_analysis(state: ResultsReads<'_>) -> Result<(&SimulationRun, &Analysi
     Ok((run, analysis))
 }
 
-fn report(state: &mut AppState, result: Result<(), String>) {
+fn report(state: &mut ResultsParts<'_>, result: Result<(), String>) {
     if let Err(error) = result {
         state.prompt(error);
     }
@@ -181,7 +181,7 @@ pub(crate) fn add_pane_available(state: ResultsReads<'_>) -> bool {
 
 /// Open the Add pane form, seeded with the dataset, analysis and sheet the
 /// selected pane shows.
-pub(crate) fn open_add_pane(state: &mut AppState) {
+pub(crate) fn open_add_pane(state: &mut ResultsParts<'_>) {
     if !add_pane_available(state.results_reads()) {
         return;
     }
@@ -196,9 +196,9 @@ pub(crate) fn open_add_pane(state: &mut AppState) {
             .simulation
             .active_analysis()
             .map(|analysis| analysis.id),
-        viewer: Some(state.results.results.session.viewer),
+        viewer: Some(state.results.session.viewer),
     };
-    state.results.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
+    *state.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
 }
 
 /// The sheets a pane bound to `analysis` can draw: release viewers whose data
@@ -360,7 +360,7 @@ fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
             anchor_pane_id: anchor,
         },
     }));
-    let receipt = transact(state, document_id, edits)?;
+    let receipt = transact(&mut state.results_parts(), document_id, edits)?;
     if let Some(pane_id) = receipt.created.iter().find_map(|entity| match entity {
         EntityRef::Pane(id) => Some(*id),
         _ => None,
@@ -407,15 +407,15 @@ pub(super) fn toggle_pane_x_link(
     pane_id: PaneId,
 ) {
     let result = links::toggle_x_link(state, document_id, pane_id);
-    report(state, result);
+    report(&mut state.results_parts(), result);
 }
 
 /// Link or unlink A/B cursors. Over a project result document the document
 /// keeps the links, so they hold across panes and through a save; over a
 /// quick view the session's toggle links the viewer's own cursor rows.
-pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
+pub(crate) fn toggle_linked_cursors(state: &mut ResultsParts<'_>) {
     let Some(document_id) = active_document_id(state.results_reads()) else {
-        state.results.results.session.toggle_linked_cursors();
+        state.results.session.toggle_linked_cursors();
         return;
     };
     let result = project_document(state.results_reads(), document_id)
@@ -465,8 +465,8 @@ pub(super) fn move_pane(
     direction: PaneMove,
 ) {
     let result = move_pane_edit(state, document_id, pane_id, direction)
-        .and_then(|edit| transact(state, document_id, vec![edit]).map(|_| ()));
-    report(state, result);
+        .and_then(|edit| transact(&mut state.results_parts(), document_id, vec![edit]).map(|_| ()));
+    report(&mut state.results_parts(), result);
 }
 
 fn move_pane_edit(
@@ -504,8 +504,8 @@ fn move_pane_edit(
 /// the same transaction, and a group left with one member goes too.
 pub(super) fn remove_pane(state: &mut AppState, document_id: ResultDocumentId, pane_id: PaneId) {
     let result = remove_pane_edits(state, document_id, pane_id)
-        .and_then(|edits| transact(state, document_id, edits).map(|_| ()));
-    report(state, result);
+        .and_then(|edits| transact(&mut state.results_parts(), document_id, edits).map(|_| ()));
+    report(&mut state.results_parts(), result);
 }
 
 fn remove_pane_edits(

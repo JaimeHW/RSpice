@@ -1175,7 +1175,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
     });
     let linked_before = app.state.results.results.session.linked_cursors;
 
-    super::super::toggle_linked_cursors(&mut app.state);
+    super::super::toggle_linked_cursors(&mut app.state.results_parts());
     assert_eq!(
         app.state.results.results.session.linked_cursors, linked_before,
         "a document's cursor links are not the quick view's toggle"
@@ -1200,7 +1200,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
         "the linked cursor follows"
     );
 
-    super::super::toggle_linked_cursors(&mut app.state);
+    super::super::toggle_linked_cursors(&mut app.state.results_parts());
     let document = app
         .state
         .model

@@ -8,7 +8,10 @@
 use crate::state::command_catalog::CommandKey;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::state::ConsoleChannel;
+use crate::workbench::state::WorkbenchSession;
 use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
 
 use super::vocabulary::Command;
@@ -23,7 +26,7 @@ const OPEN_RUN_IN_RESULTS: CommandKey = Command::OpenRunInResults.key();
 /// at the active Results document. Offering the command whenever any dataset
 /// was retained meant pressing it from another workspace produced a console
 /// warning instead of a file.
-pub(super) fn dataset_export_is_resolvable(state: &crate::workbench::AppState) -> bool {
+pub(crate) fn dataset_export_is_resolvable(state: ResultsReads<'_>) -> bool {
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
     state.model.simulation.retained.has_results()
@@ -108,24 +111,22 @@ pub(crate) fn show_session_line(state: &mut crate::workbench::AppState, log_id: 
 /// Callers offer this only for a run the session still holds; a run dropped
 /// between the offer and the click is reported rather than opened as an empty
 /// channel.
-pub(crate) fn open_run_log(state: &mut crate::workbench::AppState, run_sequence: u64) {
-    if state
-        .model
+pub(crate) fn open_run_log(model: &Model, workbench: &mut WorkbenchSession, run_sequence: u64) {
+    if model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
         .is_none()
     {
-        state.prompt(crate::workbench::AppState::retired_run_message(
+        workbench.prompt(crate::workbench::AppState::retired_run_message(
             run_sequence,
         ));
         return;
     }
-    state
-        .workbench
+    workbench
         .console_view
         .open(ConsoleChannel::Run(run_sequence));
-    open_console_page(&mut state.workbench);
+    open_console_page(workbench);
 }
 
 /// Open the Console on one run's own log with line `line` selected and in
@@ -180,10 +181,12 @@ fn open_console_page(workbench: &mut crate::workbench::state::WorkbenchSession) 
 /// One line of glue over the owner in `workbench::state::plan_provenance`, so
 /// the dispatcher and the read-only surfaces that draw the same claim cannot
 /// drift apart.
-pub(crate) fn producing_plan_hop(app: &RSpiceApp) -> Result<ProducingPlanHop, &'static str> {
+pub(crate) fn producing_plan_hop(
+    state: ResultsReads<'_>,
+) -> Result<ProducingPlanHop, &'static str> {
     plan_provenance::producing_plan_hop(
-        &app.state.model.simulation,
-        app.state.model.sim_setup.stable_analysis_plan().ok(),
+        &state.model.simulation,
+        state.model.sim_setup.stable_analysis_plan().ok(),
     )
 }
 
@@ -194,15 +197,13 @@ pub(crate) fn producing_plan_hop(app: &RSpiceApp) -> Result<ProducingPlanHop, &'
 /// nothing to open. A selected run whose deck the archive no longer holds has
 /// something to open and cannot, and the reader has to be told which of the two
 /// it is rather than left to infer it from a control that does nothing.
-pub(crate) fn task_deck_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
-    let run = app
-        .state
+pub(crate) fn task_deck_hop(state: ResultsReads<'_>) -> Result<u64, &'static str> {
+    let run = state
         .model
         .simulation
         .active_run()
         .ok_or("no run is selected")?;
-    if app
-        .state
+    if state
         .model
         .simulation
         .retained
@@ -239,16 +240,16 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
 /// palette has no row, so it acts on the browser's check-marks — and refuses
 /// rather than choosing, because five quantities can come from five runs, and
 /// picking one silently would be the studio deciding which the reader meant.
-pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
-    if app.state.model.simulation.active_run().is_none() {
+pub(crate) fn producer_log_hop(state: ResultsReads<'_>) -> Result<u64, &'static str> {
+    if state.model.simulation.active_run().is_none() {
         return Err("no run is selected");
     }
-    let checked = &app.state.results.results.session.checked_result_quantities;
+    let checked = &state.results.session.checked_result_quantities;
     let key = match checked.len() {
         0 => return Err("check-mark the Data Browser quantity whose run log to open"),
         1 => checked.iter().next().expect("one check-marked quantity"),
         _ => return Err("check-mark exactly one Data Browser quantity"),
     };
-    producing_run(&app.state.model.simulation.retained.runs, key.dataset_id())
+    producing_run(&state.model.simulation.retained.runs, key.dataset_id())
         .ok_or("the run that produced the check-marked quantity is no longer held")
 }

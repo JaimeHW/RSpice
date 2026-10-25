@@ -73,7 +73,7 @@ impl SheetBarHost for Host<'_> {
                     state.prompt("Specs not applied: fix the invalid bound first.");
                 }
             }
-            SpecificationAction::Edit => specs::open_editor(state),
+            SpecificationAction::Edit => specs::open_editor(&mut state.results_parts()),
         }
     }
     fn instrument(&mut self, ui: &mut Ui) {

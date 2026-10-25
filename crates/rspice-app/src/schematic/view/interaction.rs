@@ -389,7 +389,9 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
         }
         Some(crate::state::RequirementTarget::ProjectSpecification(reference)) => {
             let reference = reference.to_owned();
-            crate::workbench::documents::result_document::open_specification_editor(state);
+            crate::workbench::documents::result_document::open_specification_editor(
+                &mut state.results_parts(),
+            );
             state.prompt(format!(
                 "Opened project specifications for requirement {reference}."
             ));

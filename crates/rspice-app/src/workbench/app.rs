@@ -699,7 +699,10 @@ impl RSpiceApp {
         if crate::workbench::workflows::file_workflow::poll_browser_schematic_import(
             &mut self.state,
         ) {
-            self.state.clear_transient_specialized_viewer_data();
+            self.state
+                .results
+                .analysis
+                .clear_transient_specialized_viewer_data();
         }
         #[cfg(target_arch = "wasm32")]
         crate::workbench::workflows::netlist_workflow::poll_browser_netlist_workflow(

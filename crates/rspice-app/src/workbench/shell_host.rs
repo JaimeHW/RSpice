@@ -604,7 +604,11 @@ impl Host for RSpiceApp {
     }
 
     fn open_run_log(&mut self, run_sequence: u64) {
-        crate::workbench::commands::result_navigation::open_run_log(&mut self.state, run_sequence);
+        crate::workbench::commands::result_navigation::open_run_log(
+            &self.state.model,
+            &mut self.state.workbench,
+            run_sequence,
+        );
     }
 
     fn simulation_input_changed(&mut self) {

@@ -88,7 +88,7 @@ pub(super) fn toggle_x_link(
     if edits.is_empty() {
         return Ok(());
     }
-    transact(state, document_id, edits).map(|_| ())
+    transact(&mut state.results_parts(), document_id, edits).map(|_| ())
 }
 
 fn x_link_edits(
@@ -333,7 +333,7 @@ pub(super) fn cursors_linked(document: &VisualizationDocument) -> bool {
 /// and the B cursors likewise, or take every cursor link away. A link moves
 /// each member to the selected pane's position, so the panes agree at once.
 pub(super) fn set_cursor_links(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     linked: bool,
 ) -> Result<(), String> {

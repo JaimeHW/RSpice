@@ -401,7 +401,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
         .content
         .replace_active_specification_definitions(plan_id, vec![definition]);
 
-    super::open_editor(&mut state);
+    super::open_editor(&mut state.results_parts());
     state.results.results.session.spec_drafts.as_mut().unwrap()[0].requirement_name =
         "Input-referred offset".to_owned();
     assert!(apply_drafts(&mut state));

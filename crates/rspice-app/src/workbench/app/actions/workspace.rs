@@ -1788,7 +1788,10 @@ fn selected_instance_generated_line(
 impl RSpiceApp {
     pub(crate) fn restore_workspace_after_project_load(&mut self) {
         self.state.restore_active_schematic_from_workspace();
-        self.state.clear_transient_specialized_viewer_data();
+        self.state
+            .results
+            .analysis
+            .clear_transient_specialized_viewer_data();
     }
 }
 

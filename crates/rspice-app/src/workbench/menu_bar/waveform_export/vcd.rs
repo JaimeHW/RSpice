@@ -138,7 +138,8 @@ mod tests {
         crate::workbench::app_state::services_access::accept_loaded_project(
             &mut state, baseline, None,
         );
-        stage_imported_result_dataset(&mut state, "roundtrip.vcd", &prepared.bytes).unwrap();
+        stage_imported_result_dataset(&mut state.results_parts(), "roundtrip.vcd", &prepared.bytes)
+            .unwrap();
         commit_result_import_draft(&mut state).unwrap();
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();

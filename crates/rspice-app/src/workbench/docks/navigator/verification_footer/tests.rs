@@ -1367,7 +1367,7 @@ fn a_quantitys_run_log_is_the_log_of_the_run_that_produced_it() {
 
     let producer = producing_run(&app.state.model.simulation.retained.runs, dataset)
         .expect("the session holds the producing run");
-    open_run_log(&mut app.state, producer);
+    open_run_log(&app.state.model, &mut app.state.workbench, producer);
     assert!(app.state.workbench.console_visible);
     assert_eq!(app.state.workbench.console_page, ConsolePage::Console);
     assert_eq!(

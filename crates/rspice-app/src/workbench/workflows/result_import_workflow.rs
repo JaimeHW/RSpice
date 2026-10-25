@@ -12,7 +12,8 @@ use crate::state::{
     ResultImportSource, RetainedTrace, SimulationRunLifecycle, SimulationRunProvenance,
 };
 use crate::ui::tokens::Tokens;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::import::{
     ResultImportDialogState, ResultImportStage,
 };
@@ -130,8 +131,8 @@ pub(crate) struct ParsedResultDataset {
     pub(crate) event_payload: Option<AnalysisResultPayload>,
 }
 
-pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
-    if let Some(reason) = result_import_block_reason(state) {
+pub(crate) fn import_result_dataset(state: &mut ResultsParts<'_>) -> bool {
+    if let Some(reason) = result_import_block_reason(state.model, state.platform) {
         state.prompt(reason);
         return false;
     }
@@ -172,7 +173,7 @@ pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
     }
 }
 
-fn record_import_failure(state: &mut AppState, error: &str) {
+fn record_import_failure(state: &mut ResultsParts<'_>, error: &str) {
     state.record(
         LogSeverity::Error,
         LogSource::Studio,
@@ -180,14 +181,14 @@ fn record_import_failure(state: &mut AppState, error: &str) {
     );
 }
 
-fn result_import_block_reason(state: &AppState) -> Option<String> {
-    if !state.platform.project_lifecycle.is_open() {
+fn result_import_block_reason(model: &Model, platform: &PlatformState) -> Option<String> {
+    if !platform.project_lifecycle.is_open() {
         return Some("Open a project before importing a result dataset.".to_owned());
     }
-    if state.model.safe_mode.project_read_only() {
+    if model.safe_mode.project_read_only() {
         return Some("The project is read-only; result history cannot be changed.".to_owned());
     }
-    if state.model.simulation.execution.has_active_execution() {
+    if model.simulation.execution.has_active_execution() {
         return Some(
             "Wait for the active simulation execution to finish before importing result data."
                 .to_owned(),
@@ -233,16 +234,16 @@ fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
 /// Parse a selected file into a reviewable draft without mutating retained
 /// simulation history.
 pub(crate) fn stage_imported_result_dataset(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     source_name: &str,
     bytes: &[u8],
 ) -> Result<(), String> {
-    if let Some(reason) = result_import_block_reason(state) {
+    if let Some(reason) = result_import_block_reason(state.model, state.platform) {
         return Err(reason);
     }
     let parsed = parse_result_dataset(source_name, bytes)?;
     let signal_count = parsed.waveforms.len();
-    state.results.result_import = ResultImportDialogState {
+    *state.result_import = ResultImportDialogState {
         open: true,
         stage: ResultImportStage::Detect,
         source_name: source_name.to_owned(),
@@ -370,7 +371,7 @@ fn parsed_result_from_draft(
 /// history. Any failure restores the simulation and workbench selections that
 /// existed before the transaction.
 pub(crate) fn commit_result_import_draft(state: &mut AppState) -> Result<(), String> {
-    if let Some(reason) = result_import_block_reason(state) {
+    if let Some(reason) = result_import_block_reason(&state.model, &state.platform) {
         return Err(reason);
     }
     let draft = state.results.result_import.clone();
@@ -574,7 +575,7 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut AppStat
                     }
                     ResultImportStage::Validate => {
                         let valid = parsed_result_from_draft(&draft).is_ok()
-                            && result_import_block_reason(state).is_none();
+                            && result_import_block_reason(&state.model, &state.platform).is_none();
                         commit = ui
                             .add_enabled(valid, egui::Button::new("Import dataset"))
                             .clicked();
@@ -893,7 +894,7 @@ fn apply_imported_result_dataset(
     source_name: &str,
     bytes: &[u8],
 ) -> Result<(), String> {
-    stage_imported_result_dataset(state, source_name, bytes)?;
+    stage_imported_result_dataset(&mut state.results_parts(), source_name, bytes)?;
     commit_result_import_draft(state)
 }
 
@@ -1111,16 +1112,16 @@ pub(crate) fn poll_browser_result_dataset_import(state: &mut AppState) -> bool {
                 .original_bytes
                 .as_deref()
                 .unwrap_or(file.contents.as_bytes());
-            match stage_imported_result_dataset(state, &file.name, bytes) {
+            match stage_imported_result_dataset(&mut state.results_parts(), &file.name, bytes) {
                 Ok(()) => true,
                 Err(error) => {
-                    record_import_failure(state, &error);
+                    record_import_failure(&mut state.results_parts(), &error);
                     false
                 }
             }
         }
         BrowserResultDatasetImportResult::Failed(error) => {
-            record_import_failure(state, &error);
+            record_import_failure(&mut state.results_parts(), &error);
             false
         }
         BrowserResultDatasetImportResult::Cancelled => false,
@@ -1238,7 +1239,7 @@ mod tests {
             .unwrap();
             bytes.extend_from_slice(format!("Flags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 {name} {kind}\n1 V(out) voltage\nValues:\n0 0 3\n1 1 4\n").as_bytes());
             let mut state = loaded_project_state();
-            stage_imported_result_dataset(&mut state, "axis.raw", &bytes).unwrap();
+            stage_imported_result_dataset(&mut state.results_parts(), "axis.raw", &bytes).unwrap();
             assert_eq!(
                 state.results.result_import.coordinate_unit.as_deref(),
                 Some(canonical)
@@ -1351,7 +1352,7 @@ mod tests {
 
     fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
         let mut state = loaded_project_state();
-        stage_imported_result_dataset(&mut state, name, bytes).unwrap();
+        stage_imported_result_dataset(&mut state.results_parts(), name, bytes).unwrap();
         assert_eq!(state.results.result_import.waveforms.len(), 1);
         assert_eq!(state.results.result_import.waveforms[0].sample(1), None);
         commit_result_import_draft(&mut state).unwrap();
@@ -1455,8 +1456,12 @@ mod tests {
     #[test]
     fn import_review_cannot_reinterpret_a_current_coordinate_as_time() {
         let mut state = loaded_project_state();
-        stage_imported_result_dataset(&mut state, "bias.csv", b"bias [mA],V(out) [V]\n0,0\n1,2\n")
-            .unwrap();
+        stage_imported_result_dataset(
+            &mut state.results_parts(),
+            "bias.csv",
+            b"bias [mA],V(out) [V]\n0,0\n1,2\n",
+        )
+        .unwrap();
         state.results.result_import.analysis_type = AnalysisType::Transient;
         let error = commit_result_import_draft(&mut state).unwrap_err();
         assert!(error.contains("incompatible"), "{error}");
@@ -1744,8 +1749,12 @@ mod tests {
         let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let workspace = state.workbench.workspace;
         let document = state.workbench.documents.active(workspace).cloned();
-        stage_imported_result_dataset(&mut state, "next.csv", b"time [s],V(out) [V]\n0,2\n1,3\n")
-            .expect("reviewing a draft requires no sequence");
+        stage_imported_result_dataset(
+            &mut state.results_parts(),
+            "next.csv",
+            b"time [s],V(out) [V]\n0,2\n1,3\n",
+        )
+        .expect("reviewing a draft requires no sequence");
         let selected = state.results.result_import.selected_signals.clone();
 
         for _ in 0..2 {
@@ -1864,7 +1873,7 @@ mod tests {
         let initial_workspace = state.workbench.workspace;
 
         stage_imported_result_dataset(
-            &mut state,
+            &mut state.results_parts(),
             "external.csv",
             b"time [s],V(out) [V]\n0,0\n1,1\n",
         )
@@ -1896,7 +1905,7 @@ mod tests {
     fn validation_failure_retains_draft_and_leaves_history_unchanged() {
         let mut state = loaded_project_state();
         stage_imported_result_dataset(
-            &mut state,
+            &mut state.results_parts(),
             "external.csv",
             b"time [s],V(out) [V]\n0,0\n1,1\n",
         )
@@ -1914,7 +1923,7 @@ mod tests {
     fn commit_imports_only_explicitly_selected_signals() {
         let mut state = loaded_project_state();
         stage_imported_result_dataset(
-            &mut state,
+            &mut state.results_parts(),
             "external.csv",
             b"time [s],V(out) [V],I(VDD) [A]\n0,0,1\n1,1,2\n",
         )
@@ -1936,8 +1945,12 @@ mod tests {
     #[test]
     fn remapping_zero_coordinate_data_to_ac_is_rejected_before_commit() {
         let mut state = loaded_project_state();
-        stage_imported_result_dataset(&mut state, "external.csv", b"time,V(out) [V]\n0,0\n1,1\n")
-            .expect("stage succeeds");
+        stage_imported_result_dataset(
+            &mut state.results_parts(),
+            "external.csv",
+            b"time,V(out) [V]\n0,0\n1,1\n",
+        )
+        .expect("stage succeeds");
         state.results.result_import.analysis_type = AnalysisType::Ac;
 
         let error = commit_result_import_draft(&mut state).expect_err("invalid frequency rejected");

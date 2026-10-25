@@ -50,7 +50,7 @@ pub(crate) fn compare_available(state: ResultsReads<'_>) -> bool {
 
 /// Open Compare datasets on the result the reader is looking at, against the
 /// first compatible baseline.
-pub(crate) fn open_compare(state: &mut AppState) {
+pub(crate) fn open_compare(state: &mut ResultsParts<'_>) {
     let baseline = match reading_analysis(state.results_reads()) {
         Ok((run, analysis)) => baselines(state.results_reads(), run, analysis)
             .first()
@@ -61,7 +61,7 @@ pub(crate) fn open_compare(state: &mut AppState) {
     let Some(baseline) = baseline else {
         return;
     };
-    state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {
+    *state.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {
         baseline: Some(baseline),
         ..CompareDraft::default()
     }));
@@ -224,7 +224,7 @@ pub(super) fn commit(
         (outcome, edits)
     };
     if let Some((document_id, edits)) = edits {
-        transact(state, document_id, edits)?;
+        transact(&mut state.results_parts(), document_id, edits)?;
     }
     draft.outcome = Some(outcome);
     Ok(Some(ResultDocumentDialog::Compare(draft)))
