@@ -740,10 +740,6 @@ pub struct Bsim3v3Geometry {
     /// `OFF`: start the device off in the initial DC iteration (engine seam;
     /// not used by the eval itself).
     pub off: bool,
-    /// `IC=vds,vgs,vbs` initial conditions (engine seam for UIC).
-    pub ic_vds: Value,
-    pub ic_vgs: Value,
-    pub ic_vbs: Value,
 }
 
 impl Default for Bsim3v3Geometry {
@@ -762,9 +758,6 @@ impl Default for Bsim3v3Geometry {
             delvto: 0.0,
             mulu0: 1.0,
             off: false,
-            ic_vds: 0.0,
-            ic_vgs: 0.0,
-            ic_vbs: 0.0,
         }
     }
 }

@@ -1054,7 +1054,6 @@ impl Engine {
             source_squares_given: given(&["NRS"]).is_some(),
             delvto: given(&["DELVTO", "DELVT0"]).unwrap_or(0.0),
             mulu0: given(&["MULU0"]).unwrap_or(1.0),
-            dtemp: given(&["DTEMP"]).unwrap_or(0.0),
             sa: given(&["SA"]).unwrap_or(0.0),
             sb: given(&["SB"]).unwrap_or(0.0),
             sd: given(&["SD"]).unwrap_or(0.0),
@@ -1067,12 +1066,6 @@ impl Engine {
             scc: given(&["SCC"]).unwrap_or(0.0),
             scc_given: given(&["SCC"]).is_some(),
             off: given(&["OFF"]).is_some_and(|v| v != 0.0),
-            // The underscored spellings are what the B3SOI reader below
-            // accepts, so a card that initializes an SOI device reads the
-            // same on a bulk BSIM4 one.
-            ic_vds: given(&["ICVDS", "IC_VDS", "IC"]).unwrap_or(0.0),
-            ic_vgs: given(&["ICVGS", "IC_VGS"]).unwrap_or(0.0),
-            ic_vbs: given(&["ICVBS", "IC_VBS"]).unwrap_or(0.0),
         };
 
         let core = Bsim4v8::new_shared(

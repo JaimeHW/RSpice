@@ -477,7 +477,6 @@ fn poly_depletion_value(
 pub struct Bsim4v8SizeDep {
     pub width: Value,
     pub length: Value,
-    pub nfinger: Value,
 
     // Binned values, post temperature adjustment.
     pub cdsc: Value,
@@ -716,7 +715,6 @@ impl Bsim4v8SizeDep {
         let mut p = Self {
             width: wdrn,
             length: ldrn,
-            nfinger: nf,
             ..Self::default()
         };
         let temp = mt.temp;
@@ -1415,8 +1413,6 @@ pub struct Bsim4v8Geometry {
     pub delvto: Value,
     /// Low-field mobility multiplier `MULU0`.
     pub mulu0: Value,
-    /// Instance temperature offset `DTEMP` (Celsius delta).
-    pub dtemp: Value,
     /// Stress-effect layout distances (`SA`/`SB`/`SD`).
     pub sa: Value,
     pub sb: Value,
@@ -1434,10 +1430,6 @@ pub struct Bsim4v8Geometry {
     /// `OFF`: start the device off in the initial DC iteration (engine
     /// seam; not used by the eval itself).
     pub off: bool,
-    /// `IC=vds,vgs,vbs` initial conditions (engine seam for UIC).
-    pub ic_vds: Value,
-    pub ic_vgs: Value,
-    pub ic_vbs: Value,
 }
 
 impl Default for Bsim4v8Geometry {
@@ -1467,7 +1459,6 @@ impl Default for Bsim4v8Geometry {
             source_squares_given: false,
             delvto: 0.0,
             mulu0: 1.0,
-            dtemp: 0.0,
             sa: 0.0,
             sb: 0.0,
             sd: 0.0,
@@ -1480,9 +1471,6 @@ impl Default for Bsim4v8Geometry {
             scc: 0.0,
             scc_given: false,
             off: false,
-            ic_vds: 0.0,
-            ic_vgs: 0.0,
-            ic_vbs: 0.0,
         }
     }
 }

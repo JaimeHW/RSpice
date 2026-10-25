@@ -199,7 +199,6 @@ pub struct B3SoiDdModel {
     pub cle: Value,
     pub dwc: Value,
     pub dlc: Value,
-    pub dlc_given: bool,
     pub dlcb: Value,
     pub dlbg: Value,
     pub fbody: Value,
@@ -247,7 +246,6 @@ pub struct B3SoiDdModel {
     pub qsieff: Value,
     pub csit: Value,
     pub cboxt: Value,
-    pub nfb: Value,
     pub adice: Value,
 }
 
@@ -555,7 +553,6 @@ impl B3SoiDdModel {
             cle: val(p, "CLE", 0.0),
             dwc,
             dlc,
-            dlc_given,
             dlcb: val(p, "DLCB", 0.0),
             dlbg: val(p, "DLBG", 0.0),
             fbody: val(p, "FBODY", 1.0),
@@ -599,7 +596,6 @@ impl B3SoiDdModel {
             qsieff: 0.0,
             csit: 0.0,
             cboxt: 0.0,
-            nfb: 0.0,
             adice: 0.0,
         };
 
@@ -645,8 +641,6 @@ impl B3SoiDdModel {
         }
         self.csit = 1.0 / (1.0 / self.cox + 1.0 / self.csieff);
         self.cboxt = 1.0 / (1.0 / self.cbox + 1.0 / self.csieff);
-        let nfb0 = 1.0 / (1.0 + self.cbox / self.csit);
-        self.nfb = self.kb3.v * nfb0;
         self.adice = self.adice0.v / (1.0 + cboxt / self.cox);
     }
 }

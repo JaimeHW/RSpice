@@ -71,7 +71,6 @@ pub struct Bsim3v3Model {
     pub cap_mod: i32,
     pub acm_mod: i32,
     pub acm_mod_value: Value,
-    pub calcacm: i32,
     pub noi_mod: i32,
     pub nqs_mod: i32,
     pub acnqs_mod: i32,
@@ -236,8 +235,6 @@ pub struct Bsim3v3Model {
     pub lwn: Value,
     pub lwl: Value,
     pub lwlc: Value,
-    pub lmin: Value,
-    pub lmax: Value,
     pub wint: Value,
     pub wl: Value,
     pub wlc: Value,
@@ -247,11 +244,8 @@ pub struct Bsim3v3Model {
     pub wwn: Value,
     pub wwl: Value,
     pub wwlc: Value,
-    pub wmin: Value,
-    pub wmax: Value,
     pub dwc: Value,
     pub dlc: Value,
-    pub dlc_given: bool,
 
     // Flicker/thermal noise card (stored; the noise analyses are out of scope
     // for the load port).
@@ -402,7 +396,7 @@ impl Bsim3v3Model {
         let mob_mod = selector(p, "MOBMOD", 1, &[1, 2, 3])?;
         let cap_mod = selector(p, "CAPMOD", 3, &[0, 1, 2, 3])?;
         let acm_mod = selector(p, "ACM", 0, &[0, 1])?;
-        let calcacm = selector(p, "CALCACM", 0, &[0, 1])?;
+        selector(p, "CALCACM", 0, &[0, 1])?;
         let noi_mod = selector(p, "NOIMOD", 1, &[1, 2, 3, 4, 5, 6])?;
         let nqs_mod = selector_reset_to_default(p, "NQSMOD", 0, &[0, 1])?;
         let acnqs_mod = selector_reset_to_default(p, "ACNQSMOD", 0, &[0, 1])?;
@@ -467,7 +461,6 @@ impl Bsim3v3Model {
             cap_mod,
             acm_mod,
             acm_mod_value: val(p, "ACM", 0.0),
-            calcacm,
             noi_mod,
             nqs_mod,
             acnqs_mod,
@@ -658,8 +651,6 @@ impl Bsim3v3Model {
             lwn: val(p, "LWN", geometry_exponent_default),
             lwl,
             lwlc: val(p, "LWLC", lwl),
-            lmin: val(p, "LMIN", 0.0),
-            lmax: val(p, "LMAX", 1.0),
             wint,
             wl,
             wlc: val(p, "WLC", wl),
@@ -680,11 +671,8 @@ impl Bsim3v3Model {
             wwn: val(p, "WWN", geometry_exponent_default),
             wwl,
             wwlc: val(p, "WWLC", wwl),
-            wmin: val(p, "WMIN", 0.0),
-            wmax: val(p, "WMAX", 1.0),
             dwc,
             dlc,
-            dlc_given,
 
             oxide_trap_density_a: val(p, "NOIA", if is_pmos { 9.9e18 } else { 1.0e20 }),
             oxide_trap_density_b: val(p, "NOIB", if is_pmos { 2.4e3 } else { 5.0e4 }),

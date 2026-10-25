@@ -158,7 +158,6 @@ pub struct B3SoiFdModel {
     pub cle: Value,
     pub dwc: Value,
     pub dlc: Value,
-    pub dlc_given: bool,
     pub cgso: Value,
     pub cgdo: Value,
     pub cgeo: Value,
@@ -195,7 +194,6 @@ pub struct B3SoiFdModel {
     pub qsieff: Value,
     pub csit: Value,
     pub cboxt: Value,
-    pub nfb: Value,
     pub adice: Value,
 }
 
@@ -442,7 +440,6 @@ impl B3SoiFdModel {
             cle: val(p, "CLE", 0.0),
             dwc,
             dlc,
-            dlc_given,
             cgso,
             cgdo,
             cgeo: val(p, "CGEO", 0.0),
@@ -476,7 +473,6 @@ impl B3SoiFdModel {
             qsieff: 0.0,
             csit: 0.0,
             cboxt: 0.0,
-            nfb: 0.0,
             adice: 0.0,
         };
 
@@ -522,8 +518,6 @@ impl B3SoiFdModel {
         }
         self.csit = 1.0 / (1.0 / self.cox + 1.0 / self.csieff);
         self.cboxt = 1.0 / (1.0 / self.cbox + 1.0 / self.csieff);
-        let nfb0 = 1.0 / (1.0 + self.cbox / self.csit);
-        self.nfb = self.kb3.v * nfb0;
         self.adice = self.adice0.v / (1.0 + cboxt / self.cox);
     }
 }

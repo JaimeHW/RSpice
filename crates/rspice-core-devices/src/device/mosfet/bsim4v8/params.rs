@@ -47,7 +47,7 @@
 //!   `NRD`/`NRS`, including Xyce-style model-card defaults.
 //!
 //! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits (`vgsMax`
-//! family) are accepted and stored — they do not affect the DC/charge load.
+//! family) are accepted — they do not affect the DC/charge load.
 //! `tnoiMod=1` adjusts source/drain series-resistance noise during noise
 //! analysis; the load stores the selector and operating point, while the
 //! engine applies that noise-only adjustment.
@@ -117,17 +117,11 @@ pub struct Bsim4v8Model {
 
     // Oxide / gate stack.
     pub toxe: Value,
-    pub toxe_given: bool,
     pub toxp: Value,
-    pub toxp_given: bool,
     pub toxm: Value,
-    pub toxm_given: bool,
     pub toxref: Value,
-    pub dtox: Value,
-    pub dtox_given: bool,
     pub epsrox: Value,
     pub eot: Value,
-    pub eot_given: bool,
     pub vddeot: Value,
     pub tempeot: Value,
     pub leffeot: Value,
@@ -272,9 +266,6 @@ pub struct Bsim4v8Model {
     pub aigc: Binned,
     pub bigc: Binned,
     pub cigc: Binned,
-    pub aigsd: Binned,
-    pub bigsd: Binned,
-    pub cigsd: Binned,
     pub aigs: Binned,
     pub bigs: Binned,
     pub cigs: Binned,
@@ -469,12 +460,8 @@ pub struct Bsim4v8Model {
     /// TNOM in Kelvin (card value is Celsius, transformed on entry).
     pub tnom: Value,
     pub cgso: Value,
-    pub cgso_given: bool,
     pub cgdo: Value,
-    pub cgdo_given: bool,
     pub cgbo: Value,
-    pub cgbo_given: bool,
-    pub cf_given: bool,
     pub xpart: Value,
     pub sheet_resistance: Value,
 
@@ -488,8 +475,6 @@ pub struct Bsim4v8Model {
     pub lwn: Value,
     pub lwl: Value,
     pub lwlc: Value,
-    pub lmin: Value,
-    pub lmax: Value,
     pub wint: Value,
     pub wl: Value,
     pub wlc: Value,
@@ -499,11 +484,8 @@ pub struct Bsim4v8Model {
     pub wwn: Value,
     pub wwl: Value,
     pub wwlc: Value,
-    pub wmin: Value,
-    pub wmax: Value,
     pub dwc: Value,
     pub dlc: Value,
-    pub dlc_given: bool,
     pub dwj: Value,
     pub xl: Value,
     pub xw: Value,
@@ -552,19 +534,6 @@ pub struct Bsim4v8Model {
     pub af: Value,
     pub kf: Value,
     pub lintnoi: Value,
-
-    // SOA voltage limits (stored; the SOA check is out of scope).
-    pub vgs_max: Value,
-    pub vgd_max: Value,
-    pub vgb_max: Value,
-    pub vds_max: Value,
-    pub vbs_max: Value,
-    pub vbd_max: Value,
-    pub vgsr_max: Value,
-    pub vgdr_max: Value,
-    pub vgbr_max: Value,
-    pub vbsr_max: Value,
-    pub vbdr_max: Value,
 }
 
 #[inline]
@@ -702,7 +671,6 @@ impl Bsim4v8Model {
         // instance-local and stays out of the immutable card.
         let toxe_given = get(p, "TOXE").is_some();
         let toxp_given = get(p, "TOXP").is_some();
-        let toxm_given = get(p, "TOXM").is_some();
         let dtox_given = get(p, "DTOX").is_some();
         let eot_given = get(p, "EOT").is_some();
         let mut toxe = val(p, "TOXE", 30.0e-10);
@@ -819,7 +787,6 @@ impl Bsim4v8Model {
         });
 
         // cf/cg defaults are computed in b4temp.c from effective toxe/coxe.
-        let cf_given = get(p, "CF").is_some();
         let cf = Binned {
             v: get(p, "CF").unwrap_or_else(|| {
                 2.0 * material_epsrox * EPS0 / PI * (1.0 + 0.4e-6 / material_toxe).ln()
@@ -829,19 +796,16 @@ impl Bsim4v8Model {
             p: val(p, "PCF", 0.0),
         };
         // cgdo/cgso/cgbo defaults (b4temp.c:181-196).
-        let cgdo_given = get(p, "CGDO").is_some();
         let cgdo = get(p, "CGDO").unwrap_or(if dlc_given && dlc > 0.0 {
             dlc * coxe - cgdl.v
         } else {
             0.6 * xj.v * coxe
         });
-        let cgso_given = get(p, "CGSO").is_some();
         let cgso = get(p, "CGSO").unwrap_or(if dlc_given && dlc > 0.0 {
             dlc * coxe - cgsl.v
         } else {
             0.6 * xj.v * coxe
         });
-        let cgbo_given = get(p, "CGBO").is_some();
         let cgbo = get(p, "CGBO").unwrap_or(2.0 * dwc * coxe);
 
         // Diode default chains (D side from S side).
@@ -920,17 +884,11 @@ impl Bsim4v8Model {
                 .unwrap_or_else(|| "4.8.3".to_string()),
 
             toxe,
-            toxe_given,
             toxp,
-            toxp_given,
             toxm,
-            toxm_given,
             toxref: val(p, "TOXREF", 30.0e-10),
-            dtox,
-            dtox_given,
             epsrox,
             eot,
-            eot_given,
             vddeot: val(p, "VDDEOT", if nmos { 1.5 } else { -1.5 }),
             tempeot: val(p, "TEMPEOT", 300.15),
             leffeot: val(p, "LEFFEOT", 1.0),
@@ -1122,9 +1080,6 @@ impl Bsim4v8Model {
             aigc: binned(p, "AIGC", ig_def(1.36e-2, 9.80e-3)),
             bigc: binned(p, "BIGC", ig_def(1.71e-3, 7.59e-4)),
             cigc: binned(p, "CIGC", ig_def(0.075, 0.03)),
-            aigsd,
-            bigsd,
-            cigsd,
             aigs,
             bigs,
             cigs,
@@ -1310,12 +1265,8 @@ impl Bsim4v8Model {
 
             tnom,
             cgso,
-            cgso_given,
             cgdo,
-            cgdo_given,
             cgbo,
-            cgbo_given,
-            cf_given,
             xpart: val(p, "XPART", 0.0),
             sheet_resistance: val(p, "RSH", 0.0),
 
@@ -1328,8 +1279,6 @@ impl Bsim4v8Model {
             lwn: val(p, "LWN", 1.0),
             lwl,
             lwlc: val(p, "LWLC", lwl),
-            lmin: val(p, "LMIN", 0.0),
-            lmax: val(p, "LMAX", 1.0),
             wint,
             wl,
             wlc: val(p, "WLC", wl),
@@ -1339,11 +1288,8 @@ impl Bsim4v8Model {
             wwn: val(p, "WWN", 1.0),
             wwl,
             wwlc: val(p, "WWLC", wwl),
-            wmin: val(p, "WMIN", 0.0),
-            wmax: val(p, "WMAX", 1.0),
             dwc,
             dlc,
-            dlc_given,
             dwj: val(p, "DWJ", dwc),
             xl: val(p, "XL", 0.0),
             xw: val(p, "XW", 0.0),
@@ -1389,18 +1335,6 @@ impl Bsim4v8Model {
             af: val(p, "AF", 1.0),
             kf: val(p, "KF", 0.0),
             lintnoi: val(p, "LINTNOI", 0.0),
-
-            vgs_max: val(p, "VGS_MAX", 1.0e99),
-            vgd_max: val(p, "VGD_MAX", 1.0e99),
-            vgb_max: val(p, "VGB_MAX", 1.0e99),
-            vds_max: val(p, "VDS_MAX", 1.0e99),
-            vbs_max: val(p, "VBS_MAX", 1.0e99),
-            vbd_max: val(p, "VBD_MAX", 1.0e99),
-            vgsr_max: val(p, "VGSR_MAX", 1.0e99),
-            vgdr_max: val(p, "VGDR_MAX", 1.0e99),
-            vgbr_max: val(p, "VGBR_MAX", 1.0e99),
-            vbsr_max: val(p, "VBSR_MAX", 1.0e99),
-            vbdr_max: val(p, "VBDR_MAX", 1.0e99),
         })
     }
 

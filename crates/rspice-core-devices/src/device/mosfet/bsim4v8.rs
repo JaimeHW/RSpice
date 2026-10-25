@@ -62,8 +62,8 @@
 //! charge paths are ported; after those selectors are validated, `xpart < 0`
 //! suppresses intrinsic channel charge as ngspice does.
 //!
-//! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits are accepted
-//! and stored — they do not affect the DC/charge load. ngspice-46's BSIM4
+//! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits are accepted;
+//! they do not affect the DC/charge load. ngspice-46's BSIM4
 //! parses an instance `dtemp` but never uses it; this port does the same
 //! (the device evaluates at the temperature the temp pass ran at).
 //! In noise analysis, `tnoiMod=0/1/2`, `fnoiMod=0/1`, gate-shot sources, and
