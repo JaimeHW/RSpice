@@ -180,6 +180,28 @@ fn version_two_preserves_unequal_port_references_and_every_coefficient() {
 }
 
 #[test]
+fn version_one_refuses_unequal_port_references() {
+    let dir = test_dir("touchstone_v1_mixed_references");
+    let deck = dir.join("network.cir");
+    std::fs::write(
+        &deck,
+        "* Two ports with different reference impedances\nV1 in 0 AC 0 portnum=1 z0=50\nV2 out 0 AC 0 portnum=2 z0=75\nR1 in out 50\n.SP LIN 3 1G 3G\n.END\n",
+    )
+    .unwrap();
+    let path = dir.join("network.s2p");
+    std::fs::write(&path, "previous network").unwrap();
+    let result = run(&deck, &path);
+    assert_eq!(result.status.code(), Some(2), "{result:?}");
+    let error: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("Touchstone v1 supports one reference impedance"),
+        "{message}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous network");
+}
+
+#[test]
 fn version_two_retains_asymmetric_matrices_across_all_encodings() {
     use rspice_core::analysis::s_param::{
         TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, TouchstoneVersion,
