@@ -286,10 +286,6 @@ fn numeric(expression: &Expr) -> Option<f64> {
             op: UnaryOpKind::Neg,
             operand,
         } => numeric(operand).map(|value| -value),
-        Expr::UnaryOp {
-            op: UnaryOpKind::Pos,
-            operand,
-        } => numeric(operand),
         _ => None,
     }
 }

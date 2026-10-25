@@ -681,7 +681,7 @@ impl PreparedExpression {
                     let value = pop_value(&mut self.values)?;
                     self.values.push(EvaluatedValue {
                         numeric: evaluation.unary(op, value.numeric)?,
-                        numval: value.numval && matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos),
+                        numval: value.numval && op == UnaryOpKind::Neg,
                     });
                 }
                 PreparedEvalFrame::ApplyBinary(op) => {
@@ -1172,7 +1172,7 @@ impl<'a> ExpressionEvaluator<'a> {
                     let value = pop_value(&mut values)?;
                     values.push(EvaluatedValue {
                         numeric: apply_unary(op, value.numeric),
-                        numval: value.numval && matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos),
+                        numval: value.numval && op == UnaryOpKind::Neg,
                     });
                 }
                 EvalFrame::ApplyBinary(op) => {
@@ -1493,7 +1493,6 @@ fn pop_value(values: &mut Vec<EvaluatedValue>) -> Result<EvaluatedValue, ExprErr
 pub(super) fn apply_unary(op: UnaryOpKind, value: ComplexValue) -> ComplexValue {
     match op {
         UnaryOpKind::Neg => ComplexValue::new(-value.re, -value.im),
-        UnaryOpKind::Pos => value,
         UnaryOpKind::Not => bool_value(!complex_truth(value)),
     }
 }

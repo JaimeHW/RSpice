@@ -1759,7 +1759,7 @@ impl XyceTestRunner {
                 Self::collect_analysis_parameter_references(right, declared, references, directive)
             }
             NetExpr::UnaryOp {
-                op: UnaryOpKind::Neg | UnaryOpKind::Pos,
+                op: UnaryOpKind::Neg,
                 operand,
             } => Self::collect_analysis_parameter_references(
                 operand, declared, references, directive,

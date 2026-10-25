@@ -1352,7 +1352,6 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     {
                         values.push(NetExpr::Number(match op {
                             UnaryOpKind::Neg => -*value,
-                            UnaryOpKind::Pos => *value,
                             UnaryOpKind::Not => f64::from(*value == 0.0),
                         }));
                     } else {
@@ -2098,7 +2097,6 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 tasks.push(Task::Expr(operand));
                 tasks.push(Task::Static(match op {
                     UnaryOpKind::Neg => "(-",
-                    UnaryOpKind::Pos => "(",
                     UnaryOpKind::Not => "(!",
                 }));
             }

@@ -2823,7 +2823,6 @@ fn strict_output_validation_expression(
                 tasks.push(Task::Expression(operand));
                 tasks.push(Task::Static(match op {
                     UnaryOpKind::Neg => "(-",
-                    UnaryOpKind::Pos => "(+",
                     UnaryOpKind::Not => "(!",
                 }));
             }

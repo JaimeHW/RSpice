@@ -119,6 +119,5 @@ pub enum BinOpKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOpKind {
     Neg, // -
-    Pos, // +
     Not, // !
 }

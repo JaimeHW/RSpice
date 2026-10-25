@@ -89,7 +89,6 @@ where
         let direction = self.pop()?;
         let (value, direction) = match op {
             UnaryOpKind::Neg => (-value.re, -direction),
-            UnaryOpKind::Pos => (value.re, direction),
             UnaryOpKind::Not => (if value.re == 0.0 { 1.0 } else { 0.0 }, 0.0.into()),
         };
         self.directions.push(direction);

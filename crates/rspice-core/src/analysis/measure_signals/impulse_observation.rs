@@ -337,7 +337,6 @@ impl<'a> Resolver<'a, '_> {
                 let mut child = self.expression(operand)?;
                 if !child.terms.is_empty() {
                     match op {
-                        UnaryOpKind::Pos => {}
                         UnaryOpKind::Neg => child.scale(-1.0)?,
                         UnaryOpKind::Not => {
                             return Err(failure("logical operations on impulses are undefined"));

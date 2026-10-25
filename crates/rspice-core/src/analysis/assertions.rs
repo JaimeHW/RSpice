@@ -491,7 +491,6 @@ impl Program<'_> {
             Node::IsUnknown(inner) => Some(flag(self.eval(inner, values)?.is_none())),
             Node::Unary(op, inner) => self.eval(inner, values)?.map(|value| match op {
                 UnaryOpKind::Neg => -value,
-                UnaryOpKind::Pos => value,
                 UnaryOpKind::Not => flag(!truth(value)),
             }),
             Node::Binary(BinOpKind::And, left, right) => {

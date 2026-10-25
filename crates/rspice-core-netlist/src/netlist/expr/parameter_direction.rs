@@ -251,7 +251,6 @@ where
         let direction = self.pop()?;
         self.push_direction(match op {
             UnaryOpKind::Neg => Ok(-direction),
-            UnaryOpKind::Pos => Ok(direction),
             // A logical negation is a step: its value is locally constant
             // unless the argument crosses zero here, and only then undefined.
             UnaryOpKind::Not if value == ComplexValue::from(0.0) && !direction.is_zero() => Err(
