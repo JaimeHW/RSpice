@@ -5,7 +5,7 @@ use crate::workbench::AppState;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::WorkspaceDocumentId;
 
-use super::WorkspaceDocument;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per retained result dataset.
 pub(in crate::workbench) fn result_documents(state: &AppState) -> Vec<WorkspaceDocument> {

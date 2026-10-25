@@ -19,6 +19,7 @@ use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
 use crate::ui::panels::{WorkbenchIcon, elide_text};
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 const TAB_MAX_WIDTH: f32 = 190.0;
 /// The narrowest a tab shrinks to before the strip scrolls instead: its icon,
@@ -348,25 +349,6 @@ pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost<Session: Documen
         app.workbench().workspace,
         visible_documents(app.session()).len(),
     )
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct WorkspaceDocument {
-    id: WorkspaceDocumentId,
-    label: String,
-    icon: WorkbenchIcon,
-    dirty: bool,
-}
-
-impl WorkspaceDocument {
-    /// What the tab shows when it is too narrow for its label: a cell view's
-    /// cell alone, since the tab's icon already names the view.
-    fn short_label(&self) -> Option<&str> {
-        match &self.id {
-            WorkspaceDocumentId::CellView(reference) => Some(reference.cell.as_str()),
-            _ => None,
-        }
-    }
 }
 
 /// Read-only document metadata used by shell-owned document/session managers.

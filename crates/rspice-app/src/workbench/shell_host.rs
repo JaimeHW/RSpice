@@ -27,7 +27,6 @@ use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
-use crate::workbench::chrome::document_bar::WorkspaceDocument;
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 use crate::workbench::commands::vocabulary::{
@@ -45,6 +44,7 @@ use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
 use crate::workbench::sheets::SheetsFeature;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{
     ProjectPage, VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId,
 };

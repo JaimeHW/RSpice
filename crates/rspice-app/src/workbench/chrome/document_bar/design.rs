@@ -6,7 +6,7 @@ use crate::workbench::AppState;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::WorkspaceDocumentId;
 
-use super::WorkspaceDocument;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per cell view open in Design.
 pub(in crate::workbench) fn design_documents(state: &AppState) -> Vec<WorkspaceDocument> {

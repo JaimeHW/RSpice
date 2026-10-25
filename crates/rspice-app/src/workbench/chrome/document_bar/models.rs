@@ -3,7 +3,7 @@
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::WorkspaceDocumentId;
 
-use super::WorkspaceDocument;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// The Models workspace's one document, its pinned root.
 pub(in crate::workbench) fn models_documents() -> Vec<WorkspaceDocument> {

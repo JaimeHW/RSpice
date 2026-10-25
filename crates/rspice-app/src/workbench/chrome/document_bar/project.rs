@@ -4,7 +4,7 @@
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::WorkspaceDocumentId;
 
-use super::WorkspaceDocument;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// The Project workspace's one document, its overview.
 pub(in crate::workbench) fn project_documents() -> Vec<WorkspaceDocument> {

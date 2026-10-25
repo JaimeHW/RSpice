@@ -10,7 +10,7 @@ pub(crate) mod plan_provenance;
 pub(crate) mod retired_documents;
 mod session_views;
 mod stimulus_editor;
-mod workbench_session;
+pub(in crate::workbench) mod workbench_session;
 mod workflow_drafts;
 
 // The workbench's own session and the views over its records, which the

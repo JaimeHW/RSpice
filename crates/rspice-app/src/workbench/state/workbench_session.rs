@@ -18,6 +18,7 @@ use super::console_views::{
 };
 use super::navigator_tree::NavigatorTrees;
 use super::retired_documents;
+use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::localization::{MessageCatalog, UiTextLocale};
 use crate::workbench::routing::availability::SurfaceRouteUnavailable;
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -130,6 +131,25 @@ impl WorkspaceDocumentId {
             | Self::NetlistComparison
             | Self::NetlistRunSnapshot
             | Self::NetlistSource => Workspace::Netlist,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WorkspaceDocument {
+    pub(in crate::workbench) id: WorkspaceDocumentId,
+    pub(in crate::workbench) label: String,
+    pub(in crate::workbench) icon: WorkbenchIcon,
+    pub(in crate::workbench) dirty: bool,
+}
+
+impl WorkspaceDocument {
+    /// What the tab shows when it is too narrow for its label: a cell view's
+    /// cell alone, since the tab's icon already names the view.
+    pub(in crate::workbench) fn short_label(&self) -> Option<&str> {
+        match &self.id {
+            WorkspaceDocumentId::CellView(reference) => Some(reference.cell.as_str()),
+            _ => None,
         }
     }
 }

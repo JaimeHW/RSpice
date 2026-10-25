@@ -4,7 +4,7 @@
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::WorkspaceDocumentId;
 
-use super::WorkspaceDocument;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// The Simulate workspace's one document, its plan.
 pub(in crate::workbench) fn simulation_plan_documents() -> Vec<WorkspaceDocument> {

@@ -7,7 +7,7 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::netlist_document::run_deck_snapshot_run_id;
 use crate::workbench::state::WorkspaceDocumentId;
 
-use super::WorkspaceDocument;
+use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 pub(in crate::workbench) fn netlist_workspace_documents(
     state: &AppState,
