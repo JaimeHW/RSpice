@@ -16,32 +16,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DerivedViewerLoadState {
+pub enum DerivedViewerLoadState {
     Ready,
     Loading,
     Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DerivedViewKind {
+pub enum DerivedViewKind {
     EyeDiagram,
     Fft,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DerivedViewAvailability {
+pub enum DerivedViewAvailability {
     Ready,
     Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LoadedDerivedView {
+pub struct LoadedDerivedView {
     pub(crate) analysis: SpecializedViewerCacheProvenance,
     pub(crate) availability: DerivedViewAvailability,
 }
 
 #[derive(Debug)]
-pub(crate) struct PendingDerivedViewTask {
+pub struct PendingDerivedViewTask {
     pub(crate) analysis: SpecializedViewerCacheProvenance,
     pub(crate) receiver: mpsc::Receiver<DerivedViewTaskResult>,
     pub(crate) cancel_flag: Arc<AtomicBool>,
@@ -66,13 +66,13 @@ pub(crate) struct EyeBuild {
 }
 
 #[derive(Debug)]
-pub(crate) enum DerivedViewResultPayload {
+pub enum DerivedViewResultPayload {
     Eye(EyeBuild),
     Fft(Result<PreparedFftInput, FftInputError>),
 }
 
 #[derive(Debug)]
-pub(crate) struct DerivedViewTaskResult {
+pub struct DerivedViewTaskResult {
     pub(crate) analysis: SpecializedViewerCacheProvenance,
     pub(crate) payload: DerivedViewResultPayload,
 }
@@ -80,13 +80,13 @@ pub(crate) struct DerivedViewTaskResult {
 #[derive(Debug, Default)]
 pub(crate) struct TransientPostCoordinator {
     eye_task: Option<PendingDerivedViewTask>,
-    pub(crate) fft_task: Option<PendingDerivedViewTask>,
+    pub fft_task: Option<PendingDerivedViewTask>,
     pub(super) eye_loaded: Option<LoadedDerivedView>,
-    pub(crate) fft_loaded: Option<LoadedDerivedView>,
+    pub fft_loaded: Option<LoadedDerivedView>,
 }
 
 impl SimulationController {
-    pub(crate) fn ensure_transient_viewer_data(
+    pub fn ensure_transient_viewer_data(
         &mut self,
         state: &mut impl RunHost,
         viewer: ActiveViewer,
@@ -99,11 +99,7 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn mark_transient_view_ready(
-        &mut self,
-        state: &mut impl RunHost,
-        viewer: ActiveViewer,
-    ) {
+    pub fn mark_transient_view_ready(&mut self, state: &mut impl RunHost, viewer: ActiveViewer) {
         let Some(analysis) = self.active_transient_analysis_key(state.model()) else {
             return;
         };
@@ -133,7 +129,7 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn sync_transient_post_views(&mut self, state: &mut impl RunHost) {
+    pub fn sync_transient_post_views(&mut self, state: &mut impl RunHost) {
         let active_analysis = self.active_transient_analysis_key(state.model());
         self.cancel_stale_transient_task(DerivedViewKind::EyeDiagram, active_analysis);
         self.cancel_stale_transient_task(DerivedViewKind::Fft, active_analysis);
@@ -286,7 +282,7 @@ impl SimulationController {
         DerivedViewerLoadState::Loading
     }
 
-    pub(crate) fn poll_transient_task(
+    pub fn poll_transient_task(
         &mut self,
         state: &mut impl RunHost,
         view: DerivedViewKind,
@@ -414,7 +410,7 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn cancel_task_slot(&mut self, view: DerivedViewKind) {
+    pub fn cancel_task_slot(&mut self, view: DerivedViewKind) {
         if let Some(task) = self.task_slot_mut(view).take() {
             task.cancel_flag.store(true, Ordering::Relaxed);
         }
@@ -464,7 +460,7 @@ impl SimulationController {
         })
     }
 
-    pub(crate) fn analysis_supports_transient_derivation(analysis_type: AnalysisType) -> bool {
+    pub fn analysis_supports_transient_derivation(analysis_type: AnalysisType) -> bool {
         analysis_type.is_time_domain()
     }
 }
@@ -481,7 +477,7 @@ impl SimulationController {
 /// agree at the stated rate) is an answer, not a request: keying on it would
 /// make every incoherent eye disagree with the rate that produced it and
 /// rebuild itself on every frame, forever.
-pub(crate) fn eye_matches_timebase(
+pub fn eye_matches_timebase(
     loaded: Option<&EyeTimebaseProvenance>,
     requested: EyeTimebase,
 ) -> bool {
@@ -517,7 +513,7 @@ const EYE_SKIP_INITIAL: usize = 2;
 /// through here, so the two cannot drift into folding the same waveform at
 /// different periods — or, as they did, into two copies of the same estimator
 /// with the same defect.
-pub(crate) fn build_eye_from_waveform(
+pub fn build_eye_from_waveform(
     time: &[f64],
     values: &[f64],
     timebase: EyeTimebase,

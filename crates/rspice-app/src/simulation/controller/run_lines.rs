@@ -71,7 +71,7 @@ impl SimulationController {
     /// The failure a failed run's end line quotes: the first error the run
     /// wrote about itself. Never that end line, which is written last and
     /// says only that the run failed.
-    pub(crate) fn run_failure(
+    pub fn run_failure(
         run_sequence: u64,
         log: &rspice_vocabulary::run_log::RunLog,
     ) -> Option<&str> {

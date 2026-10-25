@@ -20,7 +20,7 @@ use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 /// `Clone` because a campaign prepares every member from a frozen copy of the
 /// whole application before any engine work begins, so a later member never
 /// observes edits made while an earlier one runs.
-pub(crate) trait RunHost: RunEventSink + Clone {
+pub trait RunHost: RunEventSink + Clone {
     /// The shared model.
     fn model(&self) -> &Model;
     /// The shared model, to change.
@@ -59,27 +59,27 @@ pub(crate) trait RunHost: RunEventSink + Clone {
 
 /// Which netlist document the editor shows, as a manual-deck run reads it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NetlistShown {
+pub struct NetlistShown {
     /// Whether the editor has settled which document a just-opened project
     /// shows.
-    pub(crate) settled: bool,
+    pub settled: bool,
     /// The generated revision comparison, which is not a deck.
-    pub(crate) comparison: bool,
+    pub comparison: bool,
     /// The project's own source.
-    pub(crate) owned_source: bool,
+    pub owned_source: bool,
 }
 
 /// What the transient viewers hold, read when the run tier asks.
 #[derive(Debug, Clone)]
-pub(crate) struct ViewerReading {
+pub struct ViewerReading {
     /// Whether the eye holds folded traces.
-    pub(crate) eye_has_traces: bool,
+    pub eye_has_traces: bool,
     /// The bit period the loaded eye was folded at, when it records one.
-    pub(crate) eye_timebase: Option<EyeTimebaseProvenance>,
+    pub eye_timebase: Option<EyeTimebaseProvenance>,
     /// Whether the FFT holds a spectrum.
-    pub(crate) fft_has_data: bool,
+    pub fft_has_data: bool,
     /// Whether the FFT holds an error.
-    pub(crate) fft_failed: bool,
+    pub fft_failed: bool,
     /// The trace the reader chose for the FFT.
-    pub(crate) fft_source: Option<String>,
+    pub fft_source: Option<String>,
 }

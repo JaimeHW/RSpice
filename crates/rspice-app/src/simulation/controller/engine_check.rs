@@ -33,7 +33,7 @@ use crate::simulation::execution::{
 
 /// Which stage a pipeline is in, and how far it has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PreflightStage {
+pub enum PreflightStage {
     /// Preparing the run. The total is zero until the run's points are known,
     /// and stays zero for a run that is not expanded to any.
     Preparing(PreparationProgress),
@@ -65,16 +65,16 @@ pub(super) struct PendingPreflight {
 
 /// How a pipeline ended.
 #[derive(Debug)]
-pub(crate) struct PreflightOutcome {
-    pub(crate) verdict: PreflightVerdict,
+pub struct PreflightOutcome {
+    pub verdict: PreflightVerdict,
     /// Whether nothing dropped or replaced the retained run since the press.
     /// When something did, the verdict describes inputs nobody will dispatch,
     /// and the prepared run was not retained.
-    pub(crate) current: bool,
+    pub current: bool,
 }
 
 #[derive(Debug)]
-pub(crate) enum PreflightVerdict {
+pub enum PreflightVerdict {
     /// Preparation refused the run.
     NotPrepared(PreparationError),
     /// The run was prepared, and retained when the outcome is current, and
@@ -153,7 +153,7 @@ impl SimulationController {
     }
 
     /// The stage the pipeline in flight is in, or `None` when none is.
-    pub(crate) fn preflight_stage(&self) -> Option<PreflightStage> {
+    pub fn preflight_stage(&self) -> Option<PreflightStage> {
         self.preflight.as_ref().map(|pending| {
             pending.stage.lock().map_or(
                 PreflightStage::Preparing(PreparationProgress::default()),

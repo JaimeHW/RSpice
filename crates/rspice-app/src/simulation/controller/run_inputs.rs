@@ -1070,7 +1070,7 @@ impl RetainedRunInputs {
 /// asked of them is the one its dispatch asks, refused in the same words. The
 /// two cannot disagree, and neither prepares anything.
 #[derive(Clone)]
-pub(crate) struct PreparedRunSetInputs {
+pub struct PreparedRunSetInputs {
     inputs: Arc<RetainedRunInputs>,
     /// The host sources the run's includes were read from, as they were read.
     sealed_source_dependencies: Arc<[rspice_core::netlist::ResolvedIncludeDependency]>,
@@ -1094,7 +1094,7 @@ impl PreparedRunSetInputs {
     /// Refuse unless nothing the run set was prepared from has moved, as its
     /// dispatch refuses it, whether or not it has been dispatched since.
     /// Nothing is prepared.
-    pub(crate) fn still_current(&self, state: &impl RunHost) -> Result<(), PreparationError> {
+    pub fn still_current(&self, state: &impl RunHost) -> Result<(), PreparationError> {
         self.inputs.refused_if_moved(
             state.model(),
             self.inputs.identity.run_set_moved_in(state),

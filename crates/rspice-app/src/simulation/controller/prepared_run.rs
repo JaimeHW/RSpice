@@ -70,7 +70,7 @@ type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPr
     crate::state::AnalysisResult,
 >;
 
-pub(crate) fn run_preparation_inputs(state: &impl RunHost) -> RunPreparationInputs<'_> {
+pub fn run_preparation_inputs(state: &impl RunHost) -> RunPreparationInputs<'_> {
     run_preparation_inputs_reading(state, &crate::simulation::table_route::SourceFiles)
 }
 
@@ -294,7 +294,7 @@ impl FrozenRunInputs {
 /// are not runs a frame can watch reach their end, so the controller hands
 /// the shell the fact rather than leaving it to a Console line.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum CampaignOutcome {
+pub enum CampaignOutcome {
     /// A member that could not be started, with the Console line that says
     /// why.
     MemberRefused {
@@ -337,13 +337,13 @@ impl RunWatch {
     /// Watch a run from the moment it opens, before any frame has seen it.
     /// A run that ends inside the update that started it is still one that
     /// was seen running.
-    pub(crate) fn run_started(&mut self, run_id: crate::product::RunId) {
+    pub fn run_started(&mut self, run_id: crate::product::RunId) {
         self.running.insert(run_id);
     }
 
     /// Bring the watch up to date with the runs as they stand, newest first,
     /// and return the runs that ended since it last looked, oldest first.
-    pub(crate) fn observe(
+    pub fn observe(
         &mut self,
         runs: impl IntoIterator<Item = (crate::product::RunId, crate::state::SimulationRunLifecycle)>,
     ) -> Vec<crate::product::RunId> {
@@ -369,12 +369,12 @@ impl RunWatch {
     }
 
     /// Hold a campaign outcome until the shell announces it.
-    pub(crate) fn campaign_outcome(&mut self, outcome: CampaignOutcome) {
+    pub fn campaign_outcome(&mut self, outcome: CampaignOutcome) {
         self.campaign_outcomes.push(outcome);
     }
 
     /// The campaign outcomes not yet announced, oldest first.
-    pub(crate) fn take_campaign_outcomes(&mut self) -> Vec<CampaignOutcome> {
+    pub fn take_campaign_outcomes(&mut self) -> Vec<CampaignOutcome> {
         std::mem::take(&mut self.campaign_outcomes)
     }
 }
@@ -426,7 +426,7 @@ impl SimulationController {
     /// configured-root and hierarchy projection used by run preparation.
     /// This keeps Automatic mode's forecast honest when the editor is showing
     /// a child sheet or a different library view than the simulation root.
-    pub(crate) fn effective_saved_outputs_preflight(
+    pub fn effective_saved_outputs_preflight(
         &self,
         model: &Model,
         explicit: &[crate::state::SavedOutput],
@@ -491,7 +491,7 @@ impl SimulationController {
     /// binding helpers used by prepared execution. Consumers can therefore
     /// ask the engine to inspect the exact current design without inventing a
     /// second model-resolution path.
-    pub(crate) fn prepare_design_netlist_for_inspection(
+    pub fn prepare_design_netlist_for_inspection(
         model: &Model,
     ) -> Result<String, PreparationError> {
         let projection = model
@@ -619,7 +619,7 @@ impl SimulationController {
     /// Include explicitly authored measurements in the generated primary and
     /// its exports. Operand validation waits for preparation, where includes
     /// and model-owned parameters have been resolved into the execution deck.
-    pub(crate) fn append_plan_measurements_to_generated_netlist(
+    pub fn append_plan_measurements_to_generated_netlist(
         model: &Model,
         source: &str,
     ) -> Result<String, PreparationError> {
@@ -659,7 +659,7 @@ impl SimulationController {
     /// file, its includes and its model files among it, so a dependency
     /// changed after validation cannot execute under a stale receipt; nothing
     /// is prepared again in the frame that starts it.
-    pub(crate) fn validate_manual_deck_document(
+    pub fn validate_manual_deck_document(
         &mut self,
         state: &impl RunHost,
     ) -> Result<PreparedRunMetadata, PreparationError> {
@@ -686,7 +686,7 @@ impl SimulationController {
     /// state the run is prepared from is retained with it, and the frame that
     /// dispatches it checks that identity, as it checks a Run press's.
     /// Automation prepares through [`Self::prepare_run_set_for_evidence`].
-    pub(crate) fn prepare_run_set_for_preflight(
+    pub fn prepare_run_set_for_preflight(
         &mut self,
         state: &impl RunHost,
     ) -> Result<PreparedRunMetadata, PreparationError> {
@@ -710,7 +710,7 @@ impl SimulationController {
     /// spends the retained run; the workflow keeps these inputs past it, and
     /// publishes only while [`super::PreparedRunSetInputs::still_current`]
     /// holds.
-    pub(crate) fn prepare_run_set_for_evidence(
+    pub fn prepare_run_set_for_evidence(
         &mut self,
         state: &impl RunHost,
     ) -> Result<(PreparedRunMetadata, super::PreparedRunSetInputs), PreparationError> {
@@ -742,7 +742,7 @@ impl SimulationController {
     /// plans. Every member is prepared in a cloned project view before any
     /// engine work begins, so a later member never observes edits made while
     /// an earlier member is executing.
-    pub(crate) fn prepare_and_start_campaign(
+    pub fn prepare_and_start_campaign(
         &mut self,
         state: &mut impl RunHost,
         name: &str,
@@ -1014,7 +1014,7 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn clear_prepared_run(&mut self) {
+    pub fn clear_prepared_run(&mut self) {
         self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
         self.retained_run_inputs = None;
         self.run_authorization.clear();
@@ -1033,7 +1033,7 @@ impl SimulationController {
         inputs.still_current(state, snapshot).is_ok()
     }
 
-    pub(crate) fn has_retained_manual_authorization(
+    pub fn has_retained_manual_authorization(
         &self,
         expected_snapshot_digest: crate::product::ContentDigest,
     ) -> bool {
@@ -1053,7 +1053,7 @@ impl SimulationController {
     /// A run set or a manual deck dispatches the very snapshot its
     /// preparation authorized, once nothing it was prepared from has moved;
     /// nothing is prepared here.
-    pub(crate) fn consume_snapshot_for_dispatch(
+    pub fn consume_snapshot_for_dispatch(
         &mut self,
         state: &impl RunHost,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
@@ -1066,7 +1066,7 @@ impl SimulationController {
         })
     }
 
-    pub(crate) fn build_prepared_snapshot(
+    pub fn build_prepared_snapshot(
         state: &impl RunHost,
         intent: SimulationRunIntent,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
@@ -1121,7 +1121,7 @@ impl SimulationController {
 
 /// The deck a manual run is prepared from: the netlist document the session
 /// shows, the file it came from, and what composing it reads.
-pub(crate) fn manual_source_inputs(
+pub fn manual_source_inputs(
     state: &impl RunHost,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
     let shown = state.netlist_shown();
@@ -1180,7 +1180,7 @@ pub(crate) fn manual_source_inputs(
 /// corpus and this key is asked for on every frame the Bins & geometry page or
 /// the analysis editor paints. See that method for what the key covers and why
 /// the coverage is complete.
-pub(crate) fn design_inspection_input_digest(model: &Model) -> crate::product::ContentDigest {
+pub fn design_inspection_input_digest(model: &Model) -> crate::product::ContentDigest {
     let plan_identity = model.sim_setup.analysis_plan.as_ref().map_or_else(
         || "none".to_owned(),
         |plan| format!("{}:{}", plan.id(), plan.revision().get()),

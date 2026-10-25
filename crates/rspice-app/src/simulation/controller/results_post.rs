@@ -11,10 +11,10 @@ use crate::state::{RunEvent, SpecializedViewerCacheProvenance};
 use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 
 /// What the locus is, named for the reader rather than for the transport.
-pub(crate) const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
+pub const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
 
 impl SimulationController {
-    pub(crate) fn in_flight_specialized_viewer_provenance(
+    pub fn in_flight_specialized_viewer_provenance(
         &self,
         model: &Model,
     ) -> Option<SpecializedViewerCacheProvenance> {
@@ -27,7 +27,7 @@ impl SimulationController {
         ))
     }
 
-    pub(crate) fn populate_transient_post_views(
+    pub fn populate_transient_post_views(
         &mut self,
         state: &mut impl RunHost,
         analysis: &crate::state::AnalysisResult,
@@ -122,7 +122,7 @@ impl SimulationController {
         (analysis_type == AnalysisType::Stb).then_some(STB_NYQUIST_CONTOUR_WAVEFORM)
     }
 
-    pub(crate) fn populate_ac_post_views(
+    pub fn populate_ac_post_views(
         &self,
         state: &mut impl RunHost,
         frequencies: &[f64],

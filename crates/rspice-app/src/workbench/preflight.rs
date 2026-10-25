@@ -60,7 +60,7 @@ use super::app_state::run_preflight::PreflightCheck;
 /// permit, the controller still refuses the snapshot if anything it was
 /// prepared from has moved. While the engine builds the decks, the run is
 /// queued when [`poll`] finds that they authorize it, and not before.
-pub(crate) fn start(state: &mut impl RunHost, controller: &mut SimulationController, queue: bool) {
+pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, queue: bool) {
     if queue {
         let execution = &state.model().simulation.execution;
         if execution.has_active_execution() || execution.trigger_simulation {
@@ -195,7 +195,7 @@ fn contract_of(
 /// retained run, or another preparation replaced it — authorizes nothing. Its
 /// findings are still published, against the inputs as they stood at the
 /// press, so they read as stale rather than as current.
-pub(crate) fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
+pub fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
     if state.runs_mut().preflight.take_check_cancel_request() {
         cancel(state, controller);
         return;
@@ -409,7 +409,7 @@ fn conclude(
 
 /// Queue a retained authorized report only while every revision it names is
 /// still current.
-pub(crate) fn queue_retained_run(state: &mut impl RunHost) -> bool {
+pub fn queue_retained_run(state: &mut impl RunHost) -> bool {
     let project_revision = state.model().workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
         state.model().configured_topology_revision();
@@ -778,7 +778,7 @@ fn collect(state: &impl RunHost) -> PreflightReport {
 /// Only the corner each library has *active* is checked here: that is the one
 /// a run expands. Every corner the project is authoring is checked on the
 /// Corners page, where authoring one is what a reader is doing.
-pub(crate) fn temperature_validity_advisories(model: &Model) -> Vec<PreflightAdvisory> {
+pub fn temperature_validity_advisories(model: &Model) -> Vec<PreflightAdvisory> {
     let requested = model.sim_setup.requested_temperatures_celsius();
     model
         .model_library_manager
@@ -846,7 +846,7 @@ fn preparation_requirement(stage: crate::simulation::execution::PreparationStage
 /// stage that reports no line yields a destination with none, so the row
 /// that offers it can tell a located finding from an unlocated one instead
 /// of promising a jump it cannot make.
-pub(crate) fn preparation_remediation(
+pub fn preparation_remediation(
     stage: crate::simulation::execution::PreparationStage,
     line: Option<usize>,
 ) -> PreflightRemediation {

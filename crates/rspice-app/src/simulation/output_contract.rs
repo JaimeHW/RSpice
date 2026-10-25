@@ -38,7 +38,7 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
     materialization::retain_plan_saved_outputs(&mut analysis.data, contracts);
 }
 
-pub(crate) fn materialize_live_saved_outputs(
+pub fn materialize_live_saved_outputs(
     analysis: &AnalysisResult,
     contracts: &[PreparedSavedOutput],
 ) -> Vec<RetainedTrace> {

@@ -66,7 +66,7 @@ mod analysis_spec_build;
 mod completion;
 use analysis_spec_build::analysis_inputs;
 mod engine_check;
-pub(crate) use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
+pub use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
 #[cfg(test)]
 pub(crate) mod dc_history_tests;
 #[cfg(test)]
@@ -82,7 +82,7 @@ mod results_convert;
 pub(crate) mod results_post;
 mod results_update;
 mod run_inputs;
-pub(crate) use run_inputs::PreparedRunSetInputs;
+pub use run_inputs::PreparedRunSetInputs;
 mod run_lines;
 use run_lines::write_run_line;
 #[cfg(test)]
@@ -92,7 +92,7 @@ pub(crate) mod test_host;
 mod touchstone;
 mod transient_checkpoint;
 pub(crate) mod transient_post;
-pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
+pub use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;
 
@@ -110,7 +110,7 @@ pub(crate) struct ActiveSimulationCampaign {
     completed_count: u32,
     failed_count: u32,
     cancelled: bool,
-    pub(crate) pending: VecDeque<PreparedCampaignMember>,
+    pub pending: VecDeque<PreparedCampaignMember>,
     /// When the campaign was queued, for the time its summary reports.
     started: crate::time_compat::Instant,
 }
@@ -135,13 +135,13 @@ pub(crate) struct SimulationCampaignDispatchReceipt {
 /// stored under a single simulation run.
 pub struct SimulationController {
     /// The background simulation runner
-    pub(crate) runner: SimulationRunner,
+    pub runner: SimulationRunner,
     /// Manager for yield analysis (Monte Carlo)
     yield_manager: YieldAnalysisManager,
     /// Current analysis config (stored for result processing when polling completes)
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
-    pub(crate) current_spec: Option<AnalysisSpec>,
+    pub current_spec: Option<AnalysisSpec>,
     /// Immutable prepared-task label, including its exact Run Set point.
     current_analysis_label: Option<String>,
     /// Exact typed execution options for the active spec-driven task. These
@@ -170,7 +170,7 @@ pub struct SimulationController {
         Option<rspice_simulation::execution_artifact::PreparedArtifactProducer>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
-    pub(crate) current_provenance: Option<AnalysisResultProvenance>,
+    pub current_provenance: Option<AnalysisResultProvenance>,
     /// Digest of the exact prepared payload currently executing.
     current_config_digest: Option<crate::product::ContentDigest>,
     /// Source identity extended with the exact OP voltage-corner mutation.
@@ -184,7 +184,7 @@ pub struct SimulationController {
     /// task IDs are deterministic source projections, not plan-owned IDs.
     current_source_domain: AnalysisResultSourceDomain,
     /// Stable run ID that owns the in-flight batch.
-    pub(crate) current_run_id: Option<u64>,
+    pub current_run_id: Option<u64>,
     /// When the runner took the active task, for its line in the run's log.
     current_task_started: Option<crate::time_compat::Instant>,
     /// What the run advised when it started, which its tasks' engine logs
@@ -215,17 +215,17 @@ pub struct SimulationController {
     /// results when its own turn in the queue comes.
     point_families: crate::simulation::point_family::PointFamilyRegistry,
     /// Current analysis index (1-based for display: "Analysis 2/4")
-    pub(crate) current_analysis_idx: usize,
+    pub current_analysis_idx: usize,
     /// Total number of analyses in current batch
-    pub(crate) total_analyses: usize,
+    pub total_analyses: usize,
     /// Cached netlist for multi-analysis runs (avoids regeneration)
     cached_netlist: Option<String>,
     /// Runtime coordinator for transient-derived viewer data (eye/FFT).
-    pub(crate) transient_post: transient_post::TransientPostCoordinator,
+    pub transient_post: transient_post::TransientPostCoordinator,
     /// App-state design epoch this controller's runner/queue belong to.
     design_execution_epoch: u64,
     /// Retained preflight and generation-safe dispatch authority.
-    pub(crate) run_authorization: crate::simulation::execution::PreparedRunAuthorization,
+    pub run_authorization: crate::simulation::execution::PreparedRunAuthorization,
     /// What the retained run set was prepared from, which its dispatch
     /// checks. Set and dropped with the retained run; Automation shares it,
     /// and keeps it past the dispatch.
@@ -241,7 +241,7 @@ pub struct SimulationController {
     touchstone_export_policy: TouchstoneExportPolicy,
     /// Frozen, declared-order multi-plan campaign. Each member is an
     /// independent prepared run; this record only schedules and rolls them up.
-    pub(crate) active_campaign: Option<ActiveSimulationCampaign>,
+    pub active_campaign: Option<ActiveSimulationCampaign>,
 }
 
 impl Default for SimulationController {
@@ -299,7 +299,7 @@ impl SimulationController {
     /// Process simulation state updates
     ///
     /// Call this once per frame in the app update loop.
-    pub(crate) fn update(
+    pub fn update(
         &mut self,
         state: &mut impl RunHost,
         export_io: &(impl ExportWorkflowIo + ?Sized),
@@ -387,7 +387,7 @@ impl SimulationController {
         execution.is_running = is_running;
     }
 
-    pub(crate) fn engine_availability(&self) -> super::status::EngineAvailability {
+    pub fn engine_availability(&self) -> super::status::EngineAvailability {
         self.runner.engine_availability()
     }
 
@@ -435,7 +435,7 @@ impl SimulationController {
         self.runner.set_engine_wakeup(wakeup);
     }
 
-    pub(crate) fn retry_engine_startup(&mut self) -> Result<(), Box<SimulationError>> {
+    pub fn retry_engine_startup(&mut self) -> Result<(), Box<SimulationError>> {
         self.runner.retry_engine_startup().map_err(Box::new)
     }
 
@@ -443,7 +443,7 @@ impl SimulationController {
     ///
     /// Builds all enabled analyses into a queue and starts the first one.
     /// Subsequent analyses are started automatically upon completion.
-    pub(crate) fn start_simulation(&mut self, state: &mut impl RunHost) {
+    pub fn start_simulation(&mut self, state: &mut impl RunHost) {
         log::info!("start_simulation called");
         self.design_execution_epoch = state.model().design_execution_epoch;
 
@@ -1580,7 +1580,7 @@ impl SimulationController {
     /// which stands until the inputs it was measured against move, tied to
     /// the objects the engine named for it so the Problems page can go to
     /// them. A log line is a record of the event, not a place to jump from.
-    pub(crate) fn report_failed_analysis(
+    pub fn report_failed_analysis(
         state: &mut impl RunHost,
         analysis: &str,
         message: &str,

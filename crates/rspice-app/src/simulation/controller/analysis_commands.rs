@@ -5,7 +5,7 @@ use super::*;
 impl SimulationController {
     /// The engine directive one frozen draft emits. `model` supplies live
     /// circuit context and the projected prerequisite closure where needed.
-    pub(crate) fn analysis_draft_directive(
+    pub fn analysis_draft_directive(
         &self,
         model: &Model,
         draft: &crate::simulation::plan::AnalysisDraft,

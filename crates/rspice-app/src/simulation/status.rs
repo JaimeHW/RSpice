@@ -5,6 +5,4 @@ pub use rspice_simulation::status::{EngineAvailability, SimulationStatus};
 
 mod engine_segment;
 
-pub(crate) use engine_segment::{
-    preflight_status, simulation_engine_status, simulation_progress_percent,
-};
+pub use engine_segment::{preflight_status, simulation_engine_status, simulation_progress_percent};

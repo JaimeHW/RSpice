@@ -3,12 +3,12 @@
 
 use crate::simulation::status::EngineAvailability;
 
-pub(crate) fn simulation_progress_percent(progress: f64) -> u8 {
+pub fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
 /// The engine segment, or nothing while the engine sits ready and idle.
-pub(crate) fn simulation_engine_status(
+pub fn simulation_engine_status(
     simulation: &crate::state::SimulationState,
     availability: &EngineAvailability,
 ) -> Option<String> {
@@ -49,7 +49,7 @@ pub(crate) fn simulation_engine_status(
 /// The engine segment while preflight prepares the run and then has the
 /// engine build its decks: the stage, and how far it has got once it has
 /// counted what it works through. A run of one point is not counted.
-pub(crate) fn preflight_status(stage: crate::simulation::controller::PreflightStage) -> String {
+pub fn preflight_status(stage: crate::simulation::controller::PreflightStage) -> String {
     use crate::simulation::controller::PreflightStage;
     match stage {
         PreflightStage::Preparing(progress) if progress.total > 1 => format!(
