@@ -230,7 +230,6 @@ impl<'a> Parser<'a> {
             ParseErrorKind::Expected { .. }
                 | ParseErrorKind::UnexpectedToken(_)
                 | ParseErrorKind::UnsupportedConstruct { .. }
-                | ParseErrorKind::InvalidModule
                 | ParseErrorKind::InvalidPort
                 | ParseErrorKind::InvalidExpression
         );

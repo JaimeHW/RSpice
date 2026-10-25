@@ -24,8 +24,6 @@ pub enum JitError {
     Encoding { model: SmolStr, detail: SmolStr },
     Relocation { model: SmolStr, detail: SmolStr },
     ExecutableMemory { detail: SmolStr },
-    AbiMismatch { model: SmolStr, detail: SmolStr },
-    MissingEntryPoint { model: SmolStr, entry: SmolStr },
     InternalCompilerError { model: SmolStr, detail: SmolStr },
 }
 
@@ -93,14 +91,6 @@ impl std::fmt::Display for JitError {
                     "native JIT executable memory failed: {detail}; no interpreter fallback"
                 )
             }
-            JitError::AbiMismatch { model, detail } => write!(
-                f,
-                "model {model}: native JIT ABI mismatch: {detail}; no interpreter fallback"
-            ),
-            JitError::MissingEntryPoint { model, entry } => write!(
-                f,
-                "model {model}: native JIT missing entry point {entry}; no interpreter fallback"
-            ),
             JitError::InternalCompilerError { model, detail } => write!(
                 f,
                 "model {model}: native JIT internal compiler error: {detail}; no interpreter fallback"

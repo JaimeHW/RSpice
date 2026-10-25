@@ -133,12 +133,6 @@ pub enum LexerErrorKind {
     #[error("Invalid number literal: {0}")]
     InvalidNumber(String),
 
-    #[error("Invalid escape sequence: '\\{0}'")]
-    InvalidEscape(char),
-
-    #[error("Unterminated compiler directive")]
-    UnterminatedDirective,
-
     #[error("Invalid preprocessor directive: `{0}")]
     InvalidDirective(String),
 
@@ -202,9 +196,6 @@ pub enum ParseErrorKind {
     #[error("Unexpected end of input")]
     UnexpectedEof,
 
-    #[error("Invalid module declaration")]
-    InvalidModule,
-
     #[error("Invalid port declaration")]
     InvalidPort,
 
@@ -231,17 +222,8 @@ pub enum ParseErrorKind {
     #[error("Invalid number literal: {0}")]
     InvalidNumber(String),
 
-    #[error("Invalid branch access")]
-    InvalidBranchAccess,
-
     #[error("Duplicate {kind} declaration: '{name}'")]
     Duplicate { kind: String, name: String },
-
-    #[error("Invalid discipline declaration")]
-    InvalidDiscipline,
-
-    #[error("Invalid nature declaration")]
-    InvalidNature,
 
     #[error("Unsupported {context}: {found}")]
     UnsupportedConstruct { context: String, found: String },
@@ -319,8 +301,6 @@ impl LexerErrorKind {
             Self::UnterminatedString => "VA-LEX-UNTERMINATED-STRING",
             Self::UnterminatedComment => "VA-LEX-UNTERMINATED-COMMENT",
             Self::InvalidNumber(_) => "VA-LEX-INVALID-NUMBER",
-            Self::InvalidEscape(_) => "VA-LEX-INVALID-ESCAPE",
-            Self::UnterminatedDirective => "VA-LEX-UNTERMINATED-DIRECTIVE",
             Self::InvalidDirective(_) => "VA-LEX-INVALID-DIRECTIVE",
             Self::KeywordSetInsideElement(_) => "VA-LEX-KEYWORDS-INSIDE-ELEMENT",
         }
@@ -334,7 +314,6 @@ impl ParseErrorKind {
             Self::Expected { .. } => "VA-PARSE-EXPECTED",
             Self::UnexpectedToken(_) => "VA-PARSE-UNEXPECTED-TOKEN",
             Self::UnexpectedEof => "VA-PARSE-UNEXPECTED-EOF",
-            Self::InvalidModule => "VA-PARSE-INVALID-MODULE",
             Self::InvalidPort => "VA-PARSE-INVALID-PORT",
             Self::UnpackedPortArray { .. } => "VA-PARSE-UNPACKED-PORT-ARRAY",
             Self::InvalidParameter(_) => "VA-PARSE-INVALID-PARAMETER",
@@ -342,10 +321,7 @@ impl ParseErrorKind {
             Self::InvalidEventExpression(_) => "VA-PARSE-INVALID-EVENT-EXPRESSION",
             Self::InvalidExpression => "VA-PARSE-INVALID-EXPRESSION",
             Self::InvalidNumber(_) => "VA-PARSE-INVALID-NUMBER",
-            Self::InvalidBranchAccess => "VA-PARSE-INVALID-BRANCH-ACCESS",
             Self::Duplicate { .. } => "VA-PARSE-DUPLICATE-DECLARATION",
-            Self::InvalidDiscipline => "VA-PARSE-INVALID-DISCIPLINE",
-            Self::InvalidNature => "VA-PARSE-INVALID-NATURE",
             Self::UnsupportedConstruct { .. } => "VA-PARSE-UNSUPPORTED-CONSTRUCT",
             Self::UnsupportedGenerate { .. } => "VA-PARSE-UNSUPPORTED-GENERATE",
             Self::UnsupportedAmsConstruct { .. } => "VA-PARSE-UNSUPPORTED-AMS-DIGITAL",
@@ -413,9 +389,6 @@ pub enum SemanticErrorKind {
         name: smol_str::SmolStr,
         first_defined: Span,
     },
-
-    #[error("Port '{0}' has no discipline assigned")]
-    PortNoDiscipline(String),
 
     /// A port given unpacked dimensions, in its port declaration or in the net
     /// or variable declaration that completes it.
@@ -496,13 +469,6 @@ pub enum SemanticErrorKind {
         kind: String,
     },
 
-    #[error("Parameter '{name}' out of range: value {value} not in {range}")]
-    ParameterOutOfRange {
-        name: smol_str::SmolStr,
-        value: f64,
-        range: String,
-    },
-
     #[error("Invalid condition type: expected boolean, found {found}")]
     InvalidCondition { found: String },
 
@@ -563,7 +529,6 @@ impl SemanticErrorKind {
             Self::UndefinedDiscipline(_) => "VA-SEM-UNDEFINED-DISCIPLINE",
             Self::TypeMismatch { .. } => "VA-SEM-TYPE-MISMATCH",
             Self::DuplicateSymbol { .. } => "VA-SEM-DUPLICATE-SYMBOL",
-            Self::PortNoDiscipline(_) => "VA-SEM-PORT-WITHOUT-DISCIPLINE",
             Self::UnpackedPortArray { .. } => "VA-SEM-UNPACKED-PORT-ARRAY",
             Self::VariableInputPort { .. } => "VA-SEM-VARIABLE-INPUT-PORT",
             Self::PortWithoutDirection { .. } => "VA-SEM-PORT-WITHOUT-DIRECTION",
@@ -573,7 +538,6 @@ impl SemanticErrorKind {
             Self::InvalidAssignment(_) => "VA-SEM-INVALID-ASSIGNMENT",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",
-            Self::ParameterOutOfRange { .. } => "VA-SEM-PARAMETER-OUT-OF-RANGE",
             Self::InvalidCondition { .. } => "VA-SEM-INVALID-CONDITION",
             Self::IncompatibleDisciplines(_, _) => "VA-SEM-INCOMPATIBLE-DISCIPLINES",
             Self::InvalidAnalogOperator(_) => "VA-SEM-INVALID-ANALOG-OPERATOR",
@@ -617,9 +581,6 @@ pub enum CodeGenErrorKind {
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
 
-    #[error("Failed to generate derivative for: {0}")]
-    DerivativeFailed(String),
-
     #[error("Internal error: {0}")]
     Internal(String),
 
@@ -660,7 +621,6 @@ impl CodeGenErrorKind {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedFeature(_) => "VA-CODEGEN-UNSUPPORTED-FEATURE",
-            Self::DerivativeFailed(_) => "VA-CODEGEN-DERIVATIVE-FAILED",
             Self::Internal(_) => "VA-CODEGEN-INTERNAL",
             Self::InvalidExpression(_) => "VA-CODEGEN-INVALID-EXPRESSION",
             Self::UnsupportedDigitalExecution { .. } => "VA-CODEGEN-UNSUPPORTED-AMS-DIGITAL",
