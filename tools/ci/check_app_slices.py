@@ -212,7 +212,9 @@ SLICE_RULES = [
     (W + r"(browser|platform)\.rs$", "services"),
     (W + r"framework(\.rs$|/)", "framework"),
     (W + r"routing", "framework"),
-    (W + r"(layout|localization|logging)\.rs$", "framework"),
+    # The process logger is main's: env_logger and its native init.
+    (W + r"logging\.rs$", "shell"),
+    (W + r"(layout|localization)\.rs$", "framework"),
     (W + r"state/navigator_tree", "framework"),
     (W + r"state/plan_provenance", "results"),
     (W + r"state/session_views", "session"),
