@@ -457,7 +457,10 @@ impl RSpiceApp {
             .content
             .migrate_owned_netlist_deck_ids();
 
-        state.initialize_shortcut_library_persistence(&cc.egui_ctx);
+        state
+            .shortcut_library_parts()
+            .initialize_shortcut_library_persistence(&cc.egui_ctx);
+        state.take_shortcut_resolver_reset();
         state
             .workbench
             .set_number_locale(crate::quantity::platform_number_locale());
@@ -661,7 +664,12 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         synchronize_browser_surface_navigation(&mut self.state);
         #[cfg(target_arch = "wasm32")]
-        self.state.poll_shortcut_library_persistence();
+        {
+            self.state
+                .shortcut_library_parts()
+                .poll_shortcut_library_persistence();
+            self.state.take_shortcut_resolver_reset();
+        }
         #[cfg(target_arch = "wasm32")]
         self.poll_browser_pdk_persistence(ctx);
         #[cfg(target_arch = "wasm32")]

@@ -1277,7 +1277,9 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.state.enable_volatile_test_shortcut_persistence();
+        app.state
+            .shortcut_library_parts()
+            .enable_volatile_test_shortcut_persistence();
         let mut edited = app.state.model.preferences.shortcuts().clone();
         edited
             .policies_mut()

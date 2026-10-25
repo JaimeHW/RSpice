@@ -10,7 +10,8 @@ use crate::workbench::shortcuts::library_persistence::{
     PersistedShortcutProfileLibrary, RetainedShortcutLibraryBytes,
 };
 
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::requests::{Outbox, ResetShortcutResolver};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) enum ShortcutLibraryPersistenceRuntime {
@@ -106,7 +107,18 @@ pub(crate) enum ShortcutLibraryPublicationContinuation {
     SettingsImport(Box<super::preferences_file::StagedSettingsImport>),
 }
 
-impl AppState {
+/// What the shortcut library's persistence reads and writes, borrowed from
+/// the session: the library in use, in the model's preferences, and its
+/// store's standing. Its failures go to the model's log. Putting a library in
+/// use asks the shell to reset the shortcut resolver, so a chord half-typed
+/// under the previous library does not complete under this one.
+pub(crate) struct ShortcutLibraryParts<'a> {
+    pub(crate) persistence: &'a mut ShortcutLibraryPersistenceRuntime,
+    pub(crate) model: &'a mut Model,
+    pub(crate) outbox: &'a mut Outbox,
+}
+
+impl ShortcutLibraryParts<'_> {
     pub(crate) fn initialize_shortcut_library_persistence(&mut self, ctx: &egui::Context) {
         let session_library = self.model.preferences.shortcut_profiles().clone();
 
@@ -132,7 +144,7 @@ impl AppState {
             Ok(startup) => self.install_shortcut_library_startup(startup),
             Err(error) => {
                 self.record_shortcut_library_unavailable(&error);
-                self.settings.shortcut_library_persistence =
+                *self.persistence =
                     ShortcutLibraryPersistenceRuntime::Unavailable(error.to_string());
             }
         }
@@ -145,8 +157,8 @@ impl AppState {
         publication_completion: Option<Result<(), String>>,
     ) {
         *self.model.preferences.shortcut_profiles_mut() = persisted.library().clone();
-        self.shortcut_resolver.reset();
-        self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        self.outbox.push(ResetShortcutResolver);
+        *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(persisted),
             publication_completion,
             #[cfg(test)]
@@ -162,20 +174,14 @@ impl AppState {
         candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         ctx: &egui::Context,
     ) -> Result<ShortcutLibraryPublication, String> {
-        if let Some(reason) = self.settings.shortcut_library_persistence.blocked_reason() {
+        if let Some(reason) = self.persistence.blocked_reason() {
             return Err(reason);
         }
-        let predecessor = self
-            .settings
-            .shortcut_library_persistence
-            .persisted()
-            .cloned()
-            .ok_or_else(|| {
-                self.settings
-                    .shortcut_library_persistence
-                    .blocked_reason()
-                    .unwrap_or_else(|| "shortcut library storage is unavailable".to_owned())
-            })?;
+        let predecessor = self.persistence.persisted().cloned().ok_or_else(|| {
+            self.persistence
+                .blocked_reason()
+                .unwrap_or_else(|| "shortcut library storage is unavailable".to_owned())
+        })?;
         if predecessor.library() != self.model.preferences.shortcut_profiles() {
             return Err("the shortcut profile in use no longer matches the saved copy".to_owned());
         }
@@ -185,7 +191,7 @@ impl AppState {
 
         #[cfg(test)]
         if matches!(
-            self.settings.shortcut_library_persistence,
+            *self.persistence,
             ShortcutLibraryPersistenceRuntime::Ready {
                 volatile_test: true,
                 ..
@@ -195,8 +201,8 @@ impl AppState {
             let persisted =
                 PersistedShortcutProfileLibrary::test_snapshot(candidate.clone(), generation);
             *self.model.preferences.shortcut_profiles_mut() = candidate.clone();
-            self.shortcut_resolver.reset();
-            self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+            self.outbox.push(ResetShortcutResolver);
+            *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
                 persisted: Box::new(persisted),
                 publication_completion: None,
                 volatile_test: true,
@@ -225,11 +231,10 @@ impl AppState {
                 ctx,
             )
             .map_err(|error| error.to_string())?;
-            self.settings.shortcut_library_persistence =
-                ShortcutLibraryPersistenceRuntime::Publishing {
-                    predecessor: Box::new(predecessor),
-                    token,
-                };
+            *self.persistence = ShortcutLibraryPersistenceRuntime::Publishing {
+                predecessor: Box::new(predecessor),
+                token,
+            };
             Ok(ShortcutLibraryPublication::Pending)
         }
     }
@@ -239,7 +244,7 @@ impl AppState {
     pub(crate) fn take_shortcut_library_publication_completion(
         &mut self,
     ) -> Option<Result<(), String>> {
-        match &mut self.settings.shortcut_library_persistence {
+        match &mut *self.persistence {
             ShortcutLibraryPersistenceRuntime::Ready {
                 publication_completion,
                 ..
@@ -255,7 +260,7 @@ impl AppState {
 
     #[must_use]
     pub(crate) fn shortcut_library_publication_completion_pending(&self) -> bool {
-        match &self.settings.shortcut_library_persistence {
+        match &*self.persistence {
             ShortcutLibraryPersistenceRuntime::Ready {
                 publication_completion,
                 ..
@@ -271,7 +276,7 @@ impl AppState {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn cancel_pending_shortcut_library_publication(&mut self) -> bool {
-        let (predecessor, token) = match &self.settings.shortcut_library_persistence {
+        let (predecessor, token) = match &*self.persistence {
             ShortcutLibraryPersistenceRuntime::Publishing { predecessor, token } => {
                 (predecessor.clone(), *token)
             }
@@ -282,7 +287,7 @@ impl AppState {
         ) {
             return false;
         }
-        self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: predecessor,
             publication_completion: None,
             #[cfg(test)]
@@ -293,7 +298,7 @@ impl AppState {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn poll_shortcut_library_persistence(&mut self) {
-        let (token, predecessor) = match &self.settings.shortcut_library_persistence {
+        let (token, predecessor) = match &*self.persistence {
             ShortcutLibraryPersistenceRuntime::Initializing(token) => (*token, None),
             ShortcutLibraryPersistenceRuntime::Publishing { predecessor, token } => {
                 (*token, Some(predecessor.clone()))
@@ -314,7 +319,7 @@ impl AppState {
             }
             Err(error) => {
                 if let Some(predecessor) = predecessor {
-                    self.record(
+                    self.model.record(
                         crate::diagnostics::LogSeverity::Error,
                         crate::diagnostics::LogSource::Studio,
                         format!("Shortcut changes could not be saved: {error}"),
@@ -323,23 +328,21 @@ impl AppState {
                         let message = format!(
                             "RSpice cannot tell whether the last shortcut change was saved, so shortcuts are read-only until RSpice reloads them: {error}"
                         );
-                        self.settings.shortcut_library_persistence =
-                            ShortcutLibraryPersistenceRuntime::CommitInDoubt {
-                                publication_completion: Some(Err(message.clone())),
-                                message,
-                            };
+                        *self.persistence = ShortcutLibraryPersistenceRuntime::CommitInDoubt {
+                            publication_completion: Some(Err(message.clone())),
+                            message,
+                        };
                     } else {
-                        self.settings.shortcut_library_persistence =
-                            ShortcutLibraryPersistenceRuntime::Ready {
-                                persisted: predecessor,
-                                publication_completion: Some(Err(error.to_string())),
-                                #[cfg(test)]
-                                volatile_test: false,
-                            };
+                        *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
+                            persisted: predecessor,
+                            publication_completion: Some(Err(error.to_string())),
+                            #[cfg(test)]
+                            volatile_test: false,
+                        };
                     }
                 } else {
                     self.record_shortcut_library_unavailable(&error);
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Unavailable(error.to_string());
                 }
             }
@@ -356,17 +359,17 @@ impl AppState {
                     ..
                 } => self.install_persisted_shortcut_library(*persisted, None),
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Missing => {
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Incompatible(raw) => {
                     self.record_shortcut_library_unreadable("comes from an incompatible RSpice version", raw.reason());
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Corrupt(raw) => {
                     self.record_shortcut_library_unreadable("is damaged", raw.reason());
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
                 }
             },
@@ -376,21 +379,21 @@ impl AppState {
                     self.install_persisted_shortcut_library(*persisted, None);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::InitializationStarted(token) => {
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Initializing(token);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Missing => {
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Incompatible(raw) => {
                     self.record_shortcut_library_unreadable("comes from an incompatible RSpice version", raw.reason());
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Corrupt(raw) => {
                     self.record_shortcut_library_unreadable("is damaged", raw.reason());
-                    self.settings.shortcut_library_persistence =
+                    *self.persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
                 }
             },
@@ -398,7 +401,7 @@ impl AppState {
     }
 
     fn record_shortcut_library_unavailable(&mut self, error: &dyn std::fmt::Display) {
-        self.record(
+        self.model.record(
             crate::diagnostics::LogSeverity::Error,
             crate::diagnostics::LogSource::Studio,
             format!(
@@ -413,7 +416,7 @@ impl AppState {
         condition: &str,
         reason: impl std::fmt::Display,
     ) {
-        self.record(
+        self.model.record(
             crate::diagnostics::LogSeverity::Error,
             crate::diagnostics::LogSource::Studio,
             format!(
@@ -423,7 +426,7 @@ impl AppState {
     }
 
     fn report_shortcut_library_persistence_state(&self) {
-        if let Some(persisted) = self.settings.shortcut_library_persistence.persisted() {
+        if let Some(persisted) = self.persistence.persisted() {
             debug_assert_eq!(
                 persisted.library(),
                 self.model.preferences.shortcut_profiles(),
@@ -433,16 +436,16 @@ impl AppState {
         }
         #[cfg(target_arch = "wasm32")]
         if matches!(
-            self.settings.shortcut_library_persistence,
+            *self.persistence,
             ShortcutLibraryPersistenceRuntime::Initializing(_)
                 | ShortcutLibraryPersistenceRuntime::Publishing { .. }
         ) {
-            if let Some(reason) = self.settings.shortcut_library_persistence.blocked_reason() {
+            if let Some(reason) = self.persistence.blocked_reason() {
                 log::debug!("Shortcut library persistence transition: {reason}");
             }
             return;
         }
-        if let Some(reason) = self.settings.shortcut_library_persistence.blocked_reason() {
+        if let Some(reason) = self.persistence.blocked_reason() {
             log::warn!("Shortcut library mutations are unavailable: {reason}");
         }
     }
@@ -450,7 +453,7 @@ impl AppState {
     #[cfg(test)]
     pub(crate) fn enable_volatile_test_shortcut_persistence(&mut self) {
         let library = self.model.preferences.shortcut_profiles().clone();
-        self.settings.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
+        *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(PersistedShortcutProfileLibrary::test_snapshot(library, 1)),
             publication_completion: None,
             volatile_test: true,
@@ -475,11 +478,21 @@ fn digest_prefix(digest: [u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::command_catalog::CommandPlatform;
+    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::workbench::app_state::AppState;
+    use crate::workbench::app_state::session::shortcuts::{
+        ShortcutEnvironment, ShortcutInputSnapshot,
+    };
+    use crate::workbench::commands::vocabulary::CommandRegistry;
+    use crate::workbench::framework::command_registry::ids;
 
     #[test]
     fn unacknowledged_completion_blocks_reentrant_publication() {
         let mut state = AppState::default();
-        state.enable_volatile_test_shortcut_persistence();
+        state
+            .shortcut_library_parts()
+            .enable_volatile_test_shortcut_persistence();
         let predecessor = state
             .settings
             .shortcut_library_persistence
@@ -502,11 +515,171 @@ mod tests {
             .unwrap();
 
         let error = state
+            .shortcut_library_parts()
             .publish_shortcut_library_candidate(&candidate, &egui::Context::default())
             .unwrap_err();
 
         assert!(error.contains("awaiting acknowledgement"));
         assert_eq!(state.model.preferences.shortcut_profiles(), &before);
-        assert!(state.shortcut_library_publication_completion_pending());
+        assert!(
+            state
+                .shortcut_library_parts()
+                .shortcut_library_publication_completion_pending()
+        );
+    }
+
+    /// Type one stroke with the primary modifier, `at` into the session, and
+    /// answer the command the resolver dispatches for it.
+    fn type_stroke(
+        state: &mut AppState,
+        key: egui::Key,
+        at: std::time::Duration,
+    ) -> Option<crate::state::command_catalog::CommandKey> {
+        let press = egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers {
+                command: true,
+                ctrl: true,
+                ..egui::Modifiers::NONE
+            },
+        };
+        let profile = state.model.preferences.shortcuts().clone();
+        state
+            .shortcut_resolver
+            .resolve(
+                &ShortcutInputSnapshot::from_events_for_test(&[press], false),
+                &profile,
+                &CommandRegistry,
+                CommandPlatform::Desktop,
+                ShortcutEnvironment {
+                    workspace: crate::workbench::state::Workspace::Design,
+                    active_view: crate::state::ViewType::Schematic,
+                    canvas_focus: false,
+                    source_editor_focus: false,
+                },
+                at,
+                |_| true,
+            )
+            .command
+    }
+
+    /// A session whose library binds Command palette to Ctrl+K, Ctrl+P, kept
+    /// in a store a test may write, with Ctrl+K already typed: Ctrl+P would
+    /// complete the chord.
+    fn with_half_typed_chord() -> AppState {
+        let mut state = AppState::default();
+        state
+            .model
+            .preferences
+            .shortcuts_mut()
+            .unwrap()
+            .set_binding(
+                &CommandRegistry,
+                ids::COMMAND_PALETTE,
+                ShortcutBindingSlot::Primary,
+                vec![CommandPlatform::Desktop],
+                Some(
+                    ShortcutSequence::new(vec![
+                        ShortcutStroke::new(egui::Key::K, true, false, false),
+                        ShortcutStroke::new(egui::Key::P, true, false, false),
+                    ])
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        state
+            .shortcut_library_parts()
+            .enable_volatile_test_shortcut_persistence();
+        assert_eq!(
+            type_stroke(&mut state, egui::Key::K, std::time::Duration::ZERO),
+            None,
+            "the first stroke of the chord waits for the second"
+        );
+        state
+    }
+
+    /// Ctrl+P, typed after the library changed, and what it would have done
+    /// had the resolver kept the chord begun under the previous library.
+    fn complete_the_chord(state: &mut AppState) {
+        let later = std::time::Duration::from_millis(100);
+        let mut kept = state.clone();
+        assert_eq!(
+            type_stroke(&mut kept, egui::Key::P, later),
+            Some(ids::COMMAND_PALETTE),
+            "with the chord kept, the second stroke completes it"
+        );
+        assert!(
+            state
+                .workbench
+                .outbox
+                .peek::<ResetShortcutResolver>()
+                .is_some(),
+            "putting a library in use asks for the reset"
+        );
+        state.take_shortcut_resolver_reset();
+        assert!(
+            state
+                .workbench
+                .outbox
+                .peek::<ResetShortcutResolver>()
+                .is_none()
+        );
+        let mut fresh = state.clone();
+        fresh.shortcut_resolver = Default::default();
+        let answered = type_stroke(state, egui::Key::P, later);
+        assert_ne!(
+            answered,
+            Some(ids::COMMAND_PALETTE),
+            "the chord begun under the previous library does not complete"
+        );
+        assert_eq!(
+            answered,
+            type_stroke(&mut fresh, egui::Key::P, later),
+            "Ctrl+P is read on its own, as a resolver with nothing typed reads it"
+        );
+    }
+
+    /// Whatever puts a library in use resets the resolver before the next
+    /// shortcut is resolved: a publication the Preferences dialog makes, and
+    /// the library a launch restores from its store. The library in use keeps
+    /// its active profile, so only the reset drops the half-typed chord.
+    #[test]
+    fn a_library_put_in_use_resets_the_resolver_before_the_next_shortcut() {
+        let mut published = with_half_typed_chord();
+        let mut candidate = published.model.preferences.shortcut_profiles().clone();
+        candidate
+            .insert_named_preset(
+                "Another preset",
+                crate::state::shortcuts::ShortcutPreferences::default(),
+                false,
+            )
+            .unwrap();
+        assert!(matches!(
+            published
+                .shortcut_library_parts()
+                .publish_shortcut_library_candidate(&candidate, &egui::Context::default()),
+            Ok(ShortcutLibraryPublication::Published)
+        ));
+        complete_the_chord(&mut published);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut restored = with_half_typed_chord();
+            let library = restored.model.preferences.shortcut_profiles().clone();
+            restored
+                .shortcut_library_parts()
+                .install_shortcut_library_startup(NativeOrBrowserStartup::Native(
+                    crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Ready {
+                        persisted: Box::new(PersistedShortcutProfileLibrary::test_snapshot(
+                            library, 2,
+                        )),
+                        initialized_from_session: false,
+                    },
+                ));
+            complete_the_chord(&mut restored);
+        }
     }
 }

@@ -432,7 +432,10 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             if state.settings.shortcut_editor.persistence_pending {
                 #[cfg(target_arch = "wasm32")]
-                if state.cancel_pending_shortcut_library_publication() {
+                if state
+                    .shortcut_library_parts()
+                    .cancel_pending_shortcut_library_publication()
+                {
                     state.settings.shortcut_library_publication_continuation = None;
                     state.settings.shortcut_editor.close_and_discard();
                 } else {
@@ -1265,7 +1268,11 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
         );
         return;
     }
-    match state.publish_shortcut_library_candidate(&candidate, ctx) {
+    let published = state
+        .shortcut_library_parts()
+        .publish_shortcut_library_candidate(&candidate, ctx);
+    state.take_shortcut_resolver_reset();
+    match published {
         Ok(super::ShortcutLibraryPublication::Published) => state
             .complete_shortcut_library_publication(
                 super::ShortcutLibraryPublicationContinuation::Editor,
@@ -1615,7 +1622,9 @@ mod tests {
     #[test]
     fn valid_save_atomically_replaces_the_live_profile() {
         let mut state = AppState::default();
-        state.enable_volatile_test_shortcut_persistence();
+        state
+            .shortcut_library_parts()
+            .enable_volatile_test_shortcut_persistence();
         let live = state.model.preferences.shortcuts().clone();
         state.settings.shortcut_editor.open(&live);
         state

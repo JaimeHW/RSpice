@@ -100,7 +100,10 @@ impl RSpiceApp {
                         .shortcut_library_publication_continuation,
                     Some(ShortcutLibraryPublicationContinuation::Editor)
                 )
-                && self.state.cancel_pending_shortcut_library_publication()
+                && self
+                    .state
+                    .shortcut_library_parts()
+                    .cancel_pending_shortcut_library_publication()
             {
                 self.state
                     .settings
@@ -355,7 +358,10 @@ impl RSpiceApp {
             ShortcutPortabilityAction::CancelImportCommit => {
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let cancelled = self.state.cancel_pending_shortcut_library_publication();
+                    let cancelled = self
+                        .state
+                        .shortcut_library_parts()
+                        .cancel_pending_shortcut_library_publication();
                     if cancelled {
                         self.state
                             .settings
@@ -418,10 +424,12 @@ impl RSpiceApp {
             );
             return;
         }
-        match self
+        let published = self
             .state
-            .publish_shortcut_library_candidate(candidate, ctx)
-        {
+            .shortcut_library_parts()
+            .publish_shortcut_library_candidate(candidate, ctx);
+        self.state.take_shortcut_resolver_reset();
+        match published {
             Ok(ShortcutLibraryPublication::Published) => {
                 self.state
                     .complete_shortcut_library_publication(continuation, Ok(()));
@@ -545,8 +553,15 @@ impl RSpiceApp {
             .shortcut_library_publication_continuation
             .is_none()
         {
-            if self.state.shortcut_library_publication_completion_pending() {
-                let _ = self.state.take_shortcut_library_publication_completion();
+            if self
+                .state
+                .shortcut_library_parts()
+                .shortcut_library_publication_completion_pending()
+            {
+                let _ = self
+                    .state
+                    .shortcut_library_parts()
+                    .take_shortcut_library_publication_completion();
                 let message = "Saving keyboard shortcuts finished after the dialog that started it had closed. The saved shortcuts are in effect; review them in Preferences.";
                 self.state.settings.shortcut_editor.persistence_pending = false;
                 self.state.settings.shortcut_editor.error_summary = Some(message.to_owned());
@@ -560,7 +575,11 @@ impl RSpiceApp {
             }
             return;
         }
-        let Some(result) = self.state.take_shortcut_library_publication_completion() else {
+        let Some(result) = self
+            .state
+            .shortcut_library_parts()
+            .take_shortcut_library_publication_completion()
+        else {
             return;
         };
         let continuation = self
@@ -977,7 +996,10 @@ mod tests {
         );
 
         let mut target = test_app();
-        target.state.enable_volatile_test_shortcut_persistence();
+        target
+            .state
+            .shortcut_library_parts()
+            .enable_volatile_test_shortcut_persistence();
         script_next_choice(ScriptedChoice::Chose(path));
         target.execute_preference_page_actions(
             &ctx,
@@ -1052,7 +1074,9 @@ mod tests {
     fn shortcut_policy_action_publishes_before_the_candidate_becomes_live() {
         let ctx = Context::default();
         let mut app = test_app();
-        app.state.enable_volatile_test_shortcut_persistence();
+        app.state
+            .shortcut_library_parts()
+            .enable_volatile_test_shortcut_persistence();
         let before = app.state.model.preferences.shortcuts().clone();
         let mut candidate = before.clone();
         candidate

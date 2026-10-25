@@ -550,7 +550,9 @@ fn exported(label: &str) -> (AppState, Vec<u8>) {
     let (_path, store) = temp_store(label);
     let mut source = AppState::default();
     customize(&mut source);
-    source.enable_volatile_test_shortcut_persistence();
+    source
+        .shortcut_library_parts()
+        .enable_volatile_test_shortcut_persistence();
     let mut shortcuts = source.model.preferences.shortcut_profiles().clone();
     shortcuts
         .active_mut()
@@ -571,7 +573,9 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
     let (source, bytes) = exported("export");
     let (path, store) = temp_store("import");
     let mut target = bound(&store);
-    target.enable_volatile_test_shortcut_persistence();
+    target
+        .shortcut_library_parts()
+        .enable_volatile_test_shortcut_persistence();
 
     let (shortcuts, staged) = stage_settings_import(&target.model, "rspice-settings.json", &bytes)
         .expect("a file RSpice exported imports");
@@ -585,7 +589,9 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
 
     let ctx = egui::Context::default();
     assert!(matches!(
-        target.publish_shortcut_library_candidate(&shortcuts, &ctx),
+        target
+            .shortcut_library_parts()
+            .publish_shortcut_library_candidate(&shortcuts, &ctx),
         Ok(super::super::shortcut_library::ShortcutLibraryPublication::Published)
     ));
     target
@@ -612,7 +618,9 @@ fn a_malformed_settings_file_changes_nothing() {
     let mut state = AppState::default();
     customize(&mut state);
     state.preferences_file_parts().bind_preferences_file(store);
-    state.enable_volatile_test_shortcut_persistence();
+    state
+        .shortcut_library_parts()
+        .enable_volatile_test_shortcut_persistence();
     let before = settings_of(&state);
     let shortcuts_before = state.model.preferences.shortcut_profiles().clone();
     let file_before = std::fs::read(&path).unwrap();

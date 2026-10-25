@@ -118,7 +118,13 @@ const PREPARE_FRAME: &[Step] = &[
         "5.17",
         &["synchronize_browser_surface_navigation(&mut self.state)"],
     ),
-    ("5.18", &["self.state.poll_shortcut_library_persistence()"]),
+    (
+        "5.18",
+        &[
+            "self.state.shortcut_library_parts().poll_shortcut_library_persistence()",
+            "self.state.take_shortcut_resolver_reset()",
+        ],
+    ),
     ("5.19", &["self.poll_browser_pdk_persistence(ctx)"]),
     ("5.20", &["self.poll_browser_pack_restore(ctx)"]),
     ("5.21", &["self.handle_shortcuts(ctx)"]),

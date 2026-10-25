@@ -910,6 +910,31 @@ impl AppState {
         }
     }
 
+    /// What the shortcut library's persistence reads and writes, borrowed
+    /// from this state.
+    pub(in crate::workbench) fn shortcut_library_parts(
+        &mut self,
+    ) -> crate::workbench::app_state::session::shortcut_library::ShortcutLibraryParts<'_> {
+        crate::workbench::app_state::session::shortcut_library::ShortcutLibraryParts {
+            persistence: &mut self.settings.shortcut_library_persistence,
+            model: &mut self.model,
+            outbox: &mut self.workbench.outbox,
+        }
+    }
+
+    /// Reset the shortcut resolver if the library in use changed, as the
+    /// settings feature asked. The shell takes this straight after each of
+    /// its calls that can put a library in use.
+    pub(in crate::workbench) fn take_shortcut_resolver_reset(&mut self) {
+        crate::workbench::framework::requests::drain(
+            self,
+            |state| &mut state.workbench.outbox,
+            |state, crate::workbench::framework::requests::ResetShortcutResolver| {
+                state.shortcut_resolver.reset();
+            },
+        );
+    }
+
     /// Report a failure of something the user asked for: a save, an open, an
     /// export. The Console keeps the line; the toast says it now and offers
     /// that line, so the mirrored copy of it is the same notice, not another.

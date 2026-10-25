@@ -199,6 +199,18 @@ impl Request for FollowSchematicGrid {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Drop whatever chord is half-typed: the shortcut library in use changed,
+/// so a chord begun under the previous one must not complete under this
+/// one. Raised by the settings feature when it puts a library in use, and
+/// taken straight after the call that raised it, before any shortcut is
+/// resolved again.
+#[derive(Clone, Debug)]
+pub(crate) struct ResetShortcutResolver;
+
+impl Request for ResetShortcutResolver {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section
