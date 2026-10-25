@@ -24,7 +24,7 @@ pub(super) fn analysis_inputs(model: &Model) -> AnalysisInputs<'_> {
 #[cfg(test)]
 mod manifest_tests {
     use super::*;
-    use crate::simulation::controller::tests::AppState;
+    use crate::simulation::controller::test_host::RunTestHost;
     use crate::simulation::multi_run::{
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     };
@@ -34,7 +34,7 @@ mod manifest_tests {
     fn single_frequency_noise_stb_and_disto_drafts_reach_valid_worker_specs() {
         use rspice_simulation_contract::worker_spec::WorkerAnalysisSpec;
 
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         for (index, noise_sweep) in [
             NoiseSweepType::Decade,
             NoiseSweepType::Octave,
@@ -108,7 +108,7 @@ mod manifest_tests {
 
     #[test]
     fn noise_manifest_freezes_every_selected_field_without_singleton_fallback() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.reference_pvt.temperature_celsius = 125.0;
         state.model.sim_setup.noise.output = "wrong_singleton".to_owned();
         state.model.sim_setup.ac.points = "999".to_owned();
@@ -150,7 +150,7 @@ mod manifest_tests {
 
     #[test]
     fn disto_manifest_freezes_its_owned_sweep_without_singleton_fallback() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.ac.fstart = "900".to_owned();
         state.model.sim_setup.ac.fstop = "2k".to_owned();
         state.model.sim_setup.ac.points = "7".to_owned();
@@ -202,7 +202,7 @@ mod manifest_tests {
             ("1m", 1e-3),
             ("1mil", 25.4e-6),
         ] {
-            let mut state = AppState::default();
+            let mut state = RunTestHost::default();
             let mut draft = state.model.sim_setup.tran.clone();
             draft.stop = typed.to_owned();
             state.model.sim_setup.tran.stop = "stale singleton".to_owned();
@@ -224,7 +224,7 @@ mod manifest_tests {
         // The spellings no deck reader has stay refused, rather than reaching a
         // run at a decade the engine would not have agreed with.
         for typed in ["1micro", "1wat", "1k5"] {
-            let state = AppState::default();
+            let state = RunTestHost::default();
             let mut draft = state.model.sim_setup.tran.clone();
             draft.stop = typed.to_owned();
             assert!(
@@ -240,7 +240,7 @@ mod manifest_tests {
 
     #[test]
     fn ac_and_dc_specs_read_exact_authored_drafts() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let mut ac = state.model.sim_setup.ac.clone();
         ac.fstart = "3k".to_owned();
         ac.fstop = "30k".to_owned();
@@ -293,7 +293,7 @@ mod manifest_tests {
     /// would pass just as well if the form were still ignored.
     #[test]
     fn the_optimizer_step_sizes_are_authorable_and_reach_the_run() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.optimization.ensure_initialized();
 
         let defaults = state
@@ -362,7 +362,7 @@ mod manifest_tests {
 
     #[test]
     fn sp_noise_dialog_reaches_the_typed_request() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.sp.port_source_idx = Some(1);
         for requested in [false, true] {
             let mut draft = state.model.sim_setup.sp.clone();
@@ -403,7 +403,7 @@ mod manifest_tests {
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&AppState::default().model),
+                &analysis_inputs(&RunTestHost::default().model),
                 &draft,
             )
             .expect("default draft parses");
@@ -437,7 +437,7 @@ mod manifest_tests {
             network.reltol = "2.5e-6".into();
             network.abstol = "7e-13".into();
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&AppState::default().model),
+                &analysis_inputs(&RunTestHost::default().model),
                 &draft,
             )
             .expect("periodic network draft parses");
@@ -454,7 +454,7 @@ mod manifest_tests {
 
     #[test]
     fn pss_draft_projects_every_owned_execution_field() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.pss.ensure_initialized();
         state.model.sim_setup.pss.fund_freq = "2.5Meg".to_owned();
         state.model.sim_setup.pss.tone_sources = "VIN_LO, VIN_MOD".to_owned();
@@ -500,7 +500,7 @@ mod manifest_tests {
     /// tone, and the oscillator node it does name reaches the spec.
     #[test]
     fn an_autonomous_pss_draft_projects_its_oscillator_node_and_no_tones() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.pss.ensure_initialized();
         state.model.sim_setup.pss.integration_method_idx = 0;
         state.model.sim_setup.pss.tone_sources.clear();
@@ -526,7 +526,7 @@ mod manifest_tests {
 
     #[test]
     fn fourier_spec_and_command_use_frozen_draft() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.fourier.ensure_initialized();
         state.model.sim_setup.fourier.compute_thd = false;
         state.model.sim_setup.fourier.normalize = true;
@@ -561,7 +561,7 @@ mod manifest_tests {
 
     #[test]
     fn envelope_spec_uses_frozen_draft_execution_fields() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.envelope.ensure_initialized();
         state.model.sim_setup.envelope.carrier_tones = "1Meg, 2.5Meg".to_owned();
         state.model.sim_setup.envelope.stop_time = "10m".to_owned();
@@ -607,7 +607,7 @@ mod manifest_tests {
 
     #[test]
     fn soa_spec_and_command_use_frozen_draft() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.soa.ensure_initialized();
         state.model.sim_setup.soa.stop_time = "2m".into();
         state.model.sim_setup.soa.step_time = "2u".into();
@@ -640,7 +640,7 @@ mod manifest_tests {
 
     #[test]
     fn pole_zero_sensitivity_and_transfer_function_use_frozen_drafts() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
 
         state.model.sim_setup.pz.ensure_initialized();
         state.model.sim_setup.pz.input_pos = "PZ_IN".into();
@@ -715,7 +715,7 @@ mod manifest_tests {
 
     #[test]
     fn operating_point_uses_frozen_draft_and_live_reference_temperature() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.reference_pvt.temperature_celsius = 42.0;
         let mut authored = state.model.sim_setup.op.clone();
         authored.temperature_mode_idx = 0;

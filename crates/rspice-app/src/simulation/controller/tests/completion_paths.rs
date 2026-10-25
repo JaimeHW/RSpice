@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn touchstone_auto_export_uses_export_workflow_io() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.start_run();
 
     let mut controller = SimulationController::new();
@@ -88,7 +88,7 @@ fn the_exported_file_is_the_version_that_was_chosen() {
             )
             .expect("an enabled export prepares a policy");
 
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.simulation.start_run();
         let mut controller = SimulationController::new();
         controller.touchstone_export_policy = policy;
@@ -663,7 +663,7 @@ fn incomplete_soa_results_fail_closed_without_retained_payloads() {
 
 #[test]
 fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
         &rspice_simulation_contract::sens_draft::SensConfig::default(),
     );
@@ -731,7 +731,7 @@ fn sensitivity_completion_preserves_unavailable_results_and_logs_no_values() {
             ],
         }),
     };
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     controller.apply_result_side_effects(&mut state, &result);
     assert!(
         state.model.log_buffer.is_empty(),
@@ -819,7 +819,7 @@ fn sensitivity_study_fixture() -> crate::state::SensitivityStudyEvidence {
 
 #[test]
 fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state
         .model
         .sim_setup
@@ -859,7 +859,7 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
 
 #[test]
 fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_stripped() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state
         .model
         .sim_setup
@@ -1005,7 +1005,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
 
 #[test]
 fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state
         .model
         .sim_setup
@@ -1035,7 +1035,7 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
 
 #[test]
 fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
     state.model.workspace.content.netlist_source =
@@ -1051,7 +1051,7 @@ fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
 
 #[test]
 fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
     state.model.workspace.content.netlist_source =
@@ -1065,7 +1065,7 @@ fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
 
 #[test]
 fn simulate_run_set_does_not_run_manual_deck_source() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state
         .model
         .sim_setup
@@ -1097,7 +1097,7 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
 
 #[test]
 fn successful_manual_deck_run_promotes_pending_baseline() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     state.model.simulation.source.netlist_content =
         "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
@@ -1124,7 +1124,7 @@ fn successful_manual_deck_run_promotes_pending_baseline() {
 
 #[test]
 fn failed_manual_deck_run_keeps_previous_baseline() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     state.runs.manual_run.last_run_buffer = Some("old\n.op\n.end\n".to_string());
     let run = state.model.simulation.start_run();
@@ -1146,7 +1146,7 @@ fn failed_manual_deck_run_keeps_previous_baseline() {
 
 #[test]
 fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let historical_id = state.model.simulation.start_run().id;
     let historical_lifecycle = state
         .model
@@ -1176,7 +1176,7 @@ fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
 
 #[test]
 fn disappeared_batch_target_does_not_reselect_the_active_historical_analysis() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let historical_id = state.model.simulation.start_run().id;
     let historical = state
         .model
@@ -1566,7 +1566,7 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
 
 #[test]
 fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     state.model.simulation.source.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
     let run_id = state.model.simulation.start_run().id;
@@ -1709,7 +1709,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
     // than mutated in place, which is how a project open does it.
     use crate::state::model_library::ModelLibraryManager;
 
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let epoch = state.model.design_execution_epoch;
     let project_revision = state.model.workspace.content.project.revision();
 
@@ -1928,7 +1928,7 @@ fn manual_deck_parameters_authored_with_units_are_read() {
 #[test]
 fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
     let mut controller = SimulationController::new();
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run_sequence = state.model.simulation.start_run().id;
     controller.current_run_id = Some(run_sequence);
     assert!(state.model.simulation.select_run(0));

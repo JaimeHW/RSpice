@@ -15,7 +15,7 @@ const RC: &str = "* rc checks\nV1 in 0 PWL(0 0 1p 1)\nR1 in out 1k\nC1 out 0 1n\
 #[test]
 fn a_runs_assertion_report_is_retained_saved_and_restored() {
     let export_io = MockExportWorkflowIo::default();
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(RC.to_owned());
     let mut controller = SimulationController::new();

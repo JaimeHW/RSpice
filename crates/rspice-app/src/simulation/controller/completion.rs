@@ -550,7 +550,7 @@ fn testbench_errors(result: &crate::simulation::SimulationResult) -> Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::controller::tests::AppState;
+    use crate::simulation::controller::test_host::RunTestHost;
 
     /// An analysis the engine failed reaches the Problems page through the
     /// controller's own failure path: one finding, about that analysis in
@@ -558,7 +558,7 @@ mod tests {
     /// store before, so removing the publication broke no test.
     #[test]
     fn a_failed_analysis_is_published_as_a_finding_about_its_run() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let mut controller = SimulationController::new();
         let export_io = super::super::tests::MockExportWorkflowIo::default();
         let run_sequence = state.model.simulation.start_run().id;
@@ -606,7 +606,7 @@ mod tests {
     #[test]
     fn a_testbench_that_reported_errors_fails_its_run_and_keeps_its_results() {
         use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let mut controller = SimulationController::new();
         let export_io = super::super::tests::MockExportWorkflowIo::default();
         let run_sequence = state.model.simulation.start_run().id;

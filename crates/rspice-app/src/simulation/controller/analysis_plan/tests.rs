@@ -1,14 +1,14 @@
 //! Saved-plan preflight and frozen-task integration cases.
 
 use super::*;
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
 #[test]
 fn study_options_and_commands_read_the_exact_authored_draft() {
     use rspice_simulation::sweeps::CornerBaseMode;
 
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let sealed = state
         .model
         .model_library_manager
@@ -195,7 +195,7 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
             AnalysisKind::Ac,
             AnalysisKind::DcSweep,
         ] {
-            let mut state = AppState::default();
+            let mut state = RunTestHost::default();
             state.model.sim_setup.analysis_plan = Some(SimulationPlan::empty());
             let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
             let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
@@ -411,7 +411,7 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
         AnalysisKind::Qpxf,
         AnalysisKind::Qpnoise,
     ] {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
         let (producer, _) = plan.insert(AnalysisKind::Qpss).unwrap();
@@ -626,7 +626,7 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
         AnalysisKind::Pstb,
         AnalysisKind::Psp,
     ] {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
         let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
@@ -803,7 +803,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyPeriodicOptions;
 
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (first, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
@@ -876,7 +876,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
 fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (first, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (second, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -970,7 +970,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
     use crate::simulation::dialog::{HbDialogState, McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
     use rspice_simulation_contract::hb_draft::{HbConfig, HbSolverType, HbToneConfig};
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (hb, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
@@ -1066,7 +1066,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
     for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
         let (first, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
@@ -1262,7 +1262,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
 fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     for kind in [AnalysisKind::Fourier, AnalysisKind::Fft] {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (first, _) = plan.insert(AnalysisKind::Transient).unwrap();
         let (second, _) = plan.insert(AnalysisKind::Transient).unwrap();
@@ -1384,7 +1384,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
 #[test]
 fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
@@ -1565,7 +1565,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
         scale: 0.5,
         weight: 3.0,
     }];
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
@@ -1685,7 +1685,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
 
 #[test]
 fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.sim_setup.reference_pvt.temperature_celsius = -40.0;
     state.model.sim_setup.noise.output = "singleton_must_not_leak".to_owned();
     state.model.sim_setup.ac.points = "777".to_owned();
@@ -1755,7 +1755,7 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
 
 #[test]
 fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let plan = state
         .model
         .sim_setup
@@ -1821,7 +1821,7 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
 
 #[test]
 fn same_kind_sparameter_instances_freeze_independent_export_policies() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.schematic.session.current_file = Some(std::path::PathBuf::from("rf/duplexer.rsch"));
     let plan = state
         .model

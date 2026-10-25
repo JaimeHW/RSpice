@@ -1,6 +1,8 @@
 //! App integration fixtures run through the same preparation and authorization as Run.
 
+use super::test_host::RunTestHost;
 use super::{SimulationController, SimulationRunIntent, SimulationRunner};
+use crate::simulation::RunHost;
 use crate::simulation::controller::tests::AppState;
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_simulation::results::SimulationResult;
@@ -11,14 +13,14 @@ pub(crate) mod pvt;
 pub(crate) mod saved_outputs;
 
 pub(crate) fn start_manual_deck(source: &str) -> SimulationRunner {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(source.to_owned());
     start_manual_deck_of(&state)
 }
 
 /// Validate and start the manual deck of `state`, as Run does.
-fn start_manual_deck_of(state: &AppState) -> SimulationRunner {
+fn start_manual_deck_of(state: &impl RunHost) -> SimulationRunner {
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(state)
@@ -58,7 +60,7 @@ pub(crate) fn run_manual_deck(source: &str) -> SimulationResult {
 
 /// Validate and run the manual deck of `state`, the project it belongs to
 /// and its editor's compile among what it reads.
-pub(crate) fn run_manual_deck_of(state: &AppState) -> SimulationResult {
+pub(crate) fn run_manual_deck_of(state: &impl RunHost) -> SimulationResult {
     finish(start_manual_deck_of(state))
 }
 
@@ -78,7 +80,7 @@ pub(crate) fn run_manual_batch_with_lifecycle(
     source: &str,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
@@ -89,7 +91,7 @@ pub(crate) fn run_manual_batch_with_lifecycle(
 }
 
 pub(crate) fn run_generated_batch(
-    mut state: AppState,
+    mut state: RunTestHost,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
@@ -120,20 +122,22 @@ pub(crate) fn run_manual_batch_session(source: &str) -> AppState {
 }
 
 fn run_batch(
-    mut state: AppState,
+    mut state: RunTestHost,
     controller: SimulationController,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     run_batch_session(&mut state, controller, expected_lifecycle)
 }
 
+/// Run the batch `controller` prepared to its end on `state`, whichever
+/// host it is, and check what it retained.
 fn run_batch_session(
-    state: &mut AppState,
+    state: &mut impl RunHost,
     mut controller: SimulationController,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     let export_io = super::tests::MockExportWorkflowIo::default();
-    state.model.simulation.execution.trigger_simulation = true;
+    state.model_mut().simulation.execution.trigger_simulation = true;
     controller.update(state, &export_io);
     let deadline = Instant::now() + Duration::from_secs(60);
     while controller.has_active_batch() {
@@ -141,13 +145,14 @@ fn run_batch_session(
         std::thread::sleep(Duration::from_millis(1));
         controller.update(state, &export_io);
     }
+    let model = state.model();
     assert_eq!(
-        state.model.simulation.retained.runs.len(),
+        model.simulation.retained.runs.len(),
         1,
         "{}",
-        state.model.simulation.execution.status
+        model.simulation.execution.status
     );
-    let run = state.model.simulation.retained.runs[0].clone();
+    let run = model.simulation.retained.runs[0].clone();
     assert_eq!(run.lifecycle, expected_lifecycle, "{:?}", run.analyses);
     assert!(!run.analyses.is_empty());
     if expected_lifecycle == SimulationRunLifecycle::Completed {
@@ -155,7 +160,7 @@ fn run_batch_session(
             assert!(analysis.success, "{:?}", analysis.error_message);
         }
     }
-    crate::io::capture_simulation_results(&state.model.simulation)
+    crate::io::capture_simulation_results(&model.simulation)
         .validate()
         .expect("checked batch retains valid project history");
     run

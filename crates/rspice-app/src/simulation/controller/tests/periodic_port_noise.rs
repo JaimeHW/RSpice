@@ -1,5 +1,5 @@
 //! Periodic port-noise evidence survives a checked generated run and project reload.
-use super::AppState;
+use super::RunTestHost;
 use crate::io::project_io::ProjectSimulationResults;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{AnalysisType, SimulationState};
@@ -12,8 +12,8 @@ use rspice_simulation_contract::periodic_network_draft::{
 };
 use rspice_simulation_contract::pss_draft::{PssConfig, PssDialogState};
 
-fn network(hb: bool) -> AppState {
-    let mut state = AppState::default();
+fn network(hb: bool) -> RunTestHost {
+    let mut state = RunTestHost::default();
     state.model.sim_setup.run_set =
         rspice_simulation_contract::run_set::RunSetState::reference_only();
     for (index, (kind, name, value, params, nodes)) in [

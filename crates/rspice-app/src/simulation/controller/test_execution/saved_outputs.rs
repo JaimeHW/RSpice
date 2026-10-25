@@ -59,7 +59,7 @@ pub(crate) fn run(
 }
 
 fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
-    let mut state = super::AppState::default();
+    let mut state = super::RunTestHost::default();
     state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
     let directive = rspice_simulation::analysis_preparation::analysis_spec_to_config(spec)
         .expect("fixture has an authored analysis configuration")

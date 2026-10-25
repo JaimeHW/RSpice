@@ -149,7 +149,7 @@ fn images() -> Vec<Arc<[u8]>> {
         .collect()
 }
 
-fn fixture() -> (SimulationController, AppState) {
+fn fixture() -> (SimulationController, RunTestHost) {
     let provenance = synthetic_result_provenance();
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
@@ -175,7 +175,7 @@ fn fixture() -> (SimulationController, AppState) {
         ],
     })
     .unwrap();
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run = state.model.simulation.start_run();
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .unwrap();
@@ -540,7 +540,7 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
     assert!(library.remove(evidence.digest()));
     assert!(!library.shares_content_with(&before));
     // Imported images survive clearing native history and restoring a project.
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     state
         .model
         .simulation

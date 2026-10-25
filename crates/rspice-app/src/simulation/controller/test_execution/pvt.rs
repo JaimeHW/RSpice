@@ -1,12 +1,12 @@
 //! Authored divider and corner-plan inputs for application integration tests.
 
-use super::AppState;
+use super::RunTestHost;
 use crate::simulation::plan::AnalysisDraft;
 use crate::state::{ComponentType, Point};
 use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind, RunSetState};
 
-pub(crate) fn divider() -> AppState {
-    let mut state = AppState::default();
+pub(crate) fn divider() -> RunTestHost {
+    let mut state = RunTestHost::default();
     for (index, (kind, name, value, nodes)) in [
         (ComponentType::VoltageSourceAc, "VDD", "1", vec!["vdd", "0"]),
         (ComponentType::Resistor, "R1", "1k", vec!["vdd", "out"]),
@@ -59,7 +59,7 @@ pub(crate) fn divider() -> AppState {
     state
 }
 
-pub(crate) fn run_set_divider(draft: AnalysisDraft, temperatures: &[&str]) -> AppState {
+pub(crate) fn run_set_divider(draft: AnalysisDraft, temperatures: &[&str]) -> RunTestHost {
     let mut state = divider();
     let mut supply = RunSetDimension::new(
         "fixture-supply",

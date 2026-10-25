@@ -2,13 +2,13 @@
 
 #[cfg(test)]
 mod pvt_base_tests {
-    use crate::simulation::controller::tests::AppState;
+    use crate::simulation::controller::test_host::RunTestHost;
     use rspice_simulation::sweeps::CornerBaseMode;
     use rspice_simulation_contract::worker_run_config::WorkerCornerBaseMode;
 
     #[test]
     fn pvt_base_transient_window_survives_configuration_and_worker_transport() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         state.model.sim_setup.tran.stop = "1m".into();
         state.model.sim_setup.tran.step = "10u".into();
         let temperature = rspice_simulation_contract::temp_draft::TempConfig {

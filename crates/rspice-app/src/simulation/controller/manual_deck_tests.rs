@@ -1,7 +1,7 @@
 //! Manual-deck integration with application forms and engine services.
 
 use super::{AnalysisSpec, NoiseSweepType, analysis_inputs};
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use rspice_simulation::manual_deck::build_manual_deck_queue;
 
 #[test]
@@ -62,7 +62,7 @@ fn studio_hb_card_retains_solver_controls_and_automatic_grid() {
 
 #[test]
 fn manual_noise_data_preserves_authored_axis_and_executes_row_contexts() {
-    let state = AppState::default();
+    let state = RunTestHost::default();
     let source = "noise data deck\n\
 .param rload=1k\n\
 V1 in 0 AC 1\n\
@@ -100,7 +100,7 @@ Rload out 0 {rload}\n\
 }
 
 fn specs_for(source: &str) -> Vec<AnalysisSpec> {
-    let state = AppState::default();
+    let state = RunTestHost::default();
     build_manual_deck_queue(
         state.model.sim_setup.reference_pvt.temperature_celsius,
         source,
@@ -126,7 +126,7 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
     let restored: DcMismatchDraft = serde_json::from_value(saved.clone()).unwrap();
     assert_eq!(restored.moment_relative_tolerance, "2m");
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-        &analysis_inputs(&AppState::default().model),
+        &analysis_inputs(&RunTestHost::default().model),
         &AnalysisDraft::DcMismatch(restored),
     )
     .unwrap();
@@ -231,7 +231,7 @@ fn a_bare_dcmatch_card_reads_as_the_engine_defaults() {
 
     // And a fresh Studio draft is that same specification, which is the
     // reason the draft's defaults are the card's.
-    let state = AppState::default();
+    let state = RunTestHost::default();
     let draft = crate::simulation::plan::AnalysisDraft::for_kind(
         crate::simulation::plan::AnalysisKind::DcMismatch,
     );

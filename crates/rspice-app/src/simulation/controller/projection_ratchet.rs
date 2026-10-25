@@ -35,9 +35,11 @@
 
 use serde_json::{Map, Value};
 
+use crate::simulation::controller::test_host::RunTestHost;
+use crate::simulation::controller::tests::AppState;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::model_library::ModelLibraryManager;
-use crate::workbench::app_state::{AppState, SimSetupState};
+use crate::workbench::app_state::SimSetupState;
 
 use super::{SimulationController, analysis_inputs};
 
@@ -279,7 +281,7 @@ const STUDY_BASE: &str = r#""6f2b1c34-0d5e-4a7b-9c18-3e4f5a6b7c8d""#;
 /// The order mirrors the production dispatch in `analysis_plan`: the draft's
 /// own typed spec first, and the legacy slot projection only where a kind has
 /// no draft-shaped builder.
-/// The `AppState` a draft is projected against.
+/// The run host a draft is projected against.
 ///
 /// A periodic consumer reads its prerequisite PSS out of the legacy singleton
 /// slot, which opens without a tone because only the design can name one. Left
@@ -288,14 +290,14 @@ const STUDY_BASE: &str = r#""6f2b1c34-0d5e-4a7b-9c18-3e4f5a6b7c8d""#;
 /// configuration, not a field under test — the same fixture role
 /// [`with_sealed_process_library`] plays. A Pss draft overwrites it, so a
 /// perturbation of the tone list itself is still judged.
-pub(super) fn engine_facing_state(draft: &AnalysisDraft) -> AppState {
-    let mut state = AppState::default();
+pub(super) fn engine_facing_state(draft: &AnalysisDraft) -> RunTestHost {
+    let mut state = RunTestHost::default();
     state.model.sim_setup.pss.ensure_initialized();
     apply_fixture_draft(&mut state, draft);
     state
 }
 
-fn apply_fixture_draft(state: &mut AppState, draft: &AnalysisDraft) {
+fn apply_fixture_draft(state: &mut RunTestHost, draft: &AnalysisDraft) {
     if state.model.sim_setup.pss.tone_sources.trim().is_empty() {
         state.model.sim_setup.pss.tone_sources = "VSRC".to_owned();
     }
@@ -328,8 +330,8 @@ fn projection(draft: &AnalysisDraft) -> String {
         // The project and catalogs are read-only inputs to projection. Keep
         // their identities stable and restore the complete setup for each
         // trial instead of recompiling the bootstrapped workspaces each time.
-        static FIXTURE: RefCell<(AppState, SimSetupState)> = {
-            let mut state = AppState::default();
+        static FIXTURE: RefCell<(RunTestHost, SimSetupState)> = {
+            let mut state = RunTestHost::default();
             state.model.sim_setup.pss.ensure_initialized();
             let setup = state.model.sim_setup.clone();
             RefCell::new((state, setup))

@@ -6,7 +6,7 @@
 //! `0`, and one naming a node the deck lacks is still refused.
 
 use crate::simulation::controller::test_execution::{run_generated_batch, run_manual_deck};
-use crate::simulation::controller::tests::AppState;
+use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
     ComponentType, OutputSelectionMode, Point, SavedOutput, SavedOutputCompatibility,
@@ -19,8 +19,8 @@ use rspice_results::specification_verdict::SpecificationVerdictStatus;
 
 /// V1 = 2 V into R1 = 1k over R2 = 3k, every ground drawn as a `GND!` label
 /// and no ground symbol: V(out) = 1.5 V. One transient, nothing else enabled.
-fn divider_returned_through_gnd_labels() -> AppState {
-    let mut state = AppState::default();
+fn divider_returned_through_gnd_labels() -> RunTestHost {
+    let mut state = RunTestHost::default();
     state.model.sim_setup.run_set =
         rspice_simulation_contract::run_set::RunSetState::reference_only();
     state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
@@ -147,7 +147,7 @@ fn measured(
 }
 
 fn run_with(
-    mut state: AppState,
+    mut state: RunTestHost,
     outputs: Vec<SavedOutput>,
     definitions: Vec<SpecificationDefinition>,
 ) -> SimulationRun {

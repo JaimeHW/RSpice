@@ -308,7 +308,7 @@ fn grouped(count: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::controller::tests::AppState;
+    use crate::simulation::controller::test_host::RunTestHost;
 
     #[test]
     fn counts_group_their_thousands() {
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn an_interrupted_run_failed_though_an_analysis_completed_first() {
-        let mut state = AppState::default();
+        let mut state = RunTestHost::default();
         let run_sequence = state.model.simulation.start_run().id;
         let run = state
             .model

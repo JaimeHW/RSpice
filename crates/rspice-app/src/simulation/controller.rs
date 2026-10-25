@@ -87,6 +87,8 @@ mod run_lines;
 use run_lines::write_run_line;
 #[cfg(test)]
 pub(crate) mod test_execution;
+#[cfg(test)]
+pub(crate) mod test_host;
 mod touchstone;
 mod transient_checkpoint;
 mod transient_post;

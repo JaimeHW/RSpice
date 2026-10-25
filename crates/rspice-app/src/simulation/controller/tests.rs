@@ -12,6 +12,8 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 // The application the controller's tests build. The controller itself never
 // names it; its test modules import it from here.
 pub(in crate::simulation::controller) use crate::workbench::app_state::AppState;
+
+use super::test_host::RunTestHost;
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use std::cell::RefCell;
 use std::path::Path;
@@ -188,8 +190,8 @@ impl ExportWorkflowIo for MockExportWorkflowIo {
     }
 }
 
-fn state_with_current_drc_error() -> AppState {
-    let mut state = AppState::default();
+fn state_with_current_drc_error() -> RunTestHost {
+    let mut state = RunTestHost::default();
     state
         .model
         .schematic
@@ -223,12 +225,12 @@ fn state_with_current_clean_drc() -> AppState {
 }
 
 fn bind_test_run_running(
-    state: &mut AppState,
+    state: &mut impl RunHost,
     controller: &mut SimulationController,
     run_sequence: u64,
 ) {
-    let run = state
-        .model
+    let model = state.model_mut();
+    let run = model
         .simulation
         .retained
         .run_by_sequence_mut(run_sequence)
@@ -236,10 +238,10 @@ fn bind_test_run_running(
     run.mark_running().expect("test run enters running state");
     let identity = run.execution_identity();
     controller.current_run_id = Some(run_sequence);
-    state.model.simulation.execution.active_execution = identity;
+    model.simulation.execution.active_execution = identity;
 }
 
-fn bind_and_request_test_abort(state: &mut AppState, controller: &mut SimulationController) {
+fn bind_and_request_test_abort(state: &mut RunTestHost, controller: &mut SimulationController) {
     let run_sequence = state
         .model
         .simulation
@@ -302,7 +304,7 @@ fn synthetic_result_provenance() -> AnalysisResultProvenance {
 
 #[test]
 fn failed_result_retention_never_satisfies_prepared_dependencies() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run_sequence = state.model.simulation.start_run().id;
     let provenance = synthetic_result_provenance();
     let instance = provenance.source_instance_id();
@@ -336,7 +338,7 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
 /// memo that was never re-taken.
 #[test]
 fn sealing_a_failure_declares_a_new_dataset_generation() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run_sequence = state.model.simulation.start_run().id;
     let controller = SimulationController::new();
 
@@ -428,7 +430,7 @@ fn no_shipped_path_fails_a_run_outside_the_sealing_helper() {
 
 #[test]
 fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run_sequence = state.model.simulation.start_run().id;
     let provenance = synthetic_result_provenance();
     let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
@@ -468,7 +470,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
 
 #[test]
 fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run_sequence = state.model.simulation.start_run().id;
     let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![RetainedTrace::new(
@@ -733,7 +735,7 @@ fn design_context_reset_discards_pending_controller_result() {
 
 #[test]
 fn design_epoch_reset_terminalizes_executor_owned_history() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     let run_sequence = state.model.simulation.start_run().id;
@@ -793,7 +795,7 @@ fn stale_cancellation_request_never_mutates_run_lifecycle() {
 
 #[test]
 fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     state.model.simulation.start_run();
@@ -827,7 +829,7 @@ fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
 
 #[test]
 fn abort_trigger_discards_unpolled_success_result() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     state.model.simulation.start_run();
@@ -860,7 +862,7 @@ fn abort_trigger_discards_unpolled_success_result() {
 
 #[test]
 fn completed_result_attaches_to_started_run_when_active_selection_changes() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     let older_run_id = state.model.simulation.start_run().id;
@@ -918,7 +920,7 @@ fn completed_result_attaches_to_started_run_when_active_selection_changes() {
 
 #[test]
 fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     let run_sequence = state.model.simulation.start_run().id;
@@ -992,7 +994,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
 
 #[test]
 fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     let run_sequence = state.model.simulation.start_run().id;
@@ -1068,7 +1070,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
 
 #[test]
 fn failed_completion_retains_exact_prepared_task_provenance() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     let run_sequence = state.model.simulation.start_run().id;

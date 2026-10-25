@@ -14,8 +14,8 @@ const TWO_ANALYSES: &str = "* run log fixture\n\
     .dc V1 0 1 0.5\n\
     .end\n";
 
-fn start_manual_batch(source: &str) -> (AppState, SimulationController) {
-    let mut state = AppState::default();
+fn start_manual_batch(source: &str) -> (RunTestHost, SimulationController) {
+    let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
@@ -27,7 +27,7 @@ fn start_manual_batch(source: &str) -> (AppState, SimulationController) {
     (state, controller)
 }
 
-fn inventory_lines(state: &AppState, run_sequence: u64) -> usize {
+fn inventory_lines(state: &RunTestHost, run_sequence: u64) -> usize {
     state
         .model
         .simulation
@@ -193,7 +193,7 @@ fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
 /// though the preview is tried every frame.
 #[test]
 fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
-    let mut state = AppState::default();
+    let mut state = RunTestHost::default();
     let run_sequence = state.model.simulation.start_run().id;
     let mut controller = SimulationController::new();
     controller.current_run_id = Some(run_sequence);

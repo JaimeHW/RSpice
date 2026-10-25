@@ -9,7 +9,7 @@ use rspice_simulation_contract::drafts::{DcSetup, NoiseDraft};
 pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     let parsed = rspice_core::Netlist::parse(deck).unwrap();
     assert!(parsed.subcircuits.is_empty());
-    let mut state = super::super::AppState::default();
+    let mut state = super::super::RunTestHost::default();
     state.model.sim_setup.run_set =
         rspice_simulation_contract::run_set::RunSetState::reference_only();
     state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
