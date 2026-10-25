@@ -347,7 +347,7 @@ fn generated_stage_cache_scatter_is_table_driven() {
         undeclared_installations.join("\n")
     );
 
-    let runtime_path = workspace_root().join("crates/rspice-veriloga-runtime/src/lib.rs");
+    let runtime_path = workspace_root().join("crates/rspice-veriloga-runtime/src/descriptor.rs");
     let runtime = fs::read_to_string(&runtime_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
     assert!(
