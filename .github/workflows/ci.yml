@@ -166,7 +166,7 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - name: Test core units, integration tests, and doctests
+      - name: Test core units and integration tests
         run: cargo test --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --no-fail-fast
       - name: Conformance suite unit tests
         run: >-
@@ -323,7 +323,7 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - name: Test UI units, integration tests, and doctests (Linux)
+      - name: Test UI units and integration tests (Linux)
         run: cargo test --locked -p rspice-app -p rspice-app-state --no-fail-fast
       - name: Test generated Verilog-A GUI contracts
         run: >-

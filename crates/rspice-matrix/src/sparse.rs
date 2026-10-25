@@ -253,7 +253,7 @@ pub struct StaticMatrixSolverCheckpoint {
 }
 
 impl StaticMatrixSolverCheckpoint {
-    /// Scalar storage charged to an embedding application's checkpoint budget.
+    /// Scalar storage charged to the checkpoint budget.
     pub fn retained_value_count(&self) -> usize {
         let mut count = 12usize
             .saturating_add(self.col_ptr.len())
@@ -376,8 +376,7 @@ pub struct StaticMatrix {
     /// measured high-fill Circuit LU factorization.
     klu_auto_rejected: bool,
     /// Explicit per-matrix backend policy. This avoids process-global solver
-    /// state for commercial embedding while preserving an environment-aware
-    /// compatibility constructor.
+    /// state while preserving an environment-aware compatibility constructor.
     solver_options: SolverOptions,
     /// Scratch values + RHS retained between residual probes (see
     /// [`StaticMatrix::with_probe_values`]).

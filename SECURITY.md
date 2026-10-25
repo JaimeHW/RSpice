@@ -19,7 +19,7 @@ Useful reports include the affected RSpice version and source commit, platform,
 minimal non-confidential reproduction, impact, and any known mitigations. Good
 targets include parser or model-file memory-safety issues, denial of service
 that bypasses configured resource limits or timeouts, unsafe FFI/JIT behavior,
-cross-tenant data exposure in an embedding service, and release or update
+cross-tenant data exposure in a hosted deployment, and release or update
 integrity failures.
 
 Maintainers target acknowledgment within three business days and an initial

@@ -361,9 +361,6 @@ veriloga-builtins = [
 test-support = ["rspice-core-base/test-support", "rspice-core-netlist/test-support"]
 
 [lib]
-# Examples in these modules name their paths through `rspice_core`, which
-# re-exports every one of them; they are checked by review, as rspice-core's
-# are.
 doctest = false
 
 [dependencies]

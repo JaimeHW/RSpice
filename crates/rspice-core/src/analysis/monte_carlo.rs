@@ -5,22 +5,6 @@
 //! - Lot and device tolerances
 //! - Statistical output (mean, std, min, max, histograms)
 //! - Reproducible runs via seeding
-//!
-//! # Example
-//! ```
-//! use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
-//! use std::collections::HashMap;
-//!
-//! let config = MonteCarloConfig::new(1000).with_seed(42);
-//! let mut runner = MonteCarloRunner::new(config);
-//! runner.add_component("R1", 1000.0, Tolerance::uniform(5.0));
-//! // A callback may invoke a solver or, here, evaluate a divider analytically.
-//! let results = runner.run(|values| {
-//!     let output = 1000.0 / (values.get("R1", 1000.0) + 1000.0);
-//!     Ok::<_, std::convert::Infallible>(HashMap::from([("V(out)".to_owned(), output)]))
-//! }).unwrap();
-//! assert_eq!(results.sampling.unwrap().seed, 42);
-//! ```
 
 use super::error::SimulationError;
 use crate::Value;

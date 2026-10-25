@@ -123,9 +123,9 @@ pub enum FactorizationRequest {
 
 /// Per-matrix solver policy.
 ///
-/// Commercial embedding code should pass this explicitly through
-/// [`StaticMatrix::from_triplets_with_options`]. [`Default`] is deterministic
-/// and independent of process-global environment state.
+/// Pass this explicitly through [`StaticMatrix::from_triplets_with_options`]
+/// so the process environment cannot change numeric policy. [`Default`] is
+/// deterministic and independent of process-global environment state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolverOptions {
     /// Backend used for real-valued sparse systems.

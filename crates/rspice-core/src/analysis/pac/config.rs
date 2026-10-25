@@ -37,16 +37,6 @@ pub enum PacSweepType {
 /// PAC analysis performs small-signal AC analysis around a periodic steady-state
 /// operating point. The result is a conversion matrix that relates input signals
 /// at one frequency/sideband to output signals at other frequencies/sidebands.
-///
-/// # Example
-///
-/// ```ignore
-/// let config = PacConfig::new()
-///     .with_sweep(1e6, 1e9, 100)     // 1 MHz to 1 GHz, 100 points
-///     .with_sidebands(-5, 5)          // Harmonics -5 to +5
-///     .with_input_source("VRF")       // RF input source
-///     .with_output_node("VOUT");      // Output node
-/// ```
 #[derive(Debug, Clone)]
 pub struct PacConfig {
     /// Start frequency for input sweep (Hz)
@@ -149,12 +139,6 @@ impl PacConfig {
     /// # Arguments
     /// * `min` - Minimum sideband index (negative for lower sidebands)
     /// * `max` - Maximum sideband index (positive for upper sidebands)
-    ///
-    /// # Example
-    /// ```ignore
-    /// // For a mixer: input at RF (sideband +1), output at IF (sideband 0)
-    /// config.with_sidebands(-3, 3);  // Analyze sidebands -3 to +3
-    /// ```
     pub fn with_sidebands(mut self, min: i32, max: i32) -> Self {
         self.sideband_min = min;
         self.sideband_max = max;

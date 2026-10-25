@@ -323,24 +323,6 @@ signed, application-local CPython staged into the release, never an
 interpreter discovered from `PATH`, the registry, a virtualenv, or user
 site-packages.
 
-### Rust
-
-`rspice-core` is the engine every other crate wraps. `Netlist::parse` is the
-front door and `Engine` the orchestrator; `AbortSignal` lets a frontend cancel a
-long run cooperatively.
-
-```rust
-use rspice_core::{Engine, Netlist};
-
-// The first line of a SPICE deck is the title, never an element.
-let netlist = Netlist::parse("divider\nV1 1 0 10\nR1 1 0 1k\n.end")?;
-let result = Engine::default().run_dc_op(&netlist)?;
-assert_eq!(result.voltage(1), 10.0);
-```
-
-Entry points, device routing and the feature-flag table:
-[crates/rspice-core/README.md](crates/rspice-core/README.md).
-
 ### Verilog-AMS
 
 Verilog-A is the analog subset of Verilog-AMS, and RSpice treats them as the

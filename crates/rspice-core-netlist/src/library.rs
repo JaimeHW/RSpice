@@ -4,14 +4,6 @@
 //! Libraries are compiled into the executable for seamless distribution.
 //!
 //! Also supports loading external .lib files from foundry PDKs with corner selection.
-//!
-//! # Usage
-//! ```rust
-//! use rspice_core::library::{LibParser, foundation_library_source};
-//!
-//! let parsed = LibParser::new(".").parse_string(foundation_library_source());
-//! let subcircuits = &parsed.top_level_subcircuits;
-//! ```
 
 mod foundation_defaults;
 pub mod lib_parser;

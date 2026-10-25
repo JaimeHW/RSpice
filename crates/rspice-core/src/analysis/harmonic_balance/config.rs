@@ -108,28 +108,6 @@ impl HbTone {
 ///
 /// HB analysis finds the periodic steady-state solution by solving for
 /// Fourier coefficients directly in the frequency domain.
-///
-/// # Examples
-///
-/// ## Single-tone analysis
-/// ```
-/// use rspice_core::analysis::harmonic_balance::HbConfig;
-///
-/// let config = HbConfig::new(1e9)  // 1 GHz fundamental
-///     .with_harmonics(9)           // DC through 9th harmonic
-///     .with_tolerance(1e-6);
-/// ```
-///
-/// ## Multi-tone analysis (mixer)
-/// ```
-/// use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
-///
-/// let config = HbConfig::multi_tone(vec![
-///     HbTone::new(900e6, 5).with_name("RF"),   // 900 MHz RF
-///     HbTone::new(800e6, 5).with_name("LO"),   // 800 MHz LO
-/// ])
-/// .with_tolerance(1e-6);
-/// ```
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct HbConfig {

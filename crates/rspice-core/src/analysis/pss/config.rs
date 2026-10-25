@@ -9,26 +9,6 @@ use crate::Value;
 /// PSS analysis finds the periodic operating point of circuits driven by
 /// periodic large-signal excitations. This configuration controls all
 /// aspects of the shooting Newton solver.
-///
-/// # Examples
-///
-/// ## Driven Circuit (known fundamental)
-/// ```
-/// use rspice_core::analysis::pss::PssConfig;
-///
-/// let config = PssConfig::new(1e9)  // 1 GHz fundamental
-///     .with_harmonics(9)
-///     .with_tstab(10e-9);
-/// ```
-///
-/// ## Autonomous Oscillator (period detection)
-/// ```
-/// use rspice_core::analysis::pss::PssConfig;
-///
-/// let config = PssConfig::autonomous()
-///     .with_period_guess(1e-9)  // ~1 GHz expected
-///     .with_harmonics(15);
-/// ```
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct PssConfig {
@@ -123,13 +103,6 @@ impl PssConfig {
     ///
     /// # Arguments
     /// * `fundamental_freq` - Fundamental frequency in Hz
-    ///
-    /// # Example
-    /// ```
-    /// use rspice_core::analysis::pss::PssConfig;
-    /// let config = PssConfig::new(1e9);  // 1 GHz
-    /// assert_eq!(config.period(), 1e-9);
-    /// ```
     pub fn new(fundamental_freq: Value) -> Self {
         Self {
             fundamental_freq,
@@ -154,13 +127,6 @@ impl PssConfig {
     ///
     /// Enables automatic period detection. You should provide a period guess
     /// via `with_period_guess()` for faster convergence.
-    ///
-    /// # Example
-    /// ```
-    /// use rspice_core::analysis::pss::PssConfig;
-    /// let config = PssConfig::autonomous()
-    ///     .with_period_guess(1e-9);  // ~1 GHz expected
-    /// ```
     pub fn autonomous() -> Self {
         Self {
             fundamental_freq: 0.0,

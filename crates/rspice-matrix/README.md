@@ -44,8 +44,8 @@ KLU C library.
 - `StaticMatrix::from_triplets_with_options`: freeze a topology under an
   explicit `SolverOptions`. `StaticMatrix::from_triplets` reads
   `SolverOptions::from_env()` instead (`RSPICE_SOLVER`, `RSPICE_PIVREL`,
-  `RSPICE_PIVTOL`); embedding code should pass options so process
-  environment cannot change numeric policy.
+  `RSPICE_PIVTOL`); pass options explicitly so the process environment
+  cannot change numeric policy.
 - `StaticMatrix::get_index` and `stamp_direct`: resolve a stamp location once,
   then accumulate into it with no search.
 - `StaticMatrix::solve_into`: solve into a caller-owned vector, reusing it and

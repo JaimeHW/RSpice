@@ -21,15 +21,6 @@
 //! ```text
 //! .PSS fund=1GHz nharms=9 tstab=10n
 //! ```
-//!
-//! # Example
-//! ```ignore
-//! use rspice_core::analysis::pss::{PssConfig, PssAnalysis};
-//!
-//! let config = PssConfig::new(1e9)  // 1 GHz fundamental
-//!     .with_harmonics(9)
-//!     .with_tstab(10e-9);
-//! ```
 
 mod config;
 mod period_detect;

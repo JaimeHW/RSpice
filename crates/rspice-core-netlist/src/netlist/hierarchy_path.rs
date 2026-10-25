@@ -10,19 +10,6 @@
 //! Special path segments:
 //! - Empty path represents the root/top-level design
 //! - Global nodes (ground, power rails) are never prefixed
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let path = HierarchyPath::root();
-//! let child = path.child("X1");
-//! let grandchild = child.child("X2");
-//! assert_eq!(grandchild.to_string(), "X1.X2");
-//!
-//! // Parse from string
-//! let parsed = HierarchyPath::parse("X1.X2.X3", '.');
-//! assert_eq!(parsed.depth(), 3);
-//! ```
 
 // Note: serde support not needed here - serialization handled at UI level
 use std::fmt;
@@ -119,12 +106,6 @@ impl HierarchyPath {
     /// # Arguments
     /// * `path` - The path string to parse
     /// * `separator` - The separator character to split on
-    ///
-    /// # Examples
-    /// ```ignore
-    /// let path = HierarchyPath::parse("X1.X2.R1", '.');
-    /// assert_eq!(path.segments(), &["X1", "X2", "R1"]);
-    /// ```
     pub fn parse(path: &str, separator: char) -> Self {
         if path.is_empty() {
             return Self::root_with_separator(separator);

@@ -19,19 +19,6 @@
 //! - **Oversampling**: Anti-aliasing via FFT zero-padding
 //! - **Sparse Jacobian**: Block-diagonal structure for efficiency
 //! - **Krylov solvers**: Support for large circuits
-//!
-//! # Example
-//!
-//! ```ignore
-//! use rspice_core::analysis::harmonic_balance::{HbConfig, HbSolver};
-//!
-//! let config = HbConfig::new(1e9)  // 1 GHz fundamental
-//!     .with_harmonics(9)
-//!     .with_tolerance(1e-6);
-//!
-//! let result = engine.run_hb(&netlist, config)?;
-//! println!("Converged in {} iterations", result.iterations);
-//! ```
 
 mod config;
 mod fft;

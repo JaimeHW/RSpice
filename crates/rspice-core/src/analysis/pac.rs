@@ -34,24 +34,6 @@
 //! ```text
 //! .PAC start=1Meg stop=1Gig pts=100 maxsideband=5
 //! ```
-//!
-//! # Example
-//!
-//! ```ignore
-//! use rspice_core::analysis::pac::PacConfig;
-//!
-//! let pac_config = PacConfig::new()
-//!     .with_fundamental(1e9)         // 1 GHz LO
-//!     .with_sweep(1e6, 1e9, 100)     // 1 MHz to 1 GHz, 100 points
-//!     .with_sidebands(-5, 5)         // Harmonics -5 to +5
-//!     .with_input_source("VRF")
-//!     .with_output_node("vout");
-//!
-//! let pac_result = engine.run_pac(&netlist, pac_config)?;
-//!
-//! // Conversion gain from RF (sideband 1) to IF (sideband 0)
-//! let conversion_gain = pac_result.result.conversion_gain(1, 0, 0)?;
-//! ```
 
 mod config;
 mod conversion_matrix;

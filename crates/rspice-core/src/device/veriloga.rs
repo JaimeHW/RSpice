@@ -7,19 +7,6 @@
 //! # Feature Gating
 //!
 //! This module is only available when the `veriloga` feature is enabled.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use rspice_core::device::veriloga::{VerilogADevice, CompiledModel, Compiler};
-//!
-//! // Compile a Verilog-A model
-//! let compiler = Compiler::new();
-//! let model = compiler.compile(source_code)?;
-//!
-//! // Create device instance
-//! let device = VerilogADevice::new("D1", model, &[1, 0]);
-//! ```
 
 // Re-export core types from rspice-veriloga
 pub use rspice_veriloga::{

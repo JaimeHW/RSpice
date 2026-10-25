@@ -1283,12 +1283,6 @@ impl ParamContext {
     }
 
     /// Define a user function
-    ///
-    /// # Example
-    /// ```ignore
-    /// ctx.define_function("SQUARE", vec!["X".to_string()], "X*X");
-    /// ctx.define_function("RPAR", vec!["R1".to_string(), "R2".to_string()], "R1*R2/(R1+R2)");
-    /// ```
     pub fn define_function(&mut self, name: &str, args: Vec<String>, body: &str) {
         let func = FunctionDef::new(name, args, body);
         self.functions.insert(func.name.clone(), func);

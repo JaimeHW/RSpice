@@ -11,19 +11,6 @@
 //! - Enables easy testing with mock abort signals
 //! - Allows different abort implementations (atomic, channel-based, etc.)
 //!
-//! # Usage
-//!
-//! ```rust
-//! use rspice_core::abort_signal::{AbortSignal, NoAbort};
-//!
-//! // For non-cancellable runs or testing
-//! let signal = NoAbort;
-//! assert!(!signal.is_aborted());
-//!
-//! // The engine polls on a fixed stride during long loops
-//! // if signal.is_aborted() { return Err(...); }
-//! ```
-//!
 //! # Bounded-polling policy
 //!
 //! Cancellation latency is a contract, not a best effort: a caller that
@@ -343,22 +330,6 @@ impl AbortSignal for ImmediateAbort {
 ///
 /// This is the primary implementation for UI integration where the abort
 /// flag is set from a UI thread and checked from a simulation thread.
-///
-/// # Example
-///
-/// ```rust
-/// use rspice_core::abort_signal::{AtomicAbort, AbortSignal};
-/// use std::sync::Arc;
-///
-/// let abort = Arc::new(AtomicAbort::new());
-/// let abort_clone = Arc::clone(&abort);
-///
-/// // UI thread sets abort
-/// abort_clone.set();
-///
-/// // Simulation thread checks abort
-/// assert!(abort.is_aborted());
-/// ```
 #[derive(Debug, Default)]
 pub struct AtomicAbort {
     aborted: AtomicBool,
