@@ -1,8 +1,7 @@
 //! Wire creation and hit-testing.
 //!
-//! Adding wires, and locating what is under a point: the wire itself, one of
-//! its vertices, or an endpoint. The distinction drives the cursor and what
-//! a drag does.
+//! Adding and routing wires, and locating the wire vertex under a point for
+//! corner dragging.
 
 use super::super::*;
 use rspice_design::schematic::wire_edit;
@@ -19,16 +18,6 @@ impl SchematicState {
             self.session.is_dirty = true;
         }
         id
-    }
-
-    /// Find wire at grid position
-    pub fn wire_at(&self, pos: Point) -> Option<u64> {
-        for wire in &self.design.document().wires {
-            if wire.contains_point(pos) {
-                return Some(wire.id);
-            }
-        }
-        None
     }
 
     /// Find wire vertex at a grid position for dragging
