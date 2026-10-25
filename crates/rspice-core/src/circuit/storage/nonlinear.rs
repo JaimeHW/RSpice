@@ -238,24 +238,28 @@ impl Bjts {
     }
 }
 
-/// B3SOIDD (BSIMSOI level 56) storage for nonlinear Newton-Raphson iteration.
-///
-/// Mirrors [`Mosfets`] but holds [`crate::device::B3SoiDd`] instances. These SOI
-/// devices stamp through the generic [`MatrixStamper`] path (not the O(1)
-/// `stamp_direct` linkage) because their coupled multi-terminal charge companion
-/// is integrated by the engine's dedicated B3SOI transient pass rather than the
-/// Meyer two-terminal MOSFET pathway.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct B3SoiDds {
-    pub devices: Vec<crate::device::B3SoiDd>,
+/// Newton-solve storage for one device family that stamps through the generic
+/// [`MatrixStamper`] path rather than the O(1) `stamp_direct` linkage of
+/// [`Mosfets`].
+#[derive(Debug, Clone)]
+pub(crate) struct NewtonFamily<D> {
+    pub devices: Vec<D>,
 }
 
-impl B3SoiDds {
+impl<D> Default for NewtonFamily<D> {
+    fn default() -> Self {
+        Self {
+            devices: Vec::new(),
+        }
+    }
+}
+
+impl<D: crate::device::NonlinearDevice> NewtonFamily<D> {
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn add(&mut self, device: crate::device::B3SoiDd) {
+    pub(crate) fn add(&mut self, device: D) {
         self.devices.push(device);
     }
 
@@ -267,413 +271,62 @@ impl B3SoiDds {
         self.devices.is_empty()
     }
 
-    /// Update all B3SOIDD devices with the current solution.
+    /// Update every device with the current solution.
     pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
         for d in &mut self.devices {
             d.update(voltages);
         }
     }
 
-    /// Stamp all B3SOIDD devices into the matrix for the Newton iteration.
+    /// Stamp every device into the matrix for the Newton iteration.
     pub(crate) fn stamp_all(
         &self,
         matrix: &mut impl MatrixStamper,
         rhs: &mut [Value],
         voltages: &[Value],
     ) {
-        use crate::device::NonlinearDevice;
         for d in &self.devices {
             d.stamp_nonlinear(voltages, matrix, rhs);
         }
     }
 
-    /// Check whether all B3SOIDD devices have converged.
+    /// Check whether every device has converged.
     pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
         self.devices.iter().all(|d| d.is_converged(criteria))
     }
 }
 
-/// B3SOIFD (BSIMSOI level 55, fully depleted) storage for the Newton solve.
-///
-/// Mirrors [`B3SoiDds`] but holds [`crate::device::B3SoiFd`] instances. FD has no
-/// body node and its CAPMOD=3 charge companion is integrated by the same engine
-/// B3SOI transient pass as DD, so it shares the orchestration shape.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct B3SoiFds {
-    pub devices: Vec<crate::device::B3SoiFd>,
-}
+/// B3SOIDD (BSIMSOI level 56) storage. The SOI families integrate their coupled
+/// multi-terminal charge companion in the engine's dedicated B3SOI transient
+/// pass rather than the Meyer two-terminal MOSFET pathway.
+pub(crate) type B3SoiDds = NewtonFamily<crate::device::B3SoiDd>;
 
-impl B3SoiFds {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
+/// B3SOIFD (BSIMSOI level 55, fully depleted) storage. FD has no body node; its
+/// CAPMOD=3 charge companion goes through the same B3SOI transient pass as DD.
+pub(crate) type B3SoiFds = NewtonFamily<crate::device::B3SoiFd>;
 
-    pub(crate) fn add(&mut self, device: crate::device::B3SoiFd) {
-        self.devices.push(device);
-    }
+/// B3SOIPD (BSIMSOI level 57, partially depleted) storage. PD keeps a real
+/// floating-body node and the full body-current set.
+pub(crate) type B3SoiPds = NewtonFamily<crate::device::B3SoiPd>;
 
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
+/// BSIM3v3.3 (MOS level 8/49) storage. Its coupled four-terminal charge
+/// companion is integrated by the engine's dedicated BSIM3 transient pass.
+pub(crate) type Bsim3v3s = NewtonFamily<crate::device::Bsim3v3Device>;
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
+/// BSIM4 v4.8 (MOS level 14/54) storage. Its coupled four-terminal charge
+/// companion is integrated by the engine's dedicated BSIM4 transient pass.
+pub(crate) type Bsim4v8s = NewtonFamily<crate::device::Bsim4v8Device>;
 
-    /// Update all B3SOIFD devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
+/// Native EKV 2.6 LEVEL=260 storage.
+pub(crate) type EkvMosfets = NewtonFamily<EkvMosfet>;
 
-    /// Stamp all B3SOIFD devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
+/// Native EKV3 LEVEL=301 NMOS150-slice storage.
+pub(crate) type Ekv3Mosfets = NewtonFamily<Ekv3Device>;
 
-    /// Check whether all B3SOIFD devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
-
-/// B3SOIPD (BSIMSOI level 57, partially depleted) storage for the Newton solve.
-///
-/// Mirrors [`B3SoiDds`] but holds [`crate::device::B3SoiPd`] instances. PD keeps
-/// a real floating-body node and the full body-current set, so its orchestration
-/// matches DD's exactly.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct B3SoiPds {
-    pub devices: Vec<crate::device::B3SoiPd>,
-}
-
-impl B3SoiPds {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn add(&mut self, device: crate::device::B3SoiPd) {
-        self.devices.push(device);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    /// Update all B3SOIPD devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    /// Stamp all B3SOIPD devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    /// Check whether all B3SOIPD devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
-
-/// BSIM3v3.3 (MOS level 8/49) storage for the Newton solve.
-///
-/// Mirrors [`B3SoiPds`] but holds [`crate::device::Bsim3v3Device`] instances.
-/// Like the SOI family, these stamp through the generic [`MatrixStamper`]
-/// path: their coupled four-terminal charge companion is integrated by the
-/// engine's dedicated BSIM3 transient pass, not the Meyer two-terminal
-/// MOSFET pathway.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Bsim3v3s {
-    pub devices: Vec<crate::device::Bsim3v3Device>,
-}
-
-impl Bsim3v3s {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn add(&mut self, device: crate::device::Bsim3v3Device) {
-        self.devices.push(device);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    /// Update all BSIM3 devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    /// Stamp all BSIM3 devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    /// Check whether all BSIM3 devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
-
-/// BSIM4 v4.8 (MOS level 14/54) storage for the Newton solve.
-///
-/// Mirrors [`Bsim3v3s`] but holds [`crate::device::Bsim4v8Device`]
-/// instances: the same generic [`MatrixStamper`] path, with the coupled
-/// four-terminal charge companion integrated by the engine's dedicated
-/// BSIM4 transient pass.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Bsim4v8s {
-    pub devices: Vec<crate::device::Bsim4v8Device>,
-}
-
-impl Bsim4v8s {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn add(&mut self, device: crate::device::Bsim4v8Device) {
-        self.devices.push(device);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    /// Update all BSIM4 devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    /// Stamp all BSIM4 devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    /// Check whether all BSIM4 devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
-
-/// Native EKV 2.6 LEVEL=260 storage for the Newton solve.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct EkvMosfets {
-    pub devices: Vec<EkvMosfet>,
-}
-
-impl EkvMosfets {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn add(&mut self, device: EkvMosfet) {
-        self.devices.push(device);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    /// Update all EKV 2.6 devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    /// Stamp all EKV 2.6 devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    /// Check whether all EKV 2.6 devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
-
-/// Native EKV3 LEVEL=301 NMOS150-slice storage for the Newton solve.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Ekv3Mosfets {
-    pub devices: Vec<Ekv3Device>,
-}
-
-impl Ekv3Mosfets {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn add(&mut self, device: Ekv3Device) {
-        self.devices.push(device);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    /// Update all EKV3 devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    /// Stamp all EKV3 devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    /// Check whether all EKV3 devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
-
-/// Native VDMOS power MOSFET storage.
-///
-/// These devices use the generic [`MatrixStamper`] path: their internal
-/// drain/source resistance topology is instance-dependent, and the VDMOS
-/// direct stamper does not participate in the legacy MOSFET fast path.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Vdmoses {
-    pub devices: Vec<Vdmos>,
-}
-
-impl Vdmoses {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn add(&mut self, vdmos: Vdmos) {
-        self.devices.push(vdmos);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    /// Update all VDMOS devices with the current solution.
-    pub(crate) fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    /// Stamp all VDMOS devices into the matrix for the Newton iteration.
-    pub(crate) fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    /// Check whether all VDMOS devices have converged.
-    pub(crate) fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(criteria))
-    }
-}
+/// Native VDMOS power MOSFET storage. Its internal drain/source resistance
+/// topology is instance-dependent, and the VDMOS direct stamper does not take
+/// part in the MOSFET fast path.
+pub(crate) type Vdmoses = NewtonFamily<Vdmos>;
 
 /// MOSFET storage for nonlinear Newton-Raphson iteration
 #[derive(Debug, Clone, Default)]

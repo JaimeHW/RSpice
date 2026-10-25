@@ -346,6 +346,105 @@ fn pwl_waveform_cache_entry_bytes(
     >(pwl_key_dynamic_bytes(key), waveform.retained_bytes())
 }
 
+/// Methods both independent-source families share: each keeps `names`,
+/// `source_specs`, `pwl_waveforms` and `transient_context` in the same SoA
+/// shape.
+macro_rules! shared_source_methods {
+    () => {
+        /// Set transient context used to resolve waveform defaults.
+        pub fn set_transient_context(&mut self, tstep: Value, tstop: Value) {
+            self.set_transient_context_with_dialect(
+                tstep,
+                tstop,
+                crate::config::SpiceDialect::BestAvailable,
+            );
+        }
+
+        /// Set transient context used to resolve waveform defaults for a SPICE dialect.
+        pub fn set_transient_context_with_dialect(
+            &mut self,
+            tstep: Value,
+            tstop: Value,
+            dialect: crate::config::SpiceDialect,
+        ) {
+            self.set_transient_context_with_dialect_and_limits(
+                tstep,
+                tstop,
+                dialect,
+                crate::resource::ResourceLimits::default(),
+            );
+        }
+
+        pub(crate) fn set_transient_context_with_dialect_and_limits(
+            &mut self,
+            tstep: Value,
+            tstop: Value,
+            dialect: crate::config::SpiceDialect,
+            resource_limits: crate::resource::ResourceLimits,
+        ) {
+            let step = if tstep.is_finite() && tstep > 0.0 {
+                tstep
+            } else {
+                1e-12
+            };
+            let stop = if tstop.is_finite() && tstop > 0.0 {
+                tstop
+            } else {
+                1e99
+            };
+            self.transient_context = Some(TransientSourceContext {
+                tstep: step,
+                tstop: stop,
+                dialect,
+                xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
+                    .then_some(0.0),
+                resource_limits,
+            });
+        }
+
+        /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
+        pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
+            if let Some(context) = self.transient_context.as_mut()
+                && context.dialect == crate::config::SpiceDialect::Xyce
+            {
+                context.xyce_breakpoint_tolerance =
+                    (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
+            }
+        }
+
+        pub fn len(&self) -> usize {
+            self.names.len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.names.is_empty()
+        }
+
+        /// Iterate transient specifications with their canonical source names and
+        /// circuit-owned PWL snapshots. Keeping the name coupled to the same SoA
+        /// ordinal lets analysis clients select authored sources without reparsing
+        /// or accidentally reading a changed external waveform file.
+        pub(crate) fn transient_specs_named_with_pwl(
+            &self,
+        ) -> impl Iterator<
+            Item = (
+                &str,
+                &crate::netlist::SourceSpec,
+                Option<&crate::device::pwl_file::PwlWaveform>,
+            ),
+        > {
+            self.names
+                .iter()
+                .zip(&self.source_specs)
+                .zip(&self.pwl_waveforms)
+                .filter_map(|((name, spec), waveform)| {
+                    spec.as_ref()
+                        .map(|spec| (name.as_str(), spec, waveform.as_deref()))
+                })
+        }
+    };
+}
+
 impl VoltageSources {
     pub fn new() -> Self {
         Self::default()
@@ -418,74 +517,7 @@ impl VoltageSources {
         self.invalidate_constraint_projection();
     }
 
-    /// Set transient context used to resolve waveform defaults.
-    pub fn set_transient_context(&mut self, tstep: Value, tstop: Value) {
-        self.set_transient_context_with_dialect(
-            tstep,
-            tstop,
-            crate::config::SpiceDialect::BestAvailable,
-        );
-    }
-
-    /// Set transient context used to resolve waveform defaults for a SPICE dialect.
-    pub fn set_transient_context_with_dialect(
-        &mut self,
-        tstep: Value,
-        tstop: Value,
-        dialect: crate::config::SpiceDialect,
-    ) {
-        self.set_transient_context_with_dialect_and_limits(
-            tstep,
-            tstop,
-            dialect,
-            crate::resource::ResourceLimits::default(),
-        );
-    }
-
-    pub(crate) fn set_transient_context_with_dialect_and_limits(
-        &mut self,
-        tstep: Value,
-        tstop: Value,
-        dialect: crate::config::SpiceDialect,
-        resource_limits: crate::resource::ResourceLimits,
-    ) {
-        let step = if tstep.is_finite() && tstep > 0.0 {
-            tstep
-        } else {
-            1e-12
-        };
-        let stop = if tstop.is_finite() && tstop > 0.0 {
-            tstop
-        } else {
-            1e99
-        };
-        self.transient_context = Some(TransientSourceContext {
-            tstep: step,
-            tstop: stop,
-            dialect,
-            xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
-                .then_some(0.0),
-            resource_limits,
-        });
-    }
-
-    /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
-    pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
-        if let Some(context) = self.transient_context.as_mut()
-            && context.dialect == crate::config::SpiceDialect::Xyce
-        {
-            context.xyce_breakpoint_tolerance =
-                (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.names.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.names.is_empty()
-    }
+    shared_source_methods!();
 
     /// Return the exact complex excitation stamped into this source's AC
     /// branch equation.
@@ -530,29 +562,6 @@ impl VoltageSources {
         self.source_specs[index] = None;
         self.pwl_waveforms[index] = None;
         Some(value)
-    }
-
-    /// Iterate transient specifications with their canonical source names and
-    /// circuit-owned PWL snapshots. Keeping the name coupled to the same SoA
-    /// ordinal lets analysis clients select authored sources without reparsing
-    /// or accidentally reading a changed external waveform file.
-    pub(crate) fn transient_specs_named_with_pwl(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            &str,
-            &crate::netlist::SourceSpec,
-            Option<&crate::device::pwl_file::PwlWaveform>,
-        ),
-    > {
-        self.names
-            .iter()
-            .zip(&self.source_specs)
-            .zip(&self.pwl_waveforms)
-            .filter_map(|((name, spec), waveform)| {
-                spec.as_ref()
-                    .map(|spec| (name.as_str(), spec, waveform.as_deref()))
-            })
     }
 
     /// Link indices to StaticMatrix for O(1) stamping
@@ -2345,74 +2354,7 @@ impl CurrentSources {
         self.pwl_waveforms.push(pwl_waveform);
     }
 
-    /// Set transient context used to resolve waveform defaults.
-    pub fn set_transient_context(&mut self, tstep: Value, tstop: Value) {
-        self.set_transient_context_with_dialect(
-            tstep,
-            tstop,
-            crate::config::SpiceDialect::BestAvailable,
-        );
-    }
-
-    /// Set transient context used to resolve waveform defaults for a SPICE dialect.
-    pub fn set_transient_context_with_dialect(
-        &mut self,
-        tstep: Value,
-        tstop: Value,
-        dialect: crate::config::SpiceDialect,
-    ) {
-        self.set_transient_context_with_dialect_and_limits(
-            tstep,
-            tstop,
-            dialect,
-            crate::resource::ResourceLimits::default(),
-        );
-    }
-
-    pub(crate) fn set_transient_context_with_dialect_and_limits(
-        &mut self,
-        tstep: Value,
-        tstop: Value,
-        dialect: crate::config::SpiceDialect,
-        resource_limits: crate::resource::ResourceLimits,
-    ) {
-        let step = if tstep.is_finite() && tstep > 0.0 {
-            tstep
-        } else {
-            1e-12
-        };
-        let stop = if tstop.is_finite() && tstop > 0.0 {
-            tstop
-        } else {
-            1e99
-        };
-        self.transient_context = Some(TransientSourceContext {
-            tstep: step,
-            tstop: stop,
-            dialect,
-            xyce_breakpoint_tolerance: (dialect == crate::config::SpiceDialect::Xyce)
-                .then_some(0.0),
-            resource_limits,
-        });
-    }
-
-    /// Publish Xyce's accepted-state breakpoint tolerance to source devices.
-    pub(crate) fn set_xyce_breakpoint_tolerance(&mut self, tolerance: Value) {
-        if let Some(context) = self.transient_context.as_mut()
-            && context.dialect == crate::config::SpiceDialect::Xyce
-        {
-            context.xyce_breakpoint_tolerance =
-                (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.names.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.names.is_empty()
-    }
+    shared_source_methods!();
 
     pub(crate) fn freeze_transient_source_at_time(
         &mut self,
@@ -2429,27 +2371,6 @@ impl CurrentSources {
         self.source_specs[index] = None;
         self.pwl_waveforms[index] = None;
         Some(value)
-    }
-
-    /// Iterate transient specifications with their canonical source names and
-    /// circuit-owned PWL snapshots.
-    pub(crate) fn transient_specs_named_with_pwl(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            &str,
-            &crate::netlist::SourceSpec,
-            Option<&crate::device::pwl_file::PwlWaveform>,
-        ),
-    > {
-        self.names
-            .iter()
-            .zip(&self.source_specs)
-            .zip(&self.pwl_waveforms)
-            .filter_map(|((name, spec), waveform)| {
-                spec.as_ref()
-                    .map(|spec| (name.as_str(), spec, waveform.as_deref()))
-            })
     }
 
     /// Stamp all current sources
