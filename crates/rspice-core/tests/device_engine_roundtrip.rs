@@ -1028,20 +1028,34 @@ mod b3soi_derivatives {
         let card = dialect_card(card, xyce);
         for capmod in ["3", "2"] {
             let card = card.replace("CAPMOD = 3", &format!("CAPMOD = {capmod}"));
-            for body in ["floating", "tied", "resistive"] {
-                let mut inst = instance(&card, polarity, body);
-                for point in points {
-                    let x = solution(&inst, point, 0.0);
-                    for &(dt_label, ag0) in AG0 {
-                        checked += 1;
-                        for m in check(&mut inst, &x, ag0) {
-                            lines.push(mismatch_line(
-                                &format!(
-                                    "{family} capmod{capmod} {body:<9} {:<26} {dt_label:<10}",
-                                    point.0
-                                ),
-                                &m,
-                            ));
+            for heated in [false, true] {
+                let card = if heated {
+                    self_heating(&card)
+                } else {
+                    card.clone()
+                };
+                let del_temp = if heated { DEL_TEMP } else { 0.0 };
+                for body in ["floating", "tied", "resistive"] {
+                    let mut inst = instance(&card, polarity, body);
+                    assert_eq!(
+                        inst.dev.nodes().temp != 0,
+                        heated,
+                        "{family} {body}: self-heating node"
+                    );
+                    for point in points {
+                        let x = solution(&inst, point, del_temp);
+                        for &(dt_label, ag0) in AG0 {
+                            checked += 1;
+                            for m in check(&mut inst, &x, ag0) {
+                                lines.push(mismatch_line(
+                                    &format!(
+                                        "{family} capmod{capmod} sh{} {body:<9} {:<26} {dt_label:<10}",
+                                        u8::from(heated),
+                                        point.0
+                                    ),
+                                    &m,
+                                ));
+                            }
                         }
                     }
                 }
