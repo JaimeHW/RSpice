@@ -6,30 +6,6 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-/// The name an export proposes before its extension: the schematic file's
-/// own name when it is one, otherwise the cell it exports, with the view
-/// where the cell has more than one kind ("amp_testbench"); `fallback` only
-/// when there is neither. Inside a project there is no schematic file, and
-/// every export used to propose the fallback.
-fn export_file_stem(state: &AppState, fallback: &str) -> String {
-    if let Some(stem) = state
-        .model
-        .schematic
-        .session
-        .current_file
-        .as_ref()
-        .and_then(|path| path.file_stem())
-    {
-        return stem.to_string_lossy().into_owned();
-    }
-    let reference = state.model.workspace.content.active_schematic_reference();
-    match (reference.cell.trim(), reference.view.trim()) {
-        ("", _) => fallback.to_owned(),
-        (cell, "" | "schematic") => cell.to_owned(),
-        (cell, view) => format!("{cell}_{view}"),
-    }
-}
-
 pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -66,7 +42,7 @@ pub(super) fn action_export_svg_with_io(
         },
     );
 
-    let default_name = format!("{}.svg", export_file_stem(state, "schematic"));
+    let default_name = format!("{}.svg", state.model.export_file_stem("schematic"));
 
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export SVG",
@@ -148,7 +124,7 @@ pub(crate) fn action_export_netlist_with_io(
 
     let default_name = format!(
         "{}.{}",
-        export_file_stem(state, "circuit"),
+        state.model.export_file_stem("circuit"),
         format.extension()
     );
 
