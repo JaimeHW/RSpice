@@ -1433,6 +1433,26 @@ fn native_soi_fd_self_heating_inverse_mode_matches_ngspice46_op() {
     assert_rel("FD inverse rise", temp, 2.797633057124, 1.0e-9);
 }
 
+/// The self-heated FD load keeps `phi` from the ambient temperature pass
+/// (b3soifdld.c:361, 709-714), so its operating point runs on past the
+/// temperature at which `ni` reaches NCH and `2 Vtm ln(NCH / ni)` would turn
+/// negative: 847.8 K, a 547.6 K rise, for the corpus N1 card. ngspice-46, the
+/// card with SHMOD = 1, vd = vg = 2.5 V (`.option gmin=1e-25 itl1=500`, `op`,
+/// `set numdgt=12`, `print all`).
+#[test]
+fn native_soi_fd_self_heats_past_the_temperature_where_ni_reaches_nch() {
+    for (rth0, current, rise) in [
+        ("1", -2.10111247009e-03, 6.644301025665e+02),
+        ("10", -5.37696345669e-04, 1.700345141864e+03),
+    ] {
+        let card = fd_n1_model_card().replacen("RTH0     = .006", &format!("RTH0     = {rth0}"), 1);
+        assert!(card.contains(&format!("RTH0     = {rth0}")));
+        let [id, _, temp] = soi_op(&card, "n1", true, [2.5, 2.5, 0.0, 0.0]);
+        assert_rel(&format!("FD RTH0 {rth0} rise"), temp, rise, 1.0e-9);
+        assert_rel(&format!("FD RTH0 {rth0} i(vd)"), id, current, 1.0e-9);
+    }
+}
+
 /// A complementary pair of cards, `(n1, p1)`: the corpus N1 card with
 /// `nsub` replaced so that NSUB = NCH, which zeroes the type-signed back-gate
 /// flatband `vfbb`, and its twin with the type flipped and `vth0` replaced
