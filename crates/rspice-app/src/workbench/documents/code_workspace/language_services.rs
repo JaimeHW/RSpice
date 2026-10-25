@@ -164,7 +164,6 @@ pub(crate) struct CodeLanguageToolsState {
     pub query: String,
     pub replacement: String,
     pub view: LanguageToolView,
-    pub confirm_rename: bool,
     pub error: Option<String>,
 }
 
@@ -225,7 +224,6 @@ pub(crate) fn open_language_tools_in_bundle(
         query,
         replacement: String::new(),
         view: LanguageToolView::DocumentSymbols,
-        confirm_rename: false,
         error: None,
     });
     Ok(())
@@ -290,7 +288,6 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         query: state.replacement,
         replacement: String::new(),
         view: LanguageToolView::References,
-        confirm_rename: false,
         error: None,
     });
     app.state.prompt(message.clone());
@@ -419,7 +416,6 @@ fn replace_one_language_document(
         LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
     if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
         tools.index = index;
-        tools.confirm_rename = false;
         tools.error = None;
     }
     Ok(())
@@ -1732,7 +1728,6 @@ mod tests {
             query: "protected_name".to_owned(),
             replacement: "renamed".to_owned(),
             view: LanguageToolView::References,
-            confirm_rename: true,
             error: None,
         });
 

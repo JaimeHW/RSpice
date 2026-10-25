@@ -25,20 +25,12 @@ pub struct PdkSettingsDialogState {
     pub adding_path: bool,
     /// Whether the inline new-variable input row is showing
     pub adding_env: bool,
-    /// Whether a scan is in progress
-    pub scanning: bool,
     /// Filter text for discovered files
     pub file_filter: String,
     /// Index of path being edited (if any)
     pub editing_path_index: Option<usize>,
     /// Temporary edit buffer for path
     pub edit_path_buffer: String,
-    /// Index of env var being edited (if any)
-    pub editing_env_index: Option<usize>,
-    /// Temporary edit buffer for env var name
-    pub edit_env_name_buffer: String,
-    /// Temporary edit buffer for env var value
-    pub edit_env_value_buffer: String,
 }
 
 impl PdkSettingsDialogState {
@@ -123,9 +115,7 @@ impl PdkSettingsDialogState {
 
     /// Trigger a rescan of library paths
     pub fn rescan(&mut self) {
-        self.scanning = true;
         crate::state::pdk_config::discover_model_files(&mut self.config);
-        self.scanning = false;
     }
 
     /// Add a new library path
@@ -208,9 +198,6 @@ impl PdkSettingsDialogState {
         self.adding_env = false;
         self.editing_path_index = None;
         self.edit_path_buffer.clear();
-        self.editing_env_index = None;
-        self.edit_env_name_buffer.clear();
-        self.edit_env_value_buffer.clear();
     }
 }
 

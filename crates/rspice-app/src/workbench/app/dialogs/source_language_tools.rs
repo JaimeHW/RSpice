@@ -343,7 +343,6 @@ impl RSpiceApp {
             ToolAction::Query(query) => {
                 if let Some(tools) = self.state.code.code_workspace.language_tools.as_mut() {
                     tools.query = query;
-                    tools.confirm_rename = false;
                     tools.error = None;
                 }
                 return;
@@ -351,7 +350,6 @@ impl RSpiceApp {
             ToolAction::Replacement(replacement) => {
                 if let Some(tools) = self.state.code.code_workspace.language_tools.as_mut() {
                     tools.replacement = replacement;
-                    tools.confirm_rename = false;
                     tools.error = None;
                 }
                 return;

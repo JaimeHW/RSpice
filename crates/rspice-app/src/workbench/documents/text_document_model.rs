@@ -18,15 +18,6 @@ pub(crate) enum TextEncoding {
     Utf8Bom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LineEnding {
-    None,
-    Lf,
-    CrLf,
-    Cr,
-    Mixed,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SourceTextError {
     #[error("source is not valid UTF-8 (first invalid byte at offset {valid_up_to})")]
@@ -96,7 +87,6 @@ pub(crate) struct TextDocumentModel {
     text: Rope,
     #[cfg(test)]
     encoding: TextEncoding,
-    original_line_ending: LineEnding,
     preferred_newline: &'static str,
     selections: Vec<TextSelection>,
     folds: Vec<FoldRegion>,
@@ -119,13 +109,11 @@ impl TextDocumentModel {
                 valid_up_to: error.valid_up_to()
                     + usize::from(encoding == TextEncoding::Utf8Bom) * 3,
             })?;
-        let (original_line_ending, preferred_newline) = detect_line_endings(source);
         Ok(Self {
             text: Rope::from_str(source),
             #[cfg(test)]
             encoding,
-            original_line_ending,
-            preferred_newline,
+            preferred_newline: detect_preferred_newline(source),
             selections: vec![TextSelection::caret(0)],
             folds: Vec::new(),
             fold_projection: Vec::new(),
@@ -143,11 +131,6 @@ impl TextDocumentModel {
     #[cfg(test)]
     pub const fn encoding(&self) -> TextEncoding {
         self.encoding
-    }
-
-    #[cfg(test)]
-    pub const fn original_line_ending(&self) -> LineEnding {
-        self.original_line_ending
     }
 
     pub const fn preferred_newline(&self) -> &'static str {
@@ -241,9 +224,7 @@ impl TextDocumentModel {
             return false;
         }
         self.text = Rope::from_str(source);
-        let (line_ending, preferred_newline) = detect_line_endings(source);
-        self.original_line_ending = line_ending;
-        self.preferred_newline = preferred_newline;
+        self.preferred_newline = detect_preferred_newline(source);
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
         self.undo.clear();
@@ -393,9 +374,7 @@ impl TextDocumentModel {
         let before = self.text.clone();
         let before_selections = self.selections.clone();
         self.text = Rope::from_str(source);
-        let (line_ending, preferred_newline) = detect_line_endings(source);
-        self.original_line_ending = line_ending;
-        self.preferred_newline = preferred_newline;
+        self.preferred_newline = detect_preferred_newline(source);
         self.selections = normalize_selections(selections, self.text.len_chars());
         self.commit_history(before, before_selections);
         true
@@ -768,7 +747,9 @@ fn normalize_selections(selections: Vec<TextSelection>, maximum: usize) -> Vec<T
         .collect()
 }
 
-fn detect_line_endings(source: &str) -> (LineEnding, &'static str) {
+/// The line break an edit inserts: the source's most common one, preferring
+/// CRLF then LF on a tie, and LF when the source has none.
+fn detect_preferred_newline(source: &str) -> &'static str {
     let bytes = source.as_bytes();
     let mut lf = 0_usize;
     let mut crlf = 0_usize;
@@ -791,22 +772,13 @@ fn detect_line_endings(source: &str) -> (LineEnding, &'static str) {
             _ => index += 1,
         }
     }
-    let styles = usize::from(lf > 0) + usize::from(crlf > 0) + usize::from(cr > 0);
-    let kind = match (styles, lf > 0, crlf > 0, cr > 0) {
-        (0, _, _, _) => LineEnding::None,
-        (1, true, _, _) => LineEnding::Lf,
-        (1, _, true, _) => LineEnding::CrLf,
-        (1, _, _, true) => LineEnding::Cr,
-        _ => LineEnding::Mixed,
-    };
-    let preferred = if crlf >= lf && crlf >= cr && crlf > 0 {
+    if crlf >= lf && crlf >= cr && crlf > 0 {
         "\r\n"
     } else if cr > lf && cr > 0 {
         "\r"
     } else {
         "\n"
-    };
-    (kind, preferred)
+    }
 }
 
 fn trailing_line_break_chars(slice: ropey::RopeSlice<'_>) -> usize {
@@ -833,7 +805,6 @@ mod tests {
         let bytes = b"\xEF\xBB\xBFone\r\ntwo\nthree\r";
         let model = TextDocumentModel::from_bytes(bytes).unwrap();
         assert_eq!(model.encoding(), TextEncoding::Utf8Bom);
-        assert_eq!(model.original_line_ending(), LineEnding::Mixed);
         assert_eq!(model.preferred_newline(), "\r\n");
         assert_eq!(model.encoded_bytes(), bytes);
     }

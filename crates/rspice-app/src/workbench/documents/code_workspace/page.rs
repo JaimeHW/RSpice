@@ -363,9 +363,6 @@ pub struct PendingAutomationRuntimeExecution {
     pub run_handle: Option<uuid::Uuid>,
     pub simulation_run_id: Option<crate::product::RunId>,
     pub pending_execute_call_id: Option<u64>,
-    pub requirements_evaluated: bool,
-    pub comparison_completed: bool,
-    pub artifacts_exported: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

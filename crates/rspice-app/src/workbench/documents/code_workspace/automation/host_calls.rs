@@ -307,7 +307,6 @@ pub(super) fn handle_runtime_host_call(
                     "Requirement results are unavailable until this workflow's simulation completes.",
                 ));
             } else {
-                pending.requirements_evaluated = true;
                 response = Some(host_success(
                     None,
                     if pending.mode.is_dry_run() {
@@ -342,7 +341,6 @@ pub(super) fn handle_runtime_host_call(
                     "Comparison results are unavailable until this workflow's simulation completes.",
                 ));
             } else {
-                pending.comparison_completed = true;
                 response = Some(host_success(
                     None,
                     if pending.mode.is_dry_run() {
@@ -403,7 +401,6 @@ pub(super) fn handle_runtime_host_call(
                     "The completed run did not produce every requested governed artifact.",
                 ));
             } else {
-                pending.artifacts_exported = true;
                 response = Some(host_success(
                     None,
                     if pending.mode.is_dry_run() {

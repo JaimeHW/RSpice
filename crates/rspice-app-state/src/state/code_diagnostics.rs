@@ -40,7 +40,6 @@ impl CodeDiagnosticSummary {
 #[derive(Debug, Clone, Default)]
 struct DocumentDiagnosticIndex {
     summary: CodeDiagnosticSummary,
-    record_indices: Vec<usize>,
     severity_by_line: HashMap<usize, CodeEditorSeverity>,
 }
 
@@ -115,7 +114,6 @@ impl CodeDiagnosticCollection {
 
     fn push_indexed(&mut self, mut record: CodeEditorDiagnostic) -> Result<(), String> {
         insert_diagnostic_id(&mut self.diagnostic_ids, record.canonical.diagnostic_id)?;
-        let index = self.records.len();
         self.summary.record(record.severity);
         let line = diagnostic_line(&record);
         if record.line.is_none() {
@@ -134,7 +132,6 @@ impl CodeDiagnosticCollection {
             None => &mut self.global,
         };
         target.summary.record(record.severity);
-        target.record_indices.push(index);
         if let Some(line) = line {
             target
                 .severity_by_line

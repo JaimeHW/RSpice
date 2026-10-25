@@ -825,9 +825,6 @@ fn begin_managed_python_execution(
                 run_handle: None,
                 simulation_run_id: None,
                 pending_execute_call_id: None,
-                requirements_evaluated: false,
-                comparison_completed: false,
-                artifacts_exported: false,
             });
             runtime.execution = AutomationExecutionState::PythonBroker {
                 token,
@@ -954,9 +951,6 @@ fn begin_managed_python_execution(
                 run_handle: None,
                 simulation_run_id: None,
                 pending_execute_call_id: None,
-                requirements_evaluated: false,
-                comparison_completed: false,
-                artifacts_exported: false,
             });
             runtime.execution = AutomationExecutionState::PythonBroker {
                 token,
