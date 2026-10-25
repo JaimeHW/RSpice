@@ -438,47 +438,6 @@ impl ModelLibraryManager {
             .map_or(0, |index| index.part_count())
     }
 
-    /// Search the shipped packs for definitions whose name contains `query`.
-    ///
-    /// Bounded by `limit` because the same API can inspect an explicitly opened
-    /// developer corpus. An empty query returns nothing rather than everything.
-    #[cfg(test)]
-    pub fn search_pack_models(&self, query: &str, limit: usize) -> Vec<PackModelHit> {
-        let trimmed = query.trim();
-        if trimmed.is_empty() {
-            return Vec::new();
-        }
-        let Some(index) = self.spice_packs.as_ref() else {
-            return Vec::new();
-        };
-
-        let entries = match index.search_parts(trimmed, limit) {
-            Ok(entries) => entries,
-            Err(error) => {
-                log::warn!("shipped SPICE model catalog could not be searched: {error}");
-                return Vec::new();
-            }
-        };
-
-        entries
-            .into_iter()
-            .map(|entry| {
-                let pack = index.pack(&entry.pack);
-                PackModelHit {
-                    name: entry.name.clone(),
-                    kind: entry.kind.clone(),
-                    device: entry.device.clone(),
-                    pack_name: pack.map_or_else(|| entry.pack.clone(), |p| p.name.clone()),
-                    redistributable: pack.is_some_and(|p| p.redistributable),
-                    source: entry.source_path(index),
-                    line: entry.line,
-                    pack: entry.pack,
-                    restricted: entry.restricted,
-                }
-            })
-            .collect()
-    }
-
     /// Browse a bounded first page or a canonical device-class projection of
     /// the shipped corpus without loading every catalog row into memory.
     pub fn browse_pack_models(

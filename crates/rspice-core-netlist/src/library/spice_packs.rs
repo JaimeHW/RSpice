@@ -372,20 +372,6 @@ impl SpiceLibraryIndex {
             .collect())
     }
 
-    /// Every addressable definition whose name contains `needle`,
-    /// compared case-insensitively.
-    pub fn search_parts(&self, needle: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
-        let needle = needle.to_ascii_lowercase();
-        Ok(self
-            .addressable_catalog()?
-            .entries
-            .iter()
-            .filter(|entry| entry.entry.name.to_ascii_lowercase().contains(&needle))
-            .take(limit)
-            .map(|entry| entry.entry.clone())
-            .collect())
-    }
-
     /// Query the complete addressable part catalog with bounded paging.
     ///
     /// The catalog is streamed once. `needle` matches name, device class,

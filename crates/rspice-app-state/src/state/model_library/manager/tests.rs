@@ -2048,25 +2048,14 @@ fn pack_search_finds_definitions_the_libraries_do_not_hold() {
     // Nothing is loaded, so a plain library search finds nothing...
     assert!(fixture.manager.search_models("FIXJFET").is_empty());
     // ...but the packs carry it.
-    let hits = fixture.manager.search_pack_models("FIXJFET", 50);
+    let (_, hits) = fixture
+        .manager
+        .browse_pack_models("FIXJFET", None, &[], 0, 50)
+        .expect("fixture catalog reads");
     assert_eq!(hits.len(), 1);
     let hit = &hits[0];
     assert!(hit.source.as_ref().is_some_and(|p| p.is_file()));
     assert!(hit.line > 0);
-
-    fixture.discard();
-}
-
-#[test]
-fn pack_search_is_bounded_and_ignores_an_empty_query() {
-    let fixture = fixture_pack_manager("search-bounded");
-    // An empty query must not stream the whole index.
-    assert!(fixture.manager.search_pack_models("", 50).is_empty());
-    assert!(fixture.manager.search_pack_models("   ", 50).is_empty());
-
-    // A broad query is capped at the caller's limit.
-    let hits = fixture.manager.search_pack_models("FIXNMOS", 25);
-    assert_eq!(hits.len(), 25);
 
     fixture.discard();
 }
@@ -2110,7 +2099,10 @@ fn pack_hits_carry_their_redistribution_status() {
     let fixture = fixture_pack_manager("redistribution-status");
     // The same part name sits in both packs, so the flag has to come from the
     // owning pack rather than from the definition.
-    let hits = fixture.manager.search_pack_models("FIXDIODE", 20);
+    let (_, hits) = fixture
+        .manager
+        .browse_pack_models("FIXDIODE", None, &[], 0, 20)
+        .expect("fixture catalog reads");
     assert_eq!(hits.len(), 2);
     assert!(
         hits.iter()
@@ -2252,6 +2244,10 @@ fn missing_pack_tree_is_not_an_error() {
     // synced them. Both must degrade to an empty search, not a failure.
     let manager = ModelLibraryManager::new();
     assert_eq!(manager.pack_definition_count(), 0);
-    assert!(manager.search_pack_models("2N3904", 10).is_empty());
+    let (total, hits) = manager
+        .browse_pack_models("2N3904", None, &[], 0, 10)
+        .expect("a missing pack tree is not an error");
+    assert_eq!(total, 0);
+    assert!(hits.is_empty());
     assert!(manager.spice_packs().is_none());
 }
