@@ -763,11 +763,15 @@ def measure(source_root: Path, lower_crates: dict[str, Path] | None = None):
         for _ in range(12):
             length = next(length for length in range(len(path), -1, -1)
                           if path[:length] in module_file or length == 0)
-            target = reexports.get((path[:length], path[length])) if length < len(path) else None
+            # A `use` inside an inline module (`mod lifecycle { pub use ..; }`) is
+            # keyed by that module's path, which no file defines.
+            scope = next((inner for inner in range(len(path) - 1, length, -1)
+                          if (path[:inner], path[inner]) in reexports), length)
+            target = reexports.get((path[:scope], path[scope])) if scope < len(path) else None
             if target == "EXT" and not glob:
                 return None
-            if target not in (None, "EXT") and target != path[:length + 1]:
-                path = target + path[length + 1:]
+            if target not in (None, "EXT") and target != path[:scope + 1]:
+                path = target + path[scope + 1:]
                 continue
             break
         return module_file.get(path[:length])

@@ -168,6 +168,30 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(values["feature->feature"], {"simulate->results": 1})
         self.assertEqual(stats["files"], 3)
 
+    def test_a_use_inside_an_inline_module_re_exports_like_one_in_a_file(self) -> None:
+        values, _, _ = measure_tree({
+            "lib.rs": "mod analysis;\nmod workbench;\n",
+            "analysis.rs": "pub fn plan_label() {}\n",
+            "workbench.rs": (
+                "pub(crate) mod lifecycle {\n"
+                "    pub(crate) use rspice_app_services::workbench::lifecycle::recovery;\n"
+                "}\n"
+                "pub(crate) mod browser {\n"
+                "    pub(crate) use crate::analysis::plan_label;\n"
+                "}\n"
+                "mod tools;\n"
+            ),
+            "workbench/tools.rs": "mod notification_center;\n",
+            "workbench/tools/notification_center.rs": (
+                "pub fn show() {\n"
+                "    crate::workbench::lifecycle::recovery::discard();\n"
+                "    crate::workbench::browser::plan_label();\n"
+                "}\n"
+            ),
+        })
+        # The first path leaves the crate; the second ends in results, not the shell.
+        self.assertEqual(values["lower->upper"], {"framework->results": 1})
+
     def test_whole_app_methods_and_parameters_outside_their_home_are_counted(self) -> None:
         values, _, _ = measure_tree({
             "workbench/app.rs": "pub struct RSpiceApp;\nimpl RSpiceApp {\n    pub fn frame(&mut self) {}\n}\n",
