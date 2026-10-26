@@ -1,13 +1,13 @@
 //! Shortcut import, in the cases that bind the product's own commands.
 
+use crate::feature_tests::settings::shortcut_portability_dialogs::{
+    detected, exported_artifact, open_with_artifact,
+};
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ProtectedShortcutPolicy;
 use crate::state::shortcuts::ShortcutBindingSlot;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::tests::{
-    detected, exported_artifact, open_with_artifact,
-};
 use crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::shortcuts::artifacts::ShortcutConflictPolicy;

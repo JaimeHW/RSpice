@@ -908,7 +908,7 @@ impl AppState {
     }
 
     /// What the preferences file reads and writes, borrowed from this state.
-    pub(in crate::workbench) fn preferences_file_parts(
+    pub fn preferences_file_parts(
         &mut self,
     ) -> crate::workbench::app_state::session::preferences_file::PreferencesFileParts<'_> {
         crate::workbench::app_state::session::preferences_file::PreferencesFileParts {
@@ -935,7 +935,7 @@ impl AppState {
     /// Reset the shortcut resolver if the library in use changed, as the
     /// settings feature asked. The shell takes this straight after each of
     /// its calls that can put a library in use.
-    pub(in crate::workbench) fn take_shortcut_resolver_reset(&mut self) {
+    pub fn take_shortcut_resolver_reset(&mut self) {
         crate::workbench::framework::requests::drain(
             self,
             |state| &mut state.workbench.outbox,

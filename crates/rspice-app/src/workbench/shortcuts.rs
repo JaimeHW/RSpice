@@ -7,6 +7,4 @@
 
 pub(crate) mod artifacts;
 pub(crate) mod library_persistence;
-#[cfg(test)]
-mod profile_tests;
 pub(crate) mod profile_workflow;

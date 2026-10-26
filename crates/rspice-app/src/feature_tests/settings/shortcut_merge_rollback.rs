@@ -4,15 +4,25 @@
 //! refuses to erase a later edit, and a failed persistence leaves the applied
 //! state exactly as it was.
 
-use super::*;
+use crate::state::command_catalog::CommandKey;
+use crate::state::command_catalog::CommandPlatform;
+use crate::state::shortcuts::ShortcutBindingSlot;
+use crate::state::shortcuts::ShortcutPreferences;
+use crate::state::shortcuts::ShortcutProfileLibrary;
+use crate::state::shortcuts::ShortcutProfileLibraryError;
+use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::shortcuts::artifacts::merge::*;
+use crate::workbench::shortcuts::artifacts::schema::DecodedShortcutArtifact;
 use crate::workbench::shortcuts::artifacts::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     decode_shortcut_artifact_json, serialize_shortcut_reference_json,
 };
 use egui::Key;
 use egui::os::OperatingSystem;
+use serde_json::Value;
 
 pub(crate) fn artifact_from(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
     let model = build_shortcut_reference_model(

@@ -1,9 +1,10 @@
 //! Preferences drawn as the frame's dialog step draws it, in the case that
 //! reads another feature's state: a restore reaches the open waveform view.
 
+use crate::feature_tests::settings::preferences_dialogs;
+use crate::feature_tests::settings::preferences_windows::{preferences_route, test_app};
 use crate::workbench::RouteTransitionSource;
 use crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
-use crate::workbench::app::dialogs::preferences::tests::{preferences_route, test_app};
 use crate::workbench::app::dialogs::preferences::*;
 use egui::Context;
 

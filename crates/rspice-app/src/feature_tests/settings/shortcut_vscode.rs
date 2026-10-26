@@ -1,10 +1,10 @@
 //! VS Code keybindings adapted to the product's own commands.
 
-use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::shortcuts::artifacts::sha256;
-use crate::workbench::shortcuts::artifacts::vscode::tests::{
+use crate::feature_tests::settings::shortcut_vscode_import::{
     assert_every_entry_accounted_for, has_code, vscode,
 };
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::shortcuts::artifacts::sha256;
 use crate::workbench::shortcuts::artifacts::vscode::*;
 use egui::Key;
 

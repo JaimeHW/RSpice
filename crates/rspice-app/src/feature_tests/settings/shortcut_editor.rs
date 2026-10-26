@@ -1,6 +1,8 @@
 //! The keyboard shortcut editor, in the cases that bind the product's own
 //! commands.
 
+use crate::feature_tests::settings::preferences_dialogs;
+use crate::feature_tests::settings::shortcut_preferences::input;
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ProtectedShortcutPolicy;
 use crate::state::shortcuts::ShortcutBindingSlot;
@@ -9,9 +11,7 @@ use crate::state::shortcuts::ShortcutProfileIssueCode;
 use crate::state::shortcuts::ShortcutProfileIssueSeverity;
 use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
-use crate::workbench::app::dialogs::preferences::preferences_dialogs;
 use crate::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
-use crate::workbench::app::dialogs::preferences::shortcut_preferences::tests::input;
 use crate::workbench::app::dialogs::preferences::shortcut_preferences::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;

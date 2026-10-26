@@ -1420,6 +1420,3 @@ pub fn apply_shortcut_import(
         source_name: plan.source_name.clone(),
     })
 }
-
-#[cfg(test)]
-pub(crate) mod tests;

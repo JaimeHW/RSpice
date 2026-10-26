@@ -37,15 +37,12 @@ use crate::ui::Theme;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::{UserPreferences, WorkbenchSession};
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests;
-
-const FORMAT: &str = "rspice-preferences";
+pub const FORMAT: &str = "rspice-preferences";
 const VERSION: u64 = 1;
 const SETTINGS_FORMAT: &str = "rspice-settings";
 const SETTINGS_VERSION: u64 = 1;
 #[cfg(not(target_arch = "wasm32"))]
-const FILE_NAME: &str = "preferences.json";
+pub const FILE_NAME: &str = "preferences.json";
 #[cfg(target_arch = "wasm32")]
 const BROWSER_KEY: &str = "rspice.preferences.v1";
 const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
@@ -54,13 +51,12 @@ const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 pub(in crate::workbench) const MAX_SETTINGS_FILE_BYTES: usize = 8 * 1024 * 1024;
 
 /// What the settings-file picker offers and how its messages name the file.
-pub(in crate::workbench) const SETTINGS_FILE: crate::io::file_exchange::FileKind =
-    crate::io::file_exchange::FileKind {
-        label: "RSpice settings",
-        extensions: &["json"],
-        subject: "The settings file",
-        fallback_name: "rspice-settings.json",
-    };
+pub const SETTINGS_FILE: crate::io::file_exchange::FileKind = crate::io::file_exchange::FileKind {
+    label: "RSpice settings",
+    extensions: &["json"],
+    subject: "The settings file",
+    fallback_name: "rspice-settings.json",
+};
 
 /// How long a change has to settle before it is written. A dragged control
 /// changes its value every frame; the file is written once, after it stops.
@@ -70,11 +66,11 @@ const WRITE_DELAY: Duration = Duration::from_millis(500);
 /// which is how a change made by something other than the reader is seen.
 const IDLE_LOOK: Duration = Duration::from_secs(1);
 
-const THEME: &str = "theme";
-const AUTOSAVE: &str = "autosave-minutes";
+pub const THEME: &str = "theme";
+pub const AUTOSAVE: &str = "autosave-minutes";
 const SPOKEN_FEEDBACK: &str = "browser-spoken-feedback";
-const PREFERENCES: &str = "preferences";
-const SHORTCUTS: &str = "shortcuts";
+pub const PREFERENCES: &str = "preferences";
+pub const SHORTCUTS: &str = "shortcuts";
 
 /// What a preferences file holds, decoded.
 #[derive(Debug, Clone)]
@@ -311,7 +307,7 @@ fn read_setting<T>(
 /// assistive technology. Pointer movement alone cannot, and a canvas drag or a
 /// hover is nothing but that, frame after frame; the once-a-second look
 /// catches anything that changes a setting some other way.
-fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
+pub fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
     events.iter().any(|event| match event {
         egui::Event::Key { .. }
         | egui::Event::Text(_)
@@ -330,7 +326,7 @@ fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
 /// have changed one. The shortcut library rides inside the preferences but is
 /// not in the file, and its own store owns its durability, so it is swapped
 /// out for the duration rather than serialized every time.
-fn fingerprint(
+pub fn fingerprint(
     workbench: &WorkbenchSession,
     platform: &PlatformState,
     browser_spoken_feedback: bool,
@@ -363,7 +359,7 @@ fn fingerprint(
 
 /// Where the preferences file lives.
 #[derive(Debug, Clone)]
-pub(crate) enum PreferencesStore {
+pub enum PreferencesStore {
     #[cfg(not(target_arch = "wasm32"))]
     File(std::path::PathBuf),
     #[cfg(target_arch = "wasm32")]
@@ -500,16 +496,16 @@ pub(crate) struct PreferencesFileRuntime {
     /// failure is reported once rather than once per attempt.
     failing: bool,
     #[cfg(test)]
-    writes: usize,
+    pub writes: usize,
     /// How many times the settings were hashed.
     #[cfg(test)]
-    looks: usize,
+    pub looks: usize,
 }
 
 /// A settings file that passed every check, waiting for its shortcut library
 /// to be saved before its preferences go live.
 #[derive(Debug, Clone)]
-pub(crate) struct StagedSettingsImport {
+pub struct StagedSettingsImport {
     source_name: String,
     settings: PersonalSettings,
 }
@@ -518,7 +514,7 @@ pub(crate) struct StagedSettingsImport {
 /// the theme, the autosave interval, spoken feedback and the preferences, with
 /// the file's own bookkeeping. Its failures go to the model's log, and its
 /// answers to the gesture to the session's prompt.
-pub(crate) struct PreferencesFileParts<'a> {
+pub struct PreferencesFileParts<'a> {
     pub(crate) file: &'a mut PreferencesFileRuntime,
     pub(crate) browser_spoken_feedback: &'a mut bool,
     pub(crate) model: &'a mut Model,
@@ -532,7 +528,7 @@ impl PreferencesFileParts<'_> {
     ///
     /// With no file yet, what the session carried, or the shipped defaults
     /// when it carried nothing, is written as the first one.
-    pub(in crate::workbench) fn bind_preferences_file(&mut self, store: PreferencesStore) {
+    pub fn bind_preferences_file(&mut self, store: PreferencesStore) {
         let read = store.read();
         self.file.store = Some(store.clone());
         match read {
@@ -638,7 +634,11 @@ impl PreferencesFileParts<'_> {
 
     /// [`Self::persist_preferences_file`] at `now`. Returns how long until a
     /// pending write is due.
-    fn persist_preferences_file_at(&mut self, now: Instant, had_input: bool) -> Option<Duration> {
+    pub fn persist_preferences_file_at(
+        &mut self,
+        now: Instant,
+        had_input: bool,
+    ) -> Option<Duration> {
         let runtime = &mut *self.file;
         if runtime.store.is_none() || runtime.write_withheld {
             return None;
@@ -675,7 +675,7 @@ impl PreferencesFileParts<'_> {
     }
 
     /// Write any change not yet in the file now, rather than when it settles.
-    pub(in crate::workbench) fn flush_preferences_file(&mut self) {
+    pub fn flush_preferences_file(&mut self) {
         self.file.write_due = None;
         self.file.observed = fingerprint(
             self.workbench,
@@ -732,7 +732,7 @@ impl PreferencesFileParts<'_> {
 
     /// The settings file Export… writes: the preferences file's contents and
     /// the shortcut library in use, together.
-    pub(in crate::workbench) fn settings_file_bytes(&self) -> Result<Vec<u8>, String> {
+    pub fn settings_file_bytes(&self) -> Result<Vec<u8>, String> {
         let preferences = encode(
             &Values::of(
                 self.workbench,
@@ -755,7 +755,7 @@ impl PreferencesFileParts<'_> {
 
     /// Put an imported settings file in force once its shortcut library has
     /// been saved, or say why nothing changed.
-    pub(in crate::workbench) fn finish_settings_import(
+    pub fn finish_settings_import(
         &mut self,
         staged: StagedSettingsImport,
         shortcuts_saved: Result<(), String>,
@@ -783,7 +783,7 @@ impl PreferencesFileParts<'_> {
     }
 
     /// Open the folder that holds the preferences file.
-    pub(in crate::workbench) fn show_preferences_file(&mut self) {
+    pub fn show_preferences_file(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let folder = match self.file.store.as_ref() {
@@ -809,7 +809,7 @@ impl PreferencesFileParts<'_> {
 ///
 /// Returns the shortcut library to save, which has to be in the store
 /// before anything goes live, and the preferences that follow it.
-pub(in crate::workbench) fn stage_settings_import(
+pub fn stage_settings_import(
     model: &Model,
     source_name: &str,
     bytes: &[u8],
@@ -874,7 +874,7 @@ fn show_folder(_folder: &std::path::Path) -> Result<(), String> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 thread_local! {
     /// The folders a test build was asked to show, in place of a file manager.
-    static SHOWN_FOLDERS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+    pub static SHOWN_FOLDERS: std::cell::RefCell<Vec<std::path::PathBuf>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 

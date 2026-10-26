@@ -1,6 +1,10 @@
 //! Merging an imported shortcut artifact into the library, in the cases that
 //! bind the product's own commands.
 
+use crate::feature_tests::settings::shortcut_merge_rollback::{
+    artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, set_key,
+    with_command_extra,
+};
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ProtectedShortcutPolicy;
 use crate::state::shortcuts::ShortcutBindingSlot;
@@ -11,10 +15,6 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::shortcuts::artifacts::merge::tests::{
-    artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, set_key,
-    with_command_extra,
-};
 use crate::workbench::shortcuts::artifacts::merge::*;
 use egui::Key;
 use egui::os::OperatingSystem;

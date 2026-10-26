@@ -2,12 +2,12 @@
 //! or another feature's state: restoring Shortcuts saves the shipped profile
 //! before it goes live, and the waveform defaults reach the viewer.
 
+use crate::feature_tests::settings::preferences_dialogs;
 use crate::workbench::ChoicePreference;
 use crate::workbench::RSpiceApp;
 use crate::workbench::TogglePreference;
 use crate::workbench::app::dialogs::preferences::PreferencePageActions;
 use crate::workbench::app::dialogs::preferences::preference_pages::*;
-use crate::workbench::app::dialogs::preferences::preferences_dialogs;
 use crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
 
 /// Shortcuts restore to the shipped bindings and policies, and only by

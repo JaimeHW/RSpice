@@ -19,7 +19,7 @@ impl AppState {
         Self::restore_with_store(storage, PreferencesStore::production())
     }
 
-    pub(in crate::workbench) fn restore_with_store(
+    pub fn restore_with_store(
         storage: Option<&dyn eframe::Storage>,
         store: Option<PreferencesStore>,
     ) -> Self {

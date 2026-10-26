@@ -174,7 +174,7 @@ pub(crate) enum PreferenceCategory {
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 10] = [
+    pub const ALL: [Self; 10] = [
         Self::Appearance,
         Self::Accessibility,
         Self::Workspace,
@@ -187,7 +187,7 @@ impl PreferenceCategory {
         Self::Results,
     ];
 
-    pub(super) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
             Self::Accessibility => "Accessibility",
@@ -232,7 +232,7 @@ impl PreferenceCategory {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct PreferencesShellResponse {
+pub struct PreferencesShellResponse {
     pub(super) close_requested: bool,
     /// The footer's page-scoped reset. The shell owns the control because the
     /// footer is shell geometry; the page owns which settings it covers.
@@ -326,7 +326,7 @@ impl Drop for LargeControlTargetOverride {
 ///
 /// `touch_target` is the minimum target from Accessibility, which the shell
 /// raises its controls to on narrow and coarse layouts.
-pub(super) fn show(
+pub fn show(
     ctx: &Context,
     category: &mut PreferenceCategory,
     allow_escape_close: bool,
@@ -728,7 +728,7 @@ fn render_search_field(ui: &mut Ui, width: f32) {
 /// Put a query in the field without typing it, so a review render and the
 /// tests can show the filtered dialog as a reader would meet it.
 #[cfg(test)]
-pub(super) fn set_filter_for_review(ctx: &Context, query: &str) {
+pub fn set_filter_for_review(ctx: &Context, query: &str) {
     write_filter(
         ctx,
         SettingFilter {
