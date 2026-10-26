@@ -34,19 +34,19 @@ use crate::workbench::chrome::title_bar;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::state::{NotificationFilter, WorkbenchSession};
 
-pub(crate) const PANEL_WIDTH: f32 = 420.0;
-pub(crate) const PANEL_MAX_HEIGHT: f32 = 560.0;
+pub const PANEL_WIDTH: f32 = 420.0;
+pub const PANEL_MAX_HEIGHT: f32 = 560.0;
 const PANEL_RADIUS: u8 = 8;
 /// Clearance kept between the panel and every screen edge.
-pub(crate) const SCREEN_MARGIN: f32 = 8.0;
+pub const SCREEN_MARGIN: f32 = 8.0;
 /// Clearance under the panel on a desktop, so it never reads as docked to the
 /// status bar it stops short of.
 const DESKTOP_BOTTOM_CLEARANCE: f32 = 24.0;
 /// Bell's lower edge to the panel's upper edge. The caret lives in this gap.
-pub(crate) const ANCHOR_GAP: f32 = 8.0;
+pub const ANCHOR_GAP: f32 = 8.0;
 /// How far the panel's trailing edge runs past the bell's, so the caret lands
 /// under the bell rather than on the panel's corner.
-pub(crate) const ANCHOR_OVERHANG: f32 = 6.0;
+pub const ANCHOR_OVERHANG: f32 = 6.0;
 const CARET_HALF_WIDTH: f32 = 6.0;
 const CARET_HEIGHT: f32 = 6.0;
 const PHONE_BREAKPOINT: f32 = 560.0;
@@ -82,8 +82,8 @@ const ROW_LINE_HEIGHT: f32 = 20.0;
 const ROW_LINE_GAP: f32 = 8.0;
 const ROW_TEXT_GAP: f32 = 2.0;
 const ROW_UNREAD_RAIL: f32 = 2.0;
-pub(crate) const MESSAGE_LINE_HEIGHT: f32 = 16.0;
-pub(crate) const MESSAGE_MAX_ROWS: usize = 2;
+pub const MESSAGE_LINE_HEIGHT: f32 = 16.0;
+pub const MESSAGE_MAX_ROWS: usize = 2;
 const OFFER_GAP: f32 = 3.0;
 
 const EMPTY_PADDING_TOP: f32 = 40.0;
@@ -101,14 +101,14 @@ const AGE_REFRESH: Duration = Duration::from_secs(20);
 
 /// Whether the notification surfaces raise their controls to touch size. The
 /// rule the title bar applies to the bell they hang from.
-pub(crate) fn large_targets(ctx: &egui::Context, workbench: &WorkbenchSession) -> bool {
+pub fn large_targets(ctx: &egui::Context, workbench: &WorkbenchSession) -> bool {
     ctx.content_rect().width() <= LARGE_TARGET_MAX_WIDTH || workbench.coarse_pointer
 }
 
 /// What the reader asked for during one pass. Collected while the records are
 /// borrowed for drawing and applied once they are not.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Intent {
+pub enum Intent {
     MarkRead(u64),
     Dismiss(u64),
     Follow(u64, NotificationAction),
@@ -128,7 +128,7 @@ struct PanelView {
 /// The window with the keyboard, or the main window when none of the
 /// application's windows has it. Toasts are drawn there, and so is a panel
 /// that no bell opened.
-pub(crate) fn focused_window(ctx: &egui::Context) -> ViewportId {
+pub fn focused_window(ctx: &egui::Context) -> ViewportId {
     ctx.input(|input| {
         input
             .raw
@@ -159,14 +159,11 @@ fn owner(ctx: &egui::Context) -> ViewportId {
 
 /// Whether the panel is on screen in the window this pass draws. It is
 /// drawn in one window only, whichever bell it hangs from.
-pub(in crate::workbench) fn showing_here(
-    ctx: &egui::Context,
-    workbench: &WorkbenchSession,
-) -> bool {
+pub fn showing_here(ctx: &egui::Context, workbench: &WorkbenchSession) -> bool {
     workbench.notification_center_showing() && owner(ctx) == ctx.viewport_id()
 }
 
-pub(crate) fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost, chrome_bottom: f32) {
+pub fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost, chrome_bottom: f32) {
     // Which window drew the panel on the last pass that drew it.
     let drawn_in_id = panel_id().with("drawn-in");
     let enter_id = panel_id().with("enter");
@@ -313,17 +310,17 @@ fn segment_id(index: usize) -> Id {
 
 /// Where the panel goes, resolved from the screen and the bell alone.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PanelPlacement {
-    pub(crate) min: Pos2,
-    pub(crate) width: f32,
-    pub(crate) max_height: f32,
+pub struct PanelPlacement {
+    pub min: Pos2,
+    pub width: f32,
+    pub max_height: f32,
     /// Where the caret points, when there is a bell for it to point at and
     /// the panel's straight upper edge reaches under it.
-    pub(crate) caret_x: Option<f32>,
+    pub caret_x: Option<f32>,
 }
 
 impl PanelPlacement {
-    pub(crate) fn resolve(screen: Rect, anchor: Option<Rect>, chrome_bottom: f32) -> Self {
+    pub fn resolve(screen: Rect, anchor: Option<Rect>, chrome_bottom: f32) -> Self {
         let phone = screen.width() <= PHONE_BREAKPOINT;
         let room = (screen.width() - SCREEN_MARGIN * 2.0).max(0.0);
         let width = if phone { room } else { PANEL_WIDTH.min(room) };
@@ -809,10 +806,7 @@ fn unread_only_switch(ui: &Ui, band: Rect, view: &mut PanelView, room: f32, hit_
     theme::paint_focus_ring(ui, &response, ring);
 }
 
-pub(crate) const fn filter_includes(
-    filter: NotificationFilter,
-    category: NotificationCategory,
-) -> bool {
+pub const fn filter_includes(filter: NotificationFilter, category: NotificationCategory) -> bool {
     matches!(filter, NotificationFilter::All)
         || matches!(
             (filter, category),
@@ -821,7 +815,7 @@ pub(crate) const fn filter_includes(
         )
 }
 
-pub(crate) fn is_recent(now: f64, created: f64) -> bool {
+pub fn is_recent(now: f64, created: f64) -> bool {
     now - created < RECENT_WINDOW
 }
 
@@ -934,7 +928,7 @@ fn group_heading(ui: &mut Ui, label: &str, pinned: Option<Rect>) {
 /// with and on the reader's wall clock. Read once per pass so every row
 /// agrees.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Clock {
+pub struct Clock {
     pub(crate) now: f64,
     /// Unix time at `now`; zero when the platform cannot say.
     pub(crate) wall: Duration,
@@ -964,7 +958,7 @@ impl Clock {
 thread_local! {
     /// The zone the panel reads wall times in under test; see
     /// [`local_date_time`].
-    pub(crate) static PINNED_ZONE: std::cell::Cell<Option<time::UtcOffset>> =
+    pub static PINNED_ZONE: std::cell::Cell<Option<time::UtcOffset>> =
         const { std::cell::Cell::new(None) };
 }
 
@@ -988,7 +982,7 @@ const CLOCK_AGE: f64 = 3_600.0;
 /// hour a count stops answering "when?" ("3 hr" late in a long session is a
 /// sum left to the reader), so the row gives the time on the reader's clock,
 /// as the Console's time column does, and the hover adds the date.
-pub(crate) fn age_label(clock: Clock, created: f64) -> String {
+pub fn age_label(clock: Clock, created: f64) -> String {
     let age = (clock.now - created).max(0.0);
     if age < 60.0 {
         "now".to_owned()
@@ -1003,7 +997,7 @@ pub(crate) fn age_label(clock: Clock, created: f64) -> String {
 }
 
 /// The date and time a time-of-day age stands for, for the row's hover.
-pub(crate) fn age_stamp(clock: Clock, created: f64) -> Option<String> {
+pub fn age_stamp(clock: Clock, created: f64) -> Option<String> {
     if clock.now - created < CLOCK_AGE {
         return None;
     }
@@ -1264,7 +1258,7 @@ fn notice_row(
 
 /// What an empty list says depends on why it is empty: nothing has happened,
 /// or something has and the view is hiding it.
-pub(crate) fn empty_copy(no_records: bool, unread_only: bool) -> (&'static str, &'static str) {
+pub fn empty_copy(no_records: bool, unread_only: bool) -> (&'static str, &'static str) {
     if no_records {
         (
             "No notifications yet",
@@ -1341,7 +1335,7 @@ fn empty_state(ui: &mut Ui, no_records: bool, unread_only: bool) -> Response {
 /// tab is out of sight. It sits with the notices because it is about where
 /// they reach the reader; Preferences' Task attention still decides which
 /// outcomes are worth it.
-pub(crate) fn background_alerts_band(
+pub fn background_alerts_band(
     ui: &mut Ui,
     alerts: BackgroundAlerts,
     large: bool,

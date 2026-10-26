@@ -17,7 +17,7 @@ use super::diagnostic_store::DiagnosticLevel;
 
 /// One column of the grid: what it says, and what ordering by it means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProblemColumn {
+pub enum ProblemColumn {
     Severity,
     Code,
     Subject,
@@ -28,7 +28,7 @@ pub(crate) enum ProblemColumn {
 
 impl ProblemColumn {
     /// The columns in the order the grid prints them.
-    pub(crate) const ALL: [Self; 6] = [
+    pub const ALL: [Self; 6] = [
         Self::Severity,
         Self::Code,
         Self::Subject,
@@ -37,7 +37,7 @@ impl ProblemColumn {
         Self::Message,
     ];
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Severity => "Severity",
             Self::Code => "Rule",
@@ -51,7 +51,7 @@ impl ProblemColumn {
 
 /// What the rows are grouped by, where they are grouped at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ProblemGrouping {
+pub enum ProblemGrouping {
     #[default]
     None,
     Producer,
@@ -83,7 +83,7 @@ impl ProblemGrouping {
 /// want the four errors above it, and a severity ladder as a slider cannot
 /// express that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SeverityFilter {
+pub struct SeverityFilter {
     listed: [bool; DiagnosticLevel::ALL.len()],
 }
 
@@ -100,7 +100,7 @@ impl SeverityFilter {
         self.listed[level.rung()]
     }
 
-    pub(crate) fn toggle(&mut self, level: DiagnosticLevel) {
+    pub fn toggle(&mut self, level: DiagnosticLevel) {
         let rung = level.rung();
         self.listed[rung] = !self.listed[rung];
     }
@@ -112,25 +112,25 @@ impl SeverityFilter {
 /// aggregate is built by name outside the shell; its fields and vocabulary are
 /// the shell's own, and nothing below it reads them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProblemsView {
+pub struct ProblemsView {
     /// The column the rows are ordered by. There is always one: the order
     /// producers happened to report in says nothing a reader can use, and a
     /// page that opened on it listed a warning above the critical finding
     /// under it.
-    pub(crate) sort: ProblemColumn,
+    pub sort: ProblemColumn,
     /// Whether the order is reversed. Severity read forward is worst first.
-    pub(crate) descending: bool,
-    pub(crate) severities: SeverityFilter,
+    pub descending: bool,
+    pub severities: SeverityFilter,
     /// The producer the grid is narrowed to, by its exact identity. A partial
     /// identity is one a reader cannot check, so this is never a prefix.
-    pub(crate) producer: Option<String>,
+    pub producer: Option<String>,
     /// Text matched against the rule code, the subject and the message.
-    pub(crate) text: String,
+    pub text: String,
     /// Whether findings a waiver covers are listed. On by default: a waiver is
     /// a decision somebody recorded, and a page that hides those decisions by
     /// default is a page that cannot be audited.
-    pub(crate) waived: bool,
-    pub(crate) grouping: ProblemGrouping,
+    pub waived: bool,
+    pub grouping: ProblemGrouping,
     /// The groups the reader has collapsed, by the value they group on.
     pub(crate) collapsed: BTreeSet<String>,
     /// The group header the keyboard stands on, by the value it groups on.
@@ -139,12 +139,12 @@ pub(crate) struct ProblemsView {
     /// shared with the canvas tour, and a header is not a finding. Standing on
     /// a header is how a collapsed group is reached and opened again from the
     /// keyboard.
-    pub(crate) current_group: Option<String>,
+    pub current_group: Option<String>,
     /// Whether the detail region states the rule's own words.
-    pub(crate) explain: bool,
+    pub explain: bool,
     /// The waiver being written, where the reader asked to waive a finding
     /// and has not yet recorded or abandoned it.
-    pub(crate) waiving: Option<WaiverDraft>,
+    pub waiving: Option<WaiverDraft>,
 }
 
 /// A waiver being written in the detail region: the finding it is for and
@@ -153,8 +153,8 @@ pub(crate) struct ProblemsView {
 /// It belongs to one finding. Standing on another lets it go, so a reason
 /// typed for one finding is never recorded against the next.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WaiverDraft {
-    pub(crate) finding: uuid::Uuid,
+pub struct WaiverDraft {
+    pub finding: uuid::Uuid,
     pub(in crate::workbench) reason: String,
     /// Whether the reason field has yet to take the keyboard: true on the
     /// frame the draft opens, so the reader types straight into it.
@@ -203,7 +203,7 @@ impl ProblemsView {
     /// Clicking the sorted column again is how every table in this product
     /// reverses, and the first click on a new column must not inherit the
     /// previous column's direction.
-    pub(crate) fn order_by(&mut self, column: ProblemColumn) {
+    pub fn order_by(&mut self, column: ProblemColumn) {
         if self.sort == column {
             self.descending = !self.descending;
         } else {
@@ -222,7 +222,7 @@ impl ProblemsView {
     ///
     /// Destructured, so a filter added to the position has to be cleared here
     /// or said not to be one.
-    pub(in crate::workbench) fn clear_filters(&mut self) {
+    pub fn clear_filters(&mut self) {
         let Self {
             sort: _,
             descending: _,
@@ -243,7 +243,7 @@ impl ProblemsView {
     }
 
     /// Whether anything is narrowing the list.
-    pub(crate) fn is_filtered(&self) -> bool {
+    pub fn is_filtered(&self) -> bool {
         !self.text.is_empty()
             || self.producer.is_some()
             || !self.waived
@@ -299,7 +299,7 @@ impl ProblemsView {
             && *collapsed == other.collapsed
     }
 
-    pub(crate) fn collapse(&mut self, group: &str, collapsed: bool) {
+    pub fn collapse(&mut self, group: &str, collapsed: bool) {
         if collapsed {
             self.collapsed.insert(group.to_owned());
         } else {
@@ -307,7 +307,7 @@ impl ProblemsView {
         }
     }
 
-    pub(crate) fn is_collapsed(&self, group: &str) -> bool {
+    pub fn is_collapsed(&self, group: &str) -> bool {
         self.collapsed.contains(group)
     }
 }

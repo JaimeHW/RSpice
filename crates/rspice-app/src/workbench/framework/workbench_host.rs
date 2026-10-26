@@ -22,7 +22,7 @@ use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 ///
 /// The menus a host hands over are the title bar's own types, which sit above
 /// this trait, so the title bar names them where it draws them.
-pub(crate) trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
+pub trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
     /// The session a container is handed whole, for the pages that draw from
     /// it and change it in the same pass: the console's host, the documents'
     /// host and the project lifecycle's source.
@@ -86,7 +86,7 @@ pub(crate) trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSp
 /// The session the console's pages draw from: the model and the workbench
 /// session, the Problems page's own view, and the shell's answers for a log
 /// line's anchor and a finding's waiver.
-pub(crate) trait ConsoleHost: ProblemsHost + ListingSource {
+pub trait ConsoleHost: ProblemsHost + ListingSource {
     /// The engineering model the log and the findings belong to.
     fn model(&self) -> &Model;
 

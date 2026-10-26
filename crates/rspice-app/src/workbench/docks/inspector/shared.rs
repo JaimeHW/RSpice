@@ -19,10 +19,7 @@ use crate::workbench::app_state::Model;
 /// panel inset, like the rows above it.
 const ACTION_ROW_GAP: f32 = 6.0;
 
-pub(in crate::workbench::docks::inspector) fn action_stack(
-    ui: &mut Ui,
-    body: impl FnOnce(&mut Ui),
-) {
+pub fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     let inset = panel_inset(ui);
     let width = (ui.available_width() - 2.0 * inset).max(1.0);
     section_block_gap(ui);
@@ -42,14 +39,14 @@ pub(in crate::workbench::docks::inspector) fn action_stack(
 }
 
 /// `count` things, as a row's value states them: "1 finding", "3 findings".
-pub(in crate::workbench::docks::inspector) fn count_label(count: usize, noun: &str) -> String {
+pub fn count_label(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
 /// The findings a check of the drawing as it stands reported for whatever
 /// `targets` picks out. A check run against an earlier drawing reports none:
 /// its findings may name objects that have since moved or gone.
-pub(in crate::workbench::docks::inspector) fn current_findings(
+pub fn current_findings(
     model: &Model,
     targets: impl Fn(&DrcViolation) -> bool,
 ) -> Vec<&DrcViolation> {
@@ -87,9 +84,7 @@ fn in_this_drawing(violation: &DrcViolation) -> bool {
 /// placed cell is stated once per occurrence, so counting those would make a
 /// clean sheet that places one cell eight times report eight times that
 /// cell's open pins as its own.
-pub(in crate::workbench::docks::inspector) fn sheet_open_pin_findings(
-    model: &Model,
-) -> Vec<&DrcViolation> {
+pub fn sheet_open_pin_findings(model: &Model) -> Vec<&DrcViolation> {
     current_findings(model, |violation| {
         in_this_drawing(violation)
             && matches!(
@@ -103,9 +98,7 @@ pub(in crate::workbench::docks::inspector) fn sheet_open_pin_findings(
 
 /// The floating nodes the sheet's row counts: this drawing's own, for the
 /// reason [`sheet_open_pin_findings`] gives.
-pub(in crate::workbench::docks::inspector) fn sheet_floating_net_findings(
-    model: &Model,
-) -> Vec<&DrcViolation> {
+pub fn sheet_floating_net_findings(model: &Model) -> Vec<&DrcViolation> {
     current_findings(model, |violation| {
         in_this_drawing(violation)
             && violation.violation_type == rspice_design::drc::DrcViolationType::FloatingNode
@@ -116,9 +109,7 @@ pub(in crate::workbench::docks::inspector) fn sheet_floating_net_findings(
 /// an error that counts, else a warning. A waived error is still listed, but
 /// it no longer counts against the design — the Checks header and the run
 /// gate do not count it — so it is not a failure here either.
-pub(in crate::workbench::docks::inspector) fn findings_problem(
-    findings: &[&DrcViolation],
-) -> Problem {
+pub fn findings_problem(findings: &[&DrcViolation]) -> Problem {
     if findings
         .iter()
         .any(|finding| finding.counts() && finding.severity >= DrcSeverity::Error)
@@ -130,7 +121,7 @@ pub(in crate::workbench::docks::inspector) fn findings_problem(
 }
 
 /// `true` when schematic checks were run against the drawing as it stands.
-pub(in crate::workbench::docks::inspector) fn checks_current(model: &Model) -> bool {
+pub fn checks_current(model: &Model) -> bool {
     model.design_checks.drc_results.is_some()
         && model.design_checks.drc_checked_version == model.schematic.topology_version()
 }
@@ -138,7 +129,7 @@ pub(in crate::workbench::docks::inspector) fn checks_current(model: &Model) -> b
 /// What the Checks header says, only when the check is not current and clean:
 /// "not run" before any check, "stale" once the drawing has changed under
 /// one, and the error count of a current check that found errors.
-pub(in crate::workbench::docks::inspector) fn checks_status(model: &Model) -> Option<String> {
+pub fn checks_status(model: &Model) -> Option<String> {
     let Some(result) = model.design_checks.drc_results.as_ref() else {
         return Some("not run".to_owned());
     };

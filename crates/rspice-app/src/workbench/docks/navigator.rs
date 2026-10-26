@@ -29,7 +29,7 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 use super::super::state::Workspace;
 use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon};
 
-const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
+pub const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
 /// The right inset a filter field keeps while it holds a query, so its text
 /// column ends before the control that empties it.
 const PANEL_SEARCH_CLEAR_INSET: i8 = 26;
@@ -39,26 +39,26 @@ const PANEL_SEARCH_CLEAR_TARGET: f32 = 22.0;
 /// The crossing strokes inside that target, at the size the search mark
 /// opposite it is drawn.
 const PANEL_SEARCH_CLEAR_MARK: f32 = 13.0;
-const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
-const SCHEMATIC_NAV_LABEL_SIZE: f32 = tokens::FS_1;
-const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
-const EMPTY_HINT_PADDING_X: i8 = 12;
-const EMPTY_HINT_PADDING_Y: i8 = 20;
+pub const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
+pub const SCHEMATIC_NAV_LABEL_SIZE: f32 = tokens::FS_1;
+pub const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
+pub const EMPTY_HINT_PADDING_X: i8 = 12;
+pub const EMPTY_HINT_PADDING_Y: i8 = 20;
 // The mock's 49 px is a minimum. Its three grid rows resolve to 63 px at the
 // reviewed 11 px type scale (title/detail row, 4 px gap, status row).
-const FLOW_ROW_HEIGHT: f32 = 63.0;
-const FLOW_TEXT_LEFT: f32 = 35.0;
-const FLOW_LABEL_TOP: f32 = 7.0;
-const FLOW_DETAIL_TOP: f32 = 23.0;
-const FLOW_STATUS_TOP: f32 = 43.0;
-const FLOW_DETAIL_LINE_HEIGHT: f32 = 15.0;
-const NETLIST_OUTLINE_ROW_HEIGHT: f32 = 27.0;
-const NETLIST_OUTLINE_TOUCH_ROW_HEIGHT: f32 = 44.0;
-const NETLIST_OUTLINE_ICON_SIZE: f32 = 14.0;
-const NETLIST_OUTLINE_PADDING_X: f32 = 9.0;
-const NETLIST_OUTLINE_ICON_GAP: f32 = 7.0;
+pub const FLOW_ROW_HEIGHT: f32 = 63.0;
+pub const FLOW_TEXT_LEFT: f32 = 35.0;
+pub const FLOW_LABEL_TOP: f32 = 7.0;
+pub const FLOW_DETAIL_TOP: f32 = 23.0;
+pub const FLOW_STATUS_TOP: f32 = 43.0;
+pub const FLOW_DETAIL_LINE_HEIGHT: f32 = 15.0;
+pub const NETLIST_OUTLINE_ROW_HEIGHT: f32 = 27.0;
+pub const NETLIST_OUTLINE_TOUCH_ROW_HEIGHT: f32 = 44.0;
+pub const NETLIST_OUTLINE_ICON_SIZE: f32 = 14.0;
+pub const NETLIST_OUTLINE_PADDING_X: f32 = 9.0;
+pub const NETLIST_OUTLINE_ICON_GAP: f32 = 7.0;
 
-fn panel_search_field_width(available_width: f32) -> f32 {
+pub fn panel_search_field_width(available_width: f32) -> f32 {
     (available_width - PANEL_SEARCH_MARGIN_X * 2.0).max(1.0)
 }
 
@@ -94,7 +94,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     }
 }
 
-fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
@@ -150,7 +150,7 @@ fn workspace_search(
 /// Take `R`, the request to focus a search field this pass draws, when the
 /// field can take the focus. A drawer first measures an invisible pass; the
 /// request waits for the visible one.
-pub(super) fn search_focus_requested<R: Request>(ui: &Ui, outbox: &mut Outbox) -> bool {
+pub fn search_focus_requested<R: Request>(ui: &Ui, outbox: &mut Outbox) -> bool {
     ui.is_visible() && outbox.take::<R>().is_some()
 }
 
@@ -166,7 +166,7 @@ pub(super) fn search_focus_requested<R: Request>(ui: &Ui, outbox: &mut Outbox) -
 /// Escape on its own, so the pair is one gesture: the query goes and the
 /// keyboard comes back out. An already-empty field keeps its hands off the
 /// press, so Escape goes on meaning "put the tool away" everywhere else.
-pub(super) fn panel_search(
+pub fn panel_search(
     ui: &mut Ui,
     query: &mut String,
     id: &'static str,
@@ -287,13 +287,13 @@ fn panel_search_clear(ui: &mut Ui, id: &'static str, field: &Response) -> bool {
 /// The rail used to spend the query on the nine route rows and nothing else,
 /// so a search for a corner name hid every page and left the Run set axes
 /// sitting under it, unfiltered and unrelated to what had been typed.
-fn nav_matches(query: &str, text: &str) -> bool {
+pub fn nav_matches(query: &str, text: &str) -> bool {
     query.is_empty() || text.to_lowercase().contains(query)
 }
 
 /// Thousands-grouped sample count. A six-figure retained length is read as a
 /// magnitude, not parsed digit by digit.
-pub(super) fn grouped_count(value: usize) -> String {
+pub fn grouped_count(value: usize) -> String {
     let digits = value.to_string();
     let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {
@@ -314,7 +314,7 @@ pub(super) fn grouped_count(value: usize) -> String {
 /// position it does not have draws nothing at all — so anchor that one to
 /// the row instead, on every frame it stays open rather than only on the
 /// frame that opened it.
-fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
+pub fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
     let keyboard_open = response.has_focus()
         && response
             .ctx

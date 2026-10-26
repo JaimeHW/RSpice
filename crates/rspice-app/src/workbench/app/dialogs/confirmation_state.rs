@@ -90,7 +90,7 @@ pub struct ConfirmationDialogState {
     /// Exact recent-file kind captured with [`ConfirmationAction::OpenRecent`].
     /// Project and schematic entries have different save scopes and must not
     /// be inferred later from a mutable recent-files list or extension.
-    pub(crate) pending_recent_kind: Option<crate::services::recent_files::RecentKind>,
+    pub pending_recent_kind: Option<crate::services::recent_files::RecentKind>,
     /// Example name captured with a pending example load.
     pub pending_example: Option<String>,
     /// Destructive action suspended until the exact browser save transaction
@@ -119,7 +119,7 @@ impl ConfirmationDialogState {
     }
 
     /// Open the confirmation dialog for an exact recent-file entry.
-    pub(crate) fn show_recent(
+    pub fn show_recent(
         &mut self,
         path: std::path::PathBuf,
         kind: crate::services::recent_files::RecentKind,
@@ -140,7 +140,7 @@ impl ConfirmationDialogState {
         self.pending_example = None;
     }
 
-    pub(crate) fn await_canonical_save(
+    pub fn await_canonical_save(
         &mut self,
         transaction: crate::product::TransactionId,
         action: ConfirmationAction,
@@ -204,29 +204,29 @@ pub enum ConfirmationResponse {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectReviewDialogState {
-    pub(crate) request: Option<ProjectReviewRequest>,
+pub struct ProjectReviewDialogState {
+    pub request: Option<ProjectReviewRequest>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ProjectReviewRequest {
+pub enum ProjectReviewRequest {
     RevertActive(crate::workbench::lifecycle::project_lifecycle::RevertReviewToken),
     CloseProject(ProjectCloseDestination),
 }
 
 impl ProjectReviewDialogState {
-    pub(crate) fn show_revert(
+    pub fn show_revert(
         &mut self,
         token: crate::workbench::lifecycle::project_lifecycle::RevertReviewToken,
     ) {
         self.request = Some(ProjectReviewRequest::RevertActive(token));
     }
 
-    pub(crate) fn show_close_project(&mut self, destination: ProjectCloseDestination) {
+    pub fn show_close_project(&mut self, destination: ProjectCloseDestination) {
         self.request = Some(ProjectReviewRequest::CloseProject(destination));
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         self.request = None;
     }
 }

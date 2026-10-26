@@ -18,7 +18,7 @@ enum RuntimeHost {
     NativeMobile,
 }
 
-pub(crate) fn runtime_command_platform(ctx: &egui::Context) -> CommandPlatform {
+pub fn runtime_command_platform(ctx: &egui::Context) -> CommandPlatform {
     command_platform_for_host(RuntimeHost::current(), ctx.content_rect().width())
 }
 

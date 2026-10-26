@@ -5,7 +5,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::framework::command_registry::{CommandFlags, Registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShortcutCategory {
+pub enum ShortcutCategory {
     File,
     Edit,
     View,
@@ -18,7 +18,7 @@ pub(crate) enum ShortcutCategory {
 }
 
 impl ShortcutCategory {
-    pub(crate) const ALL: [Self; 9] = [
+    pub const ALL: [Self; 9] = [
         Self::File,
         Self::Edit,
         Self::View,
@@ -30,7 +30,7 @@ impl ShortcutCategory {
         Self::General,
     ];
 
-    pub(crate) const fn display_name(self) -> &'static str {
+    pub const fn display_name(self) -> &'static str {
         match self {
             Self::File => "File",
             Self::Edit => "Edit",
@@ -47,7 +47,7 @@ impl ShortcutCategory {
     /// Lossless help projection from the canonical command metadata. Commands
     /// are categorized from `CommandSpec::group`; this deliberately avoids a
     /// second hand-maintained command inventory drifting from the registry.
-    pub(crate) fn commands(self, registry: &Registry) -> impl Iterator<Item = CommandKey> {
+    pub fn commands(self, registry: &Registry) -> impl Iterator<Item = CommandKey> {
         registry
             .ordered()
             .filter(move |spec| {

@@ -148,21 +148,21 @@ pub struct ApplicationWindowState {
     /// Transient panel presentation belongs to this window and is never
     /// restored from disk or inherited through synchronized dock preferences.
     #[serde(skip)]
-    pub(crate) drawer: Option<Drawer>,
+    pub drawer: Option<Drawer>,
     #[serde(skip)]
-    pub(crate) console_maximized: bool,
+    pub console_maximized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ApplicationWindowRenderPlan {
-    pub(crate) title: String,
-    pub(crate) inner_size: egui::Vec2,
-    pub(crate) position: Option<egui::Pos2>,
-    pub(crate) recovering: bool,
+pub struct ApplicationWindowRenderPlan {
+    pub title: String,
+    pub inner_size: egui::Vec2,
+    pub position: Option<egui::Pos2>,
+    pub recovering: bool,
 }
 
 impl ApplicationWindowState {
-    pub(crate) fn render_plan(&self, cascade_index: usize) -> ApplicationWindowRenderPlan {
+    pub fn render_plan(&self, cascade_index: usize) -> ApplicationWindowRenderPlan {
         ApplicationWindowRenderPlan {
             title: self.title.clone(),
             inner_size: egui::vec2(self.bounds.inner_size[0], self.bounds.inner_size[1]),

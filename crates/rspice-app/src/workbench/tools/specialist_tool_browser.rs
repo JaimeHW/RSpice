@@ -64,7 +64,7 @@ enum BrowserAction {
     Open(SurfaceId),
 }
 
-pub(crate) fn open(app: &mut impl WorkbenchHost) {
+pub fn open(app: &mut impl WorkbenchHost) {
     let route = SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser);
     if let Err(error) = app
         .workbench_mut()
@@ -74,7 +74,7 @@ pub(crate) fn open(app: &mut impl WorkbenchHost) {
     }
 }
 
-pub(crate) fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost) {
+pub fn show(ctx: &egui::Context, app: &mut impl WorkbenchHost) {
     if app.workbench().current_route().surface_id() != SurfaceId::SpecialistToolBrowser {
         return;
     }

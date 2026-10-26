@@ -9,33 +9,33 @@ use super::{InputState, Key, Modifiers};
 
 /// One non-repeating key-down event in exact egui event order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ShortcutKeyPress {
+pub struct ShortcutKeyPress {
     key: Key,
     modifiers: Modifiers,
 }
 
 impl ShortcutKeyPress {
-    pub(super) const fn key(self) -> Key {
+    pub const fn key(self) -> Key {
         self.key
     }
 
-    pub(super) const fn modifiers(self) -> Modifiers {
+    pub const fn modifiers(self) -> Modifiers {
         self.modifiers
     }
 
-    pub(super) fn matches(self, key: Key, primary: bool, alt: bool, shift: bool) -> bool {
+    pub fn matches(self, key: Key, primary: bool, alt: bool, shift: bool) -> bool {
         self.key == key && modifiers_match(self.modifiers, primary, alt, shift)
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ShortcutInputSnapshot {
+pub struct ShortcutInputSnapshot {
     key_presses: Vec<ShortcutKeyPress>,
     non_canvas_focus: bool,
 }
 
 impl ShortcutInputSnapshot {
-    pub(crate) fn from_input_state(input: &InputState, non_canvas_focus: bool) -> Self {
+    pub fn from_input_state(input: &InputState, non_canvas_focus: bool) -> Self {
         Self {
             key_presses: collect_key_presses(&input.events),
             non_canvas_focus,
@@ -46,7 +46,7 @@ impl ShortcutInputSnapshot {
     /// event order. `InputState::consume_key` removes every logical match, so
     /// calling it once per press loses repeated strokes and can also consume
     /// a different Shift/Alt binding. Validate the whole batch before removal.
-    pub(crate) fn consume_keys(
+    pub fn consume_keys(
         input: &mut InputState,
         keys: &[(Key, Modifiers)],
         command_key_count: usize,
@@ -54,16 +54,16 @@ impl ShortcutInputSnapshot {
         crate::ui::input::consume_keys(input, keys, command_key_count)
     }
 
-    pub(super) fn key_presses(&self) -> &[ShortcutKeyPress] {
+    pub fn key_presses(&self) -> &[ShortcutKeyPress] {
         &self.key_presses
     }
 
-    pub(super) const fn has_non_canvas_focus(&self) -> bool {
+    pub const fn has_non_canvas_focus(&self) -> bool {
         self.non_canvas_focus
     }
 
     #[cfg(test)]
-    pub(crate) fn from_events_for_test(events: &[Event], non_canvas_focus: bool) -> Self {
+    pub fn from_events_for_test(events: &[Event], non_canvas_focus: bool) -> Self {
         Self {
             key_presses: collect_key_presses(events),
             non_canvas_focus,
@@ -71,7 +71,7 @@ impl ShortcutInputSnapshot {
     }
 
     #[cfg(test)]
-    pub(crate) fn empty_for_test(non_canvas_focus: bool) -> Self {
+    pub fn empty_for_test(non_canvas_focus: bool) -> Self {
         Self {
             key_presses: Vec::new(),
             non_canvas_focus,

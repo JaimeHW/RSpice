@@ -6,7 +6,7 @@ use super::*;
 use menu_entries::MenuRow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ApplicationMenu {
+pub enum ApplicationMenu {
     File,
     Edit,
     View,
@@ -21,7 +21,7 @@ pub(crate) enum ApplicationMenu {
 }
 
 impl ApplicationMenu {
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::File => "File",
             Self::Edit => "Edit",
@@ -38,7 +38,7 @@ impl ApplicationMenu {
     }
 }
 
-pub(crate) const ALL_MENUS: [ApplicationMenu; 11] = [
+pub const ALL_MENUS: [ApplicationMenu; 11] = [
     ApplicationMenu::File,
     ApplicationMenu::Edit,
     ApplicationMenu::View,
@@ -69,7 +69,7 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
 /// The source editor's right-click menu, drawn with the menu bar's own rows
 /// and separators so its row height, text edge and rules match the menus
 /// above it. A long press opens it on touch.
-pub(in crate::workbench) fn source_editor_context_menu(
+pub fn source_editor_context_menu(
     response: &Response,
     app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
 ) {
@@ -95,7 +95,7 @@ pub(in crate::workbench) fn source_editor_context_menu(
     }
 }
 
-pub(crate) fn shortcut_for_occurrence(
+pub fn shortcut_for_occurrence(
     host: &impl Host,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
@@ -112,13 +112,13 @@ pub(super) fn menu_popup_max_height(ui: &Ui) -> f32 {
     menu_popup_height_for_viewport(ui.ctx().content_rect().height())
 }
 
-pub(crate) fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
+pub fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
     // Preserve room for the title bar and a small bottom escape margin while
     // guaranteeing enough space to navigate at least three standard rows.
     (viewport_height - 64.0).clamp(MENU_ROW_HEIGHT * 3.0, 560.0)
 }
 
-pub(crate) const fn file_menu_shows_exit(
+pub const fn file_menu_shows_exit(
     platform: crate::state::command_catalog::CommandPlatform,
 ) -> bool {
     matches!(

@@ -35,7 +35,7 @@ const NAVIGATION_SCHEMA_VERSION: u8 = 1;
 /// Version 1 adopts the redesigned workbench's responsive dock proportions.
 /// Older sessions may contain explicit widths captured from the retired shell;
 /// those values must not distort the redesigned schematic workspace forever.
-pub(super) const LAYOUT_SCHEMA_VERSION: u8 = 1;
+pub const LAYOUT_SCHEMA_VERSION: u8 = 1;
 
 /// Device-local dock composition retained independently for each workspace.
 /// Engineering documents and project state never enter this presentation
@@ -136,17 +136,17 @@ impl WorkspaceDocumentId {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct WorkspaceDocument {
-    pub(crate) id: WorkspaceDocumentId,
-    pub(crate) label: String,
-    pub(crate) icon: WorkbenchIcon,
-    pub(crate) dirty: bool,
+pub struct WorkspaceDocument {
+    pub id: WorkspaceDocumentId,
+    pub label: String,
+    pub icon: WorkbenchIcon,
+    pub dirty: bool,
 }
 
 impl WorkspaceDocument {
     /// What the tab shows when it is too narrow for its label: a cell view's
     /// cell alone, since the tab's icon already names the view.
-    pub(crate) fn short_label(&self) -> Option<&str> {
+    pub fn short_label(&self) -> Option<&str> {
         match &self.id {
             WorkspaceDocumentId::CellView(reference) => Some(reference.cell.as_str()),
             _ => None,
@@ -306,7 +306,7 @@ impl StatusPrompt {
 /// The source editor a page shows as its document, as the application's
 /// menus, palette and shortcuts address it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ActiveSourceEditor {
+pub struct ActiveSourceEditor {
     pub id: Id,
     pub editable: bool,
     /// Its language service answers go to definition, find references and
@@ -329,16 +329,16 @@ pub struct WorkbenchSession {
     // profile only ever narrowed one specialist tool list and is retired.
     /// Version marker used to distinguish sessions that predate canonical
     /// routes from sessions whose current route is intentionally Design.
-    pub(in crate::workbench) navigation_schema_version: u8,
+    pub navigation_schema_version: u8,
     /// Version marker for persisted device-local dock geometry. This is kept
     /// independent from navigation because a visual-shell migration must not
     /// rewrite the user's current route or engineering state.
-    pub(in crate::workbench) layout_schema_version: u8,
+    pub layout_schema_version: u8,
     /// Canonical current route plus bounded back/forward/recent task history.
-    pub(in crate::workbench) navigation: SurfaceNavigation,
+    pub navigation: SurfaceNavigation,
     /// Recovery or deep-link diagnostic awaiting presentation in the activity
     /// stream. It is runtime state, never engineering or preference data.
-    pub(in crate::workbench) route_diagnostic: Option<String>,
+    pub route_diagnostic: Option<String>,
     pub navigator_visible: bool,
     pub inspector_visible: bool,
     pub console_visible: bool,
@@ -373,7 +373,7 @@ pub struct WorkbenchSession {
     pub inspector_width_custom: bool,
     pub console_height: f32,
     /// Independent device-local dock snapshots for every visited workspace.
-    pub(in crate::workbench) workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
+    pub workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     /// The composition a workspace with no snapshot above opens with.
     ///
     /// Mirrored from the Workspace preference, because layout reconciliation
@@ -381,7 +381,7 @@ pub struct WorkbenchSession {
     /// there. Without it an unvisited workspace resolved to the shipped
     /// default and the preference governed only whichever workspace happened
     /// to be active when it was chosen.
-    pub(in crate::workbench) workspace_preset: WorkspacePreset,
+    pub workspace_preset: WorkspacePreset,
     pub console_page: ConsolePage,
     /// The reader's place on the Console page. Transient: a reading position
     /// over logs, not a layout preference.
@@ -418,7 +418,7 @@ pub struct WorkbenchSession {
     pub notification_unread_only: bool,
 
     /// Device-local window, document, and session presentation manager.
-    pub(crate) window_session_dialog:
+    pub window_session_dialog:
         crate::workbench::app::dialogs::window_session::WindowSessionDialogState,
 
     /// Command palette state
@@ -431,7 +431,7 @@ pub struct WorkbenchSession {
     /// Dedicated engineering review for Revert and Close Project. These
     /// destructive ellipsis actions intentionally do not use the generic
     /// Save/Don't save confirmation grammar.
-    pub(crate) project_review_dialog:
+    pub project_review_dialog:
         crate::workbench::app::dialogs::confirmation_state::ProjectReviewDialogState,
 
     /// Theme selection (direction / mode / density).
@@ -447,18 +447,18 @@ pub struct WorkbenchSession {
     /// The source editor the page on screen shows as its document, published
     /// by that page every frame it draws one. The Edit menu, the palette and
     /// the shortcuts act on it rather than on a schematic hidden behind it.
-    pub(crate) active_source_editor: Option<ActiveSourceEditor>,
+    pub active_source_editor: Option<ActiveSourceEditor>,
     /// One-shot requests the parts of the workbench raise for one another,
     /// waiting for the frame point that takes each. Runtime-only: a request
     /// is an intent of this process, never session or project data.
-    pub(crate) outbox: crate::workbench::framework::requests::Outbox,
+    pub outbox: crate::workbench::framework::requests::Outbox,
 }
 
-pub(in crate::workbench) const fn default_navigator_width() -> f32 {
+pub const fn default_navigator_width() -> f32 {
     256.0
 }
 
-pub(in crate::workbench) const fn default_inspector_width() -> f32 {
+pub const fn default_inspector_width() -> f32 {
     312.0
 }
 
@@ -466,7 +466,7 @@ pub(in crate::workbench) const fn default_inspector_width() -> f32 {
 /// least that shows the Problems page's toolbar, its header, three whole
 /// rows and the selected finding's message with the line under it. At the
 /// 145 points it was, the page had room for two rows and no detail at all.
-pub(crate) const fn default_console_height() -> f32 {
+pub const fn default_console_height() -> f32 {
     208.0
 }
 
@@ -531,7 +531,7 @@ impl WorkbenchSession {
     }
 
     #[must_use]
-    pub(crate) const fn messages(&self) -> MessageCatalog {
+    pub const fn messages(&self) -> MessageCatalog {
         MessageCatalog::new(self.text_locale)
     }
 }
@@ -549,7 +549,7 @@ impl WorkbenchSession {
 
     /// [`Self::prompt`] what an operation that answers either way said,
     /// whether it was done or refused, and hand the outcome on.
-    pub(crate) fn report(&mut self, outcome: Result<String, String>) -> Result<String, String> {
+    pub fn report(&mut self, outcome: Result<String, String>) -> Result<String, String> {
         match &outcome {
             Ok(message) | Err(message) => self.prompt(message.clone()),
         }
@@ -559,14 +559,14 @@ impl WorkbenchSession {
     /// Whether the design surface is showing in the design workspace: the
     /// only place the open sheet is edited. Print and Export own output
     /// media and never stand in for the sheet.
-    pub(crate) fn shows_design_surface(&self) -> bool {
+    pub fn shows_design_surface(&self) -> bool {
         self.workspace == Workspace::Design
             && self.current_route().surface_id() == SurfaceId::Design
     }
 
     /// Show the bottom dock, at its own height and out of focus mode, on
     /// whichever page it last showed.
-    pub(crate) fn open_console(&mut self) {
+    pub fn open_console(&mut self) {
         self.focus_mode = false;
         self.console_visible = true;
         self.console_maximized = false;
@@ -607,7 +607,7 @@ impl WorkbenchSession {
     /// Close a route-owned transient surface without stranding its canonical
     /// URL. Ordinary opens return to their exact source; a direct deep link
     /// replaces itself with the currently projected primary workspace.
-    pub(crate) fn close_route_owned_transient(&mut self, surface: SurfaceId, label: &str) {
+    pub fn close_route_owned_transient(&mut self, surface: SurfaceId, label: &str) {
         if self.current_route().surface_id() != surface {
             return;
         }
@@ -741,7 +741,7 @@ impl WorkbenchSession {
         self.navigation.current()
     }
 
-    pub(crate) fn project_application_window(
+    pub fn project_application_window(
         &mut self,
         workspace: Workspace,
         route: SurfaceRoute,
@@ -884,17 +884,17 @@ impl WorkbenchSession {
     }
 
     #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) fn has_pending_browser_history_effects(&self) -> bool {
+    pub fn has_pending_browser_history_effects(&self) -> bool {
         self.navigation.has_pending_browser_effects()
     }
 
     #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) fn clear_browser_history_effects(&mut self) {
+    pub fn clear_browser_history_effects(&mut self) {
         self.navigation.clear_browser_effects();
     }
 
     #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) fn take_browser_history_effect_queue_overflowed(&mut self) -> bool {
+    pub fn take_browser_history_effect_queue_overflowed(&mut self) -> bool {
         self.navigation.take_browser_effect_queue_overflowed()
     }
 
@@ -902,7 +902,7 @@ impl WorkbenchSession {
     /// ownership of the current URL. The active route and workspace remain
     /// unchanged; only host-history authority is reset.
     #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) fn reset_navigation_history_for_fresh_browser_session(&mut self) {
+    pub fn reset_navigation_history_for_fresh_browser_session(&mut self) {
         self.navigation.reset_history();
     }
 
@@ -990,7 +990,7 @@ impl WorkbenchSession {
         self.apply_workspace_layout(layout);
     }
 
-    pub(crate) fn current_workspace_layout(&self) -> WorkspaceLayoutState {
+    pub fn current_workspace_layout(&self) -> WorkspaceLayoutState {
         WorkspaceLayoutState {
             navigator_visible: self.navigator_visible,
             inspector_visible: self.inspector_visible,

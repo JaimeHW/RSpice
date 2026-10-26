@@ -5,13 +5,13 @@ use egui::{Align2, Frame, Sense, Stroke, Ui, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-pub(crate) const BODY_HEIGHT: f32 = 230.0;
-pub(crate) const CONTEXT_WIDTH: f32 = 260.0;
-pub(crate) const STEPS_HEIGHT: f32 = 36.0;
-pub(crate) const SURFACE_HEIGHT: f32 = 406.0;
-pub(crate) const TRANSACTION_HEIGHT: f32 = 37.0;
+pub const BODY_HEIGHT: f32 = 230.0;
+pub const CONTEXT_WIDTH: f32 = 260.0;
+pub const STEPS_HEIGHT: f32 = 36.0;
+pub const SURFACE_HEIGHT: f32 = 406.0;
+pub const TRANSACTION_HEIGHT: f32 = 37.0;
 
-pub(crate) fn operation_steps(ui: &mut Ui) {
+pub fn operation_steps(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, STEPS_HEIGHT), Sense::hover());
@@ -83,7 +83,7 @@ pub(crate) fn operation_steps(ui: &mut Ui) {
     });
 }
 
-pub(crate) fn impact_preview(ui: &mut Ui, project: &str, revision: &str) {
+pub fn impact_preview(ui: &mut Ui, project: &str, revision: &str) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -98,7 +98,7 @@ pub(crate) fn impact_preview(ui: &mut Ui, project: &str, revision: &str) {
     });
 }
 
-pub(crate) fn paint_body_dividers(ui: &Ui, body_rect: egui::Rect, form_width: f32) {
+pub fn paint_body_dividers(ui: &Ui, body_rect: egui::Rect, form_width: f32) {
     let t = Tokens::get(ui.ctx());
     ui.painter().vline(
         body_rect.left() + form_width,
@@ -112,7 +112,7 @@ pub(crate) fn paint_body_dividers(ui: &Ui, body_rect: egui::Rect, form_width: f3
     );
 }
 
-pub(crate) fn heading(ui: &mut Ui, label: &str) {
+pub fn heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);
@@ -184,7 +184,7 @@ fn fact_row(ui: &mut Ui, label: &str, value: &str) {
     }
 }
 
-pub(crate) fn ellipsized_text(
+pub fn ellipsized_text(
     ui: &Ui,
     value: &str,
     available_width: f32,

@@ -239,15 +239,15 @@ fn focus_is_within_drawer(ctx: &Context, drawer_layer: egui::LayerId) -> bool {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct MobileNavigationAction {
-    pub(crate) command: CommandKey,
+pub struct MobileNavigationAction {
+    pub command: CommandKey,
     icon: WorkbenchIcon,
-    pub(crate) label: &'static str,
+    pub label: &'static str,
 }
 
 /// A workspace is called what the shell calls it everywhere else: the phone
 /// sheet used to coin a second name for four of the eight.
-pub(crate) const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
+pub const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
     MobileNavigationAction {
         command: ids::PROJECT_WORKSPACE,
         icon: WorkbenchIcon::Project,
@@ -297,7 +297,7 @@ pub(crate) const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
 /// Notifications are here because a phone's title bar has no room for the
 /// bell: without this row the panel was reachable only from the palette, and
 /// the unread count from nowhere.
-pub(crate) const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
+pub const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
     MobileNavigationAction {
         command: ids::SPECIALIST_TOOL_BROWSER,
         icon: WorkbenchIcon::More,
@@ -331,10 +331,10 @@ pub(crate) const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
 ];
 
 /// The two groups the sheet holds, in the order it paints them.
-pub(crate) const MOBILE_NAV_GROUPS: [(&str, &[MobileNavigationAction]); 2] =
+pub const MOBILE_NAV_GROUPS: [(&str, &[MobileNavigationAction]); 2] =
     [("Workspaces", &WORKSPACE_ACTIONS), ("Tools", &TOOL_ACTIONS)];
 
-pub(crate) fn mobile_navigation_natural_height(columns: usize) -> f32 {
+pub fn mobile_navigation_natural_height(columns: usize) -> f32 {
     let card_rows = MOBILE_NAV_GROUPS
         .iter()
         .map(|(_, actions)| actions.len().div_ceil(columns))
@@ -347,7 +347,7 @@ pub(crate) fn mobile_navigation_natural_height(columns: usize) -> f32 {
         + MOBILE_NAV_GRID_GAP * rows.saturating_sub(1) as f32
 }
 
-pub(crate) fn mobile_navigation_width(screen_width: f32) -> f32 {
+pub fn mobile_navigation_width(screen_width: f32) -> f32 {
     MOBILE_NAV_MAX_WIDTH.min((screen_width - MOBILE_NAV_GUTTER * 2.0).max(0.0))
 }
 
@@ -607,7 +607,7 @@ fn release_current_focus(ctx: &Context) {
 
 /// What a card states beside its name, the way a navigator row states its
 /// meta: the bell's unread count, for the shell whose title bar draws no bell.
-pub(crate) fn card_meta(command: CommandKey, app: &impl WorkbenchHost) -> Option<String> {
+pub fn card_meta(command: CommandKey, app: &impl WorkbenchHost) -> Option<String> {
     match command {
         ids::OPEN_NOTIFICATIONS => {
             let unread = app.workbench().toasts.unread_count();
@@ -688,12 +688,12 @@ fn mobile_navigation_card(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DrawerBorder {
+pub enum DrawerBorder {
     Box,
     InnerLeft,
 }
 
-pub(crate) fn drawer_border(layout: LayoutSpec, drawer: Drawer) -> DrawerBorder {
+pub fn drawer_border(layout: LayoutSpec, drawer: Drawer) -> DrawerBorder {
     match (drawer, layout.compact_shell) {
         (Drawer::Inspector, false) => DrawerBorder::InnerLeft,
         (Drawer::Navigator | Drawer::Inspector | Drawer::Workspaces, true)
@@ -721,7 +721,7 @@ fn paint_drawer_inner_edge(ui: &egui::Ui, rect: egui::Rect, tokens: &Tokens, bor
     }
 }
 
-pub(crate) fn drawer_scrim_color(tokens: &Tokens) -> egui::Color32 {
+pub fn drawer_scrim_color(tokens: &Tokens) -> egui::Color32 {
     if tokens.mode == Mode::Light {
         egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
     } else {
@@ -775,7 +775,7 @@ fn drawer_close_button(
     response
 }
 
-pub(crate) fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
+pub fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
     let size = if layout.compact_shell || layout.coarse_pointer {
         44.0
     } else {

@@ -18,7 +18,7 @@ use crate::workbench::state::{ConsoleChannel, ConsoleView};
 /// session immutably, and navigating mutates it. Returns whether following
 /// leaves the page. An anchor whose target is gone does nothing; the line said
 /// so under the pointer before the reader committed.
-pub(crate) fn follow(
+pub fn follow(
     state: &impl ConsoleHost,
     view: &mut ConsoleView,
     anchor: &LogAnchor,

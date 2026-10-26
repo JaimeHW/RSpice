@@ -66,7 +66,7 @@ fn split_results_is_visible(app: &impl WorkbenchHost) -> bool {
 
 /// Exact upgraded-mockup geometry: two equal min-zero panes, no gap, and one
 /// physical workbench divider between them.
-pub(crate) fn split_stage_rects(stage: Rect) -> (Rect, Rect, Rect) {
+pub fn split_stage_rects(stage: Rect) -> (Rect, Rect, Rect) {
     let divider_width = 1.0_f32.min(stage.width().max(0.0));
     let pane_width = (stage.width() - divider_width).max(0.0) * 0.5;
     let primary = Rect::from_min_max(
@@ -114,7 +114,7 @@ fn show_split_with_results(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     app.contribute(Point::SplitResults, &mut results);
 }
 
-pub(crate) fn register_results_split_region(ui: &mut Ui, results_rect: Rect) {
+pub fn register_results_split_region(ui: &mut Ui, results_rect: Rect) {
     let region = ui.interact(
         results_rect,
         ui.make_persistent_id("results-split-pane"),

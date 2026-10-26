@@ -18,29 +18,29 @@ use super::ShortcutInputSnapshot;
 use super::input_snapshot::ShortcutKeyPress;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShortcutEnvironment {
-    pub(crate) workspace: Workspace,
-    pub(crate) active_view: ViewType,
-    pub(crate) canvas_focus: bool,
+pub struct ShortcutEnvironment {
+    pub workspace: Workspace,
+    pub active_view: ViewType,
+    pub canvas_focus: bool,
     /// The source editor the page shows as its document holds keyboard
     /// focus. Its line and fold keys act only then.
-    pub(crate) source_editor_focus: bool,
+    pub source_editor_focus: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ShortcutResolution {
-    pub(crate) command: Option<CommandKey>,
-    pub(crate) consume: Vec<(egui::Key, egui::Modifiers)>,
+pub struct ShortcutResolution {
+    pub command: Option<CommandKey>,
+    pub consume: Vec<(egui::Key, egui::Modifiers)>,
     /// Live presses before this index complete the command; later presses
     /// belong to its continuation and may need a different input owner.
-    pub(crate) deferred_start: usize,
-    pub(crate) repaint_after: Option<Duration>,
+    pub deferred_start: usize,
+    pub repaint_after: Option<Duration>,
 }
 
 /// Transient sequence state. It is intentionally absent from session
 /// persistence: a partially entered chord has no authority after restart.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ShortcutResolverState {
+pub struct ShortcutResolverState {
     pending: Vec<ShortcutKeyPress>,
     deferred: Vec<ShortcutKeyPress>,
     pending_since: Option<Duration>,
@@ -50,7 +50,7 @@ pub(crate) struct ShortcutResolverState {
 }
 
 impl ShortcutResolverState {
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.clear_pending();
         self.deferred.clear();
     }
@@ -64,7 +64,7 @@ impl ShortcutResolverState {
     /// before precedence so a disabled higher-tier command cannot steal a
     /// chord from an executable lower-tier command. `catalog` is the shell's
     /// list of commands the profile binds.
-    pub(crate) fn resolve(
+    pub fn resolve(
         &mut self,
         snapshot: &ShortcutInputSnapshot,
         profile: &ShortcutPreferences,

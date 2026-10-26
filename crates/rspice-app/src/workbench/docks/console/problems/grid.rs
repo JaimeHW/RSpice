@@ -35,7 +35,7 @@ use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemsView};
 use super::arrange::Group;
 
 /// The header row's own height.
-pub(crate) const HEADER_HEIGHT: f32 = CONSOLE_TABLE_HEADER_HEIGHT;
+pub const HEADER_HEIGHT: f32 = CONSOLE_TABLE_HEADER_HEIGHT;
 
 /// The columns fitted to their content: every one but the message, in the
 /// order the grid prints them.
@@ -572,12 +572,12 @@ pub(super) struct RowCells<'a> {
 
 /// The identity a row is addressed by, so the current row survives the table
 /// being sorted, filtered or regrouped under it.
-pub(crate) fn row_id(finding: uuid::Uuid) -> egui::Id {
+pub fn row_id(finding: uuid::Uuid) -> egui::Id {
     egui::Id::new(("workbench.problems.row", finding))
 }
 
 /// The identity of the table's one keyboard stop.
-pub(crate) fn body_id() -> egui::Id {
+pub fn body_id() -> egui::Id {
     egui::Id::new("workbench.problems.grid")
 }
 

@@ -41,7 +41,7 @@ use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemGrouping,
 
 /// One printed line of the body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Line {
+pub enum Line {
     /// A group header, by index into the arrangement's groups.
     Group(usize),
     /// A finding, by its index in the canonical listing.
@@ -92,9 +92,9 @@ impl GroupCounts {
 
 /// One group of findings.
 #[derive(Debug, Clone)]
-pub(crate) struct Group {
+pub struct Group {
     /// The value the group is grouped on, in full.
-    pub(crate) label: String,
+    pub label: String,
     pub(super) counts: GroupCounts,
     pub(super) collapsed: bool,
 }
@@ -102,7 +102,7 @@ pub(crate) struct Group {
 /// What each filter control would list, and how wide the measured columns
 /// have to be to print what is listed.
 #[derive(Debug, Clone)]
-pub(crate) struct Tally {
+pub struct Tally {
     /// Per severity rung, in [`DiagnosticLevel::ALL`] order: the findings that
     /// rung would list, with every *other* filter exactly as it stands. That
     /// is what makes the number beside a toggle a description of the toggle
@@ -112,16 +112,16 @@ pub(crate) struct Tally {
     /// filters as they stand.
     pub(super) waived: usize,
     /// Every producer present, with what narrowing to it would list.
-    pub(crate) producers: Vec<(String, usize)>,
+    pub producers: Vec<(String, usize)>,
     /// The longest cell each column fitted to its content prints among the
     /// listed rows, in characters, in [`super::grid::FITTED`] order. The face
     /// is monospace, so a character count is what the column measurement
     /// needs.
-    pub(crate) widest: [usize; super::grid::FITTED.len()],
+    pub widest: [usize; super::grid::FITTED.len()],
 }
 
 impl Tally {
-    pub(crate) const fn severity(&self, level: DiagnosticLevel) -> usize {
+    pub const fn severity(&self, level: DiagnosticLevel) -> usize {
         self.severities[level.rung()]
     }
 }
@@ -147,7 +147,7 @@ struct Stamp {
 }
 
 /// The rows the page prints, with the groups and counts that describe them.
-pub(crate) struct Arrangement {
+pub struct Arrangement {
     /// Every finding the filters admit, in print order, a group's findings
     /// together and collapsed groups included.
     order: Vec<usize>,
@@ -158,8 +158,8 @@ pub(crate) struct Arrangement {
     /// Where each group's findings start in `order`.
     group_starts: Vec<usize>,
     /// Findings the filters admit, whether or not their group is collapsed.
-    pub(crate) listed: usize,
-    pub(crate) tally: Tally,
+    pub listed: usize,
+    pub tally: Tally,
     /// The reading position it was built for.
     view: ProblemsView,
     /// The text filter, lowercased once rather than once a row.
@@ -173,7 +173,7 @@ pub(crate) struct Arrangement {
 /// A current finding the filters exclude is still the current finding — the
 /// canvas may be standing on it — but it is not a row on this page, so the
 /// page draws no selection and describes nothing.
-pub(crate) fn arrange(
+pub fn arrange(
     ctx: &egui::Context,
     listed: &DiagnosticListing<'_>,
     view: &ProblemsView,
@@ -252,7 +252,7 @@ struct CurrentRow {
 }
 
 impl Arrangement {
-    pub(crate) fn build(listed: &DiagnosticListing<'_>, view: &ProblemsView) -> Self {
+    pub fn build(listed: &DiagnosticListing<'_>, view: &ProblemsView) -> Self {
         let needle = view.text.to_lowercase();
         let total = listed.len();
         let mut severities = [0_usize; DiagnosticLevel::ALL.len()];
@@ -349,7 +349,7 @@ impl Arrangement {
     }
 
     /// Printed lines, group headers included.
-    pub(crate) fn lines(&self) -> usize {
+    pub fn lines(&self) -> usize {
         if self.view.grouping.is_grouped() {
             self.lines.len()
         } else {
@@ -357,7 +357,7 @@ impl Arrangement {
         }
     }
 
-    pub(crate) fn line(&self, index: usize) -> Option<Line> {
+    pub fn line(&self, index: usize) -> Option<Line> {
         if self.view.grouping.is_grouped() {
             self.lines.get(index).copied()
         } else {
@@ -365,7 +365,7 @@ impl Arrangement {
         }
     }
 
-    pub(crate) fn group(&self, index: usize) -> Option<&Group> {
+    pub fn group(&self, index: usize) -> Option<&Group> {
         self.groups.get(index)
     }
 
@@ -401,7 +401,7 @@ impl Arrangement {
 
     /// Every finding the filters admit, in print order, collapsed groups
     /// included: what "listed" counts.
-    pub(crate) fn listed_rows(&self) -> impl Iterator<Item = usize> + '_ {
+    pub fn listed_rows(&self) -> impl Iterator<Item = usize> + '_ {
         self.order.iter().copied()
     }
 

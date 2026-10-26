@@ -15,7 +15,7 @@ use crate::workbench::framework::command_registry::ids;
 
 /// One entry of a menu, as the menu is written down.
 #[derive(Clone, Copy)]
-pub(crate) enum MenuEntry {
+pub enum MenuEntry {
     /// A command's row.
     Command(MenuCommand),
     /// A row that opens a menu of its own entries beside it.
@@ -32,8 +32,8 @@ pub(crate) enum MenuEntry {
 /// A command's row as written down: which command, under what label, with
 /// which key.
 #[derive(Clone, Copy)]
-pub(crate) struct MenuCommand {
-    pub(crate) command: CommandKey,
+pub struct MenuCommand {
+    pub command: CommandKey,
     label: MenuLabel,
     /// `None` shows the command's own key; `Some(key)` shows `key`.
     shortcut: Option<&'static str>,
@@ -51,7 +51,7 @@ enum MenuLabel {
 
 /// Where a block of entries is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MenuContext {
+pub enum MenuContext {
     /// A source editor is the document on screen.
     SourceEditor,
     /// A source editor whose language service answers go to definition,
@@ -78,7 +78,7 @@ impl MenuContext {
 
 impl MenuEntry {
     /// The row of the command `key` names, under the vocabulary's label.
-    pub(in crate::workbench) const fn command(key: CommandKey) -> Self {
+    pub const fn command(key: CommandKey) -> Self {
         Self::Command(MenuCommand {
             command: key,
             label: MenuLabel::Command,
@@ -88,7 +88,7 @@ impl MenuEntry {
     }
 
     /// The row of the command `key` names, under a label of the menu's own.
-    pub(in crate::workbench) const fn command_as(key: CommandKey, label: &'static str) -> Self {
+    pub const fn command_as(key: CommandKey, label: &'static str) -> Self {
         Self::Command(MenuCommand {
             command: key,
             label: MenuLabel::Fixed(label),
@@ -99,10 +99,7 @@ impl MenuEntry {
 }
 
 /// A row that opens the command palette narrowed to `scope`.
-pub(in crate::workbench) const fn palette_scope(
-    label: &'static str,
-    scope: &'static str,
-) -> MenuEntry {
+pub const fn palette_scope(label: &'static str, scope: &'static str) -> MenuEntry {
     MenuEntry::Command(MenuCommand {
         command: ids::COMMAND_PALETTE,
         label: MenuLabel::Fixed(label),
@@ -113,7 +110,7 @@ pub(in crate::workbench) const fn palette_scope(
 
 /// Every key `entries` hold, in order and whatever context their blocks show
 /// in, added to `keys`.
-pub(in crate::workbench) fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<CommandKey>) {
+pub fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<CommandKey>) {
     for entry in entries {
         match *entry {
             MenuEntry::Command(item) => keys.push(item.command),
@@ -127,7 +124,7 @@ pub(in crate::workbench) fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<Comm
 
 /// A menu row as it reads for the application's state right now.
 #[derive(Debug, Clone)]
-pub(crate) enum MenuRow {
+pub enum MenuRow {
     Command(CommandRow),
     Separator,
     Submenu {
@@ -137,26 +134,22 @@ pub(crate) enum MenuRow {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CommandRow {
-    pub(crate) command: CommandKey,
-    pub(crate) label: &'static str,
+pub struct CommandRow {
+    pub command: CommandKey,
+    pub label: &'static str,
     /// The key painted at the row's right edge, empty for none.
-    pub(crate) shortcut: String,
-    pub(crate) availability: CommandAvailability,
+    pub shortcut: String,
+    pub availability: CommandAvailability,
     /// Whether the state the command switches is on, for a command that
     /// switches one: the row shows a check mark while it is.
-    pub(crate) checked: Option<bool>,
+    pub checked: Option<bool>,
     /// The icon the row wears where it shows no check mark.
     icon: Option<WorkbenchIcon>,
     palette_scope: Option<&'static str>,
 }
 
 /// The rows `entries` show in the window `ctx` draws.
-pub(crate) fn menu_rows(
-    entries: &[MenuEntry],
-    app: &impl WorkbenchHost,
-    ctx: &Context,
-) -> Vec<MenuRow> {
+pub fn menu_rows(entries: &[MenuEntry], app: &impl WorkbenchHost, ctx: &Context) -> Vec<MenuRow> {
     resolve_menu_rows(
         entries,
         app,
@@ -167,7 +160,7 @@ pub(crate) fn menu_rows(
 
 /// The rows `entries` show for `app` on `platform`, hidden ones included so
 /// a test can see what a menu leaves out.
-pub(crate) fn resolve_menu_rows(
+pub fn resolve_menu_rows(
     entries: &[MenuEntry],
     app: &impl WorkbenchHost,
     platform: CommandPlatform,
@@ -215,7 +208,7 @@ fn push_menu_rows(
 
 /// The row a reader chose from a menu, carried out once the menu is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MenuChoice {
+pub struct MenuChoice {
     command: CommandKey,
     palette_scope: Option<&'static str>,
 }
@@ -234,7 +227,7 @@ impl MenuChoice {
 /// kept only between two groups that each show a row, so no rule leads or
 /// ends a menu and a group whose rows are all hidden leaves no second rule
 /// beside the first.
-pub(crate) fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
+pub fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
     let mut visible = Vec::with_capacity(rows.len());
     let mut pending_rule = None;
     for row in rows {
@@ -287,7 +280,7 @@ pub(super) fn show_scrolled_menu_rows(
 
 /// Draw `rows` into an open menu and return the row the reader chose, if
 /// any. Hidden rows are not drawn.
-pub(crate) fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice> {
+pub fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice> {
     let mut choice = None;
     for row in visible_rows(rows) {
         let chosen = match row {
@@ -395,7 +388,7 @@ fn menu_separator(ui: &mut Ui) {
 }
 
 /// The identity of the submenu row labelled `label`.
-pub(crate) fn submenu_row_id(label: &str) -> Id {
+pub fn submenu_row_id(label: &str) -> Id {
     Id::new(("workbench.title_menu.submenu", label))
 }
 
@@ -493,7 +486,7 @@ pub(super) fn menu_rows_width(ui: &Ui, rows: &[MenuRow]) -> f32 {
 
 /// The content width the longest of `rows` needs for its label, with its
 /// key or chevron, to be painted whole.
-pub(crate) fn menu_rows_fit(ui: &Ui, rows: &[MenuRow]) -> f32 {
+pub fn menu_rows_fit(ui: &Ui, rows: &[MenuRow]) -> f32 {
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let measure = |text: &str, font: &egui::FontId| {

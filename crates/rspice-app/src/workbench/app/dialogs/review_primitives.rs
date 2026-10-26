@@ -15,9 +15,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Problem;
 
-pub(crate) const PURPOSE_HEIGHT: f32 = 35.0;
+pub const PURPOSE_HEIGHT: f32 = 35.0;
 
-pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
+pub fn purpose_line(ui: &mut Ui, description: &str) {
     let t = Tokens::get(ui.ctx());
     let response = Frame::NONE
         .fill(t.color.bg_panel)
@@ -73,7 +73,7 @@ pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
 /// Dialogs that paint notes in a column of their own share this one painter,
 /// so a warning in Publish and a warning in Live session are the same mark at
 /// the same size with the same gap behind it.
-pub(crate) fn problem_note(ui: &mut Ui, problem: Problem, text: &str) -> Response {
+pub fn problem_note(ui: &mut Ui, problem: Problem, text: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = PROBLEM_NOTE_GAP;
@@ -112,7 +112,7 @@ use crate::ui::widgets::{
 /// The line the mark is centred on.
 const PROBLEM_NOTE_LINE: f32 = 16.0;
 
-pub(crate) fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
+pub fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     ui.label(
         egui::RichText::new(label)
@@ -123,7 +123,7 @@ pub(crate) fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut
     content(ui)
 }
 
-pub(crate) fn input_field(
+pub fn input_field(
     ui: &mut Ui,
     label: &str,
     value: &mut String,
@@ -141,7 +141,7 @@ pub(crate) fn input_field(
 }
 
 /// A compact input whose caller supplies its stable identity and editor options.
-pub(crate) fn text_edit_field(
+pub fn text_edit_field(
     ui: &mut Ui,
     label: &str,
     edit: TextEdit<'_>,
@@ -160,12 +160,7 @@ pub(crate) fn text_edit_field(
     })
 }
 
-pub(crate) fn read_only_field(
-    ui: &mut Ui,
-    label: &str,
-    value: &str,
-    description: &str,
-) -> Response {
+pub fn read_only_field(ui: &mut Ui, label: &str, value: &str, description: &str) -> Response {
     let mut text = value.to_owned();
     field_label(ui, label, |ui| {
         let t = Tokens::get(ui.ctx());
@@ -181,7 +176,7 @@ pub(crate) fn read_only_field(
     })
 }
 
-pub(crate) fn configure_field_validation(
+pub fn configure_field_validation(
     ui: &Ui,
     response: &Response,
     label: &str,
@@ -224,12 +219,12 @@ fn paint_dashed_hline(ui: &Ui, range: egui::Rangef, y: f32, stroke: Stroke) {
 
 /// Where a dialog's rows start: its title and footer sit this far in from
 /// the frame, and so does everything between them.
-pub(crate) const DIALOG_BODY_INSET: f32 = 12.0;
+pub const DIALOG_BODY_INSET: f32 = 12.0;
 
 /// A section's band across a flush dialog body or one pane of it: its title
 /// on the body's left edge, an optional count at its right. A dialog wears
 /// this one header style for every section it has.
-pub(crate) fn band_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+pub fn band_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width(), crate::ui::panels::PANEL_SECTION_H),

@@ -192,7 +192,7 @@ impl Default for SpecialistToolBrowserState {
 }
 
 impl SpecialistToolBrowserState {
-    pub(super) const RECENT_LIMIT: usize = 12;
+    pub const RECENT_LIMIT: usize = 12;
 
     #[must_use]
     pub fn is_favorite(&self, surface: SurfaceId) -> bool {
@@ -339,7 +339,7 @@ pub enum InlineEditField {
 
 /// The document and occurrence that authorized an isolated inspector draft.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct InlineEditAuthority {
+pub struct InlineEditAuthority {
     pub project: crate::product::ProjectId,
     pub document: crate::state::CellViewRef,
     pub occurrence: Option<crate::state::workspace::DocumentOccurrence>,
@@ -350,7 +350,7 @@ pub(crate) struct InlineEditAuthority {
 /// One field's expected component and validated candidate. No design snapshot
 /// is needed until the application publishes the completed edit.
 #[derive(Debug, Clone)]
-pub(crate) struct InlineEditSession {
+pub struct InlineEditSession {
     pub expected: crate::state::Component,
     pub field: InlineEditField,
     pub authority: InlineEditAuthority,
@@ -398,20 +398,16 @@ impl InlineEdit {
             .and_then(|session| session.error.as_deref())
     }
 
-    pub(crate) fn session(&self) -> Option<&InlineEditSession> {
+    pub fn session(&self) -> Option<&InlineEditSession> {
         self.session.as_ref()
     }
 
-    pub(crate) fn begin(&mut self, session: InlineEditSession) {
+    pub fn begin(&mut self, session: InlineEditSession) {
         self.session = Some(session);
     }
 
     /// The host supplies either a validated complete candidate or its rejection.
-    pub(crate) fn set_draft(
-        &mut self,
-        text: String,
-        candidate: Result<crate::state::Component, String>,
-    ) {
+    pub fn set_draft(&mut self, text: String, candidate: Result<crate::state::Component, String>) {
         if let Some(session) = &mut self.session {
             session.buffer = text;
             match candidate {
@@ -434,7 +430,7 @@ impl InlineEdit {
         }
     }
 
-    pub(crate) fn set_widget(&mut self, widget: egui::Id) {
+    pub fn set_widget(&mut self, widget: egui::Id) {
         if let Some(session) = &mut self.session {
             session.widget = Some(widget);
         }

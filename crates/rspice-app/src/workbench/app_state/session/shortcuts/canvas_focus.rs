@@ -35,7 +35,7 @@ struct CanvasFocusRecord {
 /// single-key shortcuts act only while it holds focus, so arriving there
 /// without it would leave Delete, W or R doing nothing until the reader
 /// clicked the canvas they had just been taken to.
-pub(crate) fn request_engineering_canvas_focus(ctx: &egui::Context) {
+pub fn request_engineering_canvas_focus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| data.insert_temp(Id::new(CANVAS_FOCUS_REQUEST_ID), pass));
 }
@@ -47,7 +47,7 @@ pub(crate) fn request_engineering_canvas_focus(ctx: &egui::Context) {
 /// is already the one the reader arrives at. Taking the keyboard there, not a
 /// pass later, is what lets a key pressed in the very next frame reach it. A
 /// request no canvas answers in its own pass is dropped.
-pub(crate) fn request_engineering_canvas_focus_in_this_pass(ctx: &egui::Context) {
+pub fn request_engineering_canvas_focus_in_this_pass(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| data.insert_temp(Id::new(CANVAS_FOCUS_IN_PASS_ID), pass));
 }
@@ -56,7 +56,7 @@ pub(crate) fn request_engineering_canvas_focus_in_this_pass(ctx: &egui::Context)
 /// testbench, or symbol canvas. Pointer activation explicitly transfers focus
 /// from any prior text/control owner to the engineering canvas, and so does a
 /// request a surface made by sending the reader here.
-pub(crate) fn report_engineering_canvas_focus(response: &Response, view_type: ViewType) {
+pub fn report_engineering_canvas_focus(response: &Response, view_type: ViewType) {
     let now = response.ctx.cumulative_pass_nr();
     // The canvas drawn in the pass that asked is the one the reader is leaving:
     // the route is applied after it. The request is answered from the next
@@ -115,7 +115,7 @@ pub(crate) fn report_engineering_canvas_focus(response: &Response, view_type: Vi
 /// then reach the shortcut resolver with nothing focused and resolve to
 /// Cancel, although it was meant for the widget; the record is what lets the
 /// resolver tell.
-pub(crate) fn report_escape_owner(response: &Response) {
+pub fn report_escape_owner(response: &Response) {
     if response.has_focus() {
         response.ctx.data_mut(|data| {
             data.insert_temp(Id::new(ESCAPE_OWNER_RECORD_ID), response.id);
@@ -128,7 +128,7 @@ pub(crate) fn report_escape_owner(response: &Response) {
 ///
 /// Asked before any widget is drawn. Focus held at the end of the last pass
 /// and gone at the start of this one was taken by the Escape itself.
-pub(crate) fn escape_owner_was_let_go(ctx: &egui::Context) -> bool {
+pub fn escape_owner_was_let_go(ctx: &egui::Context) -> bool {
     let Some(owner) = ctx.data(|data| data.get_temp::<Id>(Id::new(ESCAPE_OWNER_RECORD_ID))) else {
         return false;
     };
@@ -136,7 +136,7 @@ pub(crate) fn escape_owner_was_let_go(ctx: &egui::Context) -> bool {
         && ctx.memory(|memory| memory.had_focus_last_frame(owner) && memory.focused().is_none())
 }
 
-pub(crate) fn engineering_canvas_has_focus(
+pub fn engineering_canvas_has_focus(
     ctx: &egui::Context,
     workspace: Workspace,
     active_view: ViewType,

@@ -66,7 +66,7 @@ macro_rules! define_messages {
 /// and the jobs manager's. Four literals is four chances for an operator to
 /// meet the same command under two names, so the catalog decides it here,
 /// once, and the command's own label reads it from here.
-pub(in crate::workbench) const OPEN_TASK_DECK: &str = "Open task deck";
+pub const OPEN_TASK_DECK: &str = "Open task deck";
 
 define_messages! {
     EditorGeneratedSpiceNetlistViewer => "Generated SPICE netlist viewer",

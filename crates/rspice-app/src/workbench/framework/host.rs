@@ -35,7 +35,7 @@ use crate::ui::widgets::{NotificationAction, Problem};
 
 /// A place in the workbench a container leaves to an owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Point<W, S, L> {
+pub enum Point<W, S, L> {
     /// The stage of a workspace: the surface the current route opens, or else
     /// the workspace's own page.
     Surface(W),
@@ -57,7 +57,7 @@ pub(crate) enum Point<W, S, L> {
 
 /// Which inspector section answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InspectorScope<W> {
+pub enum InspectorScope<W> {
     /// A section that answers in whatever workspace is showing. While it
     /// applies it comes before every workspace's own section.
     AnyWorkspace,
@@ -71,7 +71,7 @@ pub(crate) enum InspectorScope<W> {
 
 /// A slot of the context toolbar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolbarSlot<W, S> {
+pub enum ToolbarSlot<W, S> {
     /// The lane between the document tools and the trailing group, which
     /// scrolls when its tools overflow it.
     Tools(ToolbarScope<W, S>),
@@ -82,7 +82,7 @@ pub(crate) enum ToolbarSlot<W, S> {
 
 /// Whose tools the toolbar's lane shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolbarScope<W, S> {
+pub enum ToolbarScope<W, S> {
     /// No project is open.
     NoProject,
     /// The current route opens a surface that brings tools of its own, in
@@ -94,31 +94,31 @@ pub(crate) enum ToolbarScope<W, S> {
 
 /// What the navigator container draws around a workspace's navigator.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct NavigatorSection {
+pub struct NavigatorSection {
     /// The panel heading.
-    pub(crate) title: &'static str,
+    pub title: &'static str,
     /// What the container's filter field shows while it is empty.
-    pub(crate) placeholder: &'static str,
+    pub placeholder: &'static str,
     /// Whether the container draws the filter field above the navigator. A
     /// navigator that filters by facets of its own draws its own.
-    pub(crate) container_draws_search: bool,
+    pub container_draws_search: bool,
     /// Set when the container scrolls the section: given the panel's height,
     /// whether the section needs more, so the scroll bar stays showing.
-    pub(crate) pins_scroll_bar: Option<fn(f32) -> bool>,
+    pub pins_scroll_bar: Option<fn(f32) -> bool>,
 }
 
 /// What a workspace's owner furnishes its activity-rail button with.
-pub(crate) struct RailEntry<H: ?Sized> {
+pub struct RailEntry<H: ?Sized> {
     /// The count the button's badge shows, given whether the workspace is the
     /// one showing.
-    pub(crate) badge: Option<fn(&H, bool) -> usize>,
+    pub badge: Option<fn(&H, bool) -> usize>,
     /// Run on every frame the workspace shows, and when its button is pressed.
-    pub(crate) on_visible: Option<fn(&mut H)>,
+    pub on_visible: Option<fn(&mut H)>,
 }
 
 /// Which end of the status bar a cell sits at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StatusZone {
+pub enum StatusZone {
     /// Laid out from the left edge.
     Leading,
     /// Laid out from the right edge inward.
@@ -129,7 +129,7 @@ pub(crate) enum StatusZone {
 /// the dense metadata gives way on a narrow bar, and the prompt takes only the
 /// room the other cells leave.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StatusKey {
+pub enum StatusKey {
     /// The answer to the reader's last gesture.
     Prompt,
     /// What the checks found.
@@ -150,7 +150,7 @@ pub(crate) enum StatusKey {
 
 /// The mark in front of a status cell's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StatusMark {
+pub enum StatusMark {
     None,
     /// A warning or a failure the reader has to notice.
     Problem(Problem),
@@ -161,7 +161,7 @@ pub(crate) enum StatusMark {
 
 /// How a status cell answers the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StatusControl {
+pub enum StatusControl {
     /// It only states.
     Label,
     /// It is a button.
@@ -171,17 +171,17 @@ pub(crate) enum StatusControl {
 }
 
 /// What a status cell shows on a frame.
-pub(crate) struct StatusText<'a> {
-    pub(crate) text: Cow<'a, str>,
-    pub(crate) mark: StatusMark,
-    pub(crate) control: StatusControl,
+pub struct StatusText<'a> {
+    pub text: Cow<'a, str>,
+    pub mark: StatusMark,
+    pub control: StatusControl,
     /// The tooltip. Over a guarded cell that cannot act it says why.
-    pub(crate) hover: Option<Cow<'a, str>>,
+    pub hover: Option<Cow<'a, str>>,
 }
 
 impl<'a> StatusText<'a> {
     /// A cell that only states `text`.
-    pub(crate) fn label(text: impl Into<Cow<'a, str>>) -> Self {
+    pub fn label(text: impl Into<Cow<'a, str>>) -> Self {
         Self {
             text: text.into(),
             mark: StatusMark::None,
@@ -192,25 +192,25 @@ impl<'a> StatusText<'a> {
 }
 
 /// A status cell, as the host lists it.
-pub(crate) struct StatusCell<H: Host + ?Sized> {
+pub struct StatusCell<H: Host + ?Sized> {
     /// What the cell reports.
-    pub(crate) key: StatusKey,
+    pub key: StatusKey,
     /// The end of the bar it sits at.
-    pub(crate) zone: StatusZone,
+    pub zone: StatusZone,
     /// Its place in the zone, counted from the zone's own edge.
-    pub(crate) order: usize,
+    pub order: usize,
     /// The one workspace it reports in, or `None` for every workspace.
-    pub(crate) workspace: Option<H::WorkspaceKey>,
+    pub workspace: Option<H::WorkspaceKey>,
     /// What it shows this frame, or `None` to leave its place to the next
     /// cell listed for it. A cell only reads; what changes on a frame is
     /// worked out once, into the frame value.
-    pub(crate) content: for<'a> fn(&H, &'a H::StatusFrame) -> Option<StatusText<'a>>,
+    pub content: for<'a> fn(&H, &'a H::StatusFrame) -> Option<StatusText<'a>>,
     /// What pressing it does.
-    pub(crate) activate: Option<fn(&mut H, &H::StatusFrame)>,
+    pub activate: Option<fn(&mut H, &H::StatusFrame)>,
 }
 
 /// The shell's side of the contribution points.
-pub(crate) trait Host: 'static {
+pub trait Host: 'static {
     /// The workspaces a point is keyed by.
     type WorkspaceKey: Copy + PartialEq + 'static;
     /// The routes whose surface brings tools of its own.
@@ -340,7 +340,7 @@ pub(crate) trait Host: 'static {
 
 /// The shell's side of the Problems page, answered over the session the page
 /// is handed.
-pub(crate) trait ProblemsHost {
+pub trait ProblemsHost {
     /// Apply the quick fix the page offers for `finding`: the sentence to
     /// prompt, whether it applied or why it did not.
     fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String>;
@@ -348,7 +348,7 @@ pub(crate) trait ProblemsHost {
 
 /// The shell's side of the document bar, answered over the session the bar
 /// and its commands are handed.
-pub(crate) trait DocumentHost {
+pub trait DocumentHost {
     /// The workspaces documents belong to.
     type WorkspaceKey;
     /// What names a document.

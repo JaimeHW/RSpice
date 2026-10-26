@@ -43,7 +43,7 @@ use crate::workbench::state::navigator_tree::NavigatorTreeNode;
 /// this enum adds is a way to name one of them without a closure, so the index
 /// stays a plain value the frame can carry.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum RailFold {
+pub enum RailFold {
     /// A `bool` under the row's own persisted id — the navigator's section
     /// bands and the shelf's catalog groups both hold their position there.
     Persisted(Id),
@@ -55,7 +55,7 @@ pub(super) enum RailFold {
 /// A row that discloses children: the position it is in, and where that
 /// position is kept.
 #[derive(Clone, Debug)]
-pub(super) struct RailDisclosure {
+pub struct RailDisclosure {
     pub unfolded: bool,
     pub fold: RailFold,
 }
@@ -101,7 +101,7 @@ fn index_id() -> Id {
 }
 
 /// Begin publishing a rail. Called once, above the rows it will hold.
-pub(super) fn open(ctx: &egui::Context) {
+pub fn open(ctx: &egui::Context) {
     ctx.data_mut(|data| {
         let index = data.get_temp_mut_or_default::<RailIndex>(index_id());
         index.collecting = true;
@@ -114,13 +114,13 @@ pub(super) fn open(ctx: &egui::Context) {
 /// A no-op unless a rail is open, and unless the row can take the focus at
 /// all: a row painted disabled is not in the Tab ring, and a traversal that
 /// stepped onto one would strand the keyboard on a row that answers nothing.
-pub(super) fn row(ui: &Ui, response: &Response, level: usize, disclosure: Option<RailDisclosure>) {
+pub fn row(ui: &Ui, response: &Response, level: usize, disclosure: Option<RailDisclosure>) {
     publish(ui, response, None, level, disclosure);
 }
 
 /// Publish one painted row whose disclosure control is a second hit target of
 /// its own.
-pub(super) fn row_with_caret(
+pub fn row_with_caret(
     ui: &Ui,
     response: &Response,
     caret: Id,
@@ -178,7 +178,7 @@ enum RailStep {
 /// Returns the tree node whose fold the reader moved, for the caller to apply
 /// to the workspace's own tree. A band's persisted position is moved here
 /// instead of returned, because this module can reach it and no caller has to.
-pub(super) fn traverse(ui: &mut Ui, enter_rows: bool) -> Option<NavigatorTreeNode> {
+pub fn traverse(ui: &mut Ui, enter_rows: bool) -> Option<NavigatorTreeNode> {
     let rows = ui.ctx().data_mut(|data| {
         let index = data.get_temp_mut_or_default::<RailIndex>(index_id());
         index.collecting = false;

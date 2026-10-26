@@ -16,7 +16,7 @@ use crate::workbench::state::{Workspace, WorkspaceDocumentId, WorkspaceLayoutSta
 use rspice_app_state::workbench::preferences::WorkspacePreset;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum WindowSessionPage {
+pub enum WindowSessionPage {
     #[default]
     Windows,
     Documents,
@@ -24,9 +24,9 @@ pub(crate) enum WindowSessionPage {
 }
 
 impl WindowSessionPage {
-    pub(crate) const ALL: [Self; 3] = [Self::Windows, Self::Documents, Self::SessionRestore];
+    pub const ALL: [Self; 3] = [Self::Windows, Self::Documents, Self::SessionRestore];
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Windows => "Windows",
             Self::Documents => "Documents",
@@ -36,7 +36,7 @@ impl WindowSessionPage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WindowWorkflow {
+pub enum WindowWorkflow {
     NewApplicationWindow,
     DetachDocument,
     MoveDocument,
@@ -46,7 +46,7 @@ pub(crate) enum WindowWorkflow {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum NewWindowInitialContent {
+pub enum NewWindowInitialContent {
     #[default]
     EmptyProjectWorkspace,
     CloneCurrentWorkspaceLayout,
@@ -54,7 +54,7 @@ pub(crate) enum NewWindowInitialContent {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum WindowLayoutChoice {
+pub enum WindowLayoutChoice {
     #[default]
     Engineering,
     Review,
@@ -62,32 +62,32 @@ pub(crate) enum WindowLayoutChoice {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WindowSessionDialogState {
-    pub(crate) open: bool,
-    pub(crate) page: WindowSessionPage,
-    pub(crate) workflow: Option<WindowWorkflow>,
-    pub(crate) source_window: ApplicationWindowId,
-    pub(crate) source_document: Option<crate::workbench::state::WorkspaceDocumentId>,
-    pub(crate) source_label: String,
-    pub(crate) initial_content: NewWindowInitialContent,
-    pub(crate) destination: Option<ApplicationWindowId>,
-    pub(crate) layout_choice: WindowLayoutChoice,
-    pub(crate) restore_on_launch: bool,
-    pub(crate) synchronize_chrome: bool,
-    pub(crate) recover_all_future_windows: bool,
-    pub(crate) reattach_at_end: bool,
-    pub(crate) recovery_selected: std::collections::BTreeSet<ApplicationWindowId>,
-    pub(crate) error: Option<String>,
+pub struct WindowSessionDialogState {
+    pub open: bool,
+    pub page: WindowSessionPage,
+    pub workflow: Option<WindowWorkflow>,
+    pub source_window: ApplicationWindowId,
+    pub source_document: Option<crate::workbench::state::WorkspaceDocumentId>,
+    pub source_label: String,
+    pub initial_content: NewWindowInitialContent,
+    pub destination: Option<ApplicationWindowId>,
+    pub layout_choice: WindowLayoutChoice,
+    pub restore_on_launch: bool,
+    pub synchronize_chrome: bool,
+    pub recover_all_future_windows: bool,
+    pub reattach_at_end: bool,
+    pub recovery_selected: std::collections::BTreeSet<ApplicationWindowId>,
+    pub error: Option<String>,
 }
 
 impl WindowSessionDialogState {
-    pub(crate) fn open(&mut self, page: WindowSessionPage) {
+    pub fn open(&mut self, page: WindowSessionPage) {
         *self = Self::default();
         self.open = true;
         self.page = page;
     }
 
-    pub(crate) fn open_workflow(&mut self, workflow: WindowWorkflow) {
+    pub fn open_workflow(&mut self, workflow: WindowWorkflow) {
         *self = Self {
             open: true,
             workflow: Some(workflow),
@@ -98,7 +98,7 @@ impl WindowSessionDialogState {
         };
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -118,7 +118,7 @@ enum WindowSessionAction {
     CloseWindow(ApplicationWindowId),
 }
 
-pub(crate) fn open_window_workflow(app: &mut impl WorkbenchHost, workflow: WindowWorkflow) {
+pub fn open_window_workflow(app: &mut impl WorkbenchHost, workflow: WindowWorkflow) {
     let source_window = app.workbench().window_session.current();
     let active = crate::workbench::chrome::document_bar::document_descriptors(app.session())
         .into_iter()
@@ -156,7 +156,7 @@ pub(crate) fn open_window_workflow(app: &mut impl WorkbenchHost, workflow: Windo
     }
 }
 
-pub(crate) fn render_window_session_dialog(app: &mut impl WorkbenchHost, ctx: &Context) {
+pub fn render_window_session_dialog(app: &mut impl WorkbenchHost, ctx: &Context) {
     if !app.workbench().window_session_dialog.open {
         return;
     }

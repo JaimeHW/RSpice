@@ -21,10 +21,10 @@ use super::super::state::{Workspace, WorkspaceDocumentId};
 use crate::ui::panels::{WorkbenchIcon, elide_text};
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
-pub(crate) const TAB_MAX_WIDTH: f32 = 190.0;
+pub const TAB_MAX_WIDTH: f32 = 190.0;
 /// The narrowest a tab shrinks to before the strip scrolls instead: its icon,
 /// about eleven characters of its name, and its close button.
-pub(crate) const TAB_MIN_WIDTH: f32 = 140.0;
+pub const TAB_MIN_WIDTH: f32 = 140.0;
 const TAB_PADDING_X: f32 = 10.0;
 const TAB_ICON_SIZE: f32 = 16.0;
 const TAB_CONTENT_GAP: f32 = 7.0;
@@ -39,7 +39,7 @@ const HIDDEN_MENU_FILTER_THRESHOLD: usize = 8;
 /// The session the bar and its commands are handed: the workbench session's
 /// record of the open documents, and the shell's answers for the documents
 /// each workspace offers. Any session that is both is one.
-pub(crate) trait DocumentSession:
+pub trait DocumentSession:
     ConsoleHost
     + DocumentHost<
         WorkspaceKey = Workspace,
@@ -157,17 +157,17 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
 /// does the strip scroll, and only then does it give up room for the button
 /// that lists the tabs scrolled out of view.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct StripFit {
+pub struct StripFit {
     /// The widest a tab may be, when the tabs do not fit at their own widths.
-    pub(crate) cap: Option<f32>,
+    pub cap: Option<f32>,
     /// The width the tabs scroll within.
-    pub(crate) tabs_width: f32,
+    pub tabs_width: f32,
     /// Whether some tabs are out of view even at the narrowest a tab may be.
-    pub(crate) overflowing: bool,
+    pub overflowing: bool,
 }
 
 impl StripFit {
-    pub(crate) fn resolve(natural: &[f32], strip_width: f32, hidden_button_width: f32) -> Self {
+    pub fn resolve(natural: &[f32], strip_width: f32, hidden_button_width: f32) -> Self {
         let narrowest: f32 = natural.iter().map(|width| width.min(TAB_MIN_WIDTH)).sum();
         let overflowing = narrowest > strip_width + 0.5;
         let tabs_width = if overflowing {
@@ -186,7 +186,7 @@ impl StripFit {
 /// The widest a tab may be for the tabs to fill `available`, or `None` when
 /// they fit at their own widths. Tabs narrower than the cap keep their width,
 /// and the cap never goes below [`TAB_MIN_WIDTH`].
-pub(crate) fn shared_width_cap(natural: &[f32], available: f32) -> Option<f32> {
+pub fn shared_width_cap(natural: &[f32], available: f32) -> Option<f32> {
     if natural.iter().sum::<f32>() <= available + 0.5 {
         return None;
     }
@@ -341,7 +341,7 @@ fn hidden_documents_button(
     response.on_hover_text(description);
 }
 
-pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost) -> bool {
+pub fn is_visible(app: &impl WorkbenchHost) -> bool {
     document_strip_visible(
         app.workbench().workspace,
         visible_documents(app.session()).len(),
@@ -354,19 +354,17 @@ pub(in crate::workbench) fn is_visible(app: &impl WorkbenchHost) -> bool {
 /// as the tab strip. Consumers cannot mutate project documents by editing a
 /// cached presentation model.
 #[derive(Debug, Clone)]
-pub(crate) struct WorkspaceDocumentDescriptor {
-    pub(crate) id: WorkspaceDocumentId,
-    pub(crate) label: String,
-    pub(crate) dirty: bool,
-    pub(crate) active: bool,
-    pub(crate) open: bool,
-    pub(crate) closable: bool,
+pub struct WorkspaceDocumentDescriptor {
+    pub id: WorkspaceDocumentId,
+    pub label: String,
+    pub dirty: bool,
+    pub active: bool,
+    pub open: bool,
+    pub closable: bool,
     pub(crate) owner: crate::workbench::lifecycle::window_session::ApplicationWindowId,
 }
 
-pub(crate) fn document_descriptors(
-    state: &impl DocumentSession,
-) -> Vec<WorkspaceDocumentDescriptor> {
+pub fn document_descriptors(state: &impl DocumentSession) -> Vec<WorkspaceDocumentDescriptor> {
     let available = available_documents(state);
     let active = authoritative_active_document(state, &available);
     available
@@ -386,9 +384,7 @@ pub(crate) fn document_descriptors(
         .collect()
 }
 
-pub(crate) fn all_document_descriptors(
-    state: &impl DocumentSession,
-) -> Vec<WorkspaceDocumentDescriptor> {
+pub fn all_document_descriptors(state: &impl DocumentSession) -> Vec<WorkspaceDocumentDescriptor> {
     Workspace::ALL
         .into_iter()
         .flat_map(|workspace| {
@@ -419,19 +415,19 @@ pub(crate) fn all_document_descriptors(
         .collect()
 }
 
-pub(crate) fn active_document_id(state: &impl DocumentSession) -> Option<WorkspaceDocumentId> {
+pub fn active_document_id(state: &impl DocumentSession) -> Option<WorkspaceDocumentId> {
     let available = owned_available_documents(state);
     authoritative_active_document(state, &available)
 }
 
-pub(crate) fn activate_document_by_id(
+pub fn activate_document_by_id(
     state: &mut impl DocumentSession,
     document: &WorkspaceDocumentId,
 ) -> bool {
     activate_document(state, document)
 }
 
-pub(crate) fn cycle_document(state: &mut impl DocumentSession, previous: bool) -> bool {
+pub fn cycle_document(state: &mut impl DocumentSession, previous: bool) -> bool {
     reconcile_document_registry(state);
     let documents = visible_documents(state);
     if documents.len() < 2 {
@@ -450,7 +446,7 @@ pub(crate) fn cycle_document(state: &mut impl DocumentSession, previous: bool) -
     activate_document(state, &documents[next].id)
 }
 
-pub(crate) fn close_other_documents(state: &mut impl DocumentSession) -> usize {
+pub fn close_other_documents(state: &mut impl DocumentSession) -> usize {
     reconcile_document_registry(state);
     let documents = owned_available_documents(state);
     let active = authoritative_active_document(state, &documents);
@@ -465,7 +461,7 @@ pub(crate) fn close_other_documents(state: &mut impl DocumentSession) -> usize {
     closed
 }
 
-pub(crate) fn close_all_documents(state: &mut impl DocumentSession) -> usize {
+pub fn close_all_documents(state: &mut impl DocumentSession) -> usize {
     if !state.commit_pending_edit() {
         return 0;
     }
@@ -498,7 +494,7 @@ fn available_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
     available_documents_for_workspace(state, state.workbench().workspace)
 }
 
-pub(crate) fn available_documents_for_workspace(
+pub fn available_documents_for_workspace(
     state: &impl DocumentSession,
     workspace: Workspace,
 ) -> Vec<WorkspaceDocument> {
@@ -584,7 +580,7 @@ fn authoritative_active_document(
         })
 }
 
-pub(crate) fn visible_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
+pub fn visible_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
     let available = owned_available_documents(state);
     let active = authoritative_active_document(state, &available);
     available
@@ -620,7 +616,7 @@ fn reconcile_document_registry(state: &mut impl DocumentSession) {
         .retain_documents(all_available);
 }
 
-pub(crate) fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
+pub fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
     document_count > 1
         || (matches!(workspace, Workspace::Design | Workspace::Models) && document_count == 1)
 }
@@ -748,10 +744,7 @@ fn in_view(viewport: Rect, tab: Rect) -> bool {
     tab.left() >= viewport.left() - 0.5 && tab.right() <= viewport.right() + 0.5
 }
 
-pub(crate) fn activate_document(
-    state: &mut impl DocumentSession,
-    document: &WorkspaceDocumentId,
-) -> bool {
+pub fn activate_document(state: &mut impl DocumentSession, document: &WorkspaceDocumentId) -> bool {
     if document.workspace() != state.workbench().workspace {
         return false;
     }
@@ -767,7 +760,7 @@ pub(crate) fn activate_document(
     activated
 }
 
-pub(crate) fn close_document(
+pub fn close_document(
     state: &mut impl DocumentSession,
     document: &WorkspaceDocumentId,
     documents: &[WorkspaceDocument],
@@ -841,7 +834,7 @@ struct DocumentTabPresentation<'a> {
 /// The text a tab paints at `width`: its label while the label fits, else the
 /// short form when it has one. A squeezed tab drops what its icon already
 /// says before it cuts the name.
-pub(crate) fn tab_caption<'a>(
+pub fn tab_caption<'a>(
     label: &'a str,
     short: Option<&'a str>,
     natural: f32,
@@ -1027,7 +1020,7 @@ fn document_tab(
     }
 }
 
-pub(crate) fn suffix_width(dirty: bool, closable: bool) -> f32 {
+pub fn suffix_width(dirty: bool, closable: bool) -> f32 {
     match (dirty, closable) {
         (false, false) => 0.0,
         (true, false) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE,

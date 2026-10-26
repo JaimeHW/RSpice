@@ -21,7 +21,7 @@ use super::super::layout::LayoutSpec;
 
 const STATUS_PADDING_X: f32 = 9.0;
 const STATUS_MARK_GAP: f32 = 5.0;
-pub(crate) const STATUS_FONT_SIZE: f32 = tokens::FS_1;
+pub const STATUS_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
@@ -226,7 +226,7 @@ fn paint_status_cell<H: Host>(
 /// The prompt the bar shows this frame. One that has expired is dropped here;
 /// one that has not asks for the frame that will drop it, because an idle
 /// window paints no frame of its own.
-pub(in crate::workbench) fn current_prompt(
+pub fn current_prompt(
     ctx: &egui::Context,
     slot: &mut Option<crate::workbench::state::StatusPrompt>,
 ) -> Option<String> {
@@ -244,7 +244,7 @@ pub(in crate::workbench) fn current_prompt(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct StatusVisibility {
+pub struct StatusVisibility {
     pub(crate) coordinates: bool,
     pub(crate) selection: bool,
     pub(crate) platform: bool,
@@ -267,7 +267,7 @@ impl StatusVisibility {
     }
 }
 
-pub(crate) fn status_visibility(viewport_width: f32) -> StatusVisibility {
+pub fn status_visibility(viewport_width: f32) -> StatusVisibility {
     let show_secondary = viewport_width > 900.0;
     StatusVisibility {
         coordinates: show_secondary,
@@ -277,16 +277,16 @@ pub(crate) fn status_visibility(viewport_width: f32) -> StatusVisibility {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct StatusGroupAllocation {
-    pub(crate) left: f32,
-    pub(crate) right: f32,
-    pub(crate) gap: f32,
+pub struct StatusGroupAllocation {
+    pub left: f32,
+    pub right: f32,
+    pub gap: f32,
 }
 
 /// Reproduce the mockup's `justify-content: space-between` status composition.
 /// Each group keeps its intrinsic content width while space is available. Only
 /// genuine overflow compresses both groups, in proportion to their content.
-pub(crate) fn status_group_allocation(
+pub fn status_group_allocation(
     left_desired: f32,
     right_desired: f32,
     available_width: f32,
@@ -330,7 +330,7 @@ pub(crate) fn status_group_allocation(
 /// was open, the badge from the page, the page from four producers — and they
 /// disagreed routinely. There is one list now, so there is one answer, and
 /// the bar reads it once per pass for both the text and the mark.
-pub(crate) fn check_summary(counts: DiagnosticCounts) -> Option<String> {
+pub fn check_summary(counts: DiagnosticCounts) -> Option<String> {
     if counts == DiagnosticCounts::default() {
         return None;
     }
@@ -358,7 +358,7 @@ pub(crate) fn check_summary(counts: DiagnosticCounts) -> Option<String> {
 /// a warning while anything warns, is stale or cannot be evaluated, and
 /// nothing otherwise, the way a compiler's problem count reads. A note or a
 /// hint is counted among the advisories but raises no mark.
-pub(crate) fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
+pub fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
     if counts.errors > 0 {
         Some(Problem::Failure)
     } else if counts.warnings > 0 || counts.stale > 0 || counts.unavailable > 0 {
@@ -370,10 +370,7 @@ pub(crate) fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
 
 /// The mark in front of the engine segment: a failure when the engine cannot
 /// run, the one live dot while a run is in progress, and nothing otherwise.
-pub(crate) fn engine_status_mark(
-    availability: &EngineAvailability,
-    run_in_progress: bool,
-) -> StatusMark {
+pub fn engine_status_mark(availability: &EngineAvailability, run_in_progress: bool) -> StatusMark {
     if availability.failure_reason().is_some() {
         StatusMark::Problem(Problem::Failure)
     } else if run_in_progress {
@@ -404,7 +401,7 @@ fn status_mark_size(mark: StatusMark) -> f32 {
     }
 }
 
-pub(crate) fn status_text_font() -> egui::FontId {
+pub fn status_text_font() -> egui::FontId {
     theme::mono(STATUS_FONT_SIZE, FontWeight::Regular)
 }
 

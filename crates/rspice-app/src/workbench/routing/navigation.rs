@@ -165,7 +165,7 @@ impl SurfaceNavigation {
     /// This is deliberately free of history, recent-task, and browser effects:
     /// immediate viewports share one `RSpiceApp`, and switching the render
     /// projection must not masquerade as user navigation.
-    pub(crate) fn project_transient(&mut self, route: SurfaceRoute) {
+    pub fn project_transient(&mut self, route: SurfaceRoute) {
         self.current = route;
     }
 
@@ -301,7 +301,7 @@ impl SurfaceNavigation {
     }
 
     /// Replace the current entry without creating an in-app back entry.
-    pub(crate) fn replace(&mut self, route: SurfaceRoute, source: RouteTransitionSource) {
+    pub fn replace(&mut self, route: SurfaceRoute, source: RouteTransitionSource) {
         self.current = route;
         remember_recent(&mut self.recent, route);
         match source {

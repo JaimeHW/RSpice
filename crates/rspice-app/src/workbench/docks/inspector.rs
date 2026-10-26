@@ -36,17 +36,17 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 use super::super::state::Workspace;
 use crate::ui::panels::PANEL_HEADER_H;
 
-pub(crate) const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
+pub const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct InspectorScrollMemory {
+pub struct InspectorScrollMemory {
     active: Option<String>,
     /// Recent `(subject identity, vertical offset)` entries, oldest first.
-    pub(crate) offsets: Vec<(String, f32)>,
+    pub offsets: Vec<(String, f32)>,
 }
 
 impl InspectorScrollMemory {
-    pub(crate) fn begin_subject(&mut self, identity: &str) -> Option<f32> {
+    pub fn begin_subject(&mut self, identity: &str) -> Option<f32> {
         if self.active.as_deref() == Some(identity) {
             return None;
         }
@@ -59,7 +59,7 @@ impl InspectorScrollMemory {
         )
     }
 
-    pub(crate) fn record(&mut self, identity: String, offset: f32) {
+    pub fn record(&mut self, identity: String, offset: f32) {
         if let Some(index) = self
             .offsets
             .iter()
@@ -83,7 +83,7 @@ fn inspector_scroll_memory_id() -> egui::Id {
 /// The Models workspace uses this to enable its action and the transaction
 /// repeats it immediately before mutation, so presentation and execution
 /// cannot disagree about model family, polarity, or provider authority.
-pub(crate) fn validate_component_model_catalog_binding(
+pub fn validate_component_model_catalog_binding(
     model: &rspice_app_state::workbench::app_state::model::Model,
     component_id: u64,
     library_name: &str,
@@ -196,7 +196,7 @@ fn inspector_body(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     app.contribute(Point::Inspector(scope), ui);
 }
 
-pub(crate) fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
+pub fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
     let route = app.workbench().current_route();
     if app.workbench().workspace != Workspace::Design {
         return route.to_string();
@@ -210,7 +210,7 @@ pub(crate) fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
     )
 }
 
-pub(crate) fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
@@ -252,13 +252,13 @@ const COMPACT_SIGNIFICANT_DIGITS: usize = 4;
 
 /// `value` in engineering notation with its unit, at the precision a compact
 /// panel row reads at: `96.86 µA`, not `96.86112 µA`.
-pub(crate) fn compact_readout(value: f64, unit: &str) -> String {
+pub fn compact_readout(value: f64, unit: &str) -> String {
     engineering_readout(value, unit, COMPACT_SIGNIFICANT_DIGITS)
 }
 
 /// `value` in engineering notation with its unit, to the reader's chosen
 /// number of significant digits, without the zeros that only pad it out:
 /// `900 mV` and `4.1 V`, not `900.0000 mV` and `4.100000 V`.
-fn engineering_readout(value: f64, unit: &str, significant_digits: usize) -> String {
+pub fn engineering_readout(value: f64, unit: &str, significant_digits: usize) -> String {
     rspice_results_ui::waves::fmt_in_unit_readout(value, unit, significant_digits)
 }

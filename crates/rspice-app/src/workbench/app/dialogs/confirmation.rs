@@ -20,7 +20,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
 
 /// The project's side of the confirmations: what the host does once a
 /// question is answered.
-pub(crate) trait ConfirmationHost: WorkbenchHost {
+pub trait ConfirmationHost: WorkbenchHost {
     /// Carry out the pending action as the save-changes question was
     /// answered: save first, go ahead without saving, or stay.
     fn answer_confirmation(&mut self, response: ConfirmationResponse);
@@ -46,7 +46,7 @@ pub(crate) trait ConfirmationHost: WorkbenchHost {
     fn cancel_browser_file_operation(&mut self);
 }
 
-pub(crate) fn render_confirmation_dialog(app: &mut impl ConfirmationHost, ctx: &Context) {
+pub fn render_confirmation_dialog(app: &mut impl ConfirmationHost, ctx: &Context) {
     if app.workbench().confirmation_dialog.visible {
         render_save_confirmation_dialog(app, ctx);
     }

@@ -18,24 +18,24 @@ mod input_snapshot;
 mod platform;
 pub(crate) mod resolver;
 
-pub(crate) use canvas_focus::engineering_canvas_has_focus;
-pub(crate) use canvas_focus::report_engineering_canvas_focus;
-pub(in crate::workbench) use canvas_focus::{
+pub use canvas_focus::engineering_canvas_has_focus;
+pub use canvas_focus::report_engineering_canvas_focus;
+pub use canvas_focus::{
     escape_owner_was_let_go, report_escape_owner, request_engineering_canvas_focus,
     request_engineering_canvas_focus_in_this_pass,
 };
-pub(in crate::workbench) use category::ShortcutCategory;
-pub(crate) use input_snapshot::ShortcutInputSnapshot;
-pub(crate) use platform::runtime_command_platform;
-pub(crate) use resolver::ShortcutEnvironment;
-pub(crate) use resolver::ShortcutResolverState;
+pub use category::ShortcutCategory;
+pub use input_snapshot::ShortcutInputSnapshot;
+pub use platform::runtime_command_platform;
+pub use resolver::ShortcutEnvironment;
+pub use resolver::ShortcutResolverState;
 
 /// Accessibility projection of the same effective bindings consumed by the
 /// runtime resolver. Empty/unsupported bindings are omitted rather than
 /// announcing a key that cannot execute on the current host. `catalog` and
 /// `registry` are the shell's: the commands the profile binds, and what each
 /// is called.
-pub(crate) fn accessibility_shortcut_summary(
+pub fn accessibility_shortcut_summary(
     shortcuts: &ShortcutPreferences,
     catalog: &impl CommandCatalog,
     registry: &Registry,

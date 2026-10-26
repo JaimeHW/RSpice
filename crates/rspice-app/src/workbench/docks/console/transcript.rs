@@ -44,12 +44,12 @@ const LOG_FILE: FileKind = FileKind {
 };
 
 /// The identity of the log's one keyboard stop.
-pub(crate) fn body_id() -> egui::Id {
+pub fn body_id() -> egui::Id {
     egui::Id::new("workbench.console.log")
 }
 
 /// The identity of the find field.
-pub(crate) fn find_id() -> egui::Id {
+pub fn find_id() -> egui::Id {
     egui::Id::new("workbench.console.find")
 }
 
@@ -57,7 +57,7 @@ fn save_id() -> egui::Id {
     egui::Id::new("workbench.console.save")
 }
 
-pub(crate) fn row_font() -> egui::FontId {
+pub fn row_font() -> egui::FontId {
     theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)
 }
 
@@ -86,7 +86,7 @@ struct Intent {
     save: Option<(String, String)>,
 }
 
-pub(crate) fn console(ui: &mut Ui, state: &mut impl ConsoleHost) {
+pub fn console(ui: &mut Ui, state: &mut impl ConsoleHost) {
     let mut view = std::mem::take(&mut state.workbench_mut().console_view);
     let intent = body(ui, state, &mut view);
     state.workbench_mut().console_view = view;
@@ -123,15 +123,15 @@ pub(super) fn collect_save(ctx: &egui::Context, state: &mut impl ConsoleHost) {
 
 /// Where a row's columns stand, measured from the face they are set in.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Columns {
+pub struct Columns {
     /// Where the message starts.
-    pub(crate) message: f32,
+    pub message: f32,
     width: f32,
     metrics: Metrics,
 }
 
 impl Columns {
-    pub(crate) fn measure(ui: &Ui, width: f32) -> Self {
+    pub fn measure(ui: &Ui, width: f32) -> Self {
         let clock = ui.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
                 CLOCK_WIDEST.to_owned(),
@@ -653,7 +653,7 @@ fn keyboard(
 }
 
 /// The shown lines `taken` keeps, one per text line, in log order.
-pub(crate) fn copy_of(source: Source<'_>, rows: &Rows, taken: impl Fn(u64) -> bool) -> String {
+pub fn copy_of(source: Source<'_>, rows: &Rows, taken: impl Fn(u64) -> bool) -> String {
     let mut text = String::new();
     for line in rows
         .keys()
@@ -682,7 +682,7 @@ fn copied_line(line: &Line<'_>) -> String {
 }
 
 /// The name a saved channel is offered under.
-pub(crate) fn file_name(channel: ConsoleChannel) -> String {
+pub fn file_name(channel: ConsoleChannel) -> String {
     match channel {
         ConsoleChannel::Session => "session.log".to_owned(),
         ConsoleChannel::Run(sequence) => format!("run-{sequence}.log"),

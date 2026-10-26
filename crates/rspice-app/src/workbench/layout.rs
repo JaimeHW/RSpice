@@ -13,7 +13,7 @@ use super::state::{WidthClass, WorkbenchSession};
 /// reservation smaller than the paint width lets the scrolling lane run under
 /// the chip. The layout holds it, as it holds the chip's height, because the
 /// toolbar reserves the room before the chip's owner draws in it.
-pub(crate) const RUN_CONFIG_CHIP_MAX_WIDTH: f32 = 224.0;
+pub const RUN_CONFIG_CHIP_MAX_WIDTH: f32 = 224.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutSpec {
@@ -286,7 +286,7 @@ struct ChromeMetrics {
 }
 
 impl ChromeMetrics {
-    fn resolve(width: f32, short_landscape: bool, coarse_pointer: bool) -> Self {
+    pub fn resolve(width: f32, short_landscape: bool, coarse_pointer: bool) -> Self {
         let mut metrics = Self {
             title: 35.0,
             toolbar: 45.0,

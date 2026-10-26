@@ -16,9 +16,9 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::layout::LayoutSpec;
 
-pub(crate) const NAVIGATOR_PANEL_ID: &str = "workbench.navigator";
-pub(crate) const INSPECTOR_PANEL_ID: &str = "workbench.inspector";
-pub(crate) const CONSOLE_PANEL_ID: &str = "workbench.console";
+pub const NAVIGATOR_PANEL_ID: &str = "workbench.navigator";
+pub const INSPECTOR_PANEL_ID: &str = "workbench.inspector";
+pub const CONSOLE_PANEL_ID: &str = "workbench.console";
 
 /// Keep egui's panel cache subordinate to the persisted workbench contract.
 ///
@@ -28,11 +28,7 @@ pub(crate) const CONSOLE_PANEL_ID: &str = "workbench.console";
 /// constructed. A genuinely dragged splitter is copied back to
 /// [`WorkbenchSession`](super::state::WorkbenchSession) after painting and will
 /// match the cache on the next frame.
-pub(crate) fn synchronize_panel_memory(
-    ctx: &Context,
-    app: &impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn synchronize_panel_memory(ctx: &Context, app: &impl WorkbenchHost, layout: LayoutSpec) {
     synchronize_panel_size(
         ctx,
         NAVIGATOR_PANEL_ID,
@@ -79,7 +75,7 @@ fn synchronize_panel_size(
     }
 }
 
-pub(crate) fn panel_cache_is_stale(
+pub fn panel_cache_is_stale(
     cached_size: Option<f32>,
     authoritative_size: f32,
     retain_matching_cache: bool,
@@ -108,7 +104,7 @@ fn splitter_is_dragged(ctx: &Context, panel_id: &'static str) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SplitterKeyboardAction {
+pub enum SplitterKeyboardAction {
     Decrease,
     Increase,
     Reset,
@@ -160,11 +156,7 @@ fn vertical_splitter_action(ctx: &Context, response: &Response) -> Option<Splitt
     horizontal_splitter_action(ctx, response, Key::ArrowUp, Key::ArrowDown)
 }
 
-pub(crate) fn apply_splitter_step(
-    value: f32,
-    action: SplitterKeyboardAction,
-    step: f32,
-) -> Option<f32> {
+pub fn apply_splitter_step(value: f32, action: SplitterKeyboardAction, step: f32) -> Option<f32> {
     match action {
         SplitterKeyboardAction::Decrease => Some(value - step),
         SplitterKeyboardAction::Increase => Some(value + step),
