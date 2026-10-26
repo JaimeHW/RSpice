@@ -18,8 +18,7 @@ use quick_view_overlay::*;
 
 #[cfg(test)]
 use crate::state::{
-    DrawingSheetTitleFieldId, RetainedTrace, SchematicSheetFormat, SchematicState, Selection,
-    SymbolDocument, Wire,
+    DrawingSheetTitleFieldId, SchematicSheetFormat, SchematicState, Selection, SymbolDocument, Wire,
 };
 
 use uuid::Uuid;
@@ -787,7 +786,7 @@ fn resolved_run_specifications_are_empty(model: &Model, run: &SimulationRun) -> 
     )
 }
 
-fn quick_result_availability(
+pub(crate) fn quick_result_availability(
     model: &Model,
     results: &dyn ResultsPort,
     run: &SimulationRun,
@@ -973,7 +972,7 @@ fn quick_result_availability(
     }
 }
 
-fn quick_result_analysis_index(
+pub(crate) fn quick_result_analysis_index(
     model: &Model,
     run: &SimulationRun,
     viewer: ResultViewer,
@@ -1065,7 +1064,7 @@ fn quick_result_analysis_index(
     }
 }
 
-fn active_visualization_document_pane<'m>(
+pub(crate) fn active_visualization_document_pane<'m>(
     model: &'m Model,
     results: &dyn ResultsPort,
     document_id: crate::product::ResultDocumentId,

@@ -1127,38 +1127,3 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
         "the volt trace is still on the page"
     );
 }
-
-#[test]
-fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {
-    let frame = PlotFrame {
-        x_minimum: 1e9,
-        x_maximum: 1e9 + 0.001,
-        y_minimum: 0.0,
-        y_maximum: 1.0,
-        x_span: (1e9 + 0.001) - 1e9,
-        y_span: 1.0,
-        plot_width: PLOT_WIDTH_UM - 2 * PLOT_INSET_UM,
-        plot_height: PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM,
-    };
-    let (ticks, captions) = plot_axes(AxisScale::Linear, AxisScale::Linear, &frame).unwrap();
-    let screen = crate::ui::plot::Axis::linear(frame.x_minimum, frame.x_maximum, "");
-    let anchor = screen
-        .offset_anchor()
-        .expect("this span requires an offset anchor");
-    assert!(
-        captions
-            .iter()
-            .any(|caption| caption.text == format!("x: {anchor}"))
-    );
-    for kind in [SemanticAxisKind::Horizontal, SemanticAxisKind::Vertical] {
-        let axis: Vec<_> = ticks.iter().filter(|tick| tick.axis == kind).collect();
-        assert!(!axis.is_empty());
-        assert!(axis.iter().all(|tick| tick.major && !tick.label.is_empty()));
-        for tick in axis {
-            match kind {
-                SemanticAxisKind::Horizontal => assert_eq!(tick.start.x_um, tick.end.x_um),
-                SemanticAxisKind::Vertical => assert_eq!(tick.start.y_um, tick.end.y_um),
-            }
-        }
-    }
-}

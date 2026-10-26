@@ -5,7 +5,7 @@
 //! maintained alongside it.
 
 #[cfg(test)]
-mod histogram_publication;
+pub(crate) mod histogram_publication;
 mod run_events;
 
 use crate::state::{

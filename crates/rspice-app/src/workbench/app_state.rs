@@ -38,7 +38,7 @@ pub(in crate::workbench) use rspice_app_state::workbench::app_state::symbol_cont
 #[cfg(test)]
 mod technology_demand_tests;
 mod transaction;
-pub(in crate::workbench) mod viewer_capabilities;
+pub(crate) mod viewer_capabilities;
 pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};

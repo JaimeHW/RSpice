@@ -946,7 +946,7 @@ fn setup_seeded_from_sheet_format(
     .map_err(|error| error.to_string())
 }
 
-fn active_retained_source_selection(
+pub(crate) fn active_retained_source_selection(
     parts: &HardcopyParts<'_>,
 ) -> Result<(String, rspice_hardcopy_contract::HardcopyScope), String> {
     use crate::workbench::SurfaceId;

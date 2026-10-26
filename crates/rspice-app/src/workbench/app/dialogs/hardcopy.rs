@@ -21,7 +21,7 @@ use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource, PrinterRasterGeom
 mod execution;
 #[cfg(not(target_arch = "wasm32"))]
 mod finalize;
-mod publish;
+pub(crate) mod publish;
 mod render;
 #[cfg(test)]
 mod setting_effects;

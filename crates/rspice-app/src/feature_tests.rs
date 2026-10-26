@@ -5,6 +5,7 @@
 //! the code it tests. One module per slice.
 
 mod framework;
+mod hardcopy;
 mod model;
 mod results;
 mod run;
