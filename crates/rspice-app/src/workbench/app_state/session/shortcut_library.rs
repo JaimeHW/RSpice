@@ -6,6 +6,7 @@
 //! overwriting them. Browser initialization is asynchronous and remains
 //! mutation-blocked until its exact token completes.
 
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::shortcuts::library_persistence::{
     PersistedShortcutProfileLibrary, RetainedShortcutLibraryBytes,
 };
@@ -119,7 +120,11 @@ pub(crate) struct ShortcutLibraryParts<'a> {
 }
 
 impl ShortcutLibraryParts<'_> {
-    pub(crate) fn initialize_shortcut_library_persistence(&mut self, ctx: &egui::Context) {
+    pub(crate) fn initialize_shortcut_library_persistence(
+        &mut self,
+        ctx: &egui::Context,
+        registry: &Registry,
+    ) {
         let session_library = self.model.preferences.shortcut_profiles().clone();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -129,6 +134,7 @@ impl ShortcutLibraryParts<'_> {
         let startup =
             crate::workbench::shortcuts::library_persistence::startup_shortcut_profile_library_native(
                 Some(&session_library),
+                registry,
             )
             .map(NativeOrBrowserStartup::Native);
 
@@ -137,6 +143,7 @@ impl ShortcutLibraryParts<'_> {
             crate::workbench::shortcuts::library_persistence::startup_shortcut_profile_library_browser(
                 Some(&session_library),
                 ctx,
+                registry,
             )
             .map(NativeOrBrowserStartup::Browser);
 
@@ -173,6 +180,7 @@ impl ShortcutLibraryParts<'_> {
         &mut self,
         candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         ctx: &egui::Context,
+        registry: &Registry,
     ) -> Result<ShortcutLibraryPublication, String> {
         if let Some(reason) = self.persistence.blocked_reason() {
             return Err(reason);
@@ -217,6 +225,7 @@ impl ShortcutLibraryParts<'_> {
                 crate::workbench::shortcuts::library_persistence::update_shortcut_profile_library_native(
                     &predecessor,
                     candidate,
+                    registry,
                 )
                 .map_err(|error| error.to_string())?;
             self.install_persisted_shortcut_library(persisted, None);
@@ -229,6 +238,7 @@ impl ShortcutLibraryParts<'_> {
                 &predecessor,
                 candidate,
                 ctx,
+                registry,
             )
             .map_err(|error| error.to_string())?;
             *self.persistence = ShortcutLibraryPersistenceRuntime::Publishing {

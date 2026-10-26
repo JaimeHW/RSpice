@@ -4,6 +4,7 @@
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::pdf::*;
 use crate::workbench::shortcuts::artifacts::projection::ShortcutExportRequest;
 use crate::workbench::shortcuts::artifacts::projection::ShortcutExportScope;
@@ -24,6 +25,7 @@ fn pdf_excludes_private_profile_state_and_filesystem_paths() {
             operating_system: OperatingSystem::Windows,
             current_contexts: Vec::new(),
         },
+        command_registry(),
     )
     .unwrap();
     let pdf = serialize_shortcut_reference_pdf(&model).unwrap();

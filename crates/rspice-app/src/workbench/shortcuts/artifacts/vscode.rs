@@ -22,7 +22,7 @@ use crate::state::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,
     ShortcutSequence, ShortcutStroke, shortcut_context_precedence_rank, shortcut_contexts_overlap,
 };
-use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::framework::command_registry::Registry;
 
 /// Version of the audited VS Code-to-RSpice command identity table.
 pub const VSCODE_MAPPING_VERSION: u16 = 1;
@@ -335,6 +335,7 @@ pub fn detect_shortcut_artifact(
     source_name: impl Into<String>,
     source_bytes: &[u8],
     platform: VscodeHostPlatform,
+    registry: &Registry,
 ) -> Result<DetectedShortcutArtifact, VscodeAdapterError> {
     validate_source_size(source_bytes)?;
     let source = std::str::from_utf8(source_bytes).map_err(|_| {
@@ -375,6 +376,7 @@ pub fn detect_shortcut_artifact(
             source_digest,
             entries,
             platform,
+            registry,
         )
         .map(DetectedShortcutArtifact::Vscode),
         Value::Object(_) => Err(VscodeAdapterError::new(
@@ -394,8 +396,9 @@ pub fn adapt_vscode_keybindings(
     source_name: impl Into<String>,
     source_bytes: &[u8],
     platform: VscodeHostPlatform,
+    registry: &Registry,
 ) -> Result<VscodeShortcutAdaptation, VscodeAdapterError> {
-    match detect_shortcut_artifact(source_name, source_bytes, platform)? {
+    match detect_shortcut_artifact(source_name, source_bytes, platform, registry)? {
         DetectedShortcutArtifact::Vscode(adaptation) => Ok(adaptation),
         DetectedShortcutArtifact::RSpice(_) => Err(VscodeAdapterError::new(
             "shortcut-adapter.expected-vscode",
@@ -672,6 +675,7 @@ fn adapt_vscode_entries(
     source_digest: [u8; 32],
     entries: Vec<Value>,
     platform: VscodeHostPlatform,
+    registry: &Registry,
 ) -> Result<VscodeShortcutAdaptation, VscodeAdapterError> {
     let mut report = ReportBuilder::new(entries.len());
     let mut candidates = BTreeMap::<String, CandidateBinding>::new();
@@ -752,9 +756,9 @@ fn adapt_vscode_entries(
         }
     }
 
-    diagnose_cross_command_collisions(&mut candidates, &mut report);
+    diagnose_cross_command_collisions(&mut candidates, &mut report, registry);
     let report = report.finish(&candidates);
-    let canonical_artifact_json = build_native_artifact(&candidates, &report)?;
+    let canonical_artifact_json = build_native_artifact(&candidates, &report, registry)?;
     let artifact = decode_shortcut_artifact_json_with_provenance(
         source_name,
         &canonical_artifact_json,
@@ -1130,6 +1134,7 @@ fn vscode_key(token: &str) -> Option<Key> {
 fn diagnose_cross_command_collisions(
     candidates: &mut BTreeMap<String, CandidateBinding>,
     report: &mut ReportBuilder,
+    registry: &Registry,
 ) {
     let mut bindings = candidates.values().cloned().collect::<Vec<_>>();
     bindings.sort_by_key(|candidate| candidate.entry_index);
@@ -1137,8 +1142,8 @@ fn diagnose_cross_command_collisions(
     for (left_index, left) in bindings.iter().enumerate() {
         for right in &bindings[left_index + 1..] {
             let (Some(left_context), Some(right_context)) = (
-                CommandRegistry.context(left.command),
-                CommandRegistry.context(right.command),
+                registry.context(left.command),
+                registry.context(right.command),
             ) else {
                 continue;
             };
@@ -1181,11 +1186,12 @@ fn diagnose_cross_command_collisions(
 fn build_native_artifact(
     candidates: &BTreeMap<String, CandidateBinding>,
     report: &VscodeImportReport,
+    registry: &Registry,
 ) -> Result<String, VscodeAdapterError> {
     let mut commands = BTreeMap::<String, Value>::new();
     let mut contexts = BTreeSet::<String>::new();
     for candidate in candidates.values() {
-        if let Some(context) = CommandRegistry.context(candidate.command) {
+        if let Some(context) = registry.context(candidate.command) {
             contexts.insert(context.label().to_owned());
         }
         let binding = ProfileShortcutBinding::new(

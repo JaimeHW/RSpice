@@ -4,6 +4,7 @@ use crate::feature_tests::settings::shortcut_vscode_import::{
     assert_every_entry_accounted_for, has_code, vscode,
 };
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::sha256;
 use crate::workbench::shortcuts::artifacts::vscode::*;
 use egui::Key;
@@ -42,6 +43,7 @@ fn jsonc_chord_adaptation_is_deterministic_and_round_trips_as_native() {
         "adapted.json",
         first.canonical_artifact_json().as_bytes(),
         VscodeHostPlatform::Windows,
+        command_registry(),
     )
     .unwrap();
     let DetectedShortcutArtifact::RSpice(round_trip) = detected else {

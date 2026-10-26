@@ -28,6 +28,7 @@ use crate::workbench::app_state::session::shortcut_library::{
 };
 use crate::workbench::app_state::session::shortcuts::ShortcutContextMatch;
 use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::framework::feature::CloudPort;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
@@ -87,6 +88,9 @@ pub(crate) struct PreferencesDialogs<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) platform: &'a mut PlatformState,
     pub(crate) cloud: &'a dyn CloudPort,
+    /// Every command the application registers: what a shortcut profile is
+    /// checked against and a command is labelled by.
+    pub(crate) commands: &'static Registry,
 }
 
 impl PreferencesDialogs<'_> {
@@ -329,7 +333,9 @@ impl PreferencesDialogs<'_> {
             operating_system: ctx.os(),
             current_contexts: &current_contexts,
         };
-        let action = self.shortcut_portability.render(ctx, &library, environment);
+        let action = self
+            .shortcut_portability
+            .render(ctx, &library, environment, self.commands);
         self.execute_shortcut_portability_action(ctx, action);
     }
 
@@ -342,11 +348,16 @@ impl PreferencesDialogs<'_> {
             ShortcutPortabilityAction::None => {}
             ShortcutPortabilityAction::SelectImportSource => {
                 #[cfg(not(target_arch = "wasm32"))]
-                match crate::workbench::shortcuts::artifacts::import_shortcut_artifact_source() {
+                match crate::workbench::shortcuts::artifacts::import_shortcut_artifact_source(
+                    self.commands,
+                ) {
                     Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
                         let library = self.model.preferences.shortcut_profiles().clone();
-                        self.shortcut_portability
-                            .accept_import_source(&library, *source);
+                        self.shortcut_portability.accept_import_source(
+                            &library,
+                            *source,
+                            self.commands,
+                        );
                     }
                     Ok(ShortcutArtifactImportOutcome::Cancelled) => {
                         self.shortcut_portability.import_source_cancelled()
@@ -357,7 +368,9 @@ impl PreferencesDialogs<'_> {
                 }
                 #[cfg(target_arch = "wasm32")]
                 if let Err(error) =
-                    crate::workbench::shortcuts::artifacts::start_browser_shortcut_artifact_import()
+                    crate::workbench::shortcuts::artifacts::start_browser_shortcut_artifact_import(
+                        self.commands,
+                    )
                 {
                     self.shortcut_portability
                         .import_source_failed(error.to_string());
@@ -441,9 +454,10 @@ impl PreferencesDialogs<'_> {
             );
             return;
         }
+        let commands = self.commands;
         let published = self
             .shortcut_library_parts()
-            .publish_shortcut_library_candidate(candidate, ctx);
+            .publish_shortcut_library_candidate(candidate, ctx, commands);
         match published {
             Ok(ShortcutLibraryPublication::Published) => {
                 self.complete_shortcut_library_publication(continuation, Ok(()));
@@ -464,8 +478,11 @@ impl PreferencesDialogs<'_> {
             match result {
                 Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
                     let library = self.model.preferences.shortcut_profiles().clone();
-                    self.shortcut_portability
-                        .accept_import_source(&library, *source);
+                    self.shortcut_portability.accept_import_source(
+                        &library,
+                        *source,
+                        self.commands,
+                    );
                 }
                 Ok(ShortcutArtifactImportOutcome::Cancelled) => {
                     self.shortcut_portability.import_source_cancelled()
@@ -525,7 +542,12 @@ impl PreferencesDialogs<'_> {
         }
         match crate::io::file_exchange::take_opened(ctx, Id::new(SETTINGS_IMPORT_ID)) {
             Some(Ok(Some(file))) => {
-                match stage_settings_import(self.model, &file.name, file.text.as_bytes()) {
+                match stage_settings_import(
+                    self.model,
+                    &file.name,
+                    file.text.as_bytes(),
+                    self.commands,
+                ) {
                     Ok((shortcuts, staged)) => self.publish_shortcut_candidate(
                         ctx,
                         &shortcuts,

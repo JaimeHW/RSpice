@@ -11,7 +11,7 @@ use std::fmt;
 use serde_json::Value;
 
 use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
 
 pub const SHORTCUT_LIBRARY_STORE_FORMAT: &str = "rspice.shortcut-profile-library";
@@ -207,7 +207,10 @@ fn retained(
     }
 }
 
-pub(crate) fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
+pub(crate) fn decode_store_bytes(
+    bytes: &[u8],
+    registry: &Registry,
+) -> ShortcutProfileLibraryRestore {
     if bytes.len() > MAX_SHORTCUT_LIBRARY_STORE_BYTES {
         return ShortcutProfileLibraryRestore::Corrupt(retained(
             bytes,
@@ -338,7 +341,7 @@ pub(crate) fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore 
             "library payload belongs to an incompatible shortcut profile version",
         ));
     }
-    if let Err(reason) = validate_library(&library) {
+    if let Err(reason) = validate_library(&library, registry) {
         return ShortcutProfileLibraryRestore::Corrupt(retained(bytes, Some(generation), reason));
     }
     ShortcutProfileLibraryRestore::Compatible(Box::new(PersistedShortcutProfileLibrary {
@@ -350,19 +353,22 @@ pub(crate) fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore 
     }))
 }
 
-pub(crate) fn validate_library(library: &ShortcutProfileLibrary) -> Result<(), String> {
+pub(crate) fn validate_library(
+    library: &ShortcutProfileLibrary,
+    registry: &Registry,
+) -> Result<(), String> {
     if !library.is_compatible() {
         return Err("shortcut profile library is incompatible".to_owned());
     }
     if library.revision() == u64::MAX {
         return Err("shortcut profile library revision is exhausted".to_owned());
     }
-    if !library.active().audit(&CommandRegistry).is_valid() {
+    if !library.active().audit(registry).is_valid() {
         return Err("active shortcut profile does not pass its complete audit".to_owned());
     }
     if let Some(invalid) = library
         .named_presets()
-        .find(|preset| !preset.profile().audit(&CommandRegistry).is_valid())
+        .find(|preset| !preset.profile().audit(registry).is_valid())
     {
         return Err(format!(
             "shortcut preset '{}' does not pass its complete audit",
@@ -446,6 +452,7 @@ fn validate_device_local_privacy(value: &Value) -> Result<(), String> {
 pub(crate) fn encode_store_bytes(
     library: &ShortcutProfileLibrary,
     generation: u64,
+    registry: &Registry,
 ) -> Result<Vec<u8>, ShortcutLibraryPersistenceError> {
     if generation == 0 {
         return Err(ShortcutLibraryPersistenceError::new(
@@ -453,7 +460,7 @@ pub(crate) fn encode_store_bytes(
             "generation zero is reserved for missing storage",
         ));
     }
-    validate_library(library).map_err(|message| {
+    validate_library(library, registry).map_err(|message| {
         ShortcutLibraryPersistenceError::new("shortcut-library.invalid-library", message)
     })?;
     let library_value = serde_json::to_value(library).map_err(|error| {
@@ -491,7 +498,7 @@ pub(crate) fn encode_store_bytes(
             ),
         ));
     }
-    match decode_store_bytes(&bytes) {
+    match decode_store_bytes(&bytes, registry) {
         ShortcutProfileLibraryRestore::Compatible(decoded)
             if decoded.library == *library && decoded.token.generation == generation => {}
         _ => {
@@ -507,11 +514,14 @@ pub(crate) fn encode_store_bytes(
 #[cfg(any(test, not(target_arch = "wasm32")))]
 fn restore_from_store(
     store: &impl ShortcutLibraryStore,
+    registry: &Registry,
 ) -> Result<ShortcutProfileLibraryRestore, ShortcutLibraryPersistenceError> {
     store.read().map(|bytes| {
         bytes
             .as_deref()
-            .map_or(ShortcutProfileLibraryRestore::Missing, decode_store_bytes)
+            .map_or(ShortcutProfileLibraryRestore::Missing, |bytes| {
+                decode_store_bytes(bytes, registry)
+            })
     })
 }
 
@@ -519,8 +529,9 @@ fn restore_from_store(
 fn create_in_store(
     store: &impl ShortcutLibraryStore,
     library: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
-    let prepared = prepare_create(library)?;
+    let prepared = prepare_create(library, registry)?;
     store.compare_exchange(prepared.expected, &prepared.bytes)?;
     Ok(prepared.persisted)
 }
@@ -530,17 +541,19 @@ fn update_in_store(
     store: &impl ShortcutLibraryStore,
     predecessor: &PersistedShortcutProfileLibrary,
     candidate: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
-    let prepared = prepare_update(predecessor, candidate)?;
+    let prepared = prepare_update(predecessor, candidate, registry)?;
     store.compare_exchange(prepared.expected, &prepared.bytes)?;
     Ok(prepared.persisted)
 }
 
 fn prepare_create(
     library: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> Result<PreparedStoreWrite, ShortcutLibraryPersistenceError> {
-    let bytes = encode_store_bytes(library, 1)?;
-    let persisted = compatible_after_publication(&bytes)?;
+    let bytes = encode_store_bytes(library, 1, registry)?;
+    let persisted = compatible_after_publication(&bytes, registry)?;
     Ok(PreparedStoreWrite {
         expected: StoreExpectation::Missing,
         bytes,
@@ -551,8 +564,10 @@ fn prepare_create(
 fn prepare_update(
     predecessor: &PersistedShortcutProfileLibrary,
     candidate: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> Result<PreparedStoreWrite, ShortcutLibraryPersistenceError> {
-    let predecessor_bytes = encode_store_bytes(&predecessor.library, predecessor.token.generation)?;
+    let predecessor_bytes =
+        encode_store_bytes(&predecessor.library, predecessor.token.generation, registry)?;
     if sha256(&predecessor_bytes) != predecessor.token.file_digest {
         return Err(ShortcutLibraryPersistenceError::new(
             "shortcut-library.invalid-predecessor",
@@ -575,8 +590,8 @@ fn prepare_update(
             "shortcut library persistence generation is exhausted",
         )
     })?;
-    let bytes = encode_store_bytes(candidate, generation)?;
-    let persisted = compatible_after_publication(&bytes)?;
+    let bytes = encode_store_bytes(candidate, generation, registry)?;
+    let persisted = compatible_after_publication(&bytes, registry)?;
     Ok(PreparedStoreWrite {
         expected: StoreExpectation::Digest(predecessor.token.file_digest),
         bytes,
@@ -586,8 +601,9 @@ fn prepare_update(
 
 fn compatible_after_publication(
     bytes: &[u8],
+    registry: &Registry,
 ) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
-    match decode_store_bytes(bytes) {
+    match decode_store_bytes(bytes, registry) {
         ShortcutProfileLibraryRestore::Compatible(persisted) => Ok(*persisted),
         _ => Err(ShortcutLibraryPersistenceError::new(
             "shortcut-library.self-validation",
@@ -699,28 +715,32 @@ impl ShortcutLibraryStore for NativeShortcutLibraryStore {
 pub fn update_shortcut_profile_library_native(
     predecessor: &PersistedShortcutProfileLibrary,
     candidate: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
     update_in_store(
         &NativeShortcutLibraryStore::production()?,
         predecessor,
         candidate,
+        registry,
     )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn startup_shortcut_profile_library_native(
     compatible_session_library: Option<&ShortcutProfileLibrary>,
+    registry: &Registry,
 ) -> Result<ShortcutProfileLibraryStartup, ShortcutLibraryPersistenceError> {
     let store = NativeShortcutLibraryStore::production()?;
-    startup_from_store(&store, compatible_session_library)
+    startup_from_store(&store, compatible_session_library, registry)
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
 fn startup_from_store(
     store: &impl ShortcutLibraryStore,
     compatible_session_library: Option<&ShortcutProfileLibrary>,
+    registry: &Registry,
 ) -> Result<ShortcutProfileLibraryStartup, ShortcutLibraryPersistenceError> {
-    Ok(match restore_from_store(store)? {
+    Ok(match restore_from_store(store, registry)? {
         ShortcutProfileLibraryRestore::Compatible(persisted) => {
             ShortcutProfileLibraryStartup::Ready {
                 persisted,
@@ -732,7 +752,7 @@ fn startup_from_store(
                 compatible_session_library.filter(|library| library.is_compatible())
             {
                 ShortcutProfileLibraryStartup::Ready {
-                    persisted: Box::new(create_in_store(store, library)?),
+                    persisted: Box::new(create_in_store(store, library, registry)?),
                     initialized_from_session: true,
                 }
             } else {
@@ -874,19 +894,23 @@ pub enum BrowserShortcutProfileLibraryStartup {
 /// Synchronously reads one complete localStorage value. The returned bytes are
 /// an atomic browser storage observation; no eframe storage mirror is involved.
 #[cfg(target_arch = "wasm32")]
-pub fn restore_shortcut_profile_library_browser()
--> Result<ShortcutProfileLibraryRestore, ShortcutLibraryPersistenceError> {
+pub fn restore_shortcut_profile_library_browser(
+    registry: &Registry,
+) -> Result<ShortcutProfileLibraryRestore, ShortcutLibraryPersistenceError> {
     Ok(browser_storage_bytes()?
         .as_deref()
-        .map_or(ShortcutProfileLibraryRestore::Missing, decode_store_bytes))
+        .map_or(ShortcutProfileLibraryRestore::Missing, |bytes| {
+            decode_store_bytes(bytes, registry)
+        }))
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn start_create_shortcut_profile_library_browser(
     library: &ShortcutProfileLibrary,
     repaint: &egui::Context,
+    registry: &Registry,
 ) -> Result<BrowserShortcutLibraryWriteToken, ShortcutLibraryPersistenceError> {
-    start_browser_write(prepare_create(library)?, repaint)
+    start_browser_write(prepare_create(library, registry)?, repaint)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -894,8 +918,9 @@ pub fn start_update_shortcut_profile_library_browser(
     predecessor: &PersistedShortcutProfileLibrary,
     candidate: &ShortcutProfileLibrary,
     repaint: &egui::Context,
+    registry: &Registry,
 ) -> Result<BrowserShortcutLibraryWriteToken, ShortcutLibraryPersistenceError> {
-    start_browser_write(prepare_update(predecessor, candidate)?, repaint)
+    start_browser_write(prepare_update(predecessor, candidate, registry)?, repaint)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -936,8 +961,9 @@ pub fn cancel_shortcut_profile_library_browser_write(
 pub fn startup_shortcut_profile_library_browser(
     compatible_session_library: Option<&ShortcutProfileLibrary>,
     repaint: &egui::Context,
+    registry: &Registry,
 ) -> Result<BrowserShortcutProfileLibraryStartup, ShortcutLibraryPersistenceError> {
-    Ok(match restore_shortcut_profile_library_browser()? {
+    Ok(match restore_shortcut_profile_library_browser(registry)? {
         ShortcutProfileLibraryRestore::Compatible(persisted) => {
             BrowserShortcutProfileLibraryStartup::Ready(persisted)
         }
@@ -946,7 +972,7 @@ pub fn startup_shortcut_profile_library_browser(
                 compatible_session_library.filter(|library| library.is_compatible())
             {
                 BrowserShortcutProfileLibraryStartup::InitializationStarted(
-                    start_create_shortcut_profile_library_browser(library, repaint)?,
+                    start_create_shortcut_profile_library_browser(library, repaint, registry)?,
                 )
             } else {
                 BrowserShortcutProfileLibraryStartup::Missing
@@ -1433,17 +1459,33 @@ mod tests {
     #[test]
     fn deterministic_create_and_strict_restore() {
         let library = ShortcutProfileLibrary::default();
-        let first = encode_store_bytes(&library, 1).unwrap();
-        let second = encode_store_bytes(&library, 1).unwrap();
+        let first = encode_store_bytes(
+            &library,
+            1,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
+        let second = encode_store_bytes(
+            &library,
+            1,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
         assert_eq!(first, second);
         assert!(matches!(
-            decode_store_bytes(&first),
+            decode_store_bytes(
+                &first,
+                crate::workbench::commands::vocabulary::command_registry()
+            ),
             ShortcutProfileLibraryRestore::Compatible(_)
         ));
         let mut noncanonical = first;
         noncanonical.pop();
         assert!(matches!(
-            decode_store_bytes(&noncanonical),
+            decode_store_bytes(
+                &noncanonical,
+                crate::workbench::commands::vocabulary::command_registry()
+            ),
             ShortcutProfileLibraryRestore::Corrupt(_)
         ));
     }
@@ -1451,20 +1493,59 @@ mod tests {
     #[test]
     fn create_is_create_only_and_update_requires_exact_predecessor() {
         let store = MemoryStore::default();
-        let first = create_in_store(&store, &ShortcutProfileLibrary::default()).unwrap();
-        assert!(create_in_store(&store, &ShortcutProfileLibrary::default()).is_err());
+        let first = create_in_store(
+            &store,
+            &ShortcutProfileLibrary::default(),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
+        assert!(
+            create_in_store(
+                &store,
+                &ShortcutProfileLibrary::default(),
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .is_err()
+        );
         let candidate = edited(&first);
-        let second = update_in_store(&store, &first, &candidate).unwrap();
+        let second = update_in_store(
+            &store,
+            &first,
+            &candidate,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
         assert_eq!(second.token().generation(), 2);
-        assert!(update_in_store(&store, &first, &edited(&first)).is_err());
+        assert!(
+            update_in_store(
+                &store,
+                &first,
+                &edited(&first),
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn late_external_edits_are_not_clobbered() {
         let store = MemoryStore::default();
-        let first = create_in_store(&store, &ShortcutProfileLibrary::default()).unwrap();
+        let first = create_in_store(
+            &store,
+            &ShortcutProfileLibrary::default(),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
         *store.bytes.borrow_mut() = Some(b"foreign late edit\n".to_vec());
-        assert!(update_in_store(&store, &first, &edited(&first)).is_err());
+        assert!(
+            update_in_store(
+                &store,
+                &first,
+                &edited(&first),
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .is_err()
+        );
         assert_eq!(
             store.bytes.borrow().as_deref(),
             Some(&b"foreign late edit\n"[..])
@@ -1483,7 +1564,12 @@ mod tests {
         }))
         .unwrap();
         *store.bytes.borrow_mut() = Some(future.clone());
-        let startup = startup_from_store(&store, Some(&ShortcutProfileLibrary::default())).unwrap();
+        let startup = startup_from_store(
+            &store,
+            Some(&ShortcutProfileLibrary::default()),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
         let ShortcutProfileLibraryStartup::Incompatible(raw) = startup else {
             panic!("future store was not retained");
         };
@@ -1493,7 +1579,12 @@ mod tests {
         let corrupt = b"{not-json".to_vec();
         *store.bytes.borrow_mut() = Some(corrupt.clone());
         assert!(matches!(
-            startup_from_store(&store, Some(&ShortcutProfileLibrary::default())).unwrap(),
+            startup_from_store(
+                &store,
+                Some(&ShortcutProfileLibrary::default()),
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .unwrap(),
             ShortcutProfileLibraryStartup::Corrupt(_)
         ));
         assert_eq!(store.bytes.borrow().as_deref(), Some(corrupt.as_slice()));
@@ -1502,7 +1593,12 @@ mod tests {
     #[test]
     fn missing_store_may_initialize_once_from_compatible_session() {
         let store = MemoryStore::default();
-        let startup = startup_from_store(&store, Some(&ShortcutProfileLibrary::default())).unwrap();
+        let startup = startup_from_store(
+            &store,
+            Some(&ShortcutProfileLibrary::default()),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
         let ShortcutProfileLibraryStartup::Ready {
             persisted,
             initialized_from_session,
@@ -1555,7 +1651,10 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(
-            decode_store_bytes(&bytes),
+            decode_store_bytes(
+                &bytes,
+                crate::workbench::commands::vocabulary::command_registry()
+            ),
             ShortcutProfileLibraryRestore::Incompatible(_)
         ));
     }
@@ -1571,7 +1670,12 @@ mod tests {
             "revision": 0
         }))
         .unwrap();
-        let error = create_in_store(&store, &library).unwrap_err();
+        let error = create_in_store(
+            &store,
+            &library,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap_err();
         assert_eq!(error.code(), "shortcut-library.size-limit");
         assert!(store.bytes.borrow().is_none());
     }
@@ -1584,14 +1688,31 @@ mod tests {
         let store = NativeShortcutLibraryStore {
             path: root.join(NATIVE_FILENAME),
         };
-        let first = create_in_store(&store, &ShortcutProfileLibrary::default()).unwrap();
-        let restored = restore_from_store(&store).unwrap();
+        let first = create_in_store(
+            &store,
+            &ShortcutProfileLibrary::default(),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
+        let restored = restore_from_store(
+            &store,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap();
         assert!(matches!(
             restored,
             ShortcutProfileLibraryRestore::Compatible(_)
         ));
         std::fs::write(&store.path, b"late external edit\n").unwrap();
-        assert!(update_in_store(&store, &first, &edited(&first)).is_err());
+        assert!(
+            update_in_store(
+                &store,
+                &first,
+                &edited(&first),
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .is_err()
+        );
         assert_eq!(std::fs::read(&store.path).unwrap(), b"late external edit\n");
         let _ = std::fs::remove_dir_all(root);
     }

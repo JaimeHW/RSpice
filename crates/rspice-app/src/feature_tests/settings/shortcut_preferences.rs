@@ -113,7 +113,7 @@ fn pending_policy_publication_cannot_queue_a_second_candidate() {
 #[test]
 fn typed_context_filters_cover_every_registry_command() {
     for command in command_registry().order().iter().copied() {
-        assert!(ShortcutEditorContext::ALL.contains(&editor_context(command)));
+        assert!(ShortcutEditorContext::ALL.contains(&editor_context(command, command_registry())));
     }
 }
 
@@ -127,7 +127,7 @@ fn incompatible_profile_repair_is_draft_only_and_emits_a_receipt() {
     let mut editor = ShortcutEditorState::default();
     editor.open(&live);
 
-    repair_invalid_entries(&mut editor);
+    repair_invalid_entries(&mut editor, command_registry());
 
     assert!(
         editor

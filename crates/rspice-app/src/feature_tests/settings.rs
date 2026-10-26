@@ -31,6 +31,7 @@ mod shortcut_vscode_import;
 
 use crate::workbench::app::dialogs::preferences::PreferencesDialogs;
 use crate::workbench::app_state::AppState;
+use crate::workbench::commands::vocabulary::command_registry;
 
 /// Preferences and the windows it opens, over the application state's
 /// parts, for a test that draws them without the feature's context.
@@ -51,5 +52,6 @@ pub(crate) fn preferences_dialogs(state: &mut AppState) -> PreferencesDialogs<'_
         workbench: &mut state.workbench,
         platform: &mut state.platform,
         cloud: &*state.cloud,
+        commands: command_registry(),
     }
 }

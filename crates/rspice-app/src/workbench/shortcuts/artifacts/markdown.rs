@@ -165,6 +165,7 @@ mod tests {
                 operating_system: OperatingSystem::Windows,
                 current_contexts: Vec::new(),
             },
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap();
         let first = serialize_shortcut_reference_markdown(&model);

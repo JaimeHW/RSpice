@@ -6,6 +6,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::shortcut_library::*;
 use crate::workbench::app_state::session::shortcuts::{ShortcutEnvironment, ShortcutInputSnapshot};
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::ResetShortcutResolver;
 use crate::workbench::shortcuts::library_persistence::PersistedShortcutProfileLibrary;
@@ -39,7 +40,11 @@ fn unacknowledged_completion_blocks_reentrant_publication() {
 
     let error = state
         .shortcut_library_parts()
-        .publish_shortcut_library_candidate(&candidate, &egui::Context::default())
+        .publish_shortcut_library_candidate(
+            &candidate,
+            &egui::Context::default(),
+            command_registry(),
+        )
         .unwrap_err();
 
     assert!(error.contains("awaiting acknowledgement"));
@@ -183,7 +188,11 @@ fn a_library_put_in_use_resets_the_resolver_before_the_next_shortcut() {
     assert!(matches!(
         published
             .shortcut_library_parts()
-            .publish_shortcut_library_candidate(&candidate, &egui::Context::default()),
+            .publish_shortcut_library_candidate(
+                &candidate,
+                &egui::Context::default(),
+                command_registry()
+            ),
         Ok(ShortcutLibraryPublication::Published)
     ));
     complete_the_chord(&mut published);

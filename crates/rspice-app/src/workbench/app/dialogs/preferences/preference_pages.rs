@@ -954,7 +954,7 @@ pub(crate) fn restore_defaults(
             // replacing it has to go through the persist-before-live owner
             // that the editor and the policy rows already use.
             let mut shipped = preferences.shortcuts().clone();
-            shipped.restore_shipped(&crate::workbench::commands::vocabulary::CommandRegistry);
+            shipped.restore_shipped(state.commands);
             actions.shortcut_policy_candidate = Some(shipped);
         }
         PreferenceCategory::Units => preferences.restore_defaults(

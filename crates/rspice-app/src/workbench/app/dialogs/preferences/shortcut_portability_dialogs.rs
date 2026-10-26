@@ -16,7 +16,7 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,
@@ -178,13 +178,14 @@ impl ShortcutImportDialogState {
         &mut self,
         base: &ShortcutProfileLibrary,
         source: ReadyShortcutArtifactSource,
+        registry: &Registry,
     ) {
         if self.pending != ImportPending::Source || self.cancel_requested {
             self.close();
             return;
         }
         self.pending = ImportPending::None;
-        self.accept_detected(base, source.into_detected());
+        self.accept_detected(base, source.into_detected(), registry);
     }
 
     pub(crate) fn source_cancelled(&mut self) {
@@ -213,6 +214,7 @@ impl ShortcutImportDialogState {
         &mut self,
         base: &ShortcutProfileLibrary,
         detected: DetectedShortcutArtifact,
+        registry: &Registry,
     ) {
         // A protected acknowledgement belongs to exactly one reviewed source.
         // Replacing the source must never carry consent to a different digest.
@@ -236,16 +238,16 @@ impl ShortcutImportDialogState {
         self.discard_confirmation = false;
         self.error = None;
         self.plan_dirty = true;
-        self.refresh_plan(base);
+        self.refresh_plan(base, registry);
     }
 
-    pub fn refresh_plan(&mut self, base: &ShortcutProfileLibrary) {
+    pub fn refresh_plan(&mut self, base: &ShortcutProfileLibrary, registry: &Registry) {
         let Some(artifact) = self.artifact.as_ref() else {
             self.plan = None;
             self.plan_dirty = false;
             return;
         };
-        match plan_shortcut_import(base, artifact, &self.options) {
+        match plan_shortcut_import(base, artifact, &self.options, registry) {
             Ok(plan) => {
                 self.plan = Some(plan);
                 self.error = None;
@@ -258,7 +260,7 @@ impl ShortcutImportDialogState {
         self.plan_dirty = false;
     }
 
-    pub(crate) fn synchronize_plan(&mut self, base: &ShortcutProfileLibrary) {
+    pub(crate) fn synchronize_plan(&mut self, base: &ShortcutProfileLibrary, registry: &Registry) {
         if self.pending != ImportPending::None || self.artifact.is_none() {
             return;
         }
@@ -274,7 +276,7 @@ impl ShortcutImportDialogState {
             }
         };
         if self.plan_dirty || stale {
-            self.refresh_plan(base);
+            self.refresh_plan(base, registry);
         }
     }
 
@@ -457,8 +459,9 @@ impl ShortcutPortabilityDialogsState {
         &mut self,
         base: &ShortcutProfileLibrary,
         source: ReadyShortcutArtifactSource,
+        registry: &Registry,
     ) {
-        self.import.accept_source(base, source);
+        self.import.accept_source(base, source, registry);
     }
 
     pub(crate) fn import_source_cancelled(&mut self) {
@@ -489,11 +492,18 @@ impl ShortcutPortabilityDialogsState {
         ctx: &Context,
         library: &ShortcutProfileLibrary,
         environment: ShortcutExportEnvironment<'_>,
+        registry: &Registry,
     ) -> ShortcutPortabilityAction {
         if self.import.is_open() {
-            render_import_dialog(ctx, &mut self.import, library)
+            render_import_dialog(ctx, &mut self.import, library, registry)
         } else if self.export.is_open() {
-            render_export_dialog(ctx, &mut self.export, library.active(), environment)
+            render_export_dialog(
+                ctx,
+                &mut self.export,
+                library.active(),
+                environment,
+                registry,
+            )
         } else {
             ShortcutPortabilityAction::None
         }
@@ -504,8 +514,9 @@ fn render_import_dialog(
     ctx: &Context,
     state: &mut ShortcutImportDialogState,
     base: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> ShortcutPortabilityAction {
-    state.synchronize_plan(base);
+    state.synchronize_plan(base, registry);
     let can_apply = state.pending == ImportPending::None
         && state
             .plan
@@ -560,7 +571,7 @@ fn render_import_dialog(
     }
     let choice = dialog.show(ctx, |ui| {
         render_latest_import_receipt(ui, state);
-        if render_import_body(ui, state, base) {
+        if render_import_body(ui, state, base, registry) {
             state.pending = ImportPending::Source;
             state.cancel_requested = false;
             state.discard_confirmation = false;
@@ -617,6 +628,7 @@ pub fn render_import_body(
     ui: &mut Ui,
     state: &mut ShortcutImportDialogState,
     base: &ShortcutProfileLibrary,
+    registry: &Registry,
 ) -> bool {
     let controls_enabled = state.pending == ImportPending::None;
     let source_requested = workflow_row(
@@ -713,11 +725,9 @@ pub fn render_import_body(
             |ui| {
                 ui.vertical(|ui| {
                     for command_id in &required {
-                        let label = command_registry()
+                        let label = registry
                             .resolve(command_id)
-                            .map_or(command_id.as_str(), |command| {
-                                command_registry().label(command)
-                            });
+                            .map_or(command_id.as_str(), |command| registry.label(command));
                         let mut confirmed =
                             state.options.protected_confirmations.contains(command_id);
                         if ui
@@ -764,7 +774,7 @@ pub fn render_import_body(
     if options_changed {
         state.discard_confirmation = false;
         state.plan_dirty = true;
-        state.refresh_plan(base);
+        state.refresh_plan(base, registry);
     }
     source_requested
 }
@@ -946,6 +956,7 @@ fn render_export_dialog(
     state: &mut ShortcutExportDialogState,
     profile: &ShortcutPreferences,
     environment: ShortcutExportEnvironment<'_>,
+    registry: &Registry,
 ) -> ShortcutPortabilityAction {
     let mut action = ShortcutPortabilityAction::None;
     let cancel_label = if state.discard_confirmation {
@@ -991,7 +1002,7 @@ fn render_export_dialog(
                 operating_system: environment.operating_system,
                 current_contexts: environment.current_contexts.to_vec(),
             };
-            let prepared = build_shortcut_reference_model(profile, &request)
+            let prepared = build_shortcut_reference_model(profile, &request, registry)
                 .map_err(|error| error.to_string())
                 .and_then(|model| {
                     prepare_shortcut_artifact(&model, state.format, None)

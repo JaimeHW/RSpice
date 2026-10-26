@@ -7,6 +7,8 @@
 //! by accident.
 
 use super::*;
+use crate::state::command_catalog::CommandCatalog;
+use crate::workbench::framework::command_registry::Registry;
 
 pub(super) fn key_capture_control(
     ui: &mut Ui,
@@ -118,7 +120,11 @@ pub(super) fn paint_dashed_rect(painter: &egui::Painter, rect: egui::Rect, color
     }
 }
 
-pub(crate) fn process_key_capture(ctx: &Context, editor: &mut ShortcutEditorState) {
+pub(crate) fn process_key_capture(
+    ctx: &Context,
+    editor: &mut ShortcutEditorState,
+    registry: &Registry,
+) {
     let Some(target) = editor.recording else {
         return;
     };
@@ -152,11 +158,11 @@ pub(crate) fn process_key_capture(ctx: &Context, editor: &mut ShortcutEditorStat
         }
         let no_modifiers = modifiers_are_empty(modifiers);
         if key == Key::Enter && no_modifiers && !editor.capture_strokes.is_empty() {
-            finish_capture(editor, target);
+            finish_capture(editor, target, registry);
             return;
         }
         if key == Key::Backspace && no_modifiers && editor.capture_strokes.is_empty() {
-            clear_capture(editor, target);
+            clear_capture(editor, target, registry);
             return;
         }
         editor.capture_strokes.push(ShortcutStroke::new(
@@ -167,7 +173,7 @@ pub(crate) fn process_key_capture(ctx: &Context, editor: &mut ShortcutEditorStat
         ));
         editor.capture_last_input_at = Some(ctx.input(|input| input.time));
         if editor.capture_strokes.len() == MAX_SHORTCUT_SEQUENCE_STROKES {
-            finish_capture(editor, target);
+            finish_capture(editor, target, registry);
             return;
         }
     }
@@ -186,14 +192,18 @@ pub(crate) fn process_key_capture(ctx: &Context, editor: &mut ShortcutEditorStat
     if let (Some(timeout), Some(last)) = (timeout, editor.capture_last_input_at) {
         let now = ctx.input(|input| input.time);
         if !editor.capture_strokes.is_empty() && now - last >= timeout {
-            finish_capture(editor, target);
+            finish_capture(editor, target, registry);
         } else {
             ctx.request_repaint_after(Duration::from_secs_f64((timeout - (now - last)).max(0.01)));
         }
     }
 }
 
-pub(super) fn finish_capture(editor: &mut ShortcutEditorState, target: ShortcutCaptureTarget) {
+pub(super) fn finish_capture(
+    editor: &mut ShortcutEditorState,
+    target: ShortcutCaptureTarget,
+    registry: &Registry,
+) {
     let strokes = std::mem::take(&mut editor.capture_strokes);
     let Ok(sequence) = ShortcutSequence::new(strokes) else {
         cancel_capture(editor);
@@ -203,20 +213,21 @@ pub(super) fn finish_capture(editor: &mut ShortcutEditorState, target: ShortcutC
         editor.draft.as_ref().expect("editor draft"),
         target.command,
         target.slot,
+        registry,
     );
     match editor.draft.as_mut().expect("editor draft").set_binding(
-        &CommandRegistry,
+        registry,
         target.command,
         target.slot,
         platforms,
         Some(sequence),
     ) {
-        Ok(()) => mark_editor_changed(editor),
+        Ok(()) => mark_editor_changed(editor, registry),
         Err(error) => {
             editor.error_summary = Some(format!(
                 "Could not record {} for {}: {error}",
                 target.slot.label(),
-                command_registry().label(target.command)
+                registry.label(target.command)
             ))
         }
     }
@@ -224,20 +235,25 @@ pub(super) fn finish_capture(editor: &mut ShortcutEditorState, target: ShortcutC
     editor.capture_last_input_at = None;
 }
 
-pub(super) fn clear_capture(editor: &mut ShortcutEditorState, target: ShortcutCaptureTarget) {
+pub(super) fn clear_capture(
+    editor: &mut ShortcutEditorState,
+    target: ShortcutCaptureTarget,
+    registry: &Registry,
+) {
     let platforms = binding_platforms(
         editor.draft.as_ref().expect("editor draft"),
         target.command,
         target.slot,
+        registry,
     );
     match editor.draft.as_mut().expect("editor draft").set_binding(
-        &CommandRegistry,
+        registry,
         target.command,
         target.slot,
         platforms,
         None,
     ) {
-        Ok(()) => mark_editor_changed(editor),
+        Ok(()) => mark_editor_changed(editor, registry),
         Err(error) => editor.error_summary = Some(error.to_string()),
     }
     cancel_capture(editor);
@@ -261,9 +277,10 @@ pub(crate) fn binding_platforms(
     profile: &ShortcutPreferences,
     command: CommandKey,
     slot: ShortcutBindingSlot,
+    registry: &Registry,
 ) -> Vec<CommandPlatform> {
     if let Some(binding) = profile
-        .resolved_bindings(&CommandRegistry, command)
+        .resolved_bindings(registry, command)
         .into_iter()
         .find(|binding| binding.slot() == slot)
     {
@@ -271,7 +288,7 @@ pub(crate) fn binding_platforms(
     }
     match slot {
         ShortcutBindingSlot::Primary
-            if CommandRegistry.primary_is_reserved_on(command, CommandPlatform::Browser) =>
+            if registry.primary_is_reserved_on(command, CommandPlatform::Browser) =>
         {
             vec![CommandPlatform::Desktop]
         }

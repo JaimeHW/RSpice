@@ -557,6 +557,7 @@ mod tests {
                 operating_system: OperatingSystem::Windows,
                 current_contexts: vec![ShortcutContext::ResultsWorkspace],
             },
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap()
     }

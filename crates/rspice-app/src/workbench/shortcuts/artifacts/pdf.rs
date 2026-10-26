@@ -790,6 +790,7 @@ mod tests {
                 operating_system: OperatingSystem::Windows,
                 current_contexts: Vec::new(),
             },
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap()
     }

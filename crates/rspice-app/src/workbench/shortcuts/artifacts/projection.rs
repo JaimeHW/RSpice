@@ -20,8 +20,8 @@ use crate::state::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutPreferences, ShortcutSequence,
 };
-use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 use crate::workbench::framework::command_registry::CommandSpec;
+use crate::workbench::framework::command_registry::Registry;
 
 pub use super::schema::ShortcutArtifactScope as ShortcutExportScope;
 
@@ -117,8 +117,9 @@ impl std::error::Error for ShortcutExportError {}
 pub fn build_shortcut_reference_model(
     profile: &ShortcutPreferences,
     request: &ShortcutExportRequest,
+    registry: &Registry,
 ) -> Result<ShortcutReferenceModel, ShortcutExportError> {
-    let audit = profile.audit(&CommandRegistry);
+    let audit = profile.audit(registry);
     if !audit.is_valid() {
         return Err(ShortcutExportError(
             "shortcut profile has blocking audit findings and cannot be exported".to_owned(),
@@ -161,17 +162,17 @@ pub fn build_shortcut_reference_model(
         .map_or(0, |commands| {
             commands
                 .keys()
-                .filter(|id| command_registry().resolve(id).is_none())
+                .filter(|id| registry.resolve(id).is_none())
                 .count()
         });
 
     let (mut portable_profile, mut rows) = match request.scope {
         ShortcutExportScope::UserOverrides => (
             slice_user_profile(raw_profile.clone(), &platforms),
-            user_override_rows(profile, &platforms, request.operating_system),
+            user_override_rows(profile, &platforms, request.operating_system, registry),
         ),
         ShortcutExportScope::CompleteResolved | ShortcutExportScope::CurrentWorkspace => {
-            materialized_projection(profile, request, &coverage, &platforms)?
+            materialized_projection(profile, request, &coverage, &platforms, registry)?
         }
     };
     scrub_private_profile_state(&mut portable_profile);
@@ -264,9 +265,10 @@ fn user_override_rows(
     profile: &ShortcutPreferences,
     platforms: &[CommandPlatform],
     operating_system: OperatingSystem,
+    registry: &Registry,
 ) -> Vec<ShortcutReferenceRow> {
     let mut rows = Vec::new();
-    for command in command_registry().ordered() {
+    for command in registry.ordered() {
         let Some(command_override) = profile.command_override(command.key) else {
             continue;
         };
@@ -303,15 +305,16 @@ fn materialized_projection(
     request: &ShortcutExportRequest,
     coverage: &ShortcutArtifactCoverage,
     platforms: &[CommandPlatform],
+    registry: &Registry,
 ) -> Result<(Value, Vec<ShortcutReferenceRow>), ShortcutExportError> {
     let mut commands = BTreeMap::new();
     let mut rows = Vec::new();
-    for command in command_registry().ordered().filter(|command| {
+    for command in registry.ordered().filter(|command| {
         request.scope != ShortcutExportScope::CurrentWorkspace
             || coverage.covers_context(command.context.label())
     }) {
         let mut bindings = Vec::new();
-        for binding in profile.effective_bindings(&CommandRegistry, command.key) {
+        for binding in profile.effective_bindings(registry, command.key) {
             let binding_platforms = binding
                 .platforms()
                 .iter()
@@ -428,6 +431,7 @@ mod tests {
                 operating_system: OperatingSystem::Windows,
                 current_contexts: Vec::new(),
             },
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap();
         assert!(complete.profile()["commands"].get("save-project").is_some());
@@ -441,6 +445,7 @@ mod tests {
                 operating_system: OperatingSystem::Windows,
                 current_contexts: vec![ShortcutContext::ResultsWorkspace],
             },
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap();
         assert!(

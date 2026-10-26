@@ -19,8 +19,8 @@ use crate::state::shortcuts::{
     ShortcutProfileLibrary, ShortcutProfileLibraryError, ShortcutSequence, ShortcutStroke,
     SingleKeyCanvasPolicy, shortcut_context_precedence_rank, shortcut_contexts_overlap,
 };
-use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 use crate::workbench::framework::command_registry::CommandSpec;
+use crate::workbench::framework::command_registry::Registry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -265,17 +265,18 @@ pub fn plan_shortcut_import(
     base: &ShortcutProfileLibrary,
     artifact: &DecodedShortcutArtifact,
     options: &ShortcutImportOptions,
+    registry: &Registry,
 ) -> Result<ShortcutImportPlan, ShortcutImportPlanError> {
     if !base.is_compatible() {
         return Err(ShortcutImportPlanError::IncompatibleLibrary);
     }
-    let base_audit = base.active().audit(&CommandRegistry);
+    let base_audit = base.active().audit(registry);
     if !base_audit.is_valid() {
         return Err(ShortcutImportPlanError::InvalidBaseProfile(
             blocking_messages(&base_audit),
         ));
     }
-    let imported_audit = artifact.profile().audit(&CommandRegistry);
+    let imported_audit = artifact.profile().audit(registry);
     let non_resolvable = imported_audit
         .issues()
         .iter()
@@ -303,9 +304,9 @@ pub fn plan_shortcut_import(
     };
     let baseline_profile = working_profile.clone();
     let default_profile = ShortcutPreferences::default();
-    let baseline_slices = profile_slices(&baseline_profile);
-    let default_slices = profile_slices(&default_profile);
-    let imported_slices = profile_slices(artifact.profile());
+    let baseline_slices = profile_slices(&baseline_profile, registry);
+    let default_slices = profile_slices(&default_profile, registry);
+    let imported_slices = profile_slices(artifact.profile(), registry);
     let mut working_slices = baseline_slices.clone();
     let mut imported_keys = BTreeSet::new();
     let mut conflicts = Vec::new();
@@ -322,7 +323,7 @@ pub fn plan_shortcut_import(
     }
 
     if options.merge_policy == ShortcutMergePolicy::ReplaceCurrentUserBindings {
-        for command in command_registry().ordered() {
+        for command in registry.ordered() {
             if !artifact
                 .manifest()
                 .coverage
@@ -352,7 +353,7 @@ pub fn plan_shortcut_import(
     // Known records outside the declared context coverage are not part of
     // this transaction. In particular, their forward-compatible extra fields
     // must not leak into an unrelated partial-context Replace.
-    let mut commands_to_apply = command_registry()
+    let mut commands_to_apply = registry
         .ordered()
         .filter(|command| imported_command_ids.contains(command.key.as_str()))
         .filter(|command| {
@@ -365,7 +366,7 @@ pub fn plan_shortcut_import(
         .collect::<BTreeSet<_>>();
     if options.merge_policy == ShortcutMergePolicy::ReplaceCurrentUserBindings {
         commands_to_apply.extend(
-            command_registry()
+            registry
                 .ordered()
                 .filter(|command| {
                     artifact
@@ -377,7 +378,7 @@ pub fn plan_shortcut_import(
                 .map(|command| command.key.as_str().to_owned()),
         );
     }
-    for command in command_registry().ordered() {
+    for command in registry.ordered() {
         if !imported_command_ids.contains(command.key.as_str())
             || !artifact
                 .manifest()
@@ -447,6 +448,7 @@ pub fn plan_shortcut_import(
         &working_slices,
         &default_slices,
         &commands_to_apply,
+        registry,
     )?;
     restore_known_command_extras(
         &mut working_profile,
@@ -505,6 +507,7 @@ pub fn plan_shortcut_import(
         options.conflict_policy,
         &mut conflicts,
         &mut summaries,
+        registry,
     )?;
     merge_unknown_profile_fields(
         &mut working_profile,
@@ -516,11 +519,11 @@ pub fn plan_shortcut_import(
         &mut summaries,
     )?;
 
-    working_slices = profile_slices(&working_profile);
+    working_slices = profile_slices(&working_profile, registry);
     let mut unresolved_internal_conflict = false;
     let mut seen_collisions = BTreeSet::new();
-    for _ in 0..(command_registry().order().len() * 2) {
-        let collisions = blocking_collisions(&working_profile);
+    for _ in 0..(registry.order().len() * 2) {
+        let collisions = blocking_collisions(&working_profile, registry);
         let Some(collision) = collisions
             .into_iter()
             .find(|collision| !seen_collisions.contains(&collision.identity()))
@@ -534,9 +537,9 @@ pub fn plan_shortcut_import(
             unresolved_internal_conflict = true;
             break;
         }
-        let class = CommandRegistry
+        let class = registry
             .resolve(&collision.left.command_id)
-            .and_then(|command| CommandRegistry.context(command))
+            .and_then(|command| registry.context(command))
             .and_then(binding_class);
         increment_summary(&mut summaries, class, |summary| summary.conflicts += 1);
         let decision = match options.conflict_policy {
@@ -617,6 +620,7 @@ pub fn plan_shortcut_import(
             &working_slices,
             &default_slices,
             &affected_commands,
+            registry,
         )?;
         restore_known_command_extras(
             &mut working_profile,
@@ -631,7 +635,7 @@ pub fn plan_shortcut_import(
     }
 
     let mut required_protected_confirmations = BTreeSet::new();
-    let pre_confirmation_audit = working_profile.audit(&CommandRegistry);
+    let pre_confirmation_audit = working_profile.audit(registry);
     for issue in pre_confirmation_audit.issues() {
         if issue.severity() == ShortcutProfileIssueSeverity::Error
             && issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
@@ -640,7 +644,7 @@ pub fn plan_shortcut_import(
             if options
                 .protected_confirmations
                 .contains(command_id.as_str())
-                && let Some(command) = CommandRegistry.resolve(command_id.as_str())
+                && let Some(command) = registry.resolve(command_id.as_str())
             {
                 working_profile.acknowledge_protected_override(command);
             } else {
@@ -658,7 +662,7 @@ pub fn plan_shortcut_import(
             }
         }
     }
-    let audit = working_profile.audit(&CommandRegistry);
+    let audit = working_profile.audit(registry);
 
     let mut candidate_library = base.clone();
     match options.merge_policy {
@@ -711,10 +715,10 @@ fn imported_command_ids(artifact: &DecodedShortcutArtifact) -> BTreeSet<String> 
         .unwrap_or_default()
 }
 
-fn profile_slices(profile: &ShortcutPreferences) -> SliceMap {
+fn profile_slices(profile: &ShortcutPreferences, registry: &Registry) -> SliceMap {
     let mut slices = BTreeMap::new();
-    for command in CommandRegistry.commands().iter().copied() {
-        let bindings = profile.resolved_bindings(&CommandRegistry, command);
+    for command in registry.commands().iter().copied() {
+        let bindings = profile.resolved_bindings(registry, command);
         for slot in ShortcutBindingSlot::ALL {
             for platform in CommandPlatform::ALL {
                 let sequence = bindings
@@ -747,8 +751,9 @@ fn apply_slice_map(
     slices: &SliceMap,
     defaults: &SliceMap,
     command_ids: &BTreeSet<String>,
+    registry: &Registry,
 ) -> Result<(), ShortcutImportPlanError> {
-    for command in CommandRegistry.commands().iter().copied() {
+    for command in registry.commands().iter().copied() {
         if !command_ids.contains(command.as_str()) {
             continue;
         }
@@ -964,6 +969,7 @@ fn merge_unknown_commands(
     conflict_policy: ShortcutConflictPolicy,
     conflicts: &mut Vec<ShortcutImportConflict>,
     summaries: &mut BTreeMap<Option<ImportBindingClass>, ImportClassSummary>,
+    registry: &Registry,
 ) -> Result<(), ShortcutImportPlanError> {
     let imported_commands = artifact
         .portable_profile()
@@ -971,7 +977,7 @@ fn merge_unknown_commands(
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let known = CommandRegistry
+    let known = registry
         .commands()
         .iter()
         .map(|command| command.as_str())
@@ -1200,7 +1206,10 @@ impl BlockingCollision {
     }
 }
 
-fn blocking_collisions(profile: &ShortcutPreferences) -> Vec<BlockingCollision> {
+fn blocking_collisions(
+    profile: &ShortcutPreferences,
+    registry: &Registry,
+) -> Vec<BlockingCollision> {
     #[derive(Clone)]
     struct Entry {
         key: SliceKey,
@@ -1208,11 +1217,11 @@ fn blocking_collisions(profile: &ShortcutPreferences) -> Vec<BlockingCollision> 
         context: ShortcutContext,
     }
     let mut entries = Vec::new();
-    for command in command_registry().ordered() {
+    for command in registry.ordered() {
         // `effective_bindings` deliberately fails closed to immutable defaults
         // when a profile is invalid. Collision repair must inspect the actual
         // candidate that made the profile invalid, so use its resolved slices.
-        for binding in collision_bindings(profile, command) {
+        for binding in collision_bindings(profile, command, registry) {
             for platform in binding.platforms() {
                 entries.push(Entry {
                     key: slice_key(command.key, binding.slot(), *platform),
@@ -1256,8 +1265,9 @@ fn blocking_collisions(profile: &ShortcutPreferences) -> Vec<BlockingCollision> 
 fn collision_bindings(
     profile: &ShortcutPreferences,
     command: &CommandSpec,
+    registry: &Registry,
 ) -> Vec<crate::state::shortcuts::ResolvedShortcutBinding> {
-    let bindings = profile.resolved_bindings(&CommandRegistry, command.key);
+    let bindings = profile.resolved_bindings(registry, command.key);
     if !matches!(
         command.context,
         ShortcutContext::EditContext

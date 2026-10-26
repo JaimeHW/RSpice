@@ -8,6 +8,7 @@ use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::projection::*;
 use crate::workbench::shortcuts::artifacts::schema::ShortcutArtifactScope as ShortcutExportScope;
 use egui::os::OperatingSystem;
@@ -38,7 +39,7 @@ fn user_override_json_is_deterministic_private_and_platform_sliced() {
         operating_system: OperatingSystem::Windows,
         current_contexts: Vec::new(),
     };
-    let model = build_shortcut_reference_model(&profile, &request).unwrap();
+    let model = build_shortcut_reference_model(&profile, &request, command_registry()).unwrap();
     let first = serialize_shortcut_reference_json(&model).unwrap();
     let second = serialize_shortcut_reference_json(&model).unwrap();
     assert_eq!(first, second);

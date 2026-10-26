@@ -14,6 +14,7 @@ use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::shortcuts::artifacts::merge::*;
 use egui::Key;
@@ -92,6 +93,7 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
                 conflict_policy,
                 ..ShortcutImportOptions::default()
             },
+            command_registry(),
         )
         .unwrap();
 
@@ -146,6 +148,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
             conflict_policy: ShortcutConflictPolicy::UseImportedBinding,
             ..ShortcutImportOptions::default()
         },
+        command_registry(),
     )
     .unwrap();
 
@@ -240,6 +243,7 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
             merge_policy: ShortcutMergePolicy::ReplaceCurrentUserBindings,
             ..ShortcutImportOptions::default()
         },
+        command_registry(),
     )
     .unwrap();
     let candidate = serde_json::to_value(plan.candidate_library().active()).unwrap();
@@ -302,8 +306,13 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
         conflict_policy: ShortcutConflictPolicy::UseImportedBinding,
         ..ShortcutImportOptions::default()
     };
-    let review =
-        plan_shortcut_import(&ShortcutProfileLibrary::default(), &artifact, &options).unwrap();
+    let review = plan_shortcut_import(
+        &ShortcutProfileLibrary::default(),
+        &artifact,
+        &options,
+        command_registry(),
+    )
+    .unwrap();
 
     assert!(!review.can_apply());
     assert_eq!(
@@ -317,6 +326,7 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
             protected_confirmations: BTreeSet::from([Command::Save.stable_id().to_owned()]),
             ..options
         },
+        command_registry(),
     )
     .unwrap();
     assert!(confirmed.can_apply());
@@ -346,6 +356,7 @@ fn apply_persists_before_live_mutation() {
             conflict_policy: ShortcutConflictPolicy::UseImportedBinding,
             ..ShortcutImportOptions::default()
         },
+        command_registry(),
     )
     .unwrap();
     let before = library.clone();

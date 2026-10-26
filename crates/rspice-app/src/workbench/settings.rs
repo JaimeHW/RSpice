@@ -68,6 +68,7 @@ fn render_preferences(cx: &mut Cx<'_, SettingsFeature>, ctx: &egui::Context) {
         workbench: cx.wb,
         platform: cx.platform,
         cloud: cx.peers.cloud(),
+        commands: cx.commands,
     }
     .render(ctx);
 }

@@ -24,6 +24,7 @@
 //! rather than overwritten. A file from a newer build loads what this build
 //! knows and writes back everything else exactly as it found it.
 
+use crate::workbench::framework::command_registry::Registry;
 use std::collections::BTreeMap;
 use std::hash::Hasher as _;
 use std::time::Duration;
@@ -813,6 +814,7 @@ pub fn stage_settings_import(
     model: &Model,
     source_name: &str,
     bytes: &[u8],
+    registry: &Registry,
 ) -> Result<(ShortcutProfileLibrary, StagedSettingsImport), String> {
     let Value::Object(mut file) = parse(bytes, MAX_SETTINGS_FILE_BYTES)? else {
         return Err("it is not a JSON object".to_owned());
@@ -838,7 +840,7 @@ pub fn stage_settings_import(
             .ok_or_else(|| "it holds no keyboard shortcuts".to_owned())?,
     )
     .map_err(|error| format!("its keyboard shortcuts could not be read: {error}"))?;
-    crate::workbench::shortcuts::library_persistence::validate_library(&imported)
+    crate::workbench::shortcuts::library_persistence::validate_library(&imported, registry)
         .map_err(|reason| format!("its keyboard shortcuts are not usable: {reason}"))?;
     let mut shortcuts = model.preferences.shortcut_profiles().clone();
     shortcuts

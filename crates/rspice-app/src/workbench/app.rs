@@ -24,6 +24,7 @@
 //! 2. Observable for efficient updates
 //! 3. Serializable for session recovery
 
+use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 
 use crate::workbench::app_state::AppState;
@@ -455,7 +456,7 @@ impl RSpiceApp {
 
         state
             .shortcut_library_parts()
-            .initialize_shortcut_library_persistence(&cc.egui_ctx);
+            .initialize_shortcut_library_persistence(&cc.egui_ctx, command_registry());
         state.take_shortcut_resolver_reset();
         state
             .workbench

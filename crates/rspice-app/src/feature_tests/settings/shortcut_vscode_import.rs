@@ -6,7 +6,13 @@ use crate::workbench::shortcuts::artifacts::vscode::*;
 use std::collections::BTreeSet;
 
 pub(crate) fn vscode(source: &str, platform: VscodeHostPlatform) -> VscodeShortcutAdaptation {
-    adapt_vscode_keybindings(r"C:\private\keybindings.json", source.as_bytes(), platform).unwrap()
+    adapt_vscode_keybindings(
+        r"C:\private\keybindings.json",
+        source.as_bytes(),
+        platform,
+        command_registry(),
+    )
+    .unwrap()
 }
 
 pub(crate) fn has_code(report: &VscodeImportReport, code: VscodeDiagnosticCode) -> bool {
@@ -150,9 +156,13 @@ fn native_detection_retains_exact_source_bytes_and_digest() {
         },
         "profile":{"commands":{}},
     }"#;
-    let detected =
-        detect_shortcut_artifact(r"C:\private\native.json", source, VscodeHostPlatform::Linux)
-            .unwrap();
+    let detected = detect_shortcut_artifact(
+        r"C:\private\native.json",
+        source,
+        VscodeHostPlatform::Linux,
+        command_registry(),
+    )
+    .unwrap();
     let DetectedShortcutArtifact::RSpice(native) = detected else {
         panic!("expected native artifact");
     };
@@ -195,14 +205,22 @@ fn diagnostics_do_not_echo_source_values_or_paths() {
 
 #[test]
 fn unsupported_root_and_unterminated_jsonc_have_stable_codes() {
-    let root_error =
-        detect_shortcut_artifact("bad.json", br#"{"commands":{}}"#, VscodeHostPlatform::Linux)
-            .unwrap_err();
+    let root_error = detect_shortcut_artifact(
+        "bad.json",
+        br#"{"commands":{}}"#,
+        VscodeHostPlatform::Linux,
+        command_registry(),
+    )
+    .unwrap_err();
     assert_eq!(root_error.code(), "shortcut-adapter.unknown-object");
 
-    let comment_error =
-        detect_shortcut_artifact("bad.json", b"[/* private", VscodeHostPlatform::Linux)
-            .unwrap_err();
+    let comment_error = detect_shortcut_artifact(
+        "bad.json",
+        b"[/* private",
+        VscodeHostPlatform::Linux,
+        command_registry(),
+    )
+    .unwrap_err();
     assert_eq!(
         comment_error.code(),
         "shortcut-adapter.unterminated-comment"

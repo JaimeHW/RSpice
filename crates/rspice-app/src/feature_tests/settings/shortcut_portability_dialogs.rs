@@ -7,6 +7,7 @@ use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 use crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::DecodedShortcutArtifact;
 use crate::workbench::shortcuts::artifacts::DetectedShortcutArtifact;
 use crate::workbench::shortcuts::artifacts::ImportBindingClass;
@@ -35,6 +36,7 @@ pub(crate) fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcu
             operating_system: egui::os::OperatingSystem::Windows,
             current_contexts: Vec::new(),
         },
+        command_registry(),
     )
     .unwrap();
     decode_shortcut_artifact_json(
@@ -51,6 +53,7 @@ pub(crate) fn detected(profile: &ShortcutPreferences) -> DetectedShortcutArtifac
             CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
         ),
+        command_registry(),
     )
     .unwrap();
     let json = serialize_shortcut_reference_json(&model).unwrap();
@@ -58,6 +61,7 @@ pub(crate) fn detected(profile: &ShortcutPreferences) -> DetectedShortcutArtifac
         "rspice-shortcuts.json",
         json.as_bytes(),
         crate::workbench::shortcuts::artifacts::VscodeHostPlatform::Windows,
+        command_registry(),
     )
     .unwrap()
 }
@@ -70,7 +74,7 @@ pub(crate) fn open_with_artifact(
     state.open();
     state.artifact = Some(artifact);
     state.plan_dirty = true;
-    state.refresh_plan(base);
+    state.refresh_plan(base, command_registry());
 }
 
 #[test]
@@ -193,7 +197,7 @@ fn stale_base_replans_before_commit() {
     })
     .unwrap()
     .unwrap();
-    state.synchronize_plan(&base);
+    state.synchronize_plan(&base, command_registry());
     assert_ne!(
         state.plan.as_ref().unwrap().base_revision(),
         original_revision
@@ -208,7 +212,13 @@ fn stale_base_replans_before_commit() {
 fn failed_commit_cancellation_keeps_ownership_until_receipt_arrives() {
     let base = ShortcutProfileLibrary::default();
     let artifact = exported_artifact(&ShortcutPreferences::default());
-    let plan = plan_shortcut_import(&base, &artifact, &ShortcutImportOptions::default()).unwrap();
+    let plan = plan_shortcut_import(
+        &base,
+        &artifact,
+        &ShortcutImportOptions::default(),
+        command_registry(),
+    )
+    .unwrap();
     let mut published = base.clone();
     let receipt = apply_shortcut_import(&mut published, &plan, |_| Ok(())).unwrap();
     let receipt_source = receipt.source_name().to_owned();
@@ -257,6 +267,7 @@ fn export_effect_contains_fully_prepared_private_artifact() {
                     operating_system: egui::os::OperatingSystem::Windows,
                     current_contexts: &[ShortcutContext::EngineeringCanvas],
                 },
+                command_registry(),
             );
         },
     );
@@ -284,6 +295,7 @@ fn export_effect_contains_fully_prepared_private_artifact() {
                     operating_system: egui::os::OperatingSystem::Windows,
                     current_contexts: &[ShortcutContext::EngineeringCanvas],
                 },
+                command_registry(),
             );
         },
     );
@@ -323,6 +335,7 @@ fn modal_accessibility_tree_exposes_exact_titles_and_summary_table() {
                     operating_system: egui::os::OperatingSystem::Windows,
                     current_contexts: &[],
                 },
+                command_registry(),
             );
         },
     );
@@ -388,6 +401,7 @@ fn pending_import_controls_are_accessibly_disabled_and_source_keeps_picker_seman
                     operating_system: egui::os::OperatingSystem::Windows,
                     current_contexts: &[],
                 },
+                command_registry(),
             );
         },
     );
@@ -431,7 +445,7 @@ fn pending_render_is_structurally_immutable_even_for_incomplete_restored_state()
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let _ = render_import_body(ui, &mut state, &library);
+                let _ = render_import_body(ui, &mut state, &library, command_registry());
             });
         },
     );
@@ -465,6 +479,7 @@ fn pending_export_controls_are_accessibly_disabled() {
                     operating_system: egui::os::OperatingSystem::Windows,
                     current_contexts: &[],
                 },
+                command_registry(),
             );
         },
     );

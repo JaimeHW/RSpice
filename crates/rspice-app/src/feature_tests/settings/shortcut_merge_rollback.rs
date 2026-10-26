@@ -14,6 +14,7 @@ use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::merge::*;
 use crate::workbench::shortcuts::artifacts::schema::DecodedShortcutArtifact;
 use crate::workbench::shortcuts::artifacts::{
@@ -34,6 +35,7 @@ pub(crate) fn artifact_from(profile: &ShortcutPreferences) -> DecodedShortcutArt
             operating_system: OperatingSystem::Windows,
             current_contexts: Vec::new(),
         },
+        command_registry(),
     )
     .unwrap();
     decode_shortcut_artifact_json(
@@ -190,6 +192,7 @@ fn same_target_conflict_honors_every_resolution_policy() {
                 conflict_policy,
                 ..ShortcutImportOptions::default()
             },
+            command_registry(),
         )
         .unwrap();
         assert!(plan.can_apply());
@@ -237,6 +240,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
             false,
         ),
         &ShortcutImportOptions::default(),
+        command_registry(),
     )
     .unwrap();
 
@@ -303,6 +307,7 @@ fn single_platform_replace_preserves_other_platform_slices() {
             merge_policy: ShortcutMergePolicy::ReplaceCurrentUserBindings,
             ..ShortcutImportOptions::default()
         },
+        command_registry(),
     )
     .unwrap();
 
@@ -365,6 +370,7 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
             merge_policy: ShortcutMergePolicy::ReplaceCurrentUserBindings,
             ..ShortcutImportOptions::default()
         },
+        command_registry(),
     )
     .unwrap();
 
@@ -437,6 +443,7 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
             false,
         ),
         &ShortcutImportOptions::default(),
+        command_registry(),
     )
     .unwrap();
     let candidate = serde_json::to_value(plan.candidate_library().active()).unwrap();
@@ -491,6 +498,7 @@ fn full_replace_resets_omitted_known_and_unknown_command_overrides() {
             merge_policy: ShortcutMergePolicy::ReplaceCurrentUserBindings,
             ..ShortcutImportOptions::default()
         },
+        command_registry(),
     )
     .unwrap();
     let candidate = serde_json::to_value(plan.candidate_library().active()).unwrap();
@@ -531,6 +539,7 @@ fn imported_unknown_profile_and_command_records_are_preserved() {
         &ShortcutProfileLibrary::default(),
         &artifact_value_with_coverage(raw, &["all"], &CommandPlatform::ALL, true),
         &ShortcutImportOptions::default(),
+        command_registry(),
     )
     .unwrap();
     let candidate = serde_json::to_value(plan.candidate_library().active()).unwrap();
@@ -566,6 +575,7 @@ fn unknown_envelope_metadata_is_reported_as_intentionally_omitted() {
         &ShortcutProfileLibrary::default(),
         &artifact,
         &ShortcutImportOptions::default(),
+        command_registry(),
     )
     .unwrap();
 
@@ -607,7 +617,12 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
         ..ShortcutImportOptions::default()
     };
     assert!(matches!(
-        plan_shortcut_import(&base, &artifact_from(&imported), &options),
+        plan_shortcut_import(
+            &base,
+            &artifact_from(&imported),
+            &options,
+            command_registry()
+        ),
         Err(ShortcutImportPlanError::Preset(
             ShortcutProfileLibraryError::DuplicateName(_)
         ))
@@ -619,6 +634,7 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
             overwrite_existing_preset: true,
             ..options
         },
+        command_registry(),
     )
     .unwrap();
     assert_eq!(
@@ -647,6 +663,7 @@ fn apply_rejects_a_stale_revision_before_persistence() {
         &library,
         &artifact_from(&ShortcutPreferences::default()),
         &ShortcutImportOptions::default(),
+        command_registry(),
     )
     .unwrap();
     let _ = library.active_mut().unwrap();
@@ -678,7 +695,8 @@ fn future_library_is_rejected_without_discarding_raw_state() {
         plan_shortcut_import(
             &library,
             &artifact_from(&ShortcutPreferences::default()),
-            &ShortcutImportOptions::default()
+            &ShortcutImportOptions::default(),
+            command_registry(),
         )
         .unwrap_err(),
         ShortcutImportPlanError::IncompatibleLibrary

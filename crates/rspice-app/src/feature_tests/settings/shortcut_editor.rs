@@ -28,7 +28,8 @@ fn capture_platforms_preserve_defaults_and_protected_alternates() {
         binding_platforms(
             &profile,
             Command::Save.key(),
-            ShortcutBindingSlot::Alternate
+            ShortcutBindingSlot::Alternate,
+            command_registry(),
         ),
         vec![
             CommandPlatform::Browser,
@@ -85,15 +86,22 @@ fn search_matches_context_and_binding_text() {
         ..ShortcutEditorState::default()
     };
     let os = egui::os::OperatingSystem::Windows;
-    assert!(filtered_commands(&editor, os).contains(&Command::GenerateNetlist.key()));
+    assert!(
+        filtered_commands(&editor, os, command_registry())
+            .contains(&Command::GenerateNetlist.key())
+    );
     editor.query = "verification".to_owned();
-    assert!(filtered_commands(&editor, os).iter().all(|command| {
-        editor_context(*command) == ShortcutEditorContext::Verification
-            || command_registry()
-                .label(*command)
-                .to_lowercase()
-                .contains("verification")
-    }));
+    assert!(
+        filtered_commands(&editor, os, command_registry())
+            .iter()
+            .all(|command| {
+                editor_context(*command, command_registry()) == ShortcutEditorContext::Verification
+                    || command_registry()
+                        .label(*command)
+                        .to_lowercase()
+                        .contains("verification")
+            })
+    );
 }
 
 #[test]
@@ -126,7 +134,7 @@ fn ordered_same_frame_keydowns_produce_one_multi_stroke_sequence() {
             ],
             ..egui::RawInput::default()
         },
-        |ctx| process_key_capture(ctx, &mut editor),
+        |ctx| process_key_capture(ctx, &mut editor, command_registry()),
     );
 
     assert!(editor.recording.is_none());
@@ -136,6 +144,7 @@ fn ordered_same_frame_keydowns_produce_one_multi_stroke_sequence() {
             Command::Save.key(),
             ShortcutBindingSlot::Primary,
             egui::os::OperatingSystem::Windows,
+            command_registry(),
         )
         .as_deref(),
         Some("Ctrl+K Ctrl+C")
@@ -208,6 +217,7 @@ fn valid_save_atomically_replaces_the_live_profile() {
             Command::Save.key(),
             ShortcutBindingSlot::Primary,
             egui::os::OperatingSystem::Windows,
+            command_registry(),
         )
         .as_deref(),
         Some("F6")

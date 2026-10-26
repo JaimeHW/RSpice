@@ -3,6 +3,7 @@
 //! change. Nothing here reads or writes the real settings folder.
 
 use crate::workbench::app_state::session::preferences_file::SHOWN_FOLDERS;
+use crate::workbench::commands::vocabulary::command_registry;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -583,8 +584,13 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
         .shortcut_library_parts()
         .enable_volatile_test_shortcut_persistence();
 
-    let (shortcuts, staged) = stage_settings_import(&target.model, "rspice-settings.json", &bytes)
-        .expect("a file RSpice exported imports");
+    let (shortcuts, staged) = stage_settings_import(
+        &target.model,
+        "rspice-settings.json",
+        &bytes,
+        command_registry(),
+    )
+    .expect("a file RSpice exported imports");
     assert_eq!(
         settings_of(&target),
         settings_of(&AppState::default()),
@@ -597,7 +603,7 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
     assert!(matches!(
         target
             .shortcut_library_parts()
-            .publish_shortcut_library_candidate(&shortcuts, &ctx),
+            .publish_shortcut_library_candidate(&shortcuts, &ctx, command_registry()),
         Ok(crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPublication::Published)
     ));
     target
@@ -663,7 +669,8 @@ fn a_malformed_settings_file_changes_nothing() {
             "keyboard shortcuts",
         ),
     ] {
-        let refusal = stage_settings_import(&state.model, "bad.json", &bytes).expect_err(case);
+        let refusal = stage_settings_import(&state.model, "bad.json", &bytes, command_registry())
+            .expect_err(case);
         assert!(refusal.contains(reason), "{case}: {refusal}");
     }
     assert_eq!(settings_of(&state), before);
@@ -682,8 +689,13 @@ fn an_import_whose_shortcuts_cannot_be_saved_changes_nothing() {
     let before = settings_of(&state);
     let file_before = std::fs::read(&path).unwrap();
 
-    let (_shortcuts, staged) =
-        stage_settings_import(&state.model, "rspice-settings.json", &bytes).unwrap();
+    let (_shortcuts, staged) = stage_settings_import(
+        &state.model,
+        "rspice-settings.json",
+        &bytes,
+        command_registry(),
+    )
+    .unwrap();
     state
         .preferences_file_parts()
         .finish_settings_import(staged, Err("the shortcut store is unavailable".to_owned()));

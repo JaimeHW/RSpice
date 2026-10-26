@@ -4,6 +4,7 @@
 //! merely ready for the caller's review/merge transaction; picker cancellation
 //! is represented explicitly and is never reported as an import.
 
+use crate::workbench::framework::command_registry::Registry;
 use std::fmt;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -190,6 +191,7 @@ fn detect_source(
     source_name: String,
     source_bytes: Vec<u8>,
     platform: VscodeHostPlatform,
+    registry: &Registry,
 ) -> Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError> {
     ensure_source_limit(source_bytes.len() as u64, &source_name)?;
     std::str::from_utf8(&source_bytes).map_err(|error| {
@@ -199,7 +201,7 @@ fn detect_source(
             format!("selected shortcut source is not valid UTF-8: {error}"),
         )
     })?;
-    let detected = super::detect_shortcut_artifact(&source_name, &source_bytes, platform)
+    let detected = super::detect_shortcut_artifact(&source_name, &source_bytes, platform, registry)
         .map_err(|error| ShortcutArtifactImportError::detection(source_name.clone(), error))?;
     Ok(ShortcutArtifactImportOutcome::Ready(Box::new(
         ReadyShortcutArtifactSource {
@@ -326,6 +328,7 @@ impl ShortcutArtifactImportIo for NativeShortcutArtifactImportIo {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn import_shortcut_artifact_source_with_io(
     io: &(impl ShortcutArtifactImportIo + ?Sized),
+    registry: &Registry,
 ) -> Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError> {
     let platform = io.host_platform()?;
     let Some(path) = io.show_open_dialog().map_err(|error| {
@@ -359,14 +362,15 @@ pub fn import_shortcut_artifact_source_with_io(
             format!("could not read selected shortcut source: {error}"),
         )
     })?;
-    detect_source(source_name, bytes, platform)
+    detect_source(source_name, bytes, platform, registry)
 }
 
 /// Open the production native source picker and structurally detect its bytes.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn import_shortcut_artifact_source()
--> Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError> {
-    import_shortcut_artifact_source_with_io(&NativeShortcutArtifactImportIo)
+pub fn import_shortcut_artifact_source(
+    registry: &Registry,
+) -> Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError> {
+    import_shortcut_artifact_source_with_io(&NativeShortcutArtifactImportIo, registry)
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -441,11 +445,12 @@ fn browser_host_platform() -> Result<VscodeHostPlatform, ShortcutArtifactImportE
 fn browser_picker_result(
     platform: VscodeHostPlatform,
     result: Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
+    registry: &Registry,
 ) -> Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError> {
     match result {
         Ok(Some(file)) => {
             let source_name = normalized_source_filename(&file.name)?;
-            detect_source(source_name, file.contents.into_bytes(), platform)
+            detect_source(source_name, file.contents.into_bytes(), platform, registry)
         }
         Ok(None) => Ok(ShortcutArtifactImportOutcome::Cancelled),
         Err(error) => {
@@ -477,7 +482,9 @@ fn complete_browser_shortcut_artifact_import(
 
 /// Start one browser file-picker operation under the shared import lease.
 #[cfg(target_arch = "wasm32")]
-pub fn start_browser_shortcut_artifact_import() -> Result<(), ShortcutArtifactImportError> {
+pub fn start_browser_shortcut_artifact_import(
+    registry: &'static Registry,
+) -> Result<(), ShortcutArtifactImportError> {
     let platform = browser_host_platform()?;
     let token = begin_browser_shortcut_artifact_import()?;
     crate::workbench::browser::file_import::pick_text_file(
@@ -487,7 +494,7 @@ pub fn start_browser_shortcut_artifact_import() -> Result<(), ShortcutArtifactIm
             if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
-            let result = browser_picker_result(platform, result);
+            let result = browser_picker_result(platform, result, registry);
             let _ = complete_browser_shortcut_artifact_import(token, result);
         },
     );
@@ -638,7 +645,11 @@ mod tests {
             ..FakeIo::ready(Vec::new())
         };
 
-        let outcome = import_shortcut_artifact_source_with_io(&io).expect("cancel is valid");
+        let outcome = import_shortcut_artifact_source_with_io(
+            &io,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .expect("cancel is valid");
 
         assert_eq!(outcome, ShortcutArtifactImportOutcome::Cancelled);
         assert_eq!(io.picks.get(), 1);
@@ -650,7 +661,13 @@ mod tests {
     fn native_jsonc_retains_exact_bytes_digest_and_stable_filename() {
         let io = FakeIo::ready(NATIVE_JSONC.to_vec());
 
-        let source = ready(import_shortcut_artifact_source_with_io(&io).expect("source detects"));
+        let source = ready(
+            import_shortcut_artifact_source_with_io(
+                &io,
+                crate::workbench::commands::vocabulary::command_registry(),
+            )
+            .expect("source detects"),
+        );
 
         assert_eq!(source.source_name(), "keybindings.jsonc");
         assert_eq!(source.source_bytes(), NATIVE_JSONC);
@@ -670,9 +687,12 @@ mod tests {
             ..FakeIo::ready(Vec::new())
         };
         assert_eq!(
-            import_shortcut_artifact_source_with_io(&picker)
-                .unwrap_err()
-                .kind(),
+            import_shortcut_artifact_source_with_io(
+                &picker,
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .unwrap_err()
+            .kind(),
             ShortcutArtifactImportErrorKind::Picker
         );
 
@@ -681,9 +701,12 @@ mod tests {
             ..FakeIo::ready(Vec::new())
         };
         assert_eq!(
-            import_shortcut_artifact_source_with_io(&read)
-                .unwrap_err()
-                .kind(),
+            import_shortcut_artifact_source_with_io(
+                &read,
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .unwrap_err()
+            .kind(),
             ShortcutArtifactImportErrorKind::Read
         );
 
@@ -693,22 +716,32 @@ mod tests {
                 .expect("test limit fits usize")
         ]);
         assert_eq!(
-            import_shortcut_artifact_source_with_io(&oversized)
-                .unwrap_err()
-                .kind(),
+            import_shortcut_artifact_source_with_io(
+                &oversized,
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .unwrap_err()
+            .kind(),
             ShortcutArtifactImportErrorKind::ByteLimit
         );
 
         let utf8 = FakeIo::ready(vec![0xff]);
         assert_eq!(
-            import_shortcut_artifact_source_with_io(&utf8)
-                .unwrap_err()
-                .kind(),
+            import_shortcut_artifact_source_with_io(
+                &utf8,
+                crate::workbench::commands::vocabulary::command_registry()
+            )
+            .unwrap_err()
+            .kind(),
             ShortcutArtifactImportErrorKind::InvalidUtf8
         );
 
         let detection = FakeIo::ready(b"not json".to_vec());
-        let error = import_shortcut_artifact_source_with_io(&detection).unwrap_err();
+        let error = import_shortcut_artifact_source_with_io(
+            &detection,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ShortcutArtifactImportErrorKind::Detection);
         assert_eq!(error.cause_code(), Some("shortcut-adapter.invalid-json"));
         assert_eq!(error.source_name(), Some("keybindings.jsonc"));
@@ -725,7 +758,11 @@ mod tests {
             ..FakeIo::ready(NATIVE_JSONC.to_vec())
         };
 
-        let error = import_shortcut_artifact_source_with_io(&io).unwrap_err();
+        let error = import_shortcut_artifact_source_with_io(
+            &io,
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .unwrap_err();
 
         assert_eq!(
             error.kind(),
@@ -764,10 +801,16 @@ mod tests {
     fn detection_is_deterministic_and_does_not_mutate_live_shortcuts() {
         let live = crate::state::shortcuts::ShortcutProfileLibrary::default();
         let before = serde_json::to_value(&live).expect("live library serializes");
-        let first = import_shortcut_artifact_source_with_io(&FakeIo::ready(NATIVE_JSONC.to_vec()))
-            .expect("first detects");
-        let second = import_shortcut_artifact_source_with_io(&FakeIo::ready(NATIVE_JSONC.to_vec()))
-            .expect("second detects");
+        let first = import_shortcut_artifact_source_with_io(
+            &FakeIo::ready(NATIVE_JSONC.to_vec()),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .expect("first detects");
+        let second = import_shortcut_artifact_source_with_io(
+            &FakeIo::ready(NATIVE_JSONC.to_vec()),
+            crate::workbench::commands::vocabulary::command_registry(),
+        )
+        .expect("second detects");
 
         assert_eq!(first, second);
         assert_eq!(
@@ -780,7 +823,11 @@ mod tests {
     fn browser_picker_cancel_polls_as_explicit_cancelled_outcome() {
         reset_browser_test_state();
         let token = begin_browser_shortcut_artifact_import().expect("lease starts");
-        let result = browser_picker_result(VscodeHostPlatform::Windows, Ok(None));
+        let result = browser_picker_result(
+            VscodeHostPlatform::Windows,
+            Ok(None),
+            crate::workbench::commands::vocabulary::command_registry(),
+        );
         assert!(complete_browser_shortcut_artifact_import(token, result));
 
         assert_eq!(
@@ -894,6 +941,7 @@ mod tests {
             Err(format!(
                 "Selected huge.json exceeds the supported {MAX_SHORTCUT_ARTIFACT_SOURCE_BYTES}-byte size limit"
             )),
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap_err();
         assert_eq!(limit.kind(), ShortcutArtifactImportErrorKind::ByteLimit);
@@ -901,6 +949,7 @@ mod tests {
         let utf8 = browser_picker_result(
             VscodeHostPlatform::Windows,
             Err("Selected file is not valid UTF-8: invalid byte".to_owned()),
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap_err();
         assert_eq!(utf8.kind(), ShortcutArtifactImportErrorKind::InvalidUtf8);
@@ -914,6 +963,7 @@ mod tests {
                     original_bytes: None,
                 },
             )),
+            crate::workbench::commands::vocabulary::command_registry(),
         )
         .unwrap_err();
         assert_eq!(detection.kind(), ShortcutArtifactImportErrorKind::Detection);
