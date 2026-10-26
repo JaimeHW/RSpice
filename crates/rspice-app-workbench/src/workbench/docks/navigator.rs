@@ -313,3 +313,278 @@ pub fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
     }
     (popup, keyboard_open)
 }
+
+pub fn nav_row_indented_styled(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    nav_row_indented_styled_with_metrics(
+        ui,
+        icon,
+        label,
+        selected,
+        meta,
+        level,
+        mono,
+        t.metrics.row_h,
+        tokens::FS_0,
+        tokens::FS_0,
+        false,
+        false,
+        egui::Sense::click(),
+    )
+}
+
+pub fn nav_row_indented_styled_with_metrics(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+    height: f32,
+    label_size: f32,
+    meta_size: f32,
+    expanded: bool,
+    child_guide: bool,
+    sense: egui::Sense,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
+    // The meta column is half of what the row says. `bridge_drive  SIN · r1`
+    // states a family and a revision, `Libraries` rows state their cell count
+    // and whether they are writable, and a name built from the label alone
+    // hands a screen reader the half that is not the answer. Same shape as
+    // `ui::widgets::tree`, which is where the label-comma-meta spelling the
+    // rest of the product announces comes from.
+    let announced = meta.map_or_else(|| label.to_owned(), |meta| format!("{label}, {meta}"));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            &announced,
+        )
+    });
+    if selected || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            if selected {
+                t.color.accent_dim
+            } else {
+                t.color.bg_hover
+            },
+        );
+    }
+    if selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            t.color.accent,
+        );
+    }
+    let schematic_metrics = (height - SCHEMATIC_NAV_ROW_HEIGHT).abs() <= f32::EPSILON
+        && (label_size - SCHEMATIC_NAV_LABEL_SIZE).abs() <= f32::EPSILON;
+    let child_offset = if child_guide { 19.0 } else { 0.0 };
+    if child_guide {
+        ui.painter().vline(
+            rect.left() + 19.0,
+            rect.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
+    // `.nav-children` owns its 19 px hierarchy offset; its rows reset their
+    // own padding to the root-row contract instead of accumulating levels.
+    let indent = if child_guide {
+        0.0
+    } else {
+        14.0 * level as f32
+    };
+    if expanded {
+        WorkbenchIcon::ChevronDown.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(
+                    rect.left()
+                        + child_offset
+                        + if schematic_metrics { 14.0 } else { 12.0 }
+                        + indent,
+                    rect.center().y,
+                ),
+                egui::vec2(9.0, 9.0),
+            ),
+            t.color.text_faint,
+        );
+    }
+    icon.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(
+                rect.left() + child_offset + if schematic_metrics { 33.5 } else { 31.0 } + indent,
+                rect.center().y,
+            ),
+            egui::vec2(15.0, 15.0),
+        ),
+        if selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    let meta_width = meta.map_or(0.0, |meta| {
+        ui.painter()
+            .layout_no_wrap(
+                meta.to_owned(),
+                theme::mono(meta_size, FontWeight::Regular),
+                t.color.text_faint,
+            )
+            .size()
+            .x
+    });
+    let label_left =
+        rect.left() + child_offset + if schematic_metrics { 47.0 } else { 45.0 } + indent;
+    let label_right = if meta.is_some() {
+        rect.right() - 14.0 - meta_width
+    } else {
+        rect.right() - 8.0
+    };
+    ui.painter()
+        .with_clip_rect(egui::Rect::from_x_y_ranges(
+            label_left..=label_right.max(label_left),
+            rect.y_range(),
+        ))
+        .text(
+            egui::pos2(label_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            if mono {
+                theme::mono(label_size, FontWeight::Regular)
+            } else {
+                theme::sans(label_size, FontWeight::Regular)
+            },
+            if selected {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+    if let Some(meta) = meta {
+        ui.painter().text(
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(meta_size, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response
+}
+
+pub fn nav_row(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+) -> bool {
+    nav_row_response(ui, icon, label, selected, meta).clicked()
+}
+
+pub fn nav_row_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+) -> Response {
+    nav_row_indented_response(ui, icon, label, selected, meta, 0)
+}
+
+pub fn nav_row_indented_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+) -> Response {
+    nav_row_indented_styled(ui, icon, label, selected, meta, level, false)
+}
+
+pub fn schematic_nav_row_indented_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+    expanded: bool,
+    child_guide: bool,
+) -> Response {
+    let response = nav_row_indented_styled_with_metrics(
+        ui,
+        icon,
+        label,
+        selected,
+        meta,
+        level,
+        mono,
+        SCHEMATIC_NAV_ROW_HEIGHT,
+        SCHEMATIC_NAV_LABEL_SIZE,
+        SCHEMATIC_NAV_META_SIZE,
+        expanded,
+        child_guide,
+        // accessibility-pointer-shim: the sense is forwarded to
+        // `nav_row_indented_styled_with_metrics`, which allocates the row and
+        // owns both its WidgetInfo and its focus ring.
+        egui::Sense::click(),
+    );
+    // One level deeper than the row draws itself: the rail's own level 0 is
+    // the section band above it, which is what Left climbs out to.
+    rail::row(ui, &response, level + 1, None);
+    response
+}
+
+pub fn schematic_nav_row_indented_drag_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+    expanded: bool,
+    child_guide: bool,
+) -> Response {
+    let response = nav_row_indented_styled_with_metrics(
+        ui,
+        icon,
+        label,
+        selected,
+        meta,
+        level,
+        mono,
+        SCHEMATIC_NAV_ROW_HEIGHT,
+        SCHEMATIC_NAV_LABEL_SIZE,
+        SCHEMATIC_NAV_META_SIZE,
+        expanded,
+        child_guide,
+        // accessibility-pointer-shim: same forwarding wrapper, drag variant.
+        egui::Sense::click_and_drag(),
+    );
+    rail::row(ui, &response, level + 1, None);
+    response
+}
