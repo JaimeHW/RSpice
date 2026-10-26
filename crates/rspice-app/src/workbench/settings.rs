@@ -29,6 +29,7 @@ pub(crate) struct SettingsFeature;
 impl Feature for SettingsFeature {
     type State = SettingsState;
     type Session = WorkbenchSession;
+    type Handles = crate::workbench::framework::feature::NoHandles;
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SettingsCommand>();

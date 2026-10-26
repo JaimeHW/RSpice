@@ -25,6 +25,7 @@ use crate::workbench::hardcopy::commands::HardcopyCommand;
 fn cx(state: &mut AppState) -> Cx<'_, HardcopyFeature> {
     Cx::new(
         &mut *state.hardcopy,
+        &mut [],
         &mut state.model,
         &mut *state.workbench,
         &mut state.platform,
@@ -33,7 +34,11 @@ fn cx(state: &mut AppState) -> Cx<'_, HardcopyFeature> {
             export_io:
                 &rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         },
-        Peers::new(&mut *state.design, &*state.cloud, Some(&*state.results)),
+        Peers::new(
+            &mut *state.design,
+            Some(&*state.cloud),
+            Some(&*state.results),
+        ),
     )
 }
 

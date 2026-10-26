@@ -17,6 +17,7 @@ use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
 use crate::state::{ComponentType, ModelsPage};
+use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::results::commands::ResultsCommand;
@@ -51,8 +52,6 @@ pub enum Command {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
-    LiveSession,
-    PublishToWeb,
     ExportNetlist(crate::io::NetlistFormat),
     Exit,
     Undo,
@@ -263,8 +262,6 @@ pub enum Command {
     AutomationConsole,
     CommandPalette,
     KeyboardShortcuts,
-    AccountOrganization,
-    License,
     SpecialistToolBrowser,
     HelpCenter,
     ReleaseNotes,
@@ -347,8 +344,6 @@ impl Command {
             Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
-            Self::LiveSession => spec("live-session", "Live session…", "File"),
-            Self::PublishToWeb => spec("publish-web", "Publish to web…", "File"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
             }
@@ -824,12 +819,6 @@ impl Command {
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "Help"),
-            Self::AccountOrganization => spec(
-                "account-organization",
-                "Account and administration…",
-                "Account",
-            ),
-            Self::License => spec("license-activation", "License and activation…", "Help"),
             Self::SpecialistToolBrowser => spec(
                 "specialist-tool-browser",
                 "Specialist tool browser…",
@@ -907,8 +896,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
-    Command::LiveSession,
-    Command::PublishToWeb,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
@@ -1117,8 +1104,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AutomationConsole,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
-    Command::AccountOrganization,
-    Command::License,
     Command::SpecialistToolBrowser,
     Command::HelpCenter,
     Command::ReleaseNotes,
@@ -1154,8 +1139,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::ImportResultDataset.key(),
     HardcopyCommand::ExportSchematicSvg.key(),
     HardcopyCommand::ExportPublicationSnapshot.key(),
-    Command::LiveSession.key(),
-    Command::PublishToWeb.key(),
+    CloudCommand::LiveSession.key(),
+    CloudCommand::PublishToWeb.key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice).key(),
@@ -1418,8 +1403,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::AutomationConsole.key(),
     Command::CommandPalette.key(),
     Command::KeyboardShortcuts.key(),
-    Command::AccountOrganization.key(),
-    Command::License.key(),
+    CloudCommand::AccountOrganization.key(),
+    CloudCommand::License.key(),
     Command::SpecialistToolBrowser.key(),
     HardcopyCommand::ReportAuthoring.key(),
     ResultsCommand::AddVisualizationPane.key(),
@@ -1477,6 +1462,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(SettingsCommand::ALL.map(SettingsCommand::declared_spec))
                 .chain(HardcopyCommand::LISTED.map(HardcopyCommand::declared_spec))
                 .chain(ResultsCommand::ALL.map(ResultsCommand::declared_spec))
+                .chain(CloudCommand::ALL.map(CloudCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         )

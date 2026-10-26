@@ -4,6 +4,7 @@
 
 use crate::ui::tokens::{Mode, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::docks::drawers::*;
 use crate::workbench::layout::LayoutSpec;
@@ -139,7 +140,7 @@ fn mobile_organization_entry_opens_the_canonical_account_manager() {
         .iter()
         .find(|action| action.label == "Organization & licensing")
         .expect("the account entry");
-    assert_eq!(action.command, Command::AccountOrganization.key());
+    assert_eq!(action.command, CloudCommand::AccountOrganization.key());
 }
 
 /// A phone's title bar draws no bell, so the sheet carries it: the panel

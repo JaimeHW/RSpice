@@ -441,39 +441,43 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "3",
+        &["|app, OpenPublishWebDialog| app.open_publish_web_dialog()"],
+    ),
+    (
+        "4",
         &[
             "|app, FollowSchematicGrid|",
             "state.design.follow_schematic_grid(&state.model)",
         ],
     ),
-    ("4", &["self.state.take_shortcut_resolver_reset()"]),
+    ("5", &["self.state.take_shortcut_resolver_reset()"]),
     (
-        "5",
+        "6",
         &[
             "|app, ApplyWaveformDefaults|",
             "state.results.start_waveform_viewer_session(&state.model.preferences)",
         ],
     ),
     (
-        "6",
+        "7",
         &["|app, ExportDataset| file_action(app, FileMenuAction::ExportCsvWaveforms)"],
     ),
     (
-        "7",
+        "8",
         &[
             "|app, SelectAnalysisInstance(instance)|",
             "app.state.simulate.active_analysis_instance = instance",
         ],
     ),
     (
-        "8",
+        "9",
         &[
             "|app, RevealExecutedDeck(sequence)|",
             "crate::workbench::commands::result_navigation::open_task_deck(",
         ],
     ),
     (
-        "9",
+        "10",
         &[
             "|app, ShowWaveforms { visibility, selected, }|",
             "results.reveal_waveforms(visibility);",
@@ -482,21 +486,21 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
-        "10",
+        "11",
         &[
             "|app, SetFamilyFilter(filter)|",
             "crate::workbench::documents::result_document::set_family_filter(",
         ],
     ),
     (
-        "11",
+        "12",
         &[
             "|app, ShowSchematicAnnotations(annotations)|",
             "app.state.design.schematic_visibility.annotations = annotations;",
         ],
     ),
     (
-        "12",
+        "13",
         &[
             "|app, MarkFailureSites(run_sequence)|",
             "if app.state.highlight_active_failure_sites() {",
@@ -875,8 +879,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        12,
-        "`after_contribution` answers exactly the twelve requests it lists"
+        13,
+        "`after_contribution` answers exactly the thirteen requests it lists"
     );
 }
 

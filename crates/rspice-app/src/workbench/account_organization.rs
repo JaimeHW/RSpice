@@ -485,7 +485,7 @@ impl AccountAction {
 }
 
 fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::framework::command_registry::ids;
     match action {
         AccountAction::PersonalPreferences => {
             if app
@@ -509,7 +509,11 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
             }
         }
         AccountAction::ActivateLicense | AccountAction::ManageLicense => {
-            app.open_license_dialog();
+            let cloud = &mut *app.state.cloud;
+            crate::workbench::app::dialogs::license::open_license_dialog(
+                &mut cloud.license_dialog,
+                cloud.license.as_ref(),
+            );
         }
         AccountAction::SignIn => app.cloud.account.sign_in(),
         AccountAction::ReopenSignInPage => app.cloud.account.reopen_sign_in_page(),
@@ -517,28 +521,15 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
         AccountAction::SignOut => app.cloud.account.sign_out(),
         AccountAction::RefreshSession => app.cloud.account.refresh(),
         AccountAction::RevokeLease(lease_id) => app.cloud.account.revoke_lease(lease_id),
-        AccountAction::LegalPrivacy => Command::LegalPrivacy.execute(app),
-        AccountAction::SupportBundle => Command::SupportBundle.execute(app),
-        AccountAction::HelpCenter => Command::HelpCenter.execute(app),
+        AccountAction::LegalPrivacy => app.execute_command_key(ids::LEGAL_PRIVACY),
+        AccountAction::SupportBundle => app.execute_command_key(ids::SUPPORT_BUNDLE),
+        AccountAction::HelpCenter => app.execute_command_key(ids::HELP_CENTER),
     }
 }
 
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
-
-/// Open the canonical manager route from title chrome or another manager.
-///
-/// Routing is a state transition, so this takes the state rather than the
-/// application: the navigation and the message it may push are both
-/// [`AppState`]'s, and nothing here needs the cloud session or the dialogs
-/// the whole application would also hand over.
-pub(crate) fn open(state: &mut AppState) {
-    let route = SurfaceRoute::surface(SurfaceId::AccountOrganization);
-    if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
-        state.prompt(error.to_string());
-    }
-}
 
 /// Render the route owner. The local license dialog is rendered earlier in
 /// the application pass; temporarily yielding this parent keeps that child
@@ -1762,14 +1753,16 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn typed_command_and_rendered_surface_disclose_the_same_offline_boundary() {
-        use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+        use crate::workbench::cloud::commands::CloudCommand;
+        use crate::workbench::commands::vocabulary::command_registry;
 
-        assert!(COMMAND_REGISTRY.contains(&Command::AccountOrganization));
+        let key = CloudCommand::AccountOrganization.key();
+        assert!(command_registry().order().contains(&key));
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        Command::AccountOrganization.execute(&mut app);
+        app.execute_command_key(key);
         assert_eq!(
             app.state.workbench.current_route().surface_id(),
             SurfaceId::AccountOrganization

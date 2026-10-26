@@ -183,6 +183,7 @@ SLICE_RULES = [
     (W + r"settings(\.rs$|/)", "settings"),
     (W + r"hardcopy(\.rs$|/)", "hardcopy"),
     (W + r"results(\.rs$|/)", "results"),
+    (W + r"cloud(\.rs$|/)", "cloud"),
     (W + r"shell_host(\.rs$|/)", "shell"),
     (W + r"menu_bar/waveform_export", "results"),
     (W + r"menu_bar/netlist_compat", "code"),

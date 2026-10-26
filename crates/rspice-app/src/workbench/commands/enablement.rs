@@ -51,26 +51,6 @@ impl Command {
                     && !state.model.safe_mode.project_read_only()
                     && !state.model.simulation.execution.has_active_execution()
             }
-            Self::PublishToWeb => {
-                matches!(
-                    app.cloud.account.availability(),
-                    crate::services::cloud_account::CloudAccountAvailability::Native
-                ) && app
-                    .cloud.account
-                    .snapshot()
-                    .cloud_feature_enabled(crate::services::cloud_account::CLOUD_PUBLISHING_FEATURE)
-            }
-            // Hosting needs an open project, but the same dialog joins by
-            // code from any state — so the command never requires one.
-            Self::LiveSession => {
-                matches!(
-                    app.cloud.account.availability(),
-                    crate::services::cloud_account::CloudAccountAvailability::Native
-                        | crate::services::cloud_account::CloudAccountAvailability::Browser
-                ) && app.cloud.account.snapshot().cloud_feature_enabled(
-                    crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
-                )
-            }
             Self::Undo => {
                 if state.model.safe_mode.project_read_only()
                     || state.schematic_edit_in_progress()

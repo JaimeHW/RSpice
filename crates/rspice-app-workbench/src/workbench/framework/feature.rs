@@ -2,11 +2,11 @@
 //! state it owns, the commands it declares and the context they run in.
 //!
 //! A feature's code never holds the whole application. Each command it
-//! declares is answered and carried out in a [`Cx`]: its own state, the
-//! model every feature shares, the session, the platform services' state,
-//! the application's handles on the services below the workbench, and
-//! narrow views of the other features it reads, read-only but for letting
-//! go of design's canvas gesture. The shell builds that context from the
+//! declares is answered and carried out in a [`Cx`]: its own state and the
+//! services it runs, the model every feature shares, the session, the
+//! platform services' state, the application's handles on the services
+//! below the workbench, and narrow views of the other features it reads,
+//! read-only but for letting go of design's canvas gesture. The shell builds that context from the
 //! application's parts for each call; it is references and views only, so
 //! building one allocates nothing.
 //!
@@ -46,10 +46,19 @@ pub trait Feature: Sized + 'static {
     type State: 'static;
     /// The session its context holds.
     type Session: Session;
+    /// What the feature runs on the services below the workbench, held by
+    /// the application beside its state and lent with its context;
+    /// [`NoHandles`] for a feature that runs none.
+    type Handles: 'static;
 
     /// Hand the registry everything the feature declares.
     fn register(registry: &mut FeatureRegistry<Self>);
 }
+
+/// What a feature that runs no services of its own is lent beside its
+/// context: nothing. It is an empty array because an empty array is the one
+/// value a context can borrow mutably with nothing holding it.
+pub type NoHandles = [(); 0];
 
 /// What design shows that another feature reads.
 pub trait DesignPort {
@@ -151,7 +160,9 @@ impl Default for PublicationDraft {
 /// design's canvas gesture.
 pub struct Peers<'a> {
     design: &'a mut dyn DesignPeer,
-    cloud: &'a dyn CloudPort,
+    /// `None` in the cloud feature's own context, as `results` is in the
+    /// results feature's.
+    cloud: Option<&'a dyn CloudPort>,
     /// `None` in the results feature's own context: a feature reads its own
     /// state, never itself as a peer.
     results: Option<&'a dyn ResultsPort>,
@@ -160,7 +171,7 @@ pub struct Peers<'a> {
 impl<'a> Peers<'a> {
     pub fn new(
         design: &'a mut dyn DesignPeer,
-        cloud: &'a dyn CloudPort,
+        cloud: Option<&'a dyn CloudPort>,
         results: Option<&'a dyn ResultsPort>,
     ) -> Self {
         Self {
@@ -174,8 +185,12 @@ impl<'a> Peers<'a> {
         &*self.design
     }
 
+    /// What the cloud shows. The cloud feature's own context holds no such
+    /// peer, because the feature reads its own state; its code asking for one
+    /// is a fault in that code.
     pub fn cloud(&self) -> &'a dyn CloudPort {
         self.cloud
+            .expect("the cloud feature reads its own state, never itself as a peer")
     }
 
     /// What the results workspace shows. The results feature's own context
@@ -206,6 +221,8 @@ impl CanvasGesturePort for Peers<'_> {
 /// The context a feature's command runs in.
 pub struct Cx<'a, F: Feature> {
     pub state: &'a mut F::State,
+    /// What the feature runs, lent for the one call.
+    pub own: &'a mut F::Handles,
     pub model: &'a mut Model,
     pub wb: &'a mut F::Session,
     /// What the platform services keep between frames: the autosave
@@ -221,6 +238,7 @@ pub struct Cx<'a, F: Feature> {
 impl<'a, F: Feature> Cx<'a, F> {
     pub fn new(
         state: &'a mut F::State,
+        own: &'a mut F::Handles,
         model: &'a mut Model,
         wb: &'a mut F::Session,
         platform: &'a mut PlatformState,
@@ -230,6 +248,7 @@ impl<'a, F: Feature> Cx<'a, F> {
     ) -> Self {
         Self {
             state,
+            own,
             model,
             wb,
             platform,
@@ -249,6 +268,8 @@ impl<'a, F: Feature> Cx<'a, F> {
 /// What a feature reads to answer whether one of its commands can run.
 pub struct Reads<'a, F: Feature> {
     pub state: &'a F::State,
+    /// What the feature runs.
+    pub own: &'a F::Handles,
     pub model: &'a Model,
     pub wb: &'a F::Session,
     /// Whether a project is open, and whether an operation on it is still
@@ -261,6 +282,7 @@ pub struct Reads<'a, F: Feature> {
 impl<'a, F: Feature> Reads<'a, F> {
     pub fn new(
         state: &'a F::State,
+        own: &'a F::Handles,
         model: &'a Model,
         wb: &'a F::Session,
         platform: &'a PlatformState,
@@ -268,6 +290,7 @@ impl<'a, F: Feature> Reads<'a, F> {
     ) -> Self {
         Self {
             state,
+            own,
             model,
             wb,
             platform,
@@ -317,6 +340,12 @@ pub trait CommandSet: Copy + 'static {
     /// What the command declares about itself.
     fn spec(self) -> CommandSpec;
 
+    /// Whether the command is offered here at all, asked before the shell's
+    /// own guards: one that is not is hidden, whatever they would answer.
+    fn offered(self, _reads: &Reads<'_, Self::Feature>) -> bool {
+        true
+    }
+
     /// Whether the command can run here, once the shell's own guards (a
     /// project operation in flight, no project open) have passed.
     fn availability(self, reads: &Reads<'_, Self::Feature>) -> CommandAvailability;
@@ -337,12 +366,17 @@ pub trait CommandSet: Copy + 'static {
 pub struct FeatureCommand<F: Feature> {
     pub spec: CommandSpec,
     index: usize,
+    offered: fn(usize, &Reads<'_, F>) -> bool,
     availability: fn(usize, &Reads<'_, F>) -> CommandAvailability,
     execute: fn(usize, &mut Cx<'_, F>),
     checked: fn(usize, &Reads<'_, F>) -> Option<bool>,
 }
 
 impl<F: Feature> FeatureCommand<F> {
+    pub fn offered(&self, reads: &Reads<'_, F>) -> bool {
+        (self.offered)(self.index, reads)
+    }
+
     pub fn availability(&self, reads: &Reads<'_, F>) -> CommandAvailability {
         (self.availability)(self.index, reads)
     }
@@ -508,6 +542,7 @@ impl<F: Feature> FeatureRegistry<F> {
             self.commands.push(FeatureCommand {
                 spec: command.spec(),
                 index,
+                offered: |index, reads| C::REGISTERED[index].offered(reads),
                 availability: |index, reads| C::REGISTERED[index].availability(reads),
                 execute: |index, cx| C::REGISTERED[index].execute(cx),
                 checked: |index, reads| C::REGISTERED[index].checked(reads),
@@ -517,6 +552,7 @@ impl<F: Feature> FeatureRegistry<F> {
             self.commands.push(FeatureCommand {
                 spec: command.spec(),
                 index,
+                offered: |index, reads| C::UNLISTED[index].offered(reads),
                 availability: |index, reads| C::UNLISTED[index].availability(reads),
                 execute: |index, cx| C::UNLISTED[index].execute(cx),
                 checked: |index, reads| C::UNLISTED[index].checked(reads),

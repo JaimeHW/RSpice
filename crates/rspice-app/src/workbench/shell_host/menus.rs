@@ -7,6 +7,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry, palette_scope};
+use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -42,6 +43,11 @@ const fn settings(command: SettingsCommand) -> MenuEntry {
 
 /// The hardcopy feature's command's row under the label it declares.
 const fn hardcopy(command: HardcopyCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The cloud feature's command's row under the label it declares.
+const fn cloud(command: CloudCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -88,8 +94,8 @@ const FILE_MENU: &[MenuEntry] = &[
     hardcopy(HardcopyCommand::ExportPublicationSnapshot),
     command(Command::ExportNetlist(crate::io::NetlistFormat::Spice)),
     Separator,
-    command(Command::LiveSession),
-    command(Command::PublishToWeb),
+    cloud(CloudCommand::LiveSession),
+    cloud(CloudCommand::PublishToWeb),
     Separator,
     command(Command::CloseActiveDocument),
     command(Command::CloseProject),

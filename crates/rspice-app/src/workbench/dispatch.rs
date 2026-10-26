@@ -34,8 +34,8 @@ use crate::workbench::framework::command_registry::{
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ExportDataset, FollowSchematicGrid, MarkFailureSites,
-    PrintActiveView, PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance,
-    SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
+    OpenPublishWebDialog, PrintActiveView, PromptAfterCommands, RevealExecutedDeck,
+    SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -55,18 +55,22 @@ impl RSpiceApp {
     }
 
     /// Whether the command `key` names can run here, and why not: the
-    /// shell's own guards first, then the command's owner. `Hidden` for a key
-    /// no command answers to.
+    /// shell's own guards first, then the command's owner, except that a
+    /// command its owner does not offer here is hidden before any guard asks.
+    /// `Hidden` for a key no command answers to.
     pub(crate) fn command_availability(&self, key: CommandKey) -> CommandAvailability {
         let Some(spec) = features::spec(key) else {
             return legacy_command(key).map_or(CommandAvailability::Hidden, |command| {
                 command.availability(self)
             });
         };
+        if !features::offered(self, key) {
+            return CommandAvailability::Hidden;
+        }
         if let Some(reason) = held_back(spec.flags, &self.state.platform) {
             return CommandAvailability::Disabled(reason);
         }
-        features::availability(&self.state, key).unwrap_or(CommandAvailability::Hidden)
+        features::availability(self, key).unwrap_or(CommandAvailability::Hidden)
     }
 
     /// Whether the command `key` names is available here, as the shortcut
@@ -95,7 +99,7 @@ impl RSpiceApp {
     /// Whether the routed command `key` can run in the feature that takes it
     /// where the reader is working; `None` when no feature takes it there.
     pub(crate) fn routed_command_key_enabled(&self, key: CommandKey) -> Option<bool> {
-        features::routed_enabled(&self.state, key)
+        features::routed_enabled(self, key)
     }
 
     /// Carry out the feature command `spec` declares behind the same
@@ -134,14 +138,15 @@ impl RSpiceApp {
 
     /// Answer what a feature's call raised for straight after it: the
     /// commands it ran next and what it said once they had run, the print
-    /// workflow it asked for, the snap that follows a new schematic grid, the
-    /// shortcut resolver's reset when a shortcut library was put in use, the
-    /// open waveform view starting again from changed defaults, the dataset
-    /// export, the analysis instance and the executed deck a results command
-    /// asked for, the waveforms and the family member a hand-off into Results
-    /// opens its viewer or form on, the annotations a result viewer shows on
-    /// the schematic it locates something on, and the failure sites the
-    /// results failure banner marks there.
+    /// workflow it asked for, the publish dialog it opened, the snap that
+    /// follows a new schematic grid, the shortcut resolver's reset when a
+    /// shortcut library was put in use, the open waveform view starting again
+    /// from changed defaults, the dataset export, the analysis instance and
+    /// the executed deck a results command asked for, the waveforms and the
+    /// family member a hand-off into Results opens its viewer or form on, the
+    /// annotations a result viewer shows on the schematic it locates
+    /// something on, and the failure sites the results failure banner marks
+    /// there.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -159,6 +164,11 @@ impl RSpiceApp {
             |app, PrintActiveView| {
                 app.open_requested_hardcopy_workflow(HardcopyWorkflow::Print);
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, OpenPublishWebDialog| app.open_publish_web_dialog(),
         );
         requests::drain(
             self,
@@ -353,7 +363,7 @@ mod tests {
     fn the_registry_lists_every_command_the_enum_declares() {
         let declared = declared_variants();
         assert!(
-            declared.len() > 200,
+            declared.len() > 150,
             "`enum Command` parsed as only {} variants: the parse broke, not the enum",
             declared.len()
         );

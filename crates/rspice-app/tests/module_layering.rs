@@ -594,6 +594,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "settings/commands",
     // What the hardcopy feature's commands declare, the same way.
     "hardcopy/commands",
+    // What the cloud feature's commands declare, the same way.
+    "cloud/commands",
     // The documents module's own vocabulary: which Code page is showing and
     // what a source-file action is. Each document engine has its own entry;
     // a document file without one is owned here, where its first reach into
@@ -715,6 +717,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The results feature: its commands' answers over its own slot, the
     // model, the session and the platform state.
     "results",
+    // The cloud feature: its commands' answers over its own slot, the model,
+    // the session, and the account service and live-session engine it runs.
+    "cloud",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",
@@ -838,7 +843,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
     ("commands", "menu_bar", 5),
-    ("commands", "account_organization", 1),
     ("commands", "preflight", 1),
     ("commands", "tools/jobs_manager", 1),
     ("commands", "tools/specialist_tool_browser", 1),

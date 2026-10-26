@@ -18,6 +18,7 @@ use crate::workbench::chrome::title_bar::application_menus::{
 };
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
 use crate::workbench::chrome::title_bar::*;
+use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
 use crate::workbench::framework::host::Host;
@@ -1204,8 +1205,11 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
         crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild,
         "the test build pins no cloud endpoints"
     );
-    for command in [Command::LiveSession, Command::PublishToWeb] {
-        assert_eq!(command.availability(&app), CommandAvailability::Hidden);
+    for command in [CloudCommand::LiveSession, CloudCommand::PublishToWeb] {
+        assert_eq!(
+            app.command_availability(command.key()),
+            CommandAvailability::Hidden
+        );
     }
     let rows = menu_entries::resolve_menu_rows(
         application_menu_entries(ApplicationMenu::File),

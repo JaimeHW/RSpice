@@ -677,9 +677,6 @@ impl Command {
             | Self::CompileVerilogA
             | Self::VerilogABuildSettings
             | Self::AutomationConsole => CommandOwner::Code,
-            Self::LiveSession | Self::PublishToWeb | Self::AccountOrganization | Self::License => {
-                CommandOwner::Cloud
-            }
         }
     }
 
@@ -727,8 +724,6 @@ impl Command {
             Self::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
             Self::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
             Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
-            Self::LiveSession => app.open_live_session_dialog(),
-            Self::PublishToWeb => app.open_publish_web_dialog(),
             Self::ExportNetlist(format) => {
                 if netlist_page_is_visible(&app.state) {
                     app.state.code.netlist.export_dialog.open = true;
@@ -1621,10 +1616,6 @@ impl Command {
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
-            Self::AccountOrganization => {
-                super::account_organization::open(&mut app.state);
-            }
-            Self::License => app.open_license_dialog(),
             Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
                 crate::workbench::tools::specialist_tool_browser::open(app);
             }

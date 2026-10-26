@@ -2,18 +2,21 @@
 //! feature that declares it.
 //!
 //! [`features!`] lists every registered feature with the slot of the
-//! application state it owns. Each feature's registry is built once. A call
-//! into one of its commands borrows the feature's slot, the model, the
-//! session, the platform services' state and the peers it reads from the
-//! application state, and the application's handles on the services below
-//! the workbench beside it, for that one call: a context is references
-//! only, so building one allocates nothing.
+//! application state it owns, and the application's field holding what the
+//! feature runs, for a feature that runs services of its own. Each
+//! feature's registry is built once. A call into one of its commands borrows
+//! the feature's slot, the model, the session, the platform services' state
+//! and the peers it reads from the application state, and what the feature
+//! runs and the application's handles on the services below the workbench
+//! beside it, for that one call: a context is references only, so building
+//! one allocates nothing.
 
 use std::sync::LazyLock;
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::cloud::CloudFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -25,26 +28,22 @@ use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
-/// from the application state.
+/// from the application.
 pub(super) trait Registered: Feature {
     /// Everything the feature registered, built on first use.
     fn registry() -> &'static FeatureRegistry<Self>;
 
     /// What the feature reads to answer whether a command can run.
-    fn reads(state: &AppState) -> Reads<'_, Self>;
+    fn reads(app: &RSpiceApp) -> Reads<'_, Self>;
 
-    /// The context the feature's command runs in, over `state` and the
-    /// `handles` lent beside it.
-    fn cx<'a>(state: &'a mut AppState, handles: LowerHandles<'a>) -> Cx<'a, Self>;
+    /// The context the feature's command runs in, borrowed from `app`.
+    fn cx(app: &mut RSpiceApp) -> Cx<'_, Self>;
 }
 
-/// The context `F`'s call runs in, borrowed from `app`: its state, and its
-/// handles on the services below the workbench beside it.
+/// The context `F`'s call runs in, borrowed from `app`: its state, what it
+/// runs, and the application's handles on the services below the workbench.
 pub(super) fn cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
-    let handles = LowerHandles {
-        export_io: app.export_workflow_io.as_ref(),
-    };
-    F::cx(&mut app.state, handles)
+    F::cx(app)
 }
 
 /// The results peer a context over `state` holds for the feature whose slot
@@ -58,10 +57,39 @@ macro_rules! results_peer {
     };
 }
 
+/// The cloud peer a context over `state` holds for the feature whose slot is
+/// `slot`: none for the cloud feature itself, whose slot it is.
+macro_rules! cloud_peer {
+    (cloud, $state:ident) => {
+        None
+    };
+    ($slot:ident, $state:ident) => {
+        Some(&*$state.cloud)
+    };
+}
+
+/// What a context over `app` lends the feature as what it runs: the
+/// application's field `own`, or nothing for a feature that runs nothing.
+macro_rules! own {
+    (&mut $app:ident) => {
+        &mut []
+    };
+    (&mut $app:ident, $own:ident) => {
+        &mut $app.$own
+    };
+    (&$app:ident) => {
+        &[]
+    };
+    (&$app:ident, $own:ident) => {
+        &$app.$own
+    };
+}
+
 /// Register each `slot: Feature` pair: the feature `Feature`, whose state is
-/// the application state's field `slot`.
+/// the application state's field `slot`. `slot: Feature => own` also names
+/// the application's field `own` that holds what the feature runs.
 macro_rules! features {
-    ($($slot:ident: $feature:ty),+ $(,)?) => {
+    ($($slot:ident: $feature:ty $(=> $own:ident)?),+ $(,)?) => {
         $(
             impl Registered for $feature {
                 fn registry() -> &'static FeatureRegistry<Self> {
@@ -70,9 +98,11 @@ macro_rules! features {
                     &REGISTRY
                 }
 
-                fn reads(state: &AppState) -> Reads<'_, Self> {
+                fn reads(app: &RSpiceApp) -> Reads<'_, Self> {
+                    let state = &app.state;
                     Reads::new(
                         &*state.$slot,
+                        own!(&app $(, $own)?),
                         &state.model,
                         &*state.workbench,
                         &*state.platform,
@@ -80,19 +110,40 @@ macro_rules! features {
                     )
                 }
 
-                fn cx<'a>(state: &'a mut AppState, handles: LowerHandles<'a>) -> Cx<'a, Self> {
+                fn cx(app: &mut RSpiceApp) -> Cx<'_, Self> {
+                    let handles = LowerHandles {
+                        export_io: app.export_workflow_io.as_ref(),
+                    };
+                    let state = &mut app.state;
                     Cx::new(
                         &mut *state.$slot,
+                        own!(&mut app $(, $own)?),
                         &mut state.model,
                         &mut *state.workbench,
                         &mut *state.platform,
                         &mut *state.runs,
                         handles,
-                        Peers::new(&mut *state.design, &*state.cloud, results_peer!($slot, state)),
+                        Peers::new(
+                            &mut *state.design,
+                            cloud_peer!($slot, state),
+                            results_peer!($slot, state),
+                        ),
                     )
                 }
             }
         )+
+
+        /// Whether the feature command `key` names is offered here at all, as
+        /// its feature answers before the shell's own guards; `true` for a
+        /// key no registered feature declares.
+        pub(super) fn offered(app: &RSpiceApp, key: CommandKey) -> bool {
+            $(
+                if let Some(command) = <$feature as Registered>::registry().command(key) {
+                    return command.offered(&<$feature as Registered>::reads(app));
+                }
+            )+
+            true
+        }
 
         /// What the feature command `key` names declares; `None` for a key
         /// no registered feature declares.
@@ -108,10 +159,10 @@ macro_rules! features {
         /// Whether the feature command `key` names can run here, as its
         /// feature answers once the shell's own guards have passed; `None`
         /// for a key no registered feature declares.
-        pub(super) fn availability(state: &AppState, key: CommandKey) -> Option<CommandAvailability> {
+        pub(super) fn availability(app: &RSpiceApp, key: CommandKey) -> Option<CommandAvailability> {
             $(
                 if let Some(command) = <$feature as Registered>::registry().command(key) {
-                    return Some(command.availability(&<$feature as Registered>::reads(state)));
+                    return Some(command.availability(&<$feature as Registered>::reads(app)));
                 }
             )+
             None
@@ -119,10 +170,10 @@ macro_rules! features {
 
         /// Whether the routed command `key` can run in the feature that takes
         /// it here; `None` when no registered feature takes it here.
-        pub(super) fn routed_enabled(state: &AppState, key: CommandKey) -> Option<bool> {
+        pub(super) fn routed_enabled(app: &RSpiceApp, key: CommandKey) -> Option<bool> {
             $(
                 if let Some(routed) = <$feature as Registered>::registry().routed_command(key) {
-                    let reads = <$feature as Registered>::reads(state);
+                    let reads = <$feature as Registered>::reads(app);
                     if (routed.takes)(&reads) {
                         return Some((routed.enabled)(&reads));
                     }
@@ -137,7 +188,7 @@ macro_rules! features {
         pub(super) fn route(app: &mut RSpiceApp, key: CommandKey) -> bool {
             $(
                 if let Some(routed) = <$feature as Registered>::registry().routed_command(key)
-                    && (routed.takes)(&<$feature as Registered>::reads(&app.state))
+                    && (routed.takes)(&<$feature as Registered>::reads(app))
                 {
                     (routed.execute)(&mut cx::<$feature>(app));
                     return true;
@@ -149,10 +200,10 @@ macro_rules! features {
         /// Whether the state the feature command `key` names switches is on;
         /// `None` for a command that acts once, and for a key no registered
         /// feature declares.
-        pub(super) fn checked(state: &AppState, key: CommandKey) -> Option<bool> {
+        pub(super) fn checked(app: &RSpiceApp, key: CommandKey) -> Option<bool> {
             $(
                 if let Some(command) = <$feature as Registered>::registry().command(key) {
-                    return command.checked(&<$feature as Registered>::reads(state));
+                    return command.checked(&<$feature as Registered>::reads(app));
                 }
             )+
             None
@@ -210,6 +261,7 @@ features! {
     settings: SettingsFeature,
     hardcopy: HardcopyFeature,
     results: ResultsFeature,
+    cloud: CloudFeature => cloud,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers
@@ -263,6 +315,7 @@ mod tests {
         let settings = <SettingsFeature as Registered>::registry();
         let hardcopy = <HardcopyFeature as Registered>::registry();
         let results = <ResultsFeature as Registered>::registry();
+        let cloud = <CloudFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
             assert_eq!(
@@ -274,6 +327,7 @@ mod tests {
                 settings.command(*key).is_some(),
                 hardcopy.command(*key).is_some(),
                 results.command(*key).is_some(),
+                cloud.command(*key).is_some(),
             ];
             assert_eq!(
                 declaring.iter().filter(|declares| **declares).count(),
@@ -291,6 +345,7 @@ mod tests {
                 + crate::workbench::settings::commands::SettingsCommand::ALL.len()
                 + crate::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
                 + crate::workbench::results::commands::ResultsCommand::ALL.len()
+                + crate::workbench::cloud::commands::CloudCommand::ALL.len()
         );
     }
 

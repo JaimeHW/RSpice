@@ -43,19 +43,18 @@ pub struct LicenseDialogState {
 /// Lines the key field shows: a whole key, wrapped, without scrolling.
 const KEY_LINES: usize = 3;
 
-impl RSpiceApp {
-    /// Open the dialog: fresh entry, or the stored grant when already
-    /// activated (primary becomes Close, secondary removes the license).
-    pub(crate) fn open_license_dialog(&mut self) {
-        let dialog = &mut self.state.cloud.license_dialog;
-        dialog.open = true;
-        dialog.text.clear();
-        dialog.phase = match &self.state.cloud.license {
-            Some(info) => LicensePhase::Verified(info.clone()),
-            None => LicensePhase::Entry,
-        };
-    }
+/// Open the dialog: fresh entry, or `license`, the stored grant, when already
+/// activated (primary becomes Close, secondary removes the license).
+pub(crate) fn open_license_dialog(dialog: &mut LicenseDialogState, license: Option<&LicenseInfo>) {
+    dialog.open = true;
+    dialog.text.clear();
+    dialog.phase = match license {
+        Some(info) => LicensePhase::Verified(info.clone()),
+        None => LicensePhase::Entry,
+    };
+}
 
+impl RSpiceApp {
     pub(in crate::workbench) fn render_license_dialog(&mut self, ctx: &Context) {
         if !self.state.cloud.license_dialog.open {
             return;
@@ -297,7 +296,8 @@ mod tests {
     #[test]
     fn a_verified_key_names_where_this_platform_keeps_it() {
         let mut app = RSpiceApp::test_instance();
-        app.open_license_dialog();
+        let cloud = &mut *app.state.cloud;
+        open_license_dialog(&mut cloud.license_dialog, cloud.license.as_ref());
         app.state.cloud.license_dialog.text = license::SAMPLE_KEY.to_owned();
         app.verify_license_input();
         let shown = shown_texts(&mut app);
@@ -324,7 +324,8 @@ mod tests {
     #[test]
     fn the_license_dialog_offers_no_sample_key_and_speaks_plainly() {
         let mut app = RSpiceApp::test_instance();
-        app.open_license_dialog();
+        let cloud = &mut *app.state.cloud;
+        open_license_dialog(&mut cloud.license_dialog, cloud.license.as_ref());
         let mut seen = shown_texts(&mut app);
         app.state.cloud.license_dialog.text = "RSPICE-K1.TRUNCATED".to_owned();
         app.verify_license_input();

@@ -97,6 +97,7 @@ pub(crate) mod chrome {
         pub(crate) mod simulate;
     }
 }
+pub(crate) mod cloud;
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod diagnostic_routes;

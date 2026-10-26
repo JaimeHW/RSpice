@@ -49,6 +49,7 @@ pub(crate) struct SheetsFeature;
 impl Feature for SheetsFeature {
     type State = SheetsState;
     type Session = WorkbenchSession;
+    type Handles = crate::workbench::framework::feature::NoHandles;
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SheetsCommand>();

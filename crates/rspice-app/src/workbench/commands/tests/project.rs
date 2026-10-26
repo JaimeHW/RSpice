@@ -7,6 +7,7 @@
 //! that skips the gate is invisible to a single aggregate check.
 
 use super::*;
+use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::framework::requests::FocusProjectLauncherSearch;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -183,19 +184,9 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             !command.is_enabled(&app),
             "enabled without project: {command:?}"
         );
-        // A build with no cloud endpoints offers neither cloud row at all,
-        // and that rule outranks the closed-project reason.
-        let expected = if matches!(command, Command::LiveSession | Command::PublishToWeb)
-            && app.cloud.account.availability()
-                == crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
-        {
-            CommandAvailability::Hidden
-        } else {
-            CommandAvailability::Disabled("no project is open")
-        };
         assert_eq!(
             command.availability(&app),
-            expected,
+            CommandAvailability::Disabled("no project is open"),
             "wrong closed-project reason for {command:?}"
         );
 
@@ -266,6 +257,36 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             "a disabled command is silent: {command:?}"
         );
     }
+
+    // Publishing to the web needs a project too. A build with no cloud
+    // endpoints offers the row not at all, and that rule outranks the
+    // closed-project reason.
+    let publish = CloudCommand::PublishToWeb;
+    assert!(
+        publish
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+        "missing closed-project boundary: {publish:?}"
+    );
+    let mut app = RSpiceApp::test_instance();
+    app.state.close_project_session();
+    app.state.workbench.workspace = Workspace::Project;
+    assert_eq!(
+        app.cloud.account.availability(),
+        crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
+    );
+    assert!(!app.command_key_enabled(publish.key()));
+    assert_eq!(
+        app.command_availability(publish.key()),
+        CommandAvailability::Hidden
+    );
+    let before = app.state.model.log_buffer.revision();
+    app.execute_command_key(publish.key());
+    assert_eq!(app.state.workbench.workspace, Workspace::Project);
+    assert_eq!(app.state.model.log_buffer.revision(), before);
+    assert_eq!(app.state.prompt_text(), None);
+    assert!(!app.state.cloud.publish_web.open);
 
     // The results feature's commands that need a project hold it too.
     let results: Vec<_> = ResultsCommand::ALL

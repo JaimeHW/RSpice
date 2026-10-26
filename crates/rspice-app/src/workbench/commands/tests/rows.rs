@@ -22,6 +22,7 @@ use crate::workbench::app_state::ShortcutContextMatch;
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
+use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
@@ -130,6 +131,12 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                     })
                     .or_else(|| HardcopyCommand::from_key(key).map(HardcopyCommand::declared_spec))
                     .or_else(|| ResultsCommand::from_key(key).map(ResultsCommand::declared_spec))
+                    .or_else(|| {
+                        CloudCommand::ALL
+                            .into_iter()
+                            .find(|command| command.key() == key)
+                            .map(CloudCommand::declared_spec)
+                    })
                     .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
                 return feature_row(index, &spec, apps);
             };

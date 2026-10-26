@@ -10,8 +10,8 @@
 use egui::Context;
 
 use crate::services::cloud_account::{
-    CloudAccountAvailability, LIVE_COLLABORATION_FEATURE, LiveParticipantSummary,
-    LiveSessionPolicySummary, LiveSessionState, LiveSessionSummary,
+    CloudAccountAvailability, CloudAccountService, LIVE_COLLABORATION_FEATURE,
+    LiveParticipantSummary, LiveSessionPolicySummary, LiveSessionState, LiveSessionSummary,
 };
 use crate::services::live_protocol::PeerIdentity;
 use crate::ui::theme::{self, FontWeight};
@@ -56,36 +56,37 @@ enum LiveDialogAction {
     DenyHostRun(PeerIdentity),
 }
 
-impl RSpiceApp {
-    /// Open the dialog against the current session state. No-op unless
-    /// this build reaches the cloud and the seat carries the entitlement.
-    pub(crate) fn open_live_session_dialog(&mut self) {
-        if !matches!(
-            self.cloud.account.availability(),
-            CloudAccountAvailability::Native | CloudAccountAvailability::Browser
-        ) || !self
-            .cloud
-            .account
-            .snapshot()
-            .cloud_feature_enabled(LIVE_COLLABORATION_FEATURE)
-        {
-            return;
-        }
-        let policy_draft = match self.cloud.account.snapshot().live_session.as_ref() {
-            Some(LiveSessionState::Hosting(summary)) => Some(summary.policy),
-            _ => None,
-        };
-        self.state.cloud.live_session = LiveSessionDialogState {
-            open: true,
-            policy_draft,
-            ..Default::default()
-        };
-        // Freshen the roster and clear any stale notice before rendering.
-        if self.cloud.account.snapshot().live_session.is_some() {
-            self.cloud.account.refresh_live_session();
-        }
+/// Open `dialog` against the session state `account` holds. No-op unless
+/// this build reaches the cloud and the seat carries the entitlement.
+pub(crate) fn open_live_session_dialog(
+    dialog: &mut LiveSessionDialogState,
+    account: &mut CloudAccountService,
+) {
+    if !matches!(
+        account.availability(),
+        CloudAccountAvailability::Native | CloudAccountAvailability::Browser
+    ) || !account
+        .snapshot()
+        .cloud_feature_enabled(LIVE_COLLABORATION_FEATURE)
+    {
+        return;
     }
+    let policy_draft = match account.snapshot().live_session.as_ref() {
+        Some(LiveSessionState::Hosting(summary)) => Some(summary.policy),
+        _ => None,
+    };
+    *dialog = LiveSessionDialogState {
+        open: true,
+        policy_draft,
+        ..Default::default()
+    };
+    // Freshen the roster and clear any stale notice before rendering.
+    if account.snapshot().live_session.is_some() {
+        account.refresh_live_session();
+    }
+}
 
+impl RSpiceApp {
     pub(in crate::workbench) fn render_live_session_dialog(&mut self, ctx: &Context) {
         if !self.state.cloud.live_session.open {
             return;

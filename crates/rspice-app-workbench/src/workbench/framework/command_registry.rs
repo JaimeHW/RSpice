@@ -296,6 +296,8 @@ pub mod ids {
         EXPORT_RESULTS = "export-results";
         EXPRESSION_DIAGNOSTICS = "expression-diagnostics";
         FAMILY_SLICING = "family-slicing";
+        HELP_CENTER = "help-center";
+        LEGAL_PRIVACY = "legal-privacy-center";
         MEASUREMENT_LIBRARY = "measurement-library";
         MODELS_WORKSPACE = "models";
         NETLIST_WORKSPACE = "netlist";
@@ -319,6 +321,7 @@ pub mod ids {
         SIMULATE_WORKSPACE = "simulate";
         SPECIALIST_TOOL_BROWSER = "specialist-tool-browser";
         STIMULUS_WORKSPACE = "stimulus";
+        SUPPORT_BUNDLE = "support-bundle";
         TOGGLE_CONSOLE = "console";
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";

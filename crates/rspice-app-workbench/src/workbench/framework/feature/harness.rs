@@ -169,10 +169,11 @@ impl ResultsPort for NullPorts {
     }
 }
 
-/// A feature, its own state, and the model and session its commands run
-/// over.
+/// A feature, its own state and what it runs, and the model and session its
+/// commands run over.
 pub struct FeatureHarness<F: Feature> {
     pub state: F::State,
+    pub own: F::Handles,
     pub model: Model,
     pub wb: F::Session,
     pub(crate) platform: PlatformState,
@@ -182,11 +183,13 @@ pub struct FeatureHarness<F: Feature> {
 impl<F: Feature> FeatureHarness<F>
 where
     F::State: Default,
+    F::Handles: Default,
 {
     /// The feature with nothing of its own open, over `model` and `wb`.
     pub fn with_model(model: Model, wb: F::Session) -> Self {
         Self {
             state: F::State::default(),
+            own: F::Handles::default(),
             model,
             wb,
             platform: PlatformState::default(),
@@ -199,6 +202,7 @@ where
     pub fn availability(&self, key: CommandKey) -> CommandAvailability {
         command(&FeatureRegistry::<F>::build(), key).availability(&Reads::new(
             &self.state,
+            &self.own,
             &self.model,
             &self.wb,
             &self.platform,
@@ -211,6 +215,7 @@ where
     pub fn execute(&mut self, key: CommandKey) {
         command(&FeatureRegistry::<F>::build(), key).execute(&mut Cx::new(
             &mut self.state,
+            &mut self.own,
             &mut self.model,
             &mut self.wb,
             &mut self.platform,
@@ -218,7 +223,7 @@ where
             LowerHandles {
                 export_io: &NullExportIo,
             },
-            Peers::new(&mut NullPorts, &NullPorts, Some(&NullPorts)),
+            Peers::new(&mut NullPorts, Some(&NullPorts), Some(&NullPorts)),
         ));
     }
 }

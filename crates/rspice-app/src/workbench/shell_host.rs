@@ -24,6 +24,7 @@ use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
+use crate::workbench::app::dialogs::live_session::open_live_session_dialog;
 use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
@@ -332,7 +333,10 @@ impl Host for RSpiceApp {
 
                 for action in session_presence_cluster(ui, app, large_targets) {
                     match action {
-                        PresenceAction::OpenDialog => app.open_live_session_dialog(),
+                        PresenceAction::OpenDialog => open_live_session_dialog(
+                            &mut app.state.cloud.live_session,
+                            &mut app.cloud.account,
+                        ),
                         PresenceAction::EndSession => app.cloud.account.end_live_session(),
                         PresenceAction::LeaveSession => {
                             app.cloud.account.leave_live_session();
@@ -561,7 +565,7 @@ impl Host for RSpiceApp {
 
     fn checked(&self, key: CommandKey) -> Option<bool> {
         legacy_command(key).map_or_else(
-            || features::checked(&self.state, key),
+            || features::checked(self, key),
             |command| command.checked(self),
         )
     }
@@ -968,7 +972,6 @@ mod tests {
     #[test]
     fn each_framework_id_names_its_command() {
         for (id, command) in [
-            (ids::ACCOUNT_ORGANIZATION, Command::AccountOrganization),
             (ids::CANCEL, Command::Cancel),
             (ids::CLEAR_CONSOLE, Command::ClearConsole),
             (ids::COMMAND_PALETTE, Command::CommandPalette),
@@ -977,6 +980,8 @@ mod tests {
                 ids::DESIGN_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Design),
             ),
+            (ids::HELP_CENTER, Command::HelpCenter),
+            (ids::LEGAL_PRIVACY, Command::LegalPrivacy),
             (
                 ids::MODELS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Models),
@@ -1016,6 +1021,7 @@ mod tests {
                 ids::STIMULUS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Stimulus),
             ),
+            (ids::SUPPORT_BUNDLE, Command::SupportBundle),
             (ids::TOGGLE_CONSOLE, Command::ToggleConsole),
             (
                 ids::TOGGLE_CONSOLE_MAXIMIZED,
@@ -1070,6 +1076,21 @@ mod tests {
             assert_eq!(ResultsCommand::from_key(id), Some(command), "{command:?}");
             assert_eq!(legacy_command(id), None, "{command:?}");
         }
+    }
+
+    /// The key framework code names the account console by is the key the
+    /// cloud feature's command declares.
+    #[test]
+    fn each_cloud_id_names_its_command() {
+        use crate::workbench::cloud::commands::CloudCommand;
+
+        let command = CloudCommand::AccountOrganization;
+        assert_eq!(ids::ACCOUNT_ORGANIZATION, command.key());
+        assert_eq!(legacy_command(ids::ACCOUNT_ORGANIZATION), None);
+        assert_eq!(
+            features::spec(ids::ACCOUNT_ORGANIZATION).map(|spec| spec.key),
+            Some(command.key())
+        );
     }
 
     /// The commands a feature leaves out of the registry answer by the key
