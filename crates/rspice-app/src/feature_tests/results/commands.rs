@@ -6,10 +6,12 @@
 //! is reachable by a stable id, so it can be bound to a shortcut or driven
 //! from automation rather than only clicked.
 
-use super::*;
-use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::RSpiceApp;
+use crate::workbench::commands::vocabulary::{self, command_registry};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::results::commands::ResultsCommand;
+use crate::workbench::state::Workspace;
 
 #[test]
 fn edit_specifications_opens_the_real_results_editor() {

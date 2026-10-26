@@ -36,7 +36,7 @@ const FORCED_LIST_HEIGHT: f32 = 160.0;
 
 /// Open Run details… on the retained run `run_id`. A run that is no longer
 /// retained opens nothing.
-pub(in crate::workbench::docks) fn open(state: &mut AppState, run_id: u64) {
+pub(crate) fn open(state: &mut AppState, run_id: u64) {
     let Some(run) = state
         .model
         .simulation

@@ -55,7 +55,7 @@ impl std::ops::Deref for PaneProjection {
     }
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocumentId) {
+pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocumentId) {
     // A document that cannot advance onto the newest run is still a document
     // about a real dataset. Blanking it withheld the evidence the reader
     // already had over a decision about which evidence to show next.
@@ -339,7 +339,7 @@ fn compatible_active_viewer(
     })
 }
 
-fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
+pub(crate) fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
     let netlist = &state.model.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
@@ -378,7 +378,7 @@ fn latest_successful_authored_analysis(
 }
 
 /// What Latest tracking could do for one document on this frame.
-enum LatestBinding {
+pub(crate) enum LatestBinding {
     /// Nothing to report: pinned, already current, or freshly retargeted.
     Current,
     /// The document keeps the last binding that worked, and the reader is
@@ -400,7 +400,10 @@ fn degraded_tracking_reason(cause: &str) -> String {
     )
 }
 
-fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -> LatestBinding {
+pub(crate) fn refresh_latest_binding(
+    state: &mut AppState,
+    document_id: ResultDocumentId,
+) -> LatestBinding {
     use crate::results::visualization_document::{DocumentEdit, ResultDocumentTrackingMode};
 
     let Some(document) = state
@@ -1244,4 +1247,4 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

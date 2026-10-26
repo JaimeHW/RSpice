@@ -75,7 +75,7 @@ fn dc_inspector_names_its_sources_and_primary_traversal() {
     }
 }
 
-fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
+pub(crate) fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.split_with_results = split;
@@ -255,103 +255,6 @@ fn stale_cross_probe_map_fails_without_leaving_results() {
 }
 
 #[test]
-fn historical_result_revision_cannot_cross_probe_current_geometry() {
-    let mut app = result_app_with_current_out_map(false);
-    let stale_revision = app
-        .state
-        .model
-        .workspace
-        .content
-        .project
-        .revision()
-        .next()
-        .expect("next project revision");
-    let run = app
-        .state
-        .model
-        .simulation
-        .active_run()
-        .expect("prepared retained run");
-    let analysis_id = run.analyses[0]
-        .provenance()
-        .expect("prepared analysis provenance")
-        .source_instance_id();
-    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
-        project_revision: stale_revision,
-        prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x51; 32]),
-        source_content_digest: crate::product::ContentDigest::from_bytes([0x52; 32]),
-        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
-            crate::product::ContentDigest::from_bytes([0x53; 32]),
-        ),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        tasks: vec![
-            crate::state::PreparedRunTaskReceipt::new(
-                analysis_id,
-                stale_revision,
-                Vec::new(),
-                1,
-                crate::product::ContentDigest::from_bytes([0x54; 32]),
-            )
-            .expect("valid prepared task"),
-        ],
-    })
-    .expect("valid stale receipt");
-    let mut stale_run = crate::state::SimulationRun::new_prepared(1, receipt);
-    stale_run.add_analysis(
-        crate::state::AnalysisResult::new(
-            1,
-            crate::state::AnalysisType::Transient,
-            "historical TRAN",
-        )
-        .with_provenance(
-            crate::state::AnalysisResultProvenance::new_with_source_domain(
-                crate::state::AnalysisResultSourceDomain::SimulationPlan,
-                analysis_id,
-                stale_revision,
-                crate::product::ContentDigest::from_bytes([0x54; 32]),
-                Vec::new(),
-            )
-            .expect("valid historical analysis provenance"),
-        )
-        .with_waveforms(vec![crate::state::RetainedTrace::new(
-            "V(out)",
-            vec![0.0, 1.0],
-            vec![0.0, 1.0],
-            "#ffbd2e",
-        )]),
-    );
-    app.state.model.simulation.retained.runs[0] = stale_run;
-    app.state.results.results.session.selected_trace = Some(
-        rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
-            &app.state.model.simulation.retained.runs[0],
-            0,
-            0,
-        )
-        .expect("selected historical trace"),
-    );
-
-    let error = cross_probe_trace_to_design(&mut app, "V(out)")
-        .expect_err("historical result must fail closed");
-
-    assert!(error.contains("different project revision"));
-    assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert!(
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .wires
-            .is_empty()
-    );
-}
-
-#[test]
 fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     let mut app = result_app_with_current_out_map(false);
     let view = app.state.model.workspace.content.active_view.clone();
@@ -426,7 +329,7 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
 /// A finished 1 ms transient on the Waves sheet, the way James had it open:
 /// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
 /// and the solver's convergence evidence retained with no forced points.
-fn waves_details_app() -> RSpiceApp {
+pub(crate) fn waves_details_app() -> RSpiceApp {
     use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, TransientConvergenceEvidence};
     let quality = rspice_core::diagnostics::ConvergenceQuality::default();
     let mut app = RSpiceApp::test_instance();
@@ -483,12 +386,12 @@ fn waves_details_app() -> RSpiceApp {
 
 /// The inspector's default width on a wide window and its floor in every
 /// window class (`workbench::layout::inspector_width_bounds`).
-const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
+pub(crate) const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
 const INSPECTOR_MIN_WIDTH: f32 = 278.0;
 
 /// Run the whole inspector at `width` the way the raster harness does — three
 /// passes, the last one kept — and return what it painted and published.
-fn run_inspector(
+pub(crate) fn run_inspector(
     app: &mut RSpiceApp,
     width: f32,
     height: f32,
@@ -625,69 +528,6 @@ fn the_waves_details_panel_keeps_every_line_inside_the_row_inset() {
             clipped.join("\n")
         );
     }
-}
-
-/// The Results inspector names the run and leaves its provenance to Run
-/// details…, which holds the identifiers and the executed deck the panel no
-/// longer shows.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn run_provenance_lives_in_run_details_not_on_the_panel() {
-    let mut app = waves_details_app();
-    let (_, nodes) = run_inspector(&mut app, INSPECTOR_DEFAULT_WIDTH, 2400.0);
-    let labelled = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str| {
-        nodes.iter().any(|(_, node)| node.label() == Some(label))
-    };
-    assert!(
-        labelled(&nodes, "Run details\u{2026}"),
-        "no route to the run's details"
-    );
-    for gone in [
-        "Dataset ID",
-        "Run sequence",
-        "Execution target",
-        "Samples",
-        "Visibility",
-    ] {
-        assert!(!labelled(&nodes, gone), "{gone} is still on the panel");
-    }
-
-    let run_id = app
-        .state
-        .model
-        .simulation
-        .active_run()
-        .expect("retained run")
-        .id;
-    run_details::open(&mut app.state, run_id);
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut nodes = Vec::new();
-    for _ in 0..2 {
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            run_details::show(ui.ctx(), &mut app);
-        });
-        nodes = output
-            .platform_output
-            .accesskit_update
-            .map(|update| update.nodes)
-            .unwrap_or_default();
-    }
-    for present in ["Dataset ID", "Dataset digest", "Run ID"] {
-        assert!(labelled(&nodes, present), "Run details lacks {present}");
-    }
-
-    run_details::open(&mut app.state, u64::MAX);
-    assert_eq!(
-        app.state
-            .results
-            .run_details
-            .as_ref()
-            .map(|details| details.run_id),
-        Some(run_id),
-        "a run no longer retained opens nothing"
-    );
 }
 
 /// What James read off the panel, pinned on the panel: each range field shows

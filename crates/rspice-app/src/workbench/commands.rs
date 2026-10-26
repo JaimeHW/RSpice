@@ -1663,4 +1663,4 @@ use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{active_schematic_editor, file_action};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

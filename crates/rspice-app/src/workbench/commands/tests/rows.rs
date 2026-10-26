@@ -10,7 +10,6 @@
 use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 
-use super::result_navigation::{RunOrigin, app_with_prepared_run};
 use super::*;
 use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutKind,

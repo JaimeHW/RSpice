@@ -15,8 +15,6 @@ mod drawing_sheets;
 mod execution;
 mod models;
 mod project;
-mod result_navigation;
-mod results;
 mod rows;
 mod schematic_editing;
 mod schematic_placement;
@@ -26,8 +24,13 @@ mod view_state;
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
+use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
 use crate::state::ModelsPage;
 use crate::state::Wire;
+use crate::state::{
+    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
+    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
+};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
@@ -94,5 +97,102 @@ fn app_with_selected_authored_symbol() -> RSpiceApp {
         .editor
         .selection
         .select_component(701);
+    app
+}
+
+/// The active plan's identity and its first instance, which a seeded run is
+/// sealed against so the return edge has something exact to resolve.
+pub(crate) fn plan_binding(app: &RSpiceApp) -> (SimulationPlanId, AnalysisInstanceId) {
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance owns a stable analysis plan");
+    (
+        plan.id(),
+        plan.instances()
+            .first()
+            .expect("the default plan holds one instance")
+            .id(),
+    )
+}
+
+/// Which plan a seeded prepared run is sealed against.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunOrigin {
+    /// The app's own active plan, so the return edge resolves.
+    ActivePlan,
+    /// A plan that is not the active one — a retained dataset from a plan the
+    /// project has since switched away from.
+    ForeignPlan,
+    /// No plan at all: a deck run by hand.
+    ManualDeck,
+}
+
+/// A project with one retained, prepared run sealed against `origin`.
+pub(crate) fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let (active_plan, analysis_id) = plan_binding(&app);
+    let project_revision = app.state.model.workspace.content.project.revision();
+    let (domain, plan_id, source_check) = match origin {
+        RunOrigin::ActivePlan => (
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(active_plan),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x33; 32])),
+        ),
+        RunOrigin::ForeignPlan => (
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x33; 32])),
+        ),
+        RunOrigin::ManualDeck => (
+            AnalysisResultSourceDomain::ManualDeck,
+            None,
+            PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([0x33; 32])),
+        ),
+    };
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: domain,
+        simulation_plan_id: plan_id,
+        project_revision,
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x11; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x22; 32]),
+        source_check_receipt: source_check,
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
+            PreparedRunTaskReceipt::new(
+                analysis_id,
+                project_revision,
+                Vec::new(),
+                1,
+                ContentDigest::from_bytes([0x44; 32]),
+            )
+            .expect("valid prepared task"),
+        ],
+    })
+    .expect("valid prepared run receipt");
+    app.state
+        .model
+        .simulation
+        .start_prepared_run(receipt)
+        .unwrap()
+        .add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "retained TRAN").with_provenance(
+                AnalysisResultProvenance::new_with_source_domain(
+                    AnalysisResultSourceDomain::SimulationPlan,
+                    analysis_id,
+                    project_revision,
+                    ContentDigest::from_bytes([0x44; 32]),
+                    Vec::new(),
+                )
+                .expect("valid prepared analysis provenance"),
+            ),
+        );
+    app.state.model.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.view.active_analysis_idx = Some(0);
     app
 }

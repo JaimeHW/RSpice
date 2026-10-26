@@ -552,7 +552,10 @@ fn schematic_cross_probe_unavailability(
 /// derived signal therefore leaves the engineer in Results with an exact
 /// explanation. On success, the Design surface opens; a remembered split
 /// remains active and projects Design + the same canonical Results document.
-fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<String, String> {
+pub(crate) fn cross_probe_trace_to_design(
+    app: &mut RSpiceApp,
+    signal: &str,
+) -> Result<String, String> {
     let selected = app
         .state
         .results
@@ -574,4 +577,4 @@ fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<Stri
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
