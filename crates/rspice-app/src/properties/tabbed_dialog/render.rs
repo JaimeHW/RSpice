@@ -2,11 +2,11 @@
 
 use super::state::{ComponentPropertyContext, RetainedTableFile, TabbedPropertyDialogState};
 use crate::properties::PropertyEditorSchema;
-use crate::properties::model_browser::ModelBrowserState;
 use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use crate::simulation::stimulus_realize::PreviewTiming;
 use crate::state::{Component, ComponentType, PropertyValue};
 use egui::Ui;
+use rspice_app_workbench::workbench::app::dialogs::model_browser::ModelBrowserState;
 use rspice_schematic_editor::component_properties::{
     ComponentPropertyDialogResult, ComponentPropertyDialogView, ComponentPropertyDraft,
     ComponentPropertyServices, PropertyBrowseRequest, render_component_property_dialog,
@@ -132,7 +132,7 @@ impl ComponentPropertyServices for ComponentDialogServices<'_> {
                     kind,
                     text("model"),
                     text("model_library"),
-                    crate::properties::model_browser::InstanceGeometry {
+                    rspice_app_workbench::workbench::app::dialogs::model_browser::InstanceGeometry {
                         length: dimension("l"),
                         width: dimension("w"),
                     },
@@ -348,7 +348,9 @@ fn render_model_browser(
     model_library_manager: &crate::state::ModelLibraryManager,
 ) {
     if state.model_browser.open {
-        use crate::properties::model_browser::{ModelBrowserResult, render_model_browser};
+        use rspice_app_workbench::workbench::app::dialogs::model_browser::{
+            ModelBrowserResult, render_model_browser,
+        };
 
         match render_model_browser(ctx, &mut state.model_browser, model_library_manager) {
             ModelBrowserResult::Selected { library, model } => {

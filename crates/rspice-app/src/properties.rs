@@ -6,10 +6,8 @@
 //!
 
 //! - `tabbed_dialog` - The schema-driven schematic component editor
-//! - `model_browser` - Model library browser
 //! - `property_bridge` - Bidirectional property synchronization
 
-pub(crate) mod model_browser;
 pub(crate) mod property_bridge;
 mod schema;
 pub(crate) mod source_preview;

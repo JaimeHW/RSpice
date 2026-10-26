@@ -70,7 +70,7 @@ use crate::workbench::app::RSpiceApp;
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_model_browser_dialog(&mut self, ctx: &Context) {
-        let _ = crate::properties::model_browser::render_model_browser(
+        let _ = rspice_app_workbench::workbench::app::dialogs::model_browser::render_model_browser(
             ctx,
             &mut self.state.models.model_browser_state,
             &self.state.model.model_library_manager,

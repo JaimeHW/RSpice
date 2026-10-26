@@ -1,8 +1,8 @@
 //! Component-property dialog lifecycle, document authority, and host services.
 
-use crate::properties::model_browser::ModelBrowserState;
 use crate::state::property_types::{PropertySheet, PropertyValue};
 use crate::state::{Component, ComponentType};
+use rspice_app_workbench::workbench::app::dialogs::model_browser::ModelBrowserState;
 use rspice_schematic_editor::component_properties::ComponentPropertyDraft;
 use rspice_schematic_editor::requests::EditorRequestSource;
 use std::collections::HashMap;
