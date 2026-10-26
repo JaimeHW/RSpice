@@ -3300,6 +3300,17 @@ mod tests {
         expression.split_whitespace().collect()
     }
 
+    fn parse_validated(
+        input: &str,
+        options: super::super::NetlistParseOptions,
+    ) -> Result<Netlist, ParseError> {
+        super::super::finish_non_aborting_parse(Netlist::parse_validated_with_options_and_abort(
+            input,
+            options,
+            &crate::abort_signal::NoAbort,
+        ))
+    }
+
     #[test]
     fn output_expression_extraction_preserves_authored_order_and_nested_quotes() {
         assert_eq!(
@@ -3320,7 +3331,7 @@ mod tests {
             let source = format!(
                 "typed output expression\nVA 0 1 5\nRB 1 2 100\nRC 2 0 100\n.TRAN 0 1\n.PRINT TRAN {{{expression}}}\n.END\n"
             );
-            let error = Netlist::parse_validated_with_options(&source, options)
+            let error = parse_validated(&source, options)
                 .expect_err("invalid output expression must fail before execution");
             let ParseError::OutputExpressionValidation(error) = error else {
                 panic!("wrong typed output-expression error: {error:?}");
@@ -3340,7 +3351,7 @@ mod tests {
         }
 
         let valid = "valid output expression\nVA 0 1 5\nRB 1 2 100\nRC 2 0 100\n.TRAN 0 1\n.PRINT TRAN {ABS(V(1))}\n.END\n";
-        Netlist::parse_validated_with_options(valid, options)
+        parse_validated(valid, options)
             .expect("a supported function and defined probe remain valid");
     }
 
@@ -3364,8 +3375,7 @@ X1 1 CELL
 .MEASURE TRAN VV2 EQN {V(1)+2}
 .END
 ";
-        Netlist::parse_validated_with_options(source, options)
-            .expect("nested grouping, DDX, and live measures validate");
+        parse_validated(source, options).expect("nested grouping, DDX, and live measures validate");
 
         let atomic_devices = "atomic Xyce device outputs
 VC 1 0 5
@@ -3378,10 +3388,10 @@ X1 1 CELL
 .PRINT DC {VC} {R1} {X1:R2}
 .END
 ";
-        Netlist::parse_validated_with_options(atomic_devices, options)
+        parse_validated(atomic_devices, options)
             .expect("atomic source, passive, and flattened device values validate");
         assert!(matches!(
-            Netlist::parse_validated_with_options(
+            parse_validated(
                 &atomic_devices.replace("{R1}", "{R1+1}"),
                 options,
             ),
@@ -3401,7 +3411,7 @@ X1 1 CELL
         ] {
             assert!(
                 matches!(
-                    Netlist::parse_validated_with_options(&invalid_measure, options),
+                    parse_validated(&invalid_measure, options),
                     Err(ParseError::OutputExpressionValidation(error))
                         if matches!(error.issue, OutputExpressionIssue::UnresolvedIdentifier { ref identifier } if identifier == "VV1")
                 ),
@@ -3409,11 +3419,8 @@ X1 1 CELL
             );
         }
 
-        let error = Netlist::parse_validated_with_options(
-            &source.replace("DDX(V(1)*V(1),V(1))", "DDX(V(1))"),
-            options,
-        )
-        .expect_err("DDX retains its exact two-argument contract");
+        let error = parse_validated(&source.replace("DDX(V(1)*V(1),V(1))", "DDX(V(1))"), options)
+            .expect_err("DDX retains its exact two-argument contract");
         assert!(matches!(
             error,
             ParseError::OutputExpressionValidation(error)
@@ -3431,7 +3438,7 @@ X1 1 CELL
             let invalid_source = source.replace("DDX(V(1)*V(1),V(1))", invalid);
             assert!(
                 matches!(
-                    Netlist::parse_validated_with_options(&invalid_source, options),
+                    parse_validated(&invalid_source, options),
                     Err(ParseError::OutputExpressionValidation(error))
                         if matches!(error.issue, OutputExpressionIssue::Syntax { .. })
                 ),
@@ -3446,7 +3453,7 @@ V1 1 0 1
 .MEASURE TRAN E3 PARAM='V(1)'
 .END
 ";
-        Netlist::parse_validated_with_options(numeric_collision, options)
+        parse_validated(numeric_collision, options)
             .expect("runtime names do not rewrite exponent or engineering suffix tokens");
 
         let function_derivative = "DDX function formal
@@ -3456,10 +3463,10 @@ V1 1 0 1
 .PRINT TRAN {DERIV(V(1))}
 .END
 ";
-        Netlist::parse_validated_with_options(function_derivative, options)
+        parse_validated(function_derivative, options)
             .expect("DDX accepts a referenced user-function formal target");
         assert!(matches!(
-            Netlist::parse_validated_with_options(
+            parse_validated(
                 &function_derivative.replace("DDX(X*X,X)", "DDX(X*X,1)"),
                 options,
             ),
@@ -3471,7 +3478,7 @@ V1 1 0 1
             let missing_dependency = format!(
                 "function dependency\nV1 1 0 1\n.FUNC OBSERVE(X) {{{missing}+X}}\n.TRAN 0 1\n.PRINT TRAN {{OBSERVE(1)}}\n.END\n"
             );
-            let observed = Netlist::parse_validated_with_options(&missing_dependency, options);
+            let observed = parse_validated(&missing_dependency, options);
             assert!(
                 matches!(
                     &observed,
@@ -3512,7 +3519,7 @@ RC 2 0 100
 .PRINT TRAN {RB:R}
 .END
 ";
-        Netlist::parse_validated_with_options(source, options)
+        parse_validated(source, options)
             .expect("Xyce output-domain operands validate before execution");
 
         let noise = "valid Xyce noise expression operands
@@ -3523,14 +3530,14 @@ R2 out 0 1k
 .PRINT NOISE {LOG(ONOISE)+LOG(INOISE)+DNO(R1,thermal)+DNI(R1,thermal)}
 .END
 ";
-        Netlist::parse_validated_with_options(noise, options)
+        parse_validated(noise, options)
             .expect("noise-owned expression operands validate in the NOISE domain");
 
         let wrong_domain = source.replace(
             ".PRINT TRAN {RB:R}",
             ".PRINT TRAN {LOG(ONOISE)+LOG(INOISE)}",
         );
-        let error = Netlist::parse_validated_with_options(&wrong_domain, options)
+        let error = parse_validated(&wrong_domain, options)
             .expect_err("noise vectors remain analysis-owned");
         assert!(matches!(
             error,
@@ -3556,7 +3563,7 @@ V1 1 0 1
 .PRINT TRAN {RAND()+RANDOM()+UNIF(1,.1)+AUNIF(1,.1)+GAUSS(1,.1)+AGAUSS(1,.1,3)}
 .END
 ";
-        Netlist::parse_validated_with_options(source, options)
+        parse_validated(source, options)
             .expect("Xyce output projections and statistical functions are valid");
 
         for expression in ["R()", "UNIF(1)", "GAUSS(1)", "RAND(1)"] {
@@ -3565,7 +3572,7 @@ V1 1 0 1
                 &format!("{{{expression}}}"),
             );
             assert!(matches!(
-                Netlist::parse_validated_with_options(&invalid, options),
+                parse_validated(&invalid, options),
                 Err(ParseError::OutputExpressionValidation(error))
                     if matches!(error.issue, OutputExpressionIssue::Syntax { .. })
             ));
@@ -3582,7 +3589,7 @@ V1 1 0 1
             let source = format!(
                 "invalid accessor\nV1 1 0 1\nR1 1 0 1k\n.TRAN 1 1\n.PRINT TRAN {{{expression}}}\n.END\n"
             );
-            let error = Netlist::parse_validated_with_options(&source, options)
+            let error = parse_validated(&source, options)
                 .expect_err("invalid accessor must fail semantic validation");
             assert!(matches!(
                 error,
@@ -3602,12 +3609,12 @@ V1 1 0 1
             let valid = format!(
                 "internal node projection\nV1 1 0 1\n.TRAN 1 1\n.PRINT TRAN {{{accessor}(1)}}\n.END\n"
             );
-            Netlist::parse_validated_with_options(&valid, options)
+            parse_validated(&valid, options)
                 .unwrap_or_else(|error| panic!("{accessor} rejected an existing node: {error}"));
 
             let missing = valid.replace(&format!("{accessor}(1)"), &format!("{accessor}(MISSING)"));
             assert!(matches!(
-                Netlist::parse_validated_with_options(&missing, options),
+                parse_validated(&missing, options),
                 Err(ParseError::OutputSymbolValidation(error))
                     if error.unresolved.len() == 1
                         && error.unresolved[0].operator == accessor
@@ -3623,7 +3630,7 @@ V1 1 0 1
             ..super::super::NetlistParseOptions::default()
         };
         let noise = "noise contribution domain\nV1 in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.NOISE V(out) V1 DEC 1 1 10\n.PRINT NOISE {DNO(R1)+DNI(R1,thermal)}\n.END\n";
-        Netlist::parse_validated_with_options(noise, options)
+        parse_validated(noise, options)
             .expect("DNO and DNI are valid in a NOISE output expression");
 
         for (analysis, command) in [("TRAN", ".TRAN 1 1"), ("AC", ".AC LIN 1 1 1")] {
@@ -3632,7 +3639,7 @@ V1 1 0 1
                     "wrong noise domain\nV1 1 0 1 AC 1\nR1 1 0 1k\n{command}\n.PRINT {analysis} {{{accessor}(R1)}}\n.END\n"
                 );
                 assert!(matches!(
-                    Netlist::parse_validated_with_options(&source, options),
+                    parse_validated(&source, options),
                     Err(ParseError::OutputExpressionValidation(error))
                         if matches!(
                             error.issue,
@@ -3661,12 +3668,12 @@ RSUB A 0 2k
 .PRINT TRAN {RB:R+X1:RSUB:R}
 .END
 ";
-        Netlist::parse_validated_with_options(valid, options)
+        parse_validated(valid, options)
             .expect("top-level and hierarchical passive parameters resolve");
 
         for authored in ["MISSING:R", "RB:BOGUS", "X1:RSUB:BOGUS"] {
             let source = valid.replace("RB:R+X1:RSUB:R", authored);
-            let error = Netlist::parse_validated_with_options(&source, options)
+            let error = parse_validated(&source, options)
                 .expect_err("absent device parameters must fail closed");
             assert!(matches!(
                 error,
@@ -4591,12 +4598,12 @@ R1 out ref 1k\n\
             expression_dialect: super::super::ExpressionDialect::Xyce,
             ..Default::default()
         };
-        Netlist::parse_validated_with_options(
+        parse_validated(
             "defined GND\nV1 GND 0 1\n.PRINT OP V(GND)\n.OP\n.END\n",
             options,
         )
         .expect("an authored GND node is valid without replacement");
-        let error = Netlist::parse_validated_with_options(
+        let error = parse_validated(
             "undefined GND\nV1 1 0 1\n.PRINT OP V(GND)\n.OP\n.END\n",
             options,
         )
@@ -4674,7 +4681,7 @@ R1 out ref 1k\n\
             expression_dialect: super::super::ExpressionDialect::Xyce,
             ..Default::default()
         };
-        let netlist = Netlist::parse_validated_with_options(
+        let netlist = parse_validated(
             "late replacement\n\
              X1 1 GND DIV\n\
              .SUBCKT DIV A B\n\
@@ -4695,7 +4702,7 @@ R1 out ref 1k\n\
             expression_dialect: super::super::ExpressionDialect::Xyce,
             ..Default::default()
         };
-        let netlist = Netlist::parse_validated_with_options(
+        let netlist = parse_validated(
             "false replacement\n\
              .PREPROCESS REPLACEGROUND FALSE\n\
              X1 1 GND DIV\n\

@@ -3,11 +3,12 @@
 use std::f64::consts::PI;
 
 use rspice_core::Netlist;
-use rspice_core::abort_signal::CountingAbort;
+use rspice_core::abort_signal::{CountingAbort, NoAbort};
 use rspice_core::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult};
 use rspice_core::netlist::OutputSymbolKind::{Device, Node};
 use rspice_core::netlist::{
-    NetlistParseOptions, OutputDirectiveKind, ParseError, validate_output_symbols,
+    NetlistParseOptions, OutputDirectiveKind, ParseError, validate_output_requests,
+    validate_output_symbols,
 };
 
 fn analyzer(fundamental: f64, harmonics: usize) -> FourierAnalysis {
@@ -255,13 +256,17 @@ fn unresolved_output_symbols_keep_the_deck_file_provenance() {
         "invalid output\nV1 1 0 1\n.PRINT OP V(missing)\n.END\n",
     )
     .unwrap();
-    let source = Netlist::read_source_with_options(&path, NetlistParseOptions::default()).unwrap();
-    let error = Netlist::parse_validated_with_path_and_options(
-        &source,
+    let source = Netlist::read_source_with_options_and_abort(
         &path,
         NetlistParseOptions::default(),
+        &NoAbort,
     )
-    .expect_err("V(missing) names no node of the deck");
+    .unwrap();
+    let netlist =
+        Netlist::parse_with_path_and_options(&source, &path, NetlistParseOptions::default())
+            .unwrap();
+    let error =
+        validate_output_requests(&netlist).expect_err("V(missing) names no node of the deck");
     let deck = std::fs::canonicalize(&path).unwrap();
     let ParseError::OutputSymbolValidation(error) = error else {
         panic!("expected the typed output-symbol validation failure, got {error}");

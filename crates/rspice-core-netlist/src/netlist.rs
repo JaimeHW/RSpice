@@ -1702,16 +1702,6 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_options_and_abort(input, options, &NoAbort))
     }
 
-    /// Parse with explicit options and validate output requests.
-    pub fn parse_validated_with_options(
-        input: &str,
-        options: NetlistParseOptions,
-    ) -> Result<Self, ParseError> {
-        finish_non_aborting_parse(Self::parse_validated_with_options_and_abort(
-            input, options, &NoAbort,
-        ))
-    }
-
     /// Parse with explicit options, validate output requests, and cooperatively
     /// observe cancellation throughout both phases.
     pub fn parse_validated_with_options_and_abort(
@@ -1806,32 +1796,6 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_options_and_abort(
             input, file_path, options, &NoAbort,
         ))
-    }
-
-    /// Parse with include resolution and explicit options, then validate
-    /// output requests.
-    pub fn parse_validated_with_path_and_options(
-        input: &str,
-        file_path: &std::path::Path,
-        options: NetlistParseOptions,
-    ) -> Result<Self, ParseError> {
-        finish_non_aborting_parse(Self::parse_validated_with_path_and_options_and_abort(
-            input, file_path, options, &NoAbort,
-        ))
-    }
-
-    /// Parse with include resolution and explicit options, then validate
-    /// output requests with cooperative cancellation.
-    pub fn parse_validated_with_path_and_options_and_abort(
-        input: &str,
-        file_path: &std::path::Path,
-        options: NetlistParseOptions,
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, ParseWithAbortError> {
-        let netlist =
-            Self::parse_with_path_and_options_and_abort(input, file_path, options, abort)?;
-        validate_output_requests_with_abort(&netlist, abort)?;
-        Ok(netlist)
     }
 
     /// Parse a netlist with include resolution, explicit parser options, and
@@ -2239,23 +2203,6 @@ impl Netlist {
             abort,
         )?;
         Self::parse_with_path_and_options_and_abort(&content, path, options, abort)
-    }
-
-    /// Read a deck file with the same encoding handling `parse_file` uses
-    /// (UTF-8 with fallbacks), without parsing — for callers that
-    /// preprocess the text first (multi-run expansion).
-    pub fn read_source(path: &std::path::Path) -> Result<String, ParseError> {
-        Self::read_source_with_options(path, NetlistParseOptions::default())
-    }
-
-    /// Read and decode a root source file under an explicit byte policy.
-    pub fn read_source_with_options(
-        path: &std::path::Path,
-        options: NetlistParseOptions,
-    ) -> Result<String, ParseError> {
-        finish_non_aborting_parse(Self::read_source_with_options_and_abort(
-            path, options, &NoAbort,
-        ))
     }
 
     /// Read and decode a root source file under an explicit byte policy while

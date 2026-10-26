@@ -707,7 +707,13 @@ mod tests {
 
     fn parse_bug702_with_family_execution_dir(name: &str) -> Result<Netlist, ParseError> {
         let path = bug702_path(name);
-        let source = Netlist::read_source(&path)?;
+        let source = crate::netlist::finish_non_aborting_parse(
+            Netlist::read_source_with_options_and_abort(
+                &path,
+                super::super::NetlistParseOptions::default(),
+                &NoAbort,
+            ),
+        )?;
         Netlist::parse_with_path_and_execution_dir(
             &source,
             &path,
