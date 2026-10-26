@@ -2585,7 +2585,11 @@ fn xyce_level10_default_gain_stage_matches_xyce_ngspice_dc_op() {
 
 fn bypass_engine(reltol: Value, abstol: Value) -> Engine {
     Engine::new(SimulationConfig {
-        bypass_config: rspice_core::engine::BypassConfig::with_tolerances(reltol, abstol),
+        bypass_config: rspice_core::engine::BypassConfig {
+            enabled: true,
+            reltol,
+            abstol,
+        },
         ..SimulationConfig::default()
     })
 }

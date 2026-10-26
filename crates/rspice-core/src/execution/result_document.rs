@@ -1660,11 +1660,6 @@ impl ResultSignal {
         self.qualifier.as_ref()
     }
 
-    /// Whether this series was retained, and if not, why.
-    pub const fn availability(&self) -> SeriesAvailability {
-        self.availability
-    }
-
     /// The samples themselves.
     pub const fn values(&self) -> &SeriesValues {
         &self.values
@@ -1872,11 +1867,6 @@ impl DeviceStateSeries {
     /// Device family label, when the producing result declares one.
     pub fn device_kind(&self) -> Option<&str> {
         self.device_kind.as_deref()
-    }
-
-    /// Operating region at each point, or empty.
-    pub fn regions(&self) -> &[Option<String>] {
-        &self.regions
     }
 
     /// Named operating-point parameter histories.

@@ -1798,11 +1798,6 @@ impl TransientResult {
         self.try_voltage_at(node, time_index)
     }
 
-    /// Get number of time points
-    pub fn num_points(&self) -> usize {
-        self.time.len()
-    }
-
     fn is_ground_name(name: &str) -> bool {
         crate::naming::is_spice_ground_name(name)
     }

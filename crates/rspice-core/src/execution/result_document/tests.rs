@@ -1357,7 +1357,7 @@ fn operating_point_document_matches_its_source() {
     let state = document.device_states().first().expect("device state");
     assert_eq!(state.device_name(), "M1");
     assert_eq!(state.device_kind(), Some("MOSFET"));
-    assert_eq!(state.regions(), [Some("saturation".to_owned())]);
+    assert_eq!(state.regions, [Some("saturation".to_owned())]);
     assert_eq!(state.parameters()[0].values, vec![Some(1.5e-3)]);
 }
 
@@ -1451,7 +1451,7 @@ fn transient_document_keeps_unretained_series_as_explicit_absence() {
         .iter()
         .find(|signal| signal.descriptor().canonical_name() == "v(mid)")
         .expect("the unretained node keeps its descriptor");
-    assert_eq!(mid.availability(), SeriesAvailability::NotProjected);
+    assert_eq!(mid.availability, SeriesAvailability::NotProjected);
     assert!(!mid.has_any_sample());
     assert_eq!(
         mid.values(),

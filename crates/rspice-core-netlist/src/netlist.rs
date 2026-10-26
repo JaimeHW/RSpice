@@ -3093,11 +3093,6 @@ impl Netlist {
             }
         }
     }
-
-    /// Check if a node is global
-    pub fn is_global(&self, node: &str) -> bool {
-        self.global_nodes.contains(&node.to_uppercase())
-    }
 }
 
 /// Whether a Verilog-A source spelling names a registered runtime rather than

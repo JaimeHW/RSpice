@@ -873,7 +873,7 @@ fn law_missingness_survives_the_round_trip_as_absence() {
             )
             .expect("a document this build wrote decodes");
             for (original, decoded) in document.signals().iter().zip(decoded.signals()) {
-                prop_assert_eq!(original.availability(), decoded.availability());
+                prop_assert_eq!(original, decoded);
                 match (original.values(), decoded.values()) {
                     (
                         SeriesValues::Real { samples: left },

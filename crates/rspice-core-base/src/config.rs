@@ -1130,15 +1130,6 @@ impl BypassConfig {
             ..Default::default()
         }
     }
-
-    /// Create bypass config with custom tolerances
-    pub fn with_tolerances(reltol: Value, abstol: Value) -> Self {
-        Self {
-            enabled: true,
-            reltol,
-            abstol,
-        }
-    }
 }
 
 impl Default for SimulationConfig {

@@ -1660,7 +1660,6 @@ mod tests {
         assert_eq!(card.num_harmonics, 10);
         assert_eq!(card.max_iterations, 50);
         assert!(card.auto_period, "the positional form is autonomous");
-        assert!(card.is_autonomous());
         assert_eq!(
             card.tstab_periods,
             PssCard::DEFAULT_AUTONOMOUS_TSTAB_PERIODS

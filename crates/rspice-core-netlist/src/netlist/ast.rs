@@ -2706,11 +2706,6 @@ impl PssCard {
         }
     }
 
-    /// Whether the period is a solver unknown rather than authored input.
-    pub fn is_autonomous(&self) -> bool {
-        self.auto_period || self.fundamental_freq <= 0.0
-    }
-
     /// Period the stabilization run is measured in.
     pub fn period(&self) -> Value {
         if self.fundamental_freq > 0.0 {

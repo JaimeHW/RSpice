@@ -315,11 +315,6 @@ pub struct PstbResult {
 }
 
 impl PstbResult {
-    /// Check if the periodic orbit is stable
-    pub fn is_stable(&self) -> bool {
-        self.stability_verdict == FloquetStabilityVerdict::Stable
-    }
-
     /// Re-derive every quantity this result publishes and refuse the result if
     /// any of them disagrees with the spectrum it was derived from.
     ///
@@ -965,7 +960,6 @@ mod tests {
             FloquetSpectrumEvidence::NoDynamicModes
         );
         assert_eq!(empty.stability_verdict, FloquetStabilityVerdict::Stable);
-        assert!(empty.is_stable());
 
         let invalid = [vec![vec![1.0, 0.0], vec![0.0]], vec![vec![Value::NAN]]];
         for monodromy in invalid {
@@ -998,7 +992,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.stability, StabilityType::SaddleNode);
-        assert!(!result.is_stable());
+        assert_ne!(result.stability_verdict, FloquetStabilityVerdict::Stable);
         assert_eq!(result.min_stability_margin_db, Some(-0.0));
     }
 
@@ -1014,7 +1008,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.stability, StabilityType::Marginal);
-        assert!(!result.is_stable());
+        assert_ne!(result.stability_verdict, FloquetStabilityVerdict::Stable);
     }
 
     #[test]
@@ -1031,7 +1025,6 @@ mod tests {
             invalid_phase.stability_verdict,
             FloquetStabilityVerdict::Indeterminate
         );
-        assert!(!invalid_phase.is_stable());
 
         config.stability_threshold = 1.0 + 1e-6;
         let mut analyzer = PstbAnalyzer::new(config);
@@ -1040,7 +1033,6 @@ mod tests {
             .unwrap();
         assert_eq!(stable.trivial_multiplier_index, Some(0));
         assert_eq!(stable.stability_verdict, FloquetStabilityVerdict::Stable);
-        assert!(stable.is_stable());
 
         let phase_only = analyzer
             .analyze_monodromy_with_abort(&[vec![1.0]], 1.0, &NoAbort)
@@ -1064,7 +1056,6 @@ mod tests {
         assert!(result.multipliers[0].is_trivial);
         assert!(!result.multipliers[0].is_unstable);
         assert_eq!(result.num_unstable, 0);
-        assert!(result.is_stable());
     }
 
     #[test]
