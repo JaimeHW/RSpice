@@ -4,9 +4,9 @@
 //! transactional import planning. It deliberately has no egui rendering or
 //! platform IO so desktop, browser, and mobile surfaces consume one model.
 
-mod import_io;
-mod io;
-mod markdown;
+pub(crate) mod import_io;
+pub(crate) mod io;
+pub(crate) mod markdown;
 pub(crate) mod merge;
 pub(crate) mod pdf;
 pub(crate) mod projection;
