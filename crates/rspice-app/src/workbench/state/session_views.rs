@@ -95,6 +95,28 @@ impl TuningInstanceBindingDraft {
     }
 }
 
+/// One limit cell of the Monte Carlo yield table, open for entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct YieldLimitDraft {
+    /// The output whose limit is being entered, as the trials name it.
+    pub output: String,
+    pub bound: YieldLimitBound,
+    /// What the reader has typed.
+    pub text: String,
+    /// What the cell said when it opened. Applying it unchanged changes
+    /// nothing, so a limit spelled to four digits is never rounded by a click.
+    pub seed: String,
+    /// Set until the cell first paints, so the field takes the keyboard once.
+    pub focus: bool,
+}
+
+/// Which bound of a limit a yield cell states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YieldLimitBound {
+    Lower,
+    Upper,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VerificationSessionState {
     #[serde(default)]
@@ -109,6 +131,10 @@ pub struct VerificationSessionState {
     /// specification's measurement name. Review state only.
     #[serde(skip)]
     pub yield_selected_spec: Option<String>,
+    /// The yield table's limit cell open for entry. Transient: a limit is
+    /// the plan's only once it is applied.
+    #[serde(skip)]
+    pub yield_limit_draft: Option<YieldLimitDraft>,
     #[serde(skip)]
     pub regression_comparison: Option<RegressionComparisonReceipt>,
     #[serde(skip)]

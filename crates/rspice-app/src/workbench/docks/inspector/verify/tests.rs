@@ -53,3 +53,29 @@ fn wilson_interval_is_bounded_and_contains_the_observed_rate() {
     assert!(wilson_interval_95(0, 0).is_none());
     assert!(wilson_interval_95(2, 1).is_none());
 }
+
+/// A trial that did not converge has a place in the trail and no sample, so
+/// after it the two no longer line up. The worst samples are the values
+/// outside their limit, not the values at a failing trail position.
+#[test]
+fn worst_samples_are_the_values_outside_their_limit() {
+    let result = rspice_results::yield_analysis::YieldResult {
+        spec: rspice_results::yield_analysis::YieldSpec::lower("gain", 40.0, "dB"),
+        total_runs: 4,
+        pass_count: 2,
+        fail_count: 2,
+        yield_percent: 50.0,
+        stats: Default::default(),
+        // The second trial did not converge; the fourth measured 39.5 dB.
+        trail: vec![true, false, true, false],
+        samples: vec![41.0, 42.0, 39.5],
+    };
+    let worst = worst_samples(&[result]);
+    assert_eq!(
+        worst
+            .iter()
+            .map(|sample| (sample.sample_index, sample.value))
+            .collect::<Vec<_>>(),
+        [(2, 39.5)]
+    );
+}

@@ -168,6 +168,10 @@ pub(super) struct Cell {
     pub(super) text: String,
     mono: bool,
     ink: Ink,
+    /// The cell answers a click by opening for entry.
+    editable: bool,
+    /// What the cell says when the pointer rests on it.
+    hint: Option<String>,
 }
 
 impl Cell {
@@ -177,6 +181,8 @@ impl Cell {
             text: text.into(),
             mono: false,
             ink: Ink::Plain,
+            editable: false,
+            hint: None,
         }
     }
 
@@ -186,6 +192,8 @@ impl Cell {
             text: text.into(),
             mono: true,
             ink: Ink::Plain,
+            editable: false,
+            hint: None,
         }
     }
 
@@ -195,6 +203,8 @@ impl Cell {
             text: "\u{2014}".to_owned(),
             mono: true,
             ink: Ink::Faint,
+            editable: false,
+            hint: None,
         }
     }
 
@@ -220,8 +230,50 @@ impl Cell {
             text: text.into(),
             mono: false,
             ink: Ink::Problem(problem),
+            editable: false,
+            hint: None,
         }
     }
+
+    /// The same words, opened for entry by a click.
+    pub(super) fn editable(mut self) -> Self {
+        self.editable = true;
+        self
+    }
+
+    /// The same words, saying `hint` when the pointer rests on them.
+    pub(super) fn hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+}
+
+/// The one cell open for entry: where it is and what has been typed.
+pub(super) struct CellEditor<'a> {
+    pub(super) row: usize,
+    pub(super) column: usize,
+    pub(super) text: &'a mut String,
+    /// Set on the frame the cell opens: the field takes the keyboard, with
+    /// its words selected so the first keystroke replaces them.
+    pub(super) focus: bool,
+}
+
+/// How an open cell was closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EditOutcome {
+    /// Enter, or the field let go of the keyboard: apply what was typed.
+    Commit,
+    /// Escape: leave the value as it was.
+    Cancel,
+}
+
+/// What one row reported back.
+#[derive(Debug, Clone, Copy, Default)]
+struct RowResponse {
+    clicked: bool,
+    /// The editable column the reader clicked.
+    edit: Option<usize>,
+    edited: Option<EditOutcome>,
 }
 
 /// What a table reported back this frame.
@@ -229,6 +281,10 @@ impl Cell {
 pub(super) struct TableResponse {
     /// The row the reader clicked.
     pub(super) clicked: Option<usize>,
+    /// The editable cell the reader clicked, as (row, column).
+    pub(super) edit: Option<(usize, usize)>,
+    /// How the open cell was closed this frame, if it was.
+    pub(super) edited: Option<EditOutcome>,
 }
 
 /// One table: its columns, its rows, and where it may grow.
@@ -239,6 +295,7 @@ pub(super) struct DataTable<'a> {
     selected: Option<usize>,
     clickable: bool,
     max_height: f32,
+    editor: Option<CellEditor<'a>>,
 }
 
 impl<'a> DataTable<'a> {
@@ -250,7 +307,14 @@ impl<'a> DataTable<'a> {
             selected: None,
             clickable: false,
             max_height: f32::INFINITY,
+            editor: None,
         }
+    }
+
+    /// The cell open for entry, painted as a field in its place.
+    pub(super) fn editing(mut self, editor: Option<CellEditor<'a>>) -> Self {
+        self.editor = editor;
+        self
     }
 
     /// The row painted with the selection wash.
@@ -272,10 +336,11 @@ impl<'a> DataTable<'a> {
     }
 
     pub(super) fn show(
-        self,
+        mut self,
         ui: &mut Ui,
         mut row_at: impl FnMut(usize) -> Vec<Cell>,
     ) -> TableResponse {
+        let mut editor = self.editor.take();
         let visible = ui.available_rect_before_wrap().intersect(ui.clip_rect());
         let available = visible.width().max(1.0);
         let least: f32 = self.columns.iter().map(|column| column.width).sum();
@@ -295,9 +360,16 @@ impl<'a> DataTable<'a> {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                     for index in range {
                         let cells = row_at(index);
-                        if self.row(ui, index, width, &widths, &cells) {
+                        let open = editor.as_mut().filter(|editor| editor.row == index);
+                        let row = self.row(ui, index, width, &widths, &cells, open);
+                        if row.clicked {
                             response.clicked = Some(index);
                         }
+                        if let Some(column) = row.edit {
+                            response.clicked = Some(index);
+                            response.edit = Some((index, column));
+                        }
+                        response.edited = response.edited.or(row.edited);
                     }
                 });
         };
@@ -371,8 +443,16 @@ impl<'a> DataTable<'a> {
         );
     }
 
-    /// Paint one row and report whether it was clicked.
-    fn row(&self, ui: &mut Ui, index: usize, width: f32, widths: &[f32], cells: &[Cell]) -> bool {
+    /// Paint one row and report what the reader did to it.
+    fn row(
+        &self,
+        ui: &mut Ui,
+        index: usize,
+        width: f32,
+        widths: &[f32],
+        cells: &[Cell],
+        mut editor: Option<&mut CellEditor<'_>>,
+    ) -> RowResponse {
         let t = Tokens::get(ui.ctx());
         let (rect, response) = ui.allocate_exact_size(
             vec2(width, TABLE_ROW_H),
@@ -410,6 +490,10 @@ impl<'a> DataTable<'a> {
         });
         #[cfg(test)]
         super::raster::probe(ui, "table.row", rect);
+        let mut answered = RowResponse {
+            clicked: self.clickable && response.clicked(),
+            ..RowResponse::default()
+        };
         if ui.is_rect_visible(rect) {
             if selected {
                 ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
@@ -422,6 +506,55 @@ impl<'a> DataTable<'a> {
             {
                 let cell_rect =
                     Rect::from_min_size(pos2(x, rect.top()), vec2(*column_width, rect.height()));
+                if column_index > 0 {
+                    ui.painter().vline(
+                        cell_rect.left(),
+                        cell_rect.y_range(),
+                        egui::Stroke::new(1.0, t.color.border),
+                    );
+                }
+                x += column_width;
+                if let Some(open) = editor
+                    .as_deref_mut()
+                    .filter(|editor| editor.column == column_index)
+                {
+                    answered.edited = self.edit_cell(ui, index, column, cell_rect, open);
+                    continue;
+                }
+                if cell.editable || cell.hint.is_some() {
+                    let cell_response = ui.interact(
+                        cell_rect,
+                        ui.id().with((self.id, "cell", index, column_index)),
+                        if cell.editable {
+                            Sense::click()
+                        } else {
+                            Sense::hover()
+                        },
+                    );
+                    if cell.editable {
+                        cell_response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                ui.is_enabled(),
+                                format!("Edit {}: {}", column.head, cell.text),
+                            )
+                        });
+                        if cell_response.hovered() {
+                            ui.painter()
+                                .rect_filled(cell_rect.shrink(1.0), 0.0, t.color.bg_hover);
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+                        }
+                        if theme::focus_is_visible(ui.ctx(), &cell_response) {
+                            theme::paint_focus_ring(ui, &cell_response, cell_rect.shrink(1.0));
+                        }
+                        if cell_response.clicked() {
+                            answered.edit = Some(column_index);
+                        }
+                    }
+                    if let Some(hint) = &cell.hint {
+                        let _ = cell_response.on_hover_text(hint);
+                    }
+                }
                 let font = if cell.mono {
                     theme::mono(tokens::FS_0, FontWeight::Regular)
                 } else {
@@ -452,14 +585,6 @@ impl<'a> DataTable<'a> {
                 {
                     super::raster::probe(ui, &format!("table.right.{column_index}"), text);
                 }
-                if column_index > 0 {
-                    ui.painter().vline(
-                        cell_rect.left(),
-                        cell_rect.y_range(),
-                        egui::Stroke::new(1.0, t.color.border),
-                    );
-                }
-                x += column_width;
             }
             ui.painter().hline(
                 rect.x_range(),
@@ -470,7 +595,57 @@ impl<'a> DataTable<'a> {
                 theme::paint_focus_ring(ui, &response, rect);
             }
         }
-        self.clickable && response.clicked()
+        answered
+    }
+
+    /// Paint the open cell as a field in its place and report how it closed.
+    ///
+    /// The field's words sit where the cell's did: the same mono face, the same
+    /// edge, the same padding, so opening a cell moves nothing but the caret.
+    fn edit_cell(
+        &self,
+        ui: &mut Ui,
+        index: usize,
+        column: &Column,
+        cell: Rect,
+        editor: &mut CellEditor<'_>,
+    ) -> Option<EditOutcome> {
+        let id = ui.id().with((self.id, "edit", index, editor.column));
+        if editor.focus {
+            ui.memory_mut(|memory| memory.request_focus(id));
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(editor.text.chars().count()),
+                )));
+            state.store(ui.ctx(), id);
+        }
+        let field = cell.shrink(1.0);
+        #[cfg(test)]
+        super::raster::probe(ui, "table.edit", field);
+        let response = ui.put(
+            field,
+            egui::TextEdit::singleline(editor.text)
+                .id(id)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .horizontal_align(match column.align {
+                    Align::Left => egui::Align::LEFT,
+                    Align::Right => egui::Align::RIGHT,
+                })
+                // One point under the cell's padding, which the field's own
+                // inset takes up.
+                .margin(egui::Margin::symmetric(7, 2))
+                .desired_width(field.width()),
+        );
+        response.lost_focus().then(|| {
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                EditOutcome::Cancel
+            } else {
+                EditOutcome::Commit
+            }
+        })
     }
 
     /// The horizontal span a column's words may occupy: the cell less its

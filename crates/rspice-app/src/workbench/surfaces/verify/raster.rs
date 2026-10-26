@@ -19,9 +19,8 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{VerificationPage, Workspace};
-use rspice_results::yield_analysis::{
-    DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
-};
+use rspice_results::family_metadata::MonteCarloVariableMetadata;
+use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
 pub(super) const PAGE_WIDTH: f32 = 1100.0;
 pub(super) const PAGE_HEIGHT: f32 = 720.0;
@@ -103,6 +102,35 @@ impl PageGeometry {
     }
 }
 
+/// The review-size screen, with `events` arriving on it.
+pub(super) fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(
+            egui::Pos2::ZERO,
+            vec2(PAGE_WIDTH, PAGE_HEIGHT),
+        )),
+        events,
+        ..Default::default()
+    }
+}
+
+/// One pass of `page` over `input` in an unframed central panel, and where
+/// its widgets put things on it.
+pub(super) fn page_pass(
+    ctx: &egui::Context,
+    input: egui::RawInput,
+    mut page: impl FnMut(&mut egui::Ui),
+) -> (egui::FullOutput, PageGeometry) {
+    let _ = take_probes(ctx);
+    let output = ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| page(ui));
+    });
+    let probes = take_probes(ctx);
+    (output, PageGeometry { probes })
+}
+
 /// Lay one page out at the review size and read back where it put things,
 /// without rasterizing it.
 pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageGeometry {
@@ -110,40 +138,54 @@ pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageG
     app.state.simulate.verification_page = page;
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let mut probes = Vec::new();
+    let mut geometry = PageGeometry::default();
     for _ in 0..3 {
-        let _ = take_probes(&ctx);
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    vec2(PAGE_WIDTH, PAGE_HEIGHT),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show(ui, &mut app));
-            },
-        );
-        probes = take_probes(&ctx);
+        geometry = page_pass(&ctx, page_input(Vec::new()), |ui| super::show(ui, &mut app)).1;
     }
-    PageGeometry { probes }
+    geometry
+}
+
+/// One page rasterized as a 2x display shows it, with where its widgets put
+/// things on the rasterized pass. The canvas is in device pixels, the
+/// geometry in points.
+pub(super) fn page_render(
+    mut app: RSpiceApp,
+    page: VerificationPage,
+) -> (rspice_ui_kit::raster::Canvas, PageGeometry) {
+    app.state.workbench.activate(Workspace::Verify);
+    app.state.simulate.verification_page = page;
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let size = vec2(PAGE_WIDTH, PAGE_HEIGHT);
+    let mut last = None;
+    for _ in 0..3 {
+        last = Some(page_pass(
+            &ctx,
+            rspice_ui_kit::raster::display_input(size, 2.0),
+            |ui| super::show(ui, &mut app),
+        ));
+    }
+    let (output, geometry) = last.expect("three passes ran");
+    (
+        rspice_ui_kit::raster::rasterize(&ctx, size, &output),
+        geometry,
+    )
 }
 
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
-    attributed_to(analysis, AnalysisInstanceId::new())
+    attributed_to(analysis, AnalysisInstanceId::new(), ObjectRevision::INITIAL)
 }
 
 fn attributed_to(
     analysis: AnalysisResult,
     source_instance_id: AnalysisInstanceId,
+    source_revision: ObjectRevision,
 ) -> AnalysisResult {
     analysis.with_provenance(
         crate::state::AnalysisResultProvenance::new(
             source_instance_id,
-            ObjectRevision::INITIAL,
+            source_revision,
             ContentDigest::from_bytes([0x5a; 32]),
             Vec::new(),
         )
@@ -160,9 +202,28 @@ pub(super) fn sealed_run(
     analysis_kind_tag: u8,
     analysis: AnalysisResult,
 ) -> SimulationRun {
+    sealed_run_at(
+        run_number,
+        plan_id,
+        (source_instance_id, ObjectRevision::INITIAL),
+        analysis_kind_tag,
+        analysis,
+    )
+}
+
+/// [`sealed_run`] of the analysis `source` names at the plan revision it
+/// names, as a run of an analysis the plan holds is sealed.
+fn sealed_run_at(
+    run_number: u64,
+    plan_id: crate::product::SimulationPlanId,
+    source: (AnalysisInstanceId, ObjectRevision),
+    analysis_kind_tag: u8,
+    analysis: AnalysisResult,
+) -> SimulationRun {
+    let (source_instance_id, source_revision) = source;
     let task = crate::state::PreparedRunTaskReceipt::new(
         source_instance_id,
-        ObjectRevision::INITIAL,
+        source_revision,
         Vec::new(),
         analysis_kind_tag,
         ContentDigest::from_bytes([analysis_kind_tag; 32]),
@@ -184,7 +245,7 @@ pub(super) fn sealed_run(
     })
     .expect("fixture run receipt is internally valid");
     let mut run = SimulationRun::new_prepared(run_number, receipt);
-    run.add_analysis(attributed_to(analysis, source_instance_id));
+    run.add_analysis(attributed_to(analysis, source_instance_id, source_revision));
     run
 }
 
@@ -401,10 +462,80 @@ fn app_with_run(analysis: AnalysisResult) -> RSpiceApp {
     app
 }
 
-/// Forty Monte Carlo samples of a 40 dB gain floor, three of them under it.
+/// The seed the Monte Carlo fixture's campaign ran from.
+const MONTE_CARLO_SEED: u64 = 0x1A2B;
+
+/// A Monte Carlo analysis with one trial per sample, each of which measured
+/// `gain` in dB.
+fn gain_campaign(samples: Vec<f64>) -> AnalysisResult {
+    let count = samples.len() as f64;
+    let mean = samples.iter().sum::<f64>() / count;
+    let std_dev = (samples
+        .iter()
+        .map(|sample| (sample - mean).powi(2))
+        .sum::<f64>()
+        / (count - 1.0))
+        .sqrt();
+    let members = samples
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::MonteCarloTrial {
+                    index,
+                    seed: MONTE_CARLO_SEED + index as u64,
+                },
+                vec![FamilyMeasurementEvidence {
+                    unit: Some(rspice_core::analysis::MeasurementUnit::Known(
+                        "dB".to_owned(),
+                    )),
+                    name: "gain".to_owned(),
+                    value: Some(*value),
+                    passed: true,
+                    error: None,
+                }],
+            )
+        })
+        .collect();
+    AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo").with_family_metadata(
+        AnalysisResultFamilyMetadata::MonteCarlo {
+            seed: MONTE_CARLO_SEED,
+            runs_requested: samples.len(),
+            runs_completed: samples.len(),
+            failures: 0,
+            all_converged: true,
+            variables: vec![MonteCarloVariableMetadata {
+                mean_confidence: None,
+                name: "gain".to_owned(),
+                mean,
+                std_dev,
+                min: samples.iter().copied().fold(f64::INFINITY, f64::min),
+                max: samples.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                samples,
+            }],
+            member_measurements: members,
+        },
+    )
+}
+
+/// Forty trials of the plan's Monte Carlo analysis, judged against its 40 dB
+/// gain floor as the frame judges them: three are under it.
 pub(super) fn monte_carlo_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    set_limits(&mut app, vec![limit("gain", Some(40.0), None, "dB")]);
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("default plan");
+    let (source, _) = plan
+        .insert(AnalysisKind::MonteCarlo)
+        .expect("the plan takes a Monte Carlo analysis");
+    let (plan_id, revision) = (plan.id(), plan.revision());
+    app.state
+        .model
+        .sim_setup
+        .refresh_legacy_analysis_projections();
     let samples = (0..40)
         .map(|index| match index {
             7 => 39.2,
@@ -413,38 +544,22 @@ pub(super) fn monte_carlo_app() -> RSpiceApp {
             _ => 40.4 + f64::from(index % 9) * 0.35,
         })
         .collect::<Vec<f64>>();
-    let trail = samples
-        .iter()
-        .map(|value| *value >= 40.0)
-        .collect::<Vec<_>>();
-    let pass_count = trail.iter().filter(|passes| **passes).count();
-    let result = YieldResult {
-        spec: YieldSpec::lower("gain", 40.0, "dB"),
-        total_runs: samples.len(),
-        pass_count,
-        fail_count: samples.len() - pass_count,
-        yield_percent: pass_count as f64 / samples.len() as f64 * 100.0,
-        stats: DistributionStats::default(),
-        samples,
-        trail,
-    };
-    let mut run = SimulationRun::new(3);
+    let mut run = sealed_run_at(
+        3,
+        plan_id,
+        (source, revision),
+        AnalysisKind::MonteCarlo.canonical_kind().tag(),
+        gain_campaign(samples),
+    );
     run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
         .expect("a finite elapsed time");
-    let provenance = YieldAnalysisProvenance {
-        source_run_id: run.run_id,
-        source_dataset_id: run.dataset_id,
-        seed: 0x1A2B,
-        runs_requested: 40,
-        runs_completed: 40,
-        sampling_mode: MonteCarloSamplingMode::PseudoRandom,
-    };
     app.state.model.simulation.retained.runs = vec![run].into();
-    app.state.model.simulation.view.active_run_idx = Some(0);
-    app.state
-        .model
+    assert!(app.state.model.simulation.select_run(0));
+    set_limits(&mut app, vec![limit("gain", Some(40.0), None, "dB")]);
+    let model = &mut app.state.model;
+    model
         .simulation
-        .replace_yield_evidence(vec![result], Some(provenance));
+        .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
     app
 }
 

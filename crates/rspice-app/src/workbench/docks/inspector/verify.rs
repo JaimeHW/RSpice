@@ -139,6 +139,12 @@ struct FailedSample {
     normalized_margin: f64,
 }
 
+/// The samples outside their limits, worst first.
+///
+/// Judged by value, never by position in the trail: the trail has one entry
+/// per trial and the samples one per finite observation, so after a trial
+/// that did not converge the two no longer line up, and pairing them named
+/// passing values as failures.
 fn worst_samples(results: &[rspice_results::yield_analysis::YieldResult]) -> Vec<FailedSample> {
     let mut failures = results
         .iter()
@@ -148,9 +154,7 @@ fn worst_samples(results: &[rspice_results::yield_analysis::YieldResult]) -> Vec
                 .iter()
                 .copied()
                 .enumerate()
-                .filter(|(index, value)| {
-                    result.trail.get(*index).is_some_and(|passes| !passes) && value.is_finite()
-                })
+                .filter(|(_, value)| value.is_finite() && !result.spec.evaluates(*value))
                 .filter_map(|(index, value)| {
                     normalized_yield_margin(&result.spec, value).map(|normalized_margin| {
                         FailedSample {
