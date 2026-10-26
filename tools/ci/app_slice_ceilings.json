@@ -1,6 +1,6 @@
 {
   "feature->feature": {
-    "cloud->code": 4,
+    "cloud->code": 2,
     "cloud->project": 9,
     "code->design": 3,
     "code->project": 8,

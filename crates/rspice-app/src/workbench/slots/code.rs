@@ -1,7 +1,10 @@
 //! The code feature's dialogs, creating a Verilog-A device and editing the
 //! open Verilog-A view's build settings, and its netlist and Code & Automation
 //! editors' session, with the netlist documents opened and the outline groups
-//! collapsed.
+//! collapsed; and what code shows other features.
+
+use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::framework::feature::CodePort;
 
 /// What the code feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -61,5 +64,15 @@ impl CodeState {
         self.netlist = Default::default();
         self.netlist_open_documents.clear();
         self.netlist.rerun_queued = false;
+    }
+}
+
+impl CodePort for CodeState {
+    fn owned_source_active(&self) -> bool {
+        self.netlist.active_document == ActiveNetlistDocument::OwnedSource
+    }
+
+    fn netlist_cursor_line(&self) -> usize {
+        self.netlist.cursor_line
     }
 }

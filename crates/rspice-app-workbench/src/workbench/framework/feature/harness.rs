@@ -71,6 +71,11 @@ impl DesignPort for NullPorts {
     fn review_markers(&self) -> SchematicReviewMarkerVisibility {
         SchematicReviewMarkerVisibility::default()
     }
+
+    /// A fresh session's pointer rests on no canvas.
+    fn canvas_hover(&self) -> Option<(f64, f64)> {
+        None
+    }
 }
 
 /// A fresh session holds no canvas gesture to let go of.

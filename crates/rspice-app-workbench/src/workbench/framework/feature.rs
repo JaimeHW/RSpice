@@ -66,6 +66,17 @@ pub trait DesignPort {
     /// Which review markers the drawing shows, part of the view the drawing
     /// is read through.
     fn review_markers(&self) -> SchematicReviewMarkerVisibility;
+    /// Where the pointer rests on the canvas, in the sheet's coordinates,
+    /// while it rests there.
+    fn canvas_hover(&self) -> Option<(f64, f64)>;
+}
+
+/// What code shows that another feature reads.
+pub trait CodePort {
+    /// Whether the netlist editor shows the project's own netlist source.
+    fn owned_source_active(&self) -> bool;
+    /// The zero-based line holding the netlist editor's caret.
+    fn netlist_cursor_line(&self) -> usize;
 }
 
 /// What the cloud shows that another feature reads.

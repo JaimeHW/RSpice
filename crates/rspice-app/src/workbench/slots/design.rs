@@ -279,4 +279,8 @@ impl DesignPort for DesignState {
     fn review_markers(&self) -> SchematicReviewMarkerVisibility {
         self.schematic_visibility.review_markers
     }
+
+    fn canvas_hover(&self) -> Option<(f64, f64)> {
+        self.canvas_hover
+    }
 }

@@ -31,7 +31,10 @@ use crate::state::SchematicState;
 use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
 use crate::workbench::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::{CodePort, DesignPort};
 use crate::workbench::framework::requests::LiveMirrorEntry;
+use crate::workbench::state::WorkbenchSession;
 
 /// Presence cadence; doubles as the relay keepalive under its idle timeout.
 const PRESENCE_PERIOD: Duration = Duration::from_secs(15);
@@ -278,7 +281,7 @@ impl LiveSessionEngine {
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
-        self.send_cursor_update(state);
+        self.send_cursor_update(&state.model, &state.workbench, &*state.design, &*state.code);
         self.prune_peers();
         self.project_locks(state);
     }
@@ -1530,7 +1533,16 @@ impl LiveSessionEngine {
         self.presence_sent_at = Some(Instant::now());
     }
 
-    fn send_cursor_update(&mut self, state: &AppState) {
+    /// Tell the peers where this participant points: the canvas point of
+    /// the schematic `design` hovers in the Design workspace, or the line of
+    /// the project's own netlist source `code` shows in the Netlist one.
+    fn send_cursor_update(
+        &mut self,
+        model: &Model,
+        workbench: &WorkbenchSession,
+        design: &dyn DesignPort,
+        code: &dyn CodePort,
+    ) {
         if self.connection.is_none()
             || self
                 .cursor_sent_at
@@ -1538,22 +1550,21 @@ impl LiveSessionEngine {
         {
             return;
         }
-        let locus = if state.workbench.workspace == crate::workbench::state::Workspace::Design {
-            state.design.canvas_hover.and_then(|(x, y)| {
+        let locus = if workbench.workspace == crate::workbench::state::Workspace::Design {
+            design.canvas_hover().and_then(|(x, y)| {
                 let (x, y) = (x as f32, y as f32);
                 (x.is_finite() && y.is_finite()).then(|| CursorLocus::Canvas {
-                    doc: schematic_doc_key(&state.model.workspace.content.active_key()),
+                    doc: schematic_doc_key(&model.workspace.content.active_key()),
                     x,
                     y,
                 })
             })
-        } else if state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && state.code.netlist.active_document
-                == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+        } else if workbench.workspace == crate::workbench::state::Workspace::Netlist
+            && code.owned_source_active()
         {
             Some(CursorLocus::Netlist {
                 doc: NETLIST_DOC.to_owned(),
-                line: u32::try_from(state.code.netlist.cursor_line.saturating_add(1))
+                line: u32::try_from(code.netlist_cursor_line().saturating_add(1))
                     .unwrap_or(u32::MAX),
             })
         } else {
