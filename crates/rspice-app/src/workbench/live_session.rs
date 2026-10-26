@@ -31,10 +31,12 @@ use crate::state::SchematicState;
 use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
 use crate::workbench::AppState;
-use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::LiveOwnedSource;
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::{CodePort, DesignPort};
-use crate::workbench::framework::requests::{AdoptLiveOwnedSource, LiveMirrorEntry};
+use crate::workbench::framework::requests::{
+    AdoptLiveOwnedSource, CloseForLiveMirror, LiveMirrorEntry, Outbox,
+};
 use crate::workbench::state::WorkbenchSession;
 
 /// Presence cadence; doubles as the relay keepalive under its idle timeout.
@@ -461,32 +463,21 @@ impl LiveSessionEngine {
     }
 
     /// Guest lifecycle: begin adopting the host's project as this install's
-    /// mirror. Open local work goes through the data-safe close review
-    /// first; the engine completes adoption once the close transaction
-    /// lands, so callers need no continuation of their own.
-    pub(crate) fn request_mirror_entry(&mut self, state: &mut AppState) {
+    /// mirror. An open project is first closed by the shell, through the
+    /// data-safe close review when it holds unsaved work; the engine
+    /// completes adoption once the close transaction lands, so callers need
+    /// no continuation of their own.
+    pub(crate) fn request_mirror_entry(&self, platform: &PlatformState, outbox: &mut Outbox) {
         let Role::Guest(guest) = &self.role else {
             return;
         };
         if guest.mirroring {
             return;
         }
-        if state.platform.project_lifecycle.is_open() {
-            let destination =
-                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror;
-            if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
-                state
-                    .workbench
-                    .project_review_dialog
-                    .show_close_project(destination);
-            } else {
-                crate::workbench::workflows::project_workflow::close_project_discard(
-                    state,
-                    destination,
-                );
-            }
+        if platform.project_lifecycle.is_open() {
+            outbox.push(CloseForLiveMirror);
         } else {
-            state.workbench.outbox.push(LiveMirrorEntry);
+            outbox.push(LiveMirrorEntry);
         }
     }
 

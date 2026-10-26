@@ -19,6 +19,10 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
+use crate::workbench::app_state::run_preflight::PreflightDialogState;
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::framework::requests::Outbox;
+use crate::workbench::live_session::LiveSessionEngine;
 
 /// Live-session dialog state. The session itself lives in the cloud
 /// service's snapshot; this holds only the user's in-dialog inputs.
@@ -86,242 +90,264 @@ pub(crate) fn open_live_session_dialog(
     }
 }
 
+/// What the live-session dialog reads and writes: its own inputs, the
+/// account service and the session engine the cloud runs, the model and the
+/// platform it shows, the run gate a host's approval asks, and the outbox the
+/// close that makes room for a mirror is asked through.
+pub(crate) struct LiveSessionParts<'a> {
+    pub dialog: &'a mut LiveSessionDialogState,
+    pub account: &'a mut CloudAccountService,
+    pub engine: &'a mut LiveSessionEngine,
+    pub model: &'a Model,
+    pub platform: &'a PlatformState,
+    pub preflight: &'a mut PreflightDialogState,
+    pub outbox: &'a mut Outbox,
+}
+
 impl RSpiceApp {
+    /// The live-session dialog step: draw the dialog over the parts the
+    /// cloud holds, then answer what it raised, as every feature's dialog
+    /// step does.
     pub(in crate::workbench) fn render_live_session_dialog(&mut self, ctx: &Context) {
-        if !self.state.cloud.live_session.open {
-            return;
-        }
+        let state = &mut self.state;
+        render_live_session_dialog(
+            &mut LiveSessionParts {
+                dialog: &mut state.cloud.live_session,
+                account: &mut self.cloud.account,
+                engine: &mut self.cloud.live_session,
+                model: &state.model,
+                platform: &state.platform,
+                preflight: &mut state.runs.preflight,
+                outbox: &mut state.workbench.outbox,
+            },
+            ctx,
+        );
+        self.after_contribution();
+    }
+}
 
-        let session = self.cloud.account.snapshot().live_session.clone();
-        let mirroring = self.state.model.live_write_locks.mirror;
-        let circuit_id = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .cloud_publication()
-            .map(|binding| binding.circuit_id().to_owned());
-        let project_open = self.state.platform.project_lifecycle.is_open();
-        let incompatible_peer = self.cloud.live_session.incompatible_peer_seen();
-        let host_run: Option<String> = self.cloud.live_session.guest_run_status().map(describe_run);
-        let pending_run_requests = self.cloud.live_session.pending_run_requests();
+/// Draw the live-session dialog for this frame, when it is open, and carry
+/// out what the reader chose in it.
+pub(crate) fn render_live_session_dialog(parts: &mut LiveSessionParts<'_>, ctx: &Context) {
+    if !parts.dialog.open {
+        return;
+    }
 
-        // Resolve the dialog chrome for the current lifecycle state.
-        let (title, primary, primary_enabled, secondary): (String, String, bool, Option<&str>) =
-            match &session {
-                None | Some(LiveSessionState::Failed { .. }) => (
-                    "Start a live session".to_owned(),
-                    "Go live".to_owned(),
-                    project_open,
-                    None,
-                ),
-                Some(LiveSessionState::Starting) => (
-                    "Start a live session".to_owned(),
-                    "Creating…".to_owned(),
-                    false,
-                    None,
-                ),
-                Some(LiveSessionState::Joining) => (
-                    "Join a live session".to_owned(),
-                    "Joining…".to_owned(),
-                    false,
-                    None,
-                ),
-                Some(LiveSessionState::AwaitingApproval(_)) => (
-                    "Join a live session".to_owned(),
-                    "Waiting for the host…".to_owned(),
-                    false,
-                    Some("Leave"),
-                ),
-                Some(LiveSessionState::Hosting(summary)) => {
-                    let draft = self
-                        .state
-                        .cloud
-                        .live_session
-                        .policy_draft
-                        .unwrap_or(summary.policy);
-                    (
-                        match &summary.join_code {
-                            Some(code) => format!("Live session {code}"),
-                            None => "Live session".to_owned(),
-                        },
-                        "Apply session policy".to_owned(),
-                        draft != summary.policy,
-                        Some("End session"),
-                    )
-                }
-                Some(LiveSessionState::Participating(_)) => (
-                    "Live session".to_owned(),
-                    if mirroring {
-                        "Close".to_owned()
-                    } else {
-                        "Open the host's project".to_owned()
+    let session = parts.account.snapshot().live_session.clone();
+    let mirroring = parts.model.live_write_locks.mirror;
+    let circuit_id = parts
+        .model
+        .workspace
+        .content
+        .project
+        .cloud_publication()
+        .map(|binding| binding.circuit_id().to_owned());
+    let project_open = parts.platform.project_lifecycle.is_open();
+    let incompatible_peer = parts.engine.incompatible_peer_seen();
+    let host_run: Option<String> = parts.engine.guest_run_status().map(describe_run);
+    let pending_run_requests = parts.engine.pending_run_requests();
+
+    // Resolve the dialog chrome for the current lifecycle state.
+    let (title, primary, primary_enabled, secondary): (String, String, bool, Option<&str>) =
+        match &session {
+            None | Some(LiveSessionState::Failed { .. }) => (
+                "Start a live session".to_owned(),
+                "Go live".to_owned(),
+                project_open,
+                None,
+            ),
+            Some(LiveSessionState::Starting) => (
+                "Start a live session".to_owned(),
+                "Creating…".to_owned(),
+                false,
+                None,
+            ),
+            Some(LiveSessionState::Joining) => (
+                "Join a live session".to_owned(),
+                "Joining…".to_owned(),
+                false,
+                None,
+            ),
+            Some(LiveSessionState::AwaitingApproval(_)) => (
+                "Join a live session".to_owned(),
+                "Waiting for the host…".to_owned(),
+                false,
+                Some("Leave"),
+            ),
+            Some(LiveSessionState::Hosting(summary)) => {
+                let draft = parts.dialog.policy_draft.unwrap_or(summary.policy);
+                (
+                    match &summary.join_code {
+                        Some(code) => format!("Live session {code}"),
+                        None => "Live session".to_owned(),
                     },
-                    true,
-                    Some("Leave session"),
-                ),
-            };
+                    "Apply session policy".to_owned(),
+                    draft != summary.policy,
+                    Some("End session"),
+                )
+            }
+            Some(LiveSessionState::Participating(_)) => (
+                "Live session".to_owned(),
+                if mirroring {
+                    "Close".to_owned()
+                } else {
+                    "Open the host's project".to_owned()
+                },
+                true,
+                Some("Leave session"),
+            ),
+        };
 
-        let description = match &session {
+    let description = match &session {
+        None | Some(LiveSessionState::Failed { .. }) => {
+            "Share this machine's working copy over the hosted relay, or join \
+             another host's session by code."
+        }
+        Some(LiveSessionState::Hosting(_)) => {
+            "Host controls: the join code, each participant's capability, and \
+             the session policy."
+        }
+        Some(LiveSessionState::Participating(_)) => {
+            "Your seat in the host's session: the mirror, your capability, and \
+             the roster."
+        }
+        _ => "The session is being established.",
+    };
+    let mut dialog = Dialog::new(&title, &primary)
+        .description(description)
+        .size(DialogSize::Transaction)
+        .ghost("Close")
+        .primary_enabled(primary_enabled)
+        .primary_on_enter(false);
+    if let Some(secondary) = secondary {
+        dialog = dialog.secondary(secondary);
+    }
+
+    let mut actions: Vec<LiveDialogAction> = Vec::new();
+    let dialog_state = &mut *parts.dialog;
+    let choice = dialog.show(ctx, |ui| {
+        let t = Tokens::get(ui.ctx());
+        let c = t.color;
+        if incompatible_peer {
+            problem_note(
+                ui,
+                Problem::Warning,
+                "A participant runs an incompatible RSpice build; their changes cannot \
+                 be shared.",
+            );
+            ui.add_space(tokens::SP_4);
+        }
+        match &session {
+            None => {
+                render_start(ui, dialog_state, project_open, &mut actions);
+            }
+            Some(LiveSessionState::Failed { message }) => {
+                problem_note(ui, Problem::Failure, message);
+                ui.add_space(tokens::SP_4);
+                render_start(ui, dialog_state, project_open, &mut actions);
+            }
+            Some(LiveSessionState::Starting) => {
+                busy_row(ui, "Creating the session and attaching the relay…");
+            }
+            Some(LiveSessionState::Joining) => {
+                busy_row(ui, "Joining the session…");
+            }
+            Some(LiveSessionState::AwaitingApproval(summary)) => {
+                busy_row(ui, "Waiting for the host to admit you.");
+                ui.add_space(tokens::SP_4);
+                note(
+                    ui,
+                    "The host reviews each join under this session's policy. Leaving \
+                     withdraws nothing on the host's side; the request simply expires.",
+                    c.text_dim,
+                );
+                if let Some(notice) = &summary.notice {
+                    ui.add_space(tokens::SP_4);
+                    problem_note(ui, Problem::Warning, notice);
+                }
+            }
+            Some(LiveSessionState::Hosting(summary)) => {
+                render_hosting(
+                    ui,
+                    dialog_state,
+                    summary,
+                    &pending_run_requests,
+                    &mut actions,
+                );
+            }
+            Some(LiveSessionState::Participating(summary)) => {
+                render_participating(ui, summary, mirroring, host_run.clone(), &mut actions);
+            }
+        }
+    });
+
+    for action in actions {
+        match action {
+            LiveDialogAction::Join(code) => parts.account.join_live_session(code),
+            LiveDialogAction::CopyCode(code) => ctx.copy_text(code),
+            LiveDialogAction::RotateCode => parts.account.regenerate_live_session_code(),
+            LiveDialogAction::Approve(principal_id) => {
+                parts.account.approve_live_session_participant(principal_id)
+            }
+            LiveDialogAction::SetEditor(principal_id, editor) => parts
+                .account
+                .set_live_session_participant_editor(principal_id, editor),
+            LiveDialogAction::Remove(principal_id) => {
+                parts.account.remove_live_session_participant(principal_id)
+            }
+            LiveDialogAction::RequestHostRun => parts.engine.request_run(),
+            LiveDialogAction::ApproveHostRun(sender) => {
+                if parts.engine.approve_run_request(sender) {
+                    // Dialogs render after the frame loop, so this request
+                    // is served on the next pass. Ask for one rather than
+                    // waiting on the next inbound relay message.
+                    parts.preflight.request_run_and_queue();
+                    ctx.request_repaint();
+                }
+            }
+            LiveDialogAction::DenyHostRun(sender) => {
+                parts.engine.deny_run_request(sender);
+            }
+        }
+    }
+
+    match choice {
+        DialogChoice::None => {}
+        DialogChoice::Cancelled | DialogChoice::Ghost => {
+            // The session (hosted or joined) keeps running; the dialog
+            // is a control surface, not the session's lifetime.
+            parts.dialog.open = false;
+        }
+        DialogChoice::Secondary => match &session {
+            Some(LiveSessionState::Hosting(_)) => parts.account.end_live_session(),
+            Some(LiveSessionState::AwaitingApproval(_))
+            | Some(LiveSessionState::Participating(_)) => {
+                parts.account.leave_live_session();
+            }
+            _ => {}
+        },
+        DialogChoice::Primary => match &session {
             None | Some(LiveSessionState::Failed { .. }) => {
-                "Share this machine's working copy over the hosted relay, or join \
-                 another host's session by code."
+                let policy = parts.dialog.policy_draft.unwrap_or_else(default_policy);
+                parts.account.start_live_session(policy, circuit_id);
             }
             Some(LiveSessionState::Hosting(_)) => {
-                "Host controls: the join code, each participant's capability, and \
-                 the session policy."
+                if let Some(policy) = parts.dialog.policy_draft {
+                    parts.account.apply_live_session_policy(policy);
+                }
             }
             Some(LiveSessionState::Participating(_)) => {
-                "Your seat in the host's session: the mirror, your capability, and \
-                 the roster."
-            }
-            _ => "The session is being established.",
-        };
-        let mut dialog = Dialog::new(&title, &primary)
-            .description(description)
-            .size(DialogSize::Transaction)
-            .ghost("Close")
-            .primary_enabled(primary_enabled)
-            .primary_on_enter(false);
-        if let Some(secondary) = secondary {
-            dialog = dialog.secondary(secondary);
-        }
-
-        let mut actions: Vec<LiveDialogAction> = Vec::new();
-        let dialog_state = &mut self.state.cloud.live_session;
-        let choice = dialog.show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            let c = t.color;
-            if incompatible_peer {
-                problem_note(
-                    ui,
-                    Problem::Warning,
-                    "A participant runs an incompatible RSpice build; their changes cannot \
-                     be shared.",
-                );
-                ui.add_space(tokens::SP_4);
-            }
-            match &session {
-                None => {
-                    render_start(ui, dialog_state, project_open, &mut actions);
-                }
-                Some(LiveSessionState::Failed { message }) => {
-                    problem_note(ui, Problem::Failure, message);
-                    ui.add_space(tokens::SP_4);
-                    render_start(ui, dialog_state, project_open, &mut actions);
-                }
-                Some(LiveSessionState::Starting) => {
-                    busy_row(ui, "Creating the session and attaching the relay…");
-                }
-                Some(LiveSessionState::Joining) => {
-                    busy_row(ui, "Joining the session…");
-                }
-                Some(LiveSessionState::AwaitingApproval(summary)) => {
-                    busy_row(ui, "Waiting for the host to admit you.");
-                    ui.add_space(tokens::SP_4);
-                    note(
-                        ui,
-                        "The host reviews each join under this session's policy. Leaving \
-                         withdraws nothing on the host's side; the request simply expires.",
-                        c.text_dim,
-                    );
-                    if let Some(notice) = &summary.notice {
-                        ui.add_space(tokens::SP_4);
-                        problem_note(ui, Problem::Warning, notice);
-                    }
-                }
-                Some(LiveSessionState::Hosting(summary)) => {
-                    render_hosting(
-                        ui,
-                        dialog_state,
-                        summary,
-                        &pending_run_requests,
-                        &mut actions,
-                    );
-                }
-                Some(LiveSessionState::Participating(summary)) => {
-                    render_participating(ui, summary, mirroring, host_run.clone(), &mut actions);
+                if mirroring {
+                    parts.dialog.open = false;
+                } else {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    parts
+                        .engine
+                        .request_mirror_entry(parts.platform, parts.outbox);
                 }
             }
-        });
-
-        for action in actions {
-            match action {
-                LiveDialogAction::Join(code) => self.cloud.account.join_live_session(code),
-                LiveDialogAction::CopyCode(code) => ctx.copy_text(code),
-                LiveDialogAction::RotateCode => self.cloud.account.regenerate_live_session_code(),
-                LiveDialogAction::Approve(principal_id) => self
-                    .cloud
-                    .account
-                    .approve_live_session_participant(principal_id),
-                LiveDialogAction::SetEditor(principal_id, editor) => self
-                    .cloud
-                    .account
-                    .set_live_session_participant_editor(principal_id, editor),
-                LiveDialogAction::Remove(principal_id) => self
-                    .cloud
-                    .account
-                    .remove_live_session_participant(principal_id),
-                LiveDialogAction::RequestHostRun => self.cloud.live_session.request_run(),
-                LiveDialogAction::ApproveHostRun(sender) => {
-                    if self.cloud.live_session.approve_run_request(sender) {
-                        // Dialogs render after the frame loop, so this request
-                        // is served on the next pass. Ask for one rather than
-                        // waiting on the next inbound relay message.
-                        self.state.runs.preflight.request_run_and_queue();
-                        ctx.request_repaint();
-                    }
-                }
-                LiveDialogAction::DenyHostRun(sender) => {
-                    self.cloud.live_session.deny_run_request(sender);
-                }
-            }
-        }
-
-        match choice {
-            DialogChoice::None => {}
-            DialogChoice::Cancelled | DialogChoice::Ghost => {
-                // The session (hosted or joined) keeps running; the dialog
-                // is a control surface, not the session's lifetime.
-                self.state.cloud.live_session.open = false;
-            }
-            DialogChoice::Secondary => match &session {
-                Some(LiveSessionState::Hosting(_)) => self.cloud.account.end_live_session(),
-                Some(LiveSessionState::AwaitingApproval(_))
-                | Some(LiveSessionState::Participating(_)) => {
-                    self.cloud.account.leave_live_session();
-                }
-                _ => {}
-            },
-            DialogChoice::Primary => match &session {
-                None | Some(LiveSessionState::Failed { .. }) => {
-                    let policy = self
-                        .state
-                        .cloud
-                        .live_session
-                        .policy_draft
-                        .unwrap_or_else(default_policy);
-                    self.cloud.account.start_live_session(policy, circuit_id);
-                }
-                Some(LiveSessionState::Hosting(_)) => {
-                    if let Some(policy) = self.state.cloud.live_session.policy_draft {
-                        self.cloud.account.apply_live_session_policy(policy);
-                    }
-                }
-                Some(LiveSessionState::Participating(_)) => {
-                    if mirroring {
-                        self.state.cloud.live_session.open = false;
-                    } else {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        self.cloud
-                            .live_session
-                            .request_mirror_entry(&mut self.state);
-                    }
-                }
-                _ => {}
-            },
-        }
+            _ => {}
+        },
     }
 }
 

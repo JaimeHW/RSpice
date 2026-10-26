@@ -867,10 +867,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("slots", "cross_probe", 1),
     // Artifacts reaching sideways into the workflows.
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
-    // The live-session engine closes the project for a guest entering a
-    // mirror through the project workflow, which ranks above the application
-    // that owns the engine.
-    ("live_session", "workflows/project_workflow", 1),
     // Result import opens the imported result's tab through the document
     // bar, and the dispatcher that starts an import ranks below the bar.
     ("workflows/result_import_workflow", "chrome", 1),

@@ -11,7 +11,9 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
-use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
+use crate::workbench::lifecycle::project_lifecycle::{
+    ProjectCloseDestination, has_unsaved_changes,
+};
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, MirrorApply};
 use crate::workbench::workflows::project_workflow::{
     LiveProjectApply, apply_live_project_snapshot, close_project_discard,
@@ -22,6 +24,22 @@ impl RSpiceApp {
     /// it asks for.
     pub(crate) fn pump_live_session(&mut self) {
         pump_live_session(&mut self.state, &mut self.cloud);
+    }
+
+    /// Close the open project to make room for the live session host's as
+    /// this install's mirror: through the close review when it holds unsaved
+    /// work, at once otherwise. The close lets the mirror in once it lands.
+    pub(crate) fn close_for_live_mirror(&mut self) {
+        let state = &mut self.state;
+        let destination = ProjectCloseDestination::LiveMirror;
+        if has_unsaved_changes(state) {
+            state
+                .workbench
+                .project_review_dialog
+                .show_close_project(destination);
+        } else {
+            close_project_discard(state, destination);
+        }
     }
 }
 

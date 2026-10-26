@@ -33,9 +33,9 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ExportDataset, FollowSchematicGrid, MarkFailureSites,
-    PrintActiveView, PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance,
-    SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
+    self, ApplyWaveformDefaults, CloseForLiveMirror, ExportDataset, FollowSchematicGrid,
+    MarkFailureSites, PrintActiveView, PromptAfterCommands, RevealExecutedDeck,
+    SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -145,7 +145,8 @@ impl RSpiceApp {
     /// asked for, the waveforms and the family member a hand-off into Results
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
-    /// results failure banner marks there.
+    /// results failure banner marks there, and the close that makes room for
+    /// a live session's mirror.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -244,6 +245,11 @@ impl RSpiceApp {
                     app.state.results.results.marked_failure_run = run_sequence;
                 }
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, CloseForLiveMirror| app.close_for_live_mirror(),
         );
     }
 }

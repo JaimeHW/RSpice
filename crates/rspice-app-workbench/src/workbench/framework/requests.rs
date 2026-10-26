@@ -368,6 +368,17 @@ impl Request for AdoptLiveOwnedSource {
     const DRAIN: Drain = Drain::LiveSessionPump;
 }
 
+/// Close the open project to make room for the live session host's as this
+/// install's mirror: through the close review when it holds unsaved work,
+/// at once otherwise. Raised by the live session's dialog, and taken straight
+/// after the dialog step that raised it.
+#[derive(Clone, Debug)]
+pub struct CloseForLiveMirror;
+
+impl Request for CloseForLiveMirror {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;
