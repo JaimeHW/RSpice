@@ -20,9 +20,8 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::PublicationDraft;
-use crate::workbench::hardcopy_adapters::publication_snapshot::{
-    build_publication_snapshot, publication_timestamp_utc,
+use crate::workbench::framework::feature::{
+    HardcopyPort, PublicationDraft, publication_timestamp_utc,
 };
 
 /// What the open-time snapshot build proved about the publish scope.
@@ -453,8 +452,9 @@ impl RSpiceApp {
             }
         };
         let draft = publication_draft(dialog);
-        let built = build_publication_snapshot(&self.state, &draft)
-            .map_err(|error| error.to_string())
+        let built = self
+            .state
+            .build_publication_snapshot(&draft)
             .and_then(|snapshot| {
                 snapshot
                     .canonical_bytes()
@@ -536,7 +536,7 @@ fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDraft {
 
 /// Build the reviewed scope from the same draft the final submission uses.
 fn build_scope(state: &AppState, draft: &PublicationDraft) -> Result<PublishScope, String> {
-    let snapshot = build_publication_snapshot(state, draft).map_err(|error| error.to_string())?;
+    let snapshot = state.build_publication_snapshot(draft)?;
     let payload_bytes = snapshot
         .canonical_bytes()
         .map_err(|error| error.to_string())?

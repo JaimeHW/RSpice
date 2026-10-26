@@ -23,7 +23,7 @@ use rspice_publication_contract::{
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::PublicationDraft;
+use crate::workbench::framework::feature::{HardcopyPort, PublicationDraft};
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, SourceReads, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
@@ -38,20 +38,6 @@ use rspice_hardcopy::render::{
     scene_from_resolved,
 };
 use rspice_hardcopy_contract::{ContentExtent, HardcopyScope};
-
-/// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
-/// the hardcopy pipeline's exact civil-date transform.
-pub(crate) fn publication_timestamp_utc() -> String {
-    let seconds = crate::time_compat::unix_epoch().as_secs();
-    rspice_hardcopy::render::HardcopyPublicationTimestamp::from_unix_seconds(seconds)
-        .map(|stamp| {
-            format!(
-                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-                stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second
-            )
-        })
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
 
 /// Why a snapshot could not be built. Every variant names the boundary that
 /// refused, so the publish surface can show an actionable message.
@@ -113,6 +99,18 @@ impl std::fmt::Display for PublicationBuildError {
                 )
             }
         }
+    }
+}
+
+/// A reader that still holds the whole application state asks the snapshot
+/// of it: the cloud's publish dialog, which reaches the snapshot through its
+/// port once the cloud has a context of its own.
+impl HardcopyPort for AppState {
+    fn build_publication_snapshot(
+        &self,
+        draft: &PublicationDraft,
+    ) -> Result<PublicationSnapshot, String> {
+        build_publication_snapshot(self, draft).map_err(|error| error.to_string())
     }
 }
 
