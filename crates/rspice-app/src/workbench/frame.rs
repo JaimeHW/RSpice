@@ -230,7 +230,7 @@ impl RSpiceApp {
 
     /// Have the cloud feature take the publish executor's receipt, in its
     /// context.
-    pub(in crate::workbench) fn record_publish_receipt(&mut self) {
+    pub(crate) fn record_publish_receipt(&mut self) {
         CloudFeature::record_publish_receipt(&mut features::cx(self));
     }
 }

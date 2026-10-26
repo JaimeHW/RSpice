@@ -4,6 +4,7 @@
 //! which only the shell can construct, so it lives here rather than beside
 //! the code it tests. One module per slice.
 
+mod cloud;
 mod framework;
 mod hardcopy;
 mod model;
