@@ -10,7 +10,7 @@ use egui::Ui;
 
 use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results_ui::bode::inspector::{self, BodeInspector, NoiseSpectrumModel};
 
 use super::{BodeDerived, ResultsParts, ResultsReads};
@@ -272,7 +272,7 @@ mod tests {
 
     /// How many traces the selected ordinary-noise spectrum draws. The card
     /// stopped stating the count, so the shape is asked directly.
-    fn selected_noise_trace_count(state: &AppState) -> Option<usize> {
+    fn selected_noise_trace_count(state: &ResultsTestHost) -> Option<usize> {
         let run = state.model.simulation.active_run()?;
         let (_, analysis) = selected_noise_analysis(state.results_reads())?;
         Some(noise_spectrum_shape(state.results_reads(), run.dataset_id, analysis)?.trace_count)
@@ -309,7 +309,7 @@ mod tests {
         run.add_analysis(ac_result(first_id, "V(first)", [10.0, 1.0]));
         run.add_analysis(ac_result(second_id, "V(second)", [100.0, 10.0]));
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
@@ -353,7 +353,7 @@ mod tests {
             ]),
         );
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         let model = build_model(&mut state.results_parts()).expect("Bode model");
@@ -403,7 +403,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(failed);
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         assert!(state.model.simulation.select_analysis(0));
@@ -439,7 +439,7 @@ mod tests {
         run.add_analysis(noise_result(AnalysisType::Noise, "NOISE", "onoise"));
         run.add_analysis(AnalysisResult::new(3, AnalysisType::Transient, "TRAN"));
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
@@ -484,7 +484,7 @@ mod tests {
             ]),
         );
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
@@ -524,7 +524,7 @@ mod tests {
             ]),
         );
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         let _ = build_noise_model(state.results_reads()).expect("input-referred noise model");

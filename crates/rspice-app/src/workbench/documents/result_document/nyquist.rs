@@ -5,7 +5,7 @@ mod agreement;
 
 use crate::ui::plot;
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 use rspice_results_ui::nyquist::NyquistData;
@@ -138,7 +138,7 @@ mod tests {
     /// result replaces them instead of serving the previous locus's stability.
     #[test]
     fn derived_stability_follows_the_retained_data_version() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state
             .results
             .analysis

@@ -75,14 +75,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::AppState;
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
     use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
 
     /// Panning and zooming must not rebake. The bake walks every acquisition,
     /// and a drag is exactly when the reader can least afford it.
     #[test]
     fn moving_the_view_does_not_rebake_the_density() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut data = EyeData::new(1.0e-9, 2);
         for trace in 0..8 {
             data.add_trace(EyeTrace::new(
@@ -94,7 +94,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let frame = |state: &mut AppState| {
+        let frame = |state: &mut ResultsTestHost| {
             let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(

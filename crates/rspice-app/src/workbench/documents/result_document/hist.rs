@@ -568,7 +568,7 @@ mod tests {
         AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
         SimulationRun,
     };
-    use crate::workbench::AppState;
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
     use rspice_results::yield_analysis::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldSpec,
     };
@@ -702,7 +702,7 @@ mod tests {
         );
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
@@ -732,7 +732,7 @@ mod tests {
         });
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
@@ -756,7 +756,7 @@ mod tests {
         );
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
@@ -794,7 +794,7 @@ mod tests {
         );
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 

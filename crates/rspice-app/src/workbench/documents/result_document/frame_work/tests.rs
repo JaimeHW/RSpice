@@ -16,8 +16,8 @@ use super::{DatasetWalk, FrameSampleRead, WorkCounts};
 // Results workspace's own surfaces with the session type that workspace
 // already holds, and does not reach for the session aggregate on its own.
 use super::super::{
-    AppState, ResultViewer, bode, events, eye, fft, manifest, noise_contrib, nyquist, op_inspector,
-    optimization, sensitivity, soa, table, waves,
+    ResultViewer, ResultsTestHost, bode, events, eye, fft, manifest, noise_contrib, nyquist,
+    op_inspector, optimization, sensitivity, soa, table, waves,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, DcOpResult,
@@ -428,8 +428,8 @@ fn optimization_analysis() -> AnalysisResult {
 }
 
 /// One run carrying every dataset the measured surfaces read.
-fn large_state() -> AppState {
-    let mut state = AppState::default();
+fn large_state() -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(transient_analysis());
     run.add_analysis(operating_point_analysis());
@@ -508,7 +508,7 @@ fn large_state() -> AppState {
 }
 
 /// Select the analysis a surface speaks for, by retained analysis type.
-fn select_analysis(state: &mut AppState, analysis_type: AnalysisType) {
+fn select_analysis(state: &mut ResultsTestHost, analysis_type: AnalysisType) {
     let index = state
         .model
         .simulation
@@ -524,8 +524,8 @@ fn select_analysis(state: &mut AppState, analysis_type: AnalysisType) {
 /// Run one frame of `surface` against an unchanged state and identical input.
 fn frame(
     ctx: &egui::Context,
-    state: &mut AppState,
-    surface: &mut dyn FnMut(&mut egui::Ui, &mut AppState),
+    state: &mut ResultsTestHost,
+    surface: &mut dyn FnMut(&mut egui::Ui, &mut ResultsTestHost),
 ) {
     let _ = ctx.run_ui(
         egui::RawInput {
@@ -543,8 +543,8 @@ fn frame(
 
 /// Work counted across [`IDLE_FRAMES`] frames that follow a first frame.
 fn steady_state_work(
-    state: &mut AppState,
-    mut surface: impl FnMut(&mut egui::Ui, &mut AppState),
+    state: &mut ResultsTestHost,
+    mut surface: impl FnMut(&mut egui::Ui, &mut ResultsTestHost),
 ) -> WorkCounts {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -576,7 +576,7 @@ fn surfaces() -> Vec<(&'static str, ResultViewer)> {
     ]
 }
 
-fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
+fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut ResultsTestHost) {
     state.results.results.session.viewer = viewer;
     // The document bar states the sheet's purpose on every frame, including
     // whether the retained evidence validated, and the tab strip decides on
@@ -639,7 +639,7 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-fn state_for(viewer: ResultViewer) -> AppState {
+fn state_for(viewer: ResultViewer) -> ResultsTestHost {
     let mut state = large_state();
     match viewer {
         ResultViewer::Op => select_analysis(&mut state, AnalysisType::DcOp),
@@ -664,7 +664,7 @@ fn state_for(viewer: ResultViewer) -> AppState {
 /// on every frame, and resolving a strip happens twice per frame — so it is
 /// where a per-frame full scan hides most easily. Without one on the fixture,
 /// every gate here is measuring a Waves sheet the product rarely shows.
-fn add_transient_expression(state: &mut AppState) {
+fn add_transient_expression(state: &mut ResultsTestHost) {
     let run = state
         .model
         .simulation

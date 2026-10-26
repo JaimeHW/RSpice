@@ -459,6 +459,8 @@ mod copied_value_tests;
 
 #[cfg(test)]
 pub(crate) mod test_host;
+#[cfg(test)]
+pub(crate) use test_host::ResultsTestHost;
 
 /// Lossless source-evidence projection for one typed Data Browser artifact.
 ///

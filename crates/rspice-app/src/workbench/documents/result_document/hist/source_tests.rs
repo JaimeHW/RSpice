@@ -3,9 +3,9 @@
 use super::super::ActiveViewer;
 use super::*;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
-fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
+fn state_with(variable: MonteCarloVariableMetadata) -> ResultsTestHost {
     let count = variable.samples.len();
     let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
         AnalysisResultFamilyMetadata::MonteCarlo {
@@ -18,7 +18,7 @@ fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
             member_measurements: Vec::new(),
         },
     );
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
@@ -30,7 +30,7 @@ fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
     state
 }
 
-fn paint(state: &mut AppState, panel: bool) -> String {
+fn paint(state: &mut ResultsTestHost, panel: bool) -> String {
     fn collect(shape: &egui::Shape, text: &mut String) {
         match shape {
             egui::Shape::Text(value) => {
@@ -80,7 +80,7 @@ fn paint(state: &mut AppState, panel: bool) -> String {
 #[test]
 fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
     let original = state_with(super::tests::mc_variable("gain"));
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation = crate::io::simulation_state_from_results(
         crate::io::capture_simulation_results(&original.model.simulation),
     )

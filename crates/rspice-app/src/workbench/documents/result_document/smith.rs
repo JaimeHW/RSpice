@@ -8,7 +8,7 @@ use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
 use super::frame_work;
 use rspice_results_ui::smith_chart::view::{self, SmithPlotTrace};
@@ -289,7 +289,7 @@ mod tests {
             .with_waveforms(vec![waveform])
     }
 
-    fn draw(state: &mut AppState) {
+    fn draw(state: &mut ResultsTestHost) {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(
@@ -316,7 +316,7 @@ mod tests {
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(sparam_analysis(1, "SP low", &[(0.1, 0.0), (0.2, 0.1)]));
         run.add_analysis(sparam_analysis(2, "SP high", &[(-0.6, 0.3), (-0.5, 0.4)]));
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         assert!(state.model.simulation.select_analysis(0));
