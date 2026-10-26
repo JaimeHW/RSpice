@@ -436,14 +436,6 @@ fn auto_rejects_circuit_lu_fill(n: usize, a_nnz: usize, l_nnz: usize, u_nnz: usi
 }
 
 #[inline]
-fn auto_prefers_supernodal_from_pattern(n: usize, a_nnz: usize) -> bool {
-    // High-degree unsymmetric patterns are the regime where a supernodal
-    // backend amortizes dense frontal work and Circuit LU is likely to create
-    // large scalar fill. Avoid paying for a known-bad exploratory factor.
-    n >= 512 && a_nnz >= n.saturating_mul(8)
-}
-
-#[inline]
 fn finite_solution_or_singular(solution: Vec<Value>) -> Result<Vec<Value>, SolverError> {
     if solution.iter().all(|value| value.is_finite()) {
         Ok(solution)
@@ -2970,11 +2962,6 @@ impl StaticMatrix {
     ) -> Result<(), SolverError> {
         self.check_stamping_error()?;
         let n = self.nrows;
-        if self.solver_options.real_backend == RealSolverBackend::Auto
-            && auto_prefers_supernodal_from_pattern(n, self.values.len())
-        {
-            self.klu_auto_rejected = true;
-        }
         let required = n.checked_mul(rhs_count).ok_or_else(|| {
             SolverError::InvalidCircuit("Real batched RHS size overflow".to_string())
         })?;
@@ -3345,12 +3332,6 @@ impl StaticMatrix {
     ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
-
-        if self.solver_options.real_backend == RealSolverBackend::Auto
-            && auto_prefers_supernodal_from_pattern(n, self.values.len())
-        {
-            self.klu_auto_rejected = true;
-        }
 
         if n != rhs.len() || self.ncols != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
@@ -6567,18 +6548,20 @@ mod tests {
 
     #[test]
     fn solver_checkpoint_preserves_auto_fallback_routing() {
-        let n = 512;
-        let triplets: Vec<_> = (0..n)
-            .flat_map(|col| {
-                (0..9).map(move |offset| {
-                    (
-                        (col + offset) % n,
-                        col,
-                        if offset == 0 { 20.0 } else { 0.125 },
-                    )
-                })
-            })
-            .collect();
+        // A random pattern has no low-fill ordering, so Auto measures Circuit
+        // LU fill on the first factor and keeps faer from then on.
+        let n = 2048;
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut triplets = Vec::with_capacity(9 * n);
+        for col in 0..n {
+            triplets.push((col, col, 20.0));
+            for _ in 0..8 {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                triplets.push(((state >> 33) as usize % n, col, 0.125));
+            }
+        }
         let options = SolverOptions {
             real_backend: RealSolverBackend::Auto,
             ..Default::default()
@@ -8350,9 +8333,6 @@ mod tests {
         assert!(!auto_rejects_circuit_lu_fill(255, 100, 0, 10_000));
         assert!(!auto_rejects_circuit_lu_fill(1_000, 100, 400, 400));
         assert!(auto_rejects_circuit_lu_fill(1_000, 100, 401, 400));
-        assert!(!auto_prefers_supernodal_from_pattern(511, 100_000));
-        assert!(!auto_prefers_supernodal_from_pattern(1_000, 7_999));
-        assert!(auto_prefers_supernodal_from_pattern(1_000, 8_000));
     }
 
     #[test]
@@ -9765,5 +9745,45 @@ mod tests {
         matrix.clear_values();
         matrix.add(0, 0, 2.0);
         assert_relative_solution(&matrix.solve(&[4.0]).unwrap(), &[2.0]);
+    }
+
+    #[test]
+    fn auto_keeps_klu_for_dense_device_blocks_on_a_shared_supply() {
+        // Dense 12-node blocks tied to one supply row: the shape BSIM4's stamp
+        // reservation gives a CMOS netlist. Over 12 entries per row, yet
+        // Circuit LU adds fill only between each block and the supply.
+        const BLOCK: usize = 12;
+        const BLOCKS: usize = 100;
+        let n = 1 + BLOCK * BLOCKS;
+        let mut triplets = vec![(0, 0, 1.0e3)];
+        for block in 0..BLOCKS {
+            let base = 1 + block * BLOCK;
+            for row in base..base + BLOCK {
+                for col in base..base + BLOCK {
+                    triplets.push((row, col, if row == col { 50.0 } else { -1.0 }));
+                }
+            }
+            triplets.push((0, base, -1.0));
+            triplets.push((base, 0, -1.0));
+        }
+        assert!(triplets.len() >= 8 * n);
+        let expected: Vec<Value> = (0..n).map(|row| 1.0 + row as Value / n as Value).collect();
+        let mut rhs = vec![0.0; n];
+        for &(row, col, value) in &triplets {
+            rhs[row] += value * expected[col];
+        }
+        let mut matrix = StaticMatrix::from_triplets_with_options(
+            n,
+            n,
+            &triplets,
+            SolverOptions {
+                real_backend: RealSolverBackend::Auto,
+                ..SolverOptions::default()
+            },
+        )
+        .unwrap();
+        assert_relative_solution(&matrix.solve(&rhs).unwrap(), &expected);
+        assert!(!matrix.klu_auto_rejected);
+        assert!(matrix.capture_solver_checkpoint().unwrap().klu.is_some());
     }
 }
