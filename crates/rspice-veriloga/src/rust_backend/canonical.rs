@@ -892,6 +892,34 @@ impl InitializationInput {
     }
 }
 
+/// A noise evaluator takes `&self`, runs at a fixed operating point, and is
+/// not a Newton step: there is nothing to damp and no history it may write.
+/// Both limit bindings are therefore the limiting-disabled ones, which is what
+/// the device itself does when `ctx.limiting_enabled()` is false, so a
+/// magnitude that reads a limited voltage reads the proposed one.
+fn emit_disabled_limit_bindings(wants: &Wants, pad: &str, out: &mut String) {
+    if wants.limit {
+        let _ = writeln!(
+            out,
+            "{pad}let limit = |_operator: usize, proposed: f64, _candidate: f64| proposed;"
+        );
+    }
+    if wants.limit_previous {
+        let _ = writeln!(
+            out,
+            "{pad}let limit_previous = |_operator: usize, proposed: f64| proposed;"
+        );
+    }
+}
+
+pub(super) fn emit_noise_limit_bindings(function: &CfgFunction, pad: &str, out: &mut String) {
+    let mut wants = Wants::default();
+    for value in &function.values {
+        wants.observe(&value.kind);
+    }
+    emit_disabled_limit_bindings(&wants, pad, out);
+}
+
 pub(super) fn emit_frozen_idtmod_bindings(function: &CfgFunction, pad: &str, out: &mut String) {
     let mut wants = Wants::default();
     for value in &function.values {
@@ -3601,22 +3629,7 @@ impl ModelPlan {
                     .join(", ")
             );
         }
-        // `evaluate_noise_sources` takes `&self`, runs at a fixed operating
-        // point, and is not a Newton step — there is nothing to damp and no
-        // history it may write. Both bindings are therefore the
-        // limiting-disabled ones, which is what the device itself does when
-        // `ctx.limiting_enabled()` is false, so a magnitude that reads a limited
-        // voltage reads the proposed one.
-        if wants.limit {
-            out.push_str(
-                "        let limit = |_operator: usize, proposed: f64, _candidate: f64| proposed;\n",
-            );
-        }
-        if wants.limit_previous {
-            out.push_str(
-                "        let limit_previous = |_operator: usize, proposed: f64| proposed;\n",
-            );
-        }
+        emit_disabled_limit_bindings(&wants, "        ", out);
         if wants.cross {
             out.push_str("        macro_rules! rspice_cross { ($slot:expr, $value:expr, $direction:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{ let _ = ($slot, $value, $direction, $time_tol, $expr_tol, $enable); 0.0 }}; }\n");
         }

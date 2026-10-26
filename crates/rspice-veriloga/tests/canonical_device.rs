@@ -573,6 +573,53 @@ for (proposed,expected) in [(0.0,0.0),(2.0,0.5),(2.0,1.0),(2.0,1.5),(2.0,2.0)] {
 }
 
 #[test]
+fn generated_noise_evaluators_read_a_limited_voltage_as_proposed() {
+    // Noise runs at a fixed operating point, not a Newton step, so both noise
+    // evaluators bind the limiting-disabled forms of a built-in and a
+    // function limiter.
+    let source = r#"
+module limited_noise(p);
+ inout p; electrical p;
+ real v,w;
+ analog function real clip;
+  input real proposed,previous;
+  input integer increment;
+  clip=min(proposed,previous+0.25*increment);
+ endfunction
+ analog begin
+  v=$limit(V(p),"pnjlim",0.025,0.6);
+  w=$limit(V(p),clip,1.6);
+  I(p)<+V(p)+white_noise(4.0*v*w,"shot");
+ end
+endmodule
+"#;
+    let name = "limited noise";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(name, &state, &stamp, &noise, r#"
+struct Capture(f64);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_index:usize,value:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+for proposed in [0.3_f64,2.0] {
+    let voltages=[proposed];
+    let ctx=runtime::GeneratedEvalContext { voltages:&voltages,temperature:300.0 };
+    let mut source=Capture(-1.0);
+    instance.evaluate_noise_sources(&ctx,&mut source).unwrap();
+    let mut process=Capture(-1.0);
+    instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut process).unwrap();
+    assert_eq!(source.0,4.0*proposed*proposed,"source at {proposed}");
+    assert_eq!(process.0,4.0*proposed*proposed,"process at {proposed}");
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
 fn generated_default_limit_preserves_state_unit_slope_and_affine_correction() {
     for (suffix, step) in [(",0.25", 0.25), ("", 0.7)] {
         let source = format!(

@@ -637,6 +637,7 @@ pub(super) fn grouped_noise_extension(
     bindings.idt = "grouped_noise_idt_is_unsupported".into();
     bindings.idtmod = "grouped_noise_idtmod_is_unsupported".into();
     super::canonical::emit_frozen_idtmod_bindings(&plan.function, "        ", &mut out);
+    super::canonical::emit_noise_limit_bindings(&plan.function, "        ", &mut out);
     emit_frozen_event_bindings(&mut out, &plan.function, options);
     let (body, values) = emit_body(&plan.function, &plan.outputs, &bindings)
         .map_err(|error| unsupported(artifact, format!("grouped noise body: {error}")))?;
