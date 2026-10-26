@@ -655,6 +655,18 @@ fn cmc_bjt_levels_fail_closed_as_veriloga_codegen_targets() {
 }
 
 #[test]
+fn cmc_bjt_level_is_refused_by_family_before_its_parameters_are_checked() {
+    // Mextram's flicker-noise parameters share KFN with VBIC's; the card must
+    // still be refused as Mextram, not told that KFN needs a VBIC model.
+    let deck = op_deck(".model qmod NPN (LEVEL=504 IS=1e-16 KF=20e-12 KFN=20e-12)");
+    let message = run(&deck).expect_err("a Mextram card must fail closed");
+    assert!(
+        message.contains("MEXTRAM") && message.contains("no native implementation"),
+        "LEVEL=504 error should refuse the Mextram family by name: {message}"
+    );
+}
+
+#[test]
 fn unsupported_advanced_bjt_level_is_rejected() {
     let level = 235;
     let deck = op_deck(&format!(
@@ -2190,10 +2202,10 @@ fn vbic13_specific_parameters_reject_fail_closed_when_not_inert_or_not_native_vb
     }
 
     let deck = op_deck(&format!(
-        ".model qmod NPN (LEVEL=234 IS=1e-16 IBEI=1e-18 IBCI=1e-18 {})",
+        ".model qmod NPN (LEVEL=1 IS=1e-16 IBEI=1e-18 IBCI=1e-18 {})",
         inert_vbic13_params()
     ));
-    let message = run(&deck).expect_err("VBIC13 params must reject on unsupported BJT levels");
+    let message = run(&deck).expect_err("VBIC13 params must reject on legacy GP cards");
     assert!(
         message.contains("LEVEL=4")
             && message.contains("LEVEL=9")
@@ -2201,6 +2213,18 @@ fn vbic13_specific_parameters_reject_fail_closed_when_not_inert_or_not_native_vb
             && message.contains("LEVEL=12")
             && message.contains("LEVEL=13"),
         "error should name the native VBIC-only acceptance scope: {message}"
+    );
+
+    // On a family with no native model the card is refused by that family
+    // before any parameter is weighed against the native sets.
+    let deck = op_deck(&format!(
+        ".model qmod NPN (LEVEL=234 IS=1e-16 IBEI=1e-18 IBCI=1e-18 {})",
+        inert_vbic13_params()
+    ));
+    let message = run(&deck).expect_err("VBIC13 params must reject on unsupported BJT levels");
+    assert!(
+        message.contains("HICUM") && message.contains("no native implementation"),
+        "error should refuse the HICUM family by name: {message}"
     );
 }
 

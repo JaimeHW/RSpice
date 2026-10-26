@@ -675,6 +675,28 @@ pub(super) fn validate_bjt_model_level(
             "BJT '{element_name}': model '{model}' has invalid LEVEL={level_value}"
         )));
     }
+    // A family with no native implementation is refused by name before any
+    // parameter check: those checks describe the native Gummel-Poon and VBIC
+    // parameter sets, so a Mextram card's KFN would read as a VBIC requirement.
+    if let Some(level) = level
+        && !supported_bjt_level(level)
+    {
+        let descriptor = bjt_level_descriptor(level);
+        if let Some((family, selector)) = known_unsupported_bjt_family(level) {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' requests {family} {descriptor} ({selector}), \
+                 which has no native implementation. Advanced CMC BJT families are future \
+                 Verilog-A-to-Rust codegen targets and must not fall back to any other BJT model \
+                 family or runtime Verilog-A."
+            )));
+        }
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' requests {descriptor}, which has no native \
+             implementation. Supported BJT model levels: legacy Gummel-Poon (no LEVEL or \
+             LEVEL=1/2), and LEVEL=4/9/11/12/13 (VBIC). Advanced CMC BJT models are generated \
+             from Verilog-A rather than hand-written here."
+        )));
+    }
 
     validate_bjt_model_alias_groups(element_name, model, params, expr_params, string_params)?;
 
@@ -901,30 +923,6 @@ pub(super) fn validate_bjt_model_level(
             expr_params,
             string_params,
         )?;
-    }
-
-    let Some(level) = level else {
-        return Ok(());
-    };
-
-    if !supported_bjt_level(level) {
-        if let Some((family, selector)) = known_unsupported_bjt_family(level) {
-            let descriptor = bjt_level_descriptor(level);
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' requests {family} {descriptor} ({selector}), \
-                 which has no native implementation. Advanced CMC BJT families are future \
-                 Verilog-A-to-Rust codegen targets and must not fall back to any other BJT model \
-                 family or runtime Verilog-A."
-            )));
-        }
-
-        let descriptor = bjt_level_descriptor(level);
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' requests {descriptor}, which has no native \
-             implementation. Supported BJT model levels: legacy Gummel-Poon (no LEVEL or \
-             LEVEL=1/2), and LEVEL=4/9/11/12/13 (VBIC). Advanced CMC BJT models are generated \
-             from Verilog-A rather than hand-written here."
-        )));
     }
 
     Ok(())
