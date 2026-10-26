@@ -248,12 +248,13 @@ pub enum StructuralDefect {
     /// different columns, so its two rows differ.
     ///
     /// Rows the device left entirely empty are excluded and reported by
-    /// [`StructuralDefect::UnwrittenBranchEquation`] instead, on the terms
-    /// given there.
+    /// [`StructuralDefect::UnwrittenBranchEquation`] and
+    /// [`StructuralDefect::UnwrittenInternalNode`] instead, on the terms given
+    /// there.
     DuplicatedEquation { rows: Vec<usize> },
     /// A branch unknown the device wrote nothing for, in any block.
     ///
-    /// Restricted to branch unknowns on purpose. An empty *node* row is
+    /// An empty *terminal* row is
     /// ordinary in a single device's block and several shipped models have one:
     /// a MOSFET gate conducts nothing at DC, and the netlist attached to that
     /// terminal supplies the rest of the node's equation. A branch unknown has
@@ -261,6 +262,12 @@ pub enum StructuralDefect {
     /// other device can write to its row, and a row left empty is an unknown
     /// with no equation anywhere in the assembled matrix.
     UnwrittenBranchEquation { unknown: usize },
+    /// An internal node the device wrote nothing for, in any block.
+    ///
+    /// The terminal rows a gate leaves empty are completed by the netlist, but
+    /// no other device reaches an internal node: a row left empty here is a
+    /// floating node, which no solver can factor however it approaches it.
+    UnwrittenInternalNode { node: usize },
 }
 
 impl std::fmt::Display for StructuralDefect {
@@ -280,6 +287,10 @@ impl std::fmt::Display for StructuralDefect {
             Self::UnwrittenBranchEquation { unknown } => write!(
                 f,
                 "singular stamp: branch unknown {unknown} has no equation in any block"
+            ),
+            Self::UnwrittenInternalNode { node } => write!(
+                f,
+                "singular stamp: internal node {node} has no equation in any block"
             ),
         }
     }
@@ -316,11 +327,15 @@ fn row_signature(values: &[Value], size: usize, row: usize) -> Vec<(usize, u64)>
 
 /// Every way `record` is singular on its own, in reporting order.
 ///
+/// The first `terminal_count` of the `node_count` node rows are the device's
+/// terminals, which the netlist completes; the rest are internal nodes.
+///
 /// Applied to a record on its way into a fixture and to a fixture on its way
 /// back out, so neither a capture nor a replay can quietly carry a stamp no
 /// solver could factor.
 pub fn structural_defects(
     record: &GoldenRecord,
+    terminal_count: usize,
     node_count: usize,
     branch_count: usize,
 ) -> Vec<StructuralDefect> {
@@ -348,7 +363,7 @@ pub fn structural_defects(
             .map(|rows| StructuralDefect::DuplicatedEquation { rows }),
     );
 
-    for unknown in node_count..size {
+    for unknown in terminal_count.min(node_count)..size {
         let untouched = row_signature(&record.jacobian, size, unknown).is_empty()
             && row_signature(&record.capacitance, size, unknown).is_empty()
             && record
@@ -357,7 +372,11 @@ pub fn structural_defects(
                 .copied()
                 .is_none_or(|residual| residual == 0.0);
         if untouched {
-            defects.push(StructuralDefect::UnwrittenBranchEquation { unknown });
+            defects.push(if unknown < node_count {
+                StructuralDefect::UnwrittenInternalNode { node: unknown }
+            } else {
+                StructuralDefect::UnwrittenBranchEquation { unknown }
+            });
         }
     }
 
@@ -1426,7 +1445,7 @@ mod tests {
             1.0, -1.0,
             -1.0, 2.0,
         ], 2);
-        assert_eq!(structural_defects(&record, 2, 0), Vec::new());
+        assert_eq!(structural_defects(&record, 2, 2, 0), Vec::new());
     }
 
     #[test]
@@ -1440,7 +1459,7 @@ mod tests {
             0.0, 0.0, 1.0,
         ], 3);
         assert_eq!(
-            structural_defects(&record, 3, 0),
+            structural_defects(&record, 3, 3, 0),
             vec![StructuralDefect::DuplicatedEquation { rows: vec![1, 2] }]
         );
     }
@@ -1454,7 +1473,7 @@ mod tests {
             2.5, -2.5,
             -2.5, 2.5,
         ], 2);
-        assert_eq!(structural_defects(&record, 2, 0), Vec::new());
+        assert_eq!(structural_defects(&record, 2, 2, 0), Vec::new());
     }
 
     #[test]
@@ -1465,7 +1484,7 @@ mod tests {
             1.0, -0.0,
         ], 2);
         assert_eq!(
-            structural_defects(&record, 2, 0),
+            structural_defects(&record, 2, 2, 0),
             vec![StructuralDefect::DuplicatedEquation { rows: vec![0, 1] }]
         );
     }
@@ -1478,7 +1497,7 @@ mod tests {
             Value::NAN, 1.0,
         ], 2);
         assert_eq!(
-            structural_defects(&record, 2, 0),
+            structural_defects(&record, 2, 2, 0),
             vec![StructuralDefect::DuplicatedEquation { rows: vec![0, 1] }]
         );
     }
@@ -1492,7 +1511,7 @@ mod tests {
             0.0, 0.0,
         ], 2);
         assert_eq!(
-            structural_defects(&record, 1, 1),
+            structural_defects(&record, 1, 1, 1),
             vec![StructuralDefect::UnwrittenBranchEquation { unknown: 1 }]
         );
     }
@@ -1506,17 +1525,30 @@ mod tests {
         ], 2);
         // Row 1, column 1 of a 2x2 block.
         record.capacitance[3] = 3.0e-15;
-        assert_eq!(structural_defects(&record, 1, 1), Vec::new());
+        assert_eq!(structural_defects(&record, 1, 1, 1), Vec::new());
     }
 
     #[test]
-    fn an_untouched_node_row_is_left_alone() {
+    fn an_untouched_terminal_row_is_left_alone() {
         // A MOSFET gate conducts nothing at DC and the netlist completes the
-        // node's equation, so an empty node row is not a finding. Two of them
-        // are not a duplicate pair either.
+        // node's equation, so an empty terminal row is not a finding. Two of
+        // them are not a duplicate pair either.
         let mut record = conduction_only(vec![0.0; 9], 3);
         record.jacobian[0] = 1.0;
-        assert_eq!(structural_defects(&record, 3, 0), Vec::new());
+        assert_eq!(structural_defects(&record, 3, 3, 0), Vec::new());
+    }
+
+    #[test]
+    fn an_internal_node_with_no_equation_is_reported() {
+        // The same record with node 2 internal: nothing outside the device
+        // completes that row, so it is a floating node. Terminal row 1 is
+        // still left alone.
+        let mut record = conduction_only(vec![0.0; 9], 3);
+        record.jacobian[0] = 1.0;
+        assert_eq!(
+            structural_defects(&record, 2, 3, 0),
+            vec![StructuralDefect::UnwrittenInternalNode { node: 2 }]
+        );
     }
 
     #[test]

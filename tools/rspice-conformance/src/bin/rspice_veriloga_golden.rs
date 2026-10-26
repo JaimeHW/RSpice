@@ -19,7 +19,9 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser};
 use rspice_conformance::suites::veriloga::fixture::{GoldenCase, GoldenFixture, GoldenPoint};
-use rspice_conformance::suites::veriloga::golden::{GoldenHarness, structural_defects};
+use rspice_conformance::suites::veriloga::golden::{
+    GoldenHarness, StructuralDefect, structural_defects,
+};
 use rspice_core::device::veriloga_builtins::builtins;
 use serde::Serialize;
 
@@ -90,7 +92,9 @@ fn fixture_deviation(model: &str) -> Option<&'static FixtureDeviation> {
 /// node; for one it does not, and a node row that no block writes at any
 /// probe point is a row the fixture says nothing about. A second case under a
 /// card that switches those networks on gives the replay something to compare
-/// there, at the cost of one more case in that model's fixture.
+/// there, at the cost of one more case in that model's fixture. The same
+/// card is why the default case's empty internal-node rows are not reported
+/// as a singular stamp: the card's case is checked for them instead.
 ///
 /// Not a substitute for the default case, and not a fix for a stamp that is
 /// wrong: a card is listed here only when the Verilog-A source itself writes
@@ -379,11 +383,25 @@ fn activating_card_findings(fixture: &GoldenFixture) -> Vec<String> {
 /// carried three identical Jacobian rows at every bias point.
 fn singular_points(fixture: &GoldenFixture) -> Vec<String> {
     let mut findings = Vec::new();
+    let terminals = builtins::node_count(&fixture.model_name).unwrap_or(fixture.node_count);
+    // A model has an activating card because its default card leaves internal
+    // nodes unwritten. Its card's case is where those rows are checked, and
+    // `activating_card_findings` holds that case to writing every node row.
+    let carded = activating_cards(&fixture.model_name).next().is_some();
     for (case_index, case) in fixture.cases.iter().enumerate() {
         for (point_index, point) in case.points.iter().enumerate() {
-            for defect in
-                structural_defects(&point.record, fixture.node_count, fixture.branch_count)
-            {
+            for defect in structural_defects(
+                &point.record,
+                terminals,
+                fixture.node_count,
+                fixture.branch_count,
+            ) {
+                if carded
+                    && case_index == 0
+                    && matches!(defect, StructuralDefect::UnwrittenInternalNode { .. })
+                {
+                    continue;
+                }
                 findings.push(format!("case {case_index} point {point_index}: {defect}"));
             }
         }
