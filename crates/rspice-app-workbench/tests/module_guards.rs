@@ -24,6 +24,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "dialogs"),
     ("lib.rs", "docks"),
     ("lib.rs", "documents"),
+    ("lib.rs", "fact_grid"),
     ("lib.rs", "framework"),
     ("lib.rs", "layout"),
     ("lib.rs", "lifecycle"),

@@ -28,6 +28,7 @@ pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support;
 pub(in crate::workbench) mod engineering_table;
+pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 pub(in crate::workbench) mod find_replace;
 pub(in crate::workbench) mod grid_snap_routing;
 pub(crate) mod hardcopy;

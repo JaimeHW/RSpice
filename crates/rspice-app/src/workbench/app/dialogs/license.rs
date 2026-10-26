@@ -8,13 +8,13 @@
 
 use egui::Context;
 
-use super::help::fact_grid;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::license::{self, LicenseInfo};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 
+use crate::workbench::app::dialogs::fact_grid;
 use crate::workbench::app_state::Model;
 
 /// Where the license-activation flow stands.

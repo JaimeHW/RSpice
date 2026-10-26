@@ -55,6 +55,7 @@ pub mod workbench {
         pub mod dialogs {
             pub mod confirmation;
             pub mod confirmation_state;
+            pub mod fact_grid;
             pub mod operation_primitives;
             pub mod review_primitives;
             pub mod window_session;
