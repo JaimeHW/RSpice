@@ -12,8 +12,11 @@ use egui::{Context, Ui};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::results::ResultsFeature;
+use crate::workbench::slots::ResultsState;
+use crate::workbench::state::WorkbenchSession;
 
 /// Default geometry of the mockup's modeless lower-right calculator.
 const TOOL_WIDTH: f32 = 372.0;
@@ -100,7 +103,7 @@ fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>) {
                         .on_disabled_hover_text("Enter an expression first")
                         .clicked()
                     {
-                        plot_expression(cx);
+                        plot_expression(cx.state, cx.model, cx.wb);
                     }
                     if Button::new("Evaluate").show(ui).clicked() {
                         let (panel, simulation) =
@@ -120,17 +123,16 @@ fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>) {
 ///
 /// The tool stays open: plotting is a step in composing an expression, not
 /// the end of the task.
-fn plot_expression(cx: &mut Cx<'_, ResultsFeature>) {
-    let expression = cx.state.calculator_panel.expression.trim().to_owned();
+fn plot_expression(results: &mut ResultsState, model: &mut Model, wb: &mut WorkbenchSession) {
+    let expression = results.calculator_panel.expression.trim().to_owned();
     if expression.is_empty() {
         return;
     }
-    let Some(analysis_index) = cx.model.simulation.view.active_analysis_idx else {
-        cx.wb
-            .prompt("Select a retained result analysis before plotting an expression.");
+    let Some(analysis_index) = model.simulation.view.active_analysis_idx else {
+        wb.prompt("Select a retained result analysis before plotting an expression.");
         return;
     };
-    let Some(run) = cx.model.simulation.active_run() else {
+    let Some(run) = model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -140,31 +142,30 @@ fn plot_expression(cx: &mut Cx<'_, ResultsFeature>) {
         run.dataset_id,
         analysis,
     );
-    cx.state.calculator_panel.evaluate(&cx.model.simulation);
-    if let Some(Err(error)) = cx.state.calculator_panel.outcome.as_ref() {
-        cx.wb.prompt(format!("Expression was not plotted: {error}"));
+    results.calculator_panel.evaluate(&model.simulation);
+    if let Some(Err(error)) = results.calculator_panel.outcome.as_ref() {
+        wb.prompt(format!("Expression was not plotted: {error}"));
         return;
     }
-    let added = cx.state.results.add_expression_trace(
-        &cx.model.simulation,
-        analysis_key,
-        expression.clone(),
-    );
+    let added =
+        results
+            .results
+            .add_expression_trace(&model.simulation, analysis_key, expression.clone());
     let added = match added {
         Ok(added) => added,
         Err(error) => {
-            cx.wb.prompt(error);
+            wb.prompt(error);
             return;
         }
     };
     if added {
-        cx.model.workspace.content.visualization_documents_dirty = true;
+        model.workspace.content.visualization_documents_dirty = true;
     }
-    cx.state.results.session.viewer =
+    results.results.session.viewer =
         crate::workbench::documents::result_document::ResultViewer::Waves;
-    cx.wb.activate(crate::workbench::state::Workspace::Results);
+    wb.activate(crate::workbench::state::Workspace::Results);
     // The strips are in front of the reader now; the status bar confirms it.
-    cx.wb.prompt(if added {
+    wb.prompt(if added {
         format!("Plotted {expression}")
     } else {
         format!("{expression} is already plotted")
@@ -201,9 +202,17 @@ mod tests {
         app.state.results.waveform_calculator_dialog = true;
         app.state.results.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
-        plot_expression(&mut crate::workbench::features::cx(&mut app));
+        plot_expression(
+            &mut app.state.results,
+            &mut app.state.model,
+            &mut app.state.workbench,
+        );
         assert_eq!(app.state.prompt_text(), Some("Plotted V(out)/V(in)"));
-        plot_expression(&mut crate::workbench::features::cx(&mut app));
+        plot_expression(
+            &mut app.state.results,
+            &mut app.state.model,
+            &mut app.state.workbench,
+        );
         app.state.drain_notices(&egui::Context::default());
         // The reader is looking at the strips: the answer is the status
         // bar's, and nothing is interrupted for it.
@@ -241,7 +250,11 @@ mod tests {
         let mut app = crate::workbench::RSpiceApp::test_instance();
         app.state.results.calculator_panel.expression = "   ".to_owned();
 
-        plot_expression(&mut crate::workbench::features::cx(&mut app));
+        plot_expression(
+            &mut app.state.results,
+            &mut app.state.model,
+            &mut app.state.workbench,
+        );
 
         assert!(app.state.results.results.session.exprs.is_empty());
     }

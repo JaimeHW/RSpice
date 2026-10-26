@@ -8,7 +8,9 @@
 //! whether a project is open. The data browser, the Results navigator,
 //! draws in the same context.
 
+pub(crate) mod calculator;
 pub(crate) mod commands;
+pub(crate) mod expression_diagnostics;
 mod surface;
 
 use crate::workbench::commands::result_navigation::{

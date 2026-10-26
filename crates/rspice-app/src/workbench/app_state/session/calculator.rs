@@ -3,7 +3,7 @@
 //! The expression, its recall history, and the last evaluation outcome.
 //! `AppState` owns this so the calculator keeps its place while the user
 //! works elsewhere; the floating tool that renders it lives at
-//! `workbench::tools::calculator_tool`, which reaches down here for the
+//! `workbench::results::calculator`, which reaches down here for the
 //! model and hangs its egui half off this type as a second inherent impl.
 
 use crate::analysis::calculator::{

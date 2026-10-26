@@ -373,7 +373,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         modality: Modality::Modeless,
         is_open: None,
         render: |app, ctx| {
-            crate::workbench::tools::calculator_tool::show(
+            crate::workbench::results::calculator::show(
                 ctx,
                 &mut crate::workbench::features::cx::<crate::workbench::results::ResultsFeature>(
                     app,
@@ -386,7 +386,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         modality: Modality::Modeless,
         is_open: None,
         render: |app, ctx| {
-            crate::workbench::tools::expression_diagnostics::show(
+            crate::workbench::results::expression_diagnostics::show(
                 ctx,
                 &mut crate::workbench::features::cx::<crate::workbench::results::ResultsFeature>(
                     app,

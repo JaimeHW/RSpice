@@ -203,7 +203,6 @@ SLICE_RULES = [
     (W + r"surfaces/results", "results"),
     (W + r"surfaces/(simulate|verify)", "simulate"),
     # Tools, workflows, lifecycle and the rest of workbench/.
-    (W + r"tools/(calculator_tool|expression_diagnostics)", "results"),
     (W + r"tools/(examples_browser|project_launcher)", "project"),
     (W + r"tools/jobs_manager", "simulate"),
     (W + r"tools/(notification_center|specialist_tool_browser)", "framework"),

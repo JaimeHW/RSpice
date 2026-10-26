@@ -736,8 +736,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "tools/project_launcher",
     "tools/specialist_tool_browser",
     "tools/jobs_manager",
-    "tools/calculator_tool",
-    "tools/expression_diagnostics",
     "preflight",
     "cross_probe",
     "account_organization",
