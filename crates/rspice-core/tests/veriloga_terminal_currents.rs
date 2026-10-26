@@ -1410,3 +1410,76 @@ mod card_routed {
         }
     }
 }
+
+/// Xyce certification deck BUG_507_SON/bug_507: 38,200 diodes and resistors,
+/// with a DC `.PRINT` naming the current of every one of them. Deciding which
+/// device needs a terminal meter is a lookup per device, not a scan of every
+/// request, so the operating point is reached well inside a 120 s budget (it
+/// takes about 10 s unoptimized) and matches Xyce 7.10 column for column.
+#[test]
+fn a_deck_naming_every_device_current_is_metered_in_linear_time() {
+    use rspice_core::abort_signal::AbortSignal;
+    use rspice_core::analysis::measure_signals::evaluate_dc_output_requests_with_abort;
+    use rspice_core::config::ExpressionDialect;
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
+    use rspice_core::resource::ResourceLimits;
+    use std::time::{Duration, Instant};
+
+    struct Deadline(Instant);
+    impl AbortSignal for Deadline {
+        fn is_aborted(&self) -> bool {
+            self.0.elapsed() >= Duration::from_secs(120)
+        }
+    }
+
+    let netlist = Netlist::parse_with_options(
+        include_str!("../../../tests/xyce/Netlists/Certification_Tests/BUG_507_SON/bug_507.cir"),
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        },
+    )
+    .expect("bug_507 parses");
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    });
+    let abort = Deadline(Instant::now());
+    let sweep = engine
+        .run_dc_sweep_with_abort(&netlist, "Vdd", 0.0, 0.0, 0.02, &abort)
+        .expect("bug_507 operating point inside its budget");
+    let columns =
+        evaluate_dc_output_requests_with_abort(&netlist, &sweep, ResourceLimits::default(), &abort)
+            .expect("every .PRINT column evaluates");
+
+    // Xyce 7.10, OutputData/Certification_Tests/BUG_507_SON/bug_507.cir.prn,
+    // to Xyce's RELTOL of 1e-3 with a 1 nV / 1 nA floor: a resistor current
+    // is the difference of two near-volt nodes.
+    let reference = include_str!(
+        "../../../tests/xyce/OutputData/Certification_Tests/BUG_507_SON/bug_507.cir.prn"
+    );
+    let mut lines = reference.lines();
+    let header = lines.next().expect("reference header");
+    let row = lines.next().expect("reference row");
+    let names = header.split_whitespace().skip(1).collect::<Vec<_>>();
+    let values = row
+        .split_whitespace()
+        .skip(1)
+        .map(|value| value.parse::<f64>().expect("reference value"))
+        .collect::<Vec<_>>();
+    assert_eq!(columns.len(), names.len());
+    for ((name, _, actual), (reference_name, expected)) in
+        columns.iter().zip(names.iter().zip(&values))
+    {
+        assert!(
+            name.eq_ignore_ascii_case(reference_name),
+            "{name} vs {reference_name}"
+        );
+        assert!(
+            (actual[0] - expected).abs() <= 1.0e-3 * expected.abs() + 1.0e-9,
+            "{name}: got {}, Xyce 7.10 gives {expected}",
+            actual[0]
+        );
+    }
+}

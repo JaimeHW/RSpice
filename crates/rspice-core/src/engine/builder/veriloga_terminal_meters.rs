@@ -82,29 +82,43 @@ pub(super) struct InstancePort {
 }
 
 /// What a deck asks of device currents, by spelling.
+///
+/// Each question below is asked of every element of the flattened deck, and
+/// a deck may name a current of every one of its devices, so each answers
+/// from a map keyed by canonical name. Only wildcard requests, which no map
+/// can answer, are scanned.
 pub(super) struct CurrentRequests {
-    /// Every `I(name)` probe, wildcards included, as a selection.
-    currents: SaveSet,
+    /// Whether the deck names any `I(name)` probe.
+    has_currents: bool,
+    /// `I(name)` probes a plain name selects, by canonical name.
+    selected_currents: HashSet<String>,
+    /// The other `I(name)` probes (wildcards), as a selection.
+    wildcard_currents: SaveSet,
     /// `I(name)` probes naming one device, in canonical spelling.
-    exact_currents: Vec<String>,
-    /// `@device[param]` probes: canonical device, lower-case parameter.
-    parameters: Vec<(String, String)>,
+    exact_currents: HashSet<String>,
+    /// `@device[param]` probes: lower-case parameters by canonical device.
+    parameters: HashMap<String, Vec<String>>,
     /// Bare `device:param` probes, in the same form. A bare name may also be
     /// a node, so one that names no terminal is not refused here.
-    bare_parameters: Vec<(String, String)>,
-    /// Device accessors inside output cards and measurements: upper-case
-    /// operator, canonical symbol (possibly a pattern).
-    accessors: Vec<(String, String)>,
+    bare_parameters: HashMap<String, Vec<String>>,
+    /// Device accessors inside output cards and measurements whose symbol is
+    /// one canonical name: their upper-case operators, by symbol.
+    accessors: HashMap<String, Vec<String>>,
+    /// The other accessors (patterns): upper-case operator, symbol.
+    pattern_accessors: Vec<(String, String)>,
 }
 
 impl CurrentRequests {
     pub(super) fn of(netlist: &Netlist) -> Self {
         let mut requests = Self {
-            currents: SaveSet::default(),
-            exact_currents: Vec::new(),
-            parameters: Vec::new(),
-            bare_parameters: Vec::new(),
-            accessors: Vec::new(),
+            has_currents: false,
+            selected_currents: HashSet::new(),
+            wildcard_currents: SaveSet::default(),
+            exact_currents: HashSet::new(),
+            parameters: HashMap::new(),
+            bare_parameters: HashMap::new(),
+            accessors: HashMap::new(),
+            pattern_accessors: Vec::new(),
         };
         let probes = netlist.saves.signals.iter().chain(
             netlist
@@ -119,14 +133,24 @@ impl CurrentRequests {
         for signal in probes {
             match signal {
                 SaveSignal::Current(name) => {
-                    requests.currents.signals.push(signal.clone());
+                    requests.has_currents = true;
+                    // A selection without `*` is the name itself, compared
+                    // without case and with `:` read as `.`: its canonical
+                    // spelling.
+                    if name.contains('*') || name.trim() != name {
+                        requests.wildcard_currents.signals.push(signal.clone());
+                    } else {
+                        requests.selected_currents.insert(canonical_symbol(name));
+                    }
                     if !is_pattern(name) {
-                        requests.exact_currents.push(canonical_symbol(name));
+                        requests.exact_currents.insert(canonical_symbol(name));
                     }
                 }
                 SaveSignal::DeviceParam { device, param } => requests
                     .parameters
-                    .push((canonical_symbol(device), param.trim().to_ascii_lowercase())),
+                    .entry(canonical_symbol(device))
+                    .or_default()
+                    .push(param.trim().to_ascii_lowercase()),
                 SaveSignal::Raw(name) => {
                     if let Some((device, param)) = name.trim().rsplit_once(':')
                         && !device.trim().is_empty()
@@ -134,7 +158,9 @@ impl CurrentRequests {
                     {
                         requests
                             .bare_parameters
-                            .push((canonical_symbol(device), param.trim().to_ascii_lowercase()));
+                            .entry(canonical_symbol(device))
+                            .or_default()
+                            .push(param.trim().to_ascii_lowercase());
                     }
                 }
                 _ => {}
@@ -150,20 +176,40 @@ impl CurrentRequests {
             .flat_map(|request| request.dependencies.iter().cloned());
         for dependency in authored.chain(measured) {
             if dependency.kind == OutputSymbolKind::Device {
-                requests.accessors.push((
-                    dependency.operator.trim().to_ascii_uppercase(),
-                    canonical_symbol(&dependency.symbol),
-                ));
+                let operator = dependency.operator.trim().to_ascii_uppercase();
+                let symbol = canonical_symbol(&dependency.symbol);
+                if is_pattern(&symbol) {
+                    requests.pattern_accessors.push((operator, symbol));
+                } else {
+                    requests.accessors.entry(symbol).or_default().push(operator);
+                }
             }
         }
         requests
     }
 
     fn is_empty(&self) -> bool {
-        self.currents.signals.is_empty()
+        !self.has_currents
             && self.parameters.is_empty()
             && self.bare_parameters.is_empty()
             && self.accessors.is_empty()
+            && self.pattern_accessors.is_empty()
+    }
+
+    /// Operators of the accessors whose symbol selects `canonical`: those
+    /// naming it, then the patterns matching it.
+    fn accessors_of<'a>(&'a self, canonical: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.accessors
+            .get(canonical)
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .chain(
+                self.pattern_accessors
+                    .iter()
+                    .filter(move |(_, symbol)| hierarchy_pattern_matches(symbol, canonical))
+                    .map(|(operator, _)| operator.as_str()),
+            )
     }
 
     /// Whether any request could name a current of `instance`. Every test
@@ -172,26 +218,21 @@ impl CurrentRequests {
     fn mentions(&self, instance: &str) -> bool {
         let canonical = canonical_symbol(instance);
         self.selects_instance_current(instance)
-            || self
-                .parameters
-                .iter()
-                .chain(&self.bare_parameters)
-                .any(|(device, _)| *device == canonical)
-            || self
-                .accessors
-                .iter()
-                .any(|(_, symbol)| hierarchy_pattern_matches(symbol, &canonical))
+            || self.parameters.contains_key(&canonical)
+            || self.bare_parameters.contains_key(&canonical)
+            || self.accessors_of(&canonical).next().is_some()
     }
 
     /// Whether `I(instance)` — or a projection of it such as `IM(instance)` —
     /// is asked for, by name or by pattern.
     fn selects_instance_current(&self, instance: &str) -> bool {
         let canonical = canonical_symbol(instance);
-        (!self.currents.signals.is_empty() && self.currents.selects(&format!("I({instance})")))
-            || self.accessors.iter().any(|(operator, symbol)| {
-                is_current_projection_accessor(operator)
-                    && hierarchy_pattern_matches(symbol, &canonical)
-            })
+        self.selected_currents.contains(&canonical)
+            || (!self.wildcard_currents.signals.is_empty()
+                && self.wildcard_currents.selects(&format!("I({instance})")))
+            || self
+                .accessors_of(&canonical)
+                .any(is_current_projection_accessor)
     }
 
     /// Whether `I(instance)` is asked for by name rather than by a pattern
@@ -199,32 +240,33 @@ impl CurrentRequests {
     fn names_instance_current(&self, instance: &str) -> bool {
         let canonical = canonical_symbol(instance);
         self.exact_currents.contains(&canonical)
-            || self.accessors.iter().any(|(operator, symbol)| {
-                is_current_projection_accessor(operator) && *symbol == canonical
+            || self.accessors.get(&canonical).is_some_and(|operators| {
+                operators
+                    .iter()
+                    .any(|operator| is_current_projection_accessor(operator))
             })
     }
 
     /// Whether a terminal's current is asked for under its label.
     fn selects_terminal(&self, instance: &str, label: &str) -> bool {
         let canonical = canonical_symbol(instance);
-        self.parameters
-            .iter()
-            .chain(&self.bare_parameters)
-            .any(|(device, param)| *device == canonical && param == label)
-            || self.accessors.iter().any(|(operator, symbol)| {
-                !is_current_projection_accessor(operator)
-                    && operator.eq_ignore_ascii_case(label)
-                    && hierarchy_pattern_matches(symbol, &canonical)
+        [&self.parameters, &self.bare_parameters]
+            .into_iter()
+            .filter_map(|parameters| parameters.get(&canonical))
+            .flatten()
+            .any(|param| param == label)
+            || self.accessors_of(&canonical).any(|operator| {
+                !is_current_projection_accessor(operator) && operator.eq_ignore_ascii_case(label)
             })
     }
 
     /// Parameters asked of `instance` by name, lower case.
     fn parameters_of<'a>(&'a self, instance: &str) -> impl Iterator<Item = &'a str> + 'a {
-        let canonical = canonical_symbol(instance);
         self.parameters
-            .iter()
-            .filter(move |(device, _)| *device == canonical)
-            .map(|(_, param)| param.as_str())
+            .get(&canonical_symbol(instance))
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
     }
 }
 
