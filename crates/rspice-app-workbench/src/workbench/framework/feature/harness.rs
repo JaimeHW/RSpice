@@ -35,7 +35,7 @@ use rspice_app_services::workbench::workflows::export_workflow::{
 
 use super::{
     CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry,
-    LowerHandles, Peers, Reads,
+    HardcopyPort, LowerHandles, Peers, PublicationDraft, Reads,
 };
 use crate::workbench::framework::ports::{CapturedViewport, DisplayedDatasetView, ResultsPort};
 
@@ -85,6 +85,21 @@ impl CloudPort for NullPorts {
 
     fn license_holder(&self) -> Option<&str> {
         None
+    }
+}
+
+/// A feature's own test builds no publication: the snapshot is the hardcopy
+/// feature's to build, over the whole project.
+impl HardcopyPort for NullPorts {
+    fn build_publication_snapshot(
+        &self,
+        _model: &Model,
+        _workbench: &crate::workbench::state::WorkbenchSession,
+        _results: &dyn ResultsPort,
+        _runs: &RunsState,
+        _draft: &PublicationDraft,
+    ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
+        Err("a feature's own test builds no publication snapshot".to_owned())
     }
 }
 
@@ -227,7 +242,12 @@ where
             LowerHandles {
                 export_io: &NullExportIo,
             },
-            Peers::new(&mut NullPorts, Some(&NullPorts), Some(&NullPorts)),
+            Peers::new(
+                &mut NullPorts,
+                Some(&NullPorts),
+                Some(&NullPorts),
+                Some(&NullPorts),
+            ),
         ));
     }
 }

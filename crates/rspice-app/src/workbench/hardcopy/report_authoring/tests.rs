@@ -37,6 +37,7 @@ fn cx(state: &mut AppState) -> Cx<'_, HardcopyFeature> {
         Peers::new(
             &mut *state.design,
             Some(&*state.cloud),
+            None,
             Some(&*state.results),
         ),
     )

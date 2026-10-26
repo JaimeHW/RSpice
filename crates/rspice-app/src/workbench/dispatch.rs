@@ -34,8 +34,8 @@ use crate::workbench::framework::command_registry::{
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ExportDataset, FollowSchematicGrid, MarkFailureSites,
-    OpenPublishWebDialog, PrintActiveView, PromptAfterCommands, RevealExecutedDeck,
-    SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
+    PrintActiveView, PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance,
+    SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -138,15 +138,14 @@ impl RSpiceApp {
 
     /// Answer what a feature's call raised for straight after it: the
     /// commands it ran next and what it said once they had run, the print
-    /// workflow it asked for, the publish dialog it opened, the snap that
-    /// follows a new schematic grid, the shortcut resolver's reset when a
-    /// shortcut library was put in use, the open waveform view starting again
-    /// from changed defaults, the dataset export, the analysis instance and
-    /// the executed deck a results command asked for, the waveforms and the
-    /// family member a hand-off into Results opens its viewer or form on, the
-    /// annotations a result viewer shows on the schematic it locates
-    /// something on, and the failure sites the results failure banner marks
-    /// there.
+    /// workflow it asked for, the snap that follows a new schematic grid, the
+    /// shortcut resolver's reset when a shortcut library was put in use, the
+    /// open waveform view starting again from changed defaults, the dataset
+    /// export, the analysis instance and the executed deck a results command
+    /// asked for, the waveforms and the family member a hand-off into Results
+    /// opens its viewer or form on, the annotations a result viewer shows on
+    /// the schematic it locates something on, and the failure sites the
+    /// results failure banner marks there.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -164,11 +163,6 @@ impl RSpiceApp {
             |app, PrintActiveView| {
                 app.open_requested_hardcopy_workflow(HardcopyWorkflow::Print);
             },
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, OpenPublishWebDialog| app.open_publish_web_dialog(),
         );
         requests::drain(
             self,

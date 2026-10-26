@@ -37,6 +37,7 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
     SheetCatalog, SheetId, SimulationRun, ViewType,
 };
+#[cfg(test)]
 use crate::workbench::AppState;
 
 use crate::workbench::SurfaceId;
@@ -72,6 +73,7 @@ pub(crate) struct SourceReads<'a> {
     pub(crate) results: &'a dyn ResultsPort,
 }
 
+#[cfg(test)]
 impl<'a> SourceReads<'a> {
     /// The reads `state` holds.
     pub(crate) fn of(state: &'a AppState) -> Self {

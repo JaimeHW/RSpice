@@ -17,6 +17,7 @@
 use crate::state::command_catalog::CommandKey;
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::state::workbench_session::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
@@ -34,7 +35,7 @@ pub trait Session: 'static {
     fn outbox(&mut self) -> &mut Outbox;
 }
 
-impl Session for crate::workbench::state::workbench_session::WorkbenchSession {
+impl Session for WorkbenchSession {
     fn outbox(&mut self) -> &mut Outbox {
         &mut self.outbox
     }
@@ -138,11 +139,16 @@ pub struct PublicationDraft {
 /// What the hardcopy feature builds that another feature reads.
 pub trait HardcopyPort {
     /// The validated publication snapshot `draft` describes, built from the
-    /// open project: every printable schematic sheet and plot pane, the
-    /// active run's analyses, datasets and measurements, and the effective
-    /// deck. A refusal names the boundary that refused.
+    /// open project in `model` as `workbench`, `results` and `runs` show it:
+    /// every printable schematic sheet and plot pane, the active run's
+    /// analyses, datasets and measurements, and the effective deck. A refusal
+    /// names the boundary that refused.
     fn build_publication_snapshot(
         &self,
+        model: &Model,
+        workbench: &WorkbenchSession,
+        results: &dyn ResultsPort,
+        runs: &RunsState,
         draft: &PublicationDraft,
     ) -> Result<rspice_publication_contract::PublicationSnapshot, String>;
 }
@@ -189,6 +195,9 @@ pub struct Peers<'a> {
     /// `None` in the cloud feature's own context, as `results` is in the
     /// results feature's.
     cloud: Option<&'a dyn CloudPort>,
+    /// `None` in the hardcopy feature's own context, as `results` is in the
+    /// results feature's.
+    hardcopy: Option<&'a dyn HardcopyPort>,
     /// `None` in the results feature's own context: a feature reads its own
     /// state, never itself as a peer.
     results: Option<&'a dyn ResultsPort>,
@@ -198,11 +207,13 @@ impl<'a> Peers<'a> {
     pub fn new(
         design: &'a mut dyn DesignPeer,
         cloud: Option<&'a dyn CloudPort>,
+        hardcopy: Option<&'a dyn HardcopyPort>,
         results: Option<&'a dyn ResultsPort>,
     ) -> Self {
         Self {
             design,
             cloud,
+            hardcopy,
             results,
         }
     }
@@ -217,6 +228,14 @@ impl<'a> Peers<'a> {
     pub fn cloud(&self) -> &'a dyn CloudPort {
         self.cloud
             .expect("the cloud feature reads its own state, never itself as a peer")
+    }
+
+    /// What the hardcopy feature builds. The hardcopy feature's own context
+    /// holds no such peer, because the feature reads its own state; its code
+    /// asking for one is a fault in that code.
+    pub fn hardcopy(&self) -> &'a dyn HardcopyPort {
+        self.hardcopy
+            .expect("the hardcopy feature reads its own state, never itself as a peer")
     }
 
     /// What the results workspace shows. The results feature's own context

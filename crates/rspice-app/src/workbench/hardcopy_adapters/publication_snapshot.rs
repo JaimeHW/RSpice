@@ -22,8 +22,9 @@ use rspice_publication_contract::{
 
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
+#[cfg(test)]
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::{HardcopyPort, PublicationDraft};
+use crate::workbench::framework::feature::PublicationDraft;
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, SourceReads, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
@@ -112,6 +113,7 @@ pub(crate) struct PublicationReads<'a> {
     pub(crate) runs: &'a RunsState,
 }
 
+#[cfg(test)]
 impl<'a> PublicationReads<'a> {
     /// The reads `state` holds.
     pub(crate) fn of(state: &'a AppState) -> Self {
@@ -119,19 +121,6 @@ impl<'a> PublicationReads<'a> {
             sources: SourceReads::of(state),
             runs: &state.runs,
         }
-    }
-}
-
-/// A reader that still holds the whole application state asks the snapshot
-/// of it: the cloud's publish dialog, which reaches the snapshot through its
-/// port once the cloud has a context of its own.
-impl HardcopyPort for AppState {
-    fn build_publication_snapshot(
-        &self,
-        draft: &PublicationDraft,
-    ) -> Result<PublicationSnapshot, String> {
-        build_publication_snapshot(PublicationReads::of(self), draft)
-            .map_err(|error| error.to_string())
     }
 }
 

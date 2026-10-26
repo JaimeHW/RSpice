@@ -68,6 +68,17 @@ macro_rules! cloud_peer {
     };
 }
 
+/// The hardcopy peer a context over `state` holds for the feature whose slot
+/// is `slot`: none for the hardcopy feature itself, whose slot it is.
+macro_rules! hardcopy_peer {
+    (hardcopy, $state:ident) => {
+        None
+    };
+    ($slot:ident, $state:ident) => {
+        Some(&*$state.hardcopy)
+    };
+}
+
 /// What a context over `app` lends the feature as what it runs: the
 /// application's field `own`, or nothing for a feature that runs nothing.
 macro_rules! own {
@@ -126,6 +137,7 @@ macro_rules! features {
                         Peers::new(
                             &mut *state.design,
                             cloud_peer!($slot, state),
+                            hardcopy_peer!($slot, state),
                             results_peer!($slot, state),
                         ),
                     )

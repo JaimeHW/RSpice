@@ -187,17 +187,6 @@ impl Request for PrintActiveView {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// Open the publish dialog over a fresh review build of the open project.
-/// Raised by the cloud feature's Publish to web, and answered straight after
-/// it, in the same dispatch. It goes once the command builds the review
-/// through the hardcopy feature's port.
-#[derive(Clone, Debug)]
-pub struct OpenPublishWebDialog;
-
-impl Request for OpenPublishWebDialog {
-    const DRAIN: Drain = Drain::AfterContribution;
-}
-
 /// Move design's snap onto the open schematic's grid. Raised by a feature
 /// that changes the grid the schematic is drawn on, so the snap follows the
 /// grid in the same frame, as it does when design changes the grid itself.

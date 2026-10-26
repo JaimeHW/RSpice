@@ -5,8 +5,7 @@
 //! own slot, the model, the session and the platform services' state, and
 //! the account service and live-session engine the feature runs, which the
 //! application holds beside its state and lends with the context. Publish to
-//! web still opens its dialog in the shell, on the request the command
-//! raises, straight after the command in the same dispatch.
+//! web reviews what it would publish through the hardcopy feature's port.
 
 pub(crate) mod commands;
 
@@ -15,11 +14,9 @@ use crate::services::cloud_account::{
 };
 use crate::workbench::app::dialogs::license::open_license_dialog;
 use crate::workbench::app::dialogs::live_session::open_live_session_dialog;
+use crate::workbench::app::dialogs::publish_web::{SnapshotSource, open_publish_web_dialog};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
-use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, Reads, Session,
-};
-use crate::workbench::framework::requests::OpenPublishWebDialog;
+use crate::workbench::framework::feature::{CommandSet, Cx, Feature, FeatureRegistry, Reads};
 use crate::workbench::live_session::CloudHandles;
 use crate::workbench::slots::CloudState;
 use crate::workbench::state::WorkbenchSession;
@@ -123,7 +120,16 @@ impl CommandSet for CloudCommand {
             Self::LiveSession => {
                 open_live_session_dialog(&mut cx.state.live_session, &mut cx.own.account);
             }
-            Self::PublishToWeb => cx.wb.outbox().push(OpenPublishWebDialog),
+            Self::PublishToWeb => {
+                let source = SnapshotSource {
+                    hardcopy: cx.peers.hardcopy(),
+                    model: cx.model,
+                    workbench: cx.wb,
+                    results: cx.peers.results(),
+                    runs: cx.runs,
+                };
+                open_publish_web_dialog(&mut cx.state.publish_web, &mut cx.own.account, source);
+            }
             Self::AccountOrganization => {
                 let route = SurfaceRoute::surface(SurfaceId::AccountOrganization);
                 if let Err(error) = cx.wb.navigate(route, RouteTransitionSource::User) {

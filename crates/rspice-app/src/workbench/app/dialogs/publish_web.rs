@@ -12,17 +12,22 @@ use egui::Context;
 use super::live_session::{field_label, section_head};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::cloud_account::{
-    CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, PublishRequest, PublishState, PublishTarget,
+    CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, CloudAccountService, PublishRequest,
+    PublishState, PublishTarget,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::framework::feature::{
     HardcopyPort, PublicationDraft, publication_timestamp_utc,
 };
+use crate::workbench::framework::ports::ResultsPort;
+use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_publication_contract::PublicationSnapshot;
 
 /// What the open-time snapshot build proved about the publish scope.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -76,81 +81,100 @@ pub(crate) struct PublishWebDialogState {
     pub submitted: bool,
 }
 
-impl RSpiceApp {
-    /// Open the dialog with a fresh review build and the signed-in identity
-    /// as the default author credit. No-op unless this build can publish.
-    pub(crate) fn open_publish_web_dialog(&mut self) {
-        if !matches!(
-            self.cloud.account.availability(),
-            CloudAccountAvailability::Native
-        ) || !self
-            .cloud
-            .account
-            .snapshot()
-            .cloud_feature_enabled(CLOUD_PUBLISHING_FEATURE)
-        {
-            return;
-        }
-        let author = self
-            .cloud
-            .account
-            .snapshot()
-            .principal
-            .as_ref()
-            .and_then(|principal| {
-                principal
-                    .display_name
-                    .clone()
-                    .or_else(|| principal.email.clone())
-            })
-            .unwrap_or_default();
-        let project_name = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .name()
-            .trim()
-            .to_owned();
-        let title = if project_name.is_empty() {
-            "Untitled project".to_owned()
-        } else {
-            project_name
-        };
-        let mut dialog = PublishWebDialogState {
-            open: true,
-            title,
-            author_credit: author,
-            created_utc: publication_timestamp_utc(),
-            include_schematic: true,
-            include_results: true,
-            include_netlist: true,
-            ..Default::default()
-        };
-        dialog.scope = Some(build_scope(&self.state, &publication_draft(&dialog)));
-        self.state.cloud.publish_web = dialog;
-        if let Some(binding) = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .cloud_publication()
-        {
-            self.cloud
-                .account
-                .refresh_publications(binding.circuit_id().to_owned());
+/// What a review build reads: the open project, and the hardcopy feature's
+/// port with the parts it builds the snapshot from beside its own state.
+#[derive(Clone, Copy)]
+pub(crate) struct SnapshotSource<'a> {
+    pub(crate) hardcopy: &'a dyn HardcopyPort,
+    pub(crate) model: &'a Model,
+    pub(crate) workbench: &'a WorkbenchSession,
+    pub(crate) results: &'a dyn ResultsPort,
+    pub(crate) runs: &'a RunsState,
+}
+
+impl<'a> SnapshotSource<'a> {
+    /// The parts `state` holds.
+    fn of(state: &'a AppState) -> Self {
+        Self {
+            hardcopy: &*state.hardcopy,
+            model: &state.model,
+            workbench: &state.workbench,
+            results: &*state.results,
+            runs: &state.runs,
         }
     }
 
+    /// The snapshot `draft` describes, as the hardcopy feature builds it.
+    fn build(self, draft: &PublicationDraft) -> Result<PublicationSnapshot, String> {
+        self.hardcopy.build_publication_snapshot(
+            self.model,
+            self.workbench,
+            self.results,
+            self.runs,
+            draft,
+        )
+    }
+}
+
+/// Open `dialog` with a fresh review build of `source` and the identity
+/// `account` has signed in as the default author credit. No-op unless this
+/// build can publish.
+pub(crate) fn open_publish_web_dialog(
+    dialog: &mut PublishWebDialogState,
+    account: &mut CloudAccountService,
+    source: SnapshotSource<'_>,
+) {
+    if !matches!(account.availability(), CloudAccountAvailability::Native)
+        || !account
+            .snapshot()
+            .cloud_feature_enabled(CLOUD_PUBLISHING_FEATURE)
+    {
+        return;
+    }
+    let author = account
+        .snapshot()
+        .principal
+        .as_ref()
+        .and_then(|principal| {
+            principal
+                .display_name
+                .clone()
+                .or_else(|| principal.email.clone())
+        })
+        .unwrap_or_default();
+    let project = &source.model.workspace.content.project;
+    let project_name = project.name().trim().to_owned();
+    let title = if project_name.is_empty() {
+        "Untitled project".to_owned()
+    } else {
+        project_name
+    };
+    let mut opened = PublishWebDialogState {
+        open: true,
+        title,
+        author_credit: author,
+        created_utc: publication_timestamp_utc(),
+        include_schematic: true,
+        include_results: true,
+        include_netlist: true,
+        ..Default::default()
+    };
+    opened.scope = Some(build_scope(source, &publication_draft(&opened)));
+    *dialog = opened;
+    if let Some(binding) = project.cloud_publication() {
+        account.refresh_publications(binding.circuit_id().to_owned());
+    }
+}
+
+impl RSpiceApp {
     pub(in crate::workbench) fn render_publish_web_dialog(&mut self, ctx: &Context) {
         if !self.state.cloud.publish_web.open {
             return;
         }
         if !self.state.cloud.publish_web.submitted && self.state.cloud.publish_web.scope.is_none() {
             let draft = publication_draft(&self.state.cloud.publish_web);
-            self.state.cloud.publish_web.scope = Some(build_scope(&self.state, &draft));
+            self.state.cloud.publish_web.scope =
+                Some(build_scope(SnapshotSource::of(&self.state), &draft));
         }
 
         // Server-side facts, cloned before the body borrows app state.
@@ -434,7 +458,8 @@ impl RSpiceApp {
         let include_netlist = self.state.cloud.publish_web.include_netlist;
         let imported_models_acknowledged =
             self.state.cloud.publish_web.imported_models_acknowledged;
-        let imported_model_sources = imported_model_source_count(&self.state, include_netlist);
+        let imported_model_sources =
+            imported_model_source_count(&self.state.model, include_netlist);
         if imported_model_sources > 0 && !imported_models_acknowledged {
             self.state.prompt(
                 "Publish stopped: confirm that imported model source text may be uploaded.",
@@ -455,9 +480,8 @@ impl RSpiceApp {
             }
         };
         let draft = publication_draft(dialog);
-        let built = self
-            .state
-            .build_publication_snapshot(&draft)
+        let built = SnapshotSource::of(&self.state)
+            .build(&draft)
             .and_then(|snapshot| {
                 snapshot
                     .canonical_bytes()
@@ -538,8 +562,11 @@ fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDraft {
 }
 
 /// Build the reviewed scope from the same draft the final submission uses.
-fn build_scope(state: &AppState, draft: &PublicationDraft) -> Result<PublishScope, String> {
-    let snapshot = state.build_publication_snapshot(draft)?;
+fn build_scope(
+    source: SnapshotSource<'_>,
+    draft: &PublicationDraft,
+) -> Result<PublishScope, String> {
+    let snapshot = source.build(draft)?;
     let payload_bytes = snapshot
         .canonical_bytes()
         .map_err(|error| error.to_string())?
@@ -587,17 +614,19 @@ fn build_scope(state: &AppState, draft: &PublicationDraft) -> Result<PublishScop
         analyses,
         datasets,
         measurements,
-        imported_model_sources: imported_model_source_count(state, snapshot.netlist.is_some()),
+        imported_model_sources: imported_model_source_count(
+            source.model,
+            snapshot.netlist.is_some(),
+        ),
         payload_bytes,
     })
 }
 
-fn imported_model_source_count(state: &AppState, include_netlist: bool) -> usize {
+fn imported_model_source_count(model: &Model, include_netlist: bool) -> usize {
     if !include_netlist {
         return 0;
     }
-    state
-        .model
+    model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1006,7 +1035,7 @@ mod tests {
     fn empty_project_scope_reports_the_builder_refusal() {
         let state = AppState::default();
         let scope = build_scope(
-            &state,
+            SnapshotSource::of(&state),
             &PublicationDraft {
                 title: "Untitled project".to_owned(),
                 author_display: "Anonymous".to_owned(),
@@ -1029,8 +1058,46 @@ mod tests {
             };
         state.model.model_library_manager.add_library(library);
 
-        assert_eq!(imported_model_source_count(&state, true), 1);
-        assert_eq!(imported_model_source_count(&state, false), 0);
+        assert_eq!(imported_model_source_count(&state.model, true), 1);
+        assert_eq!(imported_model_source_count(&state.model, false), 0);
+    }
+
+    /// Publish to web opens its dialog within the command's own call, over a
+    /// review build of the open project that the hardcopy feature makes, and
+    /// credits the signed-in account.
+    #[test]
+    fn publish_to_web_opens_its_dialog_over_a_review_build_of_the_project() {
+        use crate::services::cloud_account::{
+            CloudAccountService, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
+            PrincipalSummary,
+        };
+        use crate::workbench::cloud::commands::CloudCommand;
+
+        let mut app = RSpiceApp::test_instance();
+        app.cloud.account = CloudAccountService::with_snapshot(
+            CloudAccountAvailability::Native,
+            CloudSessionSnapshot {
+                phase: CloudSessionPhase::Active,
+                principal: Some(PrincipalSummary {
+                    email: Some("ada@example.com".to_owned()),
+                    display_name: Some("Ada".to_owned()),
+                }),
+                entitlements: vec![EntitlementSummary {
+                    status: "active".to_owned(),
+                    granted_features: vec![CLOUD_PUBLISHING_FEATURE.to_owned()],
+                    valid_until: None,
+                }],
+                ..CloudSessionSnapshot::default()
+            },
+        );
+        app.execute_command_key(CloudCommand::PublishToWeb.key());
+
+        let dialog = &app.state.cloud.publish_web;
+        assert!(dialog.open);
+        assert!(!dialog.submitted);
+        assert_eq!(dialog.author_credit, "Ada");
+        let review = build_scope(SnapshotSource::of(&app.state), &publication_draft(dialog));
+        assert_eq!(dialog.scope, Some(review));
     }
 
     /// A publish that fails after its dialog was closed is said, once. One
