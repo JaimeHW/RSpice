@@ -11,7 +11,7 @@
     "project->models": 6,
     "project->simulate": 3,
     "simulate->design": 4,
-    "simulate->models": 19,
+    "simulate->models": 14,
     "simulate->project": 2
   },
   "lower->upper": {},

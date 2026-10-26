@@ -18,14 +18,14 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 
 use super::super::models::closure::{
-    DefinitionRow, definition_index, scan_source_drift, source_drift_findings,
-    source_drift_needs_scan,
+    scan_source_drift, source_drift_findings, source_drift_needs_scan,
 };
 use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
     ledger_head, ledger_row, ledger_row_cells, paint_text, paint_toned_text, rule_row,
 };
+use crate::workbench::app_state::model::DefinitionRow;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -34,10 +34,11 @@ const CLOSURE_COLUMNS: [f32; 7] = [0.05, 0.18, 0.15, 0.12, 0.16, 0.20, 0.14];
 
 /// How many contested names this library provides, by the manager's own index.
 ///
-/// Never recomputed here — [`definition_index`] is the models workspace's one
-/// answer to "who provides this name", and the studio states it rather than
-/// deriving a second opinion that would eventually disagree with the workspace
-/// an operator repairs it in.
+/// Never recomputed here —
+/// [`Model::definition_index`](crate::workbench::app_state::Model::definition_index)
+/// is the models workspace's one answer to "who provides this name", and the
+/// studio states it rather than deriving a second opinion that would
+/// eventually disagree with the workspace an operator repairs it in.
 fn contested_names(definitions: &[DefinitionRow], library: &str) -> usize {
     definitions
         .iter()
@@ -85,7 +86,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     // walks every model of every loaded library.
     let definitions: Vec<DefinitionRow> =
         if app.state.model.model_library_manager.library_count() > 1 {
-            definition_index(&app.state)
+            app.state.model.definition_index()
         } else {
             Vec::new()
         };

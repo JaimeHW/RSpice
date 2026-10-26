@@ -9,6 +9,7 @@
 //! before these fields were gathered here.
 
 mod cross_probe;
+mod definition_index;
 mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
@@ -23,6 +24,7 @@ mod symbol_context;
 #[cfg(any(test, feature = "test-support"))]
 mod test_technology;
 
+pub use definition_index::DefinitionRow;
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
