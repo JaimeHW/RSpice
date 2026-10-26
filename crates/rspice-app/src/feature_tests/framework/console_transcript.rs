@@ -450,7 +450,7 @@ fn show_in_console_selects_the_line_the_notice_came_from() {
         .console_view
         .toggle(crate::workbench::state::ConsoleSeverity::Errors);
 
-    crate::workbench::commands::result_navigation::perform_notification_action(
+    crate::workbench::framework::host::Host::perform_notification_action(
         &mut app,
         NotificationAction::ShowInConsole { log_id: failure },
     );
@@ -466,7 +466,7 @@ fn show_in_console_selects_the_line_the_notice_came_from() {
     );
     assert!(view.shows(crate::workbench::state::ConsoleSeverity::Errors));
 
-    crate::workbench::commands::result_navigation::perform_notification_action(
+    crate::workbench::framework::host::Host::perform_notification_action(
         &mut app,
         NotificationAction::ShowInConsole { log_id: 9_999 },
     );

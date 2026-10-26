@@ -22,9 +22,11 @@ use crate::workbench::chrome::status_bar::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::result_document::{SharedXStatus, active_shared_x_status};
+use crate::workbench::features;
 use crate::workbench::framework::host::{
     StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
 };
+use crate::workbench::results::ResultsFeature;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -165,7 +167,7 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
                     );
                 }
             } else if can_open {
-                crate::workbench::commands::result_navigation::open_newest_retained_run(app);
+                app.open_newest_retained_run();
             }
         }),
     },
@@ -327,6 +329,17 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
         },
         hover: Some(hover),
     })
+}
+
+impl RSpiceApp {
+    /// Open Results on the newest run that holds a dataset, in the results
+    /// feature's context, then answer what it raised; false when there is
+    /// none.
+    pub(crate) fn open_newest_retained_run(&mut self) -> bool {
+        let opened = ResultsFeature::open_newest_retained_run(&mut features::cx(self));
+        self.after_contribution();
+        opened
+    }
 }
 
 /// What pressing the engine chip can do: restart an engine that stopped or

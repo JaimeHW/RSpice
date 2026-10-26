@@ -12,6 +12,7 @@ use egui::{CentralPanel, Context, Frame};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
+use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
@@ -181,7 +182,8 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         .design
         .follow_workspace(app.state.workbench.workspace);
     if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
-        commands::result_navigation::perform_notification_action(app, action);
+        ResultsFeature::perform_notification_action(&mut features::cx(app), action);
+        app.after_contribution();
     }
     app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);
@@ -650,7 +652,8 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             .toasts
             .show(ctx, 0.0, 0.0, large_targets)
         {
-            commands::result_navigation::perform_notification_action(app, action);
+            ResultsFeature::perform_notification_action(&mut features::cx(app), action);
+            app.after_contribution();
         }
     }
     apply_platform_full_screen_request(ctx, app);
@@ -724,7 +727,8 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     app.state.drain_notices(ctx);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
-        commands::result_navigation::perform_notification_action(app, action);
+        ResultsFeature::perform_notification_action(&mut features::cx(app), action);
+        app.after_contribution();
     }
     app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);

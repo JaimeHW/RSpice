@@ -638,7 +638,8 @@ impl Host for RSpiceApp {
     }
 
     fn perform_notification_action(&mut self, action: NotificationAction) {
-        crate::workbench::commands::result_navigation::perform_notification_action(self, action);
+        ResultsFeature::perform_notification_action(&mut features::cx(self), action);
+        self.after_contribution();
     }
 
     fn open_run_log(&mut self, run_sequence: u64) {

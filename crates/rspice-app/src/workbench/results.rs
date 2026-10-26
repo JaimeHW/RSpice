@@ -13,8 +13,10 @@ pub(crate) mod commands;
 mod expression_diagnostics;
 mod surface;
 
+use crate::ui::widgets::NotificationAction;
 use crate::workbench::commands::result_navigation::{
-    dataset_export_is_resolvable, open_run_log, producer_log_hop, producing_plan_hop, task_deck_hop,
+    dataset_export_is_resolvable, follow_notification_action, open_run_log, producer_log_hop,
+    producing_plan_hop, select_newest_retained_run, task_deck_hop,
 };
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
@@ -41,6 +43,31 @@ use commands::ResultsCommand;
 
 /// The results feature.
 pub(crate) struct ResultsFeature;
+
+impl ResultsFeature {
+    /// Open Results on the newest run that holds a dataset, as the status
+    /// bar's engine chip asks; false when there is none. The shell answers
+    /// the command it raises straight after.
+    pub(in crate::workbench) fn open_newest_retained_run(cx: &mut Cx<'_, Self>) -> bool {
+        let selected = select_newest_retained_run(&mut cx.model.simulation);
+        if selected {
+            cx.execute(ids::OPEN_RUN_IN_RESULTS);
+        }
+        selected
+    }
+
+    /// Take the navigation offer a notice carried: open Results on the run
+    /// it names, or the Console on the line it names. The shell answers the
+    /// command it raises straight after.
+    pub(in crate::workbench) fn perform_notification_action(
+        cx: &mut Cx<'_, Self>,
+        action: NotificationAction,
+    ) {
+        if follow_notification_action(cx.model, cx.wb, action) {
+            cx.execute(ids::OPEN_RUN_IN_RESULTS);
+        }
+    }
+}
 
 impl Feature for ResultsFeature {
     type State = ResultsState;

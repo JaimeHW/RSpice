@@ -18,6 +18,7 @@ const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_imag
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 const FEATURES: &str = include_str!("../../workbench/features.rs");
 const RESULTS: &str = include_str!("../../workbench/results.rs");
+const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
@@ -289,7 +290,8 @@ const SHOW: &[Step] = &[
         "11.33",
         &[
             "show_toasts(ctx, &mut app.state, layout)",
-            "result_navigation::perform_notification_action(app, action)",
+            "ResultsFeature::perform_notification_action(&mut features::cx(app), action)",
+            "app.after_contribution()",
         ],
     ),
     ("11.34", &["app.state.reconcile_schematic_drag(ctx, true)"]),
@@ -1039,5 +1041,40 @@ fn a_results_dialog_has_what_it_raised_answered_once_it_draws() {
             "render_result_document_dialog(cx, ui.ctx());"
         )),
         "the result document's forms are the last things the Results stage draws"
+    );
+}
+
+#[test]
+fn a_hop_into_results_has_what_it_raised_answered_where_it_is_taken() {
+    let offer: &[Step] = &[(
+        "offer",
+        &[
+            "ResultsFeature::perform_notification_action(&mut features::cx(app), action);",
+            "app.after_contribution();",
+        ],
+    )];
+    for (function, signature) in [
+        ("workbench::show", "pub fn show("),
+        (
+            "show_full_screen_presentation",
+            "fn show_full_screen_presentation(",
+        ),
+        ("show_secondary", "pub(crate) fn show_secondary("),
+    ] {
+        assert_runs_in_order(function, &body(FRAME, signature), offer);
+    }
+    assert_eq!(
+        without_whitespace(&body(SHELL_HOST, "fn perform_notification_action(")),
+        without_whitespace(
+            "ResultsFeature::perform_notification_action(&mut features::cx(self), action);             self.after_contribution();"
+        ),
+        "the notification centre's offer is answered as the toast's is"
+    );
+    assert_eq!(
+        without_whitespace(&body(STATUS_ORDER, "fn open_newest_retained_run(")),
+        without_whitespace(
+            "let opened = ResultsFeature::open_newest_retained_run(&mut features::cx(self));             self.after_contribution();             opened"
+        ),
+        "the engine chip's hop has what it raised answered before it returns"
     );
 }

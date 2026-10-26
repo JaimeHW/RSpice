@@ -5,11 +5,10 @@
 //! workspace, page, and selection — before anything navigates, so a hop that
 //! cannot land says why instead of arriving somewhere with the object lost.
 
+use crate::state::SimulationState;
 use crate::ui::widgets::NotificationAction;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::result_document::ResultsReads;
-use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::ConsoleChannel;
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
@@ -33,71 +32,63 @@ pub(crate) fn dataset_export_is_resolvable(state: ResultsReads<'_>) -> bool {
         )
 }
 
-/// Select the newest run that actually holds a dataset, then activate Results.
+/// Select the newest run that actually holds a dataset, for Results to
+/// open on.
 ///
 /// The controls that say "the results" without naming a run — the status
 /// bar's engine chip, the split-stage toggle — mean the newest materialized
 /// one. Returns false when there is none, so the caller states that rather
 /// than navigating to an empty document.
-pub(crate) fn open_newest_retained_run(app: &mut RSpiceApp) -> bool {
-    let Some(index) = app
-        .state
-        .model
-        .simulation
+pub(crate) fn select_newest_retained_run(simulation: &mut SimulationState) -> bool {
+    simulation
         .retained
         .newest_retained_result_run_index()
-    else {
-        return false;
-    };
-    if !app.state.model.simulation.select_run(index) {
-        return false;
-    }
-    app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
-    true
+        .is_some_and(|index| simulation.select_run(index))
 }
 
-/// Take the navigation offer a notice carried.
+/// Take the navigation offer a notice carried, and say whether it selected
+/// a run for Results to open on.
 ///
 /// A retained notice can outlive what it points at — history is pruned, a
 /// project is closed — so the run is re-resolved by its display sequence at
 /// the moment the offer is taken, and a lost run is reported rather than
 /// leaving the click to do nothing.
-pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: NotificationAction) {
+pub(crate) fn follow_notification_action(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    action: NotificationAction,
+) -> bool {
     match action {
         NotificationAction::OpenRunInResults { run_sequence } => {
-            if app
-                .state
-                .model
-                .simulation
-                .select_run_by_sequence(run_sequence)
-            {
-                app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
-            } else {
-                app.state
-                    .prompt(crate::workbench::AppState::retired_run_message(
-                        run_sequence,
-                    ));
+            let selected = model.simulation.select_run_by_sequence(run_sequence);
+            if !selected {
+                workbench.prompt(crate::workbench::AppState::retired_run_message(
+                    run_sequence,
+                ));
             }
+            selected
         }
-        NotificationAction::ShowInConsole { log_id } => show_session_line(&mut app.state, log_id),
+        NotificationAction::ShowInConsole { log_id } => {
+            show_session_line(model, workbench, log_id);
+            false
+        }
     }
 }
 
 /// Open the Console on the session's log with line `log_id` selected and in
 /// view, or at the end of the log when the line has since been dropped.
-pub(crate) fn show_session_line(state: &mut crate::workbench::AppState, log_id: u64) {
-    let severity = state
-        .model
+fn show_session_line(model: &Model, workbench: &mut WorkbenchSession, log_id: u64) {
+    let severity = model
         .log_buffer
         .entries()
         .find(|entry| entry.id == log_id)
         .map(|entry| entry.severity);
-    let view = &mut state.workbench.console_view;
+    let view = &mut workbench.console_view;
     match severity {
         Some(severity) => view.show_session_line(log_id, severity),
         None => view.open(ConsoleChannel::Session),
     }
-    open_console_page(&mut state.workbench);
+    open_console_page(workbench);
 }
 
 /// Open the Console on one run's own log, from its latest line.

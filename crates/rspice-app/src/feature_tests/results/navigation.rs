@@ -9,9 +9,9 @@
 use crate::state::{AnalysisResult, AnalysisType};
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::result_navigation;
 use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run, plan_binding};
 use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::host::Host;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::{SimulationPage, Workspace};
 
@@ -49,7 +49,7 @@ fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
 fn a_notice_offer_selects_its_run_and_refuses_when_the_run_is_gone() {
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     app.state.workbench.activate(Workspace::Simulate);
-    result_navigation::perform_notification_action(
+    Host::perform_notification_action(
         &mut app,
         NotificationAction::OpenRunInResults { run_sequence: 1 },
     );
@@ -61,7 +61,7 @@ fn a_notice_offer_selects_its_run_and_refuses_when_the_run_is_gone() {
 
     app.state.workbench.activate(Workspace::Simulate);
     let before = app.state.model.log_buffer.revision();
-    result_navigation::perform_notification_action(
+    Host::perform_notification_action(
         &mut app,
         NotificationAction::OpenRunInResults { run_sequence: 47 },
     );
@@ -88,7 +88,7 @@ fn the_newest_retained_run_is_what_an_unnamed_results_hop_opens() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert!(
-        !result_navigation::open_newest_retained_run(&mut app),
+        !app.open_newest_retained_run(),
         "with no materialized dataset the hop reports that it cannot land"
     );
     assert_ne!(app.state.workbench.workspace, Workspace::Results);
@@ -96,7 +96,7 @@ fn the_newest_retained_run_is_what_an_unnamed_results_hop_opens() {
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     app.state.workbench.activate(Workspace::Simulate);
     app.state.model.simulation.view.active_run_idx = None;
-    assert!(result_navigation::open_newest_retained_run(&mut app));
+    assert!(app.open_newest_retained_run());
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
         app.state.model.simulation.active_run().map(|run| run.id),
