@@ -441,50 +441,39 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "3",
-        &["|app, ExportSchematicSvg| file_action(app, FileMenuAction::ExportSvg)"],
-    ),
-    (
-        "4",
-        &[
-            "|app, ExportPublicationSnapshot|",
-            "file_action(app, FileMenuAction::ExportPublicationSnapshot)",
-        ],
-    ),
-    (
-        "5",
         &[
             "|app, FollowSchematicGrid|",
             "state.design.follow_schematic_grid(&state.model)",
         ],
     ),
-    ("6", &["self.state.take_shortcut_resolver_reset()"]),
+    ("4", &["self.state.take_shortcut_resolver_reset()"]),
     (
-        "7",
+        "5",
         &[
             "|app, ApplyWaveformDefaults|",
             "state.results.start_waveform_viewer_session(&state.model.preferences)",
         ],
     ),
     (
-        "8",
+        "6",
         &["|app, ExportDataset| file_action(app, FileMenuAction::ExportCsvWaveforms)"],
     ),
     (
-        "9",
+        "7",
         &[
             "|app, SelectAnalysisInstance(instance)|",
             "app.state.simulate.active_analysis_instance = instance",
         ],
     ),
     (
-        "10",
+        "8",
         &[
             "|app, RevealExecutedDeck(sequence)|",
             "crate::workbench::commands::result_navigation::open_task_deck(",
         ],
     ),
     (
-        "11",
+        "9",
         &[
             "|app, ShowWaveforms { visibility, selected, }|",
             "results.reveal_waveforms(visibility);",
@@ -493,7 +482,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
-        "12",
+        "10",
         &[
             "|app, SetFamilyFilter(filter)|",
             "crate::workbench::documents::result_document::set_family_filter(",
@@ -867,8 +856,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        11,
-        "`after_contribution` answers exactly the eleven requests it lists"
+        9,
+        "`after_contribution` answers exactly the nine requests it lists"
     );
 }
 

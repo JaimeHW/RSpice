@@ -17,6 +17,7 @@
 use crate::state::command_catalog::CommandKey;
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use super::command_registry::{CommandAvailability, CommandSpec};
@@ -210,6 +211,9 @@ pub struct Cx<'a, F: Feature> {
     /// What the platform services keep between frames: the autosave
     /// interval and the recent files among them.
     pub platform: &'a mut PlatformState,
+    /// What the run tier keeps between frames: the runs in flight, the run
+    /// preflight, and the deck the last manual run executed.
+    pub(crate) runs: &'a mut RunsState,
     pub handles: LowerHandles<'a>,
     pub peers: Peers<'a>,
 }
@@ -220,6 +224,7 @@ impl<'a, F: Feature> Cx<'a, F> {
         model: &'a mut Model,
         wb: &'a mut F::Session,
         platform: &'a mut PlatformState,
+        runs: &'a mut RunsState,
         handles: LowerHandles<'a>,
         peers: Peers<'a>,
     ) -> Self {
@@ -228,6 +233,7 @@ impl<'a, F: Feature> Cx<'a, F> {
             model,
             wb,
             platform,
+            runs,
             handles,
             peers,
         }

@@ -86,6 +86,7 @@ macro_rules! features {
                         &mut state.model,
                         &mut *state.workbench,
                         &mut *state.platform,
+                        &mut *state.runs,
                         handles,
                         Peers::new(&mut *state.design, &*state.cloud, results_peer!($slot, state)),
                     )

@@ -28,6 +28,7 @@ fn cx(state: &mut AppState) -> Cx<'_, HardcopyFeature> {
         &mut state.model,
         &mut *state.workbench,
         &mut state.platform,
+        &mut state.runs,
         LowerHandles {
             export_io:
                 &rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,

@@ -6,7 +6,6 @@
 //! Rendering lives in the workbench title-bar menu module, which dispatches
 //! into the functions re-exported here.
 
-mod export_actions;
 mod file_menu;
 mod netlist_compat;
 mod netlist_export;

@@ -28,6 +28,7 @@ use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, SourceReads, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
 };
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_design::connectivity::summary::{
     component_pin_names_with_hierarchy, design_nets_with_hierarchy,
 };
@@ -102,6 +103,25 @@ impl std::fmt::Display for PublicationBuildError {
     }
 }
 
+/// What a publication snapshot is built from: the retained sources, the
+/// model among them, and the run tier's state, for the deck the last manual
+/// run executed.
+#[derive(Clone, Copy)]
+pub(crate) struct PublicationReads<'a> {
+    pub(crate) sources: SourceReads<'a>,
+    pub(crate) runs: &'a RunsState,
+}
+
+impl<'a> PublicationReads<'a> {
+    /// The reads `state` holds.
+    pub(crate) fn of(state: &'a AppState) -> Self {
+        Self {
+            sources: SourceReads::of(state),
+            runs: &state.runs,
+        }
+    }
+}
+
 /// A reader that still holds the whole application state asks the snapshot
 /// of it: the cloud's publish dialog, which reaches the snapshot through its
 /// port once the cloud has a context of its own.
@@ -110,7 +130,8 @@ impl HardcopyPort for AppState {
         &self,
         draft: &PublicationDraft,
     ) -> Result<PublicationSnapshot, String> {
-        build_publication_snapshot(self, draft).map_err(|error| error.to_string())
+        build_publication_snapshot(PublicationReads::of(self), draft)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -118,10 +139,10 @@ impl HardcopyPort for AppState {
 /// every currently printable schematic sheet and plot pane, plus the active
 /// run's analyses, datasets, and measurements, plus the effective deck.
 pub(crate) fn build_publication_snapshot(
-    state: &AppState,
+    reads: PublicationReads<'_>,
     draft: &PublicationDraft,
 ) -> Result<PublicationSnapshot, PublicationBuildError> {
-    let (mut sheets, mut plot_figures) = collect_scenes(state)?;
+    let (mut sheets, mut plot_figures) = collect_scenes(reads)?;
     if !draft.include_schematic {
         sheets.clear();
     }
@@ -130,11 +151,11 @@ pub(crate) fn build_publication_snapshot(
     }
     let netlist = draft
         .include_netlist
-        .then(|| effective_deck(state))
+        .then(|| effective_deck(reads))
         .flatten();
     let results = if draft.include_results {
-        let specifications = active_specs(state);
-        results_section(state.model.simulation.active_run(), &specifications)?
+        let specifications = active_specs(reads);
+        results_section(reads.sources.model.simulation.active_run(), &specifications)?
     } else {
         None
     };
@@ -168,7 +189,7 @@ pub(crate) fn build_publication_snapshot(
         next_figure_id += 1;
     }
 
-    let engineering = engineering_publication(state, draft.include_schematic, results.as_ref())?;
+    let engineering = engineering_publication(reads, draft.include_schematic, results.as_ref())?;
     let mut section_order = vec![PublicationSection::Overview];
     if !sheets.is_empty() {
         section_order.push(PublicationSection::Schematic);
@@ -280,11 +301,12 @@ pub(crate) fn build_publication_snapshot(
 /// publication instead of sealing editor-buffer connectivity into a record
 /// that outlives the edit it came from.
 fn engineering_publication(
-    state: &AppState,
+    reads: PublicationReads<'_>,
     include_schematic: bool,
     results: Option<&ResultsSection>,
 ) -> Result<EngineeringPublication, PublicationBuildError> {
-    let simulation = results.map(|_| simulation_provenance(state.model.simulation.active_run()));
+    let simulation =
+        results.map(|_| simulation_provenance(reads.sources.model.simulation.active_run()));
     if !include_schematic {
         return Ok(EngineeringPublication {
             components: Vec::new(),
@@ -294,32 +316,50 @@ fn engineering_publication(
         });
     }
 
-    let projection = state
+    let projection = reads
+        .sources
         .model
         .workspace
         .design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &reads.sources.model.library_manager,
+            &reads.sources.model.workspace.content.active_view,
+            &reads.sources.model.schematic,
         )
         .map_err(|error| PublicationBuildError::SourceResolution {
-            source: state.model.workspace.content.active_view.display_path(),
+            source: reads
+                .sources
+                .model
+                .workspace
+                .content
+                .active_view
+                .display_path(),
             reason: error.to_string(),
         })?;
-    let hierarchy =
-        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
+    let hierarchy = HierarchySource::from_design_projection(
+        reads.sources.model.library_manager.catalog(),
+        &projection,
+    );
     let subject = projection
         .schematic_buffers()
         .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(&state.model.workspace.content.active_view.key()))
+        .find(|(key, _)| {
+            key.eq_ignore_ascii_case(&reads.sources.model.workspace.content.active_view.key())
+        })
         .map(|(_, schematic)| schematic)
         .ok_or_else(|| PublicationBuildError::SourceResolution {
-            source: state.model.workspace.content.active_view.display_path(),
+            source: reads
+                .sources
+                .model
+                .workspace
+                .content
+                .active_view
+                .display_path(),
             reason: "the open view is not part of the configured design".to_owned(),
         })?;
     let design_nets = design_nets_with_hierarchy(subject, &hierarchy);
     let resolved_pin_names = component_pin_names_with_hierarchy(subject, &hierarchy);
-    let published_components = state
+    let published_components = reads
+        .sources
         .model
         .schematic
         .document()
@@ -545,11 +585,11 @@ struct PlotSceneSource {
 /// hardcopy source registry, one source at a time so no aggregate clipping
 /// is ever involved, and compile each into a contract scene.
 fn collect_scenes(
-    state: &AppState,
+    reads: PublicationReads<'_>,
 ) -> Result<(Vec<SheetScene>, Vec<PlotSceneSource>), PublicationBuildError> {
     let mut sheets = Vec::new();
     let mut plots = Vec::new();
-    for descriptor in enumerate_retained_hardcopy_sources(SourceReads::of(state)) {
+    for descriptor in enumerate_retained_hardcopy_sources(reads.sources) {
         let scope = if descriptor.supports_scope(&HardcopyScope::CurrentSheet) {
             // A cell view that offers "All sheets" lists each of its sheets
             // as a source of its own; publishing the cell view as well would
@@ -567,7 +607,7 @@ fn collect_scenes(
             continue;
         };
         let prepared = match prepare_retained_hardcopy_resolution(
-            SourceReads::of(state),
+            reads.sources,
             &descriptor.source_key,
             scope,
         ) {
@@ -994,8 +1034,9 @@ fn convert_scene(
 // Results
 // ---------------------------------------------------------------------------
 
-fn active_specs(state: &AppState) -> Vec<SpecEntry> {
-    if let Some(receipt) = state
+fn active_specs(reads: PublicationReads<'_>) -> Vec<SpecEntry> {
+    if let Some(receipt) = reads
+        .sources
         .model
         .simulation
         .active_run()
@@ -1007,12 +1048,20 @@ fn active_specs(state: &AppState) -> Vec<SpecEntry> {
             .map(|specification| specification.entry().clone())
             .collect();
     }
-    state
+    reads
+        .sources
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .map(|plan| state.model.workspace.content.active_specs(plan.id()))
+        .map(|plan| {
+            reads
+                .sources
+                .model
+                .workspace
+                .content
+                .active_specs(plan.id())
+        })
         .unwrap_or(&[])
         .to_vec()
 }
@@ -1343,16 +1392,28 @@ fn publication_contract_display(
 /// completed manual-deck run when one exists, otherwise the same effective
 /// source the run gate would execute. Line endings are normalized to the
 /// contract's canonical form.
-fn effective_deck(state: &AppState) -> Option<NetlistSection> {
-    let raw = state
+fn effective_deck(reads: PublicationReads<'_>) -> Option<NetlistSection> {
+    let raw = reads
         .runs
         .manual_run
         .last_run_buffer
         .as_deref()
-        .or(state.model.workspace.content.netlist_source.as_deref())
+        .or(reads
+            .sources
+            .model
+            .workspace
+            .content
+            .netlist_source
+            .as_deref())
         .filter(|deck| !deck.trim().is_empty())
         .or_else(|| {
-            let live = state.model.simulation.source.netlist_content.as_str();
+            let live = reads
+                .sources
+                .model
+                .simulation
+                .source
+                .netlist_content
+                .as_str();
             (!live.trim().is_empty()).then_some(live)
         })?;
     let deck = raw.replace("\r\n", "\n").replace('\r', "\n");
@@ -1744,7 +1805,9 @@ mod tests {
         let mut state = AppState::default();
         state.model.simulation.source.netlist_content =
             "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
-        let deck = effective_deck(&state).expect("deck").deck;
+        let deck = effective_deck(PublicationReads::of(&state))
+            .expect("deck")
+            .deck;
         assert!(!deck.contains('\r'));
         assert_eq!(deck.lines().count(), 3);
     }
@@ -1754,7 +1817,7 @@ mod tests {
         let mut state = AppState::default();
         state.model.simulation.source.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
         let snapshot = build_publication_snapshot(
-            &state,
+            PublicationReads::of(&state),
             &PublicationDraft {
                 title: "Filter".to_string(),
                 description: "Short page description".to_string(),
@@ -1789,7 +1852,7 @@ mod tests {
 
         assert!(matches!(
             build_publication_snapshot(
-                &state,
+                PublicationReads::of(&state),
                 &PublicationDraft {
                     title: "Withheld".to_string(),
                     author_display: "Test".to_string(),
@@ -1807,7 +1870,7 @@ mod tests {
         let state = AppState::default();
         assert!(matches!(
             build_publication_snapshot(
-                &state,
+                PublicationReads::of(&state),
                 &PublicationDraft {
                     title: "Empty".to_string(),
                     description: String::new(),
@@ -1867,7 +1930,7 @@ mod tests {
             .assign_objects(catalog.revision(), second, [22])
             .unwrap();
 
-        let (sheets, plots) = collect_scenes(&state).unwrap();
+        let (sheets, plots) = collect_scenes(PublicationReads::of(&state)).unwrap();
         let path = state.model.workspace.content.active_display_path();
         assert_eq!(
             sheets
@@ -1887,8 +1950,8 @@ mod tests {
             crate::state::Point::new(0, 0),
         );
 
-        let projected =
-            engineering_publication(&state, true, None).expect("the fixture design resolves");
+        let projected = engineering_publication(PublicationReads::of(&state), true, None)
+            .expect("the fixture design resolves");
         assert_eq!(projected.components.len(), 1);
         let resistor = &projected.components[0];
         assert_eq!(resistor.reference, "R1");
@@ -1949,7 +2012,7 @@ mod tests {
             measurements: Vec::new(),
         };
 
-        let projected = engineering_publication(&state, true, Some(&results))
+        let projected = engineering_publication(PublicationReads::of(&state), true, Some(&results))
             .expect("the fixture design resolves");
         assert!(matches!(
             &projected.signals[0].target,
@@ -1964,7 +2027,7 @@ mod tests {
             SignalTarget::Expression { label } if label == "V(out) - V(in)"
         ));
 
-        let withheld = engineering_publication(&state, false, Some(&results))
+        let withheld = engineering_publication(PublicationReads::of(&state), false, Some(&results))
             .expect("a withheld schematic needs no design at all");
         assert!(withheld.components.is_empty());
         assert!(withheld.nets.is_empty());
@@ -2144,7 +2207,7 @@ mod tests {
         state.model.simulation.view.active_run_idx = Some(0);
 
         let snapshot = build_publication_snapshot(
-            &state,
+            PublicationReads::of(&state),
             &PublicationDraft {
                 title: "RC deck".to_string(),
                 description: String::new(),

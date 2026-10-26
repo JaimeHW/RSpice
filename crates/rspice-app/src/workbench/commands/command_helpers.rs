@@ -345,10 +345,5 @@ pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
 }
 
 pub(in crate::workbench) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
-    dispatch_file_menu_action(
-        &mut app.state,
-        action,
-        app.file_workflow_io.as_ref(),
-        app.export_workflow_io.as_ref(),
-    );
+    dispatch_file_menu_action(&mut app.state, action, app.file_workflow_io.as_ref());
 }

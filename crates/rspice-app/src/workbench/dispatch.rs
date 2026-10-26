@@ -33,9 +33,8 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ExportDataset, ExportPublicationSnapshot, ExportSchematicSvg,
-    FollowSchematicGrid, PrintActiveView, RevealExecutedDeck, SelectAnalysisInstance,
-    SetFamilyFilter, ShowWaveforms,
+    self, ApplyWaveformDefaults, ExportDataset, FollowSchematicGrid, PrintActiveView,
+    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -138,13 +137,12 @@ impl RSpiceApp {
     }
 
     /// Answer what a feature's call raised for straight after it: the
-    /// commands it ran next, the print workflow it asked for, the schematic
-    /// or publication snapshot it exported, the snap that follows a new
-    /// schematic grid, the shortcut resolver's reset when a shortcut library
-    /// was put in use, the open waveform view starting again from changed
-    /// defaults, the dataset export, the analysis instance and the executed
-    /// deck a results command asked for, and the waveforms and the family
-    /// member a hand-off into Results opens its viewer or form on.
+    /// commands it ran next, the print workflow it asked for, the snap that
+    /// follows a new schematic grid, the shortcut resolver's reset when a
+    /// shortcut library was put in use, the open waveform view starting again
+    /// from changed defaults, the dataset export, the analysis instance and
+    /// the executed deck a results command asked for, and the waveforms and
+    /// the family member a hand-off into Results opens its viewer or form on.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -156,18 +154,6 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, PrintActiveView| {
                 app.open_requested_hardcopy_workflow(HardcopyWorkflow::Print);
-            },
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, ExportSchematicSvg| file_action(app, FileMenuAction::ExportSvg),
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, ExportPublicationSnapshot| {
-                file_action(app, FileMenuAction::ExportPublicationSnapshot);
             },
         );
         requests::drain(

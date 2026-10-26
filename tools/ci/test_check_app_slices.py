@@ -80,7 +80,7 @@ class SliceRuleTests(unittest.TestCase):
             "models": ["workbench/surfaces/models.rs", "properties/model_browser.rs"],
             "project": ["workbench/surfaces/project.rs", "workbench/app/actions/file.rs"],
             "sheets": ["workbench/chrome/sheet_strip.rs", "workbench/app/drawing_sheet_edit.rs"],
-            "hardcopy": ["workbench/hardcopy_adapters/sources.rs", "workbench/menu_bar/export_actions.rs",
+            "hardcopy": ["workbench/hardcopy_adapters/sources.rs", "workbench/hardcopy/exports.rs",
                          "workbench/hardcopy.rs", "workbench/hardcopy/commands.rs"],
             "cloud": ["services/cloud_account.rs", "workbench/live_session.rs"],
             "settings": ["workbench/shortcuts/profile.rs", "workbench/app/dialogs/preferences.rs",

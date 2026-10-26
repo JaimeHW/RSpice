@@ -3,11 +3,9 @@
 //!
 //! Its commands are answered and carried out in a [`Cx`] over the feature's
 //! own slot, the model, the session and the platform services' state, and
-//! read what the results workspace shows through its port. Print and Export
-//! active view open their workflow in that context, through the export IO
-//! the context lends. The schematic and publication exports still run in
-//! the shell, on the request a command raises, straight after the command in
-//! the same dispatch.
+//! read what the results workspace shows through its port. The schematic and
+//! publication exports write through the export IO the context lends, and
+//! Print and Export active view open their workflow in the same context.
 //!
 //! The hardcopy dialog is the feature's dialog step, drawn in the same
 //! context. The shell opens its workflow, in the same context, for the
@@ -19,6 +17,7 @@
 //! the shell lays out and dispatches like any other.
 
 pub(crate) mod commands;
+mod exports;
 pub(crate) mod report;
 pub(crate) mod report_authoring;
 
@@ -29,10 +28,8 @@ use crate::workbench::app::{
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, FeatureSurface, Reads, Session,
-    ToolbarTool,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, FeatureSurface, Reads, ToolbarTool,
 };
-use crate::workbench::framework::requests::{ExportPublicationSnapshot, ExportSchematicSvg};
 use crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available;
 use crate::workbench::slots::HardcopyState;
 use crate::workbench::state::WorkbenchSession;
@@ -166,8 +163,12 @@ impl CommandSet for HardcopyCommand {
 
     fn execute(self, cx: &mut Cx<'_, HardcopyFeature>) {
         match self {
-            Self::ExportSchematicSvg => cx.wb.outbox().push(ExportSchematicSvg),
-            Self::ExportPublicationSnapshot => cx.wb.outbox().push(ExportPublicationSnapshot),
+            Self::ExportSchematicSvg => {
+                exports::action_export_svg_with_io(cx.model, cx.handles.export_io);
+            }
+            Self::ExportPublicationSnapshot => {
+                exports::action_export_publication_snapshot_with_io(cx)
+            }
             Self::PrintHardcopy => open_workflow(cx, HardcopyWorkflow::Print),
             Self::ExportActiveView => open_workflow(cx, HardcopyWorkflow::Export),
             Self::ReportAuthoring => report::open(cx.wb),

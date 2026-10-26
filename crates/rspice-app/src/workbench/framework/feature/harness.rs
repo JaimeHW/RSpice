@@ -26,6 +26,7 @@ use rspice_vocabulary::product::ResultDocumentId;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 use rspice_app_services::io::WaveformDataset;
 use rspice_app_services::workbench::workflows::export_workflow::{
@@ -170,6 +171,7 @@ pub struct FeatureHarness<F: Feature> {
     pub model: Model,
     pub wb: F::Session,
     pub(crate) platform: PlatformState,
+    pub(crate) runs: RunsState,
 }
 
 impl<F: Feature> FeatureHarness<F>
@@ -183,6 +185,7 @@ where
             model,
             wb,
             platform: PlatformState::default(),
+            runs: RunsState::default(),
         }
     }
 
@@ -206,6 +209,7 @@ where
             &mut self.model,
             &mut self.wb,
             &mut self.platform,
+            &mut self.runs,
             LowerHandles {
                 export_io: &NullExportIo,
             },

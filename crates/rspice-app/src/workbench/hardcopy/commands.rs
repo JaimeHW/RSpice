@@ -94,6 +94,12 @@ const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[
 const LISTED_COMMAND: CommandFlags =
     CommandFlags::PALETTE_VISIBLE.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
 
+/// A [`LISTED_COMMAND`] that exports what the project holds, so a value typed
+/// into the inspector and not yet committed is committed before it, and the
+/// export does not run when that commit is refused.
+const PROJECT_EXPORT: CommandFlags =
+    LISTED_COMMAND.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
+
 /// A [`LISTED_COMMAND`] that resolves the active view, so it waits for a
 /// project operation.
 const ACTIVE_VIEW_OUTPUT: CommandFlags =
@@ -152,14 +158,14 @@ impl HardcopyCommand {
             Self::ExportSchematicSvg => (
                 "Export schematic SVG\u{2026}",
                 "File",
-                LISTED_COMMAND,
+                PROJECT_EXPORT,
                 ShortcutContext::Global,
                 NONE,
             ),
             Self::ExportPublicationSnapshot => (
                 "Export publication snapshot\u{2026}",
                 "File",
-                LISTED_COMMAND,
+                PROJECT_EXPORT,
                 ShortcutContext::Global,
                 NONE,
             ),

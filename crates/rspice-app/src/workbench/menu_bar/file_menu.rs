@@ -4,7 +4,6 @@
 use crate::io::FileWorkflowIo;
 use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 
 /// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,9 +19,7 @@ pub(crate) enum FileMenuAction {
     Save,
     OpenNetlist,
     ImportNetlist,
-    ExportSvg,
     ExportCsvWaveforms,
-    ExportPublicationSnapshot,
     ImportVerilogA,
     Exit,
 }
@@ -31,7 +28,6 @@ pub(crate) fn dispatch_file_menu_action(
     state: &mut AppState,
     action: FileMenuAction,
     file_workflow_io: &(impl FileWorkflowIo + ?Sized),
-    export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
 ) {
     if !state.commit_pending_inspector_edit() {
         return;
@@ -105,19 +101,10 @@ pub(crate) fn dispatch_file_menu_action(
             }
             crate::workbench::workflows::netlist_workflow::import_netlist(state);
         }
-        FileMenuAction::ExportSvg => {
-            super::export_actions::action_export_svg_with_io(state, export_workflow_io)
-        }
         // The format is asked first; the frame runs the export once it is
         // answered, because the picker is a dialog that lives across frames.
         FileMenuAction::ExportCsvWaveforms => {
             super::waveform_export::open_dataset_export_picker(state);
-        }
-        FileMenuAction::ExportPublicationSnapshot => {
-            super::export_actions::action_export_publication_snapshot_with_io(
-                state,
-                export_workflow_io,
-            )
         }
         FileMenuAction::ImportVerilogA => {
             // Import creates cell views; it never touches the one in front.
@@ -233,25 +220,6 @@ mod tests {
         }
     }
 
-    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for NoIo {
-        fn show_save_dialog(
-            &self,
-            _: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
-        ) -> Result<Option<std::path::PathBuf>, String> {
-            panic!("unexpected export I/O")
-        }
-        fn write_text_file(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
-            panic!("unexpected export I/O")
-        }
-        fn write_waveform_csv(
-            &self,
-            _: &crate::io::WaveformDataset,
-            _: &std::path::Path,
-        ) -> Result<(), String> {
-            panic!("unexpected export I/O")
-        }
-    }
-
     #[test]
     fn file_actions_resolve_the_draft_before_saving_or_asking_about_unsaved_changes() {
         use crate::workbench::state::{InlineEditField, InlineEditSession};
@@ -285,7 +253,7 @@ mod tests {
         // Keep a regressed dispatch on the injectable standalone-file backend;
         // a failed assertion must never open a native project-save picker.
         state.close_project_session();
-        dispatch_file_menu_action(&mut state, FileMenuAction::Save, &NoIo, &NoIo);
+        dispatch_file_menu_action(&mut state, FileMenuAction::Save, &NoIo);
         assert_eq!(state.model.schematic.document().components[0].name, "V1");
         assert!(
             state
@@ -303,7 +271,7 @@ mod tests {
             .workbench
             .inline_edit
             .set_draft("V9".to_owned(), Ok(candidate));
-        dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo, &NoIo);
+        dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo);
         assert_eq!(state.model.schematic.document().components[0].name, "V9");
         assert!(state.workbench.inline_edit.session().is_none());
         assert_eq!(

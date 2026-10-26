@@ -1,40 +1,36 @@
-//! Export menu actions.
-//!
-//! Wires the File ▸ Export items to the export workflows.
+//! The hardcopy feature's file exports: the open schematic as SVG, and the
+//! sealed publication snapshot.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::hardcopy_adapters::publication_snapshot::PublicationReads;
+use crate::workbench::hardcopy_adapters::sources::SourceReads;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-pub(super) fn action_export_svg_with_io(
-    state: &mut AppState,
-    io: &(impl ExportWorkflowIo + ?Sized),
-) {
+use super::HardcopyFeature;
+
+/// Export the open schematic as SVG, through the export IO.
+pub(super) fn action_export_svg_with_io(model: &mut Model, io: &(impl ExportWorkflowIo + ?Sized)) {
     use crate::schematic::export::{
         SvgDesignContext, SvgExportConfig, export_to_svg_with_symbol_resolver_and_context,
     };
 
     let config = SvgExportConfig::default();
     let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
-        state.model.library_manager.catalog(),
-        &state.model.workspace.content.schematic_buffers,
+        model.library_manager.catalog(),
+        &model.workspace.content.schematic_buffers,
     );
-    let view_path = state.model.workspace.content.active_view.display_path();
-    let sheet_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let view_path = model.workspace.content.active_view.display_path();
+    let sheet_key = model.workspace.content.active_schematic_reference().key();
     let svg_content = export_to_svg_with_symbol_resolver_and_context(
-        state.model.schematic.document(),
+        model.schematic.document(),
         &config,
         &resolver,
         SvgDesignContext {
             view_path: &view_path,
             // What the canvas shows: the active sheet.
-            sheet_catalog: state
-                .model
+            sheet_catalog: model
                 .workspace
                 .content
                 .design_management
@@ -42,7 +38,7 @@ pub(super) fn action_export_svg_with_io(
         },
     );
 
-    let default_name = format!("{}.svg", state.model.export_file_stem("schematic"));
+    let default_name = format!("{}.svg", model.export_file_stem("schematic"));
 
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export SVG",
@@ -58,7 +54,7 @@ pub(super) fn action_export_svg_with_io(
                 .and_then(|destination| io.write_text_file_observed(&destination, &svg_content));
             match export {
                 Ok(()) => {
-                    state.record(
+                    model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
@@ -66,24 +62,22 @@ pub(super) fn action_export_svg_with_io(
                         ),
                     );
                 }
-                Err(e) => state.report_failure("SVG export failed", e.to_string()),
+                Err(e) => model.report_failure("SVG export failed", e.to_string()),
             }
         }
         Ok(None) => {
             // User cancelled - no message needed
         }
-        Err(e) => state.report_failure("SVG export failed", e.to_string()),
+        Err(e) => model.report_failure("SVG export failed", e.to_string()),
     }
 }
 
 /// Export the sealed publication snapshot: the exact canonical bytes the
 /// publish pipeline consumes, built from the current sheets, plot panes,
 /// active-run results, and effective deck.
-pub(super) fn action_export_publication_snapshot_with_io(
-    state: &mut AppState,
-    io: &(impl ExportWorkflowIo + ?Sized),
-) {
-    let stem = state
+pub(super) fn action_export_publication_snapshot_with_io(cx: &mut Cx<'_, HardcopyFeature>) {
+    let io = cx.handles.export_io;
+    let stem = cx
         .model
         .schematic
         .session
@@ -103,7 +97,8 @@ pub(super) fn action_export_publication_snapshot_with_io(
     };
     let built =
         crate::workbench::hardcopy_adapters::publication_snapshot::build_publication_snapshot(
-            state, &draft,
+            publication_reads(cx),
+            &draft,
         )
         .map_err(|error| error.to_string())
         .and_then(|snapshot| {
@@ -115,7 +110,8 @@ pub(super) fn action_export_publication_snapshot_with_io(
     let content = match built {
         Ok(content) => content,
         Err(error) => {
-            state.report_failure("Publication snapshot export failed", error);
+            cx.model
+                .report_failure("Publication snapshot export failed", error);
             return;
         }
     };
@@ -136,7 +132,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
                 .and_then(|destination| io.write_text_file_observed(&destination, &content));
             match export {
                 Ok(()) => {
-                    state.record(
+                    cx.model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
@@ -148,7 +144,8 @@ pub(super) fn action_export_publication_snapshot_with_io(
                     );
                 }
                 Err(error) => {
-                    state.report_failure("Publication snapshot export failed", error.to_string());
+                    cx.model
+                        .report_failure("Publication snapshot export failed", error.to_string());
                 }
             }
         }
@@ -156,14 +153,29 @@ pub(super) fn action_export_publication_snapshot_with_io(
             // User cancelled - no message needed
         }
         Err(error) => {
-            state.report_failure("Publication snapshot export failed", error.to_string());
+            cx.model
+                .report_failure("Publication snapshot export failed", error.to_string());
         }
+    }
+}
+
+/// What the snapshot is built from, read from the feature's context.
+fn publication_reads<'a>(cx: &'a Cx<'_, HardcopyFeature>) -> PublicationReads<'a> {
+    PublicationReads {
+        sources: SourceReads {
+            model: cx.model,
+            workbench: cx.wb,
+            report_authoring: &cx.state.report_authoring,
+            results: cx.peers.results(),
+        },
+        runs: cx.runs,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
@@ -273,7 +285,7 @@ mod tests {
             Some(PathBuf::from("designs").join("rc_filter.sch"));
         let io = MockExportWorkflowIo::returning_path(PathBuf::from("exports").join("rc_filter"));
 
-        action_export_svg_with_io(&mut state, &io);
+        action_export_svg_with_io(&mut state.model, &io);
 
         assert_eq!(
             io.configs.borrow().as_slice(),
@@ -315,7 +327,7 @@ mod tests {
         assert!(!cell.is_empty() && cell != "schematic");
         let io = MockExportWorkflowIo::returning_path(PathBuf::from("exports").join("out"));
 
-        action_export_svg_with_io(&mut state, &io);
+        action_export_svg_with_io(&mut state.model, &io);
 
         assert_eq!(io.configs.borrow()[0].default_name, format!("{cell}.svg"));
     }
@@ -325,7 +337,7 @@ mod tests {
         let mut state = AppState::default();
         let io = MockExportWorkflowIo::failing_dialog("native dialog unavailable");
 
-        action_export_svg_with_io(&mut state, &io);
+        action_export_svg_with_io(&mut state.model, &io);
 
         assert!(io.writes.borrow().is_empty());
         assert_eq!(
@@ -340,7 +352,7 @@ mod tests {
         let io = MockExportWorkflowIo::returning_path(PathBuf::from("schematic.svg"))
             .with_write_error("disk full");
 
-        action_export_svg_with_io(&mut state, &io);
+        action_export_svg_with_io(&mut state.model, &io);
 
         assert_eq!(io.writes.borrow().len(), 1);
         assert_eq!(last_log_message(&state), "SVG export failed: disk full");
@@ -358,7 +370,7 @@ mod tests {
         let io =
             MockExportWorkflowIo::returning_path(PathBuf::from("schematic.svg")).download_only();
 
-        action_export_svg_with_io(&mut state, &io);
+        action_export_svg_with_io(&mut state.model, &io);
 
         assert_eq!(
             last_log_message(&state),
