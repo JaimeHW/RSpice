@@ -24,7 +24,7 @@ use egui::Context;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::publish_model_library_candidate;
-use crate::workbench::state::ModelsOperationalState;
+use crate::workbench::surfaces::models::workspace_state::ModelsOperationalState;
 
 /// One unit of Model Hub work, on either target.
 ///
@@ -695,8 +695,10 @@ pub(super) fn note_pack_verification(
     state.models.models_view.pack_verification.insert(
         key,
         match outcome {
-            Ok(()) => crate::workbench::state::PackReProof::Verified,
-            Err(reason) => crate::workbench::state::PackReProof::Failed(reason),
+            Ok(()) => crate::workbench::surfaces::models::workspace_state::PackReProof::Verified,
+            Err(reason) => {
+                crate::workbench::surfaces::models::workspace_state::PackReProof::Failed(reason)
+            }
         },
     );
 }

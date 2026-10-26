@@ -8,7 +8,7 @@ pub(crate) struct ModelsState {
     pub models_page: crate::state::ModelsPage,
     /// Models & PDKs catalog filters and stable presentation selections.
     /// Model, source, symbol, and PDK records remain in their owning domains.
-    pub models_view: crate::workbench::state::ModelsWorkbenchViewState,
+    pub models_view: crate::workbench::surfaces::models::workspace_state::ModelsWorkbenchViewState,
     /// Selected model name within the currently selected model library.
     pub selected_model: Option<String>,
     /// Runtime-only transaction and presentation state for the project-owned
@@ -22,7 +22,8 @@ pub(crate) struct ModelsState {
         Option<crate::workbench::documents::model_editor::ModelEditorRecoveryDraft>,
     /// Application-owned recovery for unsigned PDK authoring edits that have
     /// not completed the explicit durable PDK configuration transaction.
-    pub(crate) pdk_technology_authoring: crate::workbench::state::PdkTechnologyAuthoringRecovery,
+    pub(crate) pdk_technology_authoring:
+        crate::workbench::surfaces::models::workspace_state::PdkTechnologyAuthoringRecovery,
     /// Runtime-only selection and transactional drafts for measurement
     /// correlation. Committed suites and evidence remain in the project-owned
     /// model-library domain.

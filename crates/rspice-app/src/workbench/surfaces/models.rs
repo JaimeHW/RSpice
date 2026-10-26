@@ -3,6 +3,9 @@
 
 mod manager;
 mod qualification;
+/// What the workspace keeps between frames, which the models slot holds and
+/// the session wire persists.
+pub(in crate::workbench) mod workspace_state;
 
 use qualification::*;
 /// What the rest of the surfaces may read about model qualification. The glob

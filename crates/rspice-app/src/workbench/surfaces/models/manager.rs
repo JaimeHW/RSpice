@@ -58,10 +58,10 @@ use crate::workbench::app_state::design_history::{
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{
-    ModelHubFacet, ModelPackFacet, ModelsCatalogScope, ModelsCatalogSortKey,
-    ModelsOperationalState, ModelsTableSort, ModelsWorkbenchDialog, ProjectModelFacet,
-    RSpicePartFacet,
+use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog};
+use crate::workbench::surfaces::models::workspace_state::{
+    ModelHubFacet, ModelPackFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
+    ProjectModelFacet, RSpicePartFacet,
 };
 use crate::workbench::{AppState, RSpiceApp};
 

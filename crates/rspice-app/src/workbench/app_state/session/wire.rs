@@ -32,11 +32,14 @@ use crate::workbench::slots::{
     SettingsState, SimulateState,
 };
 use crate::workbench::state::{
-    ConsolePage, DesignPanel, LibraryCellviewPage, ModelsWorkbenchViewState,
-    PdkTechnologyAuthoringRecovery, ProjectPage, SimulationPage, SpecialistToolBrowserState,
-    VerificationPage, VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
-    WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
-    default_console_height, default_inspector_width, default_navigator_width,
+    ConsolePage, DesignPanel, LibraryCellviewPage, ProjectPage, SimulationPage,
+    SpecialistToolBrowserState, VerificationPage, VerificationSessionState, WorkbenchSession,
+    Workspace, WorkspaceDocumentId, WorkspaceDocumentRegistry, WorkspaceLayoutState,
+    default_analysis_index, default_console_height, default_inspector_width,
+    default_navigator_width,
+};
+use crate::workbench::surfaces::models::workspace_state::{
+    ModelsWorkbenchViewState, PdkTechnologyAuthoringRecovery,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 

@@ -17,7 +17,7 @@ use crate::state::model_hub::{
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::ModelsOperationalState;
+use crate::workbench::surfaces::models::workspace_state::ModelsOperationalState;
 
 use super::{ModelHubOutput, ModelHubRequest, execute, publish_model_hub_output};
 

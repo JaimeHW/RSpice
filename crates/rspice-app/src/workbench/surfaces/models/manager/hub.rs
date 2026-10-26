@@ -42,7 +42,8 @@ use crate::state::model_hub::{ArchiveEvidence, ReleaseDiff, missing_capabilities
 use crate::state::model_library::PackPartPin;
 use crate::ui::accessibility::counted;
 use crate::workbench::app::ModelHubRequest;
-use crate::workbench::state::{ModelHubFacet, PackReProof, PackReleaseConfirmation};
+use crate::workbench::state::PackReleaseConfirmation;
+use crate::workbench::surfaces::models::workspace_state::{ModelHubFacet, PackReProof};
 
 /// One published release, as the inspector's Releases pane lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1067,11 +1068,13 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         .models_view
         .attempted_operation
         .clone()
-        .unwrap_or(crate::workbench::state::ModelsAttemptedOperation {
-            label: "model-source operation".to_owned(),
-            reissuable: false,
-            landing_pack: None,
-        });
+        .unwrap_or(
+            crate::workbench::surfaces::models::workspace_state::ModelsAttemptedOperation {
+                label: "model-source operation".to_owned(),
+                reissuable: false,
+                landing_pack: None,
+            },
+        );
     let text_dim = Tokens::get(ui.ctx()).color.text_dim;
     refusal_frame(
         ui,

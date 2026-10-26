@@ -29,7 +29,9 @@
 
 use super::*;
 
-use crate::workbench::state::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
+use crate::workbench::surfaces::models::workspace_state::{
+    ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope,
+};
 
 #[cfg(test)]
 thread_local! {

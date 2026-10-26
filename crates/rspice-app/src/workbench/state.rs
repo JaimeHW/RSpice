@@ -52,17 +52,6 @@ use super::{
     WorkspacePreset,
 };
 
-/// Recoverable working state for the application-owned unsigned PDK draft.
-/// Runtime authority remains in `PdkConfig`; this record protects only edits
-/// that have not yet completed the explicit durable Save draft transaction.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PdkTechnologyAuthoringRecovery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) working_draft: Option<crate::state::pdk_config::PdkTechnologyDraft>,
-    #[serde(default)]
-    pub(crate) dirty: bool,
-}
-
 /// The two Design navigator tabs specified by the workbench mockup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DesignPanel {
