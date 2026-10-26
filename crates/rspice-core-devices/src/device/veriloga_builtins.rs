@@ -3308,17 +3308,19 @@ mod tests {
         assert!(event_count > 0, "VBIC13 must exercise event-variable state");
         // The state-file emitter packs the rollback values as five `ddt`
         // lanes, six `idt` lanes, then the accepted and the candidate
-        // event-variable banks. Find the banks from the instance's own lane
-        // counts and hold the accepted one to the persistent capture, so a
-        // layout change fails here instead of writing into another lane.
+        // event-variable banks, then any extension's lanes (the junction
+        // limiters' previous voltages). Find the banks from the instance's
+        // own lane counts and hold the accepted one to the persistent
+        // capture, so a layout change fails here instead of writing into
+        // another lane.
         let accepted_start =
             5 * instance.dynamic_charge_third_back.len() + 6 * instance.dynamic_idt_state_count;
         let candidate_start = accepted_start + event_count;
+        let candidate_end = candidate_start + event_count;
         let mut trial = instance.kind.capture_rollback_state();
-        assert_eq!(
-            candidate_start + event_count,
-            trial.values.len(),
-            "the event banks close the rollback values"
+        assert!(
+            candidate_end <= trial.values.len(),
+            "the event banks lie inside the rollback values"
         );
         assert_eq!(
             bits(&trial.values[accepted_start..candidate_start]),
@@ -3331,7 +3333,7 @@ mod tests {
         // other value moves by its last mantissa bit. Every candidate then
         // differs from its accepted value in a bit a restore could lose.
         let mut zeros = 0;
-        for value in &mut trial.values[candidate_start..] {
+        for value in &mut trial.values[candidate_start..candidate_end] {
             let flip = if *value == 0.0 {
                 zeros += 1;
                 1_u64 << 63
