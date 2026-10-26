@@ -364,7 +364,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "results"),
     ("features::render_dialog", "results"),
     ("render_shortcuts_help_dialog", "shell"),
-    ("process_model_browser_dialog", "shell"),
+    ("models::render_model_browser_dialog", "models"),
     ("process_new_cell_dialog", "project"),
     ("process_new_view_dialog", "project"),
     ("render_new_veriloga_device_form", "code"),

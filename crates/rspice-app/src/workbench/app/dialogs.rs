@@ -63,17 +63,3 @@ pub(in crate::workbench) mod unpublish_web;
 pub(in crate::workbench) mod veriloga_build_settings;
 pub(in crate::workbench) mod visibility_options;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::window_session;
-
-use egui::Context;
-
-use crate::workbench::app::RSpiceApp;
-
-impl RSpiceApp {
-    pub(in crate::workbench) fn process_model_browser_dialog(&mut self, ctx: &Context) {
-        let _ = rspice_app_workbench::workbench::app::dialogs::model_browser::render_model_browser(
-            ctx,
-            &mut self.state.models.model_browser_state,
-            &self.state.model.model_library_manager,
-        );
-    }
-}
