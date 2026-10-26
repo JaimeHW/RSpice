@@ -557,6 +557,9 @@ pub struct GeneratedNoiseDescriptor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeneratedNoiseProcessDescriptor {
     pub process_id: usize,
+    /// Xyce's name for the process, `<kind>_<pos>_<neg>[_<label>]`, from the
+    /// branch its first injection authored.
+    pub mechanism: &'static str,
     pub label: Option<&'static str>,
     pub kind: GeneratedNoiseKind,
     pub table_len: usize,

@@ -792,7 +792,7 @@ impl Instance {
 }
 
 pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 1] = [
-	GeneratedNoiseProcessDescriptor { process_id: 0, label: Some("shot"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 0, mechanism: "WHITE_A_K_SHOT", label: Some("shot"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 1] = [
 	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 2, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "A", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(1), name: "K", is_internal: false } },

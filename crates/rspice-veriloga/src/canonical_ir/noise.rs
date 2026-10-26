@@ -762,6 +762,19 @@ pub(super) fn is_noise_call(name: &str) -> bool {
     )
 }
 
+/// The Xyce mechanism name, `<kind>_<pos>_<neg>[_<label>]`, of a noise
+/// source on the branch between `pos` and `neg`.
+#[cfg(feature = "rust-codegen")]
+pub(crate) fn branch_mechanism(
+    mir: &MirModel,
+    kind: CanonicalNoiseSourceKind,
+    pos: Option<NodeId>,
+    neg: Option<NodeId>,
+    label: Option<&str>,
+) -> SmolStr {
+    canonical_mechanism(kind, &endpoint(mir, pos), &endpoint(mir, neg), label)
+}
+
 fn canonical_mechanism(
     kind: CanonicalNoiseSourceKind,
     pos: &CanonicalNoiseEndpoint,

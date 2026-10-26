@@ -176,10 +176,10 @@ impl Instance {
 }
 
 pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 4] = [
-	GeneratedNoiseProcessDescriptor { process_id: 0, label: Some("Rb"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 1, label: Some("Re"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 2, label: Some("flicker_Ibe"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 3, label: Some("Ibe"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 0, mechanism: "WHITE_B_BI_RB", label: Some("Rb"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 1, mechanism: "WHITE_E_EI_RE", label: Some("Re"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 2, mechanism: "FLICKER_BI_EI_FLICKER_IBE", label: Some("flicker_Ibe"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 3, mechanism: "WHITE_BI_EI_IBE", label: Some("Ibe"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 4] = [
 	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 17, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },

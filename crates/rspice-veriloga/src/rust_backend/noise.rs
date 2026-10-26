@@ -513,8 +513,9 @@ pub(super) fn grouped_noise_extension(
     for process in &plan.processes {
         writeln!(
             out,
-            "    GeneratedNoiseProcessDescriptor {{ process_id: {}, label: {}, kind: GeneratedNoiseKind::{}, table_len: {}, table_log_interp: {} }},",
+            "    GeneratedNoiseProcessDescriptor {{ process_id: {}, mechanism: {:?}, label: {}, kind: GeneratedNoiseKind::{}, table_len: {}, table_log_interp: {} }},",
             process.process_id,
+            grouped_process_mechanism(artifact, &plan.descriptors, process).as_str(),
             option_str(process.label.as_deref()),
             noise_kind(process.kind),
             process.table.len(),
@@ -850,6 +851,73 @@ fn uses_checked_runtime(body: &str) -> bool {
     ]
     .iter()
     .any(|call| body.contains(call))
+}
+
+/// A grouped process's Xyce name, `<kind>_<pos>_<neg>_<label>`, taken from
+/// the branch of its first injection.
+fn grouped_process_mechanism(
+    artifact: &CanonicalIrArtifact,
+    descriptors: &[(usize, usize)],
+    process: &GroupedNoiseProcessPlan,
+) -> smol_str::SmolStr {
+    let (pos, neg) = descriptors
+        .iter()
+        .find(|(process_id, _)| *process_id == process.process_id)
+        .map_or((None, None), |&(_, equation)| {
+            let branch = &artifact.mir.equations[equation].branch;
+            authored_branch(artifact, branch.pos_node, branch.neg_node)
+        });
+    crate::canonical_ir::noise::branch_mechanism(
+        &artifact.mir,
+        process.kind,
+        pos,
+        neg,
+        process.label.as_deref(),
+    )
+}
+
+/// A probed flow source's contributions move onto its private flow unknown,
+/// which drives the authored branch through one `I(pos,neg) <+ V(state)`
+/// injection (see `semantic::flow_probes`). A noise source written on that
+/// branch is named after the branch, not after the unknown.
+fn authored_branch(
+    artifact: &CanonicalIrArtifact,
+    pos: Option<NodeId>,
+    neg: Option<NodeId>,
+) -> (Option<NodeId>, Option<NodeId>) {
+    let is_state = |node: Option<NodeId>| {
+        node.is_some_and(|node| artifact.mir.nodes[usize::from(node)].is_state)
+    };
+    let Some(state) = pos.filter(|_| is_state(pos) && neg.is_none()) else {
+        return (pos, neg);
+    };
+    let state_name = &artifact.mir.nodes[usize::from(state)].name;
+    artifact
+        .mir
+        .equations
+        .iter()
+        .find_map(|equation| {
+            let (branch_pos, branch_neg) = (equation.branch.pos_node, equation.branch.neg_node);
+            if equation.kind != MirEquationKind::Current
+                || is_state(branch_pos)
+                || is_state(branch_neg)
+            {
+                return None;
+            }
+            match &artifact.hir.expressions[usize::from(equation.expression.id)].kind {
+                HirExprKind::BranchAccess {
+                    pos: probed,
+                    neg: probed_neg,
+                    ..
+                } if probed == state_name
+                    && probed_neg.as_deref().is_none_or(|node| node == "0") =>
+                {
+                    Some((branch_pos, branch_neg))
+                }
+                _ => None,
+            }
+        })
+        .unwrap_or((pos, neg))
 }
 
 fn plan_grouped_noise(

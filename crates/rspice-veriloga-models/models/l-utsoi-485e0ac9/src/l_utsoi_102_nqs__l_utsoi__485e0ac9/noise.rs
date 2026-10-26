@@ -4265,16 +4265,16 @@ impl Instance {
 }
 
 pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 10] = [
-	GeneratedNoiseProcessDescriptor { process_id: 0, label: Some("rgate"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 1, label: Some("rsource"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 2, label: Some("rdrain"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 3, label: Some("rwell"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 4, label: Some("ign_g"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 5, label: Some("thermal_ids"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 6, label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 7, label: Some("shot_igs"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 8, label: Some("shot_igd"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 9, label: Some("shot_ids"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 0, mechanism: "WHITE_G_GP_RGATE", label: Some("rgate"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 1, mechanism: "WHITE_S_SI_RSOURCE", label: Some("rsource"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 2, mechanism: "WHITE_D_DI_RDRAIN", label: Some("rdrain"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 3, mechanism: "WHITE_B_BP_RWELL", label: Some("rwell"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 4, mechanism: "WHITE_NSIG_GND_IGN_G", label: Some("ign_g"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 5, mechanism: "WHITE_DI_SI_THERMAL_IDS", label: Some("thermal_ids"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 6, mechanism: "FLICKER_DI_SI_FLICKER", label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 7, mechanism: "WHITE_GP_SI_SHOT_IGS", label: Some("shot_igs"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 8, mechanism: "WHITE_GP_DI_SHOT_IGD", label: Some("shot_igd"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 9, mechanism: "WHITE_DI_SI_SHOT_IDS", label: Some("shot_ids"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 10] = [
 	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 45, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(16), name: "__flow_state3", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },

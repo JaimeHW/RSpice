@@ -576,3 +576,59 @@ fn generated_builtin_allocates_internal_nodes_from_metadata() {
     );
     assert_eq!(circuit.num_nodes(), 3);
 }
+
+#[cfg(all(
+    feature = "veriloga-model-diode-cmc",
+    feature = "veriloga-builtins-noise"
+))]
+#[test]
+fn generated_noise_processes_take_their_xyce_branch_names() {
+    use rspice_core::analysis::NoiseContributionProbe;
+    use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::{Netlist, NetlistParseOptions};
+
+    // DIODE_CMC's thermal source sits on the flow-probed branch (aik,k), so
+    // it injects through that branch's flow unknown but keeps its name.
+    let netlist = Netlist::parse_with_options(
+        include_str!("../../../tests/xyce/Netlists/DIODE_CMC/DiodeClipper_noise.cir"),
+        NetlistParseOptions {
+            expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        },
+    )
+    .expect("DiodeClipper_noise parses");
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        temperature: 300.15,
+        ..SimulationConfig::default()
+    });
+    let points = engine
+        .run_noise_named_with_input_source(&netlist, "4", None, "VIN", &[100.0], 300.15)
+        .expect("DiodeClipper_noise runs");
+    // Xyce 7.10, OutputData/DIODE_CMC/DiodeClipper_noise.cir.NOISE.prn at
+    // 100 Hz: Xyce's log() is base 10 there, and -1e50 is log(0).
+    let point = &points[0];
+    assert!(
+        (point.output_noise_density.log10() + 16.5461083).abs() <= 1e-3,
+        "log(ONOISE) = {}",
+        point.output_noise_density.log10()
+    );
+    for (probe, expected_log) in [
+        ("DNO(D1,flicker_a_aik_flicker)", None),
+        ("DNO(D1,white_aik_k_thermal)", None),
+        ("DNO(D1,white_a_aik_shot)", Some(-19.1777751)),
+    ] {
+        let parsed = NoiseContributionProbe::parse(probe).expect("probe parses");
+        let value = point
+            .contribution(&parsed)
+            .unwrap_or_else(|error| panic!("{probe}: {error}"));
+        match expected_log {
+            None => assert!(value.abs() <= f64::MIN_POSITIVE, "{probe} = {value:e}"),
+            Some(expected) => assert!(
+                (value.log10() - expected).abs() <= 1e-3,
+                "log({probe}) = {}, Xyce 7.10 gives {expected}",
+                value.log10()
+            ),
+        }
+    }
+}

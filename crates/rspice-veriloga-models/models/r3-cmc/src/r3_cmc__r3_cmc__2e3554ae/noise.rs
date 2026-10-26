@@ -829,12 +829,12 @@ impl Instance {
 }
 
 pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 6] = [
-	GeneratedNoiseProcessDescriptor { process_id: 0, label: Some("body thermal noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 1, label: Some("body 1/f noise"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 2, label: Some("end 1 resistance thermal noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 3, label: Some("end 2 resistance thermal noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 4, label: Some("end 1 parasitic shot noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 5, label: Some("end 2 parasitic shot noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 0, mechanism: "WHITE_I2_I1_BODY_THERMAL_NOISE", label: Some("body thermal noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 1, mechanism: "FLICKER_I2_I1_BODY_1_F_NOISE", label: Some("body 1/f noise"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 2, mechanism: "WHITE_N1_I1_END_1_RESISTANCE_THERMAL_NOISE", label: Some("end 1 resistance thermal noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 3, mechanism: "WHITE_N2_I2_END_2_RESISTANCE_THERMAL_NOISE", label: Some("end 2 resistance thermal noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 4, mechanism: "WHITE_NC_I1_END_1_PARASITIC_SHOT_NOISE", label: Some("end 1 parasitic shot noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 5, mechanism: "WHITE_NC_I2_END_2_PARASITIC_SHOT_NOISE", label: Some("end 2 parasitic shot noise"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 6] = [
 	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 8, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "i2", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(4), name: "i1", is_internal: true } },

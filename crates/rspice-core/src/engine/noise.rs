@@ -1038,7 +1038,7 @@ impl Engine {
     /// persistable shape becomes `_` and the rest is upper-cased, which is how
     /// the code generator composes the compiled catalog's own mechanism names,
     /// so a ranked contributor row can always carry what this names.
-    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    #[cfg(feature = "veriloga")]
     fn canonical_veriloga_noise_mechanism(label: &str) -> String {
         let mut mechanism = label
             .bytes()
@@ -2048,15 +2048,10 @@ impl Engine {
         }
         #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
-            for (process_id, label) in device.grouped_noise_process_catalog() {
-                let mechanism = if label == "NOISE" {
-                    format!("NOISE{process_id}")
-                } else {
-                    Self::canonical_veriloga_noise_mechanism(label)
-                };
+            for (_, mechanism) in device.grouped_noise_process_catalog() {
                 catalog.push(crate::analysis::NoiseSourceIdentity::mechanism(
                     device.instance_name.clone(),
-                    mechanism,
+                    mechanism.to_owned(),
                 ));
             }
         }

@@ -493,10 +493,7 @@ fn generated_process(
 
     let instance = device.instance_name.as_str();
     let descriptor = process.descriptor;
-    let mechanism = match descriptor.label {
-        Some(label) => canonical_mechanism(label),
-        None => format!("NOISE{}", descriptor.process_id),
-    };
+    let mechanism = descriptor.mechanism.to_owned();
     let invalid = |detail: String| {
         SimulationError::Circuit(format!(
             "Generated Verilog-A device '{instance}' coherent noise process '{mechanism}' is \
@@ -640,7 +637,7 @@ fn generated_process(
 /// written with. Every byte outside the persistable shape becomes `_` and the
 /// rest is upper-cased, which is how the code generator composes the compiled
 /// catalog's own mechanism names and how `.NOISE` names the contribution.
-#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+#[cfg(feature = "veriloga")]
 fn canonical_mechanism(label: &str) -> String {
     let mut mechanism = label
         .bytes()

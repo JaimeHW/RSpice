@@ -1306,7 +1306,7 @@ impl BuiltinVerilogAInstance {
                     .iter()
                     .any(|injection| injection.process_id == process.process_id)
             })
-            .map(|process| (process.process_id, process.label.unwrap_or("NOISE")))
+            .map(|process| (process.process_id, process.mechanism))
             .collect()
     }
 
@@ -3573,6 +3573,7 @@ mod tests {
     fn grouped_noise_capability_survives_fully_cancelled_routing() {
         let processes = [GeneratedNoiseProcessDescriptor {
             process_id: 0,
+            mechanism: "WHITE_P_N_CANCELLED",
             label: Some("cancelled"),
             kind: GeneratedNoiseKind::White,
             table_len: 0,
@@ -3590,6 +3591,7 @@ mod tests {
     fn grouped_noise_catalog_rejects_non_dense_duplicate_process_ids() {
         let process = |process_id| GeneratedNoiseProcessDescriptor {
             process_id,
+            mechanism: "WHITE_P_N_DUPLICATE",
             label: Some("duplicate"),
             kind: GeneratedNoiseKind::White,
             table_len: 0,

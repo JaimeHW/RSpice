@@ -8332,6 +8332,7 @@ pub mod runtime {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct GeneratedNoiseProcessDescriptor {
         pub process_id: usize,
+        pub mechanism: &'static str,
         pub label: Option<&'static str>,
         pub kind: GeneratedNoiseKind,
         pub table_len: usize,
