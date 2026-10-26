@@ -1040,7 +1040,7 @@ pub fn reveal_directory(directory: &Path) -> Result<(), String> {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
+pub fn reveal_directory(directory: &Path) -> Result<(), String> {
     std::process::Command::new("open")
         .arg(directory)
         .spawn()
@@ -1049,7 +1049,7 @@ pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
-pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
+pub fn reveal_directory(directory: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open")
         .arg(directory)
         .spawn()
