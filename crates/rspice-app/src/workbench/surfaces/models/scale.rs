@@ -337,7 +337,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(0));
         super::manager::CONSUMER_INDEX_BUILDS.with(|count| count.set(0));
         crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(|count| count.set(0));
-        super::manager::SOURCE_DRIFT_HASHES.with(|count| count.set(0));
+        crate::workbench::app_state::model::SOURCE_DRIFT_HASHES.with(|count| count.set(0));
         output = Some(ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
@@ -349,7 +349,8 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         consumer_index_builds = super::manager::CONSUMER_INDEX_BUILDS.with(std::cell::Cell::get);
         library_serializations =
             crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(std::cell::Cell::get);
-        drift_hashes = super::manager::SOURCE_DRIFT_HASHES.with(std::cell::Cell::get);
+        drift_hashes =
+            crate::workbench::app_state::model::SOURCE_DRIFT_HASHES.with(std::cell::Cell::get);
     }
     let output = output.expect("three passes");
     let nodes = output

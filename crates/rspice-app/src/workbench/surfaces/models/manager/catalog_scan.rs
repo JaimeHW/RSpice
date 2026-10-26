@@ -27,7 +27,11 @@ pub(super) fn project_catalog_scan(
     for library in app.state.model.model_library_manager.libraries_sorted() {
         let pinned = model_is_pinned(library);
         let built_in = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
-        let drifted = !drift::findings_for(app.state, &library.name).is_empty();
+        let drifted = !app
+            .state
+            .model
+            .source_drift_findings(&library.name)
+            .is_empty();
         let library_source = library.root_path.as_deref().map(path_label);
         // A binned family is one row, named as an instance binds it; its bins
         // are its detail, not rows beside it.

@@ -81,8 +81,6 @@ use paint::*;
 /// gate is a sibling of this module and reaches them through here.
 #[cfg(test)]
 pub(super) use bindings::CONSUMER_INDEX_BUILDS;
-#[cfg(test)]
-pub(super) use drift::SOURCE_DRIFT_HASHES;
 
 const ROW_H: f32 = 24.0;
 const HEADER_H: f32 = 27.0;
@@ -243,7 +241,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     }
 
-    if drift::needs_scan(&app.state) {
+    if app.state.model.source_drift_needs_scan() {
         pending_actions.push(ManagerAction::ScanSourceDrift);
     }
 
@@ -342,7 +340,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
                 apply_receipt(&mut app.state, result);
             }
-            ManagerAction::ScanSourceDrift => drift::scan(&mut app.state),
+            ManagerAction::ScanSourceDrift => app.state.model.scan_source_drift(),
             ManagerAction::ModelHub(request) => {
                 app.start_model_hub_operation(&context, request);
             }

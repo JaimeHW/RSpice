@@ -17,9 +17,6 @@ use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 
-use super::super::models::closure::{
-    scan_source_drift, source_drift_findings, source_drift_needs_scan,
-};
 use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
@@ -77,8 +74,8 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     // requested reads exactly like a closure with no drift. Event-driven, not
     // per frame: it rehashes every pinned source, and `needs_scan` is false
     // until the project revision or the catalog actually moves.
-    if source_drift_needs_scan(&app.state) {
-        scan_source_drift(&mut app.state);
+    if app.state.model.source_drift_needs_scan() {
+        app.state.model.scan_source_drift();
     }
     let bindings = app.state.model.sim_setup.model_bindings.clone();
     // One name cannot be contested by one library, so a closure that loaded a
@@ -102,7 +99,12 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
         .count();
     let drifted = bindings
         .iter()
-        .filter(|binding| !source_drift_findings(&app.state, &binding.library_name).is_empty())
+        .filter(|binding| {
+            !app.state
+                .model
+                .source_drift_findings(&binding.library_name)
+                .is_empty()
+        })
         .count();
     let contested = bindings
         .iter()
@@ -293,7 +295,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 // to it. Drift is the models workspace's finding, read here rather
                 // than recomputed: this page cannot repair it, so it must not be
                 // able to disagree about whether there is anything to repair.
-                let drift = source_drift_findings(&app.state, &binding.library_name);
+                let drift = app.state.model.source_drift_findings(&binding.library_name);
                 paint_toned_text(
                     ui,
                     cells[3].shrink2(egui::vec2(8.0, 0.0)),

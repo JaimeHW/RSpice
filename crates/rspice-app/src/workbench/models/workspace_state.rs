@@ -421,59 +421,6 @@ pub struct ModelsAttemptedOperation {
     pub landing_pack: Option<String>,
 }
 
-/// One retained source whose bytes no longer hash to what the project accepted.
-///
-/// The pinned digest is the whole of a project's claim to reproducibility: a
-/// run authenticates every executable source against it and refuses when they
-/// disagree. Discovering that disagreement in a preflight refusal, minutes
-/// before a run, is the expensive place to discover it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelSourceDriftFinding {
-    pub path: std::path::PathBuf,
-    /// The digest the accepted closure recorded, shortened for display.
-    pub pinned: String,
-    /// What the bytes hash to now, shortened the same way. `None` means the
-    /// source could not be read at all, which is its own kind of drift.
-    pub on_disk: Option<String>,
-    /// What changed, when both the accepted and the present bytes are on hand
-    /// to compare. A retained source keeps only one copy, so its accepted
-    /// bytes are gone and nothing can be said about the difference.
-    pub change: Option<String>,
-}
-
-/// What a drift report describes: which project, and which catalogue.
-///
-/// Both halves, because neither alone identifies the thing scanned. The
-/// revision moves when a project publishes one, which is what re-arms the scan
-/// after an import or a re-pin. The catalogue key is *content*, which is what
-/// makes a report expire when the catalogue is replaced wholesale — opening a
-/// project, accepting a recovery comparison, restoring a design-history
-/// candidate. None of those routes touches this view state, and a project file
-/// arrives carrying whatever revision it was saved with, so two projects at
-/// equal revisions is entirely ordinary. A catalogue cannot present a key it
-/// did not earn, however it arrived.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ModelSourceDriftScope {
-    pub project_revision: u64,
-    pub catalog_key: u64,
-}
-
-/// Pinned-versus-present source drift, as of the last scan.
-///
-/// Deciding this rehashes every retained byte, so it is decided on events —
-/// opening the workspace, finishing an import, asking for it — and never on a
-/// frame. That is also why the report records what it describes: a clean result
-/// from before an import, or from another project, is not a clean result.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ModelSourceDrift {
-    pub scanned: Option<ModelSourceDriftScope>,
-    /// When the scan ran, in UTC, when the platform offered a usable clock.
-    pub scanned_at: Option<String>,
-    /// Findings by library name. A library with none is absent from the map,
-    /// so an empty map is the healthy state and says nothing.
-    pub libraries: std::collections::BTreeMap<String, Vec<ModelSourceDriftFinding>>,
-}
-
 /// What re-proving one installed release concluded, this session.
 ///
 /// Deliberately not durable. A re-proof is a statement about bytes at one
@@ -559,10 +506,6 @@ pub struct ModelsWorkbenchViewState {
     /// the value rather than walking two part lists sixty times a second.
     #[serde(skip)]
     pub release_diff: Option<crate::state::model_hub::ReleaseDiff>,
-    /// Source drift as of the last event-driven scan. Never durable: a saved
-    /// verdict about bytes is a verdict about a moment that has passed.
-    #[serde(skip)]
-    pub source_drift: ModelSourceDrift,
     /// One authenticated source import may parse at a time. Parsing is owned
     /// by a native background thread or a dedicated browser worker; these
     /// fields are presentation only and never restore as engineering state.
@@ -638,7 +581,6 @@ impl Default for ModelsWorkbenchViewState {
             attempted_operation: None,
             pack_verification: std::collections::BTreeMap::new(),
             release_diff: None,
-            source_drift: ModelSourceDrift::default(),
             model_import_in_progress: false,
             model_import_label: None,
             model_import_progress: None,

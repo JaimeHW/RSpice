@@ -20,6 +20,7 @@ mod schematic_sync;
 mod session_start;
 mod sheet_catalog;
 mod sheet_move;
+mod source_drift;
 mod symbol_context;
 #[cfg(any(test, feature = "test-support"))]
 mod test_technology;
@@ -28,6 +29,9 @@ pub use definition_index::DefinitionRow;
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use source_drift::SOURCE_DRIFT_HASHES;
+pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
@@ -100,6 +104,10 @@ pub struct Model {
     /// The sheet-membership and generated-symbol failures the drawing sync
     /// last recorded. Runtime only.
     pub recorded_sync_failures: schematic_sync::SyncFailures,
+    /// Pinned-versus-present model source drift, as of the last event-driven
+    /// scan. Runtime only: a saved verdict about bytes is a verdict about a
+    /// moment that has passed.
+    pub source_drift: ModelSourceDrift,
 }
 
 impl Model {

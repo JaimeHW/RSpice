@@ -79,19 +79,19 @@ fn source_verification_retains_findings_without_inventing_a_scan_date() {
         Ok(std::time::Duration::ZERO),
         Ok(std::time::Duration::MAX),
     ] {
-        crate::time_compat::with_unix_epoch(epoch, || scan(&mut state));
-        assert!(state.models.models_view.source_drift.scanned_at.is_none());
-        assert_eq!(findings_for(&state, "moved").len(), 1);
-        assert!(!needs_scan(&state));
+        crate::time_compat::with_unix_epoch(epoch, || state.model.scan_source_drift());
+        assert!(state.model.source_drift.scanned_at.is_none());
+        assert_eq!(state.model.source_drift_findings("moved").len(), 1);
+        assert!(!state.model.source_drift_needs_scan());
     }
     crate::time_compat::with_unix_epoch(Ok(std::time::Duration::from_secs(1_786_786_200)), || {
-        scan(&mut state)
+        state.model.scan_source_drift()
     });
     assert_eq!(
-        state.models.models_view.source_drift.scanned_at.as_deref(),
+        state.model.source_drift.scanned_at.as_deref(),
         Some("2026-08-15 09:30 UTC")
     );
-    assert_eq!(findings_for(&state, "moved").len(), 1);
+    assert_eq!(state.model.source_drift_findings("moved").len(), 1);
 }
 
 #[test]
@@ -110,21 +110,21 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
     ));
 
     assert!(
-        needs_scan(&state),
+        state.model.source_drift_needs_scan(),
         "nothing has been scanned, which is not the same as nothing being wrong"
     );
-    scan(&mut state);
+    state.model.scan_source_drift();
     assert!(
-        !needs_scan(&state),
+        !state.model.source_drift_needs_scan(),
         "the report describes this project and this catalogue, so an idle \
          repaint rescans nothing"
     );
 
     assert!(
-        findings_for(&state, "clean").is_empty(),
+        state.model.source_drift_findings("clean").is_empty(),
         "a source that still hashes to its pin says nothing"
     );
-    let findings = findings_for(&state, "moved");
+    let findings = state.model.source_drift_findings("moved");
     assert_eq!(findings.len(), 1);
     let finding = &findings[0];
     assert_eq!(
@@ -142,7 +142,7 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
          nothing honest can be said about what changed"
     );
     assert!(
-        state.models.models_view.source_drift.scanned_at.is_some(),
+        state.model.source_drift.scanned_at.is_some(),
         "a finding says when it was found"
     );
 }
@@ -167,13 +167,16 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
         b".model a nmos\n",
         b".model a pmos\n",
     ));
-    scan(&mut open);
+    open.model.scan_source_drift();
     assert_eq!(
-        findings_for(&open, "alpha").len(),
+        open.model.source_drift_findings("alpha").len(),
         1,
         "project A really has a finding to carry over"
     );
-    assert!(!needs_scan(&open), "and its report describes project A");
+    assert!(
+        !open.model.source_drift_needs_scan(),
+        "and its report describes project A"
+    );
 
     // A different project, whose file happens to have been saved at the same
     // revision. Asserted rather than assumed, so the collision this guards is
@@ -197,22 +200,22 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
     open.model.model_library_manager = opened.model.model_library_manager;
 
     assert!(
-        findings_for(&open, "alpha").len() == 1,
+        open.model.source_drift_findings("alpha").len() == 1,
         "the stale verdict is still sitting in the view state — this is the \
          state a reader would be shown"
     );
     assert!(
-        needs_scan(&open),
+        open.model.source_drift_needs_scan(),
         "so the latch must re-arm on the catalogue's own content, which a \
          replacement cannot present without having earned it"
     );
 
-    scan(&mut open);
+    open.model.scan_source_drift();
     assert!(
-        findings_for(&open, "alpha").is_empty(),
+        open.model.source_drift_findings("alpha").is_empty(),
         "and the rescan drops the previous project's findings"
     );
-    assert!(findings_for(&open, "beta").is_empty());
+    assert!(open.model.source_drift_findings("beta").is_empty());
 }
 
 #[test]
@@ -226,8 +229,8 @@ fn a_built_in_catalog_has_no_pin_to_fail() {
         digest: digest(b"whatever"),
     }];
     state.model.model_library_manager.add_library(library);
-    scan(&mut state);
-    assert!(findings_for(&state, "builtin").is_empty());
+    state.model.scan_source_drift();
+    assert!(state.model.source_drift_findings("builtin").is_empty());
 }
 
 /// An external library keeps both copies, so its finding can say what moved.
@@ -261,27 +264,27 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
     let mut state = AppState::default();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(library);
-    scan(&mut state);
+    state.model.scan_source_drift();
     assert!(
-        findings_for(&state, "external").is_empty(),
+        state.model.source_drift_findings("external").is_empty(),
         "the file on disk is the file that was accepted"
     );
 
     // Somebody edits the PDK under the project's feet.
     std::fs::write(&path, b".model a nmos\n.model b pmos\n.model c nmos\n")
         .expect("rewrite the source");
-    state.models.models_view.source_drift = Default::default();
-    scan(&mut state);
-    let findings = findings_for(&state, "external");
+    state.model.source_drift = Default::default();
+    state.model.scan_source_drift();
+    let findings = state.model.source_drift_findings("external");
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].change.as_deref(), Some("+1 −0 lines"));
 
     // And a source that has been removed outright is drift too, of a kind the
     // digest cannot describe.
     std::fs::remove_file(&path).expect("remove the source");
-    state.models.models_view.source_drift = Default::default();
-    scan(&mut state);
-    let findings = findings_for(&state, "external");
+    state.model.source_drift = Default::default();
+    state.model.scan_source_drift();
+    let findings = state.model.source_drift_findings("external");
     assert_eq!(findings.len(), 1);
     assert!(findings[0].on_disk.is_none());
 
@@ -302,8 +305,8 @@ fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
         .model_library_manager
         .select_library("moved")
         .expect("the fixture library is loaded");
-    scan(&mut state);
-    let finding = findings_for(&state, "moved")[0].clone();
+    state.model.scan_source_drift();
+    let finding = state.model.source_drift_findings("moved")[0].clone();
 
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
@@ -391,8 +394,8 @@ fn a_banner_over_several_findings_says_how_many_it_does_not_name() {
     let mut state = AppState::default();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(library);
-    scan(&mut state);
-    assert_eq!(findings_for(&state, "foundry").len(), 3);
+    state.model.scan_source_drift();
+    assert_eq!(state.model.source_drift_findings("foundry").len(), 3);
 
     let labels = banner_labels(&mut state, "foundry");
     assert!(
@@ -417,7 +420,7 @@ fn a_library_whose_sources_all_match_paints_no_banner() {
         b".model a nmos\n",
         b".model a nmos\n",
     ));
-    scan(&mut state);
+    state.model.scan_source_drift();
 
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
