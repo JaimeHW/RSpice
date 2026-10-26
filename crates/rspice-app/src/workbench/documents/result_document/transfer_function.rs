@@ -7,9 +7,9 @@ use crate::state::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 #[cfg(test)]
 use rspice_results_ui::transfer_function::gain_unit;
@@ -131,8 +131,8 @@ mod tests {
         )
     }
 
-    fn state_with_analyses(analyses: Vec<AnalysisResult>) -> AppState {
-        let mut state = AppState::default();
+    fn state_with_analyses(analyses: Vec<AnalysisResult>) -> ResultsTestHost {
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         for analysis in analyses {
             run.add_analysis(analysis);

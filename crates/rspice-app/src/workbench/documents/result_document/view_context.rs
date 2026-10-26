@@ -321,19 +321,19 @@ mod tests {
     use crate::state::{
         AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
     };
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
     fn waveform(name: &str) -> RetainedTrace {
         RetainedTrace::new(name, vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff")
     }
 
-    fn state_with_run(analyses: Vec<AnalysisResult>) -> AppState {
+    fn state_with_run(analyses: Vec<AnalysisResult>) -> ResultsTestHost {
         let mut run = SimulationRun::new(1);
         for analysis in analyses {
             run.add_analysis(analysis);
         }
         let dataset_id = run.dataset_id;
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         state.model.simulation.view.active_run_idx = Some(0);
         state.model.simulation.view.active_analysis_idx = Some(0);

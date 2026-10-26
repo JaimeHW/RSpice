@@ -20,7 +20,7 @@ use rspice_results::specification::report::{
 
 use crate::state::{SimulationRun, SpecEntry, SpecPointScope, SpecificationDefinition};
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results_ui::specs::editor::{self, SpecDraft};
 
 use super::{ResultViewer, ResultsParts};

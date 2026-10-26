@@ -4,7 +4,7 @@
 //! Split from `specs.rs` into the sibling file the crate uses for a module's
 //! own tests, so the table and the evidence that it holds can each grow.
 
-use super::AppState;
+use super::ResultsTestHost;
 use super::{SpecDraft, SpecResultStatus, apply_drafts, result_row, result_rows, summarize_rows};
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{
@@ -214,7 +214,8 @@ fn rows_preserve_declared_contract_order_then_first_retained_order() {
 
 #[test]
 fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
-    let mut state = crate::workbench::AppState::default();
+    let mut state =
+        crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
     let plan_id = state
         .model
         .sim_setup
@@ -280,7 +281,8 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
 fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind() {
     use rspice_results::specification::{SpecificationSource, SpecificationWaiver};
 
-    let mut state = crate::workbench::AppState::default();
+    let mut state =
+        crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
     let plan = state
         .model
         .sim_setup
@@ -714,7 +716,7 @@ fn the_sheet_the_export_and_the_print_state_the_bound_the_run_was_judged_against
 /// old selection, and dropped the reader on the manifest.
 #[test]
 fn the_source_button_opens_the_viewer_the_shared_map_names() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC")

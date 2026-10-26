@@ -4,7 +4,7 @@ use super::super::frame_work::{self, DatasetWalk};
 use super::super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results_ui::sensitivity::study as viewer;
 use std::sync::Arc;
@@ -122,8 +122,8 @@ mod tests {
         SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow, SensitivityValue,
     };
     use viewer::swept_evidence;
-    pub(super) fn state_with(evidence: SensitivityStudyEvidence) -> AppState {
-        let mut state = AppState::default();
+    pub(super) fn state_with(evidence: SensitivityStudyEvidence) -> ResultsTestHost {
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(

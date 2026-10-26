@@ -3,9 +3,9 @@
 use super::super::frame_work::{self, DatasetWalk};
 use super::super::{AnalysisPresentationKey, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results_ui::sensitivity::mismatch as viewer;
 use std::sync::Arc;
@@ -95,12 +95,12 @@ mod tests {
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
     use rspice_results::dc_mismatch::DcMismatchEvidence;
     use viewer::evidence_fixture as evidence;
-    fn state_with(evidence: DcMismatchEvidence) -> AppState {
+    fn state_with(evidence: DcMismatchEvidence) -> ResultsTestHost {
         let analysis = AnalysisResult::new(1, AnalysisType::DcMismatch, "DCMATCH")
             .with_result_payload(AnalysisResultPayload::DcMismatch {
                 evidence: Arc::new(evidence),
             });
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         state.model.simulation.retained.runs = vec![run].into();
@@ -154,7 +154,7 @@ mod tests {
                     normalized: (0.25).into(),
                 }],
             });
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         state.model.simulation.retained.runs = vec![run].into();

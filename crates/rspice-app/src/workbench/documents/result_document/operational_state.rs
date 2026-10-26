@@ -12,9 +12,9 @@ use super::{AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads, R
 use crate::state::{
     AnalysisResult, AnalysisResultSourceDomain, SimulationRun, SimulationRunLifecycle,
 };
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::app_state::Model;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::framework::requests::MarkFailureSites;
 
 /// Runtime boundaries that cannot be inferred from a retained result alone.
@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn source_currentness_uses_plan_identity_and_revision_not_selection() {
-        let state = AppState::default();
+        let state = ResultsTestHost::default();
         let plan = state
             .model
             .sim_setup
@@ -772,8 +772,8 @@ mod failure_site_control_tests {
     fn state_showing_failure(
         attribution: Option<ConvergenceAttribution>,
         rendered_error: &str,
-    ) -> AppState {
-        let mut state = AppState::default();
+    ) -> ResultsTestHost {
+        let mut state = ResultsTestHost::default();
         let mut analysis =
             AnalysisResult::failed(1, AnalysisType::Transient, "tran", rendered_error);
         analysis.failure_attribution = attribution;

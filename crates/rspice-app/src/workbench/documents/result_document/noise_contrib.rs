@@ -2,9 +2,9 @@
 
 use super::bode;
 use crate::state::SimulationState;
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results_ui::noise_contrib as view;
 
@@ -159,7 +159,7 @@ mod tests {
             band: (2.0, 20.0),
             ..NoiseSummary::default()
         });
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(first);
         run.add_analysis(second);

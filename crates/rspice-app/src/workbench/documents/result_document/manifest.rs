@@ -2,9 +2,9 @@
 
 use super::frame_work::{self, DatasetWalk};
 use crate::state::{RunHistoryRevision, SimulationRun};
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results::manifest::ManifestViewModel;
 use rspice_results_ui::manifest as viewer;
@@ -155,7 +155,7 @@ mod tests {
         run.add_analysis(analysis);
         manifest_for_run(&run).rows.remove(0)
     }
-    fn state_with_run(label: &str) -> AppState {
+    fn state_with_run(label: &str) -> ResultsTestHost {
         let mut run = SimulationRun::new(7);
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.add_analysis(
@@ -163,7 +163,7 @@ mod tests {
                 RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
             ]),
         );
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         state
@@ -198,7 +198,7 @@ mod tests {
     }
     #[test]
     fn retained_view_source_manifest_tracks_restoration_and_nested_edits() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let run = state.model.simulation.start_run();
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
@@ -254,7 +254,7 @@ mod tests {
             "#ffbd2e",
         )];
         let original = active_manifest(&mut state.results_parts()).unwrap();
-        let mut other = AppState::default();
+        let mut other = ResultsTestHost::default();
         other.model.simulation = state.model.simulation.clone();
         other.results.results = state.results.results.clone();
         let work = frame_work::WorkCounts::reset();

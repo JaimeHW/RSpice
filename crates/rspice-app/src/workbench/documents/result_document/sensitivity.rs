@@ -4,7 +4,7 @@ use super::frame_work::{self, DatasetWalk};
 use super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results_ui::sensitivity as viewer;
 use std::sync::Arc;
@@ -131,8 +131,8 @@ mod tests {
             },
         )
     }
-    fn state_with_analyses(analyses: Vec<AnalysisResult>) -> AppState {
-        let mut state = AppState::default();
+    fn state_with_analyses(analyses: Vec<AnalysisResult>) -> ResultsTestHost {
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         for analysis in analyses {
             run.add_analysis(analysis);
@@ -141,7 +141,7 @@ mod tests {
         assert!(state.model.simulation.select_run(0));
         state
     }
-    fn ranked_state(parameters: usize) -> AppState {
+    fn ranked_state(parameters: usize) -> ResultsTestHost {
         let rows = (0..parameters)
             .map(|index| SensitivityResultRow {
                 parameter: format!("p{index:05}"),
