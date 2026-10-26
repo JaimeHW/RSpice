@@ -3,6 +3,7 @@
 
 use super::super::show;
 use super::*;
+use crate::workbench::RSpiceApp;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
@@ -179,10 +180,7 @@ fn result_trace_statistics_ignore_non_finite_samples() {
 fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
     let mut app = result_app_with_current_out_map(false);
 
-    assert_eq!(
-        cross_probe_trace_to_design(&mut app, "V(out)"),
-        Ok("OUT".to_owned())
-    );
+    assert_eq!(cross_probe(&mut app, "V(out)"), Ok("OUT".to_owned()));
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(!app.state.workbench.split_with_results);
@@ -211,10 +209,7 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
 fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
     let mut app = result_app_with_current_out_map(true);
 
-    assert_eq!(
-        cross_probe_trace_to_design(&mut app, "V(out)"),
-        Ok("OUT".to_owned())
-    );
+    assert_eq!(cross_probe(&mut app, "V(out)"), Ok("OUT".to_owned()));
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(
@@ -237,8 +232,7 @@ fn stale_cross_probe_map_fails_without_leaving_results() {
         crate::state::Point::new(120, 0),
     ]);
 
-    let error = cross_probe_trace_to_design(&mut app, "V(out)")
-        .expect_err("topology mismatch must fail closed");
+    let error = cross_probe(&mut app, "V(out)").expect_err("topology mismatch must fail closed");
 
     assert!(error.contains("changed since this result"));
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
@@ -264,7 +258,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
         .workspace
         .open_as_root(view.clone(), view_type);
 
-    let error = cross_probe_trace_to_design(&mut app, "V(x1.out)")
+    let error = cross_probe(&mut app, "V(x1.out)")
         .expect_err("a trace read inside X1 has no conductor on the root sheet");
     assert_eq!(error, "Descend to /x1 to cross-probe it.");
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
@@ -288,7 +282,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
         .workspace
         .descend_into("X1".to_owned(), view, view_type);
 
-    let error = cross_probe_trace_to_design(&mut app, "V(out)")
+    let error = cross_probe(&mut app, "V(out)")
         .expect_err("a root-scoped trace does not name a conductor inside X1");
     assert_eq!(error, "Ascend to / to cross-probe it.");
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
@@ -319,11 +313,19 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
         .workspace
         .descend_into("amp".to_owned(), view, view_type);
 
-    let net = cross_probe_trace_to_design(&mut app, "V(xamp.out)")
-        .expect("the written scope is this occurrence");
+    let net = cross_probe(&mut app, "V(xamp.out)").expect("the written scope is this occurrence");
 
     assert!(net.eq_ignore_ascii_case("out"), "{net}");
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
+}
+
+/// Cross-probe `signal` as the inspector's button does, then answer what the
+/// gesture raised, as the shell does once the inspector returns: Design
+/// opens there.
+pub(crate) fn cross_probe(app: &mut RSpiceApp, signal: &str) -> Result<String, String> {
+    let outcome = cross_probe_trace_to_design(&mut app.state.results_parts(), signal);
+    app.after_contribution();
+    outcome
 }
 
 /// A finished 1 ms transient on the Waves sheet, the way James had it open:

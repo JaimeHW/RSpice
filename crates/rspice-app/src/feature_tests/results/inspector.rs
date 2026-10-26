@@ -1,9 +1,9 @@
 //! The result inspector's cross-probe into Design, and its route to the
 //! run's details, observed through a whole application.
 
-use crate::workbench::docks::inspector::results::cross_probe_trace_to_design;
 use crate::workbench::docks::inspector::results::tests::{
-    INSPECTOR_DEFAULT_WIDTH, result_app_with_current_out_map, run_inspector, waves_details_app,
+    INSPECTOR_DEFAULT_WIDTH, cross_probe, result_app_with_current_out_map, run_inspector,
+    waves_details_app,
 };
 use crate::workbench::docks::inspector::run_details;
 use crate::workbench::state::Workspace;
@@ -88,8 +88,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
         .expect("selected historical trace"),
     );
 
-    let error = cross_probe_trace_to_design(&mut app, "V(out)")
-        .expect_err("historical result must fail closed");
+    let error = cross_probe(&mut app, "V(out)").expect_err("historical result must fail closed");
 
     assert!(error.contains("different project revision"));
     assert_eq!(app.state.workbench.workspace, Workspace::Results);

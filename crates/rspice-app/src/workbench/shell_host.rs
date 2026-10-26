@@ -193,14 +193,13 @@ impl Host for RSpiceApp {
                 }
             }
             Point::Inspector(InspectorScope::AnyWorkspace) => {
-                crate::workbench::docks::inspector::results::results(ui, app);
+                features::show_inspector::<ResultsFeature>(app, ui);
                 app.after_contribution();
             }
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
                 use crate::workbench::docks::inspector::code_workspace::code_workspace_inspector;
                 use crate::workbench::docks::inspector::project::project;
-                use crate::workbench::docks::inspector::results::results;
                 use crate::workbench::docks::inspector::verify::verify;
                 use crate::workbench::docks::inspector::{
                     design, models, simulation, stimulus, symbol, veriloga,
@@ -228,7 +227,7 @@ impl Host for RSpiceApp {
                     Workspace::Simulate => simulation::simulate(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Results => {
-                        results(ui, app);
+                        features::show_inspector::<ResultsFeature>(app, ui);
                         app.after_contribution();
                     }
                     Workspace::Verify => verify(ui, app),

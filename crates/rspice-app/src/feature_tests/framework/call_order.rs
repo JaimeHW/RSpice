@@ -528,12 +528,14 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
     (
         "inspector beside any workspace",
         &["Point::Inspector(InspectorScope::AnyWorkspace) => {\
-             crate::workbench::docks::inspector::results::results(ui, app);\
+             features::show_inspector::<ResultsFeature>(app, ui);\
              app.after_contribution(); }"],
     ),
     (
         "workspace inspector",
-        &["Workspace::Results => { results(ui, app); app.after_contribution(); }"],
+        &["Workspace::Results => {\
+             features::show_inspector::<ResultsFeature>(app, ui);\
+             app.after_contribution(); }"],
     ),
 ];
 

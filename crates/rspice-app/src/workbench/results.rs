@@ -21,7 +21,8 @@ use crate::workbench::documents::result_document::{
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureNavigator, FeatureRegistry, Reads, RoutedCommand, Session,
+    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, Reads,
+    RoutedCommand, Session,
 };
 use crate::workbench::framework::requests::{
     ClipboardText, ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
@@ -47,6 +48,10 @@ impl Feature for ResultsFeature {
         registry.navigator(FeatureNavigator {
             show: show_data_browser,
         });
+        registry.inspector(FeatureInspector {
+            show: show_inspector,
+            commit_pending_edit: keep_axis_drafts,
+        });
     }
 }
 
@@ -56,6 +61,18 @@ fn show_data_browser(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
     let (mut parts, run_details) = cx.state.parts_and_run_details(cx.model, cx.wb, cx.platform);
     crate::workbench::docks::navigator::results::results(ui, &mut parts, run_details);
 }
+
+/// The results inspector, over the same parts and Run details…, which it
+/// opens on the run it names.
+fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
+    let (mut parts, run_details) = cx.state.parts_and_run_details(cx.model, cx.wb, cx.platform);
+    crate::workbench::docks::inspector::results::results(ui, &mut parts, run_details);
+}
+
+/// Nothing to commit when another section shows in the inspector's place:
+/// an axis interval commits as its field loses focus, and one half typed
+/// stays a draft for when the section shows again.
+fn keep_axis_drafts(_: &mut Cx<'_, ResultsFeature>, _: &egui::Context) {}
 
 /// The workbench commands the results workspace answers for itself: Copy
 /// takes the cursor readout, the zooms and Fit move the active sheet's

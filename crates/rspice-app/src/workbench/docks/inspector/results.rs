@@ -9,9 +9,14 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::ResultViewer;
+use crate::workbench::app_state::Model;
+use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::analysis_evidence_failure;
 use crate::workbench::documents::result_document::manifest::active_manifest;
-use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::framework::feature::Execute;
+use crate::workbench::framework::requests::PromptAfterCommands;
 use rspice_results_ui::session::PaneAxis;
 
 use super::super::super::commands::vocabulary::Command;
@@ -21,44 +26,35 @@ use super::super::super::design_system::{
 use super::super::super::state::Workspace;
 use super::{compact_readout, result_authority, run_details};
 
-pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
-    let selected_trace = app
-        .state
+pub(in crate::workbench) fn results(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_details: &mut Option<Box<RunDetailsDialogState>>,
+) {
+    let selected_trace = state
         .results
-        .results
-        .valid_selected_trace(&app.state.model.simulation)
+        .valid_selected_trace(&state.model.simulation)
         .cloned();
-    let selected_artifact = app
-        .state
-        .results
+    let selected_artifact = state
         .results
         .session
         .selected_result_artifact
         .clone()
-        .filter(|key| {
-            key.resolve(&app.state.model.simulation.retained.runs)
-                .is_some()
-        });
+        .filter(|key| key.resolve(&state.model.simulation.retained.runs).is_some());
 
     // What is being read comes before where it came from: a reader adjusting
     // a pane needs its axes and bindings first, and the dataset provenance
     // below is unchanged by any of that.
-    active_result_pane(ui, app, selected_trace.as_ref());
+    active_result_pane(ui, state, selected_trace.as_ref());
     if let Some(selected) = selected_trace.as_ref() {
-        selected_result_trace(ui, app, selected);
+        selected_result_trace(ui, state, selected);
     } else if let Some(selected) = selected_artifact.as_ref() {
-        selected_result_artifact(ui, app, selected);
+        selected_result_artifact(ui, state.results_reads(), selected);
     }
 
     // The workspace's memoized projection: taking it fresh re-digested the run.
-    let manifest = active_manifest(&mut app.state.results_parts());
-    let details = match app
-        .state
-        .model
-        .simulation
-        .active_run()
-        .zip(manifest.as_deref())
-    {
+    let manifest = active_manifest(state);
+    let details = match state.model.simulation.active_run().zip(manifest.as_deref()) {
         Some((run, manifest)) => result_authority::result_run(ui, run, &manifest.model),
         None => {
             muted_inspector_copy(ui, "No run selected.");
@@ -66,28 +62,21 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     if let Some(run_id) = details {
-        run_details::open(
-            &mut app.state.results.run_details,
-            &app.state.model.simulation,
-            run_id,
-        );
+        run_details::open(run_details, &state.model.simulation, run_id);
     }
 
     // The active viewer owns its engineering readout (measurements, margins,
     // harmonics, eye metrics, distribution statistics, and so on). It follows
     // the trace and pane controls, matching the upgraded mockup's hierarchy
     // without creating a second result-data owner here.
-    if app.state.results.results.session.viewer != ResultViewer::Manifest {
-        crate::workbench::documents::result_document::right_panel(
-            ui,
-            &mut app.state.results_parts(),
-        );
+    if state.results.session.viewer != ResultViewer::Manifest {
+        crate::workbench::documents::result_document::right_panel(ui, state);
     }
 
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
-    if let Some(index) = app.state.model.simulation.view.active_analysis_idx
+    if let Some(index) = state.model.simulation.view.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
         result_authority::result_convergence(ui, analysis);
@@ -97,18 +86,17 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn selected_result_artifact(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: ResultsReads<'_>,
     selected: &rspice_results::result_presentation::ResultArtifactPresentationKey,
 ) {
-    let Some((run_index, _, analysis)) =
-        selected.resolve(&app.state.model.simulation.retained.runs)
+    let Some((run_index, _, analysis)) = selected.resolve(&state.model.simulation.retained.runs)
     else {
         return;
     };
-    let run = &app.state.model.simulation.retained.runs[run_index];
+    let run = &state.model.simulation.retained.runs[run_index];
     // Memoized per dataset generation: the validator walks every retained
     // sample. Intact data is the normal state and says nothing.
-    let corrupted = analysis_evidence_failure(app.state.results_reads(), run.dataset_id, analysis);
+    let corrupted = analysis_evidence_failure(state, run.dataset_id, analysis);
     let analysis_label = analysis.label.clone();
 
     section_header(ui, "Selected result", None);
@@ -121,10 +109,10 @@ fn selected_result_artifact(
 
 fn selected_result_trace(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     selected: &rspice_results_ui::selection::SelectedResultTrace,
 ) {
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
     let Some((analysis_index, waveform_index, analysis, waveform)) = selected.resolve(run) else {
@@ -176,7 +164,7 @@ fn selected_result_trace(
         t.color.traces[waveform_index % t.color.traces.len()],
     );
     if trace_colour_row(ui, &mut color) {
-        set_selected_trace_color(&mut app.state, selected, color);
+        set_selected_trace_color(&mut state.model.simulation, selected, color);
     }
 
     section_block_gap(ui);
@@ -190,7 +178,7 @@ fn selected_result_trace(
             .clicked()
         {
             crate::workbench::documents::result_document::toggle_visibility(
-                &mut app.state.results_parts(),
+                state,
                 analysis_index,
                 waveform_index,
             );
@@ -198,18 +186,18 @@ fn selected_result_trace(
 
         if is_schematic_cross_probe_candidate(selected.source_name()) {
             let signal = selected.source_name().to_owned();
-            let unavailable = schematic_cross_probe_unavailability(&app.state, selected, &signal);
+            let unavailable = schematic_cross_probe_unavailability(state.model, selected, &signal);
             let mut response =
                 ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
             if let Some(reason) = unavailable {
                 response = response.on_hover_text(reason);
             }
             if response.clicked() {
-                match cross_probe_trace_to_design(app, &signal) {
-                    Ok(net) => app
-                        .state
-                        .prompt(format!("Selected conductor {net} from {signal}.")),
-                    Err(message) => app.state.prompt(message),
+                match cross_probe_trace_to_design(state, &signal) {
+                    Ok(net) => state.workbench.outbox.push(PromptAfterCommands(format!(
+                        "Selected conductor {net} from {signal}."
+                    ))),
+                    Err(message) => state.prompt(message),
                 }
             }
         }
@@ -218,17 +206,17 @@ fn selected_result_trace(
 
 fn active_result_pane(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     selected: Option<&rspice_results_ui::selection::SelectedResultTrace>,
 ) {
-    let viewer = app.state.results.results.session.viewer;
+    let viewer = state.results.session.viewer;
     // A pure evidence table — OP, specs, samples, events, the manifest — has
     // no drawn pane at all. Reporting one would have the inspector state a
     // view, a fit and a limit mask for a sheet that has none of them.
     if !crate::workbench::documents::result_document::viewer_draws_a_pane(viewer) {
         return;
     }
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
     let analysis_index = selected
@@ -237,7 +225,7 @@ fn active_result_pane(
                 .resolve(run)
                 .map(|(analysis_index, _, _, _)| analysis_index)
         })
-        .or(app.state.model.simulation.view.active_analysis_idx)
+        .or(state.model.simulation.view.active_analysis_idx)
         .unwrap_or(0);
     let Some(analysis) = run.analyses.get(analysis_index) else {
         return;
@@ -246,10 +234,7 @@ fn active_result_pane(
     // The unit names the pane in a unit-scoped stack; the viewer name is
     // already on the sheet tab above.
     let tokens = Tokens::get(ui.ctx());
-    let facts = crate::workbench::documents::result_document::active_pane_facts(
-        &tokens,
-        &mut app.state.results_parts(),
-    );
+    let facts = crate::workbench::documents::result_document::active_pane_facts(&tokens, state);
     section_header(
         ui,
         "Active pane",
@@ -265,8 +250,8 @@ fn active_result_pane(
     // Explicit limits, each with its own fit. Comparing two runs on identical
     // axes, or holding a decade while a parameter sweeps, cannot be done by
     // dragging; the fields show the viewport, so no row restates it.
-    axis_limit_row(ui, app, &facts, PaneAxis::X, "X range");
-    axis_limit_row(ui, app, &facts, PaneAxis::Y, "Y range");
+    axis_limit_row(ui, state, &facts, PaneAxis::X, "X range");
+    axis_limit_row(ui, state, &facts, PaneAxis::Y, "Y range");
 }
 
 /// An explicit interval for one axis of the active pane, or automatic fit.
@@ -276,7 +261,7 @@ fn active_result_pane(
 /// so their curves can be compared at all, needs the numbers themselves.
 fn axis_limit_row(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     facts: &crate::workbench::documents::result_document::ActivePaneFacts,
     axis: PaneAxis,
     label: &str,
@@ -288,9 +273,9 @@ fn axis_limit_row(
         active_axis_is_pinned, active_axis_range, set_active_axis_range,
     };
 
-    let viewer = app.state.results.results.session.viewer;
-    let current = active_axis_range(app.state.results_reads(), facts, axis);
-    let pinned = active_axis_is_pinned(app.state.results_reads(), axis);
+    let viewer = state.results.session.viewer;
+    let current = active_axis_range(state.results_reads(), facts, axis);
+    let pinned = active_axis_is_pinned(state.results_reads(), axis);
     // The unit the field writes after its numbers, and strips before reading
     // them back. Only the waveform stack knows its axes' units; every other
     // sheet's field states bare engineering numbers, as it always has.
@@ -303,7 +288,7 @@ fn axis_limit_row(
     let committed = current
         .map(|range| format_axis_range(range, unit))
         .unwrap_or_default();
-    let mut text = match app.state.results.results.session.axis_limit_draft.as_ref() {
+    let mut text = match state.results.session.axis_limit_draft.as_ref() {
         Some((draft_viewer, draft_axis, text))
             if *draft_viewer == viewer && *draft_axis == axis =>
         {
@@ -328,7 +313,7 @@ fn axis_limit_row(
     );
 
     if edit.changed() {
-        app.state.results.results.session.axis_limit_draft = Some((viewer, axis, text.clone()));
+        state.results.session.axis_limit_draft = Some((viewer, axis, text.clone()));
     }
     // Commit on Enter or on leaving the field, never per keystroke: "1.2" is
     // a legal prefix of "1.2m" and three orders of magnitude away from it.
@@ -338,19 +323,19 @@ fn axis_limit_row(
             // The field shows the interval to six significant digits. Read
             // back unedited, that would pin an autofitting axis, or nudge a
             // pinned one, by the rounding alone.
-            app.state.results.results.session.axis_limit_draft = None;
+            state.results.session.axis_limit_draft = None;
         } else if text.trim().is_empty() {
-            set_active_axis_range(&tokens, &mut app.state.results_parts(), axis, None);
-            app.state.results.results.session.axis_limit_draft = None;
+            set_active_axis_range(&tokens, state, axis, None);
+            state.results.session.axis_limit_draft = None;
         } else if let Some(range) = parse_axis_range(&text, unit) {
-            set_active_axis_range(&tokens, &mut app.state.results_parts(), axis, Some(range));
-            app.state.results.results.session.axis_limit_draft = None;
+            set_active_axis_range(&tokens, state, axis, Some(range));
+            state.results.session.axis_limit_draft = None;
         }
     }
     if reset.clicked() {
         let tokens = Tokens::get(ui.ctx());
-        set_active_axis_range(&tokens, &mut app.state.results_parts(), axis, None);
-        app.state.results.results.session.axis_limit_draft = None;
+        set_active_axis_range(&tokens, state, axis, None);
+        state.results.session.axis_limit_draft = None;
     }
 }
 
@@ -440,21 +425,16 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
 }
 
 fn set_selected_trace_color(
-    state: &mut AppState,
+    simulation: &mut crate::state::SimulationState,
     selected: &rspice_results_ui::selection::SelectedResultTrace,
     color: Color32,
 ) {
     let color = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
-    let Some(run_index) = state.model.simulation.view.active_run_idx else {
+    let Some(run_index) = simulation.view.active_run_idx else {
         return;
     };
-    let Some((analysis_index, waveform_index)) = state
-        .model
-        .simulation
-        .retained
-        .runs
-        .get(run_index)
-        .and_then(|run| {
+    let Some((analysis_index, waveform_index)) =
+        simulation.retained.runs.get(run_index).and_then(|run| {
             selected
                 .resolve(run)
                 .map(|(analysis_index, waveform_index, _, _)| (analysis_index, waveform_index))
@@ -462,9 +442,7 @@ fn set_selected_trace_color(
     else {
         return;
     };
-    if let Some(waveform) = state
-        .model
-        .simulation
+    if let Some(waveform) = simulation
         .retained
         .runs
         .get_mut(run_index)
@@ -476,10 +454,8 @@ fn set_selected_trace_color(
     } else {
         return;
     }
-    if state.model.simulation.view.active_analysis_idx == Some(analysis_index)
-        && let Some(waveform) = state
-            .model
-            .simulation
+    if simulation.view.active_analysis_idx == Some(analysis_index)
+        && let Some(waveform) = simulation
             .view
             .waveforms
             .iter_mut()
@@ -494,7 +470,7 @@ fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
 }
 
 fn schematic_cross_probe_unavailability(
-    state: &AppState,
+    model: &Model,
     selected: &rspice_results_ui::selection::SelectedResultTrace,
     signal: &str,
 ) -> Option<String> {
@@ -504,15 +480,15 @@ fn schematic_cross_probe_unavailability(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
         ));
     };
-    let map = &state.model.simulation.source.cross_probe;
-    let topology = state.model.schematic.topology_version();
-    if !map.is_current_for(&state.model.workspace.content.active_view, topology) {
+    let map = &model.simulation.source.cross_probe;
+    let topology = model.schematic.topology_version();
+    if !map.is_current_for(&model.workspace.content.active_view, topology) {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
                 .to_owned(),
         );
     }
-    let Some(run) = state.model.simulation.active_run() else {
+    let Some(run) = model.simulation.active_run() else {
         return Some("The selected result dataset is no longer retained.".to_owned());
     };
     if run.dataset_id != selected.dataset_id() || selected.resolve(run).is_none() {
@@ -524,13 +500,13 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     };
-    if receipt.project_revision() != state.model.workspace.content.project.revision() {
+    if receipt.project_revision() != model.workspace.content.project.revision() {
         return Some(
             "The selected result was produced from a different project revision; run again before cross-probing it."
                 .to_owned(),
         );
     }
-    let here = state.model.workspace.content.occurrence_path(); // only that occurrence answers for a trace
+    let here = model.workspace.content.occurrence_path(); // only that occurrence answers for a trace
     // A trace is scoped by written instance names, `xamp` for a cell drawn
     // `amp`, so its scope is compared with the drawn occurrence by those names
     // and named to the reader as the occurrence the run drew.
@@ -549,38 +525,36 @@ fn schematic_cross_probe_unavailability(
         Ok(probe) => probe.leaf,
         Err(_) => net.to_owned(),
     };
-    let mut nets = map
-        .on_sheet(state.model.active_sheet_id())
-        .net_to_points
-        .iter();
+    let mut nets = map.on_sheet(model.active_sheet_id()).net_to_points.iter();
     let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(&leaf) && !points.is_empty());
     (!known).then(|| format!("The open sheet has no conductor named {leaf}."))
 }
 
 /// Resolve against the current schematic map before navigation. A stale or
 /// derived signal therefore leaves the engineer in Results with an exact
-/// explanation. On success, the Design surface opens; a remembered split
-/// remains active and projects Design + the same canonical Results document.
+/// explanation. On success, the Design surface opens once the inspector
+/// returns; a remembered split remains active and projects Design + the same
+/// canonical Results document.
 pub(crate) fn cross_probe_trace_to_design(
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     signal: &str,
 ) -> Result<String, String> {
-    let selected = app
-        .state
+    let selected = state
         .results
-        .results
-        .valid_selected_trace(&app.state.model.simulation)
+        .valid_selected_trace(&state.model.simulation)
         .ok_or_else(|| "No result trace is selected.".to_owned())?;
-    if let Some(reason) = schematic_cross_probe_unavailability(&app.state, selected, signal) {
+    if let Some(reason) = schematic_cross_probe_unavailability(state.model, selected, signal) {
         return Err(reason);
     }
-    let net = app
-        .state
+    let net = state
         .model
         .select_signal_conductor(signal)
         .map_err(|error| error.message(signal))?;
-    if app.state.workbench.workspace != Workspace::Design {
-        Command::OpenWorkspace(Workspace::Design).execute(app);
+    if state.workbench.workspace != Workspace::Design {
+        state
+            .workbench
+            .outbox
+            .push(Execute(Command::OpenWorkspace(Workspace::Design).key()));
     }
     Ok(net)
 }
