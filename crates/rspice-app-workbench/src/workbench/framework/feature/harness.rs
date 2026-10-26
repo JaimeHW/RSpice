@@ -214,8 +214,10 @@ pub struct FeatureHarness<F: Feature> {
     pub own: F::Handles,
     pub model: Model,
     pub wb: F::Session,
-    pub(crate) platform: PlatformState,
-    pub(crate) runs: RunsState,
+    /// What the platform services keep: whether a project is open among it.
+    pub platform: PlatformState,
+    /// What the run tier keeps: the run preflight among it.
+    pub runs: RunsState,
     pub(crate) run_controller: SimulationController,
     /// Every command the feature reads as registered.
     pub commands: &'static Registry,
