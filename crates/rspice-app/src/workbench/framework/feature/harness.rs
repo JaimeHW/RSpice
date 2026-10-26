@@ -37,7 +37,7 @@ use super::{
     CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry,
     LowerHandles, Peers, Reads,
 };
-use crate::workbench::framework::ports::{DisplayedDatasetView, ResultsPort};
+use crate::workbench::framework::ports::{CapturedViewport, DisplayedDatasetView, ResultsPort};
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
@@ -160,6 +160,11 @@ impl ResultsPort for NullPorts {
         _model: &Model,
         _workbench: &crate::workbench::state::WorkbenchSession,
     ) -> Option<DisplayedDatasetView> {
+        None
+    }
+
+    /// A fresh session pins no window on any sheet.
+    fn captured_viewport(&self, _analysis: AnalysisPresentationKey) -> Option<CapturedViewport> {
         None
     }
 }

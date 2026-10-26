@@ -134,7 +134,7 @@ fn capture_results_quick_view_presentation(
     ResultsQuickViewPresentation::try_new(
         reads.results.result_viewer(),
         overlay,
-        crate::workbench::documents::result_document::run_specifications(reads.model),
+        reads.model.active_run_specifications(),
         QuickFftSettings {
             selected_source: fft.selected_source.clone(),
             normalization: fft.normalization,

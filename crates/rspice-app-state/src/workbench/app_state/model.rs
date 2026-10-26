@@ -13,6 +13,7 @@ mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
+mod run_specifications;
 mod schematic_sync;
 mod session_start;
 mod sheet_catalog;

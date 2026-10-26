@@ -70,10 +70,9 @@ fn capture_quick_view_overlay(
             CursorInterpolation::Linear => RetainedCursorInterpolation::Linear,
             CursorInterpolation::NearestAcceptedPoint => RetainedCursorInterpolation::Nearest,
         },
-        crate::workbench::documents::result_document::captured_viewport(
-            reads.results,
-            analysis_key,
-        )
-        .map(|(x, y)| RetainedQuickViewport { x, y }),
+        reads
+            .results
+            .captured_viewport(analysis_key)
+            .map(|(x, y)| RetainedQuickViewport { x, y }),
     )
 }

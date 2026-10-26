@@ -250,4 +250,11 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
             primary_analysis_index: displayed.primary_analysis_index,
         })
     }
+
+    fn captured_viewport(
+        &self,
+        analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    ) -> Option<crate::workbench::framework::ports::CapturedViewport> {
+        crate::workbench::documents::result_document::captured_viewport(self, analysis)
+    }
 }

@@ -34,6 +34,11 @@ pub struct DisplayedDatasetView {
     pub primary_analysis_index: Option<usize>,
 }
 
+/// The two halves of a pinned view: the abscissa window, then the ordinate
+/// window. Either may be absent — the reader can pin one axis and leave the
+/// other to the page — which is why the pair is not one `Option`.
+pub(crate) type CapturedViewport = (Option<(f64, f64)>, Option<(f64, f64)>);
+
 /// What the results workspace shows that another feature reads.
 pub trait ResultsPort {
     /// The viewer the results workspace shows a dataset in.
@@ -88,4 +93,9 @@ pub trait ResultsPort {
         model: &Model,
         workbench: &WorkbenchSession,
     ) -> Option<DisplayedDatasetView>;
+
+    /// The window the reader has pinned on the active sheet, as a capture of
+    /// `analysis` takes it: the abscissa, and the ordinate where the sheet
+    /// hands one over. `None` when neither is pinned.
+    fn captured_viewport(&self, analysis: AnalysisPresentationKey) -> Option<CapturedViewport>;
 }
