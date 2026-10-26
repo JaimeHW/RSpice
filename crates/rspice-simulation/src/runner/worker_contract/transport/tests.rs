@@ -9,12 +9,13 @@ fn stb_worker_preserves_circuit_modes_and_rejects_corrupt_root_buffers() {
         CircuitPoleEvidence, CircuitPoleFailure, StbAnalyzer, StbConfig,
     };
     let mut retained = StbAnalyzer::new(StbConfig::new())
-        .analyze(
+        .analyze_with_abort(
             &[1.0, 10.0],
             &[
                 rspice_core::Complex64::new(2.0, -1.0),
                 rspice_core::Complex64::new(0.2, -0.1),
             ],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let spectrum = PoleZeroAnalyzer::new(Matrix::from_dense(vec![vec![-2.0]]), Matrix::identity(1))
@@ -60,13 +61,14 @@ fn stb_worker_preserves_circuit_modes_and_rejects_corrupt_root_buffers() {
 fn stb_worker_retains_zero_samples_and_rejects_invalid_availability() {
     use rspice_core::analysis::stb::{StbAnalyzer, StbConfig};
     let mut evidence = StbAnalyzer::new(StbConfig::new())
-        .analyze(
+        .analyze_with_abort(
             &[1.0, 100.0, 10000.0],
             &[
                 rspice_core::Complex64::new(0.0, 2.0),
                 rspice_core::Complex64::new(0.0, 0.0),
                 rspice_core::Complex64::new(0.0, -2.0),
             ],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     evidence

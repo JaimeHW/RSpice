@@ -792,7 +792,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             .map(|&v| rspice_core::Complex64::new(v, -v))
             .collect();
         let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
-            .analyze(&shape.axis_values(), &gains)
+            .analyze_with_abort(&shape.axis_values(), &gains, &NoAbort)
             .unwrap();
         let measured = AnalysisResultDocument::from_stability(analysis_id(analysis), &response)
             .unwrap()

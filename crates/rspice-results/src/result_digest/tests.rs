@@ -40,7 +40,11 @@ fn pole_stability_proofs_change_digests_and_legacy_bytes_stay_unchanged() {
         let mut core_certificate = core_certificate;
         core_certificate.asymptotically_stable = proof;
         let mut response = StbAnalyzer::new(Default::default())
-            .analyze(&[1.0], &[rspice_core::Complex64::new(0.5, 0.0)])
+            .analyze_with_abort(
+                &[1.0],
+                &[rspice_core::Complex64::new(0.5, 0.0)],
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         response.circuit_poles = CircuitPoleEvidence::Available {
             spectrum: PoleSpectrum {
@@ -65,7 +69,11 @@ fn stb_circuit_modes_and_unavailability_participate_in_the_digest() {
         CircuitPoleEvidence, CircuitPoleFailure, StbAnalyzer, StbConfig,
     };
     let response = StbAnalyzer::new(StbConfig::new())
-        .analyze(&[1.0], &[rspice_core::Complex64::new(0.5, 0.0)])
+        .analyze_with_abort(
+            &[1.0],
+            &[rspice_core::Complex64::new(0.5, 0.0)],
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     let digest = |evidence| {
         let mut response = response.clone();

@@ -631,13 +631,14 @@ fn stb_summary_preserves_retained_decibels_without_double_conversion() {
 #[test]
 fn stb_segment_selection_never_pairs_across_an_undefined_sample() {
     let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
-        .analyze(
+        .analyze_with_abort(
             &[1.0, 10.0, 100.0],
             &[
                 rspice_core::Complex64::new(2.0, 0.0),
                 rspice_core::Complex64::new(0.0, 0.0),
                 rspice_core::Complex64::new(0.0, -2.0),
             ],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let waveforms =

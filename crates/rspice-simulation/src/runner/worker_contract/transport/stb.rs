@@ -220,7 +220,11 @@ mod tests {
     #[test]
     fn stb_worker_refuses_aliasing_circuit_poles_with_loop_samples() {
         let mut response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
-            .analyze(&[1.0, 2.0], &[rspice_core::Complex64::new(0.5, 0.0); 2])
+            .analyze_with_abort(
+                &[1.0, 2.0],
+                &[rspice_core::Complex64::new(0.5, 0.0); 2],
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         response.circuit_poles = CircuitPoleEvidence::Available {
             spectrum: PoleSpectrum {

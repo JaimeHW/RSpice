@@ -803,15 +803,6 @@ impl StbAnalyzer {
         Self { config }
     }
 
-    /// Analyze loop gain data and extract stability margins
-    pub fn analyze(
-        &self,
-        frequencies: &[Value],
-        loop_gains: &[Complex64],
-    ) -> Result<StbResult, StbAnalysisError> {
-        self.analyze_with_abort(frequencies, loop_gains, &NoAbort)
-    }
-
     /// Analyze loop-gain data with cooperative cancellation during every
     /// linear scan of the potentially large sweep.
     pub fn analyze_with_abort(

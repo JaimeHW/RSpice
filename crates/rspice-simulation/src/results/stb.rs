@@ -65,7 +65,11 @@ mod tests {
     #[test]
     fn stb_studies_keep_defined_raw_zero_but_no_phase_at_zero() {
         let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
-            .analyze(&[1.0], &[rspice_core::Complex64::new(0.0, 0.0)])
+            .analyze_with_abort(
+                &[1.0],
+                &[rspice_core::Complex64::new(0.0, 0.0)],
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         let result = SimulationResult::Stb {
             response: Arc::new(response),

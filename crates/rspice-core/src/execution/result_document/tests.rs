@@ -385,13 +385,14 @@ fn distortion_result() -> DistortionAnalysisResult {
 
 fn stability_result() -> StbResult {
     let mut result = crate::analysis::stb::StbAnalyzer::new(Default::default())
-        .analyze(
+        .analyze_with_abort(
             &[1.0e3, 1.0e6, 2.0e6],
             &[
                 Complex64::new(10.0, 0.0),
                 Complex64::new(0.0, -1.0),
                 Complex64::new(-0.25, 0.0),
             ],
+            &NoAbort,
         )
         .unwrap();
     result.nyquist_points.truncate(1);

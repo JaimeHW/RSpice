@@ -121,7 +121,11 @@ fn retained_nyquist_samples_qualify_margins_when_the_complex_series_is_omitted()
 #[test]
 fn zero_gain_cannot_publish_a_finite_decibel_magnitude_or_phase() {
     let result = crate::analysis::stb::StbAnalyzer::new(Default::default())
-        .analyze(&[1.0, 2.0, 3.0], &[Complex64::new(0.0, 0.0); 3])
+        .analyze_with_abort(
+            &[1.0, 2.0, 3.0],
+            &[Complex64::new(0.0, 0.0); 3],
+            &crate::abort_signal::NoAbort,
+        )
         .unwrap();
     let valid = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)
         .unwrap()
@@ -148,9 +152,10 @@ fn stability_curve_validation_observes_cancellation() {
         .map(|index| index as f64)
         .collect();
     let result = crate::analysis::stb::StbAnalyzer::new(Default::default())
-        .analyze(
+        .analyze_with_abort(
             &frequencies,
             &vec![Complex64::new(0.5, 0.0); frequencies.len()],
+            &crate::abort_signal::NoAbort,
         )
         .unwrap();
     let document = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)
@@ -170,13 +175,14 @@ fn stability_curve_validation_observes_cancellation() {
 #[test]
 fn stability_curve_validation_preserves_finite_components_across_binary64_scales() {
     let result = crate::analysis::stb::StbAnalyzer::new(Default::default())
-        .analyze(
+        .analyze_with_abort(
             &[1.0, 2.0, 3.0],
             &[
                 Complex64::new(f64::from_bits(1), 0.0),
                 Complex64::new(f64::MAX, f64::MAX),
                 Complex64::new(0.0, 0.0),
             ],
+            &crate::abort_signal::NoAbort,
         )
         .unwrap();
     let document = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)

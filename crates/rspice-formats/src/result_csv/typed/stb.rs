@@ -186,7 +186,11 @@ mod tests {
     #[test]
     fn stb_csv_keeps_measured_zero_separate_from_undefined_quantities() {
         let mut response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
-            .analyze(&[10.0], &[rspice_core::Complex64::new(0.0, 0.0)])
+            .analyze_with_abort(
+                &[10.0],
+                &[rspice_core::Complex64::new(0.0, 0.0)],
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         response.margins.dc_loop_gain = Some(rspice_core::Complex64::new(0.0, 0.0));
         response
@@ -207,7 +211,11 @@ mod tests {
     fn stb_csv_preserves_natural_modes_and_typed_missing_evidence() {
         use rspice_core::analysis::pole_zero::{PoleSpectrum, SpectrumCertificate};
         let mut response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
-            .analyze(&[10.0], &[rspice_core::Complex64::new(1.0, 0.0)])
+            .analyze_with_abort(
+                &[10.0],
+                &[rspice_core::Complex64::new(1.0, 0.0)],
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         assert!(prepare(&response).contents.contains("status,not_computed"));
         let mut certificate = SpectrumCertificate::exact(3, 2).unwrap();

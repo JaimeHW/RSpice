@@ -1,6 +1,6 @@
 use rspice_core::analysis::stb::{StbAnalyzer, StbConfig, StbResult, StbSweepType};
 use rspice_core::execution::{AnalysisInstanceId, AnalysisKind, AnalysisResultDocument};
-use rspice_core::{Complex64, Engine, Netlist};
+use rspice_core::{Complex64, Engine, Netlist, NoAbort};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -54,7 +54,7 @@ fn roundtrip(result: &StbResult) -> AnalysisResultDocument {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn sampled_critical_points_have_real_zero_margins_even_on_a_single_point_grid() {
     let result = StbAnalyzer::new(StbConfig::default())
-        .analyze(&[100.0], &[Complex64::new(-1.0, 0.0)])
+        .analyze_with_abort(&[100.0], &[Complex64::new(-1.0, 0.0)], &NoAbort)
         .unwrap();
     assert_eq!(result.margins.num_crossovers, 1);
     for margin in [result.margins.gain_margin, result.margins.phase_margin] {
@@ -80,7 +80,7 @@ fn a_finite_band_cannot_establish_infinite_margins_or_stability() {
             }
         });
         let result = StbAnalyzer::new(StbConfig::default())
-            .analyze(&frequencies, &samples)
+            .analyze_with_abort(&frequencies, &samples, &NoAbort)
             .unwrap();
         assert_eq!(result.margins.gain_margin, None);
         assert_eq!(result.margins.phase_margin, None);
@@ -97,9 +97,10 @@ fn interpolated_crossover_frequencies_stay_inside_extreme_finite_endpoints() {
         [f64::from_bits(f64::MAX.to_bits() - 1), f64::MAX],
     ] {
         let result = StbAnalyzer::new(StbConfig::default())
-            .analyze(
+            .analyze_with_abort(
                 &frequencies,
                 &[Complex64::new(0.0, -2.0), Complex64::new(0.0, -0.5)],
+                &NoAbort,
             )
             .unwrap();
         let margin = result.margins.phase_margin.unwrap();
@@ -113,7 +114,7 @@ fn interpolated_crossover_frequencies_stay_inside_extreme_finite_endpoints() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn legacy_margin_sentinels_are_migrated_and_current_pairs_are_validated() {
     let result = StbAnalyzer::new(StbConfig::default())
-        .analyze(&[1.0, 2.0], &[Complex64::new(0.5, 0.0); 2])
+        .analyze_with_abort(&[1.0, 2.0], &[Complex64::new(0.5, 0.0); 2], &NoAbort)
         .unwrap();
     let original: serde_json::Value =
         serde_json::from_str(&roundtrip(&result).to_json().unwrap()).unwrap();

@@ -372,7 +372,9 @@ use rspice_core::analysis::harmonic_balance::{
 // B3SOI's shared `SoiCharge`, `SoiBias` and `SoiGeometry` bring it to 5,281.
 // B3SOI's shared model-card core, `SoiModelCore`, brings it to 5,282.
 // B3SOI's shared size-dependent core, `SoiSizedCore`, brings it to 5,283.
-const MAX_PUBLIC_ITEMS: usize = 5281;
+// Retiring the PSTB eigenvalue tolerance and multiplier count brings it to 5,281.
+// Deleting the core items only the Python bindings used brings it to 5,255.
+const MAX_PUBLIC_ITEMS: usize = 5255;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
@@ -493,7 +495,8 @@ const MAX_PUBLIC_ITEMS: usize = 5281;
 // and `prime_operating_point_from_solution` add five: the circuit store's
 // operating-point startup (`rspice-core` circuit/nonlinear.rs) drives them, as
 // it drives B3SOIDD's and B3SOIPD's. The census is 1,605, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1605;
+// Deleting the probe-spelling check only the Python bindings reached brings it to 1,604.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1604;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

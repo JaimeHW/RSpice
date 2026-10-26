@@ -25,13 +25,14 @@ fn roundtrip(result: &StbResult) -> serde_json::Value {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn retained_stb_rejects_fabricated_ordinates_and_mismatched_evidence() {
     let result = StbAnalyzer::new(StbConfig::new())
-        .analyze(
+        .analyze_with_abort(
             &[1.0, 100.0, 10000.0],
             &[
                 Complex64::new(0.0, 2.0),
                 Complex64::new(0.0, 0.0),
                 Complex64::new(0.0, -2.0),
             ],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     for corrupt in 0..5 {
@@ -124,7 +125,7 @@ fn zero_endpoints_use_complex_interpolation_without_bridging_undefined_phase() {
         ],
     ] {
         let result = StbAnalyzer::new(StbConfig::new())
-            .analyze(&[1.0, 100.0, 10_000.0], &gains)
+            .analyze_with_abort(&[1.0, 100.0, 10_000.0], &gains, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(result.margins.num_crossovers, 2);
         let phase = result.margins.phase_margin.unwrap();
@@ -149,7 +150,11 @@ fn zero_endpoints_use_complex_interpolation_without_bridging_undefined_phase() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn finite_components_keep_log_magnitude_when_linear_magnitude_overflows() {
     let result = StbAnalyzer::new(StbConfig::new())
-        .analyze(&[1.0], &[Complex64::new(f64::MAX, f64::MAX)])
+        .analyze_with_abort(
+            &[1.0],
+            &[Complex64::new(f64::MAX, f64::MAX)],
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     let point = &result.bode_points[0];
     assert_eq!(point.magnitude, None);
@@ -166,7 +171,11 @@ fn finite_components_keep_log_magnitude_when_linear_magnitude_overflows() {
 fn retained_validation_preserves_subnormal_gain_and_tiny_crossover_scales() {
     let analyzer = StbAnalyzer::new(StbConfig::new());
     let mut small_gain = analyzer
-        .analyze(&[1.0], &[Complex64::new(1e-310, 0.0)])
+        .analyze_with_abort(
+            &[1.0],
+            &[Complex64::new(1e-310, 0.0)],
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     roundtrip(&small_gain);
     small_gain.bode_points[0].magnitude = Some(0.0);
@@ -179,9 +188,10 @@ fn retained_validation_preserves_subnormal_gain_and_tiny_crossover_scales() {
             .is_err()
     );
     let mut tiny_frequency = analyzer
-        .analyze(
+        .analyze_with_abort(
             &[1e-200, 1e-198],
             &[Complex64::new(0.0, -2.0), Complex64::new(0.0, -0.5)],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     roundtrip(&tiny_frequency);

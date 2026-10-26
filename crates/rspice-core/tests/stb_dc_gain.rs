@@ -101,9 +101,10 @@ fn zero_and_undefined_dc_gain_preserve_valid_ac_sweeps() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn positive_frequency_samples_do_not_claim_a_dc_measurement() {
     let result = StbAnalyzer::new(StbConfig::default())
-        .analyze(
+        .analyze_with_abort(
             &[1e5, 1e6],
             &[Complex64::new(10.0, -1.0), Complex64::new(1.0, -1.0)],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     assert_eq!(result.margins.dc_loop_gain, None);
