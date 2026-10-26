@@ -39,6 +39,7 @@ rspice-app-state.workspace = true
 rspice-app-services.workspace = true
 rspice-app-runs.workspace = true
 rspice-app-workbench.workspace = true
+rspice-app-sheets.workspace = true
 rspice-vocabulary.workspace = true
 rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-schematic-editor.workspace = true

@@ -333,6 +333,11 @@ fn app_workbench_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src")
 }
 
+/// The application's sheets feature, named the same way.
+fn app_sheets_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src")
+}
+
 fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
@@ -513,6 +518,7 @@ fn path_grammar_is_owned_by_one_module() {
         ("", app_services_src_dir()),
         ("", app_runs_src_dir()),
         ("", app_workbench_src_dir()),
+        ("", app_sheets_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
     ] {
@@ -645,6 +651,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
         app_services_src_dir(),
         app_runs_src_dir(),
         app_workbench_src_dir(),
+        app_sheets_src_dir(),
     ] {
         for (path, file) in production_files(&root) {
             let code = Source::read(&file).code;
@@ -1043,9 +1050,17 @@ fn every_command_has_a_user_route() {
     let mut registry_code = None;
     let mut routing_code = None;
     let mut routes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    // A feature's commands compile in its own crate once it has one, at the
+    // same path under that crate's `src`.
     let features = FEATURE_COMMAND_FILES
         .iter()
-        .map(|file| Source::read(&root.join(file)).production)
+        .map(|file| {
+            let path = [root.join(file), app_sheets_src_dir().join(file)]
+                .into_iter()
+                .find(|path| path.is_file())
+                .unwrap_or_else(|| root.join(file));
+            Source::read(&path).production
+        })
         .collect::<Vec<_>>();
     let ids = command_ids(
         &Source::read(&workbench_root.join(COMMAND_IDS_FILE)).production,
@@ -1375,6 +1390,7 @@ fn persisted_policies_reach_a_projection() {
         ("", app_services_src_dir()),
         ("", app_runs_src_dir()),
         ("", app_workbench_src_dir()),
+        ("", app_sheets_src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),

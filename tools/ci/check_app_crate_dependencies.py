@@ -83,6 +83,13 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-design",
         "rspice-results", "rspice-hardcopy",
     },
+    # The sheets feature: the persisted model, the platform services, the
+    # workbench framework it registers with, and the painting crates the sheet
+    # strip, the inspector's Sheet section and the sheet dialogs are drawn with.
+    "rspice-app-sheets": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-workbench", "rspice-ui-kit",
+        "rspice-schematic-editor",
+    },
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -91,7 +98,14 @@ ALLOWED: dict[str, set[str]] = {
 }
 HEADLESS = set(ALLOWED) - {
     "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
-    "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+    "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
+}
+# The application's features, each a crate of its own once it is extracted. A
+# feature reaches no other feature, and nothing above the workbench framework.
+FEATURES = {
+    "rspice-app-project", "rspice-app-design", "rspice-app-simulate", "rspice-app-results",
+    "rspice-app-models", "rspice-app-code", "rspice-app-sheets", "rspice-app-hardcopy",
+    "rspice-app-settings", "rspice-app-cloud",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {
@@ -123,10 +137,10 @@ def violations(
             issues.append(f"{name} has forbidden application dependency {dep}")
     for name, closure in sorted(closures.items()):
         if name == "rspice-worker":
-            for dep in sorted(closure & {
+            for dep in sorted(closure & ({
                 "rspice-app", "rspice-app-state", "rspice-app-services", "rspice-app-runs",
                 "rspice-app-workbench",
-            }):
+            } | FEATURES)):
                 issues.append(f"rspice-worker reaches application package {dep}")
         if name == "rspice-app-state":
             for dep in sorted(closure & ({"rspice-app", "rspice-worker"} | GUI_PACKAGES)):
@@ -143,6 +157,11 @@ def violations(
             # egui paints the chrome; the window it runs in is the shell's.
             for dep in sorted(closure & ({"rspice-app", "rspice-worker"} | (GUI_PACKAGES - {"rfd"}))):
                 issues.append(f"rspice-app-workbench reaches application or host package {dep}")
+        if name in FEATURES:
+            # A feature paints with egui inside the shell's window.
+            forbidden = (FEATURES - {name}) | {"rspice-app", "rspice-worker"} | (GUI_PACKAGES - {"rfd"})
+            for dep in sorted(closure & forbidden):
+                issues.append(f"{name} reaches feature, application or host package {dep}")
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")
@@ -159,7 +178,7 @@ def violations(
                 "rspice-app", "rspice-app-state", "rspice-app-services", "rspice-app-runs",
                 "rspice-app-workbench", "rspice-project", "rspice-project-contract", "rspice-worker",
                 "rspice-simulation",
-            } | GUI_PACKAGES
+            } | FEATURES | GUI_PACKAGES
             for dep in sorted(closure & forbidden):
                 issues.append(f"{name} reaches application service or host package {dep}")
         if name == "rspice-ui-kit":

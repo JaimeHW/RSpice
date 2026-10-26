@@ -60,7 +60,7 @@ pub(crate) mod browser {
 pub(crate) mod chrome {
     pub use rspice_app_workbench::workbench::chrome::*;
     pub(in crate::workbench) mod presence;
-    pub(crate) mod sheet_strip;
+    pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
     pub(crate) mod activity_rail {
         pub use rspice_app_workbench::workbench::chrome::activity_rail::*;
         pub(in crate::workbench) mod results;
@@ -78,7 +78,7 @@ pub(crate) mod chrome {
         pub use rspice_app_workbench::workbench::chrome::status_bar::*;
         pub(crate) mod design;
         pub(crate) mod results;
-        pub(crate) mod sheets;
+        pub(crate) use rspice_app_sheets::workbench::chrome::status_bar::sheets;
         pub(in crate::workbench) mod shell;
     }
     pub(crate) mod title_bar {
@@ -213,7 +213,7 @@ mod session {
     pub(crate) mod project_transactions;
 }
 pub(crate) mod settings;
-pub(crate) mod sheets;
+pub(crate) use rspice_app_sheets::workbench::sheets;
 mod shell_host;
 pub(crate) mod shortcuts;
 pub(crate) mod slots;

@@ -49,10 +49,10 @@ SHEET_SOURCE_SCOPES = (
     "crates/rspice-design-model/src/sheet_authoring.rs",
     "crates/rspice-design-model/src/sheet_package.rs",
     "crates/rspice-app/src/schematic/view/drawing_sheet.rs",
-    "crates/rspice-app/src/workbench/app/drawing_sheet_edit.rs",
-    "crates/rspice-app/src/workbench/app/drawing_sheet_edit",
-    "crates/rspice-app/src/workbench/docks/inspector/design/sheet.rs",
-    "crates/rspice-app/src/workbench/docks/inspector/design/sheet",
+    "crates/rspice-app-sheets/src/workbench/app/drawing_sheet_edit.rs",
+    "crates/rspice-app-sheets/src/workbench/app/drawing_sheet_edit",
+    "crates/rspice-app-sheets/src/workbench/docks/inspector/design/sheet.rs",
+    "crates/rspice-app-sheets/src/workbench/docks/inspector/design/sheet",
     "crates/rspice-app/src/feature_tests/sheets/sheet_edit.rs",
     "crates/rspice-app/src/feature_tests/sheets/sheet_inspector.rs",
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy.rs",
@@ -67,6 +67,7 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-core/Cargo.toml",
     "crates/rspice-core/tests/save_directives.rs",
     "crates/rspice-app/Cargo.toml",
+    "crates/rspice-app-sheets/Cargo.toml",
     "crates/rspice-app-state/Cargo.toml",
     "crates/rspice-schematic-editor/Cargo.toml",
     "crates/rspice-hardcopy-contract/Cargo.toml",
@@ -382,6 +383,10 @@ def command_gates(
                 "--locked",
                 "-p",
                 "rspice-app",
+                # The sheet draft's and the custom sizes' own cases are the
+                # sheets feature's.
+                "-p",
+                "rspice-app-sheets",
                 # The personal drawing-sheet preferences and the grid labels
                 # printed on the sheet are model logic.
                 "-p",

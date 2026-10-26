@@ -18,7 +18,7 @@ defining file; or a use of a public free item name of 4+ characters that one
 slice alone defines, where the file imports it, globs it in, or qualifies it
 by a crate path. A token found both ways counts once. Macro bodies and trait
 calls are opaque, so a count is a floor that moves only with the source. A
-slice already moved into a lower crate (LOWER_CRATES) is no longer measured,
+slice already moved into a crate of its own (LOWER_CRATES) is no longer measured,
 but its definitions and module names still count as that slice's.
 
 app_slice_ceilings.json holds every non-zero measurement, and each must equal
@@ -41,12 +41,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "crates" / "rspice-app" / "src"
 CEILINGS = Path(__file__).resolve().with_name("app_slice_ceilings.json")
-# Slice -> the src directory of the lower crate its files were moved into.
+# Slice -> the src directory of the crate its files were moved into: a lower
+# crate, or a feature's own.
 LOWER_CRATES = {
     "model": ROOT / "crates" / "rspice-app-state" / "src",
     "services": ROOT / "crates" / "rspice-app-services" / "src",
     "run": ROOT / "crates" / "rspice-app-runs" / "src",
     "framework": ROOT / "crates" / "rspice-app-workbench" / "src",
+    "sheets": ROOT / "crates" / "rspice-app-sheets" / "src",
 }
 
 LOWER = ("model", "services", "run", "framework")

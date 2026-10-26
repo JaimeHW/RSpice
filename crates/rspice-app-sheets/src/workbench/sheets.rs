@@ -7,7 +7,7 @@
 //! the overflow review show, are read through the
 //! [`DesignPort`](crate::workbench::framework::feature::DesignPort).
 
-pub(crate) mod commands;
+pub mod commands;
 
 use egui::Context;
 

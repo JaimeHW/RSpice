@@ -4,8 +4,8 @@
 //! Personal presets publish through `UserPreferences`. Dialog drafts never
 //! mutate either authority until their explicit primary action succeeds.
 
-pub(crate) mod model;
-pub(crate) mod render;
+pub mod model;
+pub mod render;
 
 use std::collections::BTreeMap;
 

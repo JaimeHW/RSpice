@@ -11,7 +11,8 @@ pub(in crate::workbench) mod file;
 mod hierarchy_net_highlight;
 pub(in crate::workbench) mod property_edit;
 pub(in crate::workbench) mod reveal;
-pub(crate) mod sheets;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 mod symbol;

@@ -81,7 +81,8 @@ pub(in crate::workbench) mod actions;
 mod browser_history;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
-pub(crate) mod drawing_sheet_edit;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
 #[cfg(target_arch = "wasm32")]
@@ -105,8 +106,9 @@ pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;
 /// margins.
 pub(in crate::workbench) use dialogs::design_management::widgets::concept_banner;
 
-/// Sheet navigation and sheet lifecycle, named where the sheet strip, the
-/// command dispatcher and the design manager can all reach the one owner.
+/// Sheet navigation and sheet lifecycle, where the shell's feature tests
+/// reach them.
+#[cfg(test)]
 pub(crate) use actions::sheets;
 
 pub(crate) use dialogs::configuration_sets::{
@@ -118,16 +120,6 @@ pub(crate) use dialogs::design_management::{
 };
 
 pub(crate) use dialogs::rule_setup::open_rule_setup;
-
-pub(crate) use dialogs::drawing_sheet_defaults::{
-    DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
-};
-pub(crate) use dialogs::drawing_sheet_presets::{
-    DrawingSheetPresetDialogsState, open_custom_sheet_size_library,
-};
-pub(crate) use dialogs::drawing_sheet_support::{
-    DrawingSheetSupportState, open_sheet_format_manager,
-};
 
 pub(crate) use dialogs::connectivity_manager::{
     ConnectivityManagerDialogState, open_connectivity_manager,
@@ -204,7 +196,6 @@ pub(crate) use schematic::named_net::{
 };
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
-pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
 pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;

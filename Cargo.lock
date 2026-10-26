@@ -5197,6 +5197,7 @@ dependencies = [
  "ropey",
  "rspice-app-runs",
  "rspice-app-services",
+ "rspice-app-sheets",
  "rspice-app-state",
  "rspice-app-workbench",
  "rspice-automation-protocol",
@@ -5314,6 +5315,21 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-app-sheets"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui_extras",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "rspice-design-model",
+ "rspice-schematic-editor",
+ "rspice-ui-kit",
+ "uuid",
 ]
 
 [[package]]

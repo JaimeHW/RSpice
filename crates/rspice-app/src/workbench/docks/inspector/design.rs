@@ -607,8 +607,10 @@ fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
 mod inline_instance;
 use inline_instance::*;
 
-// The sheet inspector, shown with nothing selected, lives in `design/sheet.rs`.
-pub(crate) mod sheet;
+// The sheet inspector, shown with nothing selected, is the sheets feature's;
+// the shell's feature tests reach it here.
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::docks::inspector::design::sheet;
 
 // =============================================================================
 // Multi-selection inspector

@@ -18,7 +18,7 @@ mod project;
 mod results;
 pub(crate) use rspice_app_runs::workbench::slots::runs;
 mod settings;
-mod sheets;
+use rspice_app_sheets::workbench::slots::sheets;
 mod shell;
 mod simulate;
 

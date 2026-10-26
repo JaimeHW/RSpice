@@ -61,8 +61,9 @@ const LAYERS: &[(&str, u32)] = &[
     // `rspice-app-services`, and the run tier (the controller, its prepared
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
-    // compiles as `rspice-app-workbench`, inside `workbench`, where the
-    // interior order below ranks it.
+    // compiles as `rspice-app-workbench` and the sheets feature as
+    // `rspice-app-sheets`, inside `workbench`, where the interior order below
+    // ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -884,13 +885,15 @@ fn workbench_dir() -> PathBuf {
     src_dir().join("workbench")
 }
 
-/// The workbench's framework modules compile as `rspice-app-workbench`, at the
-/// paths they had here, and keep their rank in the same order: its
-/// `src/workbench` is scanned beside this crate's.
-fn workbench_roots() -> [PathBuf; 2] {
+/// The workbench's framework modules compile as `rspice-app-workbench`, and
+/// the sheets feature as `rspice-app-sheets`, at the paths they had here, and
+/// keep their rank in the same order: each crate's `src/workbench` is scanned
+/// beside this crate's.
+fn workbench_roots() -> [PathBuf; 3] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src/workbench"),
     ]
 }
 
@@ -1885,6 +1888,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-services/src",
     "rspice-app-runs/src",
     "rspice-app-workbench/src",
+    "rspice-app-sheets/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",

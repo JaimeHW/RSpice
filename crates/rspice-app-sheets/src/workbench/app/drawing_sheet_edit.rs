@@ -7,7 +7,7 @@
 //! a time. Print and Export own output media and never write here.
 
 mod draft;
-pub(crate) mod transaction;
+pub mod transaction;
 
 pub(crate) use draft::{
     current_size_choice_label, format_sheet_length, parse_sheet_length, sheet_unit_suffix,

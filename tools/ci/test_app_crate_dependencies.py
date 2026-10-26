@@ -195,6 +195,26 @@ class DependencyPolicyTests(unittest.TestCase):
                 "rspice-worker reaches application package rspice-app-workbench",
             ],
         )
+        self.assertEqual(
+            violations(
+                {"rspice-app-sheets": {"rspice-app-workbench", "rspice-app"}},
+                {
+                    "rspice-app-sheets": {
+                        "rspice-app-sheets", "rspice-app-workbench", "rspice-app-hardcopy", "egui",
+                        "rfd", "winit",
+                    },
+                    "rspice-results-ui": {"rspice-results-ui", "rspice-app-sheets"},
+                    "rspice-worker": {"rspice-worker", "rspice-app-sheets"},
+                },
+            ),
+            [
+                "rspice-app-sheets has forbidden application dependency rspice-app",
+                "rspice-app-sheets reaches feature, application or host package rspice-app-hardcopy",
+                "rspice-app-sheets reaches feature, application or host package winit",
+                "rspice-results-ui reaches application service or host package rspice-app-sheets",
+                "rspice-worker reaches application package rspice-app-sheets",
+            ],
+        )
 
         issues = violations(
             {

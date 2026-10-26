@@ -1,0 +1,28 @@
+[package]
+name = "rspice-app-sheets"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's sheets feature: drawing sheets, title blocks, sheet sizes and the sheets of one drawing"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-workbench.workspace = true
+rspice-ui-kit.workspace = true
+rspice-schematic-editor.workspace = true
+rspice-design-model.workspace = true
+uuid = { version = "1", features = ["v4"] }
+egui = { version = "0.35.0", default-features = false }
+egui_extras = { version = "0.35.0", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1", features = ["v4", "js"] }
+
+[lints]
+workspace = true

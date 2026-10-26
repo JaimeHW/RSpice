@@ -13,14 +13,20 @@ pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
 pub(in crate::workbench) mod connectivity_manager;
 pub(in crate::workbench) mod create_model_bound_symbol;
-pub(crate) mod delete_sheet;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::dialogs::delete_sheet;
 pub(in crate::workbench) mod design_management;
 pub(in crate::workbench) mod design_review_comments;
-pub(crate) mod drawing_sheet_defaults;
-pub(crate) mod drawing_sheet_overflow;
-pub(crate) mod drawing_sheet_presets;
-pub(crate) mod drawing_sheet_preview;
-pub(crate) mod drawing_sheet_support;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_overflow;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview;
+#[cfg(test)]
+pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support;
 pub(in crate::workbench) mod engineering_table;
 pub(in crate::workbench) mod find_replace;
 pub(in crate::workbench) mod grid_snap_routing;
