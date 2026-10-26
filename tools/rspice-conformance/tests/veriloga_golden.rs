@@ -262,7 +262,14 @@ fn every_builtin_evaluates_finitely_at_its_probe_points() {
             }
         };
 
-        for (index, point) in harness.probe_points(PROBE_POINTS).into_iter().enumerate() {
+        let points = match harness.settled_probe_points(PROBE_POINTS) {
+            Ok(points) => points,
+            Err(error) => {
+                failures.push(format!("{model_name}: probe points: {error}"));
+                continue;
+            }
+        };
+        for (index, point) in points.into_iter().enumerate() {
             match harness.evaluate(&point) {
                 Ok(record) => {
                     let non_finite = record
@@ -326,7 +333,10 @@ fn every_builtin_writes_only_inside_its_stamp_pattern() {
             }
         };
         let mut rhs_outside = Vec::new();
-        for (index, point) in harness.probe_points(PROBE_POINTS).into_iter().enumerate() {
+        let Ok(points) = harness.settled_probe_points(PROBE_POINTS) else {
+            continue;
+        };
+        for (index, point) in points.into_iter().enumerate() {
             let Ok(record) = harness.evaluate(&point) else {
                 continue;
             };
@@ -393,7 +403,10 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
         let mut tight = 0usize;
         let mut strict = 0usize;
 
-        for (index, point) in harness.probe_points(PROBE_POINTS).into_iter().enumerate() {
+        let Ok(points) = harness.settled_probe_points(PROBE_POINTS) else {
+            continue;
+        };
+        for (index, point) in points.into_iter().enumerate() {
             let audit = match harness.jacobian_audit(&point) {
                 Ok(audit) => audit,
                 Err(error) => {
@@ -482,7 +495,10 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
         let mut stamped_anything = false;
         let mut stored_charge = 0.0_f64;
 
-        for (index, point) in harness.probe_points(PROBE_POINTS).into_iter().enumerate() {
+        let Ok(points) = harness.settled_probe_points(PROBE_POINTS) else {
+            continue;
+        };
+        for (index, point) in points.into_iter().enumerate() {
             match harness.stored_charges(&point) {
                 Ok(charges) => {
                     stored_charge = charges
@@ -650,10 +666,13 @@ fn gmin_stepping_reaches_the_devices_that_read_it() {
         let Ok(mut harness) = GoldenHarness::new(model_name, &[]) else {
             continue;
         };
+        let Ok(points) = harness.settled_probe_points(PROBE_POINTS) else {
+            continue;
+        };
         evaluated.push(*model_name);
 
         let mut response = 0.0_f64;
-        for point in harness.probe_points(PROBE_POINTS) {
+        for point in points {
             let mut target = GeneratedSimulationParameters::new();
             target.set_gmin(GMIN);
             let mut start = GeneratedSimulationParameters::new();

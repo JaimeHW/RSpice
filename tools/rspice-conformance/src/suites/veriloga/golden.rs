@@ -164,6 +164,14 @@ const CHARGE_RECOVERY_SCALES: [Value; 2] = [1.0e10, 1.0e12];
 /// charge, above which that row's charge is treated as unrecoverable.
 const CHARGE_LINEARITY_TOLERANCE: Value = 1.0e-7;
 
+/// Newton iterations allowed for a probe point's private states.
+const SETTLE_MAX_ITERATIONS: usize = 50;
+
+/// A Newton step on the private states, relative to the state it moves, below
+/// which they count as solved; the absolute term covers a state that is zero.
+const SETTLE_RELATIVE_STEP: Value = 1.0e-12;
+const SETTLE_ABSOLUTE_STEP: Value = 1.0e-24;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GoldenError {
     UnknownModel(String),
@@ -514,6 +522,19 @@ pub struct GoldenHarness {
     rhs: Vec<Value>,
     node_count: usize,
     branch_count: usize,
+    /// Private states whose own equation determines them: the current of a
+    /// probed flow source, whose row is `i - sum(f) = 0`. The descriptor counts
+    /// private states among the internal nodes, which follow the terminals.
+    /// Their values follow from the electrical unknowns, so a probe point
+    /// solves them instead of drawing them, and the audits hold them rather
+    /// than perturb them.
+    private_states: Vec<usize>,
+    /// Private states that carry the current of a switched branch on its
+    /// potential arm. Their row is the branch's voltage equation, which does
+    /// not contain them: like the branch unknowns they were before they became
+    /// private states, their value is set by the circuit around the device, so
+    /// they are drawn and perturbed as branch currents.
+    branch_states: Vec<usize>,
 }
 
 impl GoldenHarness {
@@ -543,6 +564,19 @@ impl GoldenHarness {
             return Err(GoldenError::NoUnknowns {
                 model_name: model_name.to_string(),
             });
+        }
+        let states: Vec<usize> =
+            builtins::descriptor(model_name).map_or_else(Vec::new, |descriptor| {
+                descriptor
+                    .internal_state_nodes
+                    .iter()
+                    .map(|&internal| descriptor.terminals.len() + internal)
+                    .collect()
+            });
+        if let Some(&outside) = states.iter().find(|&&index| index >= node_count) {
+            return Err(setup_error(format!(
+                "private state at unknown {outside} lies outside the {node_count} nodes"
+            )));
         }
 
         // Rows 0..node_count are the ungrounded nodes; branch unknowns follow,
@@ -576,14 +610,27 @@ impl GoldenHarness {
         // the relation being differentiated has identical initialization rules.
         instance.set_analysis_step(true, false);
 
-        Ok(Self {
+        let mut harness = Self {
             model_name,
             instance,
             matrix,
             rhs: vec![0.0; size],
             node_count,
             branch_count,
-        })
+            private_states: Vec::new(),
+            branch_states: Vec::new(),
+        };
+        if !states.is_empty() {
+            // A state's own row contains it when it balances a flow source,
+            // `i - sum(f)`, and not when it carries the current of a switched
+            // branch on its potential arm, whose row is the branch voltage. The
+            // arm is the one equilibrium selects.
+            let (jacobian, _) = harness.stamp_dense(&vec![0.0; size])?;
+            (harness.private_states, harness.branch_states) = states
+                .into_iter()
+                .partition(|&state| jacobian[state * size + state] != 0.0);
+        }
+        Ok(harness)
     }
 
     pub fn model_name(&self) -> &'static str {
@@ -606,6 +653,13 @@ impl GoldenHarness {
     ///
     /// Seeded by the model name so points are stable across runs and machines,
     /// and so adding a model cannot shift the points another model draws.
+    ///
+    /// A private state takes no draw and is left at zero: its value follows
+    /// from the electrical unknowns, which [`Self::settled_probe_points`]
+    /// solves for. A switched branch's current is drawn as the branch unknown
+    /// it was before it became a private state. Together these leave the
+    /// electrical unknowns with the values they had before the model carried
+    /// private states.
     pub fn probe_points(&self, count: usize) -> Vec<Vec<Value>> {
         let size = self.size();
         let mut points = Vec::with_capacity(count + 1);
@@ -618,8 +672,12 @@ impl GoldenHarness {
         for _ in 1..count.max(1) {
             let mut point = Vec::with_capacity(size);
             for index in 0..size {
+                if self.private_states.contains(&index) {
+                    point.push(0.0);
+                    continue;
+                }
                 let unit = next_unit(&mut state);
-                if index < self.node_count {
+                if index < self.node_count && !self.branch_states.contains(&index) {
                     point.push(PROBE_NODE_MIN + unit * (PROBE_NODE_MAX - PROBE_NODE_MIN));
                 } else {
                     // Branch unknowns are currents; span both directions across
@@ -630,6 +688,66 @@ impl GoldenHarness {
             points.push(point);
         }
         points
+    }
+
+    /// [`Self::probe_points`] with every private state at the value its own
+    /// equation gives it there.
+    ///
+    /// A drawn value for a state that is really a probed current, say, puts
+    /// the model at a point no circuit can reach: half an ampere through a
+    /// device biased at a few hundred millivolts. Newton on the states' own
+    /// rows, with the electrical unknowns held, puts each where the model's
+    /// equations put it instead.
+    pub fn settled_probe_points(&mut self, count: usize) -> Result<Vec<Vec<Value>>, GoldenError> {
+        let mut points = self.probe_points(count);
+        for point in &mut points {
+            self.settle_private_states(point)?;
+        }
+        Ok(points)
+    }
+
+    fn settle_private_states(&mut self, point: &mut [Value]) -> Result<(), GoldenError> {
+        let states = self.private_states.clone();
+        if states.is_empty() {
+            return Ok(());
+        }
+        let size = self.size();
+        let count = states.len();
+        for _ in 0..SETTLE_MAX_ITERATIONS {
+            let (jacobian, rhs) = self.stamp_dense(point)?;
+            let mut block = vec![0.0; count * count];
+            let mut residual = vec![0.0; count];
+            for (i, &row) in states.iter().enumerate() {
+                residual[i] = (0..size)
+                    .map(|col| jacobian[row * size + col] * point[col])
+                    .sum::<Value>()
+                    - rhs[row];
+                for (j, &col) in states.iter().enumerate() {
+                    block[i * count + j] = jacobian[row * size + col];
+                }
+            }
+            let step = solve_dense(&mut block, residual, count).ok_or_else(|| {
+                GoldenError::Evaluation {
+                    model_name: self.model_name.to_string(),
+                    detail: "the private states' own block of the Jacobian is singular".to_string(),
+                }
+            })?;
+            let mut solved = true;
+            for (&index, delta) in states.iter().zip(step) {
+                point[index] -= delta;
+                solved &=
+                    delta.abs() <= SETTLE_RELATIVE_STEP * point[index].abs() + SETTLE_ABSOLUTE_STEP;
+            }
+            if solved {
+                return Ok(());
+            }
+        }
+        Err(GoldenError::Evaluation {
+            model_name: self.model_name.to_string(),
+            detail: format!(
+                "the private states did not settle in {SETTLE_MAX_ITERATIONS} Newton steps"
+            ),
+        })
     }
 
     /// Stamp once at `unknowns` and return everything observable.
@@ -675,12 +793,28 @@ impl GoldenHarness {
             ladder.push(self.difference_jacobian(unknowns, step)?);
         }
 
-        Ok(audit_against_ladder(
-            self.model_name,
-            self.size(),
-            &stamped,
-            &ladder,
-        ))
+        Ok(self.audit_electrical_columns(stamped, &ladder))
+    }
+
+    /// Hold `stamped` against `ladder` over the electrical columns alone. A
+    /// private state is never perturbed, so its column has no difference to be
+    /// held against and takes no part in the block's scale either.
+    fn audit_electrical_columns(
+        &self,
+        mut stamped: Vec<Value>,
+        ladder: &[DifferenceRung],
+    ) -> StampAudit {
+        let size = self.size();
+        for row in 0..size {
+            for &col in &self.private_states {
+                stamped[row * size + col] = 0.0;
+            }
+        }
+        let mut audit = audit_against_ladder(self.model_name, size, &stamped, ladder);
+        audit
+            .entries
+            .retain(|entry| !self.private_states.contains(&(entry.col as usize)));
+        audit
     }
 
     /// Compare the stamped reactive block against a numerical derivative of the
@@ -739,7 +873,7 @@ impl GoldenHarness {
             ladder.push(self.difference_charges(unknowns, step, fine_scale)?);
         }
 
-        let mut audit = audit_against_ladder(self.model_name, size, &stamped, &ladder);
+        let mut audit = self.audit_electrical_columns(stamped, &ladder);
 
         // A row whose charge could not be recovered has no oracle at all. Its
         // entries are blanked rather than compared, which reports them through
@@ -825,6 +959,9 @@ impl GoldenHarness {
         let mut perturbed = unknowns.to_vec();
 
         for col in 0..size {
+            if self.private_states.contains(&col) {
+                continue;
+            }
             let scale = if col < self.node_count {
                 unknowns[col].abs().max(1.0)
             } else {
@@ -875,6 +1012,9 @@ impl GoldenHarness {
         let mut perturbed = unknowns.to_vec();
 
         for col in 0..size {
+            if self.private_states.contains(&col) {
+                continue;
+            }
             let operand_scale = if col < self.node_count {
                 unknowns[col].abs().max(1.0)
             } else {
@@ -1128,6 +1268,42 @@ fn audit_against_ladder(
 
 fn magnitude_scale(left: Value, right: Value, floor: Value) -> Value {
     left.abs().max(right.abs()).max(floor)
+}
+
+/// `x` with `matrix * x = rhs`, by Gaussian elimination with partial pivoting
+/// over a dense row-major `size * size` matrix; `None` when it is singular.
+fn solve_dense(matrix: &mut [Value], mut rhs: Vec<Value>, size: usize) -> Option<Vec<Value>> {
+    for pivot in 0..size {
+        let best = (pivot..size).max_by(|&left, &right| {
+            matrix[left * size + pivot]
+                .abs()
+                .total_cmp(&matrix[right * size + pivot].abs())
+        })?;
+        let lead = matrix[best * size + pivot];
+        if lead == 0.0 || !lead.is_finite() {
+            return None;
+        }
+        if best != pivot {
+            for col in 0..size {
+                matrix.swap(best * size + col, pivot * size + col);
+            }
+            rhs.swap(best, pivot);
+        }
+        for row in pivot + 1..size {
+            let factor = matrix[row * size + pivot] / lead;
+            for col in pivot..size {
+                matrix[row * size + col] -= factor * matrix[pivot * size + col];
+            }
+            rhs[row] -= factor * rhs[pivot];
+        }
+    }
+    for row in (0..size).rev() {
+        let tail: Value = (row + 1..size)
+            .map(|col| matrix[row * size + col] * rhs[col])
+            .sum();
+        rhs[row] = (rhs[row] - tail) / matrix[row * size + row];
+    }
+    rhs.iter().all(|value| value.is_finite()).then_some(rhs)
 }
 
 /// One step of the ladder: the derivative it estimates, and how much the two
@@ -1474,5 +1650,81 @@ mod tests {
         // real.
         let precise = entry(1.0, 1.000_007, 1.0e-12);
         assert!(precise.relative_error > precise.required_tolerance(1.0e-6));
+    }
+
+    /// DIODE_CMC's four probed currents were branch unknowns before they
+    /// became private states, and the points it draws must not have moved.
+    /// The values are its point 1 as captured before that change.
+    #[test]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    fn probe_points_keep_the_draws_they_had_before_private_states() {
+        let harness = GoldenHarness::new("DIODE_CMC", &[]).unwrap();
+        assert!(harness.private_states.is_empty());
+        assert_eq!(harness.branch_states, [6, 7, 8, 9]);
+        let captured = [
+            1.2636193337415502e-1,
+            -1.529240517555175e-1,
+            -4.576902112364065e-1,
+            4.82496879558429e-1,
+            -2.15036597201961e-1,
+            1.7702206126322195e-1,
+            8.235827103139369e-7,
+            -7.738490387561529e-6,
+            1.3699321372351522e-6,
+            -9.511787582260333e-6,
+        ];
+        let point = harness.probe_points(2).remove(1);
+        let bits = |values: &[Value]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bits(&point), bits(&captured));
+    }
+
+    /// Covers whichever compiled-in built-ins carry private states: a settled
+    /// point satisfies every private state's own equation, and the audits
+    /// leave those columns out.
+    #[test]
+    fn private_states_are_solved_and_held_out_of_the_audits() {
+        for model_name in builtins::builtin_names() {
+            let Ok(mut harness) = GoldenHarness::new(model_name, &[]) else {
+                continue;
+            };
+            if harness.private_states.is_empty() {
+                continue;
+            }
+            let states = harness.private_states.clone();
+            let size = harness.size();
+            for point in harness.probe_points(3) {
+                assert!(states.iter().all(|&state| point[state] == 0.0));
+            }
+            let points = harness.settled_probe_points(3).unwrap();
+            for point in &points {
+                let (jacobian, rhs) = harness.stamp_dense(point).unwrap();
+                for &row in &states {
+                    let terms = (0..size).map(|col| jacobian[row * size + col] * point[col]);
+                    let scale = terms.clone().map(Value::abs).sum::<Value>() + rhs[row].abs();
+                    let residual = terms.sum::<Value>() - rhs[row];
+                    assert!(
+                        residual.abs() <= 1.0e-12 * scale + 1.0e-30,
+                        "{model_name}: row {row} left {residual:e} against {scale:e}"
+                    );
+                }
+            }
+            for audit in [
+                harness.jacobian_audit(&points[1]).unwrap(),
+                harness.charge_audit(&points[1]).unwrap(),
+            ] {
+                assert_eq!(audit.entries.len(), size * (size - states.len()));
+                assert!(
+                    audit
+                        .entries
+                        .iter()
+                        .all(|entry| !states.contains(&(entry.col as usize)))
+                );
+            }
+        }
     }
 }

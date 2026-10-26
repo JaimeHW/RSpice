@@ -1073,7 +1073,12 @@ fn run_audit(args: &AuditArgs) -> Result<ExitCode, GoldenError> {
         let mut gaps = 0usize;
         let mut worst = 0.0_f64;
 
-        for (index, point) in harness.probe_points(args.points).into_iter().enumerate() {
+        let points = harness
+            .settled_probe_points(args.points)
+            .map_err(|error| GoldenError {
+                message: error.to_string(),
+            })?;
+        for (index, point) in points.into_iter().enumerate() {
             let audit = match harness.jacobian_audit(&point) {
                 Ok(audit) => audit,
                 Err(error) => {
