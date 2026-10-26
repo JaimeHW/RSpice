@@ -32,6 +32,12 @@ pub(crate) trait Session: 'static {
     fn outbox(&mut self) -> &mut Outbox;
 }
 
+impl Session for crate::workbench::state::workbench_session::WorkbenchSession {
+    fn outbox(&mut self) -> &mut Outbox {
+        &mut self.outbox
+    }
+}
+
 /// One part of the product registered with the workbench.
 pub(crate) trait Feature: Sized + 'static {
     /// What the feature owns, held in its slot of the application state.

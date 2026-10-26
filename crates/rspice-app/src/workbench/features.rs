@@ -16,20 +16,12 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    Cx, Feature, FeatureRegistry, Peers, Reads, Session, ToolbarTool,
+    Cx, Feature, FeatureRegistry, Peers, Reads, ToolbarTool,
 };
-use crate::workbench::framework::requests::Outbox;
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
-use crate::workbench::state::WorkbenchSession;
-
-impl Session for WorkbenchSession {
-    fn outbox(&mut self) -> &mut Outbox {
-        &mut self.outbox
-    }
-}
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application state.
