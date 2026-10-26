@@ -111,7 +111,6 @@ pub use output_symbols::{
     OutputNodeNamespace, OutputOperandKind, canonical_symbol,
     collect_output_node_namespace_with_limits_and_abort, is_current_output_accessor,
     is_current_projection_accessor, is_device_lead_current_accessor, measure_output_dependencies,
-    probe_specification_error,
 };
 pub(crate) use output_symbols::{
     OutputOperand, collect_output_node_namespace_from_elements_with_abort,

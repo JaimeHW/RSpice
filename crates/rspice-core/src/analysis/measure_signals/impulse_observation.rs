@@ -750,13 +750,57 @@ mod tests {
         }
     }
 
+    /// The sampled column of one authored output, resolved the way an output
+    /// card resolves it. A braced or unrecognized spelling is an expression
+    /// and needs the deck's parameter scope.
+    fn finite_samples(
+        netlist: Option<&Netlist>,
+        result: &TransientResult,
+        spec: &str,
+    ) -> Result<Vec<Value>, String> {
+        let trimmed = spec.trim();
+        let braced = trimmed
+            .strip_prefix('{')
+            .and_then(|body| body.strip_suffix('}'));
+        let kind = match braced {
+            Some(body) => OutputOperandKind::Expression {
+                body: body.to_string(),
+            },
+            None => match crate::netlist::parse_save_probe(trimmed) {
+                Some(
+                    signal @ (SaveSignal::Voltage(_)
+                    | SaveSignal::VoltageDiff(_, _)
+                    | SaveSignal::Current(_)
+                    | SaveSignal::DeviceParam { .. }
+                    | SaveSignal::Raw(_)),
+                ) => OutputOperandKind::Probe(signal),
+                _ => OutputOperandKind::Expression {
+                    body: trimmed.to_string(),
+                },
+            },
+        };
+        let no_params = crate::netlist::ParamContext::new();
+        let params = match netlist {
+            Some(netlist) => &netlist.params,
+            None if matches!(kind, OutputOperandKind::Expression { .. }) => {
+                return Err(format!("'{spec}' is an expression and needs a deck"));
+            }
+            None => &no_params,
+        };
+        let signals = transient_signal_map(result);
+        let index = CanonicalMeasureSignalIndex::new(&signals);
+        evaluate_output_operand(trimmed, &kind, &result.time, &index, params, &NoAbort)
+            .map(|column| column.into_parts().2)
+            .map_err(|_| format!("'{spec}' does not resolve against the result"))
+    }
+
     fn spectrum(
         result: &TransientResult,
         spec: &str,
         netlist: Option<&Netlist>,
     ) -> Result<crate::analysis::FourierResult, FourierError> {
-        let finite = evaluate_transient_probe_with_abort(netlist, result, spec, &NoAbort)
-            .map_err(|error| FourierError::from(failure(error.to_string())))?;
+        let finite = finite_samples(netlist, result, spec)
+            .map_err(|error| FourierError::from(failure(error)))?;
         FourierAnalysis::new(FourierConfig::new(1.0).with_harmonics(4))
             .analyze_transient_output_with_abort(netlist, result, spec, &finite, &NoAbort)
     }
@@ -884,8 +928,7 @@ mod tests {
         let windowed = |stop: Value| {
             let mut config = FourierConfig::new(1.0).with_harmonics(4);
             config.window_stop = Some(stop);
-            let finite =
-                evaluate_transient_probe_with_abort(None, &result, "I(X1.V1)", &NoAbort).unwrap();
+            let finite = finite_samples(None, &result, "I(X1.V1)").unwrap();
             FourierAnalysis::new(config)
                 .analyze_transient_output_with_abort(None, &result, "I(X1.V1)", &finite, &NoAbort)
         };
