@@ -15,14 +15,27 @@ use crate::state::{CellViewRef, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 
+/// What the transient viewers' derived data is made from and reported to:
+/// the shared model, what the viewers hold and how the reader set them up,
+/// and the viewers themselves, which take each report.
+pub trait ViewerHost: RunEventSink {
+    /// The shared model.
+    fn model(&self) -> &Model;
+    /// What the transient viewers hold now.
+    fn viewer_reading(&self) -> ViewerReading;
+    /// How the FFT prepares the input it is given over `time`, as the reader
+    /// set it.
+    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions;
+    /// The bit period the reader chose for this result's eye.
+    fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase;
+}
+
 /// The application, as the run tier sees it.
 ///
 /// `Clone` because a campaign prepares every member from a frozen copy of the
 /// whole application before any engine work begins, so a later member never
 /// observes edits made while an earlier one runs.
-pub trait RunHost: RunEventSink + Clone {
-    /// The shared model.
-    fn model(&self) -> &Model;
+pub trait RunHost: ViewerHost + Clone {
     /// The shared model, to change.
     fn model_mut(&mut self) -> &mut Model;
     /// The runs' own slot.
@@ -38,13 +51,6 @@ pub trait RunHost: RunEventSink + Clone {
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt>;
     /// Which netlist document the editor shows.
     fn netlist_shown(&self) -> NetlistShown;
-    /// What the transient viewers hold now.
-    fn viewer_reading(&self) -> ViewerReading;
-    /// How the FFT prepares the input it is given over `time`, as the reader
-    /// set it.
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions;
-    /// The bit period the reader chose for this result's eye.
-    fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase;
     /// A run gate filed findings that stop the run: bring the reader to them.
     fn show_problem_findings(&mut self);
     /// The run gate authorized the retained run set: queue it, and show the

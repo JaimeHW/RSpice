@@ -15,7 +15,7 @@ use rspice_results_ui::fft::{FftInputOptions, FftState};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
-use crate::simulation::{NetlistShown, RunHost, ViewerReading};
+use crate::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{CellViewRef, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::slots::runs::RunsState;
@@ -100,11 +100,34 @@ impl RunEventSink for RunTestHost {
     fn apply_run_event(&mut self, _event: RunEvent) {}
 }
 
-impl RunHost for RunTestHost {
+impl ViewerHost for RunTestHost {
     fn model(&self) -> &Model {
         &self.model
     }
 
+    /// The viewers hold nothing.
+    fn viewer_reading(&self) -> ViewerReading {
+        ViewerReading {
+            eye_has_traces: false,
+            eye_timebase: None,
+            fft_has_data: false,
+            fft_failed: false,
+            fft_source: None,
+        }
+    }
+
+    /// The FFT prepares its input as a new session's does.
+    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
+        FftState::default().input_options_for_waveform(time)
+    }
+
+    /// The reader stated no bit period.
+    fn eye_timebase_for(&self, _owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
+        EyeTimebase::default()
+    }
+}
+
+impl RunHost for RunTestHost {
     fn model_mut(&mut self) -> &mut Model {
         &mut self.model
     }
@@ -140,27 +163,6 @@ impl RunHost for RunTestHost {
             comparison: false,
             owned_source: false,
         }
-    }
-
-    /// The viewers hold nothing.
-    fn viewer_reading(&self) -> ViewerReading {
-        ViewerReading {
-            eye_has_traces: false,
-            eye_timebase: None,
-            fft_has_data: false,
-            fft_failed: false,
-            fft_source: None,
-        }
-    }
-
-    /// The FFT prepares its input as a new session's does.
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        FftState::default().input_options_for_waveform(time)
-    }
-
-    /// The reader stated no bit period.
-    fn eye_timebase_for(&self, _owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
-        EyeTimebase::default()
     }
 
     /// Bringing the reader to the findings is the workbench's.

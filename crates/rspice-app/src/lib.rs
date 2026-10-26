@@ -81,7 +81,9 @@ pub(crate) mod simulation {
     // engine bridge are all reached through their own modules; flattening their
     // types here duplicated the path without shortening any call site.
     pub use controller::SimulationController;
-    pub(crate) use rspice_app_runs::simulation::{NetlistShown, RunHost, ViewerReading};
+    pub(crate) use rspice_app_runs::simulation::{
+        NetlistShown, RunHost, ViewerHost, ViewerReading,
+    };
     #[cfg(test)]
     pub use rspice_simulation::results::SampledWaveform;
 }

@@ -10,7 +10,7 @@ use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 use super::design_checks::CheckScope;
 use super::{AppState, Model, RunsState, SlotFacts};
-use crate::simulation::{NetlistShown, RunHost, ViewerReading};
+use crate::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
 use crate::state::{CellViewRef, SpecializedViewerCacheProvenance};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::state::Workspace;
@@ -32,11 +32,35 @@ impl AppState {
     }
 }
 
-impl RunHost for AppState {
+impl ViewerHost for AppState {
     fn model(&self) -> &Model {
         &self.model
     }
 
+    fn viewer_reading(&self) -> ViewerReading {
+        let analysis = &self.results.analysis;
+        ViewerReading {
+            eye_has_traces: analysis.eye_diagram_state.trace_count() > 0,
+            eye_timebase: analysis.eye_diagram_state.timebase_provenance().cloned(),
+            fft_has_data: analysis.fft_state.has_data(),
+            fft_failed: analysis.fft_state.last_error.is_some(),
+            fft_source: analysis.fft_state.selected_source.clone(),
+        }
+    }
+
+    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
+        self.results
+            .analysis
+            .fft_state
+            .input_options_for_waveform(time)
+    }
+
+    fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
+        self.results.results.eye_timebase_for(owner)
+    }
+}
+
+impl RunHost for AppState {
     fn model_mut(&mut self) -> &mut Model {
         &mut self.model
     }
@@ -73,28 +97,6 @@ impl RunHost for AppState {
             comparison: netlist.active_document == ActiveNetlistDocument::GeneratedDiff,
             owned_source: netlist.active_document == ActiveNetlistDocument::OwnedSource,
         }
-    }
-
-    fn viewer_reading(&self) -> ViewerReading {
-        let analysis = &self.results.analysis;
-        ViewerReading {
-            eye_has_traces: analysis.eye_diagram_state.trace_count() > 0,
-            eye_timebase: analysis.eye_diagram_state.timebase_provenance().cloned(),
-            fft_has_data: analysis.fft_state.has_data(),
-            fft_failed: analysis.fft_state.last_error.is_some(),
-            fft_source: analysis.fft_state.selected_source.clone(),
-        }
-    }
-
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        self.results
-            .analysis
-            .fft_state
-            .input_options_for_waveform(time)
-    }
-
-    fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
-        self.results.results.eye_timebase_for(owner)
     }
 
     fn show_problem_findings(&mut self) {

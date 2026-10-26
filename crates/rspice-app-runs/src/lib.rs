@@ -86,7 +86,7 @@ pub mod simulation {
     pub use config::AnalysisConfig;
     pub use controller::SimulationController;
     pub use rspice_simulation::results::{SampledWaveform, SimulationResult};
-    pub use run_host::{NetlistShown, RunHost, ViewerReading};
+    pub use run_host::{NetlistShown, RunHost, ViewerHost, ViewerReading};
     // Test-only aliases for private modules: execution reaches the bridge and
     // these helpers through their module paths.
     pub use runner::SimulationRunner;

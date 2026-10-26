@@ -4,6 +4,7 @@
 //! viewers after a run does not re-derive the same traces.
 
 use super::*;
+use crate::simulation::ViewerHost;
 use crate::state::{
     ActiveViewer, AnalysisType, RunEvent, SharedWaveformValues, SpecializedViewerCacheProvenance,
 };
@@ -88,7 +89,7 @@ pub struct TransientPostCoordinator {
 impl SimulationController {
     pub fn ensure_transient_viewer_data(
         &mut self,
-        state: &mut impl RunHost,
+        state: &mut impl ViewerHost,
         viewer: ActiveViewer,
     ) -> DerivedViewerLoadState {
         self.sync_transient_post_views(state);
@@ -99,7 +100,7 @@ impl SimulationController {
         }
     }
 
-    pub fn mark_transient_view_ready(&mut self, state: &mut impl RunHost, viewer: ActiveViewer) {
+    pub fn mark_transient_view_ready(&mut self, state: &mut impl ViewerHost, viewer: ActiveViewer) {
         let Some(analysis) = self.active_transient_analysis_key(state.model()) else {
             return;
         };
@@ -129,7 +130,7 @@ impl SimulationController {
         }
     }
 
-    pub fn sync_transient_post_views(&mut self, state: &mut impl RunHost) {
+    pub fn sync_transient_post_views(&mut self, state: &mut impl ViewerHost) {
         let active_analysis = self.active_transient_analysis_key(state.model());
         self.cancel_stale_transient_task(DerivedViewKind::EyeDiagram, active_analysis);
         self.cancel_stale_transient_task(DerivedViewKind::Fft, active_analysis);
@@ -158,7 +159,7 @@ impl SimulationController {
         self.poll_transient_task(state, DerivedViewKind::Fft, active_analysis);
     }
 
-    pub(super) fn invalidate_transient_post_views(&mut self, state: &mut impl RunHost) {
+    pub(super) fn invalidate_transient_post_views(&mut self, state: &mut impl ViewerHost) {
         self.cancel_task_slot(DerivedViewKind::EyeDiagram);
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
@@ -166,7 +167,7 @@ impl SimulationController {
         state.apply_run_event(RunEvent::TransientResultReplaced);
     }
 
-    pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut impl RunHost) {
+    pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut impl ViewerHost) {
         let Some(source) = self.current_transient_waveform_source(state) else {
             return;
         };
@@ -175,7 +176,7 @@ impl SimulationController {
         });
     }
 
-    fn ensure_eye_diagram_data(&mut self, state: &mut impl RunHost) -> DerivedViewerLoadState {
+    fn ensure_eye_diagram_data(&mut self, state: &mut impl ViewerHost) -> DerivedViewerLoadState {
         // The reader's bit period is checked before anything else, including
         // whether an eye is already loaded: an eye folded at the old period
         // is not this eye at a different zoom, it is a different measurement.
@@ -227,7 +228,7 @@ impl SimulationController {
         DerivedViewerLoadState::Loading
     }
 
-    fn ensure_fft_data(&mut self, state: &mut impl RunHost) -> DerivedViewerLoadState {
+    fn ensure_fft_data(&mut self, state: &mut impl ViewerHost) -> DerivedViewerLoadState {
         if state.viewer_reading().fft_has_data {
             self.mark_transient_view_ready(state, ActiveViewer::Fft);
             return DerivedViewerLoadState::Ready;
@@ -284,7 +285,7 @@ impl SimulationController {
 
     pub fn poll_transient_task(
         &mut self,
-        state: &mut impl RunHost,
+        state: &mut impl ViewerHost,
         view: DerivedViewKind,
         active_analysis: Option<SpecializedViewerCacheProvenance>,
     ) {
@@ -442,7 +443,7 @@ impl SimulationController {
 
     fn current_transient_waveform_source(
         &self,
-        state: &impl RunHost,
+        state: &impl ViewerHost,
     ) -> Option<DerivedWaveformSource> {
         let analysis = state.model().simulation.active_analysis()?;
         let analysis_key = self.active_transient_analysis_key(state.model())?;
