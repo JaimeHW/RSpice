@@ -142,7 +142,14 @@ pub fn create_editable_project_copy_and_open(
         )
         .map_err(|error| error.to_string())?;
     app.state.models.model_editor = editor;
-    app.state.select_model_library(&project_library_name);
+    if let Err(refusal) = app
+        .state
+        .model
+        .model_library_manager
+        .select_library(&project_library_name)
+    {
+        app.state.workbench.prompt(refusal);
+    }
     app.state.models.selected_model = Some(project_model_name.clone());
     Ok((project_library_name, project_model_name))
 }
@@ -226,7 +233,14 @@ pub fn open_project_model(
         )
         .map_err(|error| error.to_string())?;
     app.state.models.model_editor = editor;
-    app.state.select_model_library(library_name);
+    if let Err(refusal) = app
+        .state
+        .model
+        .model_library_manager
+        .select_library(library_name)
+    {
+        app.state.workbench.prompt(refusal);
+    }
     app.state.models.selected_model = Some(model_name.to_owned());
     Ok(())
 }
@@ -695,7 +709,14 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     if definition_changed {
         app.invalidate_simulation_preflight();
     }
-    app.state.select_model_library(&draft.library_name);
+    if let Err(refusal) = app
+        .state
+        .model
+        .model_library_manager
+        .select_library(&draft.library_name)
+    {
+        app.state.workbench.prompt(refusal);
+    }
     app.state.models.selected_model = Some(definition.base.name.clone());
     let reopen_result = app.state.models.model_editor.open(
         &app.state.model.model_library_manager,

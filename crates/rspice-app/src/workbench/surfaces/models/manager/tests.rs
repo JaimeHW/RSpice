@@ -651,7 +651,14 @@ fn one_model_project() -> RSpiceApp {
         .model_qualification
         .insert("nch".to_owned(), ModelQualificationState::default());
     app.state.model.model_library_manager.add_library(library);
-    app.state.select_model_library("alpha");
+    if let Err(refusal) = app
+        .state
+        .model
+        .model_library_manager
+        .select_library("alpha")
+    {
+        app.state.workbench.prompt(refusal);
+    }
     app.state.models.selected_model = Some("nch".to_owned());
     app.state.models.models_page = ModelsPage::Models;
 
