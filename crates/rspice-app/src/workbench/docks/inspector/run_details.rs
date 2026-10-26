@@ -17,8 +17,7 @@ use super::super::super::design_system::{
 use super::{engineering_readout, executed_deck, result_authority::forced_lte_acceptances};
 use crate::state::SimulationState;
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
-use crate::workbench::RSpiceApp;
-use crate::workbench::results::commands::ResultsCommand;
+use crate::workbench::app_state::Model;
 
 /// The run Run details… is open on, with its manifest taken once when the
 /// dialog opened: projecting a run digests every sample it retained.
@@ -49,16 +48,29 @@ pub(crate) fn open(
     *run_details = Some(Box::new(RunDetailsDialogState { run_id, manifest }));
 }
 
-/// Draw Run details… while it is open, and act on its two routes once the
-/// borrow of the run it describes is done.
-pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(dialog) = app.state.results.run_details.as_ref() else {
-        return;
+/// The routes out of Run details… the reader took this frame. Each is a
+/// button of the dialog, and taking either closes it.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RunDetailsRoutes {
+    /// Open the producing plan's Analyses page.
+    pub(crate) open_plan: bool,
+    /// Open the deck the engine executed for this run.
+    pub(crate) open_deck: Option<u64>,
+}
+
+/// Draw Run details… while it is open, and return the routes the reader
+/// took, for the caller to follow once the borrow of the run it describes
+/// is done.
+pub(crate) fn show(
+    ctx: &Context,
+    run_details: &mut Option<Box<RunDetailsDialogState>>,
+    model: &Model,
+) -> RunDetailsRoutes {
+    let Some(dialog) = run_details.as_ref() else {
+        return RunDetailsRoutes::default();
     };
     let run_id = dialog.run_id;
-    let Some(run) = app
-        .state
-        .model
+    let Some(run) = model
         .simulation
         .retained
         .runs
@@ -66,13 +78,11 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         .find(|run| run.id == run_id)
     else {
         // The run left the history while its details were open.
-        app.state.results.run_details = None;
-        return;
+        *run_details = None;
+        return RunDetailsRoutes::default();
     };
     let manifest = &dialog.manifest;
-    let executed = app
-        .state
-        .model
+    let executed = model
         .simulation
         .retained
         .executed_decks
@@ -80,21 +90,18 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         .map(crate::state::ExecutedDeck::model_sources);
     // The producing-plan route resolves against the active dataset, so it is
     // offered only for the run that is active.
-    let plan_block = app
-        .state
-        .model
+    let plan_block = model
         .simulation
         .active_run()
         .is_some_and(|active| active.id == run_id)
         .then(|| {
             crate::workbench::state::plan_provenance::producing_plan_block(
-                &app.state.model.simulation,
-                app.state.model.sim_setup.stable_analysis_plan().ok(),
+                &model.simulation,
+                model.sim_setup.stable_analysis_plan().ok(),
             )
         });
     let digits = usize::from(
-        app.state
-            .model
+        model
             .preferences
             .result_presentation_policy()
             .displayed_significant_digits()
@@ -197,13 +204,11 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     let close = matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled);
     if close || open_plan || open_deck.is_some() {
-        app.state.results.run_details = None;
+        *run_details = None;
     }
-    if let Some(run_id) = open_deck {
-        executed_deck::reveal(&mut app.state, run_id);
-    }
-    if open_plan {
-        app.execute_command_key(ResultsCommand::OpenProducingPlan.key());
+    RunDetailsRoutes {
+        open_plan,
+        open_deck,
     }
 }
 

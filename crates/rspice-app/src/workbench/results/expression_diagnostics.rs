@@ -43,7 +43,7 @@ struct ExpressionRow {
 }
 
 /// Show the tool when it is open.
-pub fn show(ctx: &Context, cx: &mut Cx<'_, ResultsFeature>) {
+pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     if !cx.state.expression_diagnostics_dialog {
         return;
     }

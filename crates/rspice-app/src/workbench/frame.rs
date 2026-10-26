@@ -17,6 +17,7 @@ use crate::workbench::results::commands::ResultsCommand;
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
 use super::features;
+use super::framework::dialogs::DialogKey;
 use super::framework::requests::{
     self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox,
 };
@@ -169,7 +170,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // A finding the reader chose to follow. The page that offered it holds
     // the session, not the application root, so the jump happens here.
     crate::workbench::diagnostic_routes::apply_pending(ctx, app);
-    docks::show_run_details(ctx, app);
+    features::render_dialog(app, ctx, DialogKey("results.run_details"));
     app.state.drain_notices(ctx);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is
@@ -218,7 +219,8 @@ fn outbox(app: &mut RSpiceApp) -> &mut Outbox {
 }
 
 /// The requests the result documents and the data browser raise while they
-/// are drawn, answered at [`requests::Drain::BeforeToasts`] in this order.
+/// are drawn, answered at [`requests::Drain::BeforeToasts`] in this order,
+/// with Export dataset… drawn where its request is answered.
 fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
     requests::drain(app, outbox, |app, ExportResultQuantities(keys)| {
         crate::workbench::menu_bar::action_export_result_selection_with_io(
@@ -227,31 +229,15 @@ fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
             &keys,
         );
     });
-    run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
+    // "Export dataset…" asks for a format before it writes; a result
+    // document's own export button arrives here as a request.
+    requests::drain(app, outbox, |app, ExportCsv| {
+        crate::workbench::menu_bar::open_dataset_export_picker(&mut app.state);
+    });
+    features::render_dialog(app, ctx, DialogKey("results.dataset_export"));
     requests::drain(app, outbox, |app, OpenProducingPlan| {
         app.execute_command_key(ResultsCommand::OpenProducingPlan.key());
     });
-}
-
-/// "Export dataset…" asks for a format, then writes the displayed result in
-/// it. A result document's own export button arrives here as a request.
-fn run_dataset_export(
-    ctx: &Context,
-    state: &mut AppState,
-    io: &dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
-) {
-    requests::drain(
-        state,
-        |state| &mut state.workbench.outbox,
-        |state, ExportCsv| crate::workbench::menu_bar::open_dataset_export_picker(state),
-    );
-    if crate::workbench::menu_bar::show_dataset_export_picker(
-        ctx,
-        &mut state.results.dataset_export,
-        &mut state.model.preferences,
-    ) {
-        crate::workbench::menu_bar::action_export_csv_with_io(&mut state.results_parts(), io);
-    }
 }
 
 /// Announce each run the moment it stops running, and each campaign when it

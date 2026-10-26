@@ -358,13 +358,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("results.result_import"),
         modality: Modality::Application,
-        is_open: Some(|state| state.results.result_import.open),
-        render: |app, ctx| {
-            crate::workbench::workflows::result_import_workflow::show_result_import_dialog(
-                ctx,
-                &mut app.state.results_parts(),
-            );
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("results.result_import"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("results.result_import")),
     },
     // The calculator is a modeless tool, not a modal: it renders beside
     // the dialog stack so the workspace stays live beneath it.
@@ -372,26 +367,14 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("results.calculator"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            crate::workbench::results::calculator::show(
-                ctx,
-                &mut crate::workbench::features::cx::<crate::workbench::results::ResultsFeature>(
-                    app,
-                ),
-            )
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("results.calculator")),
     },
     DialogSpec {
         key: DialogKey("results.expression_diagnostics"),
         modality: Modality::Modeless,
         is_open: None,
         render: |app, ctx| {
-            crate::workbench::results::expression_diagnostics::show(
-                ctx,
-                &mut crate::workbench::features::cx::<crate::workbench::results::ResultsFeature>(
-                    app,
-                ),
-            )
+            features::render_dialog(app, ctx, DialogKey("results.expression_diagnostics"))
         },
     },
     DialogSpec {
@@ -573,12 +556,12 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("results.dataset_export"),
         modality: Modality::Dialog,
-        is_open: |state| state.results.dataset_export.is_some(),
+        is_open: |state| features::dialog_open(state, DialogKey("results.dataset_export")),
     },
     ModalSpec {
         key: DialogKey("results.run_details"),
         modality: Modality::Dialog,
-        is_open: |state| state.results.run_details.is_some(),
+        is_open: |state| features::dialog_open(state, DialogKey("results.run_details")),
     },
     ModalSpec {
         key: DialogKey("project.launcher"),
@@ -643,12 +626,12 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("results.create_result_document"),
         modality: Modality::Application,
-        is_open: |state| state.results.create_result_document.open,
+        is_open: |state| features::dialog_open(state, DialogKey("results.create_result_document")),
     },
     ModalSpec {
         key: DialogKey("results.result_document"),
         modality: Modality::Application,
-        is_open: |state| state.results.result_document_dialog.is_some(),
+        is_open: |state| features::dialog_open(state, DialogKey("results.result_document")),
     },
     ModalSpec {
         key: DialogKey("simulate.regression_baseline_picker"),
@@ -682,16 +665,23 @@ impl ModalGate for AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppState, DIALOG_ORDER, features};
+    use super::{AppState, DIALOG_ORDER, MODAL_ONLY, features};
 
     /// The order lists every dialog step a registered feature draws, under
     /// the key the feature draws it by and in the order that feature
-    /// registers them, and lists no other step of that feature's slot.
+    /// registers them, and lists no other step of that feature's slot. The
+    /// feature registers the rest of what it draws after them: each a modal
+    /// gate the modal-only list names, in the order that list names them.
     #[test]
     fn the_order_lists_exactly_the_steps_the_features_draw() {
         let registered = features::registered_dialogs();
         assert!(!registered.is_empty());
         for (feature_slot, _) in &registered {
+            let drawn = registered
+                .iter()
+                .filter(|(slot, _)| slot == feature_slot)
+                .map(|(_, key)| *key)
+                .collect::<Vec<_>>();
             let listed = DIALOG_ORDER
                 .iter()
                 .map(|spec| spec.key)
@@ -701,12 +691,16 @@ mod tests {
                         .is_some_and(|(owner, _)| owner == *feature_slot)
                 })
                 .collect::<Vec<_>>();
-            let drawn = registered
+            let gated = MODAL_ONLY
                 .iter()
-                .filter(|(slot, _)| slot == feature_slot)
-                .map(|(_, key)| *key)
+                .map(|spec| spec.key)
+                .filter(|key| drawn.contains(key))
                 .collect::<Vec<_>>();
-            assert_eq!(listed, drawn, "the {feature_slot} feature's dialog steps");
+            assert_eq!(
+                [listed, gated].concat(),
+                drawn,
+                "the {feature_slot} feature's dialog steps"
+            );
         }
         for (slot, key) in &registered {
             assert!(

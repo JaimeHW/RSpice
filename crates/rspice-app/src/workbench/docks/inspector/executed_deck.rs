@@ -10,14 +10,12 @@
 //! It is coarser — a release, not a digest per definition — and it is the only
 //! statement here that describes every model source a result depends on.
 //!
-//! # It reports, then acts on the state and nothing wider
+//! # It reports; the caller asks for the deck
 //!
 //! The record is rendered from a borrow of the run it describes, and opening
 //! the deck mutates the session. So [`record`] returns the run a reader asked
-//! for and the caller calls [`reveal`] once that borrow is done. Both halves
-//! live here — the offer and what honouring it means, including the refusal
-//! when the deck is no longer held — but neither takes the whole application
-//! to save a line at the call site.
+//! for, and once that borrow is done the caller asks for its executed deck,
+//! which opens it or says by name that it is no longer held.
 
 use egui::Ui;
 
@@ -52,25 +50,4 @@ pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> O
         .on_hover_text("Opens the netlist exactly as this run simulated it, read-only.")
         .clicked()
         .then_some(run_id)
-}
-
-/// Open the deck the record above offers, or say why it cannot be opened.
-///
-/// The route reports whether the run's decks are still held, and a silent
-/// no-op on a control that promises a document is the one outcome a reader
-/// cannot tell from success. The record is rebuilt every frame from the same
-/// retained archive, so this fires when the deck was released between the
-/// frame that drew the control and the click.
-///
-/// Takes the state rather than the application, which is the same rule the
-/// header states: the borrow the record was rendered from is finished by the
-/// time the caller gets here.
-pub(super) fn reveal(state: &mut crate::workbench::AppState, run_id: u64) {
-    if crate::workbench::documents::netlist_document::reveal_executed_deck(state, run_id, 0) {
-        return;
-    }
-    state.prompt(format!(
-        "The source Run {run_id} executed cannot be opened: {}.",
-        crate::state::absent_deck_reason()
-    ));
 }

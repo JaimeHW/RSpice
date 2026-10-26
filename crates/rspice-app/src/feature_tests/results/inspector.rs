@@ -147,7 +147,11 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
     let mut nodes = Vec::new();
     for _ in 0..2 {
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            run_details::show(ui.ctx(), &mut app);
+            run_details::show(
+                ui.ctx(),
+                &mut app.state.results.run_details,
+                &app.state.model,
+            );
         });
         nodes = output
             .platform_output

@@ -11,6 +11,7 @@ mod bode;
 mod box_violin;
 pub(crate) mod create_document;
 mod document_edit;
+pub(crate) use document_edit::show as show_document_dialog;
 mod events;
 mod eye;
 mod fft;
@@ -1521,8 +1522,6 @@ pub fn show(
         ResultChrome::Full,
     );
     waves::marker_dialog::show(ui.ctx(), state);
-    create_document::show(ui.ctx(), state);
-    document_edit::show(ui.ctx(), state);
 }
 
 /// The workspace's own single-key gestures, as the mockup's results keymap
@@ -1733,8 +1732,6 @@ pub(crate) fn show_persistent_document(
         document_id,
     );
     waves::marker_dialog::show(ui.ctx(), state);
-    create_document::show(ui.ctx(), state);
-    document_edit::show(ui.ctx(), state);
 }
 
 /// Resolve and select the primary binding of a project-owned result document.

@@ -8,9 +8,9 @@
 //! whether a project is open. The data browser, the Results navigator,
 //! draws in the same context.
 
-pub(crate) mod calculator;
+mod calculator;
 pub(crate) mod commands;
-pub(crate) mod expression_diagnostics;
+mod expression_diagnostics;
 mod surface;
 
 use crate::workbench::commands::result_navigation::{
@@ -23,9 +23,10 @@ use crate::workbench::documents::result_document::{
     viewer_unavailability_reason, zoom_gesture_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, FeatureSplit,
-    FeatureSurface, Reads, RoutedCommand, Session,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
+    FeatureSplit, FeatureSurface, Reads, RoutedCommand, Session,
 };
 use crate::workbench::framework::requests::{
     ClipboardText, ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
@@ -58,6 +59,7 @@ impl Feature for ResultsFeature {
         });
         registry.surface(FeatureSurface { show: show_surface });
         registry.split(FeatureSplit { show: show_split });
+        registry.dialogs(DIALOGS);
     }
 }
 
@@ -81,7 +83,8 @@ fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 
 /// The Results stage, over the workspace's parts, the run controller its
 /// derived viewers load through, and the specification simulate has
-/// selected.
+/// selected; then the result document's two forms, the last things the
+/// stage draws.
 fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
     let mut parts = cx
         .state
@@ -92,6 +95,8 @@ fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
         cx.handles.run_controller,
         cx.peers.simulate().selected_specification(),
     );
+    render_create_result_document(cx, ui.ctx());
+    render_result_document_dialog(cx, ui.ctx());
 }
 
 /// The compact Results projection beside another workspace's document, over
@@ -106,6 +111,98 @@ fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
         cx.handles.run_controller,
         cx.peers.simulate().selected_specification(),
     );
+}
+
+/// The dialogs the feature draws, each under the key the shell lists it by.
+/// The dialog order draws the first three at their steps. The rest hold a
+/// modal gate the shell asks of them, and each is drawn where its work is:
+/// Export dataset… where the frame answers the export request, Run
+/// details… at its frame step, and the result document's two forms at the
+/// end of the Results stage.
+const DIALOGS: &[FeatureDialog<ResultsFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("results.result_import"),
+        is_open: |results| results.result_import.open,
+        render: render_result_import,
+    },
+    FeatureDialog {
+        key: DialogKey("results.calculator"),
+        is_open: |results| results.waveform_calculator_dialog,
+        render: calculator::show,
+    },
+    FeatureDialog {
+        key: DialogKey("results.expression_diagnostics"),
+        is_open: |results| results.expression_diagnostics_dialog,
+        render: expression_diagnostics::show,
+    },
+    FeatureDialog {
+        key: DialogKey("results.dataset_export"),
+        is_open: |results| results.dataset_export.is_some(),
+        render: render_dataset_export,
+    },
+    FeatureDialog {
+        key: DialogKey("results.run_details"),
+        is_open: |results| results.run_details.is_some(),
+        render: render_run_details,
+    },
+    FeatureDialog {
+        key: DialogKey("results.create_result_document"),
+        is_open: |results| results.create_result_document.open,
+        render: render_create_result_document,
+    },
+    FeatureDialog {
+        key: DialogKey("results.result_document"),
+        is_open: |results| results.result_document_dialog.is_some(),
+        render: render_result_document_dialog,
+    },
+];
+
+/// The staged import of an external result dataset.
+fn render_result_import(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
+    crate::workbench::workflows::result_import_workflow::show_result_import_dialog(
+        ctx,
+        &mut results_parts(cx),
+    );
+}
+
+/// "Export dataset…" asks for a format, then writes the displayed result in
+/// it.
+fn render_dataset_export(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
+    if crate::workbench::menu_bar::show_dataset_export_picker(
+        ctx,
+        &mut cx.state.dataset_export,
+        &mut cx.model.preferences,
+    ) {
+        let io = cx.handles.export_io;
+        crate::workbench::menu_bar::action_export_csv_with_io(&mut results_parts(cx), io);
+    }
+}
+
+/// Run details…, and the route out of it the reader took: the producing
+/// plan, or the deck the run executed.
+fn render_run_details(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
+    let routes =
+        crate::workbench::docks::show_run_details(ctx, &mut cx.state.run_details, cx.model);
+    if let Some(run_id) = routes.open_deck {
+        cx.wb.outbox().push(RevealExecutedDeck(run_id));
+    }
+    if routes.open_plan {
+        cx.execute(ResultsCommand::OpenProducingPlan.key());
+    }
+}
+
+/// The form that creates a result document.
+fn render_create_result_document(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
+    crate::workbench::documents::result_document::create_document::show(
+        ctx,
+        &mut results_parts(cx),
+    );
+}
+
+/// The open form of the result document: a pane, a comparison, a family, a
+/// measurement or the document's properties.
+fn render_result_document_dialog(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
+    crate::workbench::documents::result_document::show_document_dialog(ctx, &mut results_parts(cx));
 }
 
 /// Nothing to commit when another section shows in the inspector's place:

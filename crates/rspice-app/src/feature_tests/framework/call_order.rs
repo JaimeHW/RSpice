@@ -16,6 +16,8 @@ const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs")
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
 const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
+const FEATURES: &str = include_str!("../../workbench/features.rs");
+const RESULTS: &str = include_str!("../../workbench/results.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
@@ -269,7 +271,10 @@ const SHOW: &[Step] = &[
         ],
     ),
     ("11.27", &["diagnostic_routes::apply_pending(ctx, app)"]),
-    ("11.28", &["docks::show_run_details(ctx, app)"]),
+    (
+        "11.28",
+        &["features::render_dialog(app, ctx, DialogKey(\"results.run_details\"))"],
+    ),
     ("11.29", &["app.state.drain_notices(ctx)"]),
     (
         "11.30",
@@ -360,12 +365,9 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ),
     ("render_help_center_dialog", "shell"),
     ("render_about_dialog", "shell"),
-    (
-        "workflows::result_import_workflow::show_result_import_dialog",
-        "results",
-    ),
-    ("results::calculator::show", "results"),
-    ("results::expression_diagnostics::show", "results"),
+    ("features::render_dialog", "results"),
+    ("features::render_dialog", "results"),
+    ("features::render_dialog", "results"),
     ("render_shortcuts_help_dialog", "shell"),
     ("process_model_browser_dialog", "shell"),
     ("process_new_cell_dialog", "project"),
@@ -542,6 +544,50 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
         &["Workspace::Results => {\
              features::show_inspector::<ResultsFeature>(app, ui);\
              app.after_contribution(); }"],
+    ),
+];
+
+/// `answer_result_requests`, step 11.31 of the frame: the export requests
+/// the result documents raised, then Export dataset…, drawn between the
+/// request that opens it and the plan hop.
+const ANSWER_RESULT_REQUESTS: &[Step] = &[
+    (
+        "1",
+        &[
+            "|app, ExportResultQuantities(keys)|",
+            "action_export_result_selection_with_io(",
+        ],
+    ),
+    (
+        "2",
+        &[
+            "|app, ExportCsv|",
+            "open_dataset_export_picker(&mut app.state)",
+        ],
+    ),
+    (
+        "3",
+        &["features::render_dialog(app, ctx, DialogKey(\"results.dataset_export\"))"],
+    ),
+    (
+        "4",
+        &[
+            "|app, OpenProducingPlan|",
+            "app.execute_command_key(ResultsCommand::OpenProducingPlan.key())",
+        ],
+    ),
+];
+
+/// The results feature's surface: the Results stage, then the result
+/// document's two forms, the last things the stage draws.
+const RESULTS_SURFACE: &[Step] = &[
+    ("stage", &["surface::show("]),
+    (
+        "forms",
+        &[
+            "render_create_result_document(cx, ui.ctx())",
+            "render_result_document_dialog(cx, ui.ctx())",
+        ],
     ),
 ];
 
@@ -956,5 +1002,42 @@ fn a_results_contribution_has_what_it_raised_answered_once_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         RESULTS_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn a_results_dialog_has_what_it_raised_answered_once_it_draws() {
+    let render = body(FEATURES, "fn render_dialog(");
+    assert_runs_in_order(
+        "features::render_dialog",
+        &render,
+        &[(
+            "1",
+            &[
+                "(dialog.render)(&mut cx::<$feature>(app), ctx);",
+                "app.after_contribution();",
+            ],
+        )],
+    );
+    assert!(
+        without_whitespace(&render).ends_with("app.after_contribution();"),
+        "nothing runs after a dialog step has what it raised answered"
+    );
+
+    let answer = body(FRAME, "fn answer_result_requests(");
+    assert_runs_in_order("answer_result_requests", &answer, ANSWER_RESULT_REQUESTS);
+    assert_eq!(
+        answer.matches("requests::drain(").count(),
+        3,
+        "`answer_result_requests` answers exactly the three requests it lists"
+    );
+
+    let surface = body(RESULTS, "fn show_surface(");
+    assert_runs_in_order("ResultsFeature::show_surface", &surface, RESULTS_SURFACE);
+    assert!(
+        without_whitespace(&surface).ends_with(&without_whitespace(
+            "render_result_document_dialog(cx, ui.ctx());"
+        )),
+        "the result document's forms are the last things the Results stage draws"
     );
 }

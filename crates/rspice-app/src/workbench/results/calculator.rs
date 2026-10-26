@@ -28,7 +28,7 @@ const TOOL_MARGIN: f32 = 24.0;
 /// Show the calculator when it is open. Modeless: the workspace behind it
 /// stays live, so cursors can be placed and traces read while an expression
 /// is being composed.
-pub fn show(ctx: &Context, cx: &mut Cx<'_, ResultsFeature>) {
+pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     if !cx.state.waveform_calculator_dialog {
         return;
     }
