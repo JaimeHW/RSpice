@@ -10,15 +10,14 @@ use egui::Ui;
 use rspice_results_ui::eye_diagram::view;
 
 /// Apply a timebase request to the immutable source selected by the document.
-pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
+pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let owner = state.model.active_specialized_viewer_cache_provenance();
-    let timebase = owner.map(|owner| state.results.results.eye_timebase_for(owner));
-    let requested =
-        view::inline_actions(ui, &mut state.results.analysis.eye_diagram_state, timebase);
+    let timebase = owner.map(|owner| state.results.eye_timebase_for(owner));
+    let requested = view::inline_actions(ui, &mut state.analysis.eye_diagram_state, timebase);
     if let Some(owner) = owner
         && let Some(timebase) = requested
     {
-        state.results.results.set_eye_timebase(owner, timebase);
+        state.results.set_eye_timebase(owner, timebase);
     }
 }
 
@@ -38,35 +37,29 @@ pub fn unavailable_hint(state: &AppState) -> Option<String> {
     )
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let source = state
-        .results
         .analysis
         .fft_state
         .selected_source
         .as_deref()
         .unwrap_or("the active trace");
-    let plot_view = state
-        .results
-        .results
-        .session
-        .plot_view(ResultViewer::Eye, 0);
+    let plot_view = state.results.session.plot_view(ResultViewer::Eye, 0);
     let out = view::show(
         ui,
-        &state.results.analysis.eye_diagram_state,
+        &state.analysis.eye_diagram_state,
         source,
         plot_view,
-        &mut state.results.results.session.eye_texture,
-        &mut state.results.results.session.cache,
+        &mut state.results.session.eye_texture,
+        &mut state.results.session.cache,
     );
     if out.density_baked {
         frame_work::note(DatasetWalk::EyeRaster);
     }
     if let Some(response) = out.plot {
-        super::record_drawn_axes(&mut state.results.results, ResultViewer::Eye, &response);
+        super::record_drawn_axes(state.results, ResultViewer::Eye, &response);
         if response.view.any() {
             state
-                .results
                 .results
                 .session
                 .plot_view_mut(ResultViewer::Eye, 0)
@@ -114,7 +107,8 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| show(ui, state));
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| show(ui, &mut state.results_parts()));
                 },
             );
         };

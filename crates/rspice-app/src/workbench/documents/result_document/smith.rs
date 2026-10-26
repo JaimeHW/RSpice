@@ -7,6 +7,7 @@ use super::{ResultsParts, ResultsReads};
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
+#[cfg(test)]
 use crate::workbench::AppState;
 
 use super::frame_work;
@@ -155,9 +156,9 @@ pub(super) fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool 
 }
 
 /// Present the qualified traces and apply local viewer outcomes.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     // Γ-plane component arrays per trace, cached per data version.
     //
@@ -185,7 +186,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }
             hasher.finish()
         });
-    let smith = &state.results.analysis.smith_chart_state;
+    let smith = &state.analysis.smith_chart_state;
     let mut traces = Vec::new();
     for (index, trace) in smith
         .traces
@@ -195,7 +196,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         let points = &trace.points;
         let key = owner ^ ((index as u64) << 8);
-        let derived = &mut state.results.results.session.derived;
+        let derived = &mut state.results.session.derived;
         let real = derived.get_or(key ^ 0x501_0000, || {
             std::sync::Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
         });
@@ -209,7 +210,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             imaginary,
         });
     }
-    let results = &mut state.results.results;
+    let results = &mut state.results;
     let viewer = super::ResultViewer::Smith;
     let mut view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();
@@ -300,7 +301,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, state));
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
             },
         );
     }

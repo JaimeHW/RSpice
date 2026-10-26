@@ -233,7 +233,7 @@ fn the_readout_band_is_sized_by_the_rows_it_will_draw() {
     assert_eq!(retained_waveforms, 1, "one retained waveform, two branches");
     assert_eq!(readout_row_count(&mut state), 2);
     assert_eq!(
-        readout_strip_height(&mut state),
+        readout_strip_height(&mut state.results_parts()),
         READOUT_HEADER_H + (2 + 2) as f32 * READOUT_ROW_H,
         "the reserved band does not match the rows the table will draw"
     );
@@ -251,13 +251,13 @@ fn a_viewer_without_the_cursors_strip_reserves_no_band() {
     }
     state.results.results.session.cursors.place(0.25);
     state.results.results.session.readout_collapsed = false;
-    assert!(readout_strip_height(&mut state) > READOUT_HEADER_H);
+    assert!(readout_strip_height(&mut state.results_parts()) > READOUT_HEADER_H);
 
     // The waveform sheet projects time-domain analyses only, so this DC sweep
     // is not on it — while the retained analysis is still there to be found.
     state.results.results.session.viewer = super::super::super::ResultViewer::Waves;
     assert_eq!(
-        readout_strip_height(&mut state),
+        readout_strip_height(&mut state.results_parts()),
         READOUT_HEADER_H,
         "the strip reserved rows for a sheet that draws nothing"
     );
@@ -272,9 +272,7 @@ fn window_statistics_measure_each_branch_between_the_cursors() {
     state.results.results.session.cursors.a = Some(0.0);
     state.results.results.session.cursors.b = Some(0.5);
 
-    let painted = super::interaction::painted_texts(&mut state, |ui, state| {
-        right_panel(ui, &mut state.results_parts());
-    });
+    let painted = super::interaction::painted_texts(&mut state, right_panel);
     // x ≤ 0.5 selects indices {0, 1} on the way out and {3, 4} on the way
     // back: y ∈ {0, 1, 3, 4}. A contiguous slice stops at the turnaround and
     // never sees the 4 V the return leg ends on.

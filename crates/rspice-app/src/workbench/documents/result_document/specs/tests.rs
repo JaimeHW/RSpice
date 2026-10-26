@@ -52,6 +52,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
     // identity however it was typed.
     state.simulate.selected_specification = Some("BANDWIDTH_3DB".to_owned());
 
+    let selected_specification = state.simulate.selected_specification.clone();
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     crate::ui::Theme::default().apply(&ctx);
@@ -65,7 +66,13 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| super::show(ui, &mut state));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    super::show(
+                        ui,
+                        &mut state.results_parts(),
+                        selected_specification.as_deref(),
+                    );
+                });
             },
         )
         .platform_output
@@ -317,7 +324,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
     draft.unit = "dB".to_owned();
     state.results.results.session.spec_drafts = Some(vec![draft]);
 
-    assert!(apply_drafts(&mut state));
+    assert!(apply_drafts(&mut state.results_parts()));
 
     let owned = state
         .model
@@ -404,7 +411,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
     super::open_editor(&mut state.results_parts());
     state.results.results.session.spec_drafts.as_mut().unwrap()[0].requirement_name =
         "Input-referred offset".to_owned();
-    assert!(apply_drafts(&mut state));
+    assert!(apply_drafts(&mut state.results_parts()));
 
     let retained = &state
         .model
@@ -831,6 +838,7 @@ fn carried_row_position(
     state: &mut AppState,
     screen: egui::Rect,
 ) -> egui::Rect {
+    let selected_specification = state.simulate.selected_specification.clone();
     let mut spans = Vec::new();
     for _ in 0..40 {
         let output = ctx.run_ui(
@@ -841,7 +849,13 @@ fn carried_row_position(
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show(ui, state));
+                    .show(ctx, |ui| {
+                        super::show(
+                            ui,
+                            &mut state.results_parts(),
+                            selected_specification.as_deref(),
+                        );
+                    });
             },
         );
         spans = painted_spans(&output);

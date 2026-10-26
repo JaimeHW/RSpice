@@ -185,7 +185,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
             return;
         }
         if super::viewer_has_sheet_bar(viewer) {
-            super::show_sheet_bar(ui, &mut app.state);
+            super::show_sheet_bar(ui, &mut app.state.results_parts());
         }
         crate::ui::plot::set_interaction_mode(
             ui.ctx(),
@@ -200,7 +200,9 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
 
     // Persistent pages own exactly one stage-level readout, just like quick
     // Results. Individual panes never reserve their own instrument chrome.
-    let strip_height = active_viewer.map_or(0.0, |_| super::readout_strip_height(&mut app.state));
+    let strip_height = active_viewer.map_or(0.0, |_| {
+        super::readout_strip_height(&mut app.state.results_parts())
+    });
     let available = ui.available_rect_before_wrap();
     let well_height = (available.height() - strip_height).max(0.0);
     let activated_pane_id = ui
@@ -254,7 +256,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         let _ = project_pane_presentation(&mut app.state, &fresh_pane, viewer);
     }
     if strip_height > 0.0 {
-        super::waves::readout_strip(ui, &mut app.state, strip_height);
+        super::waves::readout_strip(ui, &mut app.state.results_parts(), strip_height);
     }
 }
 

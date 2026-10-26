@@ -4,14 +4,13 @@ use super::{
     AnalysisPresentationKey, ResultsParts, ResultsReads, SoaRuleSelection,
     frame_work::{self, DatasetWalk},
 };
+use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, SoaEvaluationEvidence};
 #[cfg(test)]
 use crate::state::{RetainedTrace, SoaParameterEvidence};
 #[cfg(test)]
 use crate::ui::plot::XScale;
-use crate::{
-    state::{AnalysisResult, AnalysisResultPayload, AnalysisType, SoaEvaluationEvidence},
-    workbench::AppState,
-};
+#[cfg(test)]
+use crate::workbench::AppState;
 use egui::Ui;
 use rspice_results_ui::{presentation::well_hint, soa as viewer};
 
@@ -115,7 +114,7 @@ fn soa_plan(
     Some(built)
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(dataset_id) = state
         .model
         .simulation
@@ -137,7 +136,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     // Built before the retained evidence is borrowed, so the scan happens at
     // most once per dataset generation rather than once per row per frame.
-    let Some(plan) = soa_plan(&mut state.results_parts(), analysis_key) else {
+    let Some(plan) = soa_plan(state, analysis_key) else {
         well_hint(ui, "Select a validated safe-operating-area analysis");
         return;
     };
@@ -157,16 +156,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plan: &plan.presentation,
         },
         viewer::SoaControls {
-            selected: state.results.results.session.selected_soa_rule.as_ref(),
-            filter: state.results.results.session.soa_rule_filter,
-            trace_open: state.results.results.session.soa_stress_trace_open,
-            stress_view: state
-                .results
-                .results
-                .session
-                .plot_view(super::ResultViewer::Soa, 0),
+            selected: state.results.session.selected_soa_rule.as_ref(),
+            filter: state.results.session.soa_rule_filter,
+            trace_open: state.results.session.soa_stress_trace_open,
+            stress_view: state.results.session.plot_view(super::ResultViewer::Soa, 0),
         },
-        &mut state.results.results.session.cache,
+        &mut state.results.session.cache,
         |key, device| {
             soa_device_target(
                 &state.model.simulation,
@@ -181,32 +176,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if response.fit_clicked {
         state
             .results
-            .results
             .session
             .reset_plot_view(super::ResultViewer::Soa, 0);
     }
     if let Some(change) = response.stress_view_change {
         state
             .results
-            .results
             .session
             .plot_view_mut(super::ResultViewer::Soa, 0)
             .apply(&change);
     }
-    state.results.results.session.soa_rule_filter = response.filter;
-    state.results.results.session.soa_stress_trace_open = response.trace_open;
-    if response.selection != state.results.results.session.selected_soa_rule {
+    state.results.session.soa_rule_filter = response.filter;
+    state.results.session.soa_stress_trace_open = response.trace_open;
+    if response.selection != state.results.session.selected_soa_rule {
         if response.selection.is_some() && response.trace_open {
             state
-                .results
                 .results
                 .session
                 .reset_plot_view(super::ResultViewer::Soa, 0);
         }
-        state.results.results.session.selected_soa_rule = response.selection;
+        state.results.session.selected_soa_rule = response.selection;
     }
     if let Some(selection) = response.cross_probe {
-        apply_schematic_cross_probe(&mut state.results_parts(), &selection);
+        apply_schematic_cross_probe(state, &selection);
     }
 }
 
@@ -454,7 +446,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state));
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
             },
         );
         let drawn = output

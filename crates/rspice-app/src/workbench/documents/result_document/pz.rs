@@ -1,10 +1,9 @@
 //! Active pole-zero source qualification and shared plot-view action ownership.
 
+use crate::state::{AnalysisResultPayload, AnalysisType};
+#[cfg(test)]
+use crate::workbench::AppState;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
-use crate::{
-    state::{AnalysisResultPayload, AnalysisType},
-    workbench::AppState,
-};
 use egui::Ui;
 use rspice_results::pole_zero::data::{ComplexRoot, PoleZeroData};
 use rspice_results_ui::pole_zero as view;
@@ -46,12 +45,12 @@ fn active_data(state: ResultsReads<'_>) -> Option<PoleZeroData> {
     Some(data)
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let data = active_data(state.results_reads());
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
-    let results = &mut state.results.results;
+    let results = &mut state.results;
     let viewer = super::ResultViewer::PoleZero;
     let mut plot_view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();

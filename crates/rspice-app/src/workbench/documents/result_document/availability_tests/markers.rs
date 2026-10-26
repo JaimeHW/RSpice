@@ -53,7 +53,7 @@ fn place_quick(
     x: f64,
 ) -> Option<MarkerSelector> {
     place_marker(
-        state,
+        &mut state.results_parts(),
         MarkerPlacement {
             analysis,
             anchor: marker_anchor_for(analysis, "V(out)"),
@@ -84,7 +84,7 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
             .is_some_and(|text| text.contains("marker") && text.contains("exhausted"))
     );
     commit_marker_edit(
-        &mut state,
+        &mut state.results_parts(),
         MarkerSelector::Quick(u32::MAX),
         "Edited",
         MarkerKind::Spec,
@@ -147,7 +147,7 @@ fn an_edit_cannot_succeed_after_its_quick_marker_has_been_removed() {
     state.results.results.session.remove_marker(7);
     assert!(
         commit_marker_edit(
-            &mut state,
+            &mut state.results_parts(),
             MarkerSelector::Quick(7),
             "Later edit",
             MarkerKind::Peak
@@ -302,7 +302,7 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
 
     restore_presentation(&mut state, restored.file.result_presentation);
     commit_marker_edit(
-        &mut state,
+        &mut state.results_parts(),
         MarkerSelector::Quick(3),
         "Only this annotation",
         MarkerKind::Spec,

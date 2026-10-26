@@ -3,7 +3,6 @@
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SharedWaveformValues};
 #[cfg(test)]
 use crate::state::{AnalysisResultFamilyMetadata, PeriodicNoiseOutputQuantity};
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 #[cfg(test)]
@@ -107,7 +106,7 @@ fn build_model(state: ResultsReads<'_>) -> Option<PhaseNoiseModel> {
     model_from_analysis(analysis_index, run.analyses.get(analysis_index)?)
 }
 
-fn active_periodic_noise_without_phase_trace(state: &AppState) -> bool {
+fn active_periodic_noise_without_phase_trace(state: ResultsReads<'_>) -> bool {
     let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
@@ -128,15 +127,17 @@ fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
 }
 
 /// Resolve the displayed source and apply requests to the phase-noise viewport.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantities = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy().readout();
+    let presentation = state.results_reads().presentation_policy().readout();
     let Some(model) = build_model(state.results_reads()) else {
-        view::show_absent(ui, active_periodic_noise_without_phase_trace(state));
+        view::show_absent(
+            ui,
+            active_periodic_noise_without_phase_trace(state.results_reads()),
+        );
         return;
     };
     let viewport = state
-        .results
         .results
         .session
         .plot_view(super::ResultViewer::PhaseNoise, 0);
@@ -148,24 +149,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         level_range,
         &quantities,
         presentation,
-        &mut state.results.results.session.cache,
+        &mut state.results.session.cache,
     );
     if response.fit {
         state
-            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::PhaseNoise, 0);
     }
     if let Some(response) = response.plot {
-        super::record_drawn_axes(
-            &mut state.results.results,
-            super::ResultViewer::PhaseNoise,
-            &response,
-        );
+        super::record_drawn_axes(state.results, super::ResultViewer::PhaseNoise, &response);
         if response.view.any() {
             state
-                .results
                 .results
                 .session
                 .plot_view_mut(super::ResultViewer::PhaseNoise, 0)

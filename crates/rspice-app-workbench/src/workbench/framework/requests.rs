@@ -306,6 +306,17 @@ impl Request for ShowSchematicAnnotations {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Mark on the schematic the objects the failed analysis on display was
+/// attributed to, and, when the marking lands, record it as the marking of
+/// this run. Raised by the Results failure banner's control, and taken
+/// straight after the call that raised it.
+#[derive(Clone, Copy, Debug)]
+pub struct MarkFailureSites(pub Option<u64>);
+
+impl Request for MarkFailureSites {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section

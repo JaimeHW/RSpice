@@ -1,7 +1,8 @@
 //! Retained-source controls and application transactions for Results bars.
 
 use super::{
-    AppState, ResultViewer, Ui, eye, instrument, sheet_domain_controls, sheet_purpose, specs, table,
+    ResultViewer, ResultsParts, Ui, eye, instrument, sheet_domain_controls, sheet_purpose, specs,
+    table,
 };
 use crate::workbench::framework::requests::{ExportCsv, ExportFigure};
 use rspice_results_ui::chrome::{
@@ -9,14 +10,14 @@ use rspice_results_ui::chrome::{
     bars::{self, SheetBarHost, SpecificationAction},
 };
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     bars::show(ui, &mut Host(state));
 }
 
 /// Raise what a result document's export control asked for. The dataset
 /// export needs the application's IO, and the figure goes through the
 /// hardcopy workflow, so neither is done here.
-pub(super) fn raise_exports(state: &mut AppState, requests: ExportRequests) {
+pub(super) fn raise_exports(state: &mut ResultsParts<'_>, requests: ExportRequests) {
     if requests.csv {
         state.workbench.outbox.push(ExportCsv);
     }
@@ -25,17 +26,16 @@ pub(super) fn raise_exports(state: &mut AppState, requests: ExportRequests) {
     }
 }
 
-struct Host<'a>(&'a mut AppState);
-impl SheetBarHost for Host<'_> {
+struct Host<'a, 'p>(&'a mut ResultsParts<'p>);
+impl SheetBarHost for Host<'_, '_> {
     fn viewer(&self) -> ResultViewer {
-        self.0.results.results.session.viewer
+        self.0.results.session.viewer
     }
     fn export(&mut self, requests: ExportRequests) {
         raise_exports(self.0, requests);
     }
     fn fft_summary(&self) -> Option<String> {
         self.0
-            .results
             .analysis
             .fft_state
             .data
@@ -43,17 +43,17 @@ impl SheetBarHost for Host<'_> {
             .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size))
     }
     fn operating_point_filter(&mut self) -> &mut String {
-        &mut self.0.results.results.session.op_filter
+        &mut self.0.results.session.op_filter
     }
     fn specification_editing(&self) -> bool {
-        self.0.results.results.session.spec_drafts.is_some()
+        self.0.results.session.spec_drafts.is_some()
     }
     fn request(&mut self, action: SpecificationAction) {
         let state = &mut *self.0;
         match action {
             SpecificationAction::Discard => {
-                state.results.results.session.spec_drafts = None;
-                state.results.specification_editor_route_pending = false;
+                state.results.session.spec_drafts = None;
+                *state.specification_editor_route_pending = false;
                 // With no retained dataset there is no read-only Specs
                 // evidence sheet to fall back to. Move to the ordinary
                 // empty Results landing so the destination boundary does
@@ -65,7 +65,7 @@ impl SheetBarHost for Host<'_> {
                     .ok()
                     .and_then(|plan| state.model.simulation.active_run_for_plan(plan.id()));
                 if selected_plan_dataset.is_none() {
-                    state.results.results.session.viewer = ResultViewer::Waves;
+                    state.results.session.viewer = ResultViewer::Waves;
                 }
             }
             SpecificationAction::Apply => {
@@ -73,7 +73,7 @@ impl SheetBarHost for Host<'_> {
                     state.prompt("Specs not applied: fix the invalid bound first.");
                 }
             }
-            SpecificationAction::Edit => specs::open_editor(&mut state.results_parts()),
+            SpecificationAction::Edit => specs::open_editor(state),
         }
     }
     fn instrument(&mut self, ui: &mut Ui) {
@@ -89,6 +89,6 @@ impl SheetBarHost for Host<'_> {
         sheet_domain_controls(ui, self.0)
     }
     fn purpose(&self) -> String {
-        sheet_purpose(self.0)
+        sheet_purpose(self.0.results_reads())
     }
 }

@@ -12,7 +12,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // reconciliation and prevents an authoring request from degrading into
     // an empty waveform viewer between frames.
     crate::workbench::documents::result_document::consume_pending_specification_editor(
-        &mut app.state,
+        &mut app.state.results_parts(),
     );
     // Specification authoring is a plan transaction, not a retained-result
     // presentation. It must take precedence over an already-active persistent
@@ -72,7 +72,7 @@ mod tests {
 
         assert!(
             crate::workbench::documents::result_document::consume_pending_specification_editor(
-                &mut app.state
+                &mut app.state.results_parts()
             )
         );
 

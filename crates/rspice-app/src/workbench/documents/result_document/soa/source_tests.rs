@@ -144,7 +144,7 @@ fn paint(state: &mut AppState, panel: bool) -> String {
                 if panel {
                     right_panel(ui, &mut state.results_parts());
                 } else {
-                    show(ui, state);
+                    show(ui, &mut state.results_parts());
                 }
             });
         },

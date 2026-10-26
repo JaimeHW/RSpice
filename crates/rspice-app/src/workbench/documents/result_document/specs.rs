@@ -9,6 +9,7 @@
 
 mod reference_import;
 
+use crate::workbench::documents::result_document::ResultsReads;
 use std::collections::HashSet;
 
 use egui::Ui;
@@ -18,6 +19,7 @@ use rspice_results::specification::report::{
 };
 
 use crate::state::{SimulationRun, SpecEntry, SpecPointScope, SpecificationDefinition};
+#[cfg(test)]
 use crate::workbench::AppState;
 use rspice_results_ui::specs::editor::{self, SpecDraft};
 
@@ -26,7 +28,7 @@ use super::{ResultViewer, ResultsParts};
 /// Measurements present in the active dataset but not yet bound by the
 /// active requirement contract. The editor never discovers names from a
 /// different historical dataset.
-fn untracked_measurements(state: &AppState) -> Vec<String> {
+fn untracked_measurements(state: ResultsReads<'_>) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = HashSet::new();
     if let Some(run) = state.model.simulation.active_run() {
@@ -71,9 +73,10 @@ pub(crate) fn export_csv(
 }
 
 /// Render the active dataset's specification evidence as the upgraded
-/// seven-column engineering table (or the inline contract editor).
-pub fn show(ui: &mut Ui, state: &mut AppState) {
-    if state.results.results.session.spec_drafts.is_some() {
+/// seven-column engineering table (or the inline contract editor), with the
+/// specification the simulation plan has selected marked.
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>, selected_specification: Option<&str>) {
+    if state.results.session.spec_drafts.is_some() {
         show_editor(ui, state);
         return;
     }
@@ -82,7 +85,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui,
         state.model.simulation.active_run().map(|run| &run.data),
         &state.model.workspace.content.specs,
-        state.simulate.selected_specification.as_deref(),
+        selected_specification,
     );
     if let Some(analysis_index) = focus_analysis {
         let viewer = state
@@ -92,8 +95,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .and_then(|run| run.analyses.get(analysis_index))
             .map_or(ResultViewer::Manifest, source_viewer);
         if state.model.simulation.select_analysis(analysis_index) {
-            state.results.results.session.viewer = viewer;
-            state.results.results.session.clear_cursors();
+            state.results.session.viewer = viewer;
+            state.results.session.clear_cursors();
         }
     }
 }
@@ -127,8 +130,8 @@ fn source_viewer(analysis: &crate::state::AnalysisResult) -> ResultViewer {
 /// The inline governed-requirement editor. Exact comparison kind, limits,
 /// guard band, role, and durable requirement identity remain explicit rather
 /// than being flattened through the legacy min/max projection.
-fn show_editor(ui: &mut Ui, state: &mut AppState) {
-    let untracked = untracked_measurements(state);
+fn show_editor(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let untracked = untracked_measurements(state.results_reads());
     let analysis_options = state
         .model
         .sim_setup
@@ -169,7 +172,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
         }));
     }
 
-    let Some(drafts) = state.results.results.session.spec_drafts.as_mut() else {
+    let Some(drafts) = state.results.session.spec_drafts.as_mut() else {
         return;
     };
     editor::show(
@@ -184,8 +187,8 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
 
 /// Apply the open editor's drafts to the workspace. Returns false (and
 /// leaves the editor open) when a bound fails to parse.
-pub fn apply_drafts(state: &mut AppState) -> bool {
-    let Some(drafts) = state.results.results.session.spec_drafts.clone() else {
+pub fn apply_drafts(state: &mut ResultsParts<'_>) -> bool {
+    let Some(drafts) = state.results.session.spec_drafts.clone() else {
         return true;
     };
     let mut specs = Vec::with_capacity(drafts.len());
@@ -224,8 +227,8 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
     }
     state.model.workspace = workspace;
     state.model.sim_setup = setup;
-    state.runs.preflight = Default::default();
-    state.results.results.session.spec_drafts = None;
+    *state.preflight = Default::default();
+    state.results.session.spec_drafts = None;
     true
 }
 

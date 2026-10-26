@@ -84,12 +84,12 @@ pub(crate) fn open_specification_editor(state: &mut ResultsParts<'_>) {
 /// This deliberately reconstructs both projections after document/viewer
 /// reconciliation. Returning `true` lets the surface give the editor
 /// precedence over an active persistent result document in the same frame.
-pub(crate) fn consume_pending_specification_editor(state: &mut AppState) -> bool {
-    if !std::mem::take(&mut state.results.specification_editor_route_pending) {
+pub(crate) fn consume_pending_specification_editor(state: &mut ResultsParts<'_>) -> bool {
+    if !std::mem::take(state.specification_editor_route_pending) {
         return false;
     }
-    state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;
-    specs::open_editor(&mut state.results_parts());
+    state.results.session.viewer = crate::workbench::ResultViewer::Specs;
+    specs::open_editor(state);
     true
 }
 
@@ -522,20 +522,16 @@ pub(crate) fn zoom_gesture_available(state: ResultsReads<'_>) -> bool {
 
 /// Apply any queued viewport gesture, now that the sheet's models and theme
 /// tokens exist.
-pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
-    let Some(gesture) = state.results.results.session.pending_view_gesture.take() else {
+pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut ResultsParts<'_>) {
+    let Some(gesture) = state.results.session.pending_view_gesture.take() else {
         return;
     };
-    let viewer = state.results.results.session.viewer;
+    let viewer = state.results.session.viewer;
     if !viewer_uses_wave_stack(viewer) {
         // Single-canvas viewers keep their views under plot ordinals, and
         // only fit is expressible without their renderer's own extents.
         match gesture {
-            ViewGesture::Fit => state
-                .results
-                .results
-                .session
-                .reset_viewer_plot_views(viewer),
+            ViewGesture::Fit => state.results.session.reset_viewer_plot_views(viewer),
             ViewGesture::ZoomIn | ViewGesture::ZoomOut => {}
         }
         return;
@@ -611,8 +607,9 @@ pub(crate) struct ResultsReads<'a> {
 
 /// What the results workspace's commands write: its viewer state, the
 /// specialized viewers' state, the drafts of its forms, the result import
-/// and the specification route, the model, the session, and the platform
-/// services' state, which says whether a project is open.
+/// and the specification route, the model, the session, the platform
+/// services' state, which says whether a project is open, and the run
+/// preflight.
 ///
 /// Opening a form, importing a dataset or linking cursors reads and writes
 /// those parts alone, so the operations take them rather than the
@@ -627,6 +624,9 @@ pub(crate) struct ResultsParts<'a> {
     pub(crate) model: &'a mut Model,
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) platform: &'a PlatformState,
+    /// The run preflight, which an edit to the plan's specifications drops.
+    pub(crate) preflight:
+        &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
 }
 
 impl ResultsReads<'_> {
@@ -748,7 +748,7 @@ fn retained_marker_label<'a>(note: &'a str, trace_name: &'a str) -> &'a str {
 /// swept trace), or it declines the placement outright — falls back to a quick
 /// marker and says why, rather than dropping the reader's click.
 pub(super) fn place_marker(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     placement: MarkerPlacement<'_>,
 ) -> Option<MarkerSelector> {
     if let Err(error) =
@@ -767,7 +767,6 @@ pub(super) fn place_marker(
     } = placement;
     let retained = state
         .results
-        .results
         .session
         .persistent_pane_context
         .and_then(|context| {
@@ -782,8 +781,7 @@ pub(super) fn place_marker(
                 .find(|trace| trace.pane_id == context.pane_id && trace.label == trace_name)?;
             Some((context, document.revision(), trace.id))
         });
-    let quick_fallback = |state: &mut AppState, reason: Option<String>| match state
-        .results
+    let quick_fallback = |state: &mut ResultsParts<'_>, reason: Option<String>| match state
         .results
         .session
         .add_marker(analysis, anchor.clone(), trace_name.clone(), x)
@@ -801,7 +799,7 @@ pub(super) fn place_marker(
     };
 
     let Some((context, revision, trace_id)) = retained else {
-        let reason = state.results.results.session.persistent_pane_context.is_some().then(|| {
+        let reason = state.results.session.persistent_pane_context.is_some().then(|| {
             format!(
                 "'{trace_name}' is not a retained trace of this result document, so the marker was placed on the dataset instead of the document."
             )
@@ -849,22 +847,17 @@ pub(super) fn place_marker(
         })?;
     // The overlay is rebuilt by the next projection, but the marker has to be
     // on screen and addressable in the frame the reader placed it.
-    state
-        .results
-        .results
-        .session
-        .document_markers
-        .push(DocumentMarker {
-            document_id: context.document_id,
-            pane_id: context.pane_id,
-            retained_id: marker_id,
-            analysis,
-            anchor,
-            trace_name: trace_name.clone(),
-            x: retained_x,
-            kind: MarkerKind::default(),
-            note: trace_name,
-        });
+    state.results.session.document_markers.push(DocumentMarker {
+        document_id: context.document_id,
+        pane_id: context.pane_id,
+        retained_id: marker_id,
+        analysis,
+        anchor,
+        trace_name: trace_name.clone(),
+        x: retained_x,
+        kind: MarkerKind::default(),
+        note: trace_name,
+    });
     Some(MarkerSelector::Document {
         document_id: context.document_id,
         pane_id: context.pane_id,
@@ -873,9 +866,9 @@ pub(super) fn place_marker(
 }
 
 /// Remove one marker from whichever store owns it.
-pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
+pub(super) fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
     match selector {
-        MarkerSelector::Quick(id) => state.results.results.session.remove_marker(id),
+        MarkerSelector::Quick(id) => state.results.session.remove_marker(id),
         MarkerSelector::Document {
             document_id,
             marker_id,
@@ -909,19 +902,17 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
             }
             state
                 .results
-                .results
                 .session
                 .document_markers
                 .retain(|marker| marker.retained_id != marker_id);
             if state
-                .results
                 .results
                 .session
                 .marker_edit
                 .as_ref()
                 .is_some_and(|draft| draft.selector == selector)
             {
-                state.results.results.session.marker_edit = None;
+                state.results.session.marker_edit = None;
             }
         }
     }
@@ -933,19 +924,17 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
 /// the live document rather than from the projection, so an edit of the label
 /// or kind can never restate a stale position as if the reader had moved it.
 pub(super) fn commit_marker_edit(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     selector: MarkerSelector,
     note: &str,
     kind: MarkerKind,
 ) -> Result<(), String> {
     match selector {
         MarkerSelector::Quick(id) => {
-            let marker = state
-                .results
-                .results
-                .session
-                .marker_mut(id)
-                .ok_or_else(|| "The quick marker is no longer part of this project.".to_owned())?;
+            let marker =
+                state.results.session.marker_mut(id).ok_or_else(|| {
+                    "The quick marker is no longer part of this project.".to_owned()
+                })?;
             marker.note = note.to_owned();
             marker.kind = kind;
             Ok(())
@@ -956,7 +945,6 @@ pub(super) fn commit_marker_edit(
             ..
         } => {
             let trace_name = state
-                .results
                 .results
                 .session
                 .document_marker(marker_id)
@@ -1008,7 +996,6 @@ pub(super) fn commit_marker_edit(
             // typed: those are the same thing only when the typed label was
             // one the document would accept.
             if let Some(marker) = state
-                .results
                 .results
                 .session
                 .document_markers
@@ -1514,7 +1501,7 @@ pub use rspice_results_ui::waveform::waveform_color;
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     results_keymap(ui, app);
     show_with_chrome(ui, app, ResultChrome::Full);
-    waves::marker_dialog::show(ui.ctx(), &mut app.state);
+    waves::marker_dialog::show(ui.ctx(), &mut app.state.results_parts());
     create_document::show(ui.ctx(), app);
     document_edit::show(ui.ctx(), app);
 }
@@ -1577,14 +1564,14 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
                 zoom_gesture_available(app.state.results_reads())
             }
         };
-        if permitted && consume_command_key(ctx, &app.state, command) {
+        if permitted && consume_command_key(ctx, app.state.results_reads(), command) {
             request_view_gesture(&mut app.state.results.results, gesture);
         }
     }
     if viewer_uses_wave_stack(app.state.results.results.session.viewer)
         && consume_command_key(
             ctx,
-            &app.state,
+            app.state.results_reads(),
             crate::workbench::commands::vocabulary::Command::CycleGrid,
         )
     {
@@ -1596,7 +1583,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         app.state.results.results.session.toggle_cursor_tool();
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
-        hide_selected_trace(&mut app.state);
+        hide_selected_trace(&mut app.state.results_parts());
     }
     // Arrow nudging is a cursor gesture, so it only exists while cursors do.
     if app.state.results.results.session.cursor_readout_active() {
@@ -1615,7 +1602,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         };
         if steps != 0.0 {
             let t = Tokens::get(ctx);
-            waves::nudge_cursor(&mut app.state, &t, shift, steps);
+            waves::nudge_cursor(&mut app.state.results_parts(), &t, shift, steps);
         }
     }
 }
@@ -1628,7 +1615,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
 /// menu entry is still the way in, and no key is silently invented.
 fn consume_command_key(
     ctx: &egui::Context,
-    state: &AppState,
+    state: ResultsReads<'_>,
     command: crate::workbench::commands::vocabulary::Command,
 ) -> bool {
     let platform = runtime_command_platform(ctx);
@@ -1662,12 +1649,8 @@ fn consume_command_key(
 /// Hiding is the reversible form of removal here: the retained dataset is
 /// immutable, so a trace leaves the plot by losing visibility and comes back
 /// from the pane's add-signal menu.
-fn hide_selected_trace(state: &mut AppState) {
-    let Some(selected) = state
-        .results
-        .results
-        .valid_selected_trace(&state.model.simulation)
-    else {
+fn hide_selected_trace(state: &mut ResultsParts<'_>) {
+    let Some(selected) = state.results.valid_selected_trace(&state.model.simulation) else {
         return;
     };
     let analysis_key = selected.analysis_key();
@@ -1689,8 +1672,8 @@ fn hide_selected_trace(state: &mut AppState) {
             })?
         });
     if let Some((analysis_index, waveform_index)) = located {
-        waves::toggle_visibility(&mut state.results_parts(), analysis_index, waveform_index);
-        state.results.results.session.selected_trace = None;
+        waves::toggle_visibility(state, analysis_index, waveform_index);
+        state.results.session.selected_trace = None;
     }
 }
 
@@ -1708,7 +1691,7 @@ pub(crate) fn show_persistent_document(
     // layout, so it answers the same keys and owns the same marker dialog.
     results_keymap(ui, app);
     persistent_document::show(ui, app, document_id);
-    waves::marker_dialog::show(ui.ctx(), &mut app.state);
+    waves::marker_dialog::show(ui.ctx(), &mut app.state.results_parts());
     create_document::show(ui.ctx(), app);
     document_edit::show(ui.ctx(), app);
 }
@@ -1748,7 +1731,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         .results
         .session
         .leave_persistent_document();
-    let family = document_edit::family::quick_view_selection(&app.state);
+    let family = document_edit::family::quick_view_selection(app.state.results_reads());
     app.state.results.results.set_sample_selection(family);
     prepare_viewer_state(&mut app.state.results_parts());
     let plan_before_docbar = app
@@ -1761,11 +1744,11 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     match chrome {
         ResultChrome::Full => {
             show_docbar(ui, app);
-            if result_stage_bar_visible(&app.state) {
-                show_sheet_bar(ui, &mut app.state);
+            if result_stage_bar_visible(app.state.results_reads()) {
+                show_sheet_bar(ui, &mut app.state.results_parts());
             }
         }
-        ResultChrome::CompactSplit => show_compact_docbar(ui, &mut app.state),
+        ResultChrome::CompactSplit => show_compact_docbar(ui, &mut app.state.results_parts()),
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
@@ -1791,7 +1774,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // owning scroll body are content-fit, so a stage with nothing to report
     // gives the whole area back to the document.
     let strip_height = match chrome {
-        ResultChrome::Full => readout_strip_height(&mut app.state),
+        ResultChrome::Full => readout_strip_height(&mut app.state.results_parts()),
         ResultChrome::CompactSplit => 0.0,
     };
     let available = ui.available_rect_before_wrap();
@@ -1801,7 +1784,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         show_viewer_well(ui, app, chrome);
     });
     if strip_height > 0.0 {
-        waves::readout_strip(ui, &mut app.state, strip_height);
+        waves::readout_strip(ui, &mut app.state.results_parts(), strip_height);
     }
 }
 
@@ -1810,23 +1793,23 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// Plot and custom-canvas sheets use the 31 px instrument/purpose bar. OP,
 /// Specs, and Table use the mockup's 40 px structured-document strip. XF and
 /// Manifest own no controls there and therefore collapse the row completely.
-fn result_stage_bar_visible(state: &AppState) -> bool {
-    (state.results.results.session.viewer == ResultViewer::Specs
-        && state.results.results.session.spec_drafts.is_some())
+fn result_stage_bar_visible(state: ResultsReads<'_>) -> bool {
+    (state.results.session.viewer == ResultViewer::Specs
+        && state.results.session.spec_drafts.is_some())
         || (state
             .model
             .simulation
             .active_run()
             .is_some_and(|run| !run.analyses.is_empty())
-            && viewer_has_sheet_bar(state.results.results.session.viewer))
+            && viewer_has_sheet_bar(state.results.session.viewer))
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
 ///
 /// Only the cursor-bearing waveform viewers carry a readout; structured
 /// documents (OP, specs, tables) have no cursor to report.
-fn readout_strip_height(state: &mut AppState) -> f32 {
-    match state.results.results.session.viewer {
+fn readout_strip_height(state: &mut ResultsParts<'_>) -> f32 {
+    match state.results.session.viewer {
         ResultViewer::Waves
         | ResultViewer::DcSweep
         | ResultViewer::Bode
@@ -2053,7 +2036,7 @@ pub(crate) fn set_active_axis_range(
 }
 
 fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
-    apply_pending_view_gesture(ui, &mut app.state);
+    apply_pending_view_gesture(ui, &mut app.state.results_parts());
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top.
     let well = ui.available_rect_before_wrap();
@@ -2071,8 +2054,12 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         node.set_label(panel_label);
     });
 
-    let operational = operational_state::classify_viewer(&mut app.state, viewer);
-    if operational_state::show_result_operational_status(ui, &mut app.state, &operational) {
+    let operational = operational_state::classify_viewer(&mut app.state.results_parts(), viewer);
+    if operational_state::show_result_operational_status(
+        ui,
+        &mut app.state.results_parts(),
+        &operational,
+    ) {
         return;
     }
 
@@ -2096,48 +2083,57 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 
     match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => match chrome {
-            ResultChrome::Full => waves::show(ui, &mut app.state),
-            ResultChrome::CompactSplit => waves::show_compact(ui, &mut app.state),
+            ResultChrome::Full => waves::show(ui, &mut app.state.results_parts()),
+            ResultChrome::CompactSplit => waves::show_compact(ui, &mut app.state.results_parts()),
         },
-        ResultViewer::Bode => waves::show_bode(ui, &mut app.state),
+        ResultViewer::Bode => waves::show_bode(ui, &mut app.state.results_parts()),
         ResultViewer::Fft => {
             if ensure_derived(ui, app, ActiveViewer::Fft) {
-                fft::show(ui, &mut app.state);
+                fft::show(ui, &mut app.state.results_parts());
             }
         }
-        ResultViewer::HarmonicBalance => harmonic_balance::show(ui, &mut app.state),
-        ResultViewer::PhaseNoise => phase_noise::show(ui, &mut app.state),
+        ResultViewer::HarmonicBalance => harmonic_balance::show(ui, &mut app.state.results_parts()),
+        ResultViewer::PhaseNoise => phase_noise::show(ui, &mut app.state.results_parts()),
         ResultViewer::Eye => {
             if ensure_derived(ui, app, ActiveViewer::EyeDiagram) {
-                eye::show(ui, &mut app.state);
+                eye::show(ui, &mut app.state.results_parts());
             }
         }
-        ResultViewer::Hist => hist::show(ui, &mut app.state),
-        ResultViewer::Op => op_inspector::show(ui, &mut app.state),
-        ResultViewer::NoiseContrib => waves::show_noise(ui, &mut app.state),
-        ResultViewer::Contribution => sensitivity::show(ui, &mut app.state),
-        ResultViewer::TransferFunction => transfer_function::show(ui, &mut app.state),
-        ResultViewer::Specs => specs::show(ui, &mut app.state),
-        ResultViewer::Table => table::show(ui, &mut app.state),
-        ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
-        ResultViewer::Smith => smith::show(ui, &mut app.state),
+        ResultViewer::Hist => hist::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Op => op_inspector::show(ui, &mut app.state.results_parts()),
+        ResultViewer::NoiseContrib => waves::show_noise(ui, &mut app.state.results_parts()),
+        ResultViewer::Contribution => sensitivity::show(ui, &mut app.state.results_parts()),
+        ResultViewer::TransferFunction => {
+            transfer_function::show(ui, &mut app.state.results_parts())
+        }
+        ResultViewer::Specs => {
+            let selected_specification = app.state.simulate.selected_specification.clone();
+            specs::show(
+                ui,
+                &mut app.state.results_parts(),
+                selected_specification.as_deref(),
+            );
+        }
+        ResultViewer::Table => table::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Nyquist => nyquist::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Smith => smith::show(ui, &mut app.state.results_parts()),
         ResultViewer::Polar => {
             polar::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
         }
         ResultViewer::NetworkMatrix => {
             network_matrix::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
         }
-        ResultViewer::PoleZero => pz::show(ui, &mut app.state),
+        ResultViewer::PoleZero => pz::show(ui, &mut app.state.results_parts()),
         ResultViewer::Scatter => {
             scatter::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
         }
         ResultViewer::BoxViolin => {
             box_violin::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
         }
-        ResultViewer::Events => events::show(ui, &mut app.state),
-        ResultViewer::Soa => soa::show(ui, &mut app.state),
-        ResultViewer::Optimization => optimization::show(ui, &mut app.state),
-        ResultViewer::Manifest => manifest::show(ui, &mut app.state),
+        ResultViewer::Events => events::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Soa => soa::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Optimization => optimization::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Manifest => manifest::show(ui, &mut app.state.results_parts()),
     }
 }
 
@@ -2154,13 +2150,13 @@ const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
 /// Split projection of the mockup's viewer-tab row. Run binding, output
 /// controls, result-document creation and properties remain owned by the full
 /// Results workspace; every compatible existing viewer stays reachable here.
-fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
+fn show_compact_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let available = ResultViewer::all()
         .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
     if let Some(viewer) =
-        chrome::bars::compact_document_bar(ui, state.results.results.session.viewer, available)
+        chrome::bars::compact_document_bar(ui, state.results.session.viewer, available)
     {
-        state.results.results.session.viewer = viewer;
+        state.results.session.viewer = viewer;
     }
 }
 
@@ -2221,10 +2217,9 @@ fn show_docbar_for_family(
 /// growing match here: each is a statement about that sheet's own evidence —
 /// which network term, which two columns, which normalization — and the sheet
 /// is the only place that knows what the retained result can offer.
-fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
-    let viewer = state.results.results.session.viewer;
-    let mut parts = state.results_parts();
-    let mut context = SheetContext::of(&mut parts);
+fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let viewer = state.results.session.viewer;
+    let mut context = SheetContext::of(state);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
         ResultViewer::Contribution => sensitivity::domain_bar(ui, &mut context),
@@ -2235,12 +2230,11 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
     }
 }
 
-fn hidden_wave_strip_count(state: &AppState) -> usize {
+fn hidden_wave_strip_count(state: ResultsReads<'_>) -> usize {
     let Some(run) = state.model.simulation.active_run() else {
         return 0;
     };
     state
-        .results
         .results
         .session
         .hidden_strips
@@ -2274,21 +2268,21 @@ pub(crate) fn incomplete_evidence_reason(analysis: &AnalysisResult) -> Option<&'
 /// every frame, and on the wave stack it asks for every analysis of the run,
 /// so this is the caller that must not walk the samples.
 fn memoized_incomplete_evidence_reason(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: DatasetId,
     analysis: &AnalysisResult,
 ) -> Option<&'static str> {
     if !analysis.success {
         return Some("the run did not complete — these samples stop where it failed");
     }
-    (!analysis_evidence_is_valid(state.results_reads(), dataset_id, analysis))
+    (!analysis_evidence_is_valid(state, dataset_id, analysis))
         .then_some("the saved results failed validation")
 }
 
 /// The same question for whichever analysis the active sheet is speaking for.
-fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
+fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'static str> {
     let run = state.model.simulation.active_run()?;
-    if viewer_uses_wave_stack(state.results.results.session.viewer) {
+    if viewer_uses_wave_stack(state.results.session.viewer) {
         // The stack draws every analysis of the run at once, so the bar
         // speaks for the run: one failed strip makes the sheet's evidence
         // incomplete even when the strip beside it converged.
@@ -2303,9 +2297,9 @@ fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
     )
 }
 
-fn sheet_purpose(state: &AppState) -> String {
-    let viewer = state.results.results.session.viewer;
-    let detail = viewer_availability(state.results_reads(), viewer).reason;
+fn sheet_purpose(state: ResultsReads<'_>) -> String {
+    let viewer = state.results.session.viewer;
+    let detail = viewer_availability(state, viewer).reason;
     match active_incomplete_evidence_reason(state) {
         Some(caution) => format!("{} · {detail} · {caution}", viewer.tab_label()),
         None => format!("{} · {detail}", viewer.tab_label()),

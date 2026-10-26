@@ -582,7 +582,7 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
     // whether the retained evidence validated, and the tab strip decides on
     // every frame which sheets to offer. Both are part of the frame, and both
     // used to be where the dataset walks were.
-    let _ = super::super::sheet_purpose(state);
+    let _ = super::super::sheet_purpose(state.results_reads());
     for candidate in ResultViewer::all() {
         let _ = super::super::viewer_availability(state.results_reads(), candidate);
     }
@@ -598,41 +598,41 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
             | ResultViewer::NoiseContrib
     ) {
         let tokens = super::super::Tokens::get(ui.ctx());
-        let _ = waves::family_envelope_available(state, &tokens);
+        let _ = waves::family_envelope_available(&mut state.results_parts(), &tokens);
     }
     match viewer {
-        ResultViewer::Manifest => manifest::show(ui, state),
-        ResultViewer::Op => op_inspector::show(ui, state),
-        ResultViewer::Table => table::show(ui, state),
-        ResultViewer::Soa => soa::show(ui, state),
-        ResultViewer::Waves => waves::show(ui, state),
-        ResultViewer::Eye => eye::show(ui, state),
+        ResultViewer::Manifest => manifest::show(ui, &mut state.results_parts()),
+        ResultViewer::Op => op_inspector::show(ui, &mut state.results_parts()),
+        ResultViewer::Table => table::show(ui, &mut state.results_parts()),
+        ResultViewer::Soa => soa::show(ui, &mut state.results_parts()),
+        ResultViewer::Waves => waves::show(ui, &mut state.results_parts()),
+        ResultViewer::Eye => eye::show(ui, &mut state.results_parts()),
         ResultViewer::Contribution => {
-            sensitivity::show(ui, state);
+            sensitivity::show(ui, &mut state.results_parts());
             sensitivity::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Optimization => {
-            optimization::show(ui, state);
+            optimization::show(ui, &mut state.results_parts());
             optimization::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Bode => {
-            waves::show_bode(ui, state);
+            waves::show_bode(ui, &mut state.results_parts());
             bode::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::NoiseContrib => {
-            waves::show_noise(ui, state);
+            waves::show_noise(ui, &mut state.results_parts());
             noise_contrib::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Nyquist => {
-            nyquist::show(ui, state);
+            nyquist::show(ui, &mut state.results_parts());
             nyquist::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Fft => {
-            fft::show(ui, state);
+            fft::show(ui, &mut state.results_parts());
             fft::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Events => {
-            events::show(ui, state);
+            events::show(ui, &mut state.results_parts());
             events::right_panel(ui, &mut state.results_parts());
         }
         other => panic!("{other:?} is not a measured surface"),
@@ -791,7 +791,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
     let mut state = state_for(ResultViewer::Soa);
     state.results.results.session.viewer = ResultViewer::Soa;
     assert!(soa::active_payload_is_valid(state.results_reads()));
-    let purpose = super::super::sheet_purpose(&state);
+    let purpose = super::super::sheet_purpose(state.results_reads());
     assert!(
         !purpose.contains("failed validation"),
         "the fixture starts out valid, but the bar says: {purpose}"
@@ -814,7 +814,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
         !soa::active_payload_is_valid(state.results_reads()),
         "the SOA gate served a verdict from the previous dataset generation"
     );
-    let purpose = super::super::sheet_purpose(&state);
+    let purpose = super::super::sheet_purpose(state.results_reads());
     assert!(
         purpose.contains("the saved results failed validation"),
         "the sheet bar kept the old verdict: {purpose}"

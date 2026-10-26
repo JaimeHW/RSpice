@@ -7,7 +7,9 @@ use crate::state::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
+#[cfg(test)]
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
 #[cfg(test)]
 use rspice_results_ui::transfer_function::gain_unit;
@@ -70,7 +72,7 @@ pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     active_transfer_function(state).is_some()
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     view::show(ui, active_transfer_function(state.results_reads()));
 }
 

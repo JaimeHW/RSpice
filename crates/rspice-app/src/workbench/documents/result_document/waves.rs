@@ -135,47 +135,41 @@ pub(super) fn source_waveform_anchor(
 /// pane. Stable analysis identity and engineering unit are used instead of
 /// transient pane ordinals, so hiding or reordering a strip cannot redirect an
 /// action to unrelated data.
-pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
-    let presentation = state.result_presentation_policy();
+pub(super) fn reconcile_active_pane(state: &mut ResultsParts<'_>, t: &Tokens) {
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         t,
     );
-    if active_pane(&models, &state.results.results.session).is_some() {
+    if active_pane(&models, &state.results.session).is_some() {
         return;
     }
 
     let preferred_analysis = state
         .results
-        .results
         .valid_selected_trace(&state.model.simulation)
         .map(SelectedResultTrace::analysis_key)
         .or_else(|| {
-            state
-                .results
-                .results
-                .session
-                .cursor_strip
-                .and_then(|index| {
-                    models
-                        .iter()
-                        .find(|model| model.analysis_index == index)
-                        .map(|model| model.analysis_key)
-                })
+            state.results.session.cursor_strip.and_then(|index| {
+                models
+                    .iter()
+                    .find(|model| model.analysis_index == index)
+                    .map(|model| model.analysis_key)
+            })
         });
     let next = preferred_analysis
         .and_then(|analysis| {
             models.iter().find(|model| {
                 model.analysis_key == analysis
-                    && model_is_visible(model, &models, &state.results.results.session)
+                    && model_is_visible(model, &models, &state.results.session)
             })
         })
         .or_else(|| {
             models
                 .iter()
-                .find(|model| model_is_visible(model, &models, &state.results.results.session))
+                .find(|model| model_is_visible(model, &models, &state.results.session))
         })
         .and_then(|model| {
             model
@@ -186,7 +180,7 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
                     unit: pane.unit.to_owned(),
                 })
         });
-    state.results.results.session.active_wave_pane = next;
+    state.results.session.active_wave_pane = next;
 }
 
 fn matching_spec_limits(
@@ -254,39 +248,34 @@ fn matching_spec_limits(
     limits
 }
 
-pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
-    let presentation = state.result_presentation_policy();
+pub(super) fn spec_limits_available(state: &mut ResultsParts<'_>, t: &Tokens) -> bool {
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         t,
     );
-    active_pane(&models, &state.results.results.session).is_some_and(|(model, _, pane)| {
+    active_pane(&models, &state.results.session).is_some_and(|(model, _, pane)| {
         !matching_spec_limits(state.results_reads(), model, &pane, t).is_empty()
     })
 }
 
-pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> bool {
-    let presentation = state.result_presentation_policy();
+pub(super) fn family_envelope_available(state: &mut ResultsParts<'_>, t: &Tokens) -> bool {
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         t,
     );
-    let generation = state.results.results.models.generation();
-    let Some((model, _, pane)) = active_pane(&models, &state.results.results.session) else {
+    let generation = state.results.models.generation();
+    let Some((model, _, pane)) = active_pane(&models, &state.results.session) else {
         return false;
     };
-    !extent::family_envelopes(
-        &mut state.results.results.plans.envelopes,
-        generation,
-        model,
-        &pane,
-    )
-    .series()
-    .is_empty()
+    !extent::family_envelopes(&mut state.results.plans.envelopes, generation, model, &pane)
+        .series()
+        .is_empty()
 }
 
 /// Everything dropping a marker at cursor A needs to name where it landed:
@@ -302,15 +291,17 @@ type CursorMarkerTarget = (
     std::sync::Arc<Vec<f64>>,
 );
 
-fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<CursorMarkerTarget> {
+fn cursor_marker_target(
+    state: ResultsReads<'_>,
+    models: &[StripModel],
+) -> Option<CursorMarkerTarget> {
     let cursor_x = state
-        .results
         .results
         .session
         .cursors
         .a
         .filter(|value| value.is_finite())?;
-    let (model, _, pane) = active_pane(models, &state.results.results.session)?;
+    let (model, _, pane) = active_pane(models, &state.results.session)?;
     let pane_traces = pane
         .traces
         .iter()
@@ -319,12 +310,10 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
         .collect::<Vec<_>>();
     let selected_source = state
         .results
-        .results
         .valid_selected_trace(&state.model.simulation)
         .filter(|selected| selected.analysis_key() == model.analysis_key)
         .map(SelectedResultTrace::source_name);
     let trace = state
-        .results
         .results
         .session
         .cursor_a_anchor
@@ -372,26 +361,27 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
     })
 }
 
-pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> bool {
-    let presentation = state.result_presentation_policy();
+pub(super) fn marker_at_cursor_a_available(state: &mut ResultsParts<'_>, t: &Tokens) -> bool {
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         t,
     );
-    cursor_marker_target(state, &models).is_some()
+    cursor_marker_target(state.results_reads(), &models).is_some()
 }
 
-pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
-    let presentation = state.result_presentation_policy();
+pub(super) fn drop_marker_at_cursor_a(state: &mut ResultsParts<'_>, t: &Tokens) {
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         t,
     );
-    let Some((analysis, anchor, trace_name, x, samples)) = cursor_marker_target(state, &models)
+    let Some((analysis, anchor, trace_name, x, samples)) =
+        cursor_marker_target(state.results_reads(), &models)
     else {
         return;
     };
@@ -414,14 +404,14 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
 // ---------------------------------------------------------------------------
 
 /// Render the strip stack.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     show_with_pane_chrome(ui, state, true);
 }
 
 /// Render the same retained waveform strips inside the compact split-results
 /// pane. Trace selection and swatch visibility remain fully interactive, while
 /// the pane-only maximize/close/fit and expression controls are omitted.
-pub fn show_compact(ui: &mut Ui, state: &mut AppState) {
+pub fn show_compact(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     show_with_pane_chrome(ui, state, false);
 }
 
@@ -430,23 +420,23 @@ pub fn show_compact(ui: &mut Ui, state: &mut AppState) {
 /// weighted panes — magnitude over phase on one shared X domain. The AC
 /// scope rides the viewer-aware model cache; stability margins stay in the
 /// right panel's inspector card.
-pub fn show_bode(ui: &mut Ui, state: &mut AppState) {
+pub fn show_bode(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     show_with_pane_chrome(ui, state, true);
 }
 
 /// The Noise sheet: retained noise PSDs as an nV/√Hz pane through the same
 /// instrument, scoped to Noise analyses by the viewer-aware model cache.
 /// The spectrum summary card stays in the right panel.
-pub fn show_noise(ui: &mut Ui, state: &mut AppState) {
+pub fn show_noise(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     show_with_pane_chrome(ui, state, true);
 }
 
-fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
+fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
     let t = Tokens::get(ui.ctx());
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         &t,
     );

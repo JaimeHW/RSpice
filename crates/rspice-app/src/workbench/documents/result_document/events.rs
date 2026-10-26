@@ -1,12 +1,11 @@
 //! Event source validation, history cache lifetime and selection recovery.
 
 use super::{AnalysisPresentationKey, ResultsParts, ResultsReads, SheetContext};
+use crate::state::{AnalysisResult, AnalysisResultPayload, RunHistoryRevision};
 #[cfg(test)]
 use crate::state::{AnalysisType, RetainedTrace};
-use crate::{
-    state::{AnalysisResult, AnalysisResultPayload, RunHistoryRevision},
-    workbench::AppState,
-};
+#[cfg(test)]
+use crate::workbench::AppState;
 use egui::Ui;
 use rspice_results::events::projection::EventOrder;
 #[cfg(test)]
@@ -125,7 +124,7 @@ fn event_rows(analysis: &AnalysisResult) -> Vec<EventRow<'_>> {
         })
         .collect()
 }
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some((analysis_key, structurally_renderable)) =
         state.model.simulation.active_run().and_then(|run| {
             state.model.simulation.active_analysis().map(|analysis| {
@@ -152,7 +151,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewer::show_absent(ui, EventAbsence::InvalidEvidence);
         return;
     }
-    let Some(cache) = event_order(&mut state.results_parts()) else {
+    let Some(cache) = event_order(state) else {
         return;
     };
     let analysis = state
@@ -167,14 +166,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             analysis: &analysis.data,
             order: &cache,
             origin: active_event_origin(state.results_reads()),
-            radix: state.results.results.session.event_bus_radix,
-            expanded: &state.results.results.session.expanded_event_buses,
-            selected: state
-                .results
-                .results
-                .session
-                .selected_digital_event
-                .as_ref(),
+            radix: state.results.session.event_bus_radix,
+            expanded: &state.results.session.expanded_event_buses,
+            selected: state.results.session.selected_digital_event.as_ref(),
         },
     );
     let viewer::EventResponse {
@@ -182,22 +176,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         toggled_bus,
     } = response;
     if let Some(selection) = requested {
-        state.results.results.session.selected_digital_event = Some(selection);
+        state.results.session.selected_digital_event = Some(selection);
     }
     if let Some(bus) = toggled_bus
-        && !state
-            .results
-            .results
-            .session
-            .expanded_event_buses
-            .remove(&bus)
+        && !state.results.session.expanded_event_buses.remove(&bus)
     {
-        state
-            .results
-            .results
-            .session
-            .expanded_event_buses
-            .insert(bus);
+        state.results.session.expanded_event_buses.insert(bus);
     }
 }
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {

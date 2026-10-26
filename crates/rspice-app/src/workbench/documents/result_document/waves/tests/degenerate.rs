@@ -89,7 +89,7 @@ fn degenerate_transient() -> AnalysisResult {
 /// harness that can prove the instrument survives its own data: a value that
 /// slips past the axis mapping does not fail an assert, it becomes a vertex
 /// at infinity, and the whole draw call degenerates around it.
-fn draw_and_tessellate(state: &mut AppState, sheet: fn(&mut Ui, &mut AppState)) {
+fn draw_and_tessellate(state: &mut AppState, sheet: fn(&mut Ui, &mut ResultsParts<'_>)) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
@@ -103,7 +103,7 @@ fn draw_and_tessellate(state: &mut AppState, sheet: fn(&mut Ui, &mut AppState)) 
     // is the cached path the user actually spends their time in.
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| sheet(ui, state));
+            egui::CentralPanel::default().show(ctx, |ui| sheet(ui, &mut state.results_parts()));
         });
         for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
             let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {

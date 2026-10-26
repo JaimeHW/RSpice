@@ -3,7 +3,6 @@
 use super::{ResultsParts, ResultsReads};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::ui::tokens::Tokens;
-use crate::workbench::AppState;
 use egui::Ui;
 use rspice_results_ui::harmonic_balance::{
     self as view, HarmonicBalanceModel, HarmonicTrace, recorded_fft,
@@ -159,16 +158,15 @@ fn absence(state: ResultsReads<'_>) -> view::SpectrumAbsence<'_> {
 }
 
 /// Bind the retained spectrum and apply navigation to its host viewport.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let tokens = Tokens::get(ui.ctx());
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy().readout();
+    let presentation = state.results_reads().presentation_policy().readout();
     let Some(model) = build_model(state.results_reads(), &tokens) else {
         view::show_absent(ui, absence(state.results_reads()));
         return;
     };
     let viewport = state
-        .results
         .results
         .session
         .plot_view(super::ResultViewer::HarmonicBalance, 0);
@@ -178,24 +176,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewport,
         &quantity_policy,
         presentation,
-        &mut state.results.results.session.cache,
+        &mut state.results.session.cache,
     );
     if response.fit {
         state
-            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::HarmonicBalance, 0);
     }
     if let Some(response) = response.plot {
         super::record_drawn_axes(
-            &mut state.results.results,
+            state.results,
             super::ResultViewer::HarmonicBalance,
             &response,
         );
         if response.view.any() {
             state
-                .results
                 .results
                 .session
                 .plot_view_mut(super::ResultViewer::HarmonicBalance, 0)

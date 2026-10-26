@@ -92,7 +92,7 @@ fn zoom_from_a_companion_pane_moves_the_strips_shared_abscissa() {
         analysis,
         unit: units[phase_ordinal].clone(),
     });
-    zoom_active_pane(&mut state, &Tokens::default(), 0.5);
+    zoom_active_pane(&mut state.results_parts(), &Tokens::default(), 0.5);
 
     let magnitude = pane_x(&state, analysis, 0).expect("the magnitude pane took the zoom");
     let phase = pane_x(&state, analysis, phase_ordinal).expect("the phase pane took the zoom");
@@ -147,7 +147,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
         .analysis_plot_view_pane_mut(super::super::super::ResultViewer::Waves, analysis, 0)
         .y = Some(before);
 
-    zoom_active_pane(&mut state, &Tokens::default(), 0.5);
+    zoom_active_pane(&mut state.results_parts(), &Tokens::default(), 0.5);
 
     let after = state
         .results
@@ -198,7 +198,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
         unit: units[0].clone(),
     });
 
-    fit_active_pane(&mut state, &Tokens::default());
+    fit_active_pane(&mut state.results_parts(), &Tokens::default());
 
     assert!(
         !state.results.results.session.analysis_strip_axis_is_pinned(
@@ -327,7 +327,7 @@ fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
 /// Every string one sheet paints through a real egui frame.
 pub(super) fn painted_texts(
     state: &mut AppState,
-    sheet: fn(&mut Ui, &mut AppState),
+    sheet: fn(&mut Ui, &mut ResultsParts<'_>),
 ) -> Vec<String> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -344,7 +344,7 @@ pub(super) fn painted_texts(
     for _ in 0..2 {
         texts.clear();
         let output = ctx.run_ui(input.clone(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| sheet(ui, state));
+            egui::CentralPanel::default().show(ctx, |ui| sheet(ui, &mut state.results_parts()));
         });
         collect_texts(&output.shapes, &mut texts);
     }
@@ -374,7 +374,7 @@ fn collect_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
 /// "the pane drew something" is not the question — "the pane drew a curve" is.
 pub(super) fn painted_path_points(
     state: &mut AppState,
-    sheet: fn(&mut Ui, &mut AppState),
+    sheet: fn(&mut Ui, &mut ResultsParts<'_>),
 ) -> usize {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -389,7 +389,7 @@ pub(super) fn painted_path_points(
     for _ in 0..2 {
         points = 0;
         let output = ctx.run_ui(input.clone(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| sheet(ui, state));
+            egui::CentralPanel::default().show(ctx, |ui| sheet(ui, &mut state.results_parts()));
         });
         for clipped in &output.shapes {
             points += path_points(&clipped.shape);

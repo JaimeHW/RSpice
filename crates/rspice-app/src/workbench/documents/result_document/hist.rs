@@ -457,14 +457,13 @@ fn selected_histogram_name(state: ResultsReads<'_>) -> Option<String> {
 }
 
 /// Render controls, resolve the current population, and apply local plot outcomes.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let names: Vec<String> = histogram_names(state.results_reads())
         .into_iter()
         .map(str::to_owned)
         .collect();
-    if view::controls(ui, &mut state.results.analysis.histogram_state, &names) {
+    if view::controls(ui, &mut state.analysis.histogram_state, &names) {
         state
-            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
@@ -498,31 +497,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     let plot_view = state
         .results
-        .results
         .session
         .plot_view(super::ResultViewer::Hist, 0);
-    let out = view::show(
-        ui,
-        model,
-        plot_view,
-        &mut state.results.results.session.cache,
-    );
+    let out = view::show(ui, model, plot_view, &mut state.results.session.cache);
     if out.fit_requested {
         state
-            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     if let Some(response) = out.plot {
-        super::record_drawn_axes(
-            &mut state.results.results,
-            super::ResultViewer::Hist,
-            &response,
-        );
+        super::record_drawn_axes(state.results, super::ResultViewer::Hist, &response);
         if response.view.any() {
             state
-                .results
                 .results
                 .session
                 .plot_view_mut(super::ResultViewer::Hist, 0)

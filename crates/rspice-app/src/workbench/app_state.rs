@@ -212,8 +212,12 @@ impl AppState {
 
     /// The parts the results workspace's commands write.
     pub(crate) fn results_parts(&mut self) -> ResultsParts<'_> {
-        self.results
-            .parts(&mut self.model, &mut self.workbench, &self.platform)
+        self.results.parts(
+            &mut self.model,
+            &mut self.workbench,
+            &self.platform,
+            &mut self.runs.preflight,
+        )
     }
 
     /// [`Model::library_folders`].

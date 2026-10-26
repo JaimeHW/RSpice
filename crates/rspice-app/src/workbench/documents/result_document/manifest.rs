@@ -1,11 +1,10 @@
 //! Dataset-manifest cache ownership, exact export and application actions.
 
 use super::frame_work::{self, DatasetWalk};
+use crate::state::{RunHistoryRevision, SimulationRun};
+#[cfg(test)]
+use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
-use crate::{
-    state::{RunHistoryRevision, SimulationRun},
-    workbench::AppState,
-};
 use egui::Ui;
 use rspice_results::manifest::ManifestViewModel;
 use rspice_results_ui::manifest as viewer;
@@ -42,8 +41,8 @@ pub(crate) fn active_manifest(state: &mut ResultsParts<'_>) -> Option<Arc<Manife
     state.results.plans.manifest = Some(Arc::clone(&built));
     Some(built)
 }
-pub(crate) fn show(ui: &mut Ui, state: &mut AppState) {
-    let plan = active_manifest(&mut state.results_parts());
+pub(crate) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let plan = active_manifest(state);
     viewer::show(ui, plan.as_ref().map(|plan| &plan.model));
 }
 pub(crate) fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {

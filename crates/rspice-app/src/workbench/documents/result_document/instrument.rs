@@ -1,6 +1,6 @@
 //! Active-pane authority and application effects for the Results instrument.
 
-use super::{AppState, ResultPlotTool, Tokens, Ui, hidden_wave_strip_count, waves};
+use super::{ResultPlotTool, ResultsParts, Tokens, Ui, hidden_wave_strip_count, waves};
 use rspice_results_ui::chrome::{
     ExportRequests,
     instrument::{
@@ -8,17 +8,17 @@ use rspice_results_ui::chrome::{
     },
 };
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let t = Tokens::get(ui.ctx());
     waves::reconcile_active_pane(state, &t);
     let limits_available = waves::spec_limits_available(state, &t);
     let envelope_available = waves::family_envelope_available(state, &t);
     let marker_available = waves::marker_at_cursor_a_available(state, &t);
     if !limits_available {
-        state.results.results.session.show_spec_limits = false;
+        state.results.session.show_spec_limits = false;
     }
     if !envelope_available {
-        state.results.results.session.show_family_envelope = false;
+        state.results.session.show_family_envelope = false;
     }
 
     instrument::show(
@@ -32,14 +32,14 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-struct Host<'a> {
-    state: &'a mut AppState,
+struct Host<'a, 'p> {
+    state: &'a mut ResultsParts<'p>,
     tokens: &'a Tokens,
 }
 
-impl WaveInstrumentHost for Host<'_> {
+impl WaveInstrumentHost for Host<'_, '_> {
     fn controls(&self) -> InstrumentControls {
-        let results = &self.state.results.results;
+        let results = &self.state.results;
         InstrumentControls {
             plot_tool: results.session.plot_tool,
             cursor_armed: results.session.cursor_tool.is_armed(),
@@ -52,39 +52,36 @@ impl WaveInstrumentHost for Host<'_> {
     fn request(&mut self, action: InstrumentAction) {
         match action {
             InstrumentAction::Cursor => {
-                let cursor_active = self.state.results.results.session.plot_tool
-                    == ResultPlotTool::Cursor
-                    && self.state.results.results.session.cursor_tool.is_armed();
+                let cursor_active = self.state.results.session.plot_tool == ResultPlotTool::Cursor
+                    && self.state.results.session.cursor_tool.is_armed();
                 if cursor_active {
-                    self.state.results.results.session.toggle_cursor_tool();
+                    self.state.results.session.toggle_cursor_tool();
                 } else {
-                    self.state.results.results.session.plot_tool = ResultPlotTool::Cursor;
-                    if !self.state.results.results.session.cursor_tool.is_armed() {
-                        self.state.results.results.session.toggle_cursor_tool();
+                    self.state.results.session.plot_tool = ResultPlotTool::Cursor;
+                    if !self.state.results.session.cursor_tool.is_armed() {
+                        self.state.results.session.toggle_cursor_tool();
                     }
                 }
             }
-            InstrumentAction::Tool(tool) => self.state.results.results.session.plot_tool = tool,
+            InstrumentAction::Tool(tool) => self.state.results.session.plot_tool = tool,
             InstrumentAction::Zoom(factor) => {
                 waves::zoom_active_pane(self.state, self.tokens, factor)
             }
             InstrumentAction::Fit => waves::fit_active_pane(self.state, self.tokens),
             InstrumentAction::ToggleLimits => {
-                self.state.results.results.session.show_spec_limits =
-                    !self.state.results.results.session.show_spec_limits
+                self.state.results.session.show_spec_limits =
+                    !self.state.results.session.show_spec_limits
             }
             InstrumentAction::ToggleEnvelope => {
-                self.state.results.results.session.show_family_envelope =
-                    !self.state.results.results.session.show_family_envelope
+                self.state.results.session.show_family_envelope =
+                    !self.state.results.session.show_family_envelope
             }
             InstrumentAction::ToggleGrid => {
-                self.state.results.results.session.show_minor_grid =
-                    !self.state.results.results.session.show_minor_grid
+                self.state.results.session.show_minor_grid =
+                    !self.state.results.session.show_minor_grid
             }
             InstrumentAction::DropMarker => waves::drop_marker_at_cursor_a(self.state, self.tokens),
-            InstrumentAction::RestoreStrips => {
-                self.state.results.results.session.hidden_strips.clear()
-            }
+            InstrumentAction::RestoreStrips => self.state.results.session.hidden_strips.clear(),
         }
     }
 
@@ -96,6 +93,6 @@ impl WaveInstrumentHost for Host<'_> {
         waves::inline_cursor_readout(self.state, self.tokens)
     }
     fn hidden_strip_count(&self) -> usize {
-        hidden_wave_strip_count(self.state)
+        hidden_wave_strip_count(self.state.results_reads())
     }
 }

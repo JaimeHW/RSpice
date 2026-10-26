@@ -3,7 +3,9 @@
 use super::super::frame_work::{self, DatasetWalk};
 use super::super::{AnalysisPresentationKey, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
+#[cfg(test)]
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
 use rspice_results_ui::sensitivity::mismatch as viewer;
 use std::sync::Arc;
@@ -48,7 +50,7 @@ pub(in crate::workbench::documents::result_document) struct MismatchPlan {
     analysis: AnalysisPresentationKey,
     display: viewer::MismatchPlan,
 }
-fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
+fn mismatch_plan(state: &mut ResultsParts<'_>) -> Option<Arc<MismatchPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
@@ -56,7 +58,7 @@ fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
-    if let Some(plan) = state.results.results.plans.mismatch.as_ref()
+    if let Some(plan) = state.results.plans.mismatch.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
     {
@@ -71,10 +73,10 @@ fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
         analysis: analysis_key,
         display: viewer::MismatchPlan::new(view.evidence),
     });
-    state.results.results.plans.mismatch = Some(Arc::clone(&built));
+    state.results.plans.mismatch = Some(Arc::clone(&built));
     Some(built)
 }
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let plan = mismatch_plan(state);
     viewer::show(
         ui,
@@ -110,7 +112,7 @@ mod tests {
         let mut state = state_with(evidence());
         assert!(serves_active_analysis(state.results_reads()));
         assert!(active_payload_is_valid(state.results_reads()));
-        let plan = mismatch_plan(&mut state).expect("a valid payload has a plan");
+        let plan = mismatch_plan(&mut state.results_parts()).expect("a valid payload has a plan");
         let cumulative = plan.display.cumulative();
         assert_eq!(cumulative.len(), 2);
         assert!((cumulative[0] - 0.6).abs() < 1.0e-12, "{cumulative:?}");
@@ -132,12 +134,12 @@ mod tests {
     fn an_idle_frame_does_not_rebuild_the_mismatch_plan() {
         let mut state = state_with(evidence());
         let baseline = WorkCounts::reset();
-        mismatch_plan(&mut state).expect("the first look builds the plan");
+        mismatch_plan(&mut state.results_parts()).expect("the first look builds the plan");
         assert_eq!(baseline.since().get(DatasetWalk::MismatchCumulative), 1);
 
         let baseline = WorkCounts::reset();
-        mismatch_plan(&mut state).expect("the memo answers the second look");
-        mismatch_plan(&mut state).expect("and the third");
+        mismatch_plan(&mut state.results_parts()).expect("the memo answers the second look");
+        mismatch_plan(&mut state.results_parts()).expect("and the third");
         assert_eq!(baseline.since().get(DatasetWalk::MismatchCumulative), 0);
     }
     #[test]

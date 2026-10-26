@@ -3,6 +3,7 @@
 use super::super::frame_work::{self, DatasetWalk};
 use super::super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
+#[cfg(test)]
 use crate::workbench::AppState;
 use egui::Ui;
 use rspice_results_ui::sensitivity::study as viewer;
@@ -96,8 +97,8 @@ pub(in crate::workbench::documents::result_document) fn domain_bar(
         &mut context.results.session.study,
     )
 }
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
-    let plan = study_plan(&mut state.results_parts());
+pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let plan = study_plan(state);
     viewer::show(
         ui,
         active_study(state.results_reads()),
@@ -255,7 +256,7 @@ mod tests {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    show(ui, &mut state);
+                    show(ui, &mut state.results_parts());
                     right_panel(ui, &mut state.results_parts());
                 });
             },

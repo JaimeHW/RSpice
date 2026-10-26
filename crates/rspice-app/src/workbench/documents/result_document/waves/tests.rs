@@ -24,13 +24,16 @@ fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
         "armed by default"
     );
     assert!(!state.results.results.session.cursor_readout_active());
-    assert_eq!(readout_strip_height(&mut state), 0.0);
+    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
 
     state.results.results.session.cursors.place(1.0e-3);
     assert!(state.results.results.session.cursor_readout_active());
     // No visible traces on an empty run: the header alone, never a band
     // of blank rows.
-    assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
+    assert_eq!(
+        readout_strip_height(&mut state.results_parts()),
+        READOUT_HEADER_H
+    );
 }
 
 #[test]
@@ -45,7 +48,7 @@ fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
     assert!(!state.results.results.session.cursor_tool.is_armed());
     assert!(!state.results.results.session.cursors.any());
     assert_eq!(state.results.results.session.cursor_strip, None);
-    assert_eq!(readout_strip_height(&mut state), 0.0);
+    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
 
     state.results.results.session.toggle_cursor_tool();
     assert!(state.results.results.session.cursor_tool.is_armed());
@@ -60,8 +63,11 @@ fn deep_readouts_scroll_without_exceeding_the_212_px_body_cap() {
     let mut state = deep_readout_fixture(16);
 
     assert_eq!(readout_row_count(&mut state), 16);
-    assert_eq!(readout_strip_height(&mut state), READOUT_MAX_H);
-    assert!(readout_strip_height(&mut state) <= 238.0);
+    assert_eq!(
+        readout_strip_height(&mut state.results_parts()),
+        READOUT_MAX_H
+    );
+    assert!(readout_strip_height(&mut state.results_parts()) <= 238.0);
 }
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::results::visualization_document::{
@@ -485,7 +491,7 @@ fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     ctx.enable_accesskit();
     let output = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            show(ui, &mut state);
+            show(ui, &mut state.results_parts());
         });
     });
     let nodes = output
@@ -609,7 +615,7 @@ fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
 fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
-    assert_eq!(readout_strip_height(&mut state), 0.0);
+    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
 
     state
         .results
@@ -618,14 +624,14 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
     assert_eq!(
-        readout_strip_height(&mut state),
+        readout_strip_height(&mut state.results_parts()),
         READOUT_HEADER_H + MARKER_ROW_H,
         "markers-only dock: one shared header and its one row"
     );
 
     // A closed strip takes its markers off screen with it.
     state.results.results.session.hidden_strips.insert(analysis);
-    assert_eq!(readout_strip_height(&mut state), 0.0);
+    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
 }
 
 #[test]
@@ -634,7 +640,7 @@ fn the_strip_carries_cursors_and_markers_together() {
     let (analysis, waveform) = marker_identity(&state);
     state.results.results.session.cursors.place(0.5);
     state.results.results.session.cursor_strip = Some(0);
-    let cursors_only = readout_strip_height(&mut state);
+    let cursors_only = readout_strip_height(&mut state.results_parts());
     assert!(cursors_only > 0.0);
 
     state
@@ -644,7 +650,7 @@ fn the_strip_carries_cursors_and_markers_together() {
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
     assert_eq!(
-        readout_strip_height(&mut state),
+        readout_strip_height(&mut state.results_parts()),
         cursors_only,
         "desktop columns share one body height instead of stacking sections"
     );
@@ -662,10 +668,13 @@ fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
         .unwrap();
     state.results.results.session.readout_collapsed = true;
 
-    assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
+    assert_eq!(
+        readout_strip_height(&mut state.results_parts()),
+        READOUT_HEADER_H
+    );
 
     state.results.results.session.hidden_strips.insert(analysis);
-    assert_eq!(readout_strip_height(&mut state), 0.0);
+    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
 }
 
 #[test]
@@ -688,7 +697,10 @@ fn every_visible_marker_remains_in_the_scroll_owned_body() {
 
     assert_eq!(visible_markers(&state).len(), 12);
     assert_eq!(marker_body_height(&mut state), 12.0 * MARKER_ROW_H);
-    assert_eq!(readout_strip_height(&mut state), READOUT_MAX_H);
+    assert_eq!(
+        readout_strip_height(&mut state.results_parts()),
+        READOUT_MAX_H
+    );
 }
 
 #[test]
@@ -727,7 +739,7 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
         .session
         .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5)
         .unwrap();
-    marker_dialog::open(&mut state, MarkerSelector::Quick(first));
+    marker_dialog::open(&mut state.results_parts(), MarkerSelector::Quick(first));
     assert!(state.results.results.session.marker_edit.is_some());
 
     state.results.results.session.remove_marker(first);
@@ -765,7 +777,7 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
         marker.kind = MarkerKind::Peak;
     }
 
-    marker_dialog::open(&mut state, MarkerSelector::Quick(id));
+    marker_dialog::open(&mut state.results_parts(), MarkerSelector::Quick(id));
 
     let draft = state
         .results
@@ -1600,17 +1612,19 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
 
     // Expanded: the strip owns the readout, so the bar says nothing.
     state.results.results.session.readout_collapsed = false;
-    assert_eq!(inline_cursor_readout(&mut state, &t), None);
+    assert_eq!(inline_cursor_readout(&mut state.results_parts(), &t), None);
 
     state.results.results.session.readout_collapsed = true;
-    let readout = inline_cursor_readout(&mut state, &t).expect("collapsed strip yields a readout");
+    let readout = inline_cursor_readout(&mut state.results_parts(), &t)
+        .expect("collapsed strip yields a readout");
     assert!(readout.starts_with("A "), "{readout}");
     assert!(readout.contains(" · B "), "{readout}");
     assert!(readout.contains(" \u{0394} "), "{readout}");
 
     // Cursor B unplaced: report A alone rather than an empty delta.
     state.results.results.session.cursors.b = None;
-    let single = inline_cursor_readout(&mut state, &t).expect("cursor A alone still reads out");
+    let single = inline_cursor_readout(&mut state.results_parts(), &t)
+        .expect("cursor A alone still reads out");
     assert!(!single.contains('\u{0394}'), "{single}");
 }
 
@@ -1688,7 +1702,7 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
     state.results.results.session.cursors.b = Some(1.0e4);
     state.results.results.session.readout_collapsed = true;
 
-    let readout = inline_cursor_readout(&mut state, &t)
+    let readout = inline_cursor_readout(&mut state.results_parts(), &t)
         .expect("the noise strip at index 3 owns the cursor readout");
     assert!(readout.contains('\u{0394}'), "{readout}");
 }

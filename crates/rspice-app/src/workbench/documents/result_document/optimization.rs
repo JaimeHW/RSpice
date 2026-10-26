@@ -10,6 +10,7 @@ use egui::Ui;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, RunHistoryRevision, SimulationState,
 };
+#[cfg(test)]
 use crate::workbench::AppState;
 use crate::workbench::design_system::section_header;
 
@@ -91,7 +92,7 @@ pub(super) fn active_metadata_is_valid(state: ResultsReads<'_>) -> bool {
     active_optimization(&state.model.simulation, optimization_plan(state).as_deref()).is_some()
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(run) = state.model.simulation.active_run() else {
         well_hint(ui, "Select a dataset with optimization results");
         return;
@@ -108,7 +109,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let plot_view = state
         .results
-        .results
         .session
         .plot_view(super::ResultViewer::Optimization, 0);
     // The convergence axis fits to the retained cost history, which does not
@@ -122,7 +122,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     let (cost_min, cost_max) = state
         .results
-        .results
         .session
         .derived
         .range_or(cost_key, || super::finite_extremes(&view.cost.y))
@@ -134,7 +133,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             label: &analysis.label,
             selected: state
                 .results
-                .results
                 .session
                 .selected_optimization
                 .filter(|selection| selection.analysis == analysis_key)
@@ -143,11 +141,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plot_view,
             cost_range: (cost_min, cost_max),
         },
-        &mut state.results.results.session.cache,
+        &mut state.results.session.cache,
     );
     if response.fit {
         state
-            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Optimization, 0);
@@ -155,13 +152,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if response.view.any() {
         state
             .results
-            .results
             .session
             .plot_view_mut(super::ResultViewer::Optimization, 0)
             .apply(&response.view);
     }
     if let Some(index) = response.selected {
-        state.results.results.session.selected_optimization = Some(OptimizationSelection {
+        state.results.session.selected_optimization = Some(OptimizationSelection {
             analysis: analysis_key,
             iteration_index: index,
         });
@@ -355,7 +351,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state));
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
             },
         );
         let drawn = output

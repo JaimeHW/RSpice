@@ -5,10 +5,10 @@ use super::{
     frame_work::{self, DatasetWalk},
     waves::cached_models,
 };
-use crate::{
-    state::{AnalysisType, RunHistoryRevision, bus_notations},
-    workbench::AppState,
-};
+use crate::state::{AnalysisType, RunHistoryRevision, bus_notations};
+#[cfg(test)]
+use crate::workbench::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
 use rspice_results_ui::{presentation::well_hint, table as viewer};
 use rspice_ui_kit::tokens::Tokens;
@@ -23,14 +23,14 @@ pub(super) struct ArtifactTextPlan {
 }
 
 fn artifact_text(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     key: &super::ResultArtifactPresentationKey,
 ) -> Option<std::sync::Arc<ArtifactTextPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
     );
-    if let Some(plan) = state.results.results.plans.artifact.as_ref()
+    if let Some(plan) = state.results.plans.artifact.as_ref()
         && plan.source == source
         && &plan.key == key
     {
@@ -56,11 +56,11 @@ fn artifact_text(
         text,
         lines,
     });
-    state.results.results.plans.artifact = Some(std::sync::Arc::clone(&built));
+    state.results.plans.artifact = Some(std::sync::Arc::clone(&built));
     Some(built)
 }
 
-fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
+fn show_operating_point_table(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     let Some(analysis) = state.model.simulation.active_analysis() else {
         return false;
     };
@@ -76,14 +76,8 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
     true
 }
 
-fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut AppState) -> bool {
-    let Some(key) = state
-        .results
-        .results
-        .session
-        .selected_result_artifact
-        .clone()
-    else {
+fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let Some(key) = state.results.session.selected_result_artifact.clone() else {
         return false;
     };
     let Some(plan) = artifact_text(state, &key) else {
@@ -111,7 +105,7 @@ fn place_table_cursor(results: &mut ResultsState, analysis_index: usize, x: f64)
     }
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if show_selected_result_artifact_table(ui, state) {
         return;
     }
@@ -119,12 +113,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         &t,
     );
@@ -133,7 +127,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let view = &state.results.results.session.table;
+    let view = &state.results.session.table;
     let Some(model) = models
         .iter()
         .find(|model| Some(model.analysis_key()) == view.analysis)
@@ -145,11 +139,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Around-cursor mode follows cursor A only when it belongs to this
     // analysis; a cursor on another strip is not a window into this one.
-    let cursor = (state.results.results.session.cursor_strip == Some(model.analysis_index()))
-        .then_some(state.results.results.session.cursors.a)
+    let cursor = (state.results.session.cursor_strip == Some(model.analysis_index()))
+        .then_some(state.results.session.cursors.a)
         .flatten();
-    let cursor_b = (state.results.results.session.cursor_strip == Some(model.analysis_index()))
-        .then_some(state.results.results.session.cursors.b)
+    let cursor_b = (state.results.session.cursor_strip == Some(model.analysis_index()))
+        .then_some(state.results.session.cursors.b)
         .flatten();
     let notations = OnceCell::new();
     let Some(response) = viewer::show_samples(
@@ -172,13 +166,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     if let Some(sample) = response.clicked_sample {
-        place_table_cursor(&mut state.results.results, model.analysis_index(), sample);
+        place_table_cursor(state.results, model.analysis_index(), sample);
     }
-    state.results.results.session.table.analysis = Some(model.analysis_key());
-    state.results.results.session.table_status = Some(response.status);
+    state.results.session.table.analysis = Some(model.analysis_key());
+    state.results.session.table_status = Some(response.status);
 }
 
-pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
+pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let t = Tokens::get(ui.ctx());
     if state
         .model
@@ -192,10 +186,10 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         viewer::operating_point_controls(ui);
         return;
     }
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         &t,
     );
@@ -204,11 +198,11 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         ui,
         viewer::TableControls {
             models: &models,
-            cursor_strip: state.results.results.session.cursor_strip,
-            cursor_a: state.results.results.session.cursors.a,
-            status: state.results.results.session.table_status.as_deref(),
+            cursor_strip: state.results.session.cursor_strip,
+            cursor_a: state.results.session.cursors.a,
+            status: state.results.session.table_status.as_deref(),
         },
-        &mut state.results.results.session.table,
+        &mut state.results.session.table,
         |name| {
             notations
                 .get_or_init(|| bus_notations(&state.model.workspace, &state.model.schematic))
@@ -250,7 +244,7 @@ mod tests {
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .unwrap();
         state.model.simulation.complete_run();
-        let original = artifact_text(&mut state, &key).unwrap();
+        let original = artifact_text(&mut state.results_parts(), &key).unwrap();
         assert!(
             original
                 .text
@@ -271,7 +265,7 @@ mod tests {
             crate::io::capture_simulation_results(&replacement),
         )
         .unwrap();
-        let restored = artifact_text(&mut state, &key).unwrap();
+        let restored = artifact_text(&mut state.results_parts(), &key).unwrap();
         assert_eq!(
             restored.text,
             exact_result_artifact_text(&key, &state.model.simulation.retained.runs)
@@ -290,15 +284,15 @@ mod tests {
         let payload = state.model.simulation.retained.runs[0].analyses[0]
             .result_payload
             .take();
-        let missing = artifact_text(&mut state, &key).unwrap();
+        let missing = artifact_text(&mut state.results_parts(), &key).unwrap();
         assert!(missing.text.is_err());
         assert!(missing.lines.is_empty());
         state.model.simulation.retained.runs[0].analyses[0].result_payload = payload;
-        let repaired = artifact_text(&mut state, &key).unwrap();
+        let repaired = artifact_text(&mut state.results_parts(), &key).unwrap();
         assert_eq!(repaired.text, restored.text);
         assert!(std::sync::Arc::ptr_eq(
             &repaired,
-            &artifact_text(&mut state, &key).unwrap()
+            &artifact_text(&mut state.results_parts(), &key).unwrap()
         ));
         assert_eq!(state.model.simulation.view.data_version, version);
     }

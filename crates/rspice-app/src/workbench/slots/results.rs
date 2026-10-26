@@ -65,14 +65,17 @@ impl ResultsState {
     }
 
     /// What the results workspace's commands write: this slot's viewer state
-    /// and drafts, the model, the session, and the platform state.
+    /// and drafts, the model, the session, the platform state, and the run
+    /// preflight.
     pub(crate) fn parts<'a>(
         &'a mut self,
         model: &'a mut Model,
         workbench: &'a mut WorkbenchSession,
         platform: &'a PlatformState,
+        preflight: &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
     ) -> ResultsParts<'a> {
-        self.parts_and_run_details(model, workbench, platform).0
+        self.parts_and_run_details(model, workbench, platform, preflight)
+            .0
     }
 
     /// The results workspace's parts, and beside them Run details…, which the
@@ -82,6 +85,7 @@ impl ResultsState {
         model: &'a mut Model,
         workbench: &'a mut WorkbenchSession,
         platform: &'a PlatformState,
+        preflight: &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
     ) -> (
         ResultsParts<'a>,
         &'a mut Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
@@ -96,6 +100,7 @@ impl ResultsState {
             model,
             workbench,
             platform,
+            preflight,
         };
         (parts, &mut self.run_details)
     }

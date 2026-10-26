@@ -56,7 +56,7 @@ fn with_readout<R>(
     )
 }
 
-fn apply_marker_actions(state: &mut AppState, actions: MarkerActions) {
+fn apply_marker_actions(state: &mut ResultsParts<'_>, actions: MarkerActions) {
     if let Some(selector) = actions.remove {
         super::super::remove_marker(state, selector);
     }
@@ -65,21 +65,21 @@ fn apply_marker_actions(state: &mut AppState, actions: MarkerActions) {
     }
 }
 
-pub fn readout_strip_height(state: &mut AppState) -> f32 {
-    let session = &state.results.results.session;
+pub fn readout_strip_height(state: &mut ResultsParts<'_>) -> f32 {
+    let session = &state.results.session;
     let need_models = !session.readout_collapsed
         && session.cursor_readout_active()
         && session.cursor_strip.is_some();
     with_readout(
-        &mut state.results_parts(),
+        state,
         &Tokens::default(),
         need_models,
         dock::readout_strip_height,
     )
 }
 
-pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
-    let session = &state.results.results.session;
+pub fn readout_strip(ui: &mut Ui, state: &mut ResultsParts<'_>, height: f32) {
+    let session = &state.results.session;
     let need_models = (session.cursor_readout_active() && session.cursor_strip.is_some())
         || (!session.readout_collapsed
             && height > dock::READOUT_HEADER_H
@@ -87,7 +87,7 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
                 .into_iter()
                 .any(|key| session.strip_markers(key).next().is_some()));
     let actions = with_readout(
-        &mut state.results_parts(),
+        state,
         &Tokens::get(ui.ctx()),
         need_models,
         |session, source| dock::readout_strip(ui, session, source, height),
@@ -95,17 +95,15 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
     apply_marker_actions(state, actions);
 }
 
-pub(crate) fn inline_cursor_readout(state: &mut AppState, tokens: &Tokens) -> Option<String> {
-    let session = &state.results.results.session;
+pub(crate) fn inline_cursor_readout(
+    state: &mut ResultsParts<'_>,
+    tokens: &Tokens,
+) -> Option<String> {
+    let session = &state.results.session;
     if !session.readout_collapsed || !session.cursor_readout_active() {
         return None;
     }
-    with_readout(
-        &mut state.results_parts(),
-        tokens,
-        true,
-        dock::inline_cursor_readout,
-    )
+    with_readout(state, tokens, true, dock::inline_cursor_readout)
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
@@ -146,13 +144,10 @@ pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
 }
 
 #[cfg(test)]
-pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn marker_section(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let mut actions = MarkerActions::default();
-    with_readout(
-        &mut state.results_parts(),
-        &Tokens::get(ui.ctx()),
-        true,
-        |session, source| dock::marker_section(ui, session, source, &mut actions),
-    );
+    with_readout(state, &Tokens::get(ui.ctx()), true, |session, source| {
+        dock::marker_section(ui, session, source, &mut actions)
+    });
     apply_marker_actions(state, actions);
 }

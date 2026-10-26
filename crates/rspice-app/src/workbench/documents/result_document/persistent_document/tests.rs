@@ -255,9 +255,11 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
         .expect("retained document")
         .revision();
 
-    let selector =
-        super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-            .expect("the placement resolves a store");
+    let selector = super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("the placement resolves a store");
 
     let super::super::MarkerSelector::Document {
         document_id: routed_document,
@@ -308,7 +310,7 @@ fn a_trace_the_document_does_not_retain_falls_back_to_a_quick_marker() {
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
 
     let selector = super::super::place_marker(
-        &mut app.state,
+        &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(a)+V(b)", 0.25),
     )
     .expect("the placement resolves a store");
@@ -341,8 +343,11 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
         marker.note = "dataset note".to_owned();
     }
     let pane = projected_pane(&mut app.state, document_id);
-    super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-        .expect("the document retains its own marker");
+    super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("the document retains its own marker");
 
     for _ in 0..3 {
         drive_frame(|ui| show(ui, &mut app, document_id));
@@ -398,9 +403,11 @@ fn document_marker_serials_never_reach_the_project_save_or_the_quick_allocator()
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    let selector =
-        super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-            .expect("the document retains its own marker");
+    let selector = super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("the document retains its own marker");
     let super::super::MarkerSelector::Document { marker_id, .. } = selector else {
         panic!("a persistent pane retains its own markers");
     };
@@ -436,9 +443,11 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    let selector =
-        super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-            .expect("the document retains its own marker");
+    let selector = super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("the document retains its own marker");
     let super::super::MarkerSelector::Document { marker_id, .. } = selector else {
         panic!("a persistent pane retains its own markers");
     };
@@ -460,7 +469,7 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     );
 
     super::super::commit_marker_edit(
-        &mut app.state,
+        &mut app.state.results_parts(),
         selector,
         "retained",
         super::super::MarkerKind::Peak,
@@ -484,7 +493,7 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     );
 
     super::super::commit_marker_edit(
-        &mut app.state,
+        &mut app.state.results_parts(),
         super::super::MarkerSelector::Quick(colliding),
         "edited quick",
         super::super::MarkerKind::Spec,
@@ -509,9 +518,11 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    let document_selector =
-        super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-            .expect("the document retains its own marker");
+    let document_selector = super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("the document retains its own marker");
     let quick = app
         .state
         .results
@@ -528,7 +539,10 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         .expect("retained document")
         .revision();
 
-    super::super::remove_marker(&mut app.state, super::super::MarkerSelector::Quick(quick));
+    super::super::remove_marker(
+        &mut app.state.results_parts(),
+        super::super::MarkerSelector::Quick(quick),
+    );
 
     assert!(app.state.results.results.session.markers.is_empty());
     assert_eq!(retained_markers(&app, document_id).len(), 1);
@@ -544,7 +558,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         "removing a quick marker is not a change to the document"
     );
 
-    super::super::remove_marker(&mut app.state, document_selector);
+    super::super::remove_marker(&mut app.state.results_parts(), document_selector);
 
     assert!(retained_markers(&app, document_id).is_empty());
     assert!(
@@ -575,11 +589,14 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-        .expect("the document retains its own marker");
+    super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("the document retains its own marker");
     let marker_id = retained_markers(&app, document_id)[0].id;
     super::super::commit_marker_edit(
-        &mut app.state,
+        &mut app.state.results_parts(),
         super::super::MarkerSelector::Document {
             document_id,
             pane_id: _pane.id,
@@ -643,8 +660,11 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     projected_pane(&mut app.state, document_id);
-    super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-        .expect("document marker");
+    super::super::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.5),
+    )
+    .expect("document marker");
     let retained = retained_markers(&app, document_id).remove(0);
     let mut another_run = SimulationRun::new(2);
     another_run.add_analysis(app.state.model.simulation.retained.runs[0].analyses[0].clone());

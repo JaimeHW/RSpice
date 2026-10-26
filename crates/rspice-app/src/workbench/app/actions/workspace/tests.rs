@@ -2280,7 +2280,9 @@ fn a_run_that_named_nothing_offers_no_highlight() {
     let mut state = state_with_probed_conductors();
 
     assert!(
-        !state.active_failure_names_objects(),
+        !crate::workbench::documents::result_document::operational_state::active_failure_names_objects(
+            &state.model
+        ),
         "with no failed analysis on display there is nothing to offer"
     );
     assert!(

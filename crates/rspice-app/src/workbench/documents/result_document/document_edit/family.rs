@@ -243,11 +243,13 @@ pub(in super::super) fn pane_selection(
 
 /// The rows the quick view's family policy shows for the active analysis.
 /// A policy the retained data no longer satisfies shows every row.
-pub(in super::super) fn quick_view_selection(state: &AppState) -> Option<SourceSampleSelection> {
+pub(in super::super) fn quick_view_selection(
+    state: ResultsReads<'_>,
+) -> Option<SourceSampleSelection> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let key = super::super::AnalysisPresentationKey::new(run.dataset_id, analysis);
-    let policy = state.results.results.session.family_policies.get(&key)?;
+    let policy = state.results.session.family_policies.get(&key)?;
     selection(run, analysis, &manifest(analysis).ok()?, policy).ok()
 }
 

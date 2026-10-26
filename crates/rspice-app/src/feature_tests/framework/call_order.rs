@@ -495,6 +495,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
             "app.state.design.schematic_visibility.annotations = annotations;",
         ],
     ),
+    (
+        "12",
+        &[
+            "|app, MarkFailureSites(run_sequence)|",
+            "if app.state.highlight_active_failure_sites() {",
+            "app.state.results.results.marked_failure_run = run_sequence;",
+        ],
+    ),
 ];
 
 /// The shell's `contribute`, at the points that draw the results workspace
@@ -867,8 +875,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        11,
-        "`after_contribution` answers exactly the eleven requests it lists"
+        12,
+        "`after_contribution` answers exactly the twelve requests it lists"
     );
 }
 

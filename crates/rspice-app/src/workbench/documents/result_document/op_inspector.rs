@@ -4,14 +4,14 @@ use super::{
     AnalysisPresentationKey,
     frame_work::{self, DatasetWalk},
 };
-use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
-use crate::{
-    state::{
-        AnalysisResultPayload, AnalysisType, BusNotations, RunHistoryRevision,
-        SchematicAnnotationVisibility, bus_notations,
-    },
-    workbench::AppState,
+use crate::state::{
+    AnalysisResultPayload, AnalysisType, BusNotations, RunHistoryRevision,
+    SchematicAnnotationVisibility, bus_notations,
 };
+#[cfg(test)]
+use crate::workbench::AppState;
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::framework::requests::ShowSchematicAnnotations;
 use egui::Ui;
 use rspice_results::operating_point::report::{
     OperatingPointReportFacts, RetainedDeviceDetail as RetainedDetail, retained_detail_allows,
@@ -160,8 +160,8 @@ fn result_mapping_is_current(state: ResultsReads<'_>) -> bool {
         state.model.schematic.topology_version(),
     )
 }
-fn node_target_available(state: &AppState, name: &str) -> bool {
-    if !result_mapping_is_current(state.results_reads()) {
+fn node_target_available(state: ResultsReads<'_>, name: &str) -> bool {
+    if !result_mapping_is_current(state) {
         return false;
     }
     let name = signal_leaf(name);
@@ -173,8 +173,8 @@ fn node_target_available(state: &AppState, name: &str) -> bool {
             .iter()
             .any(|(candidate, points)| candidate.eq_ignore_ascii_case(name) && !points.is_empty())
 }
-fn device_target(state: &AppState, name: &str) -> Option<u64> {
-    if !result_mapping_is_current(state.results_reads()) {
+fn device_target(state: ResultsReads<'_>, name: &str) -> Option<u64> {
+    if !result_mapping_is_current(state) {
         return None;
     }
     rspice_design::schematic::component::component_for_engine_device(
@@ -184,7 +184,7 @@ fn device_target(state: &AppState, name: &str) -> Option<u64> {
     )
     .map(|component| component.id)
 }
-fn apply_action(state: &mut AppState, action: OpAction) {
+fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
     match action {
         OpAction::LocateNode(name) => {
             let signal = if name
@@ -200,8 +200,9 @@ fn apply_action(state: &mut AppState, action: OpAction) {
             };
             match state.model.select_signal_conductor(&signal) {
                 Ok(_) => {
-                    state.design.schematic_visibility.annotations =
-                        SchematicAnnotationVisibility::OperatingPoint;
+                    state.workbench.outbox.push(ShowSchematicAnnotations(
+                        SchematicAnnotationVisibility::OperatingPoint,
+                    ));
                     state
                         .workbench
                         .activate(crate::workbench::state::Workspace::Design);
@@ -230,8 +231,9 @@ fn apply_action(state: &mut AppState, action: OpAction) {
                 .selection
                 .select_only_component(component_id);
             state.model.schematic.session.editor.center_request = Some(position);
-            state.design.schematic_visibility.annotations =
-                SchematicAnnotationVisibility::OperatingPoint;
+            state.workbench.outbox.push(ShowSchematicAnnotations(
+                SchematicAnnotationVisibility::OperatingPoint,
+            ));
             state
                 .workbench
                 .activate(crate::workbench::state::Workspace::Design);
@@ -260,15 +262,15 @@ pub(super) struct OpPlan {
     key: OpPlanKey,
     display: viewer::OpPlan,
 }
-fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Arc<OpPlan>> {
+fn op_plan(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) -> Option<Arc<OpPlan>> {
     let key = OpPlanKey {
         source: (
             state.model.simulation.retained.runs.revision(),
             state.model.simulation.view.data_version,
         ),
         analysis,
-        filter: state.results.results.session.op_filter.clone(),
-        sort: state.results.results.session.op_sort.clone(),
+        filter: state.results.session.op_filter.clone(),
+        sort: state.results.session.op_sort.clone(),
         root: state
             .model
             .workspace
@@ -276,7 +278,7 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
             .simulation_root_reference()
             .cell,
     };
-    if let Some(plan) = state.results.results.plans.op.as_ref()
+    if let Some(plan) = state.results.plans.op.as_ref()
         && plan.key == key
     {
         return Some(Arc::clone(plan));
@@ -291,11 +293,11 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
         detail.as_ref(),
     );
     let built = Arc::new(OpPlan { key, display });
-    state.results.results.plans.op = Some(Arc::clone(&built));
+    state.results.plans.op = Some(Arc::clone(&built));
     Some(built)
 }
 struct OpMapping<'a> {
-    state: &'a AppState,
+    state: ResultsReads<'a>,
     notations: Option<BusNotations>,
 }
 impl viewer::SchematicMapping for OpMapping<'_> {
@@ -311,7 +313,7 @@ impl viewer::SchematicMapping for OpMapping<'_> {
         device_target(self.state, name)
     }
 }
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(evidence) = selected_op_evidence(state.results_reads()) else {
         let absence = match state.model.simulation.active_analysis() {
             Some(_) => OpAbsence::OtherAnalysis,
@@ -348,7 +350,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .is_some_and(|plan| plan.display.node_shown() > 0)
         })
         .map(|_| bus_notations(&state.model.workspace, &state.model.schematic));
-    let mapping = OpMapping { state, notations };
+    let mapping = OpMapping {
+        state: state.results_reads(),
+        notations,
+    };
     let controls = plan
         .as_ref()
         .map(|plan| plan.key.controls())
@@ -376,8 +381,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         apply_action(state, action);
     }
     if let Some(key) = clicked_sort {
-        state.results.results.session.op_sort = match state.results.results.session.op_sort.as_ref()
-        {
+        state.results.session.op_sort = match state.results.session.op_sort.as_ref() {
             Some((current, ascending)) if current.eq_ignore_ascii_case(&key) => {
                 Some((key, !*ascending))
             }
@@ -499,11 +503,11 @@ mod tests {
     fn retained_view_source_operating_point_rebuilds_node_and_device_indices() {
         let mut state = op_state(40, 40);
         let key = active_key(&state);
-        let original = op_plan(&mut state, key).unwrap();
+        let original = op_plan(&mut state.results_parts(), key).unwrap();
         let version = state.model.simulation.view.data_version;
         state.model.simulation.retained.runs[0].analyses[0] =
             op_state(3, 2).model.simulation.retained.runs[0].analyses[0].clone();
-        let changed = op_plan(&mut state, key).unwrap();
+        let changed = op_plan(&mut state.results_parts(), key).unwrap();
         assert_eq!(changed.display.node_shown(), 3);
         assert_eq!(changed.display.device_shown(), 2);
         assert_eq!(changed.display.device_in_scope(), 2);
@@ -515,7 +519,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                show(ui, &mut state);
+                show(ui, &mut state.results_parts());
                 right_panel(ui, &mut state.results_parts());
             });
         });
@@ -525,14 +529,14 @@ mod tests {
     fn the_readers_controls_are_part_of_the_row_plan_key() {
         let mut state = op_state(40, 40);
         let key = active_key(&state);
-        let unfiltered = op_plan(&mut state, key).expect("a row plan");
+        let unfiltered = op_plan(&mut state.results_parts(), key).expect("a row plan");
         assert!(Arc::ptr_eq(
             &unfiltered,
-            &op_plan(&mut state, key).expect("a row plan")
+            &op_plan(&mut state.results_parts(), key).expect("a row plan")
         ));
 
         state.results.results.session.op_filter = "m1".to_owned();
-        let filtered = op_plan(&mut state, key).expect("a row plan");
+        let filtered = op_plan(&mut state.results_parts(), key).expect("a row plan");
         assert!(filtered.display.device_shown() < unfiltered.display.device_shown());
         assert!(
             filtered.display.device_shown() > 0,
@@ -541,7 +545,7 @@ mod tests {
 
         state.results.results.session.op_filter.clear();
         state.results.results.session.op_sort = Some(("gm".to_owned(), true));
-        let sorted = op_plan(&mut state, key).expect("a row plan");
+        let sorted = op_plan(&mut state.results_parts(), key).expect("a row plan");
         assert_ne!(
             sorted.display.device_indices().collect::<Vec<_>>(),
             unfiltered.display.device_indices().collect::<Vec<_>>(),
@@ -552,7 +556,7 @@ mod tests {
     fn a_new_dataset_generation_rebuilds_the_row_plan() {
         let mut state = op_state(8, 8);
         let key = active_key(&state);
-        let before = op_plan(&mut state, key).expect("a row plan");
+        let before = op_plan(&mut state.results_parts(), key).expect("a row plan");
         assert_eq!(before.display.node_shown(), 8);
 
         state.model.simulation.retained.runs[0].analyses[0]
@@ -564,7 +568,7 @@ mod tests {
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 
-        let after = op_plan(&mut state, key).expect("a row plan");
+        let after = op_plan(&mut state.results_parts(), key).expect("a row plan");
         assert_eq!(
             after.display.node_shown(),
             3,
@@ -581,7 +585,7 @@ mod tests {
     #[test]
     fn a_device_that_cannot_be_located_is_answered_on_the_status_bar() {
         let mut state = AppState::default();
-        apply_action(&mut state, OpAction::LocateDevice(u64::MAX));
+        apply_action(&mut state.results_parts(), OpAction::LocateDevice(u64::MAX));
         state.drain_notices(&egui::Context::default());
         assert_eq!(
             state.prompt_text(),

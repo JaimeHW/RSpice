@@ -686,7 +686,7 @@ fn specification_authoring_is_reachable_before_the_first_dataset() {
     let mut state = AppState::default();
     state.results.results.session.viewer = ResultViewer::Specs;
     specs::open_editor(&mut state.results_parts());
-    assert!(result_stage_bar_visible(&state));
+    assert!(result_stage_bar_visible(state.results_reads()));
 }
 
 #[test]
@@ -726,14 +726,14 @@ fn structured_result_controls_have_a_reachable_40_px_strip() {
 fn stage_bar_stands_down_without_a_retained_dataset() {
     let empty = AppState::default();
     assert_eq!(empty.results.results.session.viewer, ResultViewer::Waves);
-    assert!(!result_stage_bar_visible(&empty));
+    assert!(!result_stage_bar_visible(empty.results_reads()));
 
     let mut allocated = AppState::default();
     allocated.model.simulation.start_run();
-    assert!(!result_stage_bar_visible(&allocated));
+    assert!(!result_stage_bar_visible(allocated.results_reads()));
 
     let retained = state_with_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-    assert!(result_stage_bar_visible(&retained));
+    assert!(result_stage_bar_visible(retained.results_reads()));
 }
 
 #[test]
@@ -766,7 +766,7 @@ fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
         .hidden_strips
         .insert(other_key);
 
-    assert_eq!(hidden_wave_strip_count(&state), 1);
+    assert_eq!(hidden_wave_strip_count(state.results_reads()), 1);
 }
 
 const MOCKUP_FAMILIES: [&str; 8] = [
@@ -1368,11 +1368,11 @@ fn the_evidence_tables_cost_their_viewport_not_their_dataset() {
 fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
     let mut app = app_showing(ResultViewer::Waves);
     assert_eq!(
-        active_incomplete_evidence_reason(&app.state),
+        active_incomplete_evidence_reason(app.state.results_reads()),
         None,
         "a converged fixture must not claim a caution"
     );
-    let clean_purpose = sheet_purpose(&app.state);
+    let clean_purpose = sheet_purpose(app.state.results_reads());
 
     app.state.model.simulation.retained.runs[0].analyses[0].success = false;
 
@@ -1382,7 +1382,7 @@ fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
         viewer_availability(app.state.results_reads(), ResultViewer::Waves).available,
         "partial transient samples must stay drawable"
     );
-    let purpose = sheet_purpose(&app.state);
+    let purpose = sheet_purpose(app.state.results_reads());
     assert_ne!(purpose, clean_purpose);
     assert!(
         purpose.contains("did not complete"),
@@ -1403,7 +1403,8 @@ fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| waves::show(ui, &mut app.state));
+            egui::CentralPanel::default()
+                .show(ctx, |ui| waves::show(ui, &mut app.state.results_parts()));
         },
     );
     let labels: Vec<String> = output
@@ -1823,7 +1824,7 @@ fn fitting_the_wave_stack_clears_the_viewport_the_sheet_actually_reads() {
         unit: "V".to_owned(),
     });
 
-    waves::fit_active_strip(&mut state);
+    waves::fit_active_strip(&mut state.results_parts());
 
     for ordinal in 0..2 {
         assert!(
@@ -1850,7 +1851,7 @@ fn fitting_without_an_active_pane_releases_every_strip() {
         .y = Some((0.0, 1.0));
     state.results.results.session.active_wave_pane = None;
 
-    waves::fit_active_strip(&mut state);
+    waves::fit_active_strip(&mut state.results_parts());
 
     assert!(
         !state

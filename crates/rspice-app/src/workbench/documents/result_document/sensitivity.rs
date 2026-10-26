@@ -3,6 +3,7 @@
 use super::frame_work::{self, DatasetWalk};
 use super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
+#[cfg(test)]
 use crate::workbench::AppState;
 use egui::Ui;
 use rspice_results_ui::sensitivity as viewer;
@@ -81,7 +82,7 @@ fn sensitivity_plan(state: &mut ResultsParts<'_>) -> Option<Arc<SensitivityPlan>
     state.results.plans.sensitivity = Some(Arc::clone(&built));
     Some(built)
 }
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if study::serves_active_analysis(state.results_reads()) {
         study::show(ui, state);
         return;
@@ -90,7 +91,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         mismatch::show(ui, state);
         return;
     }
-    let plan = sensitivity_plan(&mut state.results_parts());
+    let plan = sensitivity_plan(state);
     viewer::show(
         ui,
         active_sensitivity(state.results_reads()),
@@ -220,7 +221,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                show(ui, &mut state);
+                show(ui, &mut state.results_parts());
                 right_panel(ui, &mut state.results_parts());
             });
         });
@@ -301,7 +302,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state));
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
             },
         );
         let tree = output.platform_output.accesskit_update.unwrap();

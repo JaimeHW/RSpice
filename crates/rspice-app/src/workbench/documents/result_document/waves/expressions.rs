@@ -18,12 +18,11 @@ pub(super) use rspice_results_ui::waves::stack::{expr_color, expr_palette_slot, 
 /// validation message that moves below the controls on compact surfaces.
 pub(super) fn expr_editor_row(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     analysis_key: AnalysisPresentationKey,
     analysis_index: usize,
 ) {
     let scope_note = state
-        .results
         .results
         .session
         .sample_selection
@@ -44,7 +43,6 @@ pub(super) fn expr_editor_row(
         });
     let Some(editor) = state
         .results
-        .results
         .session
         .expr_editor
         .as_mut()
@@ -57,10 +55,9 @@ pub(super) fn expr_editor_row(
 
     match action {
         Action::None => {}
-        Action::Cancel => state.results.results.session.expr_editor = None,
+        Action::Cancel => state.results.session.expr_editor = None,
         Action::Commit => {
             let text = state
-                .results
                 .results
                 .session
                 .expr_editor
@@ -68,10 +65,10 @@ pub(super) fn expr_editor_row(
                 .map(|e| e.text.trim().to_owned())
                 .unwrap_or_default();
             if text.is_empty() {
-                state.results.results.session.expr_editor = None;
+                state.results.session.expr_editor = None;
                 return;
             }
-            let sample_selection = state.results.results.session.sample_selection.clone();
+            let sample_selection = state.results.session.sample_selection.clone();
             let series = evaluate_expression(
                 &state.model.simulation,
                 analysis_index,
@@ -80,7 +77,7 @@ pub(super) fn expr_editor_row(
             );
             match series {
                 Ok(series) => {
-                    state.results.results.analysis_expr_cache.insert(
+                    state.results.analysis_expr_cache.insert(
                         (analysis_key, text.clone()),
                         ExprSeries {
                             version: expression_version(
@@ -93,16 +90,15 @@ pub(super) fn expr_editor_row(
                     );
                     let added = state
                         .results
-                        .results
                         .add_expression_trace(&state.model.simulation, analysis_key, text)
                         .expect("the expression editor is bound to a retained analysis");
                     if added {
                         state.model.workspace.content.visualization_documents_dirty = true;
                     }
-                    state.results.results.session.expr_editor = None;
+                    state.results.session.expr_editor = None;
                 }
                 Err(error) => {
-                    if let Some(editor) = state.results.results.session.expr_editor.as_mut() {
+                    if let Some(editor) = state.results.session.expr_editor.as_mut() {
                         editor.error = Some(error);
                         editor.want_focus = true;
                     }

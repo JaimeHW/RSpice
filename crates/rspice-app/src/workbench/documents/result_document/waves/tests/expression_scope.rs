@@ -210,7 +210,7 @@ fn family_editor_displays_calculation_scope_inside_a_narrow_pane() {
         },
         |root| {
             egui::CentralPanel::default().show(root, |ui| {
-                expr_editor_row(ui, &mut state, models[0].analysis_key, 0);
+                expr_editor_row(ui, &mut state.results_parts(), models[0].analysis_key, 0);
             });
         },
     );

@@ -8,11 +8,14 @@
 use egui::Ui;
 use rspice_results_ui::operational::{self, ResultOperationalState, ResultOperationalStatus};
 
-use super::{AnalysisPresentationKey, ResultViewer, ResultsReads, ResultsState};
+use super::{AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads, ResultsState};
 use crate::state::{
     AnalysisResult, AnalysisResultSourceDomain, SimulationRun, SimulationRunLifecycle,
 };
-use crate::workbench::app_state::AppState;
+#[cfg(test)]
+use crate::workbench::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::requests::MarkFailureSites;
 
 /// Runtime boundaries that cannot be inferred from a retained result alone.
 ///
@@ -341,7 +344,7 @@ fn failed_analysis_detail(run: &SimulationRun) -> Option<String> {
 }
 
 pub(crate) fn classify_viewer(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     viewer: ResultViewer,
 ) -> ResultOperationalStatus {
     debug_assert_eq!(ResultOperationalState::ALL.len(), 16);
@@ -351,7 +354,7 @@ pub(crate) fn classify_viewer(
 
     // Specifications owns an authoring route before any result exists.
     let authoring_without_dataset = viewer == ResultViewer::Specs
-        && (state.results.results.session.spec_drafts.is_some()
+        && (state.results.session.spec_drafts.is_some()
             || !state.model.workspace.content.specs.is_empty());
     let Some(run_index) = state
         .model
@@ -386,7 +389,7 @@ pub(crate) fn classify_viewer(
 
     let run = &state.model.simulation.retained.runs[run_index];
 
-    if let Some(condition) = state.results.results.operational_condition.clone()
+    if let Some(condition) = state.results.operational_condition.clone()
         && condition.data_version == state.model.simulation.view.data_version
     {
         let operational_state = condition.kind.operational_state();
@@ -637,7 +640,7 @@ mod tests {
 /// notices consume only a bounded banner above the still-usable viewer.
 pub(super) fn show_result_operational_status(
     ui: &mut Ui,
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     status: &ResultOperationalStatus,
 ) -> bool {
     let mut offer = None;
@@ -647,10 +650,10 @@ pub(super) fn show_result_operational_status(
         dismiss,
         highlight,
     } = operational::show(ui, status, || {
-        offer = failure_site_offer(state);
-        marked = offer.as_ref().is_some_and(|offer| {
-            state.results.results.marked_failure_run == Some(offer.run_sequence)
-        });
+        offer = failure_site_offer(state.results_reads());
+        marked = offer
+            .as_ref()
+            .is_some_and(|offer| state.results.marked_failure_run == Some(offer.run_sequence));
         offer.as_ref().map(|offer| operational::FailureSiteControl {
             named: offer.named,
             elided: offer.elided,
@@ -659,18 +662,45 @@ pub(super) fn show_result_operational_status(
         })
     });
     if dismiss {
-        state.results.results.dismiss_runtime_condition();
+        state.results.dismiss_runtime_condition();
     }
     if highlight {
         if marked {
-            state.clear_failure_site_marking();
-            state.results.results.marked_failure_run = None;
-        } else if state.highlight_active_failure_sites() {
-            state.results.results.marked_failure_run =
-                offer.as_ref().map(|offer| offer.run_sequence);
+            clear_failure_site_marking(state.model);
+            state.results.marked_failure_run = None;
+        } else {
+            state.workbench.outbox.push(MarkFailureSites(
+                offer.as_ref().map(|offer| offer.run_sequence),
+            ));
         }
     }
     blocks_visuals
+}
+
+/// Whether the analysis on display named objects worth marking.
+///
+/// A surface offering "highlight non-converged nodes" asks this to decide
+/// whether the control belongs on screen at all. It answers about the
+/// evidence, not about the schematic: whether the marking will land is
+/// `AppState::highlight_active_failure_sites`'s answer, and it is a
+/// different question with a different sentence.
+pub(crate) fn active_failure_names_objects(model: &Model) -> bool {
+    model
+        .simulation
+        .active_analysis()
+        .and_then(|analysis| analysis.failure_attribution.as_ref())
+        .is_some_and(|attribution| !attribution.sites.is_empty())
+}
+
+/// Take back a marking `AppState::highlight_active_failure_sites` made.
+///
+/// The exact inverse of what the marking did, and no more: the highlight
+/// and the selection go, the view stays where the reader left it. Scrolling
+/// them back to wherever they were before would be a second surprise
+/// rather than an undo of the first.
+fn clear_failure_site_marking(model: &mut Model) {
+    model.schematic.session.editor.net_highlight.clear();
+    model.schematic.session.editor.selection.clear();
 }
 
 /// What the failure on display named, when it named anything markable.
@@ -693,8 +723,8 @@ struct FailureSiteOffer {
 /// that solve afterwards, so the freshest attribution is not automatically the
 /// one behind the error on screen. Offering a control built on the wrong
 /// attribution would mark objects that converged.
-fn failure_site_offer(state: &AppState) -> Option<FailureSiteOffer> {
-    if !state.active_failure_names_objects() {
+fn failure_site_offer(state: ResultsReads<'_>) -> Option<FailureSiteOffer> {
+    if !active_failure_names_objects(state.model) {
         return None;
     }
     let run_sequence = state.model.simulation.active_run()?.id;
@@ -757,7 +787,8 @@ mod failure_site_control_tests {
     fn a_matching_attribution_offers_the_control_and_counts_what_it_marks() {
         let state = state_showing_failure(Some(attribution(FAILURE, 9)), FAILURE);
 
-        let offer = failure_site_offer(&state).expect("the attribution describes this failure");
+        let offer = failure_site_offer(state.results_reads())
+            .expect("the attribution describes this failure");
         assert_eq!(
             offer.named, 2,
             "it must state how many objects it will mark"
@@ -775,11 +806,11 @@ mod failure_site_control_tests {
             state_showing_failure(Some(attribution("Singular matrix at row 4", 0)), FAILURE);
 
         assert!(
-            state.active_failure_names_objects(),
+            active_failure_names_objects(&state.model),
             "there is an attribution naming objects — that gate alone is not enough"
         );
         assert!(
-            failure_site_offer(&state).is_none(),
+            failure_site_offer(state.results_reads()).is_none(),
             "but it does not describe the failure on display, so nothing is offered"
         );
     }
@@ -790,7 +821,7 @@ mod failure_site_control_tests {
     fn an_attribution_that_cannot_prove_its_pairing_offers_nothing() {
         let state = state_showing_failure(Some(attribution("", 0)), FAILURE);
 
-        assert!(failure_site_offer(&state).is_none());
+        assert!(failure_site_offer(state.results_reads()).is_none());
     }
 
     /// No attribution at all is the ordinary case for a failure the engine
@@ -799,8 +830,8 @@ mod failure_site_control_tests {
     fn a_failure_naming_no_objects_offers_nothing() {
         let state = state_showing_failure(None, FAILURE);
 
-        assert!(!state.active_failure_names_objects());
-        assert!(failure_site_offer(&state).is_none());
+        assert!(!active_failure_names_objects(&state.model));
+        assert!(failure_site_offer(state.results_reads()).is_none());
     }
 
     /// The control takes its own marking back, and nothing else.
@@ -823,7 +854,7 @@ mod failure_site_control_tests {
             .highlight_wires(std::iter::once(91).collect());
         state.model.schematic.session.editor.center_request = None;
 
-        state.clear_failure_site_marking();
+        clear_failure_site_marking(&mut state.model);
 
         assert!(
             state

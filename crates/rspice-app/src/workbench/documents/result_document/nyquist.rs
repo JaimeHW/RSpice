@@ -4,6 +4,7 @@
 mod agreement;
 
 use crate::ui::plot;
+#[cfg(test)]
 use crate::workbench::AppState;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
@@ -50,7 +51,7 @@ fn derived(state: &mut ResultsParts<'_>) -> Option<NyquistDerived> {
 }
 
 /// Present the active retained loop gain and apply local viewer outcomes.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     // Component arrays for the plot engine, cached per data version.
     //
@@ -59,12 +60,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // purely to release the borrow — meant every frame paid for a complete
     // copy of the locus before finding out the cache already held it.
     let prepared = if active_curve(state.results_reads()).is_some() {
-        let nyquist = &state.results.analysis.nyquist_state;
+        let nyquist = &state.analysis.nyquist_state;
         let points = nyquist
             .curve()
             .map(|curve| curve.points.as_slice())
             .unwrap_or_default();
-        let series = &mut state.results.results.session.derived;
+        let series = &mut state.results.session.derived;
         let re = series.get_or(
             plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
             || std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>()),
@@ -73,14 +74,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plot::trace_cache_key(NYQUIST_CACHE_BASE, IMAGINARY_SERIES),
             || std::sync::Arc::new(points.iter().map(|p| p.imag).collect::<Vec<_>>()),
         );
-        let stats = derived(&mut state.results_parts()).map(|cached| cached.stability);
+        let stats = derived(state).map(|cached| cached.stability);
         Some((re, im, stats))
     } else {
         None
     };
     let source = prepared.as_ref().and_then(|(re, im, stats)| {
         state
-            .results
             .analysis
             .nyquist_state
             .curve()
@@ -91,7 +91,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 stability: *stats,
             })
     });
-    let results = &mut state.results.results;
+    let results = &mut state.results;
     let viewer = super::ResultViewer::Nyquist;
     let mut view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();

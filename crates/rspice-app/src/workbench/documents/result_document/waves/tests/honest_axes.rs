@@ -441,8 +441,8 @@ fn the_cursor_table_publishes_what_it_paints() {
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let height = readout_strip_height(&mut state);
-                readout_strip(ui, &mut state, height);
+                let height = readout_strip_height(&mut state.results_parts());
+                readout_strip(ui, &mut state.results_parts(), height);
             });
         });
         labels = output
