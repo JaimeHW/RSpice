@@ -141,6 +141,7 @@ fn commit(
         },
         AcceptedReactiveSnapshots {
             physical_event: None,
+            left_limit_observation: false,
             bjt_phase: phase_context,
             xyce_one_step_order2: false,
             vbic_snapshots: None,

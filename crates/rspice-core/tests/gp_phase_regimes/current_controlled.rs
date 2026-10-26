@@ -146,6 +146,15 @@ fn gp_finite_behavioral_current_controls_preserve_rl_law_and_packed_restart() {
                         let omega = std::f64::consts::TAU * 1e9;
                         let reactance = omega * 1e-6;
                         for (index, &time) in result.time.iter().enumerate() {
+                            if startup == TransientStartupMode::Uic && index == 0 {
+                                // The UIC t = 0 row is the authored state, zero
+                                // here (the ordinary path's and Xyce 7.10's row).
+                                assert_eq!(
+                                    [voltage[0], base[0], collector[0], winding[0]],
+                                    [0.0; 4]
+                                );
+                                continue;
+                            }
                             // Independent solution of L*dI/dt + R*I = A*sin(w*t), I(0)=0.
                             let current = 1e-3
                                 * (1000.0 * (omega * time).sin()
@@ -176,8 +185,10 @@ fn gp_finite_behavioral_current_controls_preserve_rl_law_and_packed_restart() {
                                 -polarity * base[index],
                                 forward / 100.0 + reverse + forcing
                             );
+                            // The arrival row is its left limit, the
+                            // zero-prehistory side under UIC.
                             let arrived =
-                                time >= DELAY || (time - DELAY).abs() <= 8.0 * f64::EPSILON * DELAY;
+                                time > DELAY && (time - DELAY).abs() > 8.0 * f64::EPSILON * DELAY;
                             let transport = if startup == TransientStartupMode::Uic && !arrived {
                                 0.0
                             } else {
@@ -268,8 +279,10 @@ fn gp_current_controlled_sources_preserve_finite_currents_impulses_and_restart()
                     assert!(
                         (initial.charge_coulombs - charge).abs() < 1e-25 + charge.abs() * 1e-10
                     );
+                    // The UIC t = 0 row is the authored state, before the
+                    // startup charge lands on CC (the ordinary path's row).
                     let voltage = result.try_voltage_waveform_named("copy").unwrap()[0];
-                    assert!((voltage + charge / 1e-12).abs() < 1e-10);
+                    assert_eq!(voltage, 0.0);
                 }
             };
             for startup in [
@@ -313,9 +326,10 @@ fn gp_current_controlled_impulse_drives_the_independent_rc_response_after_restar
                     "controlled impulse\nVC c 0 {}\nVB b 0 {}\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\nVSTEP control 0 PWL(0 0 .5n 0 .5n {polarity} 2n {polarity})\nC1 control 0 1p\nF1 out 0 VSTEP {gain}\nC2 out 0 2p\nR2 out 0 1k\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(out) i(vstep) i(f1)\n.end\n",
                     2.0*polarity,0.7*polarity,if polarity>0.0 {"NPN"} else {"PNP"},
                 )).unwrap();
+                // The 0.5 ns row is the step's left limit (ngspice 46).
                 let exact = |time: f64| {
                     let after =
-                        time >= 0.5e-9 || (time - 0.5e-9).abs() < 8.0 * f64::EPSILON * 0.5e-9;
+                        time > 0.5e-9 && (time - 0.5e-9).abs() >= 8.0 * f64::EPSILON * 0.5e-9;
                     if after {
                         0.5 * gain * polarity * (-(time - 0.5e-9) / 2e-9).exp()
                     } else {
@@ -446,6 +460,12 @@ fn check_gp_finite_ccvs(probe: bool) {
                         .try_branch_current_waveform_named(control_name)
                         .unwrap();
                     for ((&time, &drive), &control) in result.time.iter().zip(drive).zip(control) {
+                        if uic && time == 0.0 {
+                            // The UIC t = 0 row is the authored state, zero
+                            // here (the ordinary path's and Xyce 7.10's row).
+                            assert_eq!([control, drive], [0.0; 2]);
+                            continue;
+                        }
                         let expected = sign
                             * polarity
                             * (0.35 + 0.5e-6 * (std::f64::consts::TAU * 1e9 * time).sin())
@@ -526,8 +546,10 @@ fn gp_probe_ccvs_step_preserves_charge_fanout_and_packed_restart() {
 
 fn check_gp_finite_ccvs_step(probe: bool) {
     let jump = 0.5e-9;
+    // An event row is its left limit, the step that ends there: the source
+    // step and the transport arrival (allowing ULP-sized clock rounding).
     let after =
-        |time: f64, event: f64| time >= event || (time - event).abs() <= 8.0 * f64::EPSILON * event;
+        |time: f64, event: f64| time > event && (time - event).abs() > 8.0 * f64::EPSILON * event;
     for dialect in [
         SpiceDialect::Ngspice,
         SpiceDialect::Xyce,

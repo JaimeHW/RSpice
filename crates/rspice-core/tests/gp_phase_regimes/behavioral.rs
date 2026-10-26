@@ -17,8 +17,27 @@ pub(super) fn check(
     let omega = std::f64::consts::TAU * 1e9;
     let vt = thermal_voltage(dialect);
     for (index, &time) in result.time.iter().enumerate() {
+        // t = 0 publishes the operating point, where the charge is static
+        // (ngspice 46's OP row), or under UIC the authored initial state,
+        // zero here (the ordinary path's and Xyce 7.10's UIC row).
+        if uic && time == 0.0 {
+            assert_eq!(
+                voltage[index], 0.0,
+                "{dialect:?}/{polarity}: UIC voltage at 0"
+            );
+            assert_eq!(
+                collector[index], 0.0,
+                "{dialect:?}/{polarity}: UIC collector at 0"
+            );
+            assert_eq!(base[index], 0.0, "{dialect:?}/{polarity}: UIC base at 0");
+            continue;
+        }
         let vb = 0.7 + 1e-6 * (omega * time).sin();
-        let rate = 1e-6 * omega * (omega * time).cos();
+        let rate = if time == 0.0 {
+            0.0
+        } else {
+            1e-6 * omega * (omega * time).cos()
+        };
         let delayed = 0.7 + 1e-6 * (omega * (time - DELAY).max(0.0)).sin();
         let (forward, conductance) = diode(vb, vt, dialect);
         let reverse = diode(vb - 2.0, vt, dialect).0;
@@ -28,10 +47,11 @@ pub(super) fn check(
             0.0
         };
         // UIC has zero transport prehistory. The exact arrival publishes its
-        // outgoing side; allow ULP-sized decimal PTF conversion in locating
-        // that clock, while retaining the same current accuracy gate.
+        // left limit, the zero-prehistory side; allow ULP-sized decimal PTF
+        // conversion in locating that clock, while retaining the same current
+        // accuracy gate.
         let arrival = (time - DELAY).abs() <= 8.0 * f64::EPSILON * DELAY;
-        let expected_collector = if uic && time < DELAY && !arrival {
+        let expected_collector = if uic && (time < DELAY || arrival) {
             -2.0 * reverse
         } else {
             diode(delayed, vt, dialect).0 - 2.0 * reverse
@@ -220,7 +240,8 @@ fn gp_nodal_behavioral_current_preserves_nonlinear_decay_and_packed_restart() {
                 let voltage = result.try_voltage_waveform_named("out").unwrap();
                 let current = result.try_branch_current_waveform_named("bdis").unwrap();
                 for (index, &time) in result.time.iter().enumerate() {
-                    let expected = if time < 0.5e-9 {
+                    // The 0.5 ns row is the step's left limit (ngspice 46).
+                    let expected = if time <= 0.5e-9 {
                         0.0
                     } else {
                         let elapsed = time - 0.5e-9;
@@ -314,8 +335,19 @@ fn gp_nodal_behavioral_current_couples_to_gp_charge_at_startup() {
                 let voltage = result.try_voltage_waveform_named("b").unwrap();
                 let omega = std::f64::consts::TAU * 1e9;
                 for (index, &time) in result.time.iter().enumerate() {
+                    // t = 0 publishes the operating point, where the charge is
+                    // static (ngspice 46's OP row), or under UIC the authored
+                    // state, zero here (the ordinary path's and Xyce 7.10's row).
+                    if startup == TransientStartupMode::Uic && index == 0 {
+                        assert_eq!([voltage[0], current[0], base[0]], [0.0; 3]);
+                        continue;
+                    }
                     let vb = 0.7 + 1e-6 * (omega * time).sin();
-                    let rate = 1e-6 * omega * (omega * time).cos();
+                    let rate = if time == 0.0 {
+                        0.0
+                    } else {
+                        1e-6 * omega * (omega * time).cos()
+                    };
                     let (forward, conductance) = diode(vb, thermal_voltage(dialect), dialect);
                     let reverse = diode(vb - 2.0, thermal_voltage(dialect), dialect).0;
                     let forcing = 1e-6 * (vb / 0.7).powi(2) * (omega * time).cos();

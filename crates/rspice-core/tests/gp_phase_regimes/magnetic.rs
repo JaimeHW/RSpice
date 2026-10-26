@@ -91,8 +91,10 @@ fn gp_perfect_coupling_preserves_null_flux_current_jumps_and_restart() {
                     let secondary = full.try_branch_current_waveform_named("L2").unwrap();
                     let a = full.try_voltage_waveform_named("a").unwrap();
                     let b = full.try_voltage_waveform_named("b").unwrap();
+                    // The edge row is its left limit, the step that ends there
+                    // (ngspice 46); the jump shows on the rows after it.
                     for (index, &time) in full.time.iter().enumerate() {
-                        let (i1, i2) = if time < edge {
+                        let (i1, i2) = if time <= edge {
                             (0.5, 0.0)
                         } else {
                             let decay = (-(time - edge) / (2.0 * scale)).exp();
@@ -114,9 +116,10 @@ fn gp_perfect_coupling_preserves_null_flux_current_jumps_and_restart() {
                     }
                     let seam = full.time.iter().position(|time| *time == edge).unwrap();
                     // The jump lies in the nullspace of the full flux matrix. Neither
-                    // winding current alone is a conserved magnetic state.
-                    assert!((primary[seam] - 0.75).abs() < 1e-10);
-                    assert!((secondary[seam] + coupling * 0.25 / turns).abs() < 1e-10);
+                    // winding current alone is a conserved magnetic state; the seam
+                    // row is the incoming one.
+                    assert!((primary[seam] - 0.5).abs() < 1e-10);
+                    assert!(secondary[seam].abs() < 1e-10);
                     assert!(
                         (primary[seam] + turns * coupling * secondary[seam] - 0.5).abs() < 1e-10
                     );
@@ -183,7 +186,8 @@ fn gp_perfect_coupling_three_windings_preserve_both_voltage_constraints() {
             for (index, &time) in full.time.iter().enumerate() {
                 // The normalized rank-one matrix has one decay mode with
                 // time constant 3*scale and two algebraic voltage constraints.
-                let expected = if time < edge {
+                // The edge row is its left limit (ngspice 46).
+                let expected = if time <= edge {
                     [0.5, 0.0, 0.0]
                 } else {
                     let decay = (-(time - edge) / (3.0 * scale)).exp();
@@ -199,9 +203,9 @@ fn gp_perfect_coupling_three_windings_preserve_both_voltage_constraints() {
                 }
             }
             let seam = full.time.iter().position(|&time| time == edge).unwrap();
-            assert!((currents[0][seam] - 5.0 / 6.0).abs() < 1e-10);
-            assert!((currents[1][seam] + 1.0 / 12.0).abs() < 1e-10);
-            assert!((currents[2][seam] + 1.0 / 18.0).abs() < 1e-10);
+            assert!((currents[0][seam] - 0.5).abs() < 1e-10);
+            assert!(currents[1][seam].abs() < 1e-10);
+            assert!(currents[2][seam].abs() < 1e-10);
             assert!(
                 (currents[0][seam] + 2.0 * currents[1][seam] + 3.0 * currents[2][seam] - 0.5).abs()
                     < 1e-10

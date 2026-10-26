@@ -49,6 +49,7 @@ mod edge;
 mod floor_march;
 mod mixed;
 mod mosfet;
+mod published_row;
 #[cfg(test)]
 mod record_limit_tests;
 mod requested;
@@ -56,6 +57,7 @@ mod solver_state;
 mod switch;
 mod vcd;
 use crate::device::behavioral::BehavioralAcceptedState;
+pub(in crate::engine::transient) use published_row::PublishedRow;
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -221,14 +223,17 @@ fn checkpoint_operation_result<T>(
 /// Version 62 binds the files the `d_vcd` stimuli replay.
 /// Version 63 retains the run of floor landings in progress, and keys coupled
 /// code-model events on the HDL tick lattice.
-const FORMAT_VERSION: u32 = floor_march::FORMAT_VERSION;
+/// Version 64 retains the row published at the checkpoint time where it is
+/// not the restart state: a startup's operating point, an event's left limit.
+const FORMAT_VERSION: u32 = published_row::FORMAT_VERSION;
 // The newest section's format is the file format; the sections before it
 // were added in order.
 const _: () = assert!(mixed::FORMAT_VERSION < switch::FORMAT_VERSION);
 const _: () = assert!(switch::FORMAT_VERSION < edge::FORMAT_VERSION);
 const _: () = assert!(edge::FORMAT_VERSION < requested::FORMAT_VERSION);
 const _: () = assert!(requested::FORMAT_VERSION < vcd::FORMAT_VERSION);
-const _: () = assert!(vcd::FORMAT_VERSION < FORMAT_VERSION);
+const _: () = assert!(vcd::FORMAT_VERSION < floor_march::FORMAT_VERSION);
+const _: () = assert!(floor_march::FORMAT_VERSION < FORMAT_VERSION);
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -684,6 +689,10 @@ pub struct TransientCheckpoint {
     /// `floor_march.rs`). `None` in files older than format 63, which did not
     /// record it.
     floor_grid: Option<super::FloorLandingGrid>,
+    /// The row the run published at `time` where it did not come from
+    /// `solution`, the restart state (see `published_row.rs`). `None` in
+    /// files older than format 64.
+    published_row: Option<PublishedRow>,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -5893,6 +5902,7 @@ impl TransientCheckpoint {
         edge::validate(&self.edge_completions, self.time)?;
         requested::validate(self.requested_breakpoints.as_deref(), self.time)?;
         floor_march::validate(self.floor_grid.as_ref(), self.time)?;
+        published_row::validate(self.published_row.as_ref())?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6911,6 +6921,7 @@ impl TransientCheckpoint {
             requested_breakpoints: Some(requested::capture(requested_breakpoints, time)),
             vcd_files: vcd::capture(circuit),
             floor_grid: Some(floor_grid),
+            published_row: None,
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -7903,6 +7914,19 @@ impl TransientCheckpoint {
         self.floor_grid.unwrap_or_default()
     }
 
+    /// The row the run published at the checkpoint time where it did not come
+    /// from the restart state. A resumed run publishes it as its first row.
+    pub(super) fn published_row(&self) -> Option<&PublishedRow> {
+        self.published_row.as_ref()
+    }
+
+    /// Carry the row the run published at the checkpoint time, taken where it
+    /// did not come from the restart state.
+    pub(super) fn with_published_row(mut self, row: Option<PublishedRow>) -> Self {
+        self.published_row = row;
+        self
+    }
+
     pub(super) fn restore_solver_state(
         &self,
         matrix: &mut crate::solver::StaticMatrix,
@@ -8192,6 +8216,7 @@ impl TransientCheckpoint {
         ));
         count = count.saturating_add(vcd::retained_values(&self.vcd_files));
         count = count.saturating_add(floor_march::retained_values(self.floor_grid.as_ref()));
+        count = count.saturating_add(published_row::retained_values(self.published_row.as_ref()));
         for instance in &self.xspice_instance_states {
             count = count
                 .saturating_add(2)
@@ -8975,6 +9000,7 @@ impl TransientCheckpoint {
         requested::write(&mut out, self.requested_breakpoints.as_deref(), abort)?;
         vcd::write(&mut out, &self.vcd_files, abort)?;
         floor_march::write(&mut out, self.floor_grid.as_ref());
+        published_row::write(&mut out, self.published_row.as_ref(), abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9822,6 +9848,7 @@ impl TransientCheckpoint {
         let requested_breakpoints = requested::read(lines, version, budget)?;
         let vcd_files = vcd::read(lines, version, budget)?;
         let floor_grid = floor_march::read(lines, version)?;
+        let published_row = published_row::read(lines, version, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9854,6 +9881,7 @@ impl TransientCheckpoint {
             requested_breakpoints,
             vcd_files,
             floor_grid,
+            published_row,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -12046,6 +12074,43 @@ mod tests {
         }
     }
 
+    /// A published row round-trips bit for bit; a file from before the
+    /// section reads with none and resumes publishing the restart state; and
+    /// a row that is out of order, not finite or names a device with a space
+    /// is refused.
+    #[test]
+    fn the_published_row_round_trips_and_reads_none_from_older_files() {
+        let checkpoint = sample();
+        let none = checkpoint.to_text();
+        assert!(none.contains("\npublished_row none\n"));
+        let row = "published_row 2 1 1\npublished_voltage 0 0.1\npublished_voltage 2 -50.005\n\
+                   published_current 1 0.00025\npublished_device q1 ib 0.0000005670346770421993\n";
+        let text = none.replace("published_row none\n", row);
+        let restored = TransientCheckpoint::from_text(&text).unwrap();
+        assert!(restored.published_row().is_some());
+        assert_eq!(restored.to_text(), text);
+        assert_eq!(
+            TransientCheckpoint::from_text(&restored.to_text()).unwrap(),
+            restored
+        );
+
+        let legacy =
+            TransientCheckpoint::from_text(&legacy_text(&restored, floor_march::FORMAT_VERSION))
+                .unwrap();
+        assert_eq!(legacy.published_row(), None);
+        assert_eq!(legacy.to_text(), none);
+
+        for invalid in [
+            row.replace("published_voltage 2 -50.005", "published_voltage 0 -50.005"),
+            row.replace("-50.005", "NaN"),
+            row.replace("q1 ib", "q1 i b"),
+            row.replace("published_row 2 1 1", "published_row 3 1 1"),
+        ] {
+            let text = none.replace("published_row none\n", &invalid);
+            assert!(TransientCheckpoint::from_text(&text).is_err(), "{invalid}");
+        }
+    }
+
     /// The files the `d_vcd` stimuli replay round-trip, a path with a space,
     /// a quote and a backslash included; a file from before the section reads
     /// with none; and a row whose digest is not BLAKE3 hex is refused.
@@ -12222,6 +12287,7 @@ mod tests {
             edge_completions: EdgeCompletionSchedule::default(),
             requested_breakpoints: Some(Vec::new()),
             vcd_files: Vec::new(),
+            published_row: None,
             floor_grid: Some(super::super::FloorLandingGrid::default()),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
@@ -12522,6 +12588,9 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < published_row::FORMAT_VERSION && line.starts_with("published_") {
+                continue;
+            }
             if version < floor_march::FORMAT_VERSION && line.starts_with("floor_march ") {
                 continue;
             }

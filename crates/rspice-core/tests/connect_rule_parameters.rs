@@ -1237,12 +1237,13 @@ fn an_image_without_the_model_breakpoints_is_refused_naming_why() {
         )
         .expect("canonical text");
         let (header, body) = text.split_once('\n').expect("a header line");
-        assert_eq!(header, "RSPICE-CHECKPOINT 63");
+        assert_eq!(header, "RSPICE-CHECKPOINT 64");
         let mut older = String::from("RSPICE-CHECKPOINT 60\n");
         for line in body.lines().filter(|line| {
             !line.starts_with("pending_model_breakpoints ")
                 && !line.starts_with("vcd_files ")
                 && !line.starts_with("floor_march ")
+                && !line.starts_with("published_row ")
         }) {
             older.push_str(line);
             older.push('\n');

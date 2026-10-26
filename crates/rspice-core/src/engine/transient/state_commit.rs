@@ -29,6 +29,10 @@ pub(super) struct AcceptedReactiveStep<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct AcceptedReactiveSnapshots<'a> {
     pub physical_event: Option<&'a PreparedPhysicalEvent>,
+    /// An observation copy accepting an event step's own (incoming) solution
+    /// to compose the row it publishes, the left limit. Nothing it commits
+    /// is integrated from, so an incoming GP phase trial is admitted.
+    pub left_limit_observation: bool,
     pub bjt_phase: bjt::BjtPhaseContext<'a>,
     pub xyce_one_step_order2: bool,
     pub vbic_snapshots: Option<&'a [Option<BjtChargeSnapshot>]>,
@@ -808,7 +812,7 @@ impl Engine {
         snapshots: AcceptedReactiveSnapshots<'_>,
         retained_transport_bytes: usize,
     ) -> Result<PreparedReactiveHistory<'engine>, SimulationError> {
-        if snapshots.bjt_phase.incoming_arrival {
+        if snapshots.bjt_phase.incoming_arrival && !snapshots.left_limit_observation {
             return Err(SimulationError::Circuit(
                 "an incoming GP phase trial cannot be accepted as the outgoing state".into(),
             ));
@@ -973,6 +977,7 @@ impl Engine {
         } = scheduling;
         let AcceptedReactiveSnapshots {
             physical_event,
+            left_limit_observation: _,
             bjt_phase: _,
             xyce_one_step_order2,
             vbic_snapshots: _,
@@ -1893,6 +1898,7 @@ mod tests {
             },
             AcceptedReactiveSnapshots {
                 physical_event: None,
+                left_limit_observation: false,
                 bjt_phase: Default::default(),
                 xyce_one_step_order2: false,
                 vbic_snapshots: None,

@@ -84,11 +84,17 @@ fn pss_origin_jump_retains_charge_and_delayed_limits_through_resume() {
         let (resumed, _) = engine
             .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.005)
             .unwrap();
+        // A continuation row at a jump publishes its left limit, the solution
+        // of the step that ends there, so it is read just before the edge
+        // (closer than the first step after it); only the first row, the
+        // periodic state the run starts from, is the outgoing side.
         for transient in [&first, &resumed] {
             for (name, shift) in [("near", 0.0), ("far", delay.rem_euclid(1.0))] {
                 let values = transient.try_voltage_waveform_named(name).unwrap();
-                for (&time, &value) in transient.time.iter().zip(values) {
-                    let reference = expected((time.rem_euclid(1.0) - shift).rem_euclid(1.0));
+                for (index, (&time, &value)) in transient.time.iter().zip(values).enumerate() {
+                    let side = if index == 0 { 0.0 } else { 1e-12 };
+                    let reference =
+                        expected(((time - side).rem_euclid(1.0) - shift).rem_euclid(1.0));
                     assert!(
                         (value - reference).abs() < tolerance,
                         "{dialect:?}, TD={delay}, C={capacitor}: resumed {name} at {time:.17e}: {value} vs {reference}"

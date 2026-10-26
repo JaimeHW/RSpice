@@ -983,6 +983,7 @@ use step_control::{SourceActivityDeltas, StepBiasFloors};
 mod acceptance;
 mod breakpoints;
 mod impulses;
+mod left_limit;
 // Exact source-root ownership is prepared separately from the ordinary
 // controller; main physical-event dispatch is integrated after propagation.
 mod checkpoint;
@@ -1284,6 +1285,9 @@ struct ScheduledCheckpointIdentity<'a> {
 #[derive(Clone, Copy)]
 struct ScheduledCheckpointState<'a> {
     solution: &'a [Value],
+    /// The result whose last row the run published from another solution
+    /// than `solution`, which a checkpoint taken here carries.
+    published: Option<&'a TransientResult>,
     circuit: &'a crate::circuit::CircuitData,
     matrix: &'a crate::solver::StaticMatrix,
     startup_mode: TransientStartupMode,
@@ -4460,6 +4464,7 @@ impl Engine {
         } = integration;
         let ScheduledCheckpointState {
             solution,
+            published,
             circuit,
             matrix,
             startup_mode,
@@ -4601,7 +4606,13 @@ impl Engine {
             },
             Some(lte_estimator),
         )
-        .map_err(SimulationError::Circuit)?;
+        .map_err(SimulationError::Circuit)?
+        .with_published_row(
+            published
+                .map(checkpoint::PublishedRow::last_of)
+                .transpose()
+                .map_err(SimulationError::Circuit)?,
+        );
         let retained_checkpoint_values = checkpoint.retained_value_count().saturating_add(1);
         self.ensure_result_values(
             retained_result_values
@@ -6800,6 +6811,12 @@ impl Engine {
         } else {
             None
         };
+        // Whether the row published at the latest accepted point came from
+        // another solution than the restart state the integration leaves
+        // from: a physical startup's operating point, or an event's left
+        // limit. A checkpoint taken there carries that row.
+        let mut published_row_is_not_restart_state =
+            resume.is_some_and(|checkpoint| checkpoint.published_row().is_some());
         if resume.is_none()
             && let Some(plan) = &physical_impulse_plan
         {
@@ -6832,23 +6849,13 @@ impl Engine {
             self.update_transient_nonlinear_devices(&mut circuit, &solution)?;
             trapgear.restart_from(&solution);
             lte_estimator.restart_history_from(&solution);
-            for (trace, value) in result.voltages.iter_mut().zip(&solution[..num_nodes]) {
-                if let Some(first) = trace.first_mut() {
-                    *first = *value;
-                }
-            }
-            for (trace, value) in result
-                .branch_currents
-                .iter_mut()
-                .zip(&solution[num_nodes..])
-            {
-                if let Some(first) = trace.first_mut() {
-                    *first = *value;
-                }
-            }
+            // The integration leaves t = 0 from the outgoing state, a right
+            // limit. The t = 0 row stays the operating point (or the UIC
+            // point) it was seeded with, as SPICE publishes it.
+            published_row_is_not_restart_state = true;
         }
 
-        if resume.is_some() || physical_sources.is_some() {
+        if resume.is_some() {
             // Derived branches are initialized before checkpoint injection
             // and before integration-owned junction history exists. Rebuild
             // the seam only after both state owners are authoritative so a
@@ -6870,7 +6877,7 @@ impl Engine {
             }
         }
 
-        if (resume.is_some() || physical_sources.is_some()) && record_device_op_traces {
+        if resume.is_some() && record_device_op_traces {
             // The initial seam report was created before checkpoint injection
             // and before the accepted terminal-current history was installed.
             // Recording at the same sample index overwrites it in place with
@@ -6895,6 +6902,13 @@ impl Engine {
                 ),
             );
             self.ensure_transient_result_limits(&result, retained_result_values)?;
+        }
+        // A checkpoint taken where the published row was not the restart
+        // state (a startup's operating point, an event's left limit) carries
+        // that row, and the resumed run publishes it as its first.
+        if let Some(row) = resume.and_then(TransientCheckpoint::published_row) {
+            row.publish_as_first_row(&mut result)
+                .map_err(SimulationError::Circuit)?;
         }
 
         if physical_sources.is_some() {
@@ -7158,6 +7172,7 @@ impl Engine {
             },
             ScheduledCheckpointState {
                 solution: &solution,
+                published: published_row_is_not_restart_state.then_some(&result),
                 circuit: &circuit,
                 matrix: &matrix,
                 startup_mode,
@@ -11575,6 +11590,58 @@ impl Engine {
                     } else {
                         None
                     };
+                    // The step that ends at an event publishes its own
+                    // solution, the left limit; the integration leaves the
+                    // event from the outgoing state.
+                    let mut left_limit = if outgoing_event.is_some() {
+                        Some(self.accept_left_limit_copy(
+                            left_limit::LeftLimitStep {
+                                circuit: &circuit,
+                                matrix: &mut matrix,
+                                incoming: &new_solution,
+                                time: t,
+                                dt,
+                                coefficients: &coeff,
+                                xyce_one_step_order2,
+                                baseline_diag_gmin: transient_baseline_diag_gmin,
+                                initial_step: analysis_initial_step,
+                                final_step: analysis_final_step,
+                                retained_transport_bytes: retained_scheduled_transport_bytes,
+                                histories: TransientDeviceHistories {
+                                    bjt: &mut bjt_history,
+                                    jfet: &mut jfet_history,
+                                    diode: &mut diode_history,
+                                    mosfet: &mut mosfet_history,
+                                    vdmos: &mut vdmos_history,
+                                    b3soi: &mut b3soi_history,
+                                    bsim3: &mut bsim3_history,
+                                    bsim4: &mut bsim4_history,
+                                    ekv26: &mut ekv26_history,
+                                },
+                                bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                                snapshots: AcceptedReactiveSnapshots {
+                                    physical_event: None,
+                                    left_limit_observation: true,
+                                    bjt_phase: trial_phase_context,
+                                    xyce_one_step_order2,
+                                    vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                                    capacitor_accepted_states: None,
+                                    mosfet_caps: None,
+                                    mosfet_gate_companion_charges: None,
+                                    suppress_gate_charge_history: suppress_gate_charge,
+                                    tline_dc_refs: &tline_dc_refs,
+                                    coupled_tline_refs: &coupled_tline_refs,
+                                },
+                                breakpoints: &breakpoints,
+                                tstop,
+                                dynamic_breakpoints_added: dynamic_tline_breakpoints_added,
+                                pending_dynamic_breakpoints: &pending_dynamic_tline_breakpoints,
+                            },
+                            abort,
+                        )?)
+                    } else {
+                        None
+                    };
                     if let Some(event) = &outgoing_event {
                         new_solution.clone_from(&event.state().solution);
                     }
@@ -11636,6 +11703,7 @@ impl Engine {
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             snapshots: AcceptedReactiveSnapshots {
                                 physical_event: outgoing_event.as_ref(),
+                                left_limit_observation: false,
                                 bjt_phase: accepted_phase_context,
                                 xyce_one_step_order2,
                                 vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
@@ -11804,21 +11872,21 @@ impl Engine {
                                 "transient trajectory point count overflowed".to_string(),
                             )
                         })?;
-                    Self::backfill_initial_linear_capacitor_branch_currents(
-                        &mut result,
-                        &circuit,
-                        &derived_branch_currents,
-                    );
-                    retained_result_values = retained_result_values.saturating_add(
-                        self.record_transient_solution_sample(
-                            &mut result,
-                            &mut circuit,
-                            TransientSample {
-                                solution: &solution,
-                                num_nodes,
-                                time: t,
-                                step_size: dt,
+                    let (row_circuit, row_solution, row_sources) = match left_limit.as_mut() {
+                        Some(row) => (
+                            &mut row.circuit,
+                            row.solution.as_slice(),
+                            TransientSampleSources {
+                                mosfet_history: &row.mosfet,
+                                jfet_history: &row.jfet,
+                                derived_branches: &derived_branch_currents,
+                                bjt_history: &row.bjt,
+                                diode_history: &row.diode,
                             },
+                        ),
+                        None => (
+                            &mut circuit,
+                            solution.as_slice(),
                             TransientSampleSources {
                                 mosfet_history: &mosfet_history,
                                 jfet_history: &jfet_history,
@@ -11826,6 +11894,24 @@ impl Engine {
                                 bjt_history: &bjt_history,
                                 diode_history: &diode_history,
                             },
+                        ),
+                    };
+                    Self::backfill_initial_linear_capacitor_branch_currents(
+                        &mut result,
+                        row_circuit,
+                        &derived_branch_currents,
+                    );
+                    retained_result_values = retained_result_values.saturating_add(
+                        self.record_transient_solution_sample(
+                            &mut result,
+                            row_circuit,
+                            TransientSample {
+                                solution: row_solution,
+                                num_nodes,
+                                time: t,
+                                step_size: dt,
+                            },
+                            row_sources,
                             TransientCaptureRequest {
                                 record_device_op_traces,
                                 capture: &capture_plan,
@@ -11834,6 +11920,11 @@ impl Engine {
                             },
                         )?,
                     );
+                    if left_limit.is_some() {
+                        // The copy closed its step; the restart state closes it too.
+                        circuit.accept_generic_switch_transient_step();
+                    }
+                    published_row_is_not_restart_state = left_limit.is_some();
                     retained_result_values = self.commit_accepted_transient_point(
                         &mut result,
                         &mut circuit,
@@ -11949,6 +12040,7 @@ impl Engine {
                         },
                         ScheduledCheckpointState {
                             solution: &solution,
+                            published: published_row_is_not_restart_state.then_some(&result),
                             circuit: &circuit,
                             matrix: &matrix,
                             startup_mode,
@@ -12221,6 +12313,62 @@ impl Engine {
             } else {
                 None
             };
+            // The step that ends at an event publishes its own solution, the
+            // left limit; the integration leaves the event from the outgoing
+            // state.
+            let mut left_limit = if outgoing_event.is_some() {
+                Some(
+                    self.accept_left_limit_copy(
+                        left_limit::LeftLimitStep {
+                            circuit: &circuit,
+                            matrix: &mut matrix,
+                            incoming: &new_solution,
+                            time: t,
+                            dt,
+                            coefficients: &coeff,
+                            xyce_one_step_order2,
+                            baseline_diag_gmin: transient_baseline_diag_gmin,
+                            initial_step: analysis_initial_step,
+                            final_step: analysis_final_step,
+                            retained_transport_bytes: retained_scheduled_transport_bytes,
+                            histories: TransientDeviceHistories {
+                                bjt: &mut bjt_history,
+                                jfet: &mut jfet_history,
+                                diode: &mut diode_history,
+                                mosfet: &mut mosfet_history,
+                                vdmos: &mut vdmos_history,
+                                b3soi: &mut b3soi_history,
+                                bsim3: &mut bsim3_history,
+                                bsim4: &mut bsim4_history,
+                                ekv26: &mut ekv26_history,
+                            },
+                            bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                            snapshots: AcceptedReactiveSnapshots {
+                                physical_event: None,
+                                left_limit_observation: true,
+                                bjt_phase: trial_phase_context,
+                                xyce_one_step_order2,
+                                vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                                capacitor_accepted_states: capacitor_accepted_states_valid
+                                    .then_some(capacitor_accepted_states_scratch.as_slice()),
+                                mosfet_caps: mosfet_caps_valid
+                                    .then_some(mosfet_caps_scratch.as_slice()),
+                                mosfet_gate_companion_charges: cached_mosfet_gate_companion_charges,
+                                suppress_gate_charge_history: suppress_gate_charge,
+                                tline_dc_refs: &tline_dc_refs,
+                                coupled_tline_refs: &coupled_tline_refs,
+                            },
+                            breakpoints: &breakpoints,
+                            tstop,
+                            dynamic_breakpoints_added: dynamic_tline_breakpoints_added,
+                            pending_dynamic_breakpoints: &pending_dynamic_tline_breakpoints,
+                        },
+                        abort,
+                    )?,
+                )
+            } else {
+                None
+            };
             if let Some(event) = &outgoing_event {
                 new_solution.clone_from(&event.state().solution);
             }
@@ -12282,6 +12430,7 @@ impl Engine {
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     snapshots: AcceptedReactiveSnapshots {
                         physical_event: outgoing_event.as_ref(),
+                        left_limit_observation: false,
                         bjt_phase: accepted_phase_context,
                         xyce_one_step_order2,
                         vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
@@ -12450,21 +12599,21 @@ impl Engine {
                 })?;
 
             // Store results
-            Self::backfill_initial_linear_capacitor_branch_currents(
-                &mut result,
-                &circuit,
-                &derived_branch_currents,
-            );
-            retained_result_values =
-                retained_result_values.saturating_add(self.record_transient_solution_sample(
-                    &mut result,
-                    &mut circuit,
-                    TransientSample {
-                        solution: &solution,
-                        num_nodes,
-                        time: t,
-                        step_size: dt,
+            let (row_circuit, row_solution, row_sources) = match left_limit.as_mut() {
+                Some(row) => (
+                    &mut row.circuit,
+                    row.solution.as_slice(),
+                    TransientSampleSources {
+                        mosfet_history: &row.mosfet,
+                        jfet_history: &row.jfet,
+                        derived_branches: &derived_branch_currents,
+                        bjt_history: &row.bjt,
+                        diode_history: &row.diode,
                     },
+                ),
+                None => (
+                    &mut circuit,
+                    solution.as_slice(),
                     TransientSampleSources {
                         mosfet_history: &mosfet_history,
                         jfet_history: &jfet_history,
@@ -12472,6 +12621,24 @@ impl Engine {
                         bjt_history: &bjt_history,
                         diode_history: &diode_history,
                     },
+                ),
+            };
+            Self::backfill_initial_linear_capacitor_branch_currents(
+                &mut result,
+                row_circuit,
+                &derived_branch_currents,
+            );
+            retained_result_values =
+                retained_result_values.saturating_add(self.record_transient_solution_sample(
+                    &mut result,
+                    row_circuit,
+                    TransientSample {
+                        solution: row_solution,
+                        num_nodes,
+                        time: t,
+                        step_size: dt,
+                    },
+                    row_sources,
                     TransientCaptureRequest {
                         record_device_op_traces,
                         capture: &capture_plan,
@@ -12479,6 +12646,11 @@ impl Engine {
                         integral_trace,
                     },
                 )?);
+            if left_limit.is_some() {
+                // The copy closed its step; the restart state closes it too.
+                circuit.accept_generic_switch_transient_step();
+            }
+            published_row_is_not_restart_state = left_limit.is_some();
             retained_result_values = self.commit_accepted_transient_point(
                 &mut result,
                 &mut circuit,
@@ -12781,6 +12953,7 @@ impl Engine {
                 },
                 ScheduledCheckpointState {
                     solution: &solution,
+                    published: published_row_is_not_restart_state.then_some(&result),
                     circuit: &circuit,
                     matrix: &matrix,
                     startup_mode,
@@ -13050,7 +13223,13 @@ impl Engine {
                     },
                     Some(&lte_estimator),
                 )
-                .map_err(SimulationError::Circuit)?,
+                .map_err(SimulationError::Circuit)?
+                .with_published_row(
+                    published_row_is_not_restart_state
+                        .then(|| checkpoint::PublishedRow::last_of(&result))
+                        .transpose()
+                        .map_err(SimulationError::Circuit)?,
+                ),
             )
         } else {
             None

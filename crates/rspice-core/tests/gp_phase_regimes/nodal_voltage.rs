@@ -48,13 +48,23 @@ fn gp_nodal_voltage_preserves_transport_charge_startup_and_packed_restart() {
                 let ib = result.try_branch_current_waveform_named("bb").unwrap();
                 let ic = result.try_branch_current_waveform_named("vc").unwrap();
                 let ix = result.try_branch_current_waveform_named("vx").unwrap();
+                let uic = startup == TransientStartupMode::Uic;
                 for (i, &time) in result.time.iter().enumerate() {
+                    // t = 0 publishes the operating point, where the charge is
+                    // static (ngspice 46's OP row), or under UIC the authored
+                    // state, zero here (the ordinary path's and Xyce 7.10's row).
+                    if uic && i == 0 {
+                        assert_eq!([base[0], ib[0], ic[0]], [0.0; 3], "{dialect:?}");
+                        continue;
+                    }
                     let (voltage, rate) = wave(time);
+                    let rate = if time == 0.0 { 0.0 } else { rate };
                     let (forward, conductance) = diode(voltage, vt, dialect);
                     let reverse = diode(voltage - 2.0, vt, dialect).0;
-                    let arrived =
-                        time >= DELAY || (time - DELAY).abs() <= 8.0 * f64::EPSILON * DELAY;
-                    let delayed = if startup == TransientStartupMode::Uic && !arrived {
+                    // The arrival row is its left limit, the zero-prehistory
+                    // side under UIC.
+                    let arrived = time > DELAY && (time - DELAY).abs() > 8.0 * f64::EPSILON * DELAY;
+                    let delayed = if uic && !arrived {
                         0.0
                     } else {
                         diode(wave((time - DELAY).max(0.0)).0, vt, dialect).0
@@ -151,8 +161,8 @@ fn gp_nodal_voltage_feedback_preserves_nonlinear_charge_jump_and_current_fanout(
             let steady_before = 2000.0 * leakage(before);
             let steady_after = 2000.0 * leakage(after);
             for (i, &time) in result.time.iter().enumerate() {
-                let arrived =
-                    time >= 0.5e-9 || (time - 0.5e-9).abs() <= 8.0 * f64::EPSILON * 0.5e-9;
+                // The 0.5 ns row is the step's left limit (ngspice 46).
+                let arrived = time > 0.5e-9 && (time - 0.5e-9).abs() > 8.0 * f64::EPSILON * 0.5e-9;
                 let voltage = if arrived { after } else { before };
                 let expected = if arrived {
                     steady_after

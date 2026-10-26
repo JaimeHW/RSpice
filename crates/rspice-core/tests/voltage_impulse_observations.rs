@@ -424,7 +424,8 @@ fn ccvs_voltage_action_changes_inductor_flux_at_the_exact_event() {
         .iter()
         .zip(result.try_branch_current_waveform_named("l1").unwrap())
     {
-        let expected = if time < 1e-9 {
+        // The event row is its left limit, as ngspice publishes it.
+        let expected = if time <= 1e-9 {
             0.0
         } else {
             -1.2e-3 * (-(time - 1e-9) / 5e-9).exp()
@@ -557,7 +558,9 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
     let deck=Netlist::parse("CCVS source jets\nV1 in 0 PWL(0 0 1n 1 2n 1 3n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
     let result = ccvs_engine().run_tran(&deck, 4e-9, 5e-12).unwrap();
     let voltage = result.try_voltage_waveform_named("out").unwrap();
-    for (time, expected) in [(0.0, -0.006), (1e-9, 0.0), (2e-9, 0.006), (3e-9, 0.0)] {
+    // t = 0 is the operating point and each corner row its left limit, as
+    // ngspice and Xyce publish them.
+    for (time, expected) in [(0.0, 0.0), (1e-9, -0.006), (2e-9, 0.0), (3e-9, 0.006)] {
         let i = result.time.iter().position(|&t| t == time).unwrap();
         assert!(
             (voltage[i] - expected).abs() < 1e-12,
@@ -744,7 +747,10 @@ fn ccvs_uic_preserves_authored_capacitor_charge_and_winding_flux() {
         action_voltage(&result, "out").points[0].volt_seconds,
         -4.5e-12,
     );
-    for &current in result.try_branch_current_waveform_named("l1").unwrap() {
+    // t = 0 publishes the authored 2 mA, as Xyce 7.10 does under UIC.
+    let winding = result.try_branch_current_waveform_named("l1").unwrap();
+    action_close(winding[0], 0.002);
+    for &current in &winding[1..] {
         action_close(current, 0.0011);
     }
     action_close(
@@ -759,23 +765,17 @@ fn ccvs_current_forcing_and_mutual_flux_keep_original_polarities() {
     let deck=Netlist::parse("CCVS coupled flux\nV1 in 0 PWL(0 0 1n 0 1n 1 4n 1)\nI1 0 in PWL(0 0 1n 0 1n .0001 4n .0001)\nC1 in 0 2p\nH1 out 0 V1 3\nL1 out 0 5n\nL2 secondary 0 20n\nK1 L1 L2 .2\nR2 secondary 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
     let result = ccvs_engine().run_tran(&deck, 4e-9, 5e-12).unwrap();
     let event = result.time.iter().position(|&time| time == 1e-9).unwrap();
-    // [L1 M; M L2] * delta_i = [-6p,0], with M=2n.
-    action_close(
-        result.try_branch_current_waveform_named("l1").unwrap()[event],
-        -0.00125,
-    );
-    action_close(
-        result.try_branch_current_waveform_named("l2").unwrap()[event],
-        0.000125,
-    );
-    action_close(
-        result.try_voltage_waveform_named("out").unwrap()[event],
-        0.0003,
-    );
-    action_close(
-        result.try_voltage_waveform_named("secondary").unwrap()[event],
-        -0.00125,
-    );
+    // The event row is its left limit, where nothing has moved yet, as
+    // ngspice publishes it; the -6 pV*s action below carries the jump.
+    for current in ["l1", "l2"] {
+        assert_eq!(
+            result.try_branch_current_waveform_named(current).unwrap()[event],
+            0.0
+        );
+    }
+    for node in ["out", "secondary"] {
+        assert_eq!(result.try_voltage_waveform_named(node).unwrap()[event], 0.0);
+    }
     action_close(
         action_voltage(&result, "out")
             .points
@@ -816,7 +816,8 @@ fn current_driven_inductor_keeps_flux_actions_out_of_finite_voltage() {
         .iter()
         .zip(result.try_branch_current_waveform_named("l1").unwrap())
     {
-        action_close(current, if time < 1e-9 { 0.0 } else { 1e-3 });
+        // The 1 ns row is the step's left limit, as ngspice publishes it.
+        action_close(current, if time <= 1e-9 { 0.0 } else { 1e-3 });
     }
 }
 
@@ -869,7 +870,8 @@ fn current_driven_coupled_winding_preserves_flux_and_finite_decay() {
         action_close(action.points[0].volt_seconds, 4.8e-12);
         assert!(action_voltage(&result, "secondary").points.is_empty());
         for (i, &time) in result.time.iter().enumerate() {
-            let decay = if time < 1e-9 {
+            // The 1 ns row is the step's left limit, as ngspice publishes it.
+            let decay = if time <= 1e-9 {
                 0.0
             } else {
                 (-(time - 1e-9) / 2e-9).exp()
@@ -950,23 +952,31 @@ fn current_driven_winding_startup_keeps_authored_flux_and_regular_source_slopes(
                 let result = Engine::new(config)
                     .run_tran_with_startup_mode(&deck, 2e-9, 5e-12, startup)
                     .unwrap();
+                // t = 0 publishes the operating point, or under UIC the
+                // authored initial state with unset nodes at zero; the 1 ns
+                // seam publishes its left limit (ngspice 46, Xyce 7.10).
+                let (current, winding, out) = if startup == TransientStartupMode::Uic {
+                    (-0.0002, 0.0, 0.0)
+                } else {
+                    (0.00025, 0.0, 0.0025)
+                };
                 action_close(
                     result.try_branch_current_waveform_named("l1").unwrap()[0],
-                    0.00025,
+                    current,
                 );
                 action_close(
                     result.try_voltage_waveform_named("winding").unwrap()[0],
-                    0.005,
+                    winding,
                 );
-                action_close(result.try_voltage_waveform_named("out").unwrap()[0], 0.0075);
+                action_close(result.try_voltage_waveform_named("out").unwrap()[0], out);
                 let seam = result.time.iter().position(|&t| t == 1e-9).unwrap();
                 action_close(
                     result.try_voltage_waveform_named("winding").unwrap()[seam],
-                    0.0,
+                    0.005,
                 );
                 action_close(
                     result.try_voltage_waveform_named("out").unwrap()[seam],
-                    0.0125,
+                    0.0175,
                 );
                 for node in ["out", "winding"] {
                     let trace = action_voltage(&result, node);
@@ -1048,7 +1058,9 @@ fn xyce_capacitor_ic_preserves_differential_charge_and_slope() {
             let winding = result.try_branch_current_waveform_named("l1").unwrap();
             let output = result.try_voltage_waveform_named("out").unwrap();
             for (i, &time) in result.time.iter().enumerate() {
-                let ramp = (1e-9..2e-9).contains(&time);
+                // Each corner row is its left limit, as ngspice and Xyce
+                // publish it: the ramp current shows on (1 ns, 2 ns].
+                let ramp = time > 1e-9 && time <= 2e-9;
                 let expected = if ramp { sign * 0.002 } else { 0.0 };
                 assert!(
                     (cap[i] - expected).abs() < 1e-12,
@@ -1057,7 +1069,7 @@ fn xyce_capacitor_ic_preserves_differential_charge_and_slope() {
                 );
                 assert!((output[i] - 3.0 * expected).abs() < 3e-12);
                 assert_eq!(zero[i], 0.0);
-                let expected_l = if time < 1e-9 {
+                let expected_l = if time <= 1e-9 {
                     0.0
                 } else {
                     sign * (0.0012 + 1.2e6 * (time - 1e-9).min(1e-9))

@@ -300,13 +300,15 @@ fn native_diode_storage_has_finite_current_at_line_arrival_and_packed_restart() 
             v[index].abs() < 1e-10,
             "{dialect:?}: junction charge remains continuous"
         );
+        // The arrival row is its left limit, before the wave has reached the
+        // junction, as ngspice publishes it; the finite current follows it.
         assert!(
-            (i[index] - 0.02).abs() < 1e-10,
-            "{dialect:?}: finite arrival current"
+            i[index].abs() < 1e-10,
+            "{dialect:?}: the arrival row is its left limit"
         );
-        for (&time, (&voltage, &current)) in result.time[index..]
+        for (&time, (&voltage, &current)) in result.time[index + 1..]
             .iter()
-            .zip(v[index..].iter().zip(&i[index..]))
+            .zip(v[index + 1..].iter().zip(&i[index + 1..]))
         {
             let decay = (-(time - arrival) / 25e-12).exp();
             assert!((voltage - 0.5 * (1.0 - decay)).abs() < 3e-3);
@@ -367,14 +369,15 @@ fn capacitor_ic_current_tracks_a_matched_line_arrival() {
         let voltage = full.try_voltage_waveform_named("far").unwrap();
         let current = full.try_branch_current_waveform_named("c1").unwrap();
         // The incident half-volt step arrives at 2 ns. The 50-ohm line
-        // and 50-ohm termination drive C through 25 ohms: tau=.25 ns.
+        // and 50-ohm termination drive C through 25 ohms: tau=.25 ns. The
+        // arrival row is its left limit, as ngspice publishes it.
         for (i, &time) in full.time.iter().enumerate() {
-            let decay = if time < 2e-9 {
+            let decay = if time <= 2e-9 {
                 0.0
             } else {
                 (-(time - 2e-9) / 0.25e-9).exp()
             };
-            let expected = if time < 2e-9 {
+            let expected = if time <= 2e-9 {
                 0.0
             } else {
                 0.5 * (1.0 - decay)
@@ -444,7 +447,8 @@ fn prescribed_capacitor_load_preserves_the_analytic_line_arrival() {
     let voltage = result.try_voltage_waveform_named("out").unwrap();
     let current = result.try_branch_current_waveform_named("c1").unwrap();
     for (i, &time) in result.time.iter().enumerate() {
-        let arrived = time >= 1e-9;
+        // The arrival row is its left limit, as ngspice publishes it.
+        let arrived = time > 1e-9;
         let expected = if arrived {
             (1.0 - (2.0 / (1.0 + time / 1e-9)).powi(11)) / 1.1
         } else {

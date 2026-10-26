@@ -374,3 +374,140 @@ RL s1 0 1k
         rel * 100.0
     );
 }
+
+/// Run a deck under its configuration's dialect, parsing it as that dialect
+/// reads it, with Xyce's default maximum step: a tenth of the window.
+fn run_tran_in(
+    config: rspice_core::engine::SimulationConfig,
+    deck: &str,
+    stop: f64,
+) -> rspice_core::engine::TransientResult {
+    let step = 0.1 * stop;
+    let dialect = config.spice_dialect;
+    let netlist = Netlist::parse_with_options(
+        deck,
+        rspice_core::netlist::NetlistParseOptions {
+            spice_dialect: Some(dialect),
+            ..Default::default()
+        },
+    )
+    .expect("parse");
+    Engine::new(config)
+        .run_tran(&netlist, stop, step)
+        .unwrap_or_else(|error| panic!("{dialect:?} transient failed: {error}"))
+}
+
+/// The value a node publishes at an exact breakpoint.
+fn published_at(result: &rspice_core::engine::TransientResult, node: &str, time: f64) -> f64 {
+    let index = result
+        .time
+        .iter()
+        .position(|sample| (sample - time).abs() <= 1e-12)
+        .unwrap_or_else(|| panic!("no sample at {time:e} s"));
+    node_series(&result.node_names, &result.voltages, node)[index]
+}
+
+/// A current ramp forced through an inductor (Xyce INDUCTOR/inductor.cir and
+/// BUG_458): V(2) = L di/dt is -50 V on the 1 ms rise, 0 on the top and
+/// +50 V on the 1 ms fall. SPICE publishes the operating point at t = 0 and,
+/// at each corner, the solution of the step that ends there, its left limit.
+/// ngspice 46 and Xyce 7.10 both print V(1), V(2) = 0, 0 at t = 0;
+/// -50.005, -50 at 1 ms; -0.005, 0 at 11 ms; 50, 50 at 12 ms. The Xyce
+/// dialect, whose ideal current-source cutset takes the physical event path,
+/// published the outgoing state instead: -50 V at t = 0 and the next ramp at
+/// every corner.
+#[test]
+fn a_current_ramp_into_an_inductor_publishes_the_operating_point_and_each_corners_left_limit() {
+    use rspice_core::engine::SpiceDialect;
+    let deck = "\
+Netlist to Test the Xyce Inductor Model
+I1 1 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L1 2 0 10mH
+R1 1 2 0.001
+.TRAN 0.1MS 20MS
+.PRINT TRAN V(1) V(2)
+.END
+";
+    for dialect in [
+        SpiceDialect::Xyce,
+        SpiceDialect::Ngspice,
+        SpiceDialect::BestAvailable,
+    ] {
+        let config = rspice_core::engine::SimulationConfig::default().with_spice_dialect(dialect);
+        let result = run_tran_in(config, deck, 20e-3);
+        for (time, v1, v2) in [
+            (0.0, 0.0, 0.0),
+            (1e-3, -50.005, -50.0),
+            (11e-3, -0.005, 0.0),
+            (12e-3, 50.0, 50.0),
+        ] {
+            for (node, expected) in [("1", v1), ("2", v2)] {
+                let actual = published_at(&result, node, time);
+                assert!(
+                    (actual - expected).abs() <= 1e-6 * expected.abs() + 1e-9,
+                    "{dialect:?} V({node}) at {time:e} s: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+/// Xyce MULTIPLICITY_FACTOR/inductor.cir: an inductor of M parallel copies
+/// is L/M, and LMOD's TC1=0.2 from TNOM=20 makes L x3 at 30 C, under the
+/// same current ramps. Each branch's V(xA) at t = 0 and at the corners is
+/// what Xyce 7.10 prints at `.options device TEMP=20` and `TEMP=30`: the
+/// operating point, then the left limit of each ramp, 0 at 11 ms and L di/dt
+/// at 1 ms and 12 ms.
+#[test]
+fn multiplicity_inductors_publish_each_corners_left_limit_like_xyce() {
+    use rspice_core::engine::SpiceDialect;
+    for (temperature, l2_multiplicity, millihenries) in [
+        (20, "0.5", [10.0, 10.0, 5.0, 5.0, 5.0, 15.0]),
+        (30, "1", [10.0, 5.0, 5.0, 15.0, 15.0, 15.0]),
+    ] {
+        let deck = format!(
+            "Test the multiplicity factor (M) for Inductor device
+I1 1 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L1 1a 0 L=10mH
+R1 1 1a 0.001
+I2 2 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L2 2a 0 L=5mH M={l2_multiplicity}
+R2 2 2a 0.001
+I3 3 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L3 3a 0 L=5mH
+R3 3 3a 0.001
+I4 4 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L4 4a 0 LMOD L=10mH M=2
+R4 4 4a 0.001
+I5 5 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L5 5a 0 LMOD L=5mH
+R5 5 5a 0.001
+.MODEL LMOD L(TNOM=20 TC1=0.2)
+I6 6 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L6 6a 0 L=15mH
+R6 6 6a 0.001
+.options timeint newbpstepping=0 reltol=1.0e-4
+.TRAN 0.1MS 20MS
+.END
+"
+        );
+        let config = rspice_core::engine::SimulationConfig {
+            temperature: 273.15 + f64::from(temperature),
+            ..rspice_core::engine::SimulationConfig::default()
+                .with_spice_dialect(SpiceDialect::Xyce)
+        };
+        let result = run_tran_in(config, &deck, 20e-3);
+        for (branch, millihenries) in millihenries.into_iter().enumerate() {
+            let node = format!("{}a", branch + 1);
+            // L di/dt for a 5 A ramp over 1 ms.
+            let ramp = millihenries * 5.0;
+            for (time, expected) in [(0.0, 0.0), (1e-3, -ramp), (11e-3, 0.0), (12e-3, ramp)] {
+                let actual = published_at(&result, &node, time);
+                assert!(
+                    (actual - expected).abs() <= 1e-6 * expected.abs() + 1e-9,
+                    "{temperature} C, V({node}) at {time:e} s: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}

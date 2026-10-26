@@ -1344,9 +1344,9 @@ fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
 
         let text = String::from_utf8(bytes).unwrap();
         let older = text
-            .replacen("RSPICE-CHECKPOINT 63\n", "RSPICE-CHECKPOINT 62\n", 1)
+            .replacen("RSPICE-CHECKPOINT 64\n", "RSPICE-CHECKPOINT 62\n", 1)
             .lines()
-            .filter(|line| !line.starts_with("floor_march "))
+            .filter(|line| !line.starts_with("floor_march ") && !line.starts_with("published_row "))
             .map(|line| format!("{line}\n"))
             .collect::<String>();
         let older = TransientCheckpoint::from_bytes(older.as_bytes()).expect("a format-62 image");

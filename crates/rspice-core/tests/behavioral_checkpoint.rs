@@ -37,9 +37,17 @@ fn capacitor_fixture() -> (Engine, Netlist, TransientCheckpoint) {
 /// state behind an availability row, format 57 added the mixed runtime image
 /// row, format 59 the accepted switch rows, format 60 the pending edge
 /// completion rows, format 61 the pending model breakpoint row, format 62 the
-/// replayed VCD file rows, and format 63 the floor march row; none exists in
-/// the legacy images built below. `None` drops the row.
+/// replayed VCD file rows, format 63 the floor march row, and format 64 the
+/// published row; none exists in the legacy images built below. `None`
+/// drops the row.
 fn pre_v56_row(line: &str) -> Option<String> {
+    if line.starts_with("published_row ") {
+        assert_eq!(
+            line, "published_row none",
+            "these checkpoints sit at no event"
+        );
+        return None;
+    }
     if line.starts_with("floor_march ") {
         assert_eq!(
             line, "floor_march none",
@@ -181,7 +189,7 @@ fn capacitor_checkpoint_rejects_malformed_mismatched_and_missing_integrals() {
 
     let mut old = String::new();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 63"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 64"));
     old.push_str("RSPICE-CHECKPOINT 50\n");
     while let Some(line) = lines.next() {
         let Some(line) = pre_v56_row(line) else {
@@ -342,7 +350,7 @@ fn behavioral_checkpoint_legacy_state_remains_unknown() {
     let (engine, netlist, checkpoint) = fixture();
     let text = checkpoint.to_text();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 63"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 64"));
     let mut old = "RSPICE-CHECKPOINT 49\n".to_owned();
     while let Some(line) = lines.next() {
         let Some(line) = pre_v56_row(line) else {

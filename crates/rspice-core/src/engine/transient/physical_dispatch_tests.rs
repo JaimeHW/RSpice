@@ -281,7 +281,8 @@ fn physical_dispatch_source_jump_keeps_finite_currents_and_outgoing_startup() {
     let currents = &result.branch_currents[source];
     assert!(result.time.contains(&1e-9));
     for ((&time, &voltage), &current) in result.time.iter().zip(voltages).zip(currents) {
-        let expected = if time < 1e-9 { 1.0 } else { 2.0 };
+        // The 1 ns row is the step's left limit (ngspice 46).
+        let expected = if time <= 1e-9 { 1.0 } else { 2.0 };
         assert!(
             (voltage - expected).abs() < 1e-10,
             "voltage at {time:e}: {voltage:e}"
@@ -341,9 +342,14 @@ fn physical_dispatch_impulses_preserve_signed_charge_and_do_not_replay_checkpoin
             .position(|name| name.eq_ignore_ascii_case("Vc"))
             .unwrap();
         for (&time, &current) in baseline.time.iter().zip(&baseline.branch_currents[source]) {
-            let voltage = if time < 1e-9 {
+            // The UIC t = 0 row is the authored state with no solved current (the
+            // ordinary path's and Xyce 7.10's row); each jump row is its left limit
+            // (ngspice 46).
+            let voltage = if uic && time == 0.0 {
+                0.0
+            } else if time <= 1e-9 {
                 1.0
-            } else if time < 2e-9 {
+            } else if time <= 2e-9 {
                 2.0
             } else {
                 0.0
@@ -676,7 +682,8 @@ fn physical_dispatch_authored_shunt_is_in_finite_event_current() {
         .position(|name| name.eq_ignore_ascii_case("Vc"))
         .unwrap();
     for (&time, &current) in result.time.iter().zip(&result.branch_currents[source]) {
-        let expected = if time < 1e-9 { -0.002 } else { -0.004 };
+        // The 1 ns row is the step's left limit (ngspice 46).
+        let expected = if time <= 1e-9 { -0.002 } else { -0.004 };
         assert!(
             (current - expected).abs() < 1e-10,
             "finite shunted source current at {time:e}: {current:e}"
@@ -697,7 +704,8 @@ fn physical_dispatch_nearby_event_trains_preserve_controller_proposal() {
     assert!(result.time.contains(&jump));
     let voltage = result.try_voltage_waveform_named("c").unwrap();
     for (&time, &actual) in result.time.iter().zip(voltage) {
-        let expected = if time < jump { 1.0 } else { 2.0 };
+        // The jump row is its left limit (ngspice 46).
+        let expected = if time <= jump { 1.0 } else { 2.0 };
         assert!((actual - expected).abs() < 1e-10);
     }
     assert!(
@@ -762,7 +770,8 @@ fn physical_dispatch_native_nodal_floor_is_in_finite_event_current() {
         .position(|name| name.eq_ignore_ascii_case("Vc"))
         .unwrap();
     for (&time, &current) in result.time.iter().zip(&result.branch_currents[source]) {
-        let expected = if time < 1e-9 { -0.002 } else { -0.004 };
+        // The 1 ns row is the step's left limit (ngspice 46).
+        let expected = if time <= 1e-9 { -0.002 } else { -0.004 };
         assert!(
             (current - expected).abs() < 1e-10,
             "native finite source current at {time:e}: {current:e}"

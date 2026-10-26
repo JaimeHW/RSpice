@@ -95,8 +95,10 @@ fn gp_voltage_controlled_step_preserves_charge_impulse_and_transport_arrival() {
     // the default charge floor is larger than the entire measured impulse.
     let jump = 0.5e-9;
     let arrival = jump + DELAY;
-    let at_or_after =
-        |time: f64, event: f64| time >= event || (time - event).abs() <= 8.0 * f64::EPSILON * event;
+    // An event row is its left limit, the step that ends there: the source
+    // step and the transport arrival (allowing ULP-sized clock rounding).
+    let after =
+        |time: f64, event: f64| time > event && (time - event).abs() > 8.0 * f64::EPSILON * event;
     for dialect in [
         SpiceDialect::Ngspice,
         SpiceDialect::Xyce,
@@ -118,12 +120,8 @@ fn gp_voltage_controlled_step_preserves_charge_impulse_and_transport_arrival() {
             let extra = result.try_branch_current_waveform_named("g1").unwrap();
             let vt = thermal_voltage(dialect);
             for (index, &time) in result.time.iter().enumerate() {
-                let voltage = if at_or_after(time, jump) { 0.701 } else { 0.7 };
-                let delayed = if at_or_after(time, arrival) {
-                    0.701
-                } else {
-                    0.7
-                };
+                let voltage = if after(time, jump) { 0.701 } else { 0.7 };
+                let delayed = if after(time, arrival) { 0.701 } else { 0.7 };
                 let reverse = diode(voltage - 2.0, vt, dialect).0;
                 let expected_collector = diode(delayed, vt, dialect).0 - 2.0 * reverse;
                 let forcing = 0.5e-6 * voltage;

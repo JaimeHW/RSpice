@@ -76,7 +76,18 @@ fn gp_diode_charge_jumps_preserve_finite_currents_startup_and_packed_restart() {
                 let diode = result.try_branch_current_waveform_named("d1").unwrap();
                 let source = result.try_branch_current_waveform_named("vd").unwrap();
                 for (index, &time) in result.time.iter().enumerate() {
-                    let expected = if time >= 1e-9 { 0.6 } else { 0.2 };
+                    if startup == TransientStartupMode::Uic && index == 0 {
+                        // The UIC t = 0 row is the authored state, zero here
+                        // (the ordinary path's and Xyce 7.10's row).
+                        assert_eq!(
+                            [voltage[0], diode[0], source[0]],
+                            [0.0; 3],
+                            "{dialect:?}/{method:?}"
+                        );
+                        continue;
+                    }
+                    // The 1 ns row is the step's left limit (ngspice 46).
+                    let expected = if time > 1e-9 { 0.6 } else { 0.2 };
                     assert!((voltage[index] - expected).abs() < 1e-10);
                     assert!(
                         (diode[index] - current(expected)).abs() < 1e-15,
@@ -166,7 +177,8 @@ fn gp_diode_series_resistance_retains_junction_charge_and_finite_event_current()
             let current = result.try_branch_current_waveform_named("d1").unwrap();
             let source = result.try_branch_current_waveform_named("vd").unwrap();
             for (i, &time) in result.time.iter().enumerate() {
-                let arrived = time >= 1e-9;
+                // The 1 ns row is the step's left limit (ngspice 46).
+                let arrived = time > 1e-9;
                 let decay = if arrived {
                     (-(time - 1e-9) / 2e-9).exp()
                 } else {
@@ -265,13 +277,16 @@ fn gp_diode_smooth_model_terms_do_not_create_endless_delay_events() {
                 let junction = result.try_voltage_waveform_named("d").unwrap();
                 let diode_current = result.try_branch_current_waveform_named("d1").unwrap();
                 let supply = result.try_branch_current_waveform_named("vd").unwrap();
-                let at_or_after = |t: f64, event: f64| {
-                    t >= event || (t - event).abs() <= 8.0 * f64::EPSILON * event
+                // An event row is its left limit, the step that ends there:
+                // the source step at 1 ns and the transport arrival 0.1 ns
+                // later (allowing ULP-sized clock rounding).
+                let after = |t: f64, event: f64| {
+                    t > event && (t - event).abs() > 8.0 * f64::EPSILON * event
                 };
                 let vt = thermal_voltage(dialect);
                 for (index, &time) in result.time.iter().enumerate() {
-                    let voltage = if at_or_after(time, 1e-9) { 0.61 } else { 0.6 };
-                    let delayed = if at_or_after(time, 1e-9 + 0.1e-9) {
+                    let voltage = if after(time, 1e-9) { 0.61 } else { 0.6 };
+                    let delayed = if after(time, 1e-9 + 0.1e-9) {
                         0.61
                     } else {
                         0.6
@@ -367,7 +382,8 @@ fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
                 let diode = result.try_branch_current_waveform_named("d1").unwrap();
                 let source = result.try_branch_current_waveform_named("vd").unwrap();
                 for (index, &time) in result.time.iter().enumerate() {
-                    let expected = current(if time >= 1e-9 { v1 } else { v0 });
+                    // The 1 ns row is the step's left limit.
+                    let expected = current(if time > 1e-9 { v1 } else { v0 });
                     assert!(
                         (diode[index] - expected).abs() < 1e-13 + expected.abs() * 1e-9,
                         "TEMP={temperature}/TIKF={coefficient}/AREA={area}/M={mult}/{method:?}/{gmin}: I(D1) at {time:e}: {} vs {expected:e}",
@@ -461,7 +477,8 @@ fn gp_xyce_diode_model_processing_preserves_current_charge_and_restart() {
                     let diode = result.try_branch_current_waveform_named("d1").unwrap();
                     let source = result.try_branch_current_waveform_named("vd").unwrap();
                     for (index, &time) in result.time.iter().enumerate() {
-                        let expected = current(if time >= 1e-9 { v1 } else { v0 });
+                        // The 1 ns row is the step's left limit.
+                        let expected = current(if time > 1e-9 { v1 } else { v0 });
                         assert!(
                             (diode[index] - expected).abs() < 1e-15 + 1e-9 * expected.abs(),
                             "TEMP={temperature} FC={authored_fc} BV={breakdown} {method:?} at {time:e}: {} vs {expected:e}",

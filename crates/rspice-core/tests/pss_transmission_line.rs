@@ -58,13 +58,16 @@ fn shooting_delay_keeps_a_period_endpoint_jump_and_its_outgoing_ramp() {
         let (resumed, _) = engine
             .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.001)
             .unwrap();
+        // A continuation row at a jump publishes its left limit, the solution
+        // of the step that ends there, so it is read just before the edge.
+        let left_limit = |time: f64| expected(time - 1e-9);
         for transient in [&first, &resumed] {
             let far = transient.try_voltage_waveform_named("far").unwrap();
             for (&time, &value) in transient.time.iter().zip(far) {
                 assert!(
-                    (value - expected(time)).abs() < 1e-6,
+                    (value - left_limit(time)).abs() < 1e-6,
                     "{dialect:?}, TD={delay}: resumed {time:.17e}, {value} vs {}",
-                    expected(time)
+                    left_limit(time)
                 );
             }
         }
@@ -152,6 +155,9 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
             let (resumed, _) = engine
                 .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.001)
                 .unwrap();
+            // A continuation row at a jump publishes its left limit, the
+            // solution of the step that ends there.
+            let left_limit = |time: f64| expected(time - 1e-9);
             for transient in [&continued, &resumed] {
                 let far = transient
                     .node_names
@@ -160,9 +166,9 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
                     .unwrap();
                 for (&time, &actual) in transient.time.iter().zip(&transient.voltages[far]) {
                     assert!(
-                        (actual - expected(time)).abs() < 1e-6,
+                        (actual - left_limit(time)).abs() < 1e-6,
                         "continued {dialect:?} TD={delay} t={time:.17e}: {actual} vs {}",
-                        expected(time)
+                        left_limit(time)
                     );
                 }
             }

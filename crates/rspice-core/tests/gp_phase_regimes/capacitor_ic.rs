@@ -35,14 +35,19 @@ fn gp_capacitor_ic_preserves_rc_decay_and_outgoing_current() {
             let voltage = result.try_voltage_waveform_named("out").unwrap();
             let current = result.try_branch_current_waveform_named("c1").unwrap();
             assert!((voltage[0] - 0.25).abs() < 1e-12);
+            // t = 0 is the operating point, whose capacitor carries the
+            // 7.5 mA its IC draws, or under UIC the authored state with no
+            // solved current (Xyce 7.10 and the ordinary path print 0).
+            let uic = startup == TransientStartupMode::Uic;
+            let initial_current = if uic { 0.0 } else { 0.0075 };
             assert!(
-                (current[0] - 0.0075).abs() < 1e-12,
+                (current[0] - initial_current).abs() < 1e-12,
                 "{startup:?}/{method:?}: {}",
                 current[0]
             );
             // tau=100 ohms*10 pF=1 ns; the prescribed initial charge
             // releases into the resistor with its physical outgoing current.
-            for (i, &time) in result.time.iter().enumerate() {
+            for (i, &time) in result.time.iter().enumerate().skip(usize::from(uic)) {
                 let decay = (-time / 1e-9).exp();
                 let expected = 1.0 - 0.75 * decay;
                 assert!(
@@ -107,7 +112,9 @@ fn gp_capacitor_ic_charge_fanout_survives_packed_restart() {
             let capacitor = result.try_branch_current_waveform_named("c2").unwrap();
             let zero = result.try_branch_current_waveform_named("czero").unwrap();
             for (i, &time) in result.time.iter().enumerate() {
-                let expected = if time < 1e-9 {
+                // The 1 ns row is the step's left limit, as ngspice
+                // publishes it.
+                let expected = if time <= 1e-9 {
                     0.0
                 } else {
                     -0.5 * (-(time - 1e-9) / 0.4e-9).exp()
@@ -217,11 +224,16 @@ fn gp_capacitor_ic_shares_nonlinear_junction_charge_without_double_counting() {
             let icap = result.try_branch_current_waveform_named("c1").unwrap();
             let ib = result.try_branch_current_waveform_named("vb").unwrap();
             let ic = result.try_branch_current_waveform_named("vc").unwrap();
-            for (i, &time) in result.time.iter().enumerate() {
-                let base = if time < 1e-9 { 0.6 } else { 0.65 };
+            // t = 0 is the authored UIC state with no solved current (the
+            // ordinary path's row); each later event row is its left limit,
+            // the step that ends there: the base step at 1 ns and the
+            // transport arrival and change at 1 ns and 2 ns.
+            assert_eq!([icap[0], ib[0], ic[0]], [0.0; 3], "{kind}/{method:?}");
+            for (i, &time) in result.time.iter().enumerate().skip(1) {
+                let base = if time <= 1e-9 { 0.6 } else { 0.65 };
                 let reverse = 1e-16 * ((base - 2.0) / vt).exp_m1();
-                let arrived = time >= 1e-9 || (time - 1e-9).abs() < 8.0 * f64::EPSILON * 1e-9;
-                let changed = time >= 2e-9 || (time - 2e-9).abs() < 8.0 * f64::EPSILON * 2e-9;
+                let arrived = time > 1e-9 && (time - 1e-9).abs() >= 8.0 * f64::EPSILON * 1e-9;
+                let changed = time > 2e-9 && (time - 2e-9).abs() >= 8.0 * f64::EPSILON * 2e-9;
                 let delayed = if !arrived {
                     0.0
                 } else {
@@ -285,10 +297,13 @@ fn gp_prescribed_capacitor_events_keep_product_charge_current_and_restart() {
                 let current = result.try_branch_current_waveform_named("c1").unwrap();
                 let source = result.try_branch_current_waveform_named("v1").unwrap();
                 // Q=3 pF*(1+t/ns)*V. On each plateau I=3 mA/V*V;
-                // at 1 ns the voltage jump transfers 6 pF*.5 V=3 pC.
+                // at 1 ns the voltage jump transfers 6 pF*.5 V=3 pC. The
+                // t = 0 row is the operating point, where no charge moves,
+                // or the authored UIC state with no solved current; the 1 ns
+                // row is its left limit (Xyce 7.10 and ngspice 46).
                 for (i, &time) in result.time.iter().enumerate() {
-                    let voltage = if time < 1e-9 { 0.25 } else { 0.75 };
-                    let expected = sign * 3e-3 * voltage;
+                    let voltage = if time <= 1e-9 { 0.25 } else { 0.75 };
+                    let expected = if i == 0 { 0.0 } else { sign * 3e-3 * voltage };
                     assert!(
                         (current[i] - expected).abs() < 2e-10,
                         "{sign}/{startup:?}/{ic}/{method:?} t={time:e}: {} != {expected}",
@@ -374,7 +389,10 @@ fn gp_prescribed_capacitor_rc_decay_obeys_product_charge() {
             let voltage = result.try_voltage_waveform_named("out").unwrap();
             let current = result.try_branch_current_waveform_named("c1").unwrap();
             // d(CV)/dt=-V/R with C=C0*(1+t/T), R*C0=T.
-            // Thus V=V0/(1+t/T)^2, including the finite outgoing rate.
+            // Thus V=V0/(1+t/T)^2, including the finite outgoing rate. The
+            // UIC t = 0 row is the authored state with no solved current
+            // (Xyce 7.10 and the ordinary path print 0).
+            let uic = startup == TransientStartupMode::Uic;
             for (i, time) in result.time.iter().enumerate() {
                 let expected = 0.5 / (1.0 + time / 1e-9).powi(2);
                 assert!(
@@ -382,7 +400,16 @@ fn gp_prescribed_capacitor_rc_decay_obeys_product_charge() {
                     "{method:?}/{startup:?} t={time:e}: {} != {expected}",
                     voltage[i]
                 );
-                assert!((current[i] + voltage[i] / 500.0).abs() < 1e-11);
+                let expected_current = if uic && i == 0 {
+                    0.0
+                } else {
+                    -voltage[i] / 500.0
+                };
+                assert!(
+                    (current[i] - expected_current).abs() < 1e-11,
+                    "{method:?}/{startup:?} t={time:e}: I(C1)={}",
+                    current[i]
+                );
             }
             let trace = actions(&result, "c1");
             assert!(
