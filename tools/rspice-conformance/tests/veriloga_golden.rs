@@ -67,12 +67,6 @@ struct KnownDeviation {
 
 const KNOWN_DEVIATIONS: &[KnownDeviation] = &[
     KnownDeviation {
-        model: "bsimimg",
-        relative_error: 2.0e-4,
-        unverified_significant: 5,
-        why: "small disagreements where the numerical difference converges",
-    },
-    KnownDeviation {
         model: "hisimsotb_va",
         relative_error: 1.0,
         unverified_significant: 0,
