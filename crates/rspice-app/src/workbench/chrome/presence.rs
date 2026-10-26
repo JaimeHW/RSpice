@@ -14,9 +14,12 @@
 use egui::{Align, Align2, Layout, Sense, Ui, Vec2};
 
 use super::title_bar::MENU_POPUP_GAP;
+use crate::services::cloud_account::CloudAccountService;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::live_session::LiveSessionEngine;
+use crate::workbench::state::Workspace;
 
 /// One roster row resolved for the presence chrome.
 struct PresencePeer {
@@ -37,16 +40,25 @@ struct PresenceFacts {
     connected_count: usize,
 }
 
-fn presence_facts(app: &RSpiceApp) -> Option<PresenceFacts> {
+/// What the presence cluster reads: the account's session, the peers the
+/// engine sees over the relay, the model's write leases, and the workspace
+/// in front of the reader.
+pub(in crate::workbench) struct PresenceReads<'a> {
+    pub account: &'a CloudAccountService,
+    pub engine: &'a LiveSessionEngine,
+    pub model: &'a Model,
+    pub workspace: Workspace,
+}
+
+fn presence_facts(reads: &PresenceReads<'_>) -> Option<PresenceFacts> {
     use crate::services::cloud_account::LiveSessionState;
-    let (hosting, summary) = match app.cloud.account.snapshot().live_session.as_ref()? {
+    let (hosting, summary) = match reads.account.snapshot().live_session.as_ref()? {
         LiveSessionState::Hosting(summary) => (true, summary),
         LiveSessionState::Participating(summary) => (false, summary),
         _ => return None,
     };
-    let connected_principals: std::collections::HashSet<String> = app
-        .cloud
-        .live_session
+    let connected_principals: std::collections::HashSet<String> = reads
+        .engine
         .peers()
         .map(|peer| peer.identity.principal_id.to_string())
         .collect();
@@ -125,11 +137,11 @@ pub(in crate::workbench) enum PresenceAction {
 /// participants popover; policy and the join code stay owned by the dialog.
 pub(in crate::workbench) fn session_presence_cluster(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    reads: &PresenceReads<'_>,
     large_target: bool,
 ) -> Vec<PresenceAction> {
     let mut actions: Vec<PresenceAction> = Vec::new();
-    let Some(facts) = presence_facts(app) else {
+    let Some(facts) = presence_facts(reads) else {
         return actions;
     };
     let t = Tokens::get(ui.ctx());
@@ -223,7 +235,7 @@ pub(in crate::workbench) fn session_presence_cluster(
 
     egui::Popup::menu(&response)
         .gap(MENU_POPUP_GAP)
-        .show(|ui| render_presence_popover(ui, app, &facts, &mut actions));
+        .show(|ui| render_presence_popover(ui, reads, &facts, &mut actions));
     actions
 }
 
@@ -231,7 +243,7 @@ pub(in crate::workbench) fn session_presence_cluster(
 /// and the session actions. Owns nothing the dialog owns.
 fn render_presence_popover(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    reads: &PresenceReads<'_>,
     facts: &PresenceFacts,
     actions: &mut Vec<PresenceAction>,
 ) {
@@ -257,9 +269,8 @@ fn render_presence_popover(
     });
     ui.add_space(4.0);
     // Where each participant works right now, from their presence frames.
-    let focused: std::collections::HashMap<String, String> = app
-        .cloud
-        .live_session
+    let focused: std::collections::HashMap<String, String> = reads
+        .engine
         .peers()
         .filter_map(|peer| {
             let location = match peer.cursor.as_ref() {
@@ -314,25 +325,24 @@ fn render_presence_popover(
     ui.add_space(6.0);
 
     // Write-lease affordance for the document in front of a mirroring guest.
-    if !facts.hosting && app.state.model.live_write_locks.mirror {
-        let (doc, held_by_other) =
-            if app.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
-                (
-                    "netlist".to_owned(),
-                    app.state.model.live_write_locks.netlist.clone(),
-                )
-            } else {
-                let key = app.state.model.workspace.content.active_key();
-                (
-                    format!("schematic/{key}"),
-                    app.state
-                        .model
-                        .live_write_locks
-                        .schematic_views
-                        .get(&key)
-                        .cloned(),
-                )
-            };
+    if !facts.hosting && reads.model.live_write_locks.mirror {
+        let (doc, held_by_other) = if reads.workspace == Workspace::Netlist {
+            (
+                "netlist".to_owned(),
+                reads.model.live_write_locks.netlist.clone(),
+            )
+        } else {
+            let key = reads.model.workspace.content.active_key();
+            (
+                format!("schematic/{key}"),
+                reads
+                    .model
+                    .live_write_locks
+                    .schematic_views
+                    .get(&key)
+                    .cloned(),
+            )
+        };
         match held_by_other {
             Some(holder) => {
                 if ui

@@ -98,6 +98,10 @@ pub trait CloudSessionPort {
     /// else the license holder `cloud` shows, else the operating system's
     /// user.
     fn review_actor(&self, cloud: &dyn CloudPort) -> String;
+    /// Whom the account button names: the signed-in account's display name
+    /// or email, else the license holder `cloud` shows; `None` when neither
+    /// names anyone.
+    fn account_holder(&self, cloud: &dyn CloudPort) -> Option<String>;
     /// Where the live session's peers point on the canvas of `doc`, the
     /// document a cursor names.
     fn live_cursors(&self, doc: &str) -> Vec<LiveCursor>;

@@ -48,6 +48,13 @@ impl CloudSessionPort for CloudHandles {
         )
     }
 
+    fn account_holder(&self, cloud: &dyn CloudPort) -> Option<String> {
+        crate::workbench::user_identity::account_holder(
+            self.account.snapshot(),
+            cloud.license_holder(),
+        )
+    }
+
     /// A peer's cursor counts when it sits on `doc` at a finite point.
     fn live_cursors(&self, doc: &str) -> Vec<LiveCursor> {
         self.live_session

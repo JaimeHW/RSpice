@@ -25,6 +25,7 @@ use crate::workbench::app::dialogs::publish_web::{
 use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebParts, render_unpublish_web_dialog,
 };
+use crate::workbench::chrome::presence::{PresenceAction, PresenceReads, session_presence_cluster};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -48,6 +49,34 @@ impl Feature for CloudFeature {
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CloudCommand>();
         registry.dialogs(DIALOGS);
+    }
+}
+
+impl CloudFeature {
+    /// Draw the live session's presence in the title bar, touch-sized while
+    /// `large_targets`, and carry out what the reader asked of it there.
+    pub(crate) fn show_presence(
+        cx: &mut Cx<'_, CloudFeature>,
+        ui: &mut egui::Ui,
+        large_targets: bool,
+    ) {
+        let reads = PresenceReads {
+            account: &cx.own.account,
+            engine: &cx.own.live_session,
+            model: cx.model,
+            workspace: cx.wb.workspace,
+        };
+        for action in session_presence_cluster(ui, &reads, large_targets) {
+            match action {
+                PresenceAction::OpenDialog => {
+                    open_live_session_dialog(&mut cx.state.live_session, &mut cx.own.account);
+                }
+                PresenceAction::EndSession => cx.own.account.end_live_session(),
+                PresenceAction::LeaveSession => cx.own.account.leave_live_session(),
+                PresenceAction::RequestLease(doc) => cx.own.live_session.request_lease(&doc),
+                PresenceAction::ReleaseLease(doc) => cx.own.live_session.release_lease(&doc),
+            }
+        }
     }
 }
 

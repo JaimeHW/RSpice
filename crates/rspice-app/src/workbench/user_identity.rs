@@ -7,18 +7,17 @@
 //! different things, and none of them calls anybody "Local project editor".
 
 use crate::services::cloud_account::CloudSessionSnapshot;
-use crate::services::license::LicenseInfo;
 
 /// What the application calls the person using it when nothing else names
 /// them: no account, no license, and no operating-system user (a browser).
 const UNNAMED_USER: &str = "Local user";
 
 /// Whom the account button names: the signed-in account's display name or
-/// email, else the license holder for an offline installation; `None` when
-/// neither names anyone.
+/// email, else `license_holder`, whom an offline installation's license
+/// names; `None` when neither names anyone.
 pub(crate) fn account_holder(
     cloud: &CloudSessionSnapshot,
-    license: Option<&LicenseInfo>,
+    license_holder: Option<&str>,
 ) -> Option<String> {
     let cloud_identity = cloud.signed_in().then(|| {
         cloud.principal.as_ref().and_then(|principal| {
@@ -28,7 +27,7 @@ pub(crate) fn account_holder(
                 .or_else(|| principal.email.clone())
         })
     });
-    let license_identity = license.map(|license| license.licensed_to.trim().to_owned());
+    let license_identity = license_holder.map(|holder| holder.trim().to_owned());
     cloud_identity
         .flatten()
         .or(license_identity)
@@ -69,6 +68,7 @@ fn operating_system_user() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::license::LicenseInfo;
 
     fn license(holder: &str) -> LicenseInfo {
         LicenseInfo {

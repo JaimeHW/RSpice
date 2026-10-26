@@ -24,12 +24,12 @@ use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
-use crate::workbench::app::dialogs::live_session::open_live_session_dialog;
 use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
+use crate::workbench::cloud::CloudFeature;
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
@@ -37,6 +37,7 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{Registry, ids};
+use crate::workbench::framework::feature::CloudSessionPort;
 use crate::workbench::framework::host::{
     DocumentHost, Host, InspectorScope, NavigatorSection, Point, ProblemsHost, RailEntry,
     StatusCell, ToolbarScope, ToolbarSlot,
@@ -323,31 +324,11 @@ impl Host for RSpiceApp {
                     pvt_selector(ui, app, layout.toolbar_control_height);
                 }
             }
-            // The live session's presence: the cluster reads the application
-            // and hands back what the reader asked of it, which runs here.
+            // The live session's presence, which the cloud feature draws and
+            // answers in its context.
             Point::Presence { large_targets } => {
-                use crate::workbench::chrome::presence::{
-                    PresenceAction, session_presence_cluster,
-                };
-
-                for action in session_presence_cluster(ui, app, large_targets) {
-                    match action {
-                        PresenceAction::OpenDialog => open_live_session_dialog(
-                            &mut app.state.cloud.live_session,
-                            &mut app.cloud.account,
-                        ),
-                        PresenceAction::EndSession => app.cloud.account.end_live_session(),
-                        PresenceAction::LeaveSession => {
-                            app.cloud.account.leave_live_session();
-                        }
-                        PresenceAction::RequestLease(doc) => {
-                            app.cloud.live_session.request_lease(&doc);
-                        }
-                        PresenceAction::ReleaseLease(doc) => {
-                            app.cloud.live_session.release_lease(&doc);
-                        }
-                    }
-                }
+                CloudFeature::show_presence(&mut features::cx(app), ui, large_targets);
+                app.after_contribution();
             }
         }
     }
@@ -496,10 +477,7 @@ impl Host for RSpiceApp {
     }
 
     fn account_holder(&self) -> Option<String> {
-        crate::workbench::user_identity::account_holder(
-            self.cloud.account.snapshot(),
-            self.state.cloud.license.as_ref(),
-        )
+        CloudSessionPort::account_holder(&self.cloud, &*self.state.cloud)
     }
 
     fn rail_entry(&self, workspace: Workspace) -> RailEntry<RSpiceApp> {
