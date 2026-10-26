@@ -60,6 +60,7 @@ use crate::ui::plot::Trace;
 use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
 use crate::ui::plot::{self, XScale, fmt_si_significant};
 use crate::ui::tokens::Tokens;
+#[cfg(test)]
 use crate::workbench::AppState;
 use crate::workbench::ComplexNumberDisplay;
 use rspice_results::family_projection::SourceSampleSelection;
@@ -546,12 +547,11 @@ pub(crate) struct SharedXStatus {
 /// waveform sheet has.
 pub(crate) fn active_shared_x_status(
     tokens: &Tokens,
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
 ) -> Option<SharedXStatus> {
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let active = state
-        .results
         .results
         .session
         .active_wave_pane
@@ -559,7 +559,7 @@ pub(crate) fn active_shared_x_status(
         .map(|key| key.analysis);
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -569,8 +569,7 @@ pub(crate) fn active_shared_x_status(
     }?;
     let full = model.x_range?;
     let panes = model.unit_panes().len();
-    let view =
-        shared_x_view(&state.results.results.session, model.analysis_key, panes).unwrap_or(full);
+    let view = shared_x_view(&state.results.session, model.analysis_key, panes).unwrap_or(full);
     let (start, end) = shared_axis_viewport_fraction(model.x_scale, full, view);
     let width = end - start;
     Some(SharedXStatus {

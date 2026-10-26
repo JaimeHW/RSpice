@@ -70,7 +70,10 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
     let project = marker_project(&state);
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    restore_presentation(&mut state, restored.file.result_presentation);
+    restore_presentation(
+        &mut state.results_parts(),
+        restored.file.result_presentation,
+    );
     assert_eq!(place_quick(&mut state, analysis, 0.75), None);
     assert_eq!(state.results.results.session.markers.len(), 1);
     assert_eq!(state.results.results.session.markers[0].id, u32::MAX);
@@ -300,7 +303,10 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
         serde_json::to_value(normalized.file.result_presentation.markers).unwrap()
     );
 
-    restore_presentation(&mut state, restored.file.result_presentation);
+    restore_presentation(
+        &mut state.results_parts(),
+        restored.file.result_presentation,
+    );
     commit_marker_edit(
         &mut state.results_parts(),
         MarkerSelector::Quick(3),

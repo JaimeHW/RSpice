@@ -83,6 +83,9 @@ impl AppState {
         &mut self,
         presentation: crate::state::result_presentation::ResultPresentation,
     ) {
-        crate::workbench::documents::result_document::restore_presentation(self, presentation);
+        crate::workbench::documents::result_document::restore_presentation(
+            &mut self.results_parts(),
+            presentation,
+        );
     }
 }

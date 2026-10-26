@@ -422,7 +422,7 @@ mod tests {
             .active_run()
             .unwrap()
             .dataset_content_digest();
-        let policy = state.result_presentation_policy();
+        let policy = state.results_reads().presentation_policy();
         let models = cached_models(
             &state.model.simulation,
             &mut state.results.results,

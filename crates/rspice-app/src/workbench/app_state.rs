@@ -130,15 +130,6 @@ impl AppState {
         );
     }
 
-    /// The reader's result presentation, with the significant digits of the
-    /// project result document the Results workspace is showing, if any.
-    #[must_use]
-    pub(crate) fn result_presentation_policy(
-        &self,
-    ) -> crate::workbench::preferences::ResultPresentationPolicy {
-        self.results_reads().presentation_policy()
-    }
-
     /// Reserve the next project revision before a library membership
     /// transaction publishes any live state.
     pub(crate) fn preflight_project_library_mutation(

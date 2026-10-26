@@ -24,7 +24,7 @@ use crate::results::visualization_document::{
 use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-use super::{AppState, ResultViewer, ResultsParts, ResultsReads};
+use super::{ResultViewer, ResultsParts, ResultsReads};
 
 /// The project result document the Results workspace is showing, if any.
 pub(super) fn active_document_id(state: ResultsReads<'_>) -> Option<ResultDocumentId> {

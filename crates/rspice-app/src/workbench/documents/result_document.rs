@@ -187,6 +187,7 @@ use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
+#[cfg(test)]
 use crate::workbench::AppState;
 #[cfg(test)]
 use crate::workbench::RSpiceApp;
@@ -660,12 +661,13 @@ impl ResultsParts<'_> {
     }
 
     /// Answer the gesture just made, on the status bar, as
-    /// [`AppState::prompt`] does.
+    /// [`AppState::prompt`](crate::workbench::AppState::prompt) does.
     pub(crate) fn prompt(&mut self, text: impl Into<String>) {
         self.workbench.prompt(text);
     }
 
-    /// Record an event in the Console, as [`AppState::record`] does.
+    /// Record an event in the Console, as
+    /// [`AppState::record`](crate::workbench::AppState::record) does.
     pub(crate) fn record(
         &mut self,
         severity: crate::diagnostics::LogSeverity,
@@ -676,7 +678,7 @@ impl ResultsParts<'_> {
     }
 
     /// Report a failure of something the reader asked for, as
-    /// [`AppState::report_failure`] does.
+    /// [`AppState::report_failure`](crate::workbench::AppState::report_failure) does.
     pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
         self.model.report_failure(title, detail);
     }
@@ -1041,7 +1043,7 @@ pub(crate) fn marker_anchor_for(
 
 /// Restore authored presentation only after its datasets and visualization
 /// documents have been loaded. Exhaustive ownership covers every durable field.
-pub(crate) fn restore_presentation(state: &mut AppState, presentation: ResultPresentation) {
+pub(crate) fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPresentation) {
     let ResultPresentation {
         markers,
         marker_id_high_water,
@@ -1065,7 +1067,7 @@ pub(crate) fn restore_presentation(state: &mut AppState, presentation: ResultPre
 /// match is content-shaped, not id-shaped: the two stores never shared an id
 /// space that could be compared.
 pub(crate) fn restore_markers(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     markers: Vec<ResultMarker>,
     high_water: Option<u32>,
 ) {
@@ -1077,7 +1079,7 @@ pub(crate) fn restore_markers(
             // Current writers explicitly own quick markers. A genuine quick
             // annotation can match a document marker without being its old
             // projection; migrate this ambiguity only in legacy files.
-            if legacy && is_document_marker_projection(state, marker) {
+            if legacy && is_document_marker_projection(state.results_reads(), marker) {
                 return false;
             }
             // A discarded dataset does not make its allocated labels reusable.
@@ -1091,16 +1093,12 @@ pub(crate) fn restore_markers(
                 .any(|run| marker.analysis.resolve(run).is_some())
         })
         .collect();
-    state
-        .results
-        .results
-        .session
-        .adopt_markers(retained, highest);
+    state.results.session.adopt_markers(retained, highest);
 }
 
 /// Whether one loaded quick marker restates a marker a project-owned
 /// visualization document already retains.
-fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> bool {
+fn is_document_marker_projection(state: ResultsReads<'_>, marker: &ResultMarker) -> bool {
     use crate::results::visualization_document::TypedValue;
     if marker.anchor.analysis != marker.analysis {
         return false;
@@ -1147,8 +1145,11 @@ fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> boo
 ///
 /// Same rule as the markers above: a presentation decision that cannot find
 /// the dataset it was made about is not a decision about anything.
-pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePresentationKey>) {
-    state.results.results.session.log_y_panes = panes
+pub(crate) fn restore_log_y_panes(
+    state: &mut ResultsParts<'_>,
+    panes: Vec<WavePanePresentationKey>,
+) {
+    state.results.session.log_y_panes = panes
         .into_iter()
         .filter(|pane| {
             state
@@ -1165,11 +1166,14 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
 /// Restore project-owned expression definitions after their immutable result
 /// datasets have been loaded. Stale groups fail closed instead of attaching
 /// their text to whichever analysis happens to occupy an old ordinal.
-pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<ResultExpressionGroup>) {
-    state.results.results.session.analysis_exprs.clear();
-    state.results.results.session.exprs.clear();
-    state.results.results.session.expr_projection_keys.clear();
-    state.results.results.analysis_expr_cache.clear();
+pub(crate) fn restore_expression_groups(
+    state: &mut ResultsParts<'_>,
+    groups: Vec<ResultExpressionGroup>,
+) {
+    state.results.session.analysis_exprs.clear();
+    state.results.session.exprs.clear();
+    state.results.session.expr_projection_keys.clear();
+    state.results.analysis_expr_cache.clear();
     for group in groups {
         let retained = state
             .model
@@ -1181,14 +1185,12 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
         if retained && !group.traces.is_empty() {
             state
                 .results
-                .results
                 .session
                 .analysis_exprs
                 .insert(group.analysis, group.traces);
         }
     }
     state
-        .results
         .results
         .reconcile_expression_projection(&state.model.simulation);
 }

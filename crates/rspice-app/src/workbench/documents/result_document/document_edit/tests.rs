@@ -920,7 +920,8 @@ fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
 
 fn shown_digits(app: &RSpiceApp) -> u8 {
     app.state
-        .result_presentation_policy()
+        .results_reads()
+        .presentation_policy()
         .displayed_significant_digits()
         .get()
 }

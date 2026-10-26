@@ -89,8 +89,8 @@ pub(crate) fn open_family(state: &mut ResultsParts<'_>) {
 
 /// Narrow the open Family slicing form to `filter`, as a hop that carries a
 /// point into the family does.
-pub(crate) fn set_family_filter(state: &mut AppState, filter: String) {
-    if let Some(ResultDocumentDialog::Family(draft)) = &mut state.results.result_document_dialog {
+pub(crate) fn set_family_filter(dialog: &mut Option<ResultDocumentDialog>, filter: String) {
+    if let Some(ResultDocumentDialog::Family(draft)) = dialog {
         draft.filter = filter;
     }
 }

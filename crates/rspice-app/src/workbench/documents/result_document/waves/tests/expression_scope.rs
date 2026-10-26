@@ -162,7 +162,7 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
     ) = serde_json::from_slice(&bytes).unwrap();
     let mut reopened = AppState::default();
     reopened.model.simulation = state.model.simulation.clone();
-    super::super::super::restore_presentation(&mut reopened, presentation);
+    super::super::super::restore_presentation(&mut reopened.results_parts(), presentation);
     let run = reopened.model.simulation.active_run().unwrap();
     let manifest = FamilyManifest::from_metadata(
         run.analyses[0].analysis_type,

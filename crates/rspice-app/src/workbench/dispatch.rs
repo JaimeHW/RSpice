@@ -224,7 +224,7 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, SetFamilyFilter(filter)| {
                 crate::workbench::documents::result_document::set_family_filter(
-                    &mut app.state,
+                    &mut app.state.results.result_document_dialog,
                     filter,
                 );
             },

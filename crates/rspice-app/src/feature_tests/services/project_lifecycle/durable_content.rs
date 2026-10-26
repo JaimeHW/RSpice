@@ -186,7 +186,10 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
         units.iter().collect::<Vec<_>>()
     );
     let expected = serde_json::to_value(&presentation).unwrap();
-    crate::workbench::documents::result_document::restore_presentation(&mut state, presentation);
+    crate::workbench::documents::result_document::restore_presentation(
+        &mut state.results_parts(),
+        presentation,
+    );
     assert_eq!(
         serde_json::to_value(
             state

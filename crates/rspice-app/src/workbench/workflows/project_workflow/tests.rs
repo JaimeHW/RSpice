@@ -1489,7 +1489,7 @@ fn save_project_to_path_round_trips_result_markers() {
     let mut reopened = AppState::default();
     reopened.model.simulation = state.model.simulation.clone();
     crate::workbench::documents::result_document::restore_presentation(
-        &mut reopened,
+        &mut reopened.results_parts(),
         loaded.file.result_presentation,
     );
     assert_eq!(reopened.results.results.session.markers.len(), 1);
@@ -1588,7 +1588,10 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     reopened.model.simulation = state.model.simulation.clone();
     let mut older_file = loaded.file.result_presentation.log_y_panes;
     older_file.push(orphan);
-    crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
+    crate::workbench::documents::result_document::restore_log_y_panes(
+        &mut reopened.results_parts(),
+        older_file,
+    );
     assert_eq!(
         reopened
             .results
@@ -1666,7 +1669,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     let mut reopened = AppState::default();
     reopened.model.simulation = state.model.simulation.clone();
     crate::workbench::documents::result_document::restore_expression_groups(
-        &mut reopened,
+        &mut reopened.results_parts(),
         loaded.file.result_presentation.expression_groups,
     );
     assert_eq!(

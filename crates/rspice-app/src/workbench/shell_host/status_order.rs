@@ -54,7 +54,7 @@ pub(super) fn status_readings(
     // visible X interval in the coordinate segment, and that interval's
     // magnification in the zoom chip beside it.
     let results_view = (state.workbench.workspace == Workspace::Results)
-        .then(|| active_shared_x_status(&t, state))
+        .then(|| active_shared_x_status(&t, &mut state.results_parts()))
         .flatten();
     StatusReadings {
         pass: ctx.cumulative_pass_nr(),
