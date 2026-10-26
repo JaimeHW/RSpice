@@ -1310,7 +1310,7 @@ fn apply_loaded_project_authorized(
     // Markers are restored after the datasets they annotate, and only those
     // that still find their analysis: a marker pointing at a dataset this
     // project no longer retains would draw on nothing.
-    crate::workbench::documents::result_document::restore_presentation(state, result_presentation);
+    state.restore_result_presentation(result_presentation);
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::services::recent_files::RecentKind::Project, path);
     }

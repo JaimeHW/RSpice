@@ -73,4 +73,16 @@ impl AppState {
         self.problems_view = Default::default();
         self.results.analysis.clear_specialized_viewer_data();
     }
+
+    /// Restore the result presentation a project retained, when it is opened
+    /// or its result history is reverted: the markers, log-scaled panes and
+    /// expression groups. It runs once the datasets and visualization
+    /// documents it annotates are loaded, so a marker is kept only where its
+    /// analysis still is.
+    pub(crate) fn restore_result_presentation(
+        &mut self,
+        presentation: crate::state::result_presentation::ResultPresentation,
+    ) {
+        crate::workbench::documents::result_document::restore_presentation(self, presentation);
+    }
 }

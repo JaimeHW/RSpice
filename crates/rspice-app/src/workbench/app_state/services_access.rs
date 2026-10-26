@@ -174,7 +174,7 @@ fn revert_document_in_place(
             revert_cell_view(state, &baseline, &reference)?;
         }
         RevertFollowUp::ResultHistory(presentation) => {
-            crate::workbench::documents::result_document::restore_presentation(state, presentation);
+            state.restore_result_presentation(presentation);
             state.results.analysis.clear_specialized_viewer_data();
         }
         RevertFollowUp::StimulusLibrary => state.design.on_project_changed(),
