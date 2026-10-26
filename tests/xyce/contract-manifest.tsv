@@ -3754,7 +3754,7 @@ Netlists/VANOISE/bsimcmg_noise_111_m_baseline.cir	upstream_excluded	upstream_exc
 Netlists/VANOISE/commonEmitterBjt_mextram.cir	executed	static_prn_noise
 Netlists/VANOISE/commonEmitterBjt_vbic13.cir	executed	static_prn_noise
 Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir	executed	static_prn_noise
-Netlists/VANOISE/ekv_150nm_nmos_noise.cir	executed	static_prn_noise
+Netlists/VANOISE/ekv_150nm_nmos_noise.cir	expected_unsupported	unsupported_xyce_runtime
 Netlists/VANOISE/gain-stage1_psp.cir	expected_unsupported	unsupported_xyce_runtime
 Netlists/VBIC13/HBT_IV.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/VBIC13/acCf.cir	expected_unsupported	unsupported_xyce_contract

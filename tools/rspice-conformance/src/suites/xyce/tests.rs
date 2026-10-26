@@ -27211,3 +27211,18 @@ fn bug402_release_710_temperature_option_contract_is_exact_and_executable() {
     assert_eq!(result.contract, XYCE_BUG402_OWNER_CONTRACT);
     assert!(result.mismatches.is_empty());
 }
+
+#[test]
+fn typed_capability_refusals_are_expected_unsupported() {
+    // The EKV3 VANOISE boundary, as the noise analysis refuses it.
+    let refusal = SimulationError::unsupported_capability(
+        "analysis.noise.device.ekv3_vanoise",
+        "unsupported EKV3 LEVEL=301 NOISE contract",
+    );
+    assert!(XyceTestRunner::is_expected_unsupported_runtime_error(
+        &refusal
+    ));
+    assert!(!XyceTestRunner::is_expected_unsupported_runtime_error(
+        &SimulationError::Circuit("Convergence failed after 100 iterations".into())
+    ));
+}

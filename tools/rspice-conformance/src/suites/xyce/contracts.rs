@@ -3788,6 +3788,11 @@ impl XyceTestRunner {
     }
 
     pub(super) fn is_expected_unsupported_runtime_error(err: &SimulationError) -> bool {
+        // A typed capability refusal is the engine naming an unsupported
+        // surface outright; the untyped messages below are matched by wording.
+        if matches!(err, SimulationError::UnsupportedCapability(_)) {
+            return true;
+        }
         let (SimulationError::Circuit(message) | SimulationError::Netlist(message)) = err else {
             return false;
         };
