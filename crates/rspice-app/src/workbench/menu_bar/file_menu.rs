@@ -104,7 +104,7 @@ pub(crate) fn dispatch_file_menu_action(
         // The format is asked first; the frame runs the export once it is
         // answered, because the picker is a dialog that lives across frames.
         FileMenuAction::ExportCsvWaveforms => {
-            super::waveform_export::open_dataset_export_picker(state);
+            super::open_dataset_export_picker(state);
         }
         FileMenuAction::ImportVerilogA => {
             // Import creates cell views; it never touches the one in front.

@@ -20,7 +20,7 @@ use rspice_results_ui::eye_diagram::EyeTimebaseProvenance;
 use typed_csv::prepare_typed_result_csv;
 
 pub(crate) use format_picker::{
-    DatasetExportPicker, open_dataset_export_picker, show_dataset_export_picker,
+    DatasetExportPicker, dataset_export_picker, show_dataset_export_picker,
 };
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";

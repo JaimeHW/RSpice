@@ -11,7 +11,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select_with_disabled};
 use crate::workbench::ChoicePreference;
-use crate::workbench::app_state::AppState;
+use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::preferences::UserPreferences;
 
 /// The open "Export dataset…" format picker: the format chosen so far, by
@@ -41,19 +41,16 @@ const FORMATS: [(&str, bool); 10] = [
 /// Why a one-analysis format is unavailable on a view that shows several.
 const ONE_ANALYSIS_REASON: &str = "Exports one analysis. Maximize one strip to use it.";
 
-/// Open the picker on the format used last, or on CSV when that one cannot
-/// export the view that is showing.
-pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
+/// The picker for the view that is showing, open on the format used last, or
+/// on CSV when that one cannot export the view. The error says why no view
+/// can be exported.
+pub(crate) fn dataset_export_picker(
+    state: ResultsReads<'_>,
+) -> Result<DatasetExportPicker, String> {
     let displayed =
-        match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
-            state.results_reads(),
-        ) {
-            Ok(displayed) => displayed,
-            Err(message) => {
-                state.prompt(message);
-                return;
-            }
-        };
+        crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
+            state,
+        )?;
     let several_analyses = displayed.analysis_indices.len() > 1;
     let last = state
         .model
@@ -65,10 +62,10 @@ pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
     } else {
         last
     };
-    state.results.dataset_export = Some(DatasetExportPicker {
+    Ok(DatasetExportPicker {
         format,
         several_analyses,
-    });
+    })
 }
 
 /// Show the picker while it is open. Returns `true` on the frame the reader
@@ -149,6 +146,7 @@ pub(crate) fn show_dataset_export_picker(
 mod tests {
     use super::*;
     use crate::workbench::EngineeringExportFormat;
+    use crate::workbench::app_state::AppState;
 
     /// The picker's list is the stored choice's numbering, and its "one
     /// analysis" flags agree with the formats the export refuses on a
