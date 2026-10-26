@@ -72,6 +72,11 @@ impl CodePort for CodeState {
         self.netlist.active_document == ActiveNetlistDocument::OwnedSource
     }
 
+    fn shows_owned_root(&self) -> bool {
+        self.netlist.active_document == ActiveNetlistDocument::OwnedSource
+            && self.netlist.active_dependency_identity.is_none()
+    }
+
     fn netlist_cursor_line(&self) -> usize {
         self.netlist.cursor_line
     }

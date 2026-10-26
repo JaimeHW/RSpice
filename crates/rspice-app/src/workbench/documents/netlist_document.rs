@@ -13,6 +13,9 @@ use super::{CodeSourceFileAction, CodeWorkspacePage};
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
 use crate::workbench::AppState;
+use crate::workbench::app_state::model::{
+    prune_owned_include_authority, replace_root_document_preserving_dependencies,
+};
 
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 
@@ -644,162 +647,19 @@ pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
     replace_owned_source_unlocked(state, source)
 }
 
-fn replace_root_document_preserving_dependencies(
-    document: &crate::state::NetlistDocument,
-    source: &str,
-) -> Result<crate::state::NetlistDocument, String> {
-    let next_dependencies = dependencies_for_rewritten_root(document, source)?;
-    let mut next = document.clone();
-    next.replace_editable_source(next.content_digest(), source.as_bytes().to_vec())
-        .map_err(|error| error.to_string())?;
-    next.acknowledge_dependencies(next.content_digest(), next_dependencies)
-        .map_err(|error| error.to_string())?;
-    Ok(next)
-}
-
-/// Rebind unchanged direct include edges to their new source-order indices and
-/// retain only transitive members still reachable from those edges. New or
-/// renamed include cards enter the closure unresolved and can then use the
-/// ordinary relink/resolution workflow. This makes adding, ordering, and
-/// removing include cards a normal atomic editor operation instead of
-/// discarding every unaffected dependency or leaving stale owned authority.
-fn dependencies_for_rewritten_root(
-    document: &crate::state::NetlistDocument,
-    source: &str,
-) -> Result<Vec<crate::state::DependencyMetadata>, String> {
-    let includes = crate::state::parse_include_directives(source);
-    let original = document.dependencies();
-    let mut next = Vec::new();
-    let mut reachable = HashSet::new();
-
-    for (index, include) in includes.iter().enumerate() {
-        let requested = include.locator();
-        if let Some(existing) = original.iter().find(|dependency| {
-            dependency.direct_include_index().is_some()
-                && dependency.parent().is_none()
-                && dependency.requested_locator() == requested
-        }) {
-            let retained = crate::state::DependencyMetadata::unresolved_direct_to(
-                index,
-                requested,
-                existing.locator().clone(),
-            )
-            .map_err(|error| error.to_string())?
-            .with_authority(existing.authority())
-            .with_resolution(existing.resolution().clone())
-            .map_err(|error| error.to_string())?;
-            reachable.insert(retained.locator().logical_identity().to_owned());
-            next.push(retained);
-        } else {
-            let display_name = std::path::Path::new(requested).file_name().map_or_else(
-                || requested.to_owned(),
-                |name| name.to_string_lossy().into_owned(),
-            );
-            let locator = crate::state::SourceLocator::try_new(requested, display_name)
-                .map_err(|error| error.to_string())?;
-            reachable.insert(locator.logical_identity().to_owned());
-            next.push(
-                crate::state::DependencyMetadata::unresolved_direct_to(index, requested, locator)
-                    .map_err(|error| error.to_string())?,
-            );
-        }
-    }
-
-    loop {
-        let before = next.len();
-        let newly_reachable = original
-            .iter()
-            .filter(|dependency| {
-                dependency
-                    .parent()
-                    .is_some_and(|parent| reachable.contains(parent.logical_identity()))
-                    && !reachable.contains(dependency.locator().logical_identity())
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        for dependency in newly_reachable {
-            reachable.insert(dependency.locator().logical_identity().to_owned());
-            next.push(dependency);
-        }
-        if next.len() == before {
-            break;
-        }
-    }
-    Ok(next)
-}
-
-fn prune_owned_include_authority(
-    descriptor: &mut crate::state::OwnedNetlistDescriptor,
-    document: &crate::state::NetlistDocument,
+/// Adopt the project's own netlist source a live session replaced: the root
+/// document rewritten over it, when the project keeps one, becomes the
+/// editor's, and the editor's revision and undo history move past the source
+/// they were taken from.
+pub(crate) fn adopt_live_owned_source(
+    netlist: &mut NetlistDocumentState,
+    document: Option<crate::state::NetlistDocument>,
 ) {
-    let retained = document
-        .dependencies()
-        .iter()
-        .map(|dependency| dependency.locator().logical_identity())
-        .collect::<HashSet<_>>();
-    descriptor
-        .owned_includes
-        .retain(|include| retained.contains(include.logical_identity.as_str()));
-}
-
-/// Apply a live-session-authorized owned-source update independently of the
-/// currently visible netlist document. Repeated delivery is convergence.
-pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> bool {
-    let Some(current) = state.model.workspace.content.netlist_source.as_deref() else {
-        return false;
-    };
-    if current == source {
-        return true;
+    if let Some(document) = document {
+        netlist.owned_document = Some(document);
     }
-    let next_document = if let Some(document) = &state.model.workspace.content.netlist_document {
-        let Ok(next) = replace_root_document_preserving_dependencies(document, &source) else {
-            return false;
-        };
-        Some(next)
-    } else {
-        None
-    };
-    let mut candidate = state.clone();
-    if !candidate
-        .model
-        .workspace
-        .content
-        .replace_editable_netlist_source(source.clone())
-    {
-        return false;
-    }
-    if candidate.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
-        && candidate.code.netlist.active_dependency_identity.is_none()
-    {
-        candidate.model.simulation.source.netlist_content = source;
-    }
-    if let Some(document) = next_document {
-        if let Some(descriptor) = candidate
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_mut()
-        {
-            prune_owned_include_authority(descriptor, &document);
-        }
-        candidate.model.workspace.content.netlist_document = Some(document.clone());
-        candidate.code.netlist.owned_document = Some(document);
-    }
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    candidate.model.invalidate_source_evidence();
-    clear_netlist_edit_journal(&mut candidate.code.netlist);
-    if candidate
-        .model
-        .workspace
-        .content
-        .validate_simulation_configuration()
-        .is_err()
-    {
-        return false;
-    }
-    state.commit_candidate(candidate);
-    true
+    netlist.revision = netlist.revision.wrapping_add(1);
+    clear_netlist_edit_journal(netlist);
 }
 
 fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {

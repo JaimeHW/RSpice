@@ -75,6 +75,9 @@ pub trait DesignPort {
 pub trait CodePort {
     /// Whether the netlist editor shows the project's own netlist source.
     fn owned_source_active(&self) -> bool;
+    /// Whether the netlist editor shows the project's own root source, and
+    /// not a file that source includes.
+    fn shows_owned_root(&self) -> bool;
     /// The zero-based line holding the netlist editor's caret.
     fn netlist_cursor_line(&self) -> usize;
 }

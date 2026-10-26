@@ -581,12 +581,20 @@ const LIVE_SESSION_PUMP: &[Step] = &[
     (
         "4",
         &[
+            "requests::drain(",
+            "|state, AdoptLiveOwnedSource(document)|",
+            "adopt_live_owned_source(&mut state.code.netlist, document)",
+        ],
+    ),
+    (
+        "5",
+        &[
             "live_session.take_mirror_snapshot()",
             "apply_live_project_snapshot(state, snapshot.bytes(), snapshot.host_label())",
             "live_session.mirror_snapshot_applied(state, snapshot, outcome)",
         ],
     ),
-    ("5", &["live_session.pump_outbound(state)"]),
+    ("6", &["live_session.pump_outbound(state)"]),
 ];
 
 /// The body of the one function `signature` opens in `source`'s shipped half,
@@ -795,13 +803,15 @@ fn the_frame_runs_its_top_level_steps_in_todays_order() {
 
 #[test]
 fn the_live_session_runs_its_phases_and_project_transactions_in_todays_order() {
-    assert_runs_in_order(
-        "pump_live_session",
-        &body(
-            PROJECT_TRANSACTIONS,
-            "pub(crate) fn pump_live_session(state",
-        ),
-        LIVE_SESSION_PUMP,
+    let pump = body(
+        PROJECT_TRANSACTIONS,
+        "pub(crate) fn pump_live_session(state",
+    );
+    assert_runs_in_order("pump_live_session", &pump, LIVE_SESSION_PUMP);
+    assert_eq!(
+        pump.matches("requests::drain(").count(),
+        1,
+        "the live session answers only the netlist source adoption in its pump"
     );
 }
 

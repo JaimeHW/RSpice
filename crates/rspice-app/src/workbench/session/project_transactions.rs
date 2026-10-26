@@ -9,6 +9,8 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::documents::netlist_document::adopt_live_owned_source;
+use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, MirrorApply};
 use crate::workbench::workflows::project_workflow::{
@@ -27,8 +29,9 @@ impl RSpiceApp {
 /// session, then its inbound half, then the host's snapshot replacing a
 /// guest's mirror, then its outbound half. Between the phases the shell
 /// closes a mirror whose session ended without a copy kept, at once or once
-/// the local run that held it has stopped, and applies the host's project
-/// snapshot.
+/// the local run that held it has stopped, has the netlist editor adopt the
+/// project source a participant's update replaced, before a snapshot can
+/// replace that project, and applies the host's project snapshot.
 pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) {
     let CloudHandles {
         account,
@@ -45,6 +48,13 @@ pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) 
     if !live_session.pump_inbound(state, account) {
         return;
     }
+    requests::drain(
+        state,
+        |state| &mut state.workbench.outbox,
+        |state, AdoptLiveOwnedSource(document)| {
+            adopt_live_owned_source(&mut state.code.netlist, document);
+        },
+    );
     if let Some(snapshot) = live_session.take_mirror_snapshot() {
         let outcome =
             match apply_live_project_snapshot(state, snapshot.bytes(), snapshot.host_label()) {

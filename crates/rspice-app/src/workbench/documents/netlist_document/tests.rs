@@ -139,6 +139,8 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
 /// without discarding the file the operator is choosing.
 #[test]
 fn netlist_commits_keep_a_specification_drafts_reference_picker() {
+    use crate::workbench::app_state::model::LiveOwnedSource;
+    use crate::workbench::framework::feature::CodePort;
     use rspice_results_ui::specs::editor::{ReferenceCompletion, ReferenceExchange, SpecDraft};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -164,9 +166,12 @@ fn netlist_commits_keep_a_specification_drafts_reference_picker() {
     draft.await_reference_exchange(Box::new(Picker(Arc::clone(&discarded))));
     state.results.results.session.spec_drafts = Some(vec![draft]);
 
-    assert!(apply_live_owned_source(
-        &mut state,
-        format!("{ROOT}* a peer's card\n")
+    let shows_owned_root = state.code.shows_owned_root();
+    assert!(matches!(
+        state
+            .model
+            .apply_live_owned_source(format!("{ROOT}* a peer's card\n"), shows_owned_root),
+        LiveOwnedSource::Applied(_)
     ));
     assert!(replace_owned_source(
         &mut state,
@@ -185,6 +190,56 @@ fn netlist_commits_keep_a_specification_drafts_reference_picker() {
         !discarded.load(Ordering::SeqCst),
         "a commit discarded the picker"
     );
+}
+
+/// A participant's source applied to the model and adopted by the editor
+/// leaves the editor on the root document the model holds, past the
+/// revision it showed, and a second delivery of the same source changes
+/// nothing.
+#[test]
+fn a_live_source_update_the_editor_adopts_leaves_it_on_the_models_document() {
+    use crate::workbench::app_state::model::LiveOwnedSource;
+    use crate::workbench::framework::feature::CodePort;
+
+    let mut state = owned_dependency_state();
+    let revision = state.code.netlist.revision;
+    let source = format!("{ROOT}* a peer's card\n");
+    let shows_owned_root = state.code.shows_owned_root();
+    assert!(shows_owned_root, "the fixture shows the project's own root");
+
+    let LiveOwnedSource::Applied(document) = state
+        .model
+        .apply_live_owned_source(source.clone(), shows_owned_root)
+    else {
+        panic!("a participant's source applies");
+    };
+    adopt_live_owned_source(&mut state.code.netlist, document);
+
+    assert_eq!(
+        state.model.workspace.content.netlist_source.as_deref(),
+        Some(source.as_str())
+    );
+    assert_eq!(state.model.simulation.source.netlist_content, source);
+    assert_eq!(
+        state.code.netlist.owned_document,
+        state.model.workspace.content.netlist_document
+    );
+    assert_eq!(
+        state
+            .code
+            .netlist
+            .owned_document
+            .as_ref()
+            .map(|document| document.source()),
+        Some(source.as_str())
+    );
+    assert_eq!(state.code.netlist.revision, revision.wrapping_add(1));
+    assert!(matches!(
+        state
+            .model
+            .apply_live_owned_source(source, shows_owned_root),
+        LiveOwnedSource::Unchanged
+    ));
 }
 
 #[test]

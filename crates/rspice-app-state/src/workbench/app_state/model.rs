@@ -13,6 +13,7 @@ mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
+mod owned_source;
 mod run_specifications;
 mod schematic_sync;
 mod session_start;
@@ -21,6 +22,10 @@ mod sheet_move;
 mod symbol_context;
 #[cfg(any(test, feature = "test-support"))]
 mod test_technology;
+
+pub use owned_source::{
+    LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
+};
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};

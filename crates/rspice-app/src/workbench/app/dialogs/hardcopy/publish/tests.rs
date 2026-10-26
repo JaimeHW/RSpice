@@ -739,9 +739,9 @@ fn assert_export_survived(app: &RSpiceApp, plan: &std::sync::Arc<HardcopyPlan>, 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn netlist_transactions_keep_an_export_in_flight() {
-    use crate::workbench::documents::netlist_document::{
-        apply_live_owned_source, replace_owned_source,
-    };
+    use crate::workbench::app_state::model::LiveOwnedSource;
+    use crate::workbench::documents::netlist_document::replace_owned_source;
+    use crate::workbench::framework::feature::CodePort;
 
     let mut app = export_open_on_a_netlist_owned_project();
     app.state.hardcopy.hardcopy.busy = true;
@@ -753,9 +753,12 @@ fn netlist_transactions_keep_an_export_in_flight() {
         .clone()
         .expect("sealed preview");
 
-    assert!(apply_live_owned_source(
-        &mut app.state,
-        PEER_DECK.to_owned()
+    let shows_owned_root = app.state.code.shows_owned_root();
+    assert!(matches!(
+        app.state
+            .model
+            .apply_live_owned_source(PEER_DECK.to_owned(), shows_owned_root),
+        LiveOwnedSource::Applied(_)
     ));
     assert_eq!(
         app.state.model.workspace.content.netlist_source.as_deref(),
@@ -866,12 +869,14 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
     )
     .expect("the export starts");
 
-    assert!(
-        crate::workbench::documents::netlist_document::apply_live_owned_source(
-            &mut app.state,
-            PEER_DECK.to_owned(),
-        )
-    );
+    let shows_owned_root =
+        crate::workbench::framework::feature::CodePort::shows_owned_root(&*app.state.code);
+    assert!(matches!(
+        app.state
+            .model
+            .apply_live_owned_source(PEER_DECK.to_owned(), shows_owned_root),
+        crate::workbench::app_state::model::LiveOwnedSource::Applied(_)
+    ));
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);

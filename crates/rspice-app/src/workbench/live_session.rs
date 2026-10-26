@@ -32,8 +32,9 @@ use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
 use crate::workbench::AppState;
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::LiveOwnedSource;
 use crate::workbench::framework::feature::{CodePort, DesignPort};
-use crate::workbench::framework::requests::LiveMirrorEntry;
+use crate::workbench::framework::requests::{AdoptLiveOwnedSource, LiveMirrorEntry};
 use crate::workbench::state::WorkbenchSession;
 
 /// Presence cadence; doubles as the relay keepalive under its idle timeout.
@@ -1095,11 +1096,7 @@ impl LiveSessionEngine {
     fn host_apply_proposal(&mut self, state: &mut AppState, completed: CompletedContent) {
         let applied = if completed.doc == NETLIST_DOC {
             match String::from_utf8(completed.bytes.clone()) {
-                Ok(source) => {
-                    crate::workbench::documents::netlist_document::apply_live_owned_source(
-                        state, source,
-                    )
-                }
+                Ok(source) => apply_owned_source(state, source),
                 Err(_) => false,
             }
         } else if let Some(cell_key) = completed.doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
@@ -1515,11 +1512,7 @@ impl LiveSessionEngine {
         }
         let applied = if completed.doc == NETLIST_DOC {
             match String::from_utf8(completed.bytes.clone()) {
-                Ok(source) => {
-                    crate::workbench::documents::netlist_document::apply_live_owned_source(
-                        state, source,
-                    )
-                }
+                Ok(source) => apply_owned_source(state, source),
                 Err(_) => false,
             }
         } else if let Some(cell_key) = completed.doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
@@ -1774,6 +1767,23 @@ impl LiveSessionEngine {
             .contains_key(&state.model.workspace.content.active_key());
         state.model.live_write_locks = locks;
         state.model.schematic.session.read_only = active_locked;
+    }
+}
+
+/// Apply a participant's netlist source as the project's own, and have the
+/// netlist editor adopt what changed. `false` when it could not be applied.
+fn apply_owned_source(state: &mut AppState, source: String) -> bool {
+    let shows_owned_root = state.code.shows_owned_root();
+    match state
+        .model
+        .apply_live_owned_source(source, shows_owned_root)
+    {
+        LiveOwnedSource::Unchanged => true,
+        LiveOwnedSource::Applied(document) => {
+            state.workbench.outbox.push(AdoptLiveOwnedSource(document));
+            true
+        }
+        LiveOwnedSource::Rejected => false,
     }
 }
 
