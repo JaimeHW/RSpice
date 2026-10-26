@@ -16,10 +16,11 @@ use crate::state::AnalysisResult;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark, problem_line};
-use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, analysis_default_unit, browser_signal_unit,
+    AnalysisPresentationKey, ResultsReads, analysis_default_unit, browser_signal_unit,
 };
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::results::ResultsFeature;
 
 const TOOL_WIDTH: f32 = 620.0;
 const TOOL_DEFAULT_HEIGHT: f32 = 400.0;
@@ -42,8 +43,8 @@ struct ExpressionRow {
 }
 
 /// Show the tool when it is open.
-pub fn show(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.results.expression_diagnostics_dialog {
+pub fn show(ctx: &Context, cx: &mut Cx<'_, ResultsFeature>) {
+    if !cx.state.expression_diagnostics_dialog {
         return;
     }
     let t = Tokens::get(ctx);
@@ -64,13 +65,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                 .inner_margin(egui::Margin::symmetric(14, 12))
                 .shadow(t.shadow()),
         )
-        .show(ctx, |ui| body(ui, app));
+        .show(ctx, |ui| body(ui, cx.state.reads(cx.model, cx.wb)));
     if !open {
-        app.state.results.expression_diagnostics_dialog = false;
+        cx.state.expression_diagnostics_dialog = false;
     }
 }
 
-fn body(ui: &mut Ui, app: &mut RSpiceApp) {
+fn body(ui: &mut Ui, state: ResultsReads<'_>) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     ui.label(
@@ -80,7 +81,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     ui.add_space(8.0);
 
-    let rows = collect_rows(app);
+    let rows = collect_rows(state);
     if rows.is_empty() {
         ui.label(
             RichText::new(
@@ -185,20 +186,18 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
 
 /// Every saved expression of the active dataset, with the verdict the
 /// workspace already holds for it.
-fn collect_rows(app: &RSpiceApp) -> Vec<ExpressionRow> {
-    let state = &app.state;
+fn collect_rows(state: ResultsReads<'_>) -> Vec<ExpressionRow> {
     let Some(run) = state.model.simulation.active_run() else {
         return Vec::new();
     };
     let mut rows = Vec::new();
     for analysis in &run.analyses {
         let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-        let Some(expressions) = state.results.results.session.analysis_exprs.get(&key) else {
+        let Some(expressions) = state.results.session.analysis_exprs.get(&key) else {
             continue;
         };
         for expression in expressions {
             let cached = state
-                .results
                 .results
                 .analysis_expr_cache
                 .get(&(key, expression.text.clone()));

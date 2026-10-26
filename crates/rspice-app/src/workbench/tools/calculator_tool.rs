@@ -12,7 +12,8 @@ use egui::{Context, Ui};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::results::ResultsFeature;
 
 /// Default geometry of the mockup's modeless lower-right calculator.
 const TOOL_WIDTH: f32 = 372.0;
@@ -24,8 +25,8 @@ const TOOL_MARGIN: f32 = 24.0;
 /// Show the calculator when it is open. Modeless: the workspace behind it
 /// stays live, so cursors can be placed and traces read while an expression
 /// is being composed.
-pub fn show(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.results.waveform_calculator_dialog {
+pub fn show(ctx: &Context, cx: &mut Cx<'_, ResultsFeature>) {
+    if !cx.state.waveform_calculator_dialog {
         return;
     }
     let t = Tokens::get(ctx);
@@ -54,13 +55,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                 .inner_margin(egui::Margin::ZERO)
                 .shadow(t.shadow()),
         )
-        .show(ctx, |ui| body(ui, app));
+        .show(ctx, |ui| body(ui, cx));
     if !open {
-        app.state.results.waveform_calculator_dialog = false;
+        cx.state.waveform_calculator_dialog = false;
     }
 }
 
-fn body(ui: &mut Ui, app: &mut RSpiceApp) {
+fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>) {
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.y = 0.0;
 
@@ -68,20 +69,13 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let (panel, simulation) = (
-                &mut app.state.results.calculator_panel,
-                &app.state.model.simulation,
-            );
+            let (panel, simulation) = (&mut cx.state.calculator_panel, &cx.model.simulation);
             panel.show_body(ui, simulation);
         });
 
     // The context line names the dataset the expression evaluates against,
     // so a number can never be read against the wrong run.
-    let hint = app
-        .state
-        .results
-        .calculator_panel
-        .context_hint(&app.state.model.simulation);
+    let hint = cx.state.calculator_panel.context_hint(&cx.model.simulation);
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.cursor().top(),
@@ -101,29 +95,20 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if Button::new("Plot")
                         .accent()
-                        .enabled(
-                            !app.state
-                                .results
-                                .calculator_panel
-                                .expression
-                                .trim()
-                                .is_empty(),
-                        )
+                        .enabled(!cx.state.calculator_panel.expression.trim().is_empty())
                         .show(ui)
                         .on_disabled_hover_text("Enter an expression first")
                         .clicked()
                     {
-                        plot_expression(app);
+                        plot_expression(cx);
                     }
                     if Button::new("Evaluate").show(ui).clicked() {
-                        let (panel, simulation) = (
-                            &mut app.state.results.calculator_panel,
-                            &app.state.model.simulation,
-                        );
+                        let (panel, simulation) =
+                            (&mut cx.state.calculator_panel, &cx.model.simulation);
                         panel.evaluate(simulation);
                     }
                     if Button::new("Clear").ghost().show(ui).clicked() {
-                        app.state.results.calculator_panel.clear();
+                        cx.state.calculator_panel.clear();
                     }
                 });
             });
@@ -135,23 +120,17 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
 ///
 /// The tool stays open: plotting is a step in composing an expression, not
 /// the end of the task.
-fn plot_expression(app: &mut RSpiceApp) {
-    let expression = app
-        .state
-        .results
-        .calculator_panel
-        .expression
-        .trim()
-        .to_owned();
+fn plot_expression(cx: &mut Cx<'_, ResultsFeature>) {
+    let expression = cx.state.calculator_panel.expression.trim().to_owned();
     if expression.is_empty() {
         return;
     }
-    let Some(analysis_index) = app.state.model.simulation.view.active_analysis_idx else {
-        app.state
+    let Some(analysis_index) = cx.model.simulation.view.active_analysis_idx else {
+        cx.wb
             .prompt("Select a retained result analysis before plotting an expression.");
         return;
     };
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = cx.model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -161,41 +140,31 @@ fn plot_expression(app: &mut RSpiceApp) {
         run.dataset_id,
         analysis,
     );
-    app.state
-        .results
-        .calculator_panel
-        .evaluate(&app.state.model.simulation);
-    if let Some(Err(error)) = app.state.results.calculator_panel.outcome.as_ref() {
-        app.state
-            .prompt(format!("Expression was not plotted: {error}"));
+    cx.state.calculator_panel.evaluate(&cx.model.simulation);
+    if let Some(Err(error)) = cx.state.calculator_panel.outcome.as_ref() {
+        cx.wb.prompt(format!("Expression was not plotted: {error}"));
         return;
     }
-    let added = app.state.results.results.add_expression_trace(
-        &app.state.model.simulation,
+    let added = cx.state.results.add_expression_trace(
+        &cx.model.simulation,
         analysis_key,
         expression.clone(),
     );
     let added = match added {
         Ok(added) => added,
         Err(error) => {
-            app.state.prompt(error);
+            cx.wb.prompt(error);
             return;
         }
     };
     if added {
-        app.state
-            .model
-            .workspace
-            .content
-            .visualization_documents_dirty = true;
+        cx.model.workspace.content.visualization_documents_dirty = true;
     }
-    app.state.results.results.session.viewer =
+    cx.state.results.session.viewer =
         crate::workbench::documents::result_document::ResultViewer::Waves;
-    app.state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+    cx.wb.activate(crate::workbench::state::Workspace::Results);
     // The strips are in front of the reader now; the status bar confirms it.
-    app.state.prompt(if added {
+    cx.wb.prompt(if added {
         format!("Plotted {expression}")
     } else {
         format!("{expression} is already plotted")
@@ -232,9 +201,9 @@ mod tests {
         app.state.results.waveform_calculator_dialog = true;
         app.state.results.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
-        plot_expression(&mut app);
+        plot_expression(&mut crate::workbench::features::cx(&mut app));
         assert_eq!(app.state.prompt_text(), Some("Plotted V(out)/V(in)"));
-        plot_expression(&mut app);
+        plot_expression(&mut crate::workbench::features::cx(&mut app));
         app.state.drain_notices(&egui::Context::default());
         // The reader is looking at the strips: the answer is the status
         // bar's, and nothing is interrupted for it.
@@ -272,7 +241,7 @@ mod tests {
         let mut app = crate::workbench::RSpiceApp::test_instance();
         app.state.results.calculator_panel.expression = "   ".to_owned();
 
-        plot_expression(&mut app);
+        plot_expression(&mut crate::workbench::features::cx(&mut app));
 
         assert!(app.state.results.results.session.exprs.is_empty());
     }

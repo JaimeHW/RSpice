@@ -372,13 +372,27 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("results.calculator"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| crate::workbench::tools::calculator_tool::show(ctx, app),
+        render: |app, ctx| {
+            crate::workbench::tools::calculator_tool::show(
+                ctx,
+                &mut crate::workbench::features::cx::<crate::workbench::results::ResultsFeature>(
+                    app,
+                ),
+            )
+        },
     },
     DialogSpec {
         key: DialogKey("results.expression_diagnostics"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| crate::workbench::tools::expression_diagnostics::show(ctx, app),
+        render: |app, ctx| {
+            crate::workbench::tools::expression_diagnostics::show(
+                ctx,
+                &mut crate::workbench::features::cx::<crate::workbench::results::ResultsFeature>(
+                    app,
+                ),
+            )
+        },
     },
     DialogSpec {
         key: DialogKey("shell.shortcuts_help"),
