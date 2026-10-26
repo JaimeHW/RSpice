@@ -404,9 +404,13 @@ impl ExecutionRunner {
                 // Measure gates are grid-stable engineering quantities and
                 // are compared free-running, as the ngspice suite runs its
                 // `measures` decks; only the pointwise comparison replays the
-                // reference grid.
+                // reference grid. An INTERP reference was printed on the TSTEP
+                // grid, not where ngspice stepped, so it is compared
+                // free-running too: replaying it would force one TSTEP step
+                // out of the initial state.
+                let interpolated_reference = netlist.options.interp.unwrap_or(false);
                 let locked_time_grid = match oracle
-                    .filter(|_| !measures)
+                    .filter(|_| !measures && !interpolated_reference)
                     .map(|oracle| oracle.transient_reference_grid(deck_path))
                     .transpose()
                 {
@@ -773,6 +777,54 @@ mod tests {
         assert!(result.passed, "{}", result.outcome.summary());
         assert!(result.oracle_compared);
         assert_eq!(result.analyses.len(), 2);
+    }
+
+    /// ngspice prints an INTERP deck on the TSTEP grid, interpolated from the
+    /// points it stepped (here 5 ns, doubling, then 1 us), so that grid is not
+    /// one to replay: pinned to it, the run leaves the UIC state with one 1 us
+    /// step across ten time constants and misses the settled 1 us row by 9%.
+    /// The rows are what ngspice 46 prints for this deck.
+    #[test]
+    fn an_interp_reference_is_compared_free_running() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("paranoia");
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("interp.sp");
+        let source = "interpolated reference from a UIC start\nV1 in 0 1\nR1 in out 1k\nC1 out 0 0.1n\n.options interp\n.tran 1u 50u uic\n.end\n";
+        std::fs::write(&path, source).unwrap();
+        let expanded = Netlist::preprocess_includes(source, &path).unwrap();
+        let fingerprint = blake3::hash(expanded.replace("\r\n", "\n").as_bytes());
+        let key = format!(".tran {:.17e} {:.17e} uic", 1e-6, 5e-5);
+        let rows = [
+            0.9999986074960604,
+            1.0000000015744555,
+            1.0000000004260094,
+            0.9999999997159934,
+            1.0000000001893374,
+            0.999999999873775,
+            1.00000000008415,
+            0.9999999999438999,
+            1.0000000000373999,
+            0.9999999999750665,
+        ];
+        let mut reference = format!(
+            "# RSPICE-NGSPICE-ORACLE 2\n# ngspice: ngspice-46\n# input-blake3: {fingerprint}\n\
+             # analysis: {key}\nIndex time v(out)\n"
+        );
+        for (index, value) in rows.into_iter().enumerate() {
+            let time = (index + 1) as f64 * 1e-6;
+            reference.push_str(&format!("{index} {time:.17e} {value:.17e}\n"));
+        }
+        reference.push_str("# end-analysis\n");
+        std::fs::write(path.with_extension("oracle.out"), reference).unwrap();
+        let runner = ExecutionRunner::new(
+            ExecutionCorpus::Paranoia,
+            temporary.path(),
+            ExecutionConfig::default(),
+        );
+        let result = runner.run_deck("interp.sp");
+        assert!(result.passed, "{}", result.outcome.summary());
+        assert!(result.oracle_compared);
     }
 
     #[test]

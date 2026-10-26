@@ -1149,10 +1149,13 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     options.output_print_footer =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "INTERP" | "NOACCT") => {
-                    // Ngspice compatibility flags. INTERP affects rawfile storage
-                    // density and NOACCT suppresses accounting output; neither
-                    // changes the solved circuit state in RSpice today.
+                (_, "INTERP") => {
+                    options.interp =
+                        Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+                }
+                (_, "NOACCT") => {
+                    // Ngspice compatibility flag: NOACCT suppresses accounting
+                    // output and does not change the solved circuit state.
                     if has_equals {
                         let _ = expect_value(stream, line_num, params)?;
                     }

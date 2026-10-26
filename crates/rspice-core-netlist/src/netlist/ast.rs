@@ -4644,6 +4644,11 @@ pub struct SimulationOptions {
     /// contract parsing, while the transient engine retains the complete
     /// solution-variable set needed by Xyce's snapshot writer.
     pub output_snapshots: Option<bool>,
+    /// ngspice `.OPTIONS INTERP`: ngspice prints a transient on the TSTEP
+    /// grid, interpolated from its accepted points, instead of at them. The
+    /// solved state is unchanged; a printed INTERP table is not where the
+    /// reference run stepped.
+    pub interp: Option<bool>,
     /// Xyce `.OPTIONS OUTPUT PRINTHEADER`: emit the column-name line for
     /// formatted output. Xyce enables it by default.
     pub output_print_header: Option<bool>,
@@ -5017,6 +5022,9 @@ impl SimulationOptions {
         }
         if other.output_snapshots.is_some() {
             self.output_snapshots = other.output_snapshots;
+        }
+        if other.interp.is_some() {
+            self.interp = other.interp;
         }
         if other.output_print_header.is_some() {
             self.output_print_header = other.output_print_header;

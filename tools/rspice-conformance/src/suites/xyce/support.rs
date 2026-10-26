@@ -2464,6 +2464,7 @@ impl XyceTestRunner {
             measure_use_cont_files: _,
             measure_use_lttm: _,
             output_snapshots: _,
+            interp: _,
             output_print_header: _,
             output_print_footer: _,
             output_interval_schedule,
