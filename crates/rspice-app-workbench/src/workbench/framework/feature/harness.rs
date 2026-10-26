@@ -82,6 +82,10 @@ impl CloudPort for NullPorts {
     fn license_dialog_open(&self) -> bool {
         false
     }
+
+    fn license_holder(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// The FFT and histogram viewers as a fresh session sets them up.

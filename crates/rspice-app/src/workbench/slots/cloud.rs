@@ -1,7 +1,10 @@
 //! The cloud feature's dialogs: license activation, web publication and live
-//! sessions.
+//! sessions; and what the cloud shows other features, from this state and
+//! from the sessions it runs.
 
-use crate::workbench::framework::feature::CloudPort;
+use crate::services::live_protocol::CursorLocus;
+use crate::workbench::framework::feature::{CloudPort, CloudSessionPort, LiveCursor};
+use crate::workbench::live_session::CloudHandles;
 
 /// What the cloud feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -28,5 +31,40 @@ pub(crate) struct CloudState {
 impl CloudPort for CloudState {
     fn license_dialog_open(&self) -> bool {
         self.license_dialog.open
+    }
+
+    fn license_holder(&self) -> Option<&str> {
+        self.license
+            .as_ref()
+            .map(|license| license.licensed_to.as_str())
+    }
+}
+
+impl CloudSessionPort for CloudHandles {
+    fn review_actor(&self, cloud: &dyn CloudPort) -> String {
+        crate::workbench::user_identity::user_display_name(
+            self.account.snapshot(),
+            cloud.license_holder(),
+        )
+    }
+
+    /// A peer's cursor counts when it sits on `doc` at a finite point.
+    fn live_cursors(&self, doc: &str) -> Vec<LiveCursor> {
+        self.live_session
+            .peers()
+            .filter_map(|peer| match peer.cursor.as_ref() {
+                Some(CursorLocus::Canvas {
+                    doc: peer_doc,
+                    x,
+                    y,
+                }) if peer_doc == doc && x.is_finite() && y.is_finite() => Some(LiveCursor {
+                    principal: peer.identity.principal_id.as_u128(),
+                    name: self.live_session.display_name(&peer.identity),
+                    x: *x,
+                    y: *y,
+                }),
+                _ => None,
+            })
+            .collect()
     }
 }

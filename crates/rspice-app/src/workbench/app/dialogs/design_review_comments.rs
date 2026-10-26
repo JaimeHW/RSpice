@@ -17,6 +17,7 @@ use crate::workbench::design_system::{elide_chars, section_header};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::feature::CloudSessionPort;
 
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Post reply";
@@ -275,10 +276,7 @@ impl RSpiceApp {
 
     /// The name a reply, a resolution and "My assignments" use for the user.
     fn review_actor(&self) -> String {
-        crate::workbench::user_identity::user_display_name(
-            self.cloud.account.snapshot(),
-            self.state.cloud.license.as_ref(),
-        )
+        self.cloud.review_actor(&*self.state.cloud)
     }
 
     fn handle_design_review_action(&mut self, action: ReviewAction) {

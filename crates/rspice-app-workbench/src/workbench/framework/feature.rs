@@ -71,6 +71,32 @@ pub trait DesignPort {
 pub trait CloudPort {
     /// Whether the license dialog is open, above whatever opened it.
     fn license_dialog_open(&self) -> bool;
+    /// Whom this machine's license names, when it holds one.
+    fn license_holder(&self) -> Option<&str>;
+}
+
+/// What the sessions the cloud runs show that another feature reads: the
+/// signed-in account and the live session's peers.
+pub trait CloudSessionPort {
+    /// The name a reply, a resolution and "My assignments" use for the
+    /// person at this application, by the cloud's rule: the account's name,
+    /// else the license holder `cloud` shows, else the operating system's
+    /// user.
+    fn review_actor(&self, cloud: &dyn CloudPort) -> String;
+    /// Where the live session's peers point on the canvas of `doc`, the
+    /// document a cursor names.
+    fn live_cursors(&self, doc: &str) -> Vec<LiveCursor>;
+}
+
+/// Where a live-session peer points on a canvas, and the name it goes by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveCursor {
+    /// The peer's principal, which picks the colour its cursor wears.
+    pub principal: u128,
+    pub name: String,
+    /// The point, in the sheet's coordinates.
+    pub x: f32,
+    pub y: f32,
 }
 
 /// What another feature may ask of the gesture under way on design's canvas:

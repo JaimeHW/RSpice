@@ -58,30 +58,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
-    use crate::services::live_protocol::CursorLocus;
+    use crate::workbench::framework::feature::{CloudSessionPort, LiveCursor};
 
     let doc = format!(
         "schematic/{}",
         app.state.model.workspace.content.active_key()
     );
-    let cursors: Vec<_> = app
-        .cloud
-        .live_session
-        .peers()
-        .filter_map(|peer| match peer.cursor.as_ref() {
-            Some(CursorLocus::Canvas {
-                doc: peer_doc,
-                x,
-                y,
-            }) if peer_doc == &doc && x.is_finite() && y.is_finite() => Some((
-                peer.identity,
-                app.cloud.live_session.display_name(&peer.identity),
-                *x,
-                *y,
-            )),
-            _ => None,
-        })
-        .collect();
+    let cursors = app.cloud.live_cursors(&doc);
     if cursors.is_empty() {
         return;
     }
@@ -105,12 +88,18 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
         egui::Color32::from_rgb(0xE8, 0x70, 0xFF),
     ];
     let mut accessible = Vec::with_capacity(cursors.len());
-    for (identity, name, x, y) in cursors {
+    for LiveCursor {
+        principal,
+        name,
+        x,
+        y,
+    } in cursors
+    {
         let point = canvas.min + pan + egui::vec2(x * zoom * grid, y * zoom * grid);
         if !canvas.expand(16.0).contains(point) {
             continue;
         }
-        let color = COLORS[(identity.principal_id.as_u128() as usize) % COLORS.len()];
+        let color = COLORS[(principal as usize) % COLORS.len()];
         let tip = point;
         painter.add(egui::Shape::convex_polygon(
             vec![

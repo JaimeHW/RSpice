@@ -1955,4 +1955,57 @@ mod tests {
 
         assert!(engine.guest_run_status().is_none());
     }
+
+    /// The cloud shows another feature the cursors its live session's peers
+    /// hold on one canvas, each under its roster name: not a cursor on
+    /// another document, a netlist caret, or a point that is not finite.
+    #[test]
+    fn the_cloud_shows_the_peers_cursors_on_one_canvas() {
+        use crate::workbench::framework::feature::{CloudSessionPort, LiveCursor};
+
+        let mut engine = LiveSessionEngine::default();
+        let mut peer = |identity: PeerIdentity, cursor: CursorLocus| {
+            engine.peers.insert(
+                identity,
+                PeerPresence {
+                    identity,
+                    focused_doc: None,
+                    cursor: Some(cursor),
+                    seen_at: Instant::now(),
+                },
+            );
+        };
+        let canvas = |doc: &str, x: f32, y: f32| CursorLocus::Canvas {
+            doc: doc.to_owned(),
+            x,
+            y,
+        };
+        peer(identity(1, 11), canvas("schematic/top", 2.0, 3.5));
+        peer(identity(2, 22), canvas("schematic/other", 1.0, 1.0));
+        peer(identity(3, 33), canvas("schematic/top", f32::NAN, 1.0));
+        peer(
+            identity(4, 44),
+            CursorLocus::Netlist {
+                doc: "schematic/top".to_owned(),
+                line: 7,
+            },
+        );
+        engine
+            .roster
+            .insert(identity(1, 11).principal_id, "Ada".to_owned());
+        let cloud = CloudHandles {
+            account: CloudAccountService::unconfigured(),
+            live_session: engine,
+        };
+
+        assert_eq!(
+            cloud.live_cursors("schematic/top"),
+            vec![LiveCursor {
+                principal: 1,
+                name: "Ada".to_owned(),
+                x: 2.0,
+                y: 3.5,
+            }]
+        );
+    }
 }

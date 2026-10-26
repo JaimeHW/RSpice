@@ -35,16 +35,16 @@ pub(crate) fn account_holder(
         .filter(|name| !name.is_empty())
 }
 
-/// The user's name, from the first source that has one.
+/// The user's name, from the first source that has one: the account, then
+/// `license_holder`, whom the license names.
 pub(crate) fn user_display_name(
     cloud: &CloudSessionSnapshot,
-    license: Option<&LicenseInfo>,
+    license_holder: Option<&str>,
 ) -> String {
     let account = cloud
         .principal
         .as_ref()
         .and_then(|principal| principal.display_name.as_deref());
-    let license_holder = license.map(|info| info.licensed_to.as_str());
     [account, license_holder]
         .into_iter()
         .flatten()
@@ -84,21 +84,22 @@ mod tests {
     #[test]
     fn the_account_name_wins_then_the_license_holder_then_the_os_user() {
         let mut cloud = CloudSessionSnapshot::default();
-        let holder = license("Ada Lovelace");
-        assert_eq!(user_display_name(&cloud, Some(&holder)), "Ada Lovelace");
+        let license = license("Ada Lovelace");
+        let holder = Some(license.licensed_to.as_str());
+        assert_eq!(user_display_name(&cloud, holder), "Ada Lovelace");
 
         cloud.principal = Some(crate::services::cloud_account::PrincipalSummary {
             display_name: Some("Grace Hopper".to_owned()),
             ..Default::default()
         });
-        assert_eq!(user_display_name(&cloud, Some(&holder)), "Grace Hopper");
+        assert_eq!(user_display_name(&cloud, holder), "Grace Hopper");
 
         // A blank name is no name: the next source answers.
         cloud.principal = Some(crate::services::cloud_account::PrincipalSummary {
             display_name: Some("  ".to_owned()),
             ..Default::default()
         });
-        assert_eq!(user_display_name(&cloud, Some(&holder)), "Ada Lovelace");
+        assert_eq!(user_display_name(&cloud, holder), "Ada Lovelace");
 
         let unlicensed = user_display_name(&CloudSessionSnapshot::default(), None);
         assert_eq!(
