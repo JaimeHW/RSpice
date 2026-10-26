@@ -13,7 +13,7 @@ pub enum LiveOwnedSource {
     Unchanged,
     /// The source was replaced. It carries the root document rewritten over
     /// it, when the project keeps one, for the netlist editor to adopt.
-    Applied(Option<crate::state::NetlistDocument>),
+    Applied(Option<Box<crate::state::NetlistDocument>>),
     /// Nothing changed: the project holds no source of its own, or the update
     /// would break the project's sources.
     Rejected,
@@ -75,7 +75,7 @@ impl Model {
         }
         candidate.notices.prepend(std::mem::take(&mut self.notices));
         *self = candidate;
-        LiveOwnedSource::Applied(next_document)
+        LiveOwnedSource::Applied(next_document.map(Box::new))
     }
 }
 

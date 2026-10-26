@@ -13,7 +13,7 @@ use super::{CodeSourceFileAction, CodeWorkspacePage};
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
 use crate::workbench::AppState;
-use crate::workbench::app_state::model::{
+use rspice_app_state::workbench::app_state::model::{
     prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
 

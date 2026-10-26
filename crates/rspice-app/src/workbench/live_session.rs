@@ -1780,7 +1780,10 @@ fn apply_owned_source(state: &mut AppState, source: String) -> bool {
     {
         LiveOwnedSource::Unchanged => true,
         LiveOwnedSource::Applied(document) => {
-            state.workbench.outbox.push(AdoptLiveOwnedSource(document));
+            state
+                .workbench
+                .outbox
+                .push(AdoptLiveOwnedSource(document.map(|document| *document)));
             true
         }
         LiveOwnedSource::Rejected => false,

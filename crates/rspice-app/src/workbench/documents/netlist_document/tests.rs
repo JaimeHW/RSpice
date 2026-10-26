@@ -20,6 +20,12 @@ const EDITED_INCLUDE: &str = ".param rmodel=2.2k\n";
 const INCLUDE_IDENTITY: &str = "models/resistor.inc";
 const INCLUDE_NATIVE_ORIGIN: &str = "C:/project/models/resistor.inc";
 
+/// Whether the netlist editor shows the project's own root source.
+fn shows_owned_root(state: &AppState) -> bool {
+    state.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && state.code.netlist.active_dependency_identity.is_none()
+}
+
 fn owned_dependency_state() -> AppState {
     let locator = SourceLocator::try_new(INCLUDE_IDENTITY, "resistor.inc")
         .unwrap()
@@ -139,8 +145,7 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
 /// without discarding the file the operator is choosing.
 #[test]
 fn netlist_commits_keep_a_specification_drafts_reference_picker() {
-    use crate::workbench::app_state::model::LiveOwnedSource;
-    use crate::workbench::framework::feature::CodePort;
+    use rspice_app_state::workbench::app_state::model::LiveOwnedSource;
     use rspice_results_ui::specs::editor::{ReferenceCompletion, ReferenceExchange, SpecDraft};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -166,7 +171,7 @@ fn netlist_commits_keep_a_specification_drafts_reference_picker() {
     draft.await_reference_exchange(Box::new(Picker(Arc::clone(&discarded))));
     state.results.results.session.spec_drafts = Some(vec![draft]);
 
-    let shows_owned_root = state.code.shows_owned_root();
+    let shows_owned_root = shows_owned_root(&state);
     assert!(matches!(
         state
             .model
@@ -198,13 +203,12 @@ fn netlist_commits_keep_a_specification_drafts_reference_picker() {
 /// nothing.
 #[test]
 fn a_live_source_update_the_editor_adopts_leaves_it_on_the_models_document() {
-    use crate::workbench::app_state::model::LiveOwnedSource;
-    use crate::workbench::framework::feature::CodePort;
+    use rspice_app_state::workbench::app_state::model::LiveOwnedSource;
 
     let mut state = owned_dependency_state();
     let revision = state.code.netlist.revision;
     let source = format!("{ROOT}* a peer's card\n");
-    let shows_owned_root = state.code.shows_owned_root();
+    let shows_owned_root = shows_owned_root(&state);
     assert!(shows_owned_root, "the fixture shows the project's own root");
 
     let LiveOwnedSource::Applied(document) = state
@@ -213,7 +217,7 @@ fn a_live_source_update_the_editor_adopts_leaves_it_on_the_models_document() {
     else {
         panic!("a participant's source applies");
     };
-    adopt_live_owned_source(&mut state.code.netlist, document);
+    adopt_live_owned_source(&mut state.code.netlist, document.map(|document| *document));
 
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
