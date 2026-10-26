@@ -177,6 +177,7 @@ pub enum GoldenError {
     UnknownModel(String),
     Setup { model_name: String, detail: String },
     Evaluation { model_name: String, detail: String },
+    NonFinite { model_name: String, detail: String },
     NoUnknowns { model_name: String },
 }
 
@@ -189,7 +190,7 @@ impl std::fmt::Display for GoldenError {
             Self::Setup { model_name, detail } => {
                 write!(f, "{model_name}: golden harness setup failed: {detail}")
             }
-            Self::Evaluation { model_name, detail } => {
+            Self::Evaluation { model_name, detail } | Self::NonFinite { model_name, detail } => {
                 write!(f, "{model_name}: evaluation failed: {detail}")
             }
             Self::NoUnknowns { model_name } => {
@@ -908,12 +909,16 @@ impl GoldenHarness {
     ) -> Result<Vec<Value>, GoldenError> {
         // Inert first. `rspice_eval_ddt` latches its history on the inert path,
         // so running it first leaves every slot initialised and makes the active
-        // pass depend on nothing but the value it is handed.
+        // pass depend on nothing but the value it is handed. `ddt` goes back
+        // to inert even when a pass is refused, since a refusal at a perturbed
+        // point does not end the audit.
         self.set_ddt_scale(None);
-        let inert = self.device_currents(unknowns)?;
+        let inert = self.device_currents(unknowns);
         self.set_ddt_scale(Some(scale));
-        let active = self.device_currents(unknowns)?;
+        let passes =
+            inert.and_then(|inert| self.device_currents(unknowns).map(|active| (inert, active)));
         self.set_ddt_scale(None);
+        let (inert, active) = passes?;
 
         Ok(inert
             .iter()
@@ -972,7 +977,7 @@ impl GoldenHarness {
             let mut sampled = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             for (slot, multiple) in [-2.0, -1.0, 1.0, 2.0].into_iter().enumerate() {
                 perturbed[col] = unknowns[col] + multiple * step;
-                sampled[slot] = self.device_currents(&perturbed)?;
+                sampled[slot] = perturbed_sample(self.device_currents(&perturbed), size)?;
             }
             perturbed[col] = unknowns[col];
 
@@ -1025,7 +1030,7 @@ impl GoldenHarness {
             let mut sampled = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             for (slot, multiple) in [-2.0, -1.0, 1.0, 2.0].into_iter().enumerate() {
                 perturbed[col] = unknowns[col] + multiple * step;
-                sampled[slot] = self.device_charges(&perturbed, scale)?;
+                sampled[slot] = perturbed_sample(self.device_charges(&perturbed, scale), size)?;
             }
             perturbed[col] = unknowns[col];
 
@@ -1175,9 +1180,13 @@ impl GoldenHarness {
     }
 
     fn evaluation_error(&self, error: GeneratedEvaluationError) -> GoldenError {
-        GoldenError::Evaluation {
-            model_name: self.model_name.to_string(),
-            detail: error.to_string(),
+        let model_name = self.model_name.to_string();
+        let detail = error.to_string();
+        match error {
+            GeneratedEvaluationError::NonFiniteContribution { .. } => {
+                GoldenError::NonFinite { model_name, detail }
+            }
+            _ => GoldenError::Evaluation { model_name, detail },
         }
     }
 }
@@ -1268,6 +1277,24 @@ fn audit_against_ladder(
 
 fn magnitude_scale(left: Value, right: Value, floor: Value) -> Value {
     left.abs().max(right.abs()).max(floor)
+}
+
+/// A sample the difference took at a perturbed point, with a refusal to stamp
+/// a non-finite value there read as a sample that says nothing.
+///
+/// A model may be defined over less than the whole space a step crosses: one
+/// that returns NaN under reverse bias is refused at every step that reaches
+/// it. That leaves the column's derivative unknown, not the stamp wrong, so
+/// its entries come out unverifiable and count as coverage gaps. Any other
+/// failure is still an error.
+fn perturbed_sample(
+    sample: Result<Vec<Value>, GoldenError>,
+    size: usize,
+) -> Result<Vec<Value>, GoldenError> {
+    match sample {
+        Err(GoldenError::NonFinite { .. }) => Ok(vec![Value::NAN; size]),
+        other => other,
+    }
 }
 
 /// `x` with `matrix * x = rhs`, by Gaussian elimination with partial pivoting
@@ -1726,5 +1753,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    fn a_non_finite_refusal_at_a_perturbed_point_is_a_sample_that_says_nothing() {
+        let harness = GoldenHarness::new("DIODE_CMC", &[]).unwrap();
+        let refused = harness.evaluation_error(GeneratedEvaluationError::NonFiniteContribution {
+            target: "right-hand side",
+        });
+        let sample = perturbed_sample(Err(refused), 3).unwrap();
+        assert_eq!(sample.len(), 3);
+        assert!(sample.iter().all(|value| value.is_nan()));
+
+        let failed = harness.evaluation_error(GeneratedEvaluationError::DiscontinuityDegree);
+        assert!(matches!(
+            perturbed_sample(Err(failed), 3),
+            Err(GoldenError::Evaluation { .. })
+        ));
     }
 }
