@@ -120,20 +120,17 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
             .push(crate::workbench::framework::requests::OpenProducingPlan);
     }
     // Acted on after the panel is drawn, like the plan route above it, so the
-    // workspace switch happens between frames rather than under the widget
-    // that asked for it. The route answers whether the bytes are still held,
-    // and a released deck is refused by name rather than opening nothing.
-    if response.open_task_deck
-        && !crate::workbench::documents::netlist_document::reveal_executed_deck(
-            state,
-            run_sequence,
-            0,
-        )
-    {
-        state.prompt(format!(
-            "The source Run {run_sequence} executed cannot be opened: {}.",
-            crate::state::absent_deck_reason()
-        ));
+    // workspace switch happens once the section has drawn rather than under
+    // the widget that asked for it. The route answers whether the bytes are
+    // still held, and a released deck is refused by name rather than opening
+    // nothing.
+    if response.open_task_deck {
+        state
+            .workbench
+            .outbox
+            .push(crate::workbench::framework::requests::RevealExecutedDeck(
+                run_sequence,
+            ));
     }
 }
 pub(crate) fn export_csv(run: &SimulationRun) -> super::ResultSheetCsv {

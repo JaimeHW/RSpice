@@ -18,12 +18,12 @@
     "project->models": 6,
     "project->results": 1,
     "project->simulate": 3,
-    "results->code": 3,
+    "results->code": 2,
     "results->design": 5,
     "simulate->design": 4,
     "simulate->models": 19,
     "simulate->project": 2,
-    "simulate->results": 2
+    "simulate->results": 1
   },
   "lower->upper": {},
   "whole-app": {

@@ -275,6 +275,38 @@ impl Request for RevealExecutedDeck {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Show these waveforms in the waveform viewer: each revealed where its
+/// dataset hides it, `selected` made the selected trace, and the cursors
+/// cleared. Raised by a hand-off that opens the viewer on them, just before
+/// it runs the viewer's command, and taken straight after that command
+/// returns.
+#[derive(Clone, Debug)]
+pub(crate) struct ShowWaveforms {
+    /// Each waveform, and whether its dataset shows it.
+    pub(crate) visibility: Vec<(
+        rspice_results::result_presentation::SourceWaveformPresentationKey,
+        bool,
+    )>,
+    /// The trace to select, where the hand-off names a single one.
+    pub(crate) selected: Option<rspice_results_ui::selection::SelectedResultTrace>,
+}
+
+impl Request for ShowWaveforms {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Narrow the Family slicing form to this filter. Raised by a hand-off that
+/// opens the form on one member of a family, just before it runs the form's
+/// command, and taken straight after that command returns: opening the form
+/// seeds its filter from the policy in force, and the member has to survive
+/// that seeding.
+#[derive(Clone, Debug)]
+pub(crate) struct SetFamilyFilter(pub(crate) String);
+
+impl Request for SetFamilyFilter {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section

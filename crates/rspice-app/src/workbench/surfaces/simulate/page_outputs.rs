@@ -1197,6 +1197,7 @@ pub(super) fn open_materialized_traces(
     waveform_indices: &[usize],
 ) {
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use crate::workbench::framework::requests::ShowWaveforms;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
     use rspice_results_ui::selection::SelectedResultTrace;
     let Some(run) = app.state.model.simulation.active_run() else {
@@ -1231,9 +1232,12 @@ pub(super) fn open_materialized_traces(
     if !app.state.model.simulation.select_analysis(analysis_index) {
         return;
     }
-    app.state.results.results.reveal_waveforms(visibility);
-    app.state.results.results.session.selected_trace = selected;
-    app.state.results.results.session.clear_cursors();
+    // Raised first and taken once the viewer's command has run, so the
+    // waveforms are revealed and selected in the viewer it opened.
+    app.state.workbench.outbox.push(ShowWaveforms {
+        visibility,
+        selected,
+    });
     app.execute_command_key(ids::RESULT_WAVEFORMS);
 }
 

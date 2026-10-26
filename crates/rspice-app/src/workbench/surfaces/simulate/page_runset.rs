@@ -1523,14 +1523,19 @@ pub(super) fn open_point_in_family(
         return;
     }
     // Results first, so the form opens somewhere the reader can see it rather
-    // than behind this page. The filter is written last because opening the
-    // form seeds it from the policy in force — a carried point has to survive
-    // that seeding, not race it.
+    // than behind this page. The filter is taken once the form's command has
+    // run, because opening the form seeds it from the policy in force — a
+    // carried point has to survive that seeding, not race it.
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
+    app.state
+        .workbench
+        .outbox
+        .push(crate::workbench::framework::requests::SetFamilyFilter(
+            query,
+        ));
     app.execute_command_key(ids::FAMILY_SLICING);
-    crate::workbench::documents::result_document::set_family_filter(&mut app.state, query);
 }
 
 /// Compile one point into the family view's filter, or say why it cannot be.

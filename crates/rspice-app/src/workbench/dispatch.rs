@@ -35,6 +35,7 @@ use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ExportDataset, ExportPublicationSnapshot, ExportSchematicSvg,
     FollowSchematicGrid, PrintActiveView, RevealExecutedDeck, SelectAnalysisInstance,
+    SetFamilyFilter, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -141,8 +142,9 @@ impl RSpiceApp {
     /// or publication snapshot it exported, the snap that follows a new
     /// schematic grid, the shortcut resolver's reset when a shortcut library
     /// was put in use, the open waveform view starting again from changed
-    /// defaults, and the dataset export, the analysis instance and the
-    /// executed deck a results command asked for.
+    /// defaults, the dataset export, the analysis instance and the executed
+    /// deck a results command asked for, and the waveforms and the family
+    /// member a hand-off into Results opens its viewer or form on.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -201,6 +203,30 @@ impl RSpiceApp {
                 crate::workbench::commands::result_navigation::open_task_deck(
                     &mut app.state,
                     sequence,
+                );
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app,
+             ShowWaveforms {
+                 visibility,
+                 selected,
+             }| {
+                let results = &mut app.state.results.results;
+                results.reveal_waveforms(visibility);
+                results.session.selected_trace = selected;
+                results.session.clear_cursors();
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, SetFamilyFilter(filter)| {
+                crate::workbench::documents::result_document::set_family_filter(
+                    &mut app.state,
+                    filter,
                 );
             },
         );

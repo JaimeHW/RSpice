@@ -15,6 +15,7 @@ const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
 const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
+const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -475,6 +476,60 @@ const AFTER_CONTRIBUTION: &[Step] = &[
             "crate::workbench::commands::result_navigation::open_task_deck(",
         ],
     ),
+    (
+        "11",
+        &[
+            "|app, ShowWaveforms { visibility, selected, }|",
+            "results.reveal_waveforms(visibility);",
+            "results.session.selected_trace = selected;",
+            "results.session.clear_cursors();",
+        ],
+    ),
+    (
+        "12",
+        &[
+            "|app, SetFamilyFilter(filter)|",
+            "crate::workbench::documents::result_document::set_family_filter(",
+        ],
+    ),
+];
+
+/// The shell's `contribute`, at the points that draw the results workspace
+/// or a page that hands off into it: each has what it raised answered once
+/// it has drawn, before the next point draws. The surface answers after
+/// every workspace's page, the others after the results workspace's own.
+const RESULTS_CONTRIBUTIONS: &[Step] = &[
+    (
+        "surface",
+        &[
+            "Workspace::Simulate => simulate::show(ui, app),",
+            "Workspace::Results => results::show(ui, app),",
+            "app.after_contribution();",
+            "Point::SplitResults =>",
+        ],
+    ),
+    (
+        "split",
+        &[
+            "crate::workbench::documents::result_document::show_compact_split(ui, app);\
+             app.after_contribution();",
+            "Point::Navigator(workspace) =>",
+        ],
+    ),
+    (
+        "navigator",
+        &["Workspace::Results => { results(ui, app); app.after_contribution(); }"],
+    ),
+    (
+        "inspector beside any workspace",
+        &["Point::Inspector(InspectorScope::AnyWorkspace) => {\
+             crate::workbench::docks::inspector::results::results(ui, app);\
+             app.after_contribution(); }"],
+    ),
+    (
+        "workspace inspector",
+        &["Workspace::Results => { results(ui, app); app.after_contribution(); }"],
+    ),
 ];
 
 /// `RSpiceApp::handle_image_export`, the last step of the frame's
@@ -805,8 +860,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        9,
-        "`after_contribution` answers exactly the nine requests it lists"
+        11,
+        "`after_contribution` answers exactly the eleven requests it lists"
     );
 }
 
@@ -825,5 +880,14 @@ fn another_part_opens_a_hardcopy_workflow_in_the_feature_context_where_it_did() 
         pump.matches("requests::drain(").count(),
         1,
         "the frame's preparation answers only the figure export there"
+    );
+}
+
+#[test]
+fn a_results_contribution_has_what_it_raised_answered_once_it_draws() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        RESULTS_CONTRIBUTIONS,
     );
 }

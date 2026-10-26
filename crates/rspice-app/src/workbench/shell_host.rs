@@ -130,9 +130,14 @@ impl Host for RSpiceApp {
                         }
                     }
                 }
+                // A hand-off a page raised on its way into another workspace
+                // is answered once the page has drawn, as a feature's command
+                // has its own answered once it returns.
+                app.after_contribution();
             }
             Point::SplitResults => {
                 crate::workbench::documents::result_document::show_compact_split(ui, app);
+                app.after_contribution();
             }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
@@ -176,7 +181,10 @@ impl Host for RSpiceApp {
                         veriloga::show(ui, app);
                     }
                     Workspace::Design => design::show(ui, app),
-                    Workspace::Results => results(ui, app),
+                    Workspace::Results => {
+                        results(ui, app);
+                        app.after_contribution();
+                    }
                     Workspace::Project => project(ui, app),
                     Workspace::Simulate => simulate(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
@@ -186,6 +194,7 @@ impl Host for RSpiceApp {
             }
             Point::Inspector(InspectorScope::AnyWorkspace) => {
                 crate::workbench::docks::inspector::results::results(ui, app);
+                app.after_contribution();
             }
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
@@ -218,7 +227,10 @@ impl Host for RSpiceApp {
                     Workspace::Design => design::show(ui, app),
                     Workspace::Simulate => simulation::simulate(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-                    Workspace::Results => results(ui, app),
+                    Workspace::Results => {
+                        results(ui, app);
+                        app.after_contribution();
+                    }
                     Workspace::Verify => verify(ui, app),
                     Workspace::Models => models::show(ui, app),
                     Workspace::Netlist => code_workspace_inspector(ui, app),
