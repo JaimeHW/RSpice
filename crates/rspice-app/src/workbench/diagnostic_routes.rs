@@ -59,7 +59,8 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
         DiagnosticRoute::Repair(remediation) => apply_remediation(app, remediation),
         DiagnosticRoute::RunLogLine { run_sequence, line } => {
             crate::workbench::commands::result_navigation::show_run_line(
-                &mut app.state,
+                &app.state.model,
+                &mut app.state.workbench,
                 run_sequence,
                 line,
             );

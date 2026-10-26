@@ -120,29 +120,29 @@ pub(crate) fn open_run_log(model: &Model, workbench: &mut WorkbenchSession, run_
 /// A run dropped since the finding was made is reported rather than opened
 /// as an empty channel.
 pub(crate) fn show_run_line(
-    state: &mut crate::workbench::AppState,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
     run_sequence: u64,
     line: usize,
 ) {
-    let Some(severity) = state
-        .model
+    let Some(severity) = model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
         .map(|run| run.log.lines().get(line).map(|line| line.severity))
     else {
-        state.prompt(format!(
+        workbench.prompt(format!(
             "Run {run_sequence} is no longer retained in this session, so its log could not be \
              opened."
         ));
         return;
     };
-    let view = &mut state.workbench.console_view;
+    let view = &mut workbench.console_view;
     match severity {
         Some(severity) => view.show_line(ConsoleChannel::Run(run_sequence), line as u64, severity),
         None => view.open(ConsoleChannel::Run(run_sequence)),
     }
-    open_console_page(&mut state.workbench);
+    open_console_page(workbench);
 }
 
 /// The run that produced dataset `dataset`, while the session still holds it.
