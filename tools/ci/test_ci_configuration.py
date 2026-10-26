@@ -1016,9 +1016,15 @@ class CiConfigurationTests(unittest.TestCase):
             ],
         )
         self.assertIn("run: cargo core-lib-test --locked\n", ci_workflow)
-        self.assertIn("Full test suite (release)", nightly_workflow)
-        self.assertIn("cargo test --locked --workspace", nightly_workflow)
-        self.assertNotIn("--exclude rspice-core", nightly_workflow)
+        # Nightly runs them again in release, where a result can change under
+        # optimization, beside the release qualification baseline.
+        conformance = workflow_job_body(nightly_workflow, "conformance")
+        self.assertIn(
+            "run: cargo test --locked --release -p rspice-core --lib\n",
+            workflow_step_body(conformance, "Core library units (release)"),
+        )
+        baseline = workflow_step_body(conformance, "Qualification baseline (release)")
+        self.assertIn("--test qualification_baseline --test no_panic_corpus", baseline)
 
     def test_veriloga_gated_core_suites_run_on_both_routes(self) -> None:
         """A `veriloga`-gated core suite cannot be added without a lane.

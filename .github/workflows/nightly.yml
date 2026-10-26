@@ -25,13 +25,13 @@ env:
 
 jobs:
   conformance:
-    name: Conformance & full suite (Linux, release)
+    name: Conformance (Linux, release)
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
-      # Keep memory-heavy UI and solver release codegen from competing on the
-      # same hosted runner.
-      CARGO_BUILD_JOBS: "1"
+      CARGO_BUILD_JOBS: "2"
+    # Every gate after the first carries `if: ${{ !cancelled() }}`: the gates
+    # are independent, and a red one must not leave the rest unrun.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -39,32 +39,38 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: nightly
+          # Saved when the job fails too; otherwise a job that stays red
+          # starts every night from an empty cache.
+          cache-on-failure: true
       - name: Install independent Verilog reference simulators
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y iverilog verilator
           iverilog -V
           verilator --version
-      - name: Full test suite (release)
-        # rspice-conformance is excluded by crate, not by test name: the
-        # dedicated ngspice step below runs that suite properly (serial
-        # threads, logged, ratcheted) and running it twice would double the
-        # nightly. This previously read `-- --skip test_ngspice_ --skip
-        # test_full_ngspice`, which depended on test names never changing.
+      - name: Core library units (release)
+        # The workspace's tests run on every push, in debug (ci.yml). What
+        # only a release build shows is a result that changes under
+        # optimization, and the core library's units are where that has
+        # happened: a deadline test that passed in debug failed in release.
+        run: cargo test --locked --release -p rspice-core --lib
+      - name: Qualification baseline (release)
+        # The baseline gates counts, never wall-clock, so a release build must
+        # produce the numbers the debug run in ci.yml does.
+        if: ${{ !cancelled() }}
         run: >-
-          cargo test --locked --workspace
-          --exclude rspice-conformance --release --no-fail-fast
-          --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
+          cargo test --locked --release -p rspice-core
+          --test qualification_baseline --test no_panic_corpus -- --nocapture
       - name: Xyce conformance suite (release)
-        # The workspace run above excludes rspice-conformance wholesale, so
-        # the Xyce corpus needs its own step or it would silently vanish from
-        # nightly.
+        # The Xyce corpus runs in no per-push job; this step is its gate.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test xyce_regression --test y_device_policy --no-fail-fast
       - name: Conformance suite unit tests (release)
         # Missing reference tools must fail, rather than silently skipping
         # the independent comparison as the routine tier intentionally does.
+        if: ${{ !cancelled() }}
         env:
           RSPICE_VERILOG_ORACLES_REQUIRED: "1"
         run: >-
@@ -86,6 +92,7 @@ jobs:
         # printed against the measurement rather than asserted, since a
         # wall-clock ratio asserted in CI is a test that fails when the runner
         # is busy.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test verilog_rnm_performance -- --nocapture
@@ -104,6 +111,7 @@ jobs:
         # What the step asserts is that both representations still agree, since
         # a ratio between two answers that differ measures nothing; the table
         # says which circuits win and by how much.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test verilog_mixed_performance -- --nocapture
@@ -112,6 +120,7 @@ jobs:
         # subcircuit wrappers and corner libraries, across four temperatures.
         # Nightly rather than CI because every case re-parses the 1.3 MB model
         # library, which dominates the runtime.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test gf180mcu_devices -- --nocapture
@@ -127,6 +136,7 @@ jobs:
         # lines — so without the flag the simulations are skipped entirely and
         # only discovery and manifest integrity are checked. The deck budget
         # is raised to match; the 120 s default is sized for paranoia.
+        if: ${{ !cancelled() }}
         env:
           RSPICE_EXECUTION_EXTENDED: "1"
           RSPICE_EXECUTION_DECK_TIMEOUT_MS: "900000"
@@ -147,6 +157,7 @@ jobs:
         # over a deterministic slice, through `rspice-core`'s `no_panic_corpus`
         # target. `--nocapture` so the deck and per-corpus counts reach the
         # log; a gate that silently swept nothing must not look like a pass.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test panic_gate -- --nocapture
@@ -156,6 +167,7 @@ jobs:
         # a hard per-case timeout; parallel threads oversubscribe the runner
         # and trip the caps. Explicit bash enables pipefail so tee cannot hide
         # a crashed test process behind a successful aggregate row.
+        if: ${{ !cancelled() }}
         shell: bash
         run: >-
           cargo test --locked -p rspice-conformance --release --test ngspice_regression
@@ -172,6 +184,8 @@ jobs:
     name: Verilog-A corpus gates (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # Every gate after the first carries `if: ${{ !cancelled() }}`: the gates
+    # are independent, and a red one must not leave the rest unrun.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -179,6 +193,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: veriloga-corpus
+          cache-on-failure: true
       - name: Corpus golden gates (43 models)
         # The four correctness gates: finite evaluation at every probe point,
         # gmin reaching the devices that read it, stamped Jacobians against a
@@ -207,6 +222,7 @@ jobs:
         # it costs one test-binary link. The stack is raised for the same
         # reason as those gates -- instantiating a generated device touches
         # bodies larger than a spawned test thread's default stack.
+        if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
@@ -217,6 +233,7 @@ jobs:
         # derivative gates above: replay detects behavioral drift, while the
         # oracle determines whether the captured derivative is mathematically
         # defensible. Both must pass.
+        if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
@@ -228,6 +245,7 @@ jobs:
         # Different model equations and sizes do not have a universal runtime
         # ratio. Initialization, finite output and real contributions still
         # have to qualify before a timing can be reported.
+        if: ${{ !cancelled() }}
         run: >-
           cargo run --locked --release -p rspice-bench
           --features generated-stamp -- generated-stamp
@@ -238,6 +256,7 @@ jobs:
         # Phase 7's property gate. `#[ignore]` by default because it compiles
         # the whole model tree through the front end; this is the run that makes
         # it mean something.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked --release -p rspice-veriloga --test cfg_derivatives
           the_whole_corpus_matches_complex_step -- --ignored --nocapture
@@ -245,6 +264,7 @@ jobs:
         # These probes parse and compile every shipped CMC Verilog-A source,
         # construct the production VerilogADevice, and reject any interpreter
         # fallback. They are release-only and ignored by ordinary cargo test.
+        if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
@@ -255,6 +275,7 @@ jobs:
         # Independent backend agreement over every finite current, charge, and
         # Jacobian entry catches native lowering errors that merely-finite
         # smoke tests cannot detect.
+        if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
@@ -269,6 +290,7 @@ jobs:
         # `ignored` inside a green summary, which is why the marking alone was
         # never going to be enough. It belongs here, beside its three siblings,
         # on the run nobody waits for.
+        if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
@@ -282,7 +304,6 @@ jobs:
         # model-gated units take two: DIODE_CMC, R2_CMC, VBIC13 and VBIC13_4T
         # with the noise runtime, and EKV without it, since with it the
         # generated EKV does not yet export the EKV 2.6 oracle deck's sources.
-        # Reports even when a gate above has failed.
         if: ${{ !cancelled() }}
         env:
           RUST_MIN_STACK: "67108864"
@@ -420,6 +441,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: ivtest
+          cache-on-failure: true
       # Icarus Verilog and its ivtest suite are GPL. The job builds the v13_0
       # source tag outside the repository for this run only; nothing of it is
       # redistributed, and the repository keeps only test names and RSpice's
