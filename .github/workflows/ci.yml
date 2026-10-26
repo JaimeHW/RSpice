@@ -347,7 +347,8 @@ jobs:
           cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
           cargo check --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --features veriloga-builtins-base --all-targets
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
-          cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards --test transient_noise_veriloga
+          cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards --test transient_noise_veriloga --test generated_veriloga_runtime
+          cargo test --locked -p rspice-core --features veriloga-model-vbic13,veriloga-model-vbic13-3t-et,veriloga-model-vbic13-4t,veriloga-builtins-noise --test compact_model_routing
           cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
       # One model per build, as a `--features veriloga-model-<name>` build
       # compiles them: a unit gated on one model can lean on an import only
