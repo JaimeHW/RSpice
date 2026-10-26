@@ -5,7 +5,7 @@
 //! workspace, page, and selection — before anything navigates, so a hop that
 //! cannot land says why instead of arriving somewhere with the object lost.
 
-use crate::state::SimulationState;
+use crate::state::{RetainedSimulationState, SimulationState};
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::result_document::ResultsReads;
@@ -62,9 +62,7 @@ pub(crate) fn follow_notification_action(
         NotificationAction::OpenRunInResults { run_sequence } => {
             let selected = model.simulation.select_run_by_sequence(run_sequence);
             if !selected {
-                workbench.prompt(crate::workbench::AppState::retired_run_message(
-                    run_sequence,
-                ));
+                workbench.prompt(RetainedSimulationState::retired_run_message(run_sequence));
             }
             selected
         }
@@ -103,9 +101,7 @@ pub(crate) fn open_run_log(model: &Model, workbench: &mut WorkbenchSession, run_
         .run_by_sequence(run_sequence)
         .is_none()
     {
-        workbench.prompt(crate::workbench::AppState::retired_run_message(
-            run_sequence,
-        ));
+        workbench.prompt(RetainedSimulationState::retired_run_message(run_sequence));
         return;
     }
     workbench

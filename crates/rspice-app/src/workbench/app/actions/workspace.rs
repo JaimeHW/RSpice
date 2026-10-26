@@ -16,7 +16,8 @@ use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::LogAnchor;
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
-    CellViewRef, ComponentType, OpenCellView, Point, SchematicState, SymbolDocument, View, ViewType,
+    CellViewRef, ComponentType, OpenCellView, Point, RetainedSimulationState, SchematicState,
+    SymbolDocument, View, ViewType,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -274,7 +275,7 @@ impl AppState {
                 .runs
                 .iter()
                 .all(|run| run.id != *run_sequence)
-                .then(|| Self::retired_run_message(*run_sequence)),
+                .then(|| RetainedSimulationState::retired_run_message(*run_sequence)),
         }
     }
 
@@ -379,22 +380,10 @@ impl AppState {
                     self.workbench
                         .activate(crate::workbench::state::Workspace::Results);
                 } else {
-                    self.prompt(Self::retired_run_message(run_sequence));
+                    self.prompt(RetainedSimulationState::retired_run_message(run_sequence));
                 }
             }
         }
-    }
-
-    /// Why a run this session no longer holds cannot be opened.
-    ///
-    /// One sentence for one condition, wherever it is asked — the notice
-    /// centre's offer and a console row's anchor name the same run the same
-    /// way, so they must refuse it the same way too.
-    pub(crate) fn retired_run_message(run_sequence: u64) -> String {
-        format!(
-            "Run {run_sequence} is no longer retained in this session, so it could not be opened \
-             in Results."
-        )
     }
 
     /// Mark the objects the analysis on display was attributed to.

@@ -195,6 +195,18 @@ impl RetainedSimulationState {
         self.runs.iter_mut().find(|run| run.id == run_sequence)
     }
 
+    /// Why a run this session no longer holds cannot be opened.
+    ///
+    /// One sentence for one condition, wherever it is asked — the notice
+    /// centre's offer and a console row's anchor name the same run the same
+    /// way, so they must refuse it the same way too.
+    pub fn retired_run_message(run_sequence: u64) -> String {
+        format!(
+            "Run {run_sequence} is no longer retained in this session, so it could not be opened \
+             in Results."
+        )
+    }
+
     /// Look up a run by its stable product identity.
     pub fn run_by_stable_id(&self, run_id: RunId) -> Option<&SimulationRun> {
         self.runs.iter().find(|run| run.run_id == run_id)
