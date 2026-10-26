@@ -8965,7 +8965,7 @@ impl Engine {
                 if converged {
                     break;
                 }
-                if _iter % ABORT_CHECK_INTERVAL == 0 && abort.is_aborted() {
+                if abort.is_aborted() {
                     log::info!(
                         "Transient simulation aborted during Newton solve at t={:.3e}s ({:.1}% complete, {} step attempts)",
                         t,

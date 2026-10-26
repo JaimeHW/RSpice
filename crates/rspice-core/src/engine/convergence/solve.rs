@@ -818,7 +818,7 @@ impl Engine {
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
         for iteration in 0..max_iterations {
-            if Self::should_abort_iteration(abort, iteration) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
 
@@ -1011,7 +1011,7 @@ impl Engine {
         let mut direct_solver_error = None;
         for iteration in 0..dc_max_iterations {
             direct_iterations = iteration + 1;
-            if Self::should_abort_iteration(abort, iteration) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             // Debug trace first few iterations
@@ -1866,7 +1866,7 @@ impl Engine {
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
         for iteration in 0..max_iterations {
-            if Self::should_abort_iteration(abort, iteration) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
 
@@ -2345,7 +2345,7 @@ impl Engine {
         };
 
         for iteration in 0..tranop_max_iterations {
-            if Self::should_abort_iteration(abort, iteration) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
 
@@ -2556,6 +2556,61 @@ impl Engine {
 #[cfg(test)]
 mod correction_constraint_tests {
     use super::*;
+
+    #[test]
+    fn newton_loops_see_an_abort_within_one_iteration() {
+        use crate::abort_signal::CountingAbort;
+        use crate::engine::convergence::fallback::CorrectorSeedMode;
+        use crate::netlist::Netlist;
+        // A diode driven hard from a zero seed needs many limited Newton
+        // iterations, so both loops are still working when the stop arrives.
+        let netlist = Netlist::parse(
+            "abort poll\nV1 a 0 100\nR1 a b 1\nD1 b 0 dmod\n.model dmod D(IS=1e-14)\n.end\n",
+        )
+        .unwrap();
+        for route in ["direct", "corrector"] {
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let mut circuit = engine.build_circuit(&netlist).unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let zero = vec![0.0; circuit.matrix_size()];
+            // The first poll opens the first iteration; the second, which
+            // reports the stop, must be the one that opens the next.
+            let abort = CountingAbort::new(1);
+            let result = match route {
+                "direct" => engine.solve_nonlinear_with_guess_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    Some(&zero),
+                    &abort,
+                ),
+                _ => engine
+                    .solve_scaled_nonlinear_corrector_with_seed_mode(
+                        &mut circuit,
+                        &mut matrix,
+                        1.0,
+                        CorrectorRun {
+                            initial_solution: &zero,
+                            damping_state: &mut NewtonDampingState::default(),
+                            max_iterations: 100,
+                        },
+                        &abort,
+                        CorrectorSeedMode::Limited,
+                    )
+                    .map(|(solution, _, _)| solution),
+            };
+            assert!(
+                matches!(result, Err(SimulationError::Aborted)),
+                "{route}: {result:?}"
+            );
+            assert_eq!(abort.polls_after_abort(), 0, "{route}");
+            assert_eq!(
+                engine.convergence_quality().total_iterations,
+                1,
+                "{route}: Newton iterations run before the stop was seen"
+            );
+        }
+    }
 
     #[test]
     fn steep_vbic_thermal_slope_converges_through_startup_and_corrector_paths() {

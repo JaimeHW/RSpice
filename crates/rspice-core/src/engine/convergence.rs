@@ -126,7 +126,6 @@ impl Engine {
     const LINE_SEARCH_BACKTRACK: Value = 0.5;
     const LINE_SEARCH_MAX_ITERS: usize = 8;
     const ARC_LENGTH_MAX_STEPS: usize = 128;
-    const ABORT_POLL_MASK: usize = 0x7;
     const DC_RESIDUAL_STALL_LIMIT: usize = 3;
     const DC_LIMIT_CYCLE_HISTORY: usize = 64;
     const DC_LIMIT_CYCLE_HIT_LIMIT: usize = 3;

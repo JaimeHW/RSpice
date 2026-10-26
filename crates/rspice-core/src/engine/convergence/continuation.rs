@@ -388,7 +388,7 @@ impl Engine {
                     total_iterations,
                 ));
             }
-            if Self::should_abort_iteration(abort, attempts) {
+            if abort.is_aborted() {
                 circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::Aborted);
             }
@@ -519,19 +519,18 @@ impl Engine {
         let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
 
-        let mut stage = 0usize;
         let mut accepted_dt = None;
         let mut total_iterations = 0usize;
         while !pseudo.is_complete() {
-            if Self::should_abort_iteration(abort, stage) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let stage_dt = pseudo.dt();
             let pseudo_conductance = pseudo.conductance(0);
             let mut stage_converged = false;
 
-            for iteration in 0..pseudo_iterations {
-                if Self::should_abort_iteration(abort, iteration) {
+            for _ in 0..pseudo_iterations {
+                if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 total_iterations += 1;
@@ -656,7 +655,6 @@ impl Engine {
                 }
                 .into());
             }
-            stage += 1;
         }
 
         match self.warm_restart_after_fallback(circuit, matrix, &solution, abort)? {
@@ -714,10 +712,9 @@ impl Engine {
         current_solution = bootstrap_solution;
         arc.initialize(&current_solution);
 
-        let mut arc_step = 0usize;
         let mut accepted_lambda = 0.0;
         while !arc.is_complete() && !arc.is_failed() {
-            if Self::should_abort_iteration(abort, arc_step) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let (predicted_solution, target_lambda) = arc.predict(&current_solution);
@@ -741,7 +738,6 @@ impl Engine {
             } else if !arc.reject_step() {
                 break;
             }
-            arc_step += 1;
         }
 
         if arc.is_complete() {
@@ -872,7 +868,7 @@ impl Engine {
                     total_iterations,
                 ));
             }
-            if Self::should_abort_iteration(abort, attempts) {
+            if abort.is_aborted() {
                 circuit.set_jfet_gate_generation_scale(1.0);
                 return Err(SimulationError::Aborted);
             }
@@ -1070,7 +1066,7 @@ impl Engine {
                     total_iterations,
                 ));
             }
-            if Self::should_abort_iteration(abort, attempts) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
 
@@ -1201,7 +1197,7 @@ impl Engine {
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, solution.len());
 
         for iteration in 0..max_iterations {
-            if Self::should_abort_iteration(abort, iteration) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             used_iterations = iteration + 1;

@@ -5,14 +5,6 @@ use crate::SpiceDialect;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::convergence) fn should_abort_iteration(
-        abort: &dyn AbortSignal,
-        iteration: usize,
-    ) -> bool {
-        (iteration & Self::ABORT_POLL_MASK) == 0 && abort.is_aborted()
-    }
-
-    #[inline]
     pub(in crate::engine::convergence) fn nonlinear_iteration_budget(
         &self,
         multiplier: usize,

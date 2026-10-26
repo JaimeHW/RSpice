@@ -205,7 +205,7 @@ impl Engine {
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, solution.len());
 
         for iter in 0..max_iterations {
-            if Self::should_abort_iteration(abort, iter) {
+            if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             used_iterations = iter + 1;
