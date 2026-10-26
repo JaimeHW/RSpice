@@ -673,6 +673,12 @@ impl ResultsParts<'_> {
     ) -> u64 {
         self.model.record(severity, source, text)
     }
+
+    /// Report a failure of something the reader asked for, as
+    /// [`AppState::report_failure`] does.
+    pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.model.report_failure(title, detail);
+    }
 }
 
 /// How a retained plot-marker kind reads as a Results marker kind.
@@ -1369,13 +1375,13 @@ pub(crate) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
 
 /// Shared bins for the sheet and exact CSV export.
 pub(crate) fn active_histogram(
-    state: &AppState,
+    state: ResultsReads<'_>,
 ) -> Option<std::sync::Arc<rspice_results::histogram::Histogram>> {
-    hist::active_histogram(state.results_reads())
+    hist::active_histogram(state)
 }
 
 pub(crate) fn active_histogram_display(
-    state: &AppState,
+    state: ResultsReads<'_>,
 ) -> Option<std::sync::Arc<rspice_results_ui::histogram::display::HistogramDisplay>> {
     hist::active_histogram_display(state)
 }

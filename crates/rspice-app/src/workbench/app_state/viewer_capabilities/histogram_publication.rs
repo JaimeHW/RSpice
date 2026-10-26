@@ -123,7 +123,9 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
         unreachable!()
     };
     assert_eq!(plot.traces[0].label, "gain");
-    let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
+    let onscreen =
+        crate::workbench::documents::result_document::active_histogram(state.results_reads())
+            .unwrap();
     assert_eq!(onscreen.name, "gain");
     assert_eq!(onscreen.data_max, 2.0);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
@@ -134,7 +136,10 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
         unreachable!()
     };
     variables.remove(0);
-    assert!(crate::workbench::documents::result_document::active_histogram(&state).is_none());
+    assert!(
+        crate::workbench::documents::result_document::active_histogram(state.results_reads())
+            .is_none()
+    );
     assert!(
         prepare_retained_hardcopy_resolution(
             SourceReads::of(&state),

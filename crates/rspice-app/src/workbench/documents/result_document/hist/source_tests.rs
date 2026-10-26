@@ -3,6 +3,7 @@
 use super::super::ActiveViewer;
 use super::*;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
+use crate::workbench::AppState;
 
 fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
     let count = variable.samples.len();
@@ -163,7 +164,7 @@ fn hist_modes_refresh_projection_and_keep_point_density_unavailable() {
     state.results.analysis.histogram_state.custom_range = true;
     state.results.analysis.histogram_state.custom_min = 0.0;
     state.results.analysis.histogram_state.custom_max = 2.0;
-    assert!(active_histogram_display(&state).is_some());
+    assert!(active_histogram_display(state.results_reads()).is_some());
 }
 
 #[test]
@@ -181,7 +182,7 @@ fn hist_empirical_cdf_reuses_a_large_sorted_population() {
     });
     state.results.analysis.histogram_state.mode = HistogramDisplayMode::Cdf;
     paint(&mut state, false);
-    let display = active_histogram_display(&state).unwrap();
+    let display = active_histogram_display(state.results_reads()).unwrap();
     assert_eq!(display.cdf.as_ref().unwrap().x.len(), 200_000);
     let work = WorkCounts::reset();
     for _ in 0..3 {
@@ -189,7 +190,7 @@ fn hist_empirical_cdf_reuses_a_large_sorted_population() {
         paint(&mut state, true);
         assert!(Arc::ptr_eq(
             &display,
-            &active_histogram_display(&state).unwrap()
+            &active_histogram_display(state.results_reads()).unwrap()
         ));
     }
     assert_eq!(work.since().total(), 0);

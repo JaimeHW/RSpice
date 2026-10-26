@@ -10,7 +10,7 @@ mod vcd;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::EngineeringExportFormat;
-use crate::workbench::app_state::AppState;
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use rspice_formats::table::csv_to_tsv;
 use rspice_formats::waveform_io::result::{
@@ -55,9 +55,9 @@ const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with the active typed result; select CSV export.";
 const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export.";
 
-fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
+fn note_result_export_failure(state: &mut ResultsParts<'_>, detail: impl Into<String>) {
     let data_version = state.model.simulation.view.data_version;
-    state.results.results.record_runtime_condition(
+    state.results.record_runtime_condition(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         detail,
         data_version,
@@ -66,9 +66,9 @@ fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
 
 /// A finished export. The Console keeps `message`, and the status bar shows
 /// it to the reader who just chose the file.
-fn note_result_export_success(state: &mut AppState, format: &str, message: String) {
+fn note_result_export_success(state: &mut ResultsParts<'_>, format: &str, message: String) {
     let data_version = state.model.simulation.view.data_version;
-    state.results.results.record_runtime_recovery_if(
+    state.results.record_runtime_recovery_if(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         format!("{format} publication succeeded after the recorded export failure."),
         data_version,
@@ -155,7 +155,7 @@ enum TabularExportFormat {
 /// Export the exact dataset-bound Data Browser selection, never whatever
 /// payload the currently visible sheet happens to choose as its default.
 pub(crate) fn action_export_result_selection_with_io(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     keys: &[rspice_results_ui::selection::ResultBrowserSelectionKey],
 ) {
@@ -231,7 +231,7 @@ pub(crate) fn action_export_result_selection_with_io(
 }
 
 pub(crate) fn action_export_csv_with_io(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
     let displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()) {
@@ -309,7 +309,8 @@ pub(crate) fn action_export_csv_with_io(
         // A native bundle carries the exact retained waveform analysis. It
         // must not quietly substitute that source for a derived or tabular
         // sheet that the reader is currently looking at.
-        let owns_non_waveform_view = prepare_displayed_table(state, &displayed).is_some();
+        let owns_non_waveform_view =
+            prepare_displayed_table(state.results_reads(), &displayed).is_some();
         if owns_non_waveform_view {
             state.prompt(
                 "RSpice bundles export one waveform analysis with a shared x-axis. Select a \
@@ -374,7 +375,7 @@ pub(crate) fn action_export_csv_with_io(
     // reading a retained vector, so routing on the payload alone handed back
     // the transient samples the spectrum was computed from and called it the
     // result.
-    if let Some(table) = prepare_displayed_table(state, &displayed) {
+    if let Some(table) = prepare_displayed_table(state.results_reads(), &displayed) {
         match table {
             Ok((prepared, touchstone_refusal)) => {
                 export_prepared_table(state, io, export_format, &prepared, touchstone_refusal);
@@ -388,7 +389,7 @@ pub(crate) fn action_export_csv_with_io(
     }
 
     let prepared = match prepare_waveform_dataset(
-        state,
+        state.results_reads(),
         &displayed,
         matches!(
             export_format,
@@ -422,7 +423,7 @@ struct PreparedTypedResultCsv {
 /// answers for it. `Some(Err)` means a view owns it and cannot produce it,
 /// which is a refusal rather than a reason to keep looking down the list.
 fn prepare_displayed_table(
-    state: &AppState,
+    state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Option<Result<(PreparedTypedResultCsv, &'static str), String>> {
     if let Some(derived) = prepare_active_derived_view_csv(state, displayed) {
@@ -438,7 +439,7 @@ fn prepare_displayed_table(
         );
     }
     if let Some(typed) = displayed
-        .primary_analysis(state.results_reads())
+        .primary_analysis(state)
         .and_then(prepare_typed_result_csv)
     {
         return Some(Ok((typed, TYPED_RESULT_TOUCHSTONE_REFUSAL)));
@@ -448,7 +449,7 @@ fn prepare_displayed_table(
 
 /// Publish one prepared table, or say why Touchstone cannot carry this one.
 fn export_prepared_table(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     format: TabularExportFormat,
     prepared: &PreparedTypedResultCsv,
@@ -468,14 +469,14 @@ fn export_prepared_table(
 /// produce it: the reader is told why rather than handed whatever the router
 /// finds attached to the same analysis.
 fn prepare_active_sheet_csv(
-    state: &AppState,
+    state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Option<Result<PreparedTypedResultCsv, String>> {
     use crate::workbench::ResultViewer;
     use crate::workbench::documents::result_document;
 
     if displayed.viewer == ResultViewer::NoiseContrib
-        && displayed.analyses(state.results_reads()).any(|analysis| {
+        && displayed.analyses(state).any(|analysis| {
             matches!(
                 analysis.result_payload,
                 Some(crate::state::AnalysisResultPayload::Qpnoise { .. })
@@ -483,14 +484,12 @@ fn prepare_active_sheet_csv(
         })
     {
         return Some(noise_stack::prepare(
-            displayed.run(state.results_reads())?,
+            displayed.run(state)?,
             &displayed.analysis_indices,
         ));
     }
     let sheet = match displayed.viewer {
-        ResultViewer::Manifest => Some(result_document::export_manifest_csv(
-            displayed.run(state.results_reads())?,
-        )),
+        ResultViewer::Manifest => Some(result_document::export_manifest_csv(displayed.run(state)?)),
         // The operating point is the one sheet whose refusal has to be
         // stated. Its export needs a successful DC solve, and the payload
         // router underneath it answers for an `OperatingPoint` payload with
@@ -498,7 +497,7 @@ fn prepare_active_sheet_csv(
         // transient carrying `dc_op` with that transient's event history —
         // both under a menu item the reader pressed on the OP sheet.
         ResultViewer::Op => {
-            let Some(analysis) = displayed.primary_analysis(state.results_reads()) else {
+            let Some(analysis) = displayed.primary_analysis(state) else {
                 // Nothing is bound to the sheet. A failed solve keeps the
                 // payload router's answer, which names the run and carries
                 // the engine's own reason. A *successful* result that simply
@@ -557,14 +556,14 @@ fn prepare_active_sheet_csv(
         // `export_specs_csv` resolves that itself so this arm cannot write a
         // bound the sheet never showed.
         ResultViewer::Specs => Some(result_document::export_specs_csv(
-            displayed.run(state.results_reads())?,
+            displayed.run(state)?,
             &state.model.workspace.content.specs,
         )),
-        ResultViewer::Optimization => result_document::export_optimization_csv(
-            displayed.primary_analysis(state.results_reads())?,
-        ),
+        ResultViewer::Optimization => {
+            result_document::export_optimization_csv(displayed.primary_analysis(state)?)
+        }
         ResultViewer::NoiseContrib => result_document::export_noise_contribution_csv(
-            displayed.run(state.results_reads())?,
+            displayed.run(state)?,
             &displayed.analysis_indices,
         ),
         _ => None,
@@ -587,7 +586,7 @@ fn prepare_active_sheet_csv(
 /// Sheets that plot a retained vector are deliberately absent. Their export
 /// already is what they show.
 fn prepare_active_derived_view_csv(
-    state: &AppState,
+    state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Option<Result<PreparedTypedResultCsv, String>> {
     match displayed.viewer {
@@ -605,10 +604,10 @@ fn prepare_active_derived_view_csv(
 }
 
 fn fft_spectrum_csv(
-    state: &AppState,
+    state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Result<PreparedTypedResultCsv, String> {
-    let displayed_analysis = displayed.primary_analysis(state.results_reads()).ok_or_else(|| {
+    let displayed_analysis = displayed.primary_analysis(state).ok_or_else(|| {
         "FFT spectrum export is unavailable because the displayed analysis identity is no longer retained"
             .to_owned()
     })?;
@@ -616,13 +615,13 @@ fn fft_spectrum_csv(
         displayed.dataset_id,
         displayed_analysis,
     );
-    if state.results.analysis.cache_authority.fft != Some(expected_authority) {
+    if state.analysis.cache_authority.fft != Some(expected_authority) {
         return Err(
             "FFT spectrum export is unavailable because the derived spectrum does not belong to the displayed result"
                 .to_owned(),
         );
     }
-    let fft = &state.results.analysis.fft_state;
+    let fft = &state.analysis.fft_state;
     if !fft.has_data() {
         return Err(fft.last_error.as_ref().map_or_else(
             || {
@@ -650,7 +649,7 @@ fn fft_spectrum_csv(
     })
 }
 
-fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+fn histogram_bins_csv(state: ResultsReads<'_>) -> Option<PreparedTypedResultCsv> {
     let histogram = crate::workbench::documents::result_document::active_histogram(state)?;
     let display = crate::workbench::documents::result_document::active_histogram_display(state)?;
     if histogram.bins.is_empty() {
@@ -664,8 +663,8 @@ fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     })
 }
 
-fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
-    let eye = &state.results.analysis.eye_diagram_state;
+fn eye_measurements_csv(state: ResultsReads<'_>) -> Option<PreparedTypedResultCsv> {
+    let eye = &state.analysis.eye_diagram_state;
     if eye.data.traces.is_empty() {
         return None;
     }
@@ -703,7 +702,7 @@ fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
 }
 
 fn export_typed_result_csv(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     prepared: &PreparedTypedResultCsv,
 ) {
@@ -719,7 +718,7 @@ fn export_typed_result_csv(
 }
 
 fn export_typed_result_tsv(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     prepared: &PreparedTypedResultCsv,
 ) {
@@ -753,7 +752,7 @@ fn export_typed_result_tsv(
 /// the dialog, the observed compare-and-exchange write and both completion
 /// messages are stated once here.
 fn publish_result_text(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     label: &str,
     extension: &str,
@@ -804,7 +803,7 @@ fn publish_result_text(
 }
 
 fn export_native_result_bundle(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
     kind: rspice_formats::native_bundle::NativeBundleKind,
@@ -833,7 +832,7 @@ fn export_native_result_bundle(
             return;
         }
     };
-    let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
+    let waveforms = exported_waveforms(state.results_reads(), displayed.dataset_id, analysis);
     if waveforms.is_empty() {
         state.prompt(if analysis.waveforms.is_empty() {
             NO_SAMPLES_MESSAGE
@@ -932,7 +931,7 @@ fn export_native_result_bundle(
 }
 
 fn export_csv(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     dataset: &crate::io::WaveformDataset,
 ) {
@@ -983,7 +982,7 @@ fn export_csv(
 }
 
 fn export_tsv(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     dataset: &crate::io::WaveformDataset,
 ) {
@@ -1039,7 +1038,7 @@ fn export_tsv(
 }
 
 fn export_touchstone(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     dataset: &crate::io::WaveformDataset,
 ) {
@@ -1119,7 +1118,7 @@ fn export_touchstone(
 /// trace changed the file only when the viewer happened to be showing two
 /// analyses or more.
 fn exported_waveforms<'a>(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: crate::product::DatasetId,
     analysis: &'a crate::state::AnalysisResult,
 ) -> Vec<&'a crate::state::RetainedTrace> {
@@ -1131,7 +1130,7 @@ fn exported_waveforms<'a>(
         .waveforms
         .iter()
         .filter(|waveform| {
-            state.results.results.session.waveform_visibility(
+            state.results.session.waveform_visibility(
                 &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
                 waveform.visible,
             )
@@ -1163,18 +1162,18 @@ fn failed_run_refusal(run: &crate::state::SimulationRun) -> Option<String> {
 }
 
 fn prepare_waveform_dataset(
-    state: &AppState,
+    state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
     touchstone: bool,
 ) -> Result<crate::io::WaveformDataset, String> {
     if displayed.analysis_indices.is_empty() {
         return Err(displayed
-            .run(state.results_reads())
+            .run(state)
             .and_then(failed_run_refusal)
             .unwrap_or_else(|| NO_SAMPLES_MESSAGE.to_owned()));
     }
     let analysis = displayed
-        .primary_analysis(state.results_reads())
+        .primary_analysis(state)
         .ok_or_else(|| NO_ACTIVE_ANALYSIS_MESSAGE.to_string())?;
     let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
     if waveforms.is_empty() && !analysis.waveforms.is_empty() {
@@ -1189,12 +1188,10 @@ fn prepare_waveform_dataset(
 /// different coordinate grids and trace counts remain exact without padding,
 /// truncation, or an invented shared axis.
 fn prepare_displayed_analysis_stack_csv(
-    state: &AppState,
+    state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Result<PreparedTypedResultCsv, String> {
-    let analyses = displayed
-        .analyses(state.results_reads())
-        .collect::<Vec<_>>();
+    let analyses = displayed.analyses(state).collect::<Vec<_>>();
     if analyses.is_empty() {
         return Err(NO_SAMPLES_MESSAGE.to_owned());
     }

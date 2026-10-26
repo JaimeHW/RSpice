@@ -23,7 +23,7 @@
 //! A reader who needs the strength band wants the RSpice Result Bundle.
 
 use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_failure, note_result_export_success};
-use crate::workbench::app_state::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
@@ -34,7 +34,7 @@ use rspice_formats::vcd::encode_result_vcd;
 const MIME_TYPE: &str = "text/plain;charset=utf-8";
 
 pub(super) fn export_vcd(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
 ) {
@@ -103,6 +103,7 @@ mod tests {
         AnalysisResult, AnalysisResultPayload, AnalysisType, DigitalEventPointEvidence,
         DigitalEventTraceEvidence,
     };
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths() {
@@ -140,7 +141,7 @@ mod tests {
         );
         stage_imported_result_dataset(&mut state.results_parts(), "roundtrip.vcd", &prepared.bytes)
             .unwrap();
-        commit_result_import_draft(&mut state).unwrap();
+        commit_result_import_draft(&mut state.results_parts()).unwrap();
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let restored = crate::io::project_io::load_project_text(&text, None).unwrap();

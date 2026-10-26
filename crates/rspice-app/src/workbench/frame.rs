@@ -222,7 +222,7 @@ fn outbox(app: &mut RSpiceApp) -> &mut Outbox {
 fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
     requests::drain(app, outbox, |app, ExportResultQuantities(keys)| {
         crate::workbench::menu_bar::action_export_result_selection_with_io(
-            &mut app.state,
+            &mut app.state.results_parts(),
             app.export_workflow_io.as_ref(),
             &keys,
         );
@@ -245,8 +245,12 @@ fn run_dataset_export(
         |state| &mut state.workbench.outbox,
         |state, ExportCsv| crate::workbench::menu_bar::open_dataset_export_picker(state),
     );
-    if crate::workbench::menu_bar::show_dataset_export_picker(ctx, state) {
-        crate::workbench::menu_bar::action_export_csv_with_io(state, io);
+    if crate::workbench::menu_bar::show_dataset_export_picker(
+        ctx,
+        &mut state.results.dataset_export,
+        &mut state.model.preferences,
+    ) {
+        crate::workbench::menu_bar::action_export_csv_with_io(&mut state.results_parts(), io);
     }
 }
 

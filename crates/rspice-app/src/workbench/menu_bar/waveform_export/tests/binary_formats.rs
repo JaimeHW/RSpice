@@ -21,7 +21,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 3)
         .expect("result bundle preference");
     let result_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut result_state, &result_io);
+    action_export_csv_with_io(&mut result_state.results_parts(), &result_io);
     assert_eq!(
         result_io.dialog_titles.borrow().as_slice(),
         &["Export RSpice Result Bundle"]
@@ -56,7 +56,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 4)
         .expect("dataset bundle preference");
     let dataset_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut dataset_state, &dataset_io);
+    action_export_csv_with_io(&mut dataset_state.results_parts(), &dataset_io);
     assert_eq!(
         dataset_io.dialog_titles.borrow().as_slice(),
         &["Export RSpice Dataset Bundle"]
@@ -124,7 +124,7 @@ fn native_bundle_preserves_saved_output_alias_units_in_real_and_complex_samples(
                 )
                 .unwrap();
             let io = MockExportWorkflowIo::default();
-            action_export_csv_with_io(&mut state, &io);
+            action_export_csv_with_io(&mut state.results_parts(), &io);
             let files = io.byte_files.borrow();
             assert_eq!(files.len(), 1, "{}", last_log_message(&state));
             let reopened =
@@ -176,7 +176,7 @@ fn binary_waveform_exports_enforce_reimport_budget_before_destination_selection(
             )
             .unwrap();
         let io = MockExportWorkflowIo::default();
-        action_export_csv_with_io(&mut state, &io);
+        action_export_csv_with_io(&mut state.results_parts(), &io);
         assert!(
             io.dialog_titles.borrow().is_empty(),
             "preference {preference}"
@@ -220,7 +220,7 @@ fn binary_waveform_exports_count_container_bytes_at_the_sample_budget_boundary()
             )
             .unwrap();
         let io = MockExportWorkflowIo::default();
-        action_export_csv_with_io(&mut state, &io);
+        action_export_csv_with_io(&mut state.results_parts(), &io);
         assert!(
             io.dialog_titles.borrow().is_empty(),
             "preference {preference}"
@@ -272,7 +272,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 5)
         .expect("VCD preference");
     let vcd_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut vcd_state, &vcd_io);
+    action_export_csv_with_io(&mut vcd_state.results_parts(), &vcd_io);
     assert_eq!(
         vcd_io.dialog_titles.borrow().as_slice(),
         &["Export Value Change Dump"]
@@ -297,7 +297,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 6)
         .expect("NumPy array preference");
     let npy_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut npy_state, &npy_io);
+    action_export_csv_with_io(&mut npy_state.results_parts(), &npy_io);
     assert_eq!(
         npy_io.dialog_titles.borrow().as_slice(),
         &["Export NumPy Array"]
@@ -320,7 +320,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 7)
         .expect("NumPy archive preference");
     let npz_io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut npz_state, &npz_io);
+    action_export_csv_with_io(&mut npz_state.results_parts(), &npz_io);
     assert_eq!(
         npz_io.dialog_titles.borrow().as_slice(),
         &["Export NumPy Archive"]
@@ -352,7 +352,7 @@ fn engineering_export_preference_dispatches_an_hdf5_dataset() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
         .expect("HDF5 preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
 
     assert_eq!(
         io.dialog_titles.borrow().as_slice(),
@@ -421,7 +421,7 @@ fn hdf5_export_ui_retains_imported_coordinate_names_and_units() {
             .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
             .unwrap();
         let io = MockExportWorkflowIo::default();
-        action_export_csv_with_io(&mut state, &io);
+        action_export_csv_with_io(&mut state.results_parts(), &io);
         let files = io.byte_files.borrow();
         assert_eq!(files.len(), 1, "{}", last_log_message(&state));
         let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
@@ -461,7 +461,7 @@ fn a_domain_the_hdf5_layout_has_no_section_for_refuses_and_writes_nothing() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
         .expect("HDF5 preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.byte_files.borrow().is_empty());
@@ -511,7 +511,7 @@ fn binary_export_workflows_preserve_mixed_real_and_complex_traces_in_all_domains
                 )
                 .unwrap();
             let io = MockExportWorkflowIo::default();
-            action_export_csv_with_io(&mut state, &io);
+            action_export_csv_with_io(&mut state.results_parts(), &io);
             let files = io.byte_files.borrow();
             assert_eq!(files.len(), 1, "{}", last_log_message(&state));
             let parsed = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
@@ -549,7 +549,7 @@ fn a_transient_without_event_evidence_refuses_the_dump_and_writes_nothing() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 5)
         .expect("VCD preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.byte_files.borrow().is_empty());
@@ -572,7 +572,7 @@ fn engineering_export_preference_dispatches_a_matlab_v5_file() {
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 9)
         .expect("MATLAB preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
 
     assert_eq!(
         io.dialog_titles.borrow().as_slice(),
@@ -614,7 +614,7 @@ fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing()
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 9)
         .expect("MATLAB preference");
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.byte_files.borrow().is_empty());

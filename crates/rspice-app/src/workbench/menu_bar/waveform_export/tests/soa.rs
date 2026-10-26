@@ -144,7 +144,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
     );
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
     let files = io.text_files.borrow();
     assert_eq!(files.len(), 1);
     let csv = &files[0].1;
@@ -328,7 +328,7 @@ fn check_soa_duration_csv(
     assert!(forged.validate_retained_evidence().is_err());
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
-    action_export_csv_with_io(&mut state, &io);
+    action_export_csv_with_io(&mut state.results_parts(), &io);
     let files = io.text_files.borrow();
     let rows: Vec<_> = files[0]
         .1

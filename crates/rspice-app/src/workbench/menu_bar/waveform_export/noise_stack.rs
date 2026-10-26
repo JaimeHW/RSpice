@@ -71,7 +71,7 @@ mod tests {
         state.results.results.session.viewer = crate::workbench::ResultViewer::NoiseContrib;
         let displayed = crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()).unwrap();
         assert_eq!(displayed.analysis_indices.len(), 2);
-        let (export, _) = super::super::prepare_displayed_table(&state, &displayed)
+        let (export, _) = super::super::prepare_displayed_table(state.results_reads(), &displayed)
             .unwrap()
             .unwrap();
         let mut reader = csv::Reader::from_reader(export.contents.as_bytes());

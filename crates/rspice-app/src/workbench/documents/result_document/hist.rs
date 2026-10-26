@@ -13,7 +13,6 @@ use crate::source_revision::SourceRevision;
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata, SimulationState,
 };
-use crate::workbench::AppState;
 use rspice_results::histogram::{Histogram, SampleMoments};
 use rspice_results::histogram::{HistogramBuilder, HistogramDisplayMode};
 use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
@@ -436,9 +435,9 @@ pub(super) fn active_histogram(state: ResultsReads<'_>) -> Option<Arc<Histogram>
     hist_plan(state, &name).histogram.clone()
 }
 
-pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<HistogramDisplay>> {
-    let name = selected_histogram_name(state.results_reads())?;
-    hist_plan(state.results_reads(), &name)
+pub(super) fn active_histogram_display(state: ResultsReads<'_>) -> Option<Arc<HistogramDisplay>> {
+    let name = selected_histogram_name(state)?;
+    hist_plan(state, &name)
         .display
         .as_ref()
         .ok()
@@ -569,6 +568,7 @@ mod tests {
         AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
         SimulationRun,
     };
+    use crate::workbench::AppState;
     use rspice_results::yield_analysis::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldSpec,
     };

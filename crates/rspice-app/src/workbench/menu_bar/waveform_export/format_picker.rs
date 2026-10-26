@@ -12,6 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select_with_disabled};
 use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
+use crate::workbench::preferences::UserPreferences;
 
 /// The open "Export dataset…" format picker: the format chosen so far, by
 /// its stored index, and whether the view it exports shows more than one
@@ -73,8 +74,12 @@ pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
 /// Show the picker while it is open. Returns `true` on the frame the reader
 /// chooses Export, with the chosen format already stored as the one the
 /// export writes and the one the picker offers next time.
-pub(crate) fn show_dataset_export_picker(ctx: &Context, state: &mut AppState) -> bool {
-    let Some(mut picker) = state.results.dataset_export else {
+pub(crate) fn show_dataset_export_picker(
+    ctx: &Context,
+    dataset_export: &mut Option<DatasetExportPicker>,
+    preferences: &mut UserPreferences,
+) -> bool {
+    let Some(mut picker) = *dataset_export else {
         return false;
     };
     let labels = FORMATS
@@ -123,20 +128,18 @@ pub(crate) fn show_dataset_export_picker(ctx: &Context, state: &mut AppState) ->
         });
     match choice {
         DialogChoice::Primary => {
-            state.results.dataset_export = None;
-            state
-                .model
-                .preferences
+            *dataset_export = None;
+            preferences
                 .set_choice(ChoicePreference::EngineeringExport, picker.format)
                 .expect("the picker offers only formats the export writes");
             true
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.results.dataset_export = None;
+            *dataset_export = None;
             false
         }
         DialogChoice::Secondary | DialogChoice::None => {
-            state.results.dataset_export = Some(picker);
+            *dataset_export = Some(picker);
             false
         }
     }
@@ -204,14 +207,22 @@ mod tests {
         };
         let mut exported = false;
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            exported |= show_dataset_export_picker(ctx, &mut state);
+            exported |= show_dataset_export_picker(
+                ctx,
+                &mut state.results.dataset_export,
+                &mut state.model.preferences,
+            );
         });
         assert!(
             state.results.dataset_export.is_some(),
             "the picker stays open until it is answered"
         );
         let _ = ctx.run_ui(escape, |ctx| {
-            exported |= show_dataset_export_picker(ctx, &mut state);
+            exported |= show_dataset_export_picker(
+                ctx,
+                &mut state.results.dataset_export,
+                &mut state.model.preferences,
+            );
         });
         assert!(!exported);
         assert!(state.results.dataset_export.is_none());

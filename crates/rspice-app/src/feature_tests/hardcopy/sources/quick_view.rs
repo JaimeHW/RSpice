@@ -367,7 +367,9 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     let mut state = quick_view_state(analysis, ResultViewer::Hist);
     state.results.analysis.histogram_state.bin_count = 5;
     state.results.analysis.histogram_state.selected = Some("gain".to_owned());
-    let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
+    let onscreen =
+        crate::workbench::documents::result_document::active_histogram(state.results_reads())
+            .unwrap();
 
     let resolved = resolve_quick_view(&state).unwrap();
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
@@ -432,9 +434,12 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             state.results.analysis.histogram_state.custom_max = 2.0;
         }
         let onscreen =
-            crate::workbench::documents::result_document::active_histogram(&state).unwrap();
-        let display =
-            crate::workbench::documents::result_document::active_histogram_display(&state).unwrap();
+            crate::workbench::documents::result_document::active_histogram(state.results_reads())
+                .unwrap();
+        let display = crate::workbench::documents::result_document::active_histogram_display(
+            state.results_reads(),
+        )
+        .unwrap();
         let resolved = resolve_quick_view(&state).unwrap();
         let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
             unreachable!()

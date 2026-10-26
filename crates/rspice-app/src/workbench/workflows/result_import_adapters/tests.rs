@@ -1,6 +1,7 @@
 //! Cross-format result-import adapter tests and binary fixture builders.
 
 use super::*;
+use crate::workbench::app_state::AppState;
 use arrow_array::{ArrayRef, Float64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use std::collections::HashMap;
@@ -503,7 +504,8 @@ fn event_source_fst_import_keeps_detected_format_through_project_reload() {
     let mut state = AppState::default();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     crate::workbench::app_state::services_access::accept_loaded_project(&mut state, project, None);
-    apply_imported_result_dataset(&mut state, "capture.fst", &generated_fst()).unwrap();
+    apply_imported_result_dataset(&mut state.results_parts(), "capture.fst", &generated_fst())
+        .unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();

@@ -362,7 +362,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| {
             crate::workbench::workflows::result_import_workflow::show_result_import_dialog(
                 ctx,
-                &mut app.state,
+                &mut app.state.results_parts(),
             );
         },
     },

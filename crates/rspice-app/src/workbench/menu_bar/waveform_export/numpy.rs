@@ -31,7 +31,7 @@ use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
     note_result_export_failure, note_result_export_success,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
@@ -111,14 +111,15 @@ fn column_order(export: &NumpyExport) -> String {
 }
 
 pub(super) fn export_numpy(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
     kind: NumpyKind,
 ) {
     let prepared = match displayed.primary_analysis(state.results_reads()) {
         Some(analysis) => {
-            let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
+            let waveforms =
+                exported_waveforms(state.results_reads(), displayed.dataset_id, analysis);
             if waveforms.is_empty() {
                 Err(if analysis.waveforms.is_empty() {
                     NO_SAMPLES_MESSAGE.to_owned()
