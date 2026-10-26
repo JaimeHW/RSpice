@@ -3,7 +3,7 @@
 use egui::Ui;
 use rspice_results::network_matrix::trace_identity;
 
-use super::ResultsReads;
+use super::{ResultsParts, ResultsReads};
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
@@ -58,7 +58,7 @@ pub(super) fn structure_is_renderable(analysis: &crate::state::AnalysisResult) -
 /// Rebuild the mutable drawing cache solely from the selected immutable
 /// result. Cache provenance makes repeated frames a no-op and prevents a
 /// same-shape result from inheriting another run's RF traces.
-pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
+pub(super) fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
     if state
         .results_reads()
         .viewer_capability(ActiveViewer::SmithChart)
@@ -67,17 +67,15 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
         return true;
     }
     let Some(run) = state.model.simulation.active_run() else {
-        state.results.analysis.smith_chart_state.clear_traces();
+        state.analysis.smith_chart_state.clear_traces();
         state
-            .results
             .analysis
             .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
     let Some(analysis) = state.model.simulation.active_analysis() else {
-        state.results.analysis.smith_chart_state.clear_traces();
+        state.analysis.smith_chart_state.clear_traces();
         state
-            .results
             .analysis
             .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
@@ -85,9 +83,8 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
     if !structure_is_renderable(analysis)
         || !super::analysis_evidence_is_valid(state.results_reads(), run.dataset_id, analysis)
     {
-        state.results.analysis.smith_chart_state.clear_traces();
+        state.analysis.smith_chart_state.clear_traces();
         state
-            .results
             .analysis
             .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
@@ -107,7 +104,7 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
     let reference_impedances_ohm = reference_impedances_ohm.clone();
     waveforms.sort_by(|left, right| left.name.cmp(&right.name));
 
-    state.results.analysis.smith_chart_state.clear_traces();
+    state.analysis.smith_chart_state.clear_traces();
     for waveform in waveforms {
         let Some(identity) = trace_identity(&waveform.name) else {
             continue;
@@ -127,7 +124,6 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
             continue;
         };
         if state
-            .results
             .analysis
             .smith_chart_state
             .load_sparam_data(
@@ -139,23 +135,20 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
             )
             .is_err()
         {
-            state.results.analysis.smith_chart_state.clear_traces();
+            state.analysis.smith_chart_state.clear_traces();
             state
-                .results
                 .analysis
                 .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
             return false;
         }
     }
-    if state.results.analysis.smith_chart_state.traces.is_empty() {
+    if state.analysis.smith_chart_state.traces.is_empty() {
         state
-            .results
             .analysis
             .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     }
     state
-        .results
         .analysis
         .bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
     true
@@ -328,7 +321,7 @@ mod tests {
         assert!(state.model.simulation.select_run(0));
         assert!(state.model.simulation.select_analysis(0));
 
-        assert!(synchronize_active_analysis(&mut state));
+        assert!(synchronize_active_analysis(&mut state.results_parts()));
         draw(&mut state);
         let first = state.results.analysis.smith_chart_state.traces[0].points[0]
             .s
@@ -336,7 +329,7 @@ mod tests {
         assert!((first - 0.1).abs() < 1.0e-12, "{first}");
 
         assert!(state.model.simulation.select_analysis(1));
-        assert!(synchronize_active_analysis(&mut state));
+        assert!(synchronize_active_analysis(&mut state.results_parts()));
         draw(&mut state);
         let second = state.results.analysis.smith_chart_state.traces[0].points[0]
             .s

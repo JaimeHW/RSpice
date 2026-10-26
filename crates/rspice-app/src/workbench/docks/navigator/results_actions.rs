@@ -339,7 +339,9 @@ pub(super) fn select_result_signal(
     // Reconcile the viewer before installing the exact trace selection so the
     // next Results frame cannot clear the selection as if it belonged to the
     // previously active dataset.
-    crate::workbench::documents::result_document::prepare_viewer_state(app);
+    crate::workbench::documents::result_document::prepare_viewer_state(
+        &mut app.state.results_parts(),
+    );
     let name = selected.source_name().to_owned();
     let recent = SourceWaveformPresentationKey::new(selected.analysis_key(), name);
     app.state.results.results.session.selected_trace = Some(selected);
@@ -426,7 +428,9 @@ pub(super) fn result_artifact_context_menu(
         if add.clicked() {
             if select_result_artifact(app, &artifact.identity) {
                 app.state.results.results.session.viewer = artifact.viewer;
-                crate::workbench::documents::result_document::add_selected_result_as_pane(app);
+                crate::workbench::documents::result_document::add_selected_result_as_pane(
+                    &mut app.state.results_parts(),
+                );
             }
             ui.close();
         }
@@ -563,7 +567,7 @@ pub(super) fn result_signal_context_menu(
         }
         if add.clicked() {
             if select_result_signal_by_key(app, &key) {
-                crate::workbench::documents::result_document::add_selected_result_as_pane(app);
+                crate::workbench::documents::result_document::add_selected_result_as_pane(&mut app.state.results_parts());
             }
             ui.close();
         }

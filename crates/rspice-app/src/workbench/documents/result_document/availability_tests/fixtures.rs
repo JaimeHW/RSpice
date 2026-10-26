@@ -298,7 +298,9 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     match viewer {
         ResultViewer::Nyquist => derive_nyquist(&mut app),
         ResultViewer::Smith => {
-            assert!(smith::synchronize_active_analysis(&mut app.state));
+            assert!(smith::synchronize_active_analysis(
+                &mut app.state.results_parts()
+            ));
         }
         _ => {}
     }

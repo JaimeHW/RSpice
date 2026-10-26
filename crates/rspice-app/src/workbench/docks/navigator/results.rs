@@ -944,7 +944,11 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .map(|retained| retained.id)
                     {
                         if details {
-                            super::super::inspector::run_details::open(&mut app.state, run_id);
+                            super::super::inspector::run_details::open(
+                                &mut app.state.results.run_details,
+                                &app.state.model.simulation,
+                                run_id,
+                            );
                         }
                         if log {
                             open_run_log(&app.state.model, &mut app.state.workbench, run_id);

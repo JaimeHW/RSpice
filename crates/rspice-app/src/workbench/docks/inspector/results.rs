@@ -66,7 +66,11 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     if let Some(run_id) = details {
-        run_details::open(&mut app.state, run_id);
+        run_details::open(
+            &mut app.state.results.run_details,
+            &app.state.model.simulation,
+            run_id,
+        );
     }
 
     // The active viewer owns its engineering readout (measurements, margins,

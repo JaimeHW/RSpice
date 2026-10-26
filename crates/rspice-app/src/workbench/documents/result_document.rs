@@ -132,11 +132,11 @@ pub(crate) fn open_create_document(state: &mut ResultsParts<'_>) {
 
 /// Add the selected result as a pane: to the open result document after its
 /// selected pane, or, over a quick view, to a new result document.
-pub(crate) fn add_selected_result_as_pane(app: &mut RSpiceApp) {
-    if add_pane_available(app.state.results_reads()) {
-        open_add_pane(&mut app.state.results_parts());
+pub(crate) fn add_selected_result_as_pane(state: &mut ResultsParts<'_>) {
+    if add_pane_available(state.results_reads()) {
+        open_add_pane(state);
     } else {
-        create_document::open(&mut app.state.results_parts());
+        create_document::open(state);
     }
 }
 
@@ -1750,7 +1750,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         .leave_persistent_document();
     let family = document_edit::family::quick_view_selection(&app.state);
     app.state.results.results.set_sample_selection(family);
-    prepare_viewer_state(app);
+    prepare_viewer_state(&mut app.state.results_parts());
     let plan_before_docbar = app
         .state
         .model
@@ -1910,20 +1910,19 @@ pub(super) fn show_persistent_pane_viewer(
         results.session.cursor_a_anchor,
     ) = cursors;
     results.session.hidden_family_traces = hidden;
-    prepare_viewer_state(app);
+    prepare_viewer_state(&mut app.state.results_parts());
     app.state.results.results.session.viewer = viewer;
     show_viewer_well(ui, app, ResultChrome::Full);
 }
 
-pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
-    synchronize_quick_view_dataset_authority(&mut app.state);
-    app.state
+pub(crate) fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
+    synchronize_quick_view_dataset_authority(state);
+    state
         .results
-        .results
-        .reconcile_retained_datasets(&app.state.model.simulation);
-    let data_version = app.state.model.simulation.view.data_version;
-    let results = &mut app.state.results.results;
-    results.synchronize_wave_caches(&app.state.model.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
+    let data_version = state.model.simulation.view.data_version;
+    let results = &mut *state.results;
+    results.synchronize_wave_caches(&state.model.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.session.clear_cursors();
@@ -1943,8 +1942,8 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     results.session.cache.ensure_version(data_version);
     results.session.derived.ensure_version(data_version);
 
-    smith::synchronize_active_analysis(&mut app.state);
-    reconcile_active_viewer(&mut app.state);
+    smith::synchronize_active_analysis(state);
+    reconcile_active_viewer(state);
 }
 
 /// Keep the ordinary Results quick-view's global simulation projection bound
@@ -1956,7 +1955,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
 /// selector. Reasserting it at the Results frame boundary prevents every
 /// downstream viewer, inspector, cursor, and measurement from reading a
 /// background run while the document bar still names another dataset.
-fn synchronize_quick_view_dataset_authority(state: &mut AppState) -> bool {
+fn synchronize_quick_view_dataset_authority(state: &mut ResultsParts<'_>) -> bool {
     let Some(WorkspaceDocumentId::ResultDataset(dataset_id)) =
         state.workbench.documents.active(Workspace::Results)
     else {
@@ -2339,8 +2338,8 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
         .is_none_or(|family| family.offers_sheet(viewer))
 }
 
-fn reconcile_active_viewer(state: &mut AppState) {
-    if viewer_availability(state.results_reads(), state.results.results.session.viewer).available {
+fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
+    if viewer_availability(state.results_reads(), state.results.session.viewer).available {
         return;
     }
     if state.model.simulation.active_run().is_none() {
@@ -2349,7 +2348,7 @@ fn reconcile_active_viewer(state: &mut AppState) {
     if let Some(viewer) = ResultViewer::all()
         .find(|viewer| viewer_availability(state.results_reads(), *viewer).available)
     {
-        state.results.results.session.viewer = viewer;
+        state.results.session.viewer = viewer;
     }
 }
 

@@ -15,9 +15,10 @@ use super::super::super::design_system::{
     property_card, property_row, property_row_height, property_row_wrapped,
 };
 use super::{engineering_readout, executed_deck, result_authority::forced_lte_acceptances};
+use crate::state::SimulationState;
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use crate::workbench::RSpiceApp;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::{AppState, RSpiceApp};
 
 /// The run Run details… is open on, with its manifest taken once when the
 /// dialog opened: projecting a run digests every sample it retained.
@@ -36,19 +37,16 @@ const FORCED_LIST_HEIGHT: f32 = 160.0;
 
 /// Open Run details… on the retained run `run_id`. A run that is no longer
 /// retained opens nothing.
-pub(crate) fn open(state: &mut AppState, run_id: u64) {
-    let Some(run) = state
-        .model
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .find(|run| run.id == run_id)
-    else {
+pub(crate) fn open(
+    run_details: &mut Option<Box<RunDetailsDialogState>>,
+    simulation: &SimulationState,
+    run_id: u64,
+) {
+    let Some(run) = simulation.retained.runs.iter().find(|run| run.id == run_id) else {
         return;
     };
     let manifest = crate::workbench::documents::result_document::manifest::manifest_for_run(run);
-    state.results.run_details = Some(Box::new(RunDetailsDialogState { run_id, manifest }));
+    *run_details = Some(Box::new(RunDetailsDialogState { run_id, manifest }));
 }
 
 /// Draw Run details… while it is open, and act on its two routes once the

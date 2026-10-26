@@ -45,7 +45,9 @@ fn frame_boundary_repairs_a_selector_that_drifted_from_the_open_dataset() {
         .documents
         .activate(WorkspaceDocumentId::ResultDataset(displayed_dataset));
 
-    assert!(synchronize_quick_view_dataset_authority(&mut state));
+    assert!(synchronize_quick_view_dataset_authority(
+        &mut state.results_parts()
+    ));
     assert_eq!(state.model.simulation.view.active_run_idx, Some(0));
     assert_eq!(
         state
@@ -56,7 +58,7 @@ fn frame_boundary_repairs_a_selector_that_drifted_from_the_open_dataset() {
         Some(displayed_dataset)
     );
     assert!(
-        !synchronize_quick_view_dataset_authority(&mut state),
+        !synchronize_quick_view_dataset_authority(&mut state.results_parts()),
         "a stable frame must not churn the selector"
     );
 }
@@ -634,7 +636,7 @@ fn incompatible_active_viewer_falls_back_to_compatible_view() {
     );
     state.results.results.session.viewer = ResultViewer::Hist;
 
-    reconcile_active_viewer(&mut state);
+    reconcile_active_viewer(&mut state.results_parts());
 
     assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
 }

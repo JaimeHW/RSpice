@@ -156,7 +156,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         unavailable_surface(ui, &active_pane.title, &reason);
         return;
     }
-    super::prepare_viewer_state(app);
+    super::prepare_viewer_state(&mut app.state.results_parts());
     if let Some(viewer) = compatible_active_viewer(&app.state, &page.page.title, active_pane) {
         app.state.results.results.session.viewer = viewer;
     }

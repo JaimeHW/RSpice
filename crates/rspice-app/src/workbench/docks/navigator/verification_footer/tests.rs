@@ -833,7 +833,9 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
         .valid_selected_trace(&app.state.model.simulation)
         .expect("signal selection resolves against the active dataset");
     assert_eq!(selected.source_name(), "V(out)");
-    crate::workbench::documents::result_document::prepare_viewer_state(&mut app);
+    crate::workbench::documents::result_document::prepare_viewer_state(
+        &mut app.state.results_parts(),
+    );
     assert_eq!(
         app.state
             .results

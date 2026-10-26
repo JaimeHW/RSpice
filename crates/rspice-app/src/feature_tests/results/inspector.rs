@@ -137,7 +137,11 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
         .active_run()
         .expect("retained run")
         .id;
-    run_details::open(&mut app.state, run_id);
+    run_details::open(
+        &mut app.state.results.run_details,
+        &app.state.model.simulation,
+        run_id,
+    );
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -156,7 +160,11 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
         assert!(labelled(&nodes, present), "Run details lacks {present}");
     }
 
-    run_details::open(&mut app.state, u64::MAX);
+    run_details::open(
+        &mut app.state.results.run_details,
+        &app.state.model.simulation,
+        u64::MAX,
+    );
     assert_eq!(
         app.state
             .results
