@@ -74,14 +74,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if selected_qualification_summary(app, &summaries).is_none()
         && let Some(first) = summaries.first()
     {
-        if let Err(refusal) = app
-            .state
-            .model
-            .model_library_manager
-            .select_library(&first.library)
-        {
-            app.state.workbench.prompt(refusal);
-        }
+        crate::workbench::models::workspace_state::select_library_or_prompt(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            &first.library,
+        );
         app.state.models.selected_model = Some(first.model.clone());
     }
     let selected = selected_qualification_summary(app, &summaries).cloned();
@@ -566,13 +563,11 @@ fn family_matrix(
                         if matrix_row(ui, summary, selected_key == Some(summary.key.as_str()))
                             .clicked()
                         {
-                            if let Err(refusal) = state
-                                .model
-                                .model_library_manager
-                                .select_library(&summary.library)
-                            {
-                                state.workbench.prompt(refusal);
-                            }
+                            crate::workbench::models::workspace_state::select_library_or_prompt(
+                                &mut state.model,
+                                &mut state.workbench,
+                                &summary.library,
+                            );
                             state.models.selected_model = Some(summary.model.clone());
                         }
                     }

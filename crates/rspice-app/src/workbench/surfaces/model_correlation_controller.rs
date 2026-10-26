@@ -834,14 +834,11 @@ fn publish_correlation(
             .model
             .publish_project_model_candidate(candidate, commit, description)?;
 
-    if let Err(refusal) = app
-        .state
-        .model
-        .model_library_manager
-        .select_library(&context.library_name)
-    {
-        app.state.workbench.prompt(refusal);
-    }
+    crate::workbench::models::workspace_state::select_library_or_prompt(
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &context.library_name,
+    );
     app.state.models.selected_model = Some(context.model_name);
     if let Some(editor_draft) = app.state.models.model_editor.draft.as_mut() {
         editor_draft.base_project_revision = committed_revision;

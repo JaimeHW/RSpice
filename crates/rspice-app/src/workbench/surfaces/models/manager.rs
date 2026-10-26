@@ -1017,14 +1017,11 @@ fn select_catalog_row(app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow)
         })
         .flatten()
         .unwrap_or_else(|| row.model.clone());
-    if let Err(refusal) = app
-        .state
-        .model
-        .model_library_manager
-        .select_library(&row.library)
-    {
-        app.state.workbench.prompt(refusal);
-    }
+    crate::workbench::models::workspace_state::select_library_or_prompt(
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &row.library,
+    );
     app.state.models.selected_model = Some(card);
 }
 

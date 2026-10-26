@@ -8,7 +8,21 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog};
+use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog, WorkbenchSession};
+use rspice_app_state::workbench::app_state::model::Model;
+
+/// Select a model library, stating on the status bar the model library
+/// manager's refusal of a name the project no longer holds. The refusal is
+/// about the gesture, so it is prompted, never logged.
+pub(crate) fn select_library_or_prompt(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    name: &str,
+) {
+    if let Err(refusal) = model.model_library_manager.select_library(name) {
+        workbench.prompt(refusal);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

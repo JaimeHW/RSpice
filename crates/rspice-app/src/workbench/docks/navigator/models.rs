@@ -56,9 +56,11 @@ pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             selected,
             Some(&count.to_string()),
         ) {
-            if let Err(refusal) = app.state.model.model_library_manager.select_library(&name) {
-                app.state.workbench.prompt(refusal);
-            }
+            crate::workbench::models::workspace_state::select_library_or_prompt(
+                &mut app.state.model,
+                &mut app.state.workbench,
+                &name,
+            );
             app.state.models.models_page = ModelsPage::Models;
             app.state.models.selected_model = None;
         }
