@@ -93,18 +93,26 @@ impl Feature for ResultsFeature {
 /// The data browser, over the results workspace's parts and Run details…,
 /// which it opens on a retained run.
 fn show_data_browser(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let (mut parts, run_details) =
-        cx.state
-            .parts_and_run_details(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
+    let (mut parts, run_details) = cx.state.parts_and_run_details(
+        cx.model,
+        cx.wb,
+        cx.platform,
+        &mut cx.runs.preflight,
+        cx.commands,
+    );
     crate::workbench::docks::navigator::results::results(ui, &mut parts, run_details);
 }
 
 /// The results inspector, over the same parts and Run details…, which it
 /// opens on the run it names.
 fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let (mut parts, run_details) =
-        cx.state
-            .parts_and_run_details(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
+    let (mut parts, run_details) = cx.state.parts_and_run_details(
+        cx.model,
+        cx.wb,
+        cx.platform,
+        &mut cx.runs.preflight,
+        cx.commands,
+    );
     crate::workbench::docks::inspector::results::results(ui, &mut parts, run_details);
 }
 
@@ -113,9 +121,13 @@ fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 /// selected; then the result document's two forms, the last things the
 /// stage draws.
 fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let mut parts = cx
-        .state
-        .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
+    let mut parts = cx.state.parts(
+        cx.model,
+        cx.wb,
+        cx.platform,
+        &mut cx.runs.preflight,
+        cx.commands,
+    );
     surface::show(
         ui,
         &mut parts,
@@ -129,9 +141,13 @@ fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 /// The compact Results projection beside another workspace's document, over
 /// the same.
 fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let mut parts = cx
-        .state
-        .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
+    let mut parts = cx.state.parts(
+        cx.model,
+        cx.wb,
+        cx.platform,
+        &mut cx.runs.preflight,
+        cx.commands,
+    );
     crate::workbench::documents::result_document::show_compact_split(
         ui,
         &mut parts,
@@ -318,8 +334,13 @@ fn results_reads<'a>(reads: &Reads<'a, ResultsFeature>) -> ResultsReads<'a> {
 
 /// What the results workspace's operations write of a command's context.
 fn results_parts<'a>(cx: &'a mut Cx<'_, ResultsFeature>) -> ResultsParts<'a> {
-    cx.state
-        .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight)
+    cx.state.parts(
+        cx.model,
+        cx.wb,
+        cx.platform,
+        &mut cx.runs.preflight,
+        cx.commands,
+    )
 }
 
 /// `Available` when `available`, and `refusal` otherwise.

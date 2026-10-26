@@ -5,6 +5,7 @@
 
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::state::WorkbenchSession;
 
 /// What the results feature keeps open between frames.
@@ -66,15 +67,16 @@ impl ResultsState {
 
     /// What the results workspace's commands write: this slot's viewer state
     /// and drafts, the model, the session, the platform state, and the run
-    /// preflight.
+    /// preflight, beside the application's command registry.
     pub(crate) fn parts<'a>(
         &'a mut self,
         model: &'a mut Model,
         workbench: &'a mut WorkbenchSession,
         platform: &'a PlatformState,
         preflight: &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
+        commands: &'static Registry,
     ) -> ResultsParts<'a> {
-        self.parts_and_run_details(model, workbench, platform, preflight)
+        self.parts_and_run_details(model, workbench, platform, preflight, commands)
             .0
     }
 
@@ -86,6 +88,7 @@ impl ResultsState {
         workbench: &'a mut WorkbenchSession,
         platform: &'a PlatformState,
         preflight: &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
+        commands: &'static Registry,
     ) -> (
         ResultsParts<'a>,
         &'a mut Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
@@ -101,6 +104,7 @@ impl ResultsState {
             workbench,
             platform,
             preflight,
+            commands,
         };
         (parts, &mut self.run_details)
     }

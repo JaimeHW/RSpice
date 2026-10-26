@@ -217,6 +217,7 @@ impl AppState {
             &mut self.workbench,
             &self.platform,
             &mut self.runs.preflight,
+            crate::workbench::commands::vocabulary::command_registry(),
         )
     }
 

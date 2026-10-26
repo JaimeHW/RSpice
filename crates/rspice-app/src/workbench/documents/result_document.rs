@@ -195,7 +195,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{
     Model, PlatformState, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
 };
-use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::ports::{CapturedViewport, ResultsPort};
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_results::family_projection::SourceSampleSelection;
@@ -633,6 +633,9 @@ pub(crate) struct ResultsParts<'a> {
     /// The run preflight, which an edit to the plan's specifications drops.
     pub(crate) preflight:
         &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
+    /// Every command the application registers: what a chord pressed over
+    /// the plot is resolved against and a command's shortcut is labelled by.
+    pub(crate) commands: &'static Registry,
 }
 
 impl ResultsReads<'_> {
@@ -1577,12 +1580,12 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
                 zoom_gesture_available(state.results_reads())
             }
         };
-        if permitted && consume_command_key(ctx, state.results_reads(), command) {
+        if permitted && consume_command_key(ctx, state.results_reads(), state.commands, command) {
             request_view_gesture(state.results, gesture);
         }
     }
     if viewer_uses_wave_stack(state.results.session.viewer)
-        && consume_command_key(ctx, state.results_reads(), ids::CYCLE_GRID)
+        && consume_command_key(ctx, state.results_reads(), state.commands, ids::CYCLE_GRID)
     {
         state.results.session.show_minor_grid = !state.results.session.show_minor_grid;
     }
@@ -1621,16 +1624,18 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
 /// pressed with one hand over the plot. A profile that moves the command onto
 /// a modifier chord simply leaves this workspace without a key for it — the
 /// menu entry is still the way in, and no key is silently invented.
-fn consume_command_key(ctx: &egui::Context, state: ResultsReads<'_>, command: CommandKey) -> bool {
+fn consume_command_key(
+    ctx: &egui::Context,
+    state: ResultsReads<'_>,
+    commands: &Registry,
+    command: CommandKey,
+) -> bool {
     let platform = runtime_command_platform(ctx);
     state
         .model
         .preferences
         .shortcuts()
-        .effective_bindings(
-            &crate::workbench::commands::vocabulary::CommandRegistry,
-            command,
-        )
+        .effective_bindings(commands, command)
         .iter()
         .filter(|binding| binding.supports(platform))
         .filter_map(|binding| {
@@ -2107,7 +2112,7 @@ fn show_viewer_well(
 
     if viewer_requires_retained_results(viewer) && !state.model.simulation.retained.has_results() {
         let shortcut = state.model.preferences.shortcuts().resolved_label(
-            &crate::workbench::commands::vocabulary::CommandRegistry,
+            state.commands,
             ids::RUN_SIMULATION,
             runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
