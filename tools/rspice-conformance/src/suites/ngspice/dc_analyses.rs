@@ -25,14 +25,15 @@ impl TestRunner {
             }
         };
 
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
         let primary_engine = self.create_dynamic_engine();
         let robust_engine = self.create_dc_engine();
-        let primary_result = primary_engine.run_dc_op(&netlist);
+        let primary_result = primary_engine.run_dc_op_with_abort(&netlist, &abort);
         let op_result = match primary_result {
             Ok(result) if !Self::simulation_result_contains_non_finite(&result) => Ok(result),
-            Ok(_) => robust_engine.run_dc_op(&netlist),
+            Ok(_) => robust_engine.run_dc_op_with_abort(&netlist, &abort),
             Err(err) if Self::is_recoverable_dc_convergence_error(&err) => {
-                robust_engine.run_dc_op(&netlist)
+                robust_engine.run_dc_op_with_abort(&netlist, &abort)
             }
             Err(err) => Err(err),
         };
@@ -528,5 +529,43 @@ impl TestRunner {
             duration_ms: start.elapsed().as_millis(),
             analysis_type: Some("DC Sweep".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn dc_op_test_stops_at_the_case_deadline() {
+        let source =
+            "deadline op\nV1 a 0 5\nR1 a b 1k\nD1 b 0 dmod\n.model dmod D(IS=1e-14)\n.op\n.end\n";
+        let path = Path::new("deadline_op.cir");
+        let runner = TestRunner::new(
+            ".",
+            TestRunnerConfig {
+                max_time_per_test_ms: 1,
+                ..TestRunnerConfig::default()
+            },
+        );
+        let start = Instant::now()
+            .checked_sub(Duration::from_millis(2))
+            .expect("construct an expired case deadline");
+        let result = runner.run_dc_op_test(&RegressionCase {
+            name: "deadline_op",
+            cir_path: path,
+            source_path: path,
+            source,
+            start,
+        });
+        assert!(!result.passed);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("aborted")),
+            "an expired case deadline must stop the operating point: {result:?}"
+        );
     }
 }
