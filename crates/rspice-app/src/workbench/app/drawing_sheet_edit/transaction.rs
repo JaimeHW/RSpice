@@ -19,13 +19,13 @@ use super::draft::{DrawingSheetDraft, SheetSizeChoice};
 /// Whether the active sheet can be edited: a writable schematic or testbench
 /// on the design surface. Print and Export own output media and never stand
 /// in for the sheet.
-pub(crate) fn drawing_sheet_editable(workbench: &WorkbenchSession, model: &Model) -> bool {
+pub fn drawing_sheet_editable(workbench: &WorkbenchSession, model: &Model) -> bool {
     workbench.shows_design_surface() && model.drawing_sheet_writable()
 }
 
 /// One property of the active sheet, as the sheet panel edits it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DrawingSheetEdit {
+pub enum DrawingSheetEdit {
     Size(DrawingSheetStandard),
     /// A one-off size the standard list does not hold, its edges as the sheet
     /// stands in its orientation. It keeps the frame of the size it started
@@ -77,7 +77,7 @@ pub(crate) enum DrawingSheetEdit {
 /// The sheet's draft is taken from what it draws, the edit is staged into
 /// it, the draft is validated whole, and the result is published with one
 /// undo entry. Nothing is left behind when the edit is refused.
-pub(crate) fn apply_drawing_sheet_edit_on(
+pub fn apply_drawing_sheet_edit_on(
     model: &mut Model,
     workbench: &WorkbenchSession,
     edit: DrawingSheetEdit,
@@ -391,10 +391,7 @@ fn other_sheet_sizes(model: &Model) -> Vec<AuthoredDrawingSheetSize> {
 /// ASME Y14.1's advice when the active sheet, drawn as `format`, leaves an
 /// ANSI or ARCH schematic's sheets on more than one size. ISO 5457 makes no
 /// such recommendation.
-pub(crate) fn mixed_size_advisory(
-    model: &Model,
-    format: &SchematicSheetFormat,
-) -> Option<&'static str> {
+pub fn mixed_size_advisory(model: &Model, format: &SchematicSheetFormat) -> Option<&'static str> {
     (format.frame_convention() == DrawingSheetFrameConvention::AsmeY141
         && drawing_sheet_sizes_mixed(
             std::iter::once(&format.authored_size).chain(&other_sheet_sizes(model)),

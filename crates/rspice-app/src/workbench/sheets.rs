@@ -42,7 +42,7 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::SheetsCommand;
 
 /// The sheets feature.
-pub(crate) struct SheetsFeature;
+pub struct SheetsFeature;
 
 impl Feature for SheetsFeature {
     type State = SheetsState;
@@ -79,11 +79,7 @@ impl Feature for SheetsFeature {
 impl SheetsFeature {
     /// Draw the sheet strip beneath the document row: the shell's frame
     /// calls this in the step that allocates the strip.
-    pub(in crate::workbench) fn show_sheet_strip(
-        cx: &mut Cx<'_, Self>,
-        root: &mut egui::Ui,
-        layout: LayoutSpec,
-    ) {
+    pub fn show_sheet_strip(cx: &mut Cx<'_, Self>, root: &mut egui::Ui, layout: LayoutSpec) {
         sheet_strip::show(
             root,
             SheetStrip {

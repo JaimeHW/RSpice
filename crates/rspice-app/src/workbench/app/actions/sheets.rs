@@ -75,7 +75,7 @@ pub fn sheet_entries(state: &impl AsRef<Model>) -> Vec<SheetEntry> {
 /// It writes the model's selection, the session's inspector, and
 /// `reveal_sheet_section`, the sheets slot's request that the inspector
 /// bring its Sheet section into view.
-pub(crate) fn reveal_sheet_properties_on(
+pub fn reveal_sheet_properties_on(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     reveal_sheet_section: &mut bool,
@@ -102,7 +102,7 @@ pub fn sheet_count(state: &impl AsRef<Model>) -> usize {
 
 /// Make one sheet the canvas the session is editing: [`Model::activate_sheet`],
 /// stated on the status bar.
-pub(crate) fn activate_sheet(
+pub fn activate_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     gesture: &mut (impl CanvasGesturePort + ?Sized),

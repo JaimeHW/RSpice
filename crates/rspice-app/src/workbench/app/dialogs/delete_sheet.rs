@@ -18,12 +18,12 @@ const PRIMARY: &str = "Delete sheet";
 
 /// A delete that is waiting for its confirmation, as it was planned.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PendingSheetDelete {
-    pub(crate) sheet: SheetId,
-    pub(crate) name: String,
-    pub(crate) objects: usize,
-    pub(crate) destination: SheetId,
-    pub(crate) destination_name: String,
+pub struct PendingSheetDelete {
+    pub sheet: SheetId,
+    pub name: String,
+    pub objects: usize,
+    pub destination: SheetId,
+    pub destination_name: String,
 }
 
 impl PendingSheetDelete {

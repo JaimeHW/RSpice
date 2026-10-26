@@ -49,8 +49,8 @@ pub(crate) enum DrawingSheetDefaultsTarget {
 }
 
 #[derive(Default, Debug, Clone)]
-pub(crate) struct DrawingSheetDefaultsDialogState {
-    pub(crate) open: bool,
+pub struct DrawingSheetDefaultsDialogState {
+    pub open: bool,
     edit: Option<SchematicEditAuthority>,
     catalog_revision: u64,
     baseline_project: DrawingSheetProjectSettings,
@@ -63,7 +63,7 @@ pub(crate) struct DrawingSheetDefaultsDialogState {
 
 /// Open the drawing-sheet defaults on the open drawing, unless they are
 /// already open.
-pub(crate) fn open_drawing_sheet_defaults(
+pub fn open_drawing_sheet_defaults(
     defaults: &mut DrawingSheetDefaultsDialogState,
     model: &Model,
 ) -> bool {

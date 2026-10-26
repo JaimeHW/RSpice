@@ -32,7 +32,7 @@ enum OverflowReviewAction {
 
 /// Open the live, itemized outside-sheet review from the inspector: `open`
 /// says whether it is open, over the drawing `model` has open.
-pub(crate) fn open_drawing_sheet_overflow_review(open: &mut bool, model: &Model) -> bool {
+pub fn open_drawing_sheet_overflow_review(open: &mut bool, model: &Model) -> bool {
     if *open
         || !matches!(
             model.workspace.content.active_view_type(),

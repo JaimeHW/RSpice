@@ -50,12 +50,12 @@ use rspice_ui_kit::panels::{section_header, section_header_explained};
 /// sheets slot's own: the one-shot request to bring the Sheet section into
 /// view, and whether the overflow review is open. `review_markers` are the
 /// ones the drawing shows, which the overflow advisories are found through.
-pub(crate) struct SheetInspector<'a> {
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) reveal_sheet_section: &'a mut bool,
-    pub(crate) overflow_review_open: &'a mut bool,
-    pub(crate) review_markers: SchematicReviewMarkerVisibility,
+pub struct SheetInspector<'a> {
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub reveal_sheet_section: &'a mut bool,
+    pub overflow_review_open: &'a mut bool,
+    pub review_markers: SchematicReviewMarkerVisibility,
 }
 
 /// An edit the panel asks for this frame, or why what was typed is refused.
@@ -82,7 +82,7 @@ pub fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleB
 }
 
 /// Draw the sheet's section: the inspector with nothing selected.
-pub(crate) fn sheet_panel(ui: &mut Ui, mut panel: SheetInspector<'_>) {
+pub fn sheet_panel(ui: &mut Ui, mut panel: SheetInspector<'_>) {
     let sheet = panel.model.active_drawing_sheet();
     let identity = sheet_identity(panel.model);
     let editable = drawing_sheet_editable(panel.workbench, panel.model);
@@ -711,7 +711,7 @@ fn text_row(
 /// field's focus, and leaving the field must not lose what was typed. A value
 /// typed on another sheet than the active one is dropped rather than written
 /// to the wrong sheet.
-pub(crate) fn commit_pending_sheet_text(
+pub fn commit_pending_sheet_text(
     ctx: &egui::Context,
     model: &mut Model,
     workbench: &mut WorkbenchSession,

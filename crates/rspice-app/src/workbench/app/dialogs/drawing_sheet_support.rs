@@ -25,7 +25,7 @@ use super::drawing_sheet_preview::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum SheetManagerFormatSource {
+pub enum SheetManagerFormatSource {
     #[default]
     ActiveSheet,
     ProjectDefault,
@@ -34,36 +34,36 @@ pub(crate) enum SheetManagerFormatSource {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SheetFormatManagerRow {
+pub struct SheetFormatManagerRow {
     pub(crate) id: SheetId,
     pub(crate) revision: u64,
     pub(crate) name: String,
     pub(crate) page: usize,
     pub(crate) page_count: usize,
     pub(crate) format: SchematicSheetFormat,
-    pub(crate) selected: bool,
+    pub selected: bool,
     pub(crate) active: bool,
     pub(crate) has_geometry: bool,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SheetFormatManagerState {
-    pub(crate) open: bool,
-    pub(crate) edit: Option<crate::workbench::app::SchematicEditAuthority>,
+pub struct SheetFormatManagerState {
+    pub open: bool,
+    pub edit: Option<crate::workbench::app::SchematicEditAuthority>,
     pub(crate) owner_key: String,
     pub(crate) design_management_revision: u64,
     pub(crate) catalog_revision: u64,
-    pub(crate) rows: Vec<SheetFormatManagerRow>,
+    pub rows: Vec<SheetFormatManagerRow>,
     pub(crate) active_format: Option<SchematicSheetFormat>,
     pub(crate) project_default: Option<SchematicSheetFormat>,
     preview_content: DrawingSheetPreviewContent,
-    pub(crate) source: SheetManagerFormatSource,
+    pub source: SheetManagerFormatSource,
     pub(crate) error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DrawingSheetSupportState {
-    pub(crate) manager: SheetFormatManagerState,
+pub struct DrawingSheetSupportState {
+    pub manager: SheetFormatManagerState,
 }
 
 impl DrawingSheetSupportState {
@@ -74,7 +74,7 @@ impl DrawingSheetSupportState {
 
 /// Open the Sheet Format Manager on the open drawing, whose sheets it
 /// previews as the drawing shows `review_markers`.
-pub(crate) fn open_sheet_format_manager(
+pub fn open_sheet_format_manager(
     support: &mut DrawingSheetSupportState,
     model: &mut Model,
     workbench: &mut WorkbenchSession,

@@ -14,7 +14,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the sheets feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SheetsCommand {
+pub enum SheetsCommand {
     SheetProperties,
     SheetFormatManager,
     CustomSheetSizes,
@@ -64,7 +64,7 @@ const DRAWING_EDIT: CommandFlags = PROJECT_COMMAND
 
 impl SheetsCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 9] = [
+    pub const ALL: [Self; 9] = [
         Self::SheetProperties,
         Self::SheetFormatManager,
         Self::CustomSheetSizes,
@@ -77,7 +77,7 @@ impl SheetsCommand {
     ];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             // The stable ID is the one shortcut profiles saved before the
             // sheet's properties moved into the inspector.
@@ -94,7 +94,7 @@ impl SheetsCommand {
     }
 
     /// What the command declares about itself.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let (label, group, flags, context, bindings) = match self {
             Self::SheetProperties => (
                 "Sheet properties",

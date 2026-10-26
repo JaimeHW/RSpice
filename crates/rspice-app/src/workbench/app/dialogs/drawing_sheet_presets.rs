@@ -61,7 +61,7 @@ fn export_exchange_id() -> Id {
 }
 
 #[derive(Default, Debug, Clone)]
-pub(crate) struct DrawingSheetPresetDialogsState {
+pub struct DrawingSheetPresetDialogsState {
     library_open: bool,
     search: String,
     edit: Option<SchematicEditAuthority>,
@@ -74,7 +74,7 @@ pub(crate) struct DrawingSheetPresetDialogsState {
 }
 
 impl DrawingSheetPresetDialogsState {
-    pub(crate) fn any_open(&self) -> bool {
+    pub fn any_open(&self) -> bool {
         self.library_open || self.editor.is_some() || self.transfer.open || self.delete.is_some()
     }
 
@@ -92,7 +92,7 @@ impl DrawingSheetPresetDialogsState {
 
 /// Open the custom sheet size library on the open drawing, unless one of its
 /// dialogs is already open.
-pub(crate) fn open_custom_sheet_size_library(
+pub fn open_custom_sheet_size_library(
     presets: &mut DrawingSheetPresetDialogsState,
     model: &Model,
 ) -> bool {
@@ -118,11 +118,11 @@ pub(crate) fn open_custom_sheet_size_library(
 /// state, the model they publish sizes into, the session that says whether
 /// the open sheet can take one, and `reveal_sheet_section`, the sheets slot's
 /// request that the inspector bring its Sheet section into view.
-pub(crate) struct PresetDialogs<'a> {
-    pub(crate) dialogs: &'a mut DrawingSheetPresetDialogsState,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) reveal_sheet_section: &'a mut bool,
+pub struct PresetDialogs<'a> {
+    pub dialogs: &'a mut DrawingSheetPresetDialogsState,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub reveal_sheet_section: &'a mut bool,
 }
 
 impl PresetDialogs<'_> {
