@@ -95,6 +95,9 @@ pub(crate) struct CensusModel {
     pub name: String,
     /// The source the module was declared in, for the messages a census
     /// panics with.
+    // Only the machine-code identity census reads it, and Windows compiles
+    // that census out.
+    #[cfg_attr(windows, allow(dead_code))]
     pub path: PathBuf,
     pub model: CompiledModel,
     pub canonical_ir: CanonicalIrArtifact,

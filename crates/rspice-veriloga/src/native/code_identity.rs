@@ -7,8 +7,8 @@
 //! either produces the same census digest or names the model that moved.
 //!
 //! It is `#[ignore]`d because compiling the whole compact-model census is
-//! release-qualification work, not a per-commit gate. Run it with
-//! `--release --features native -- --ignored --nocapture`.
+//! release-qualification work, not a per-commit gate. Run it on a System V
+//! x86-64 host with `--release --features native -- --ignored --nocapture`.
 
 use std::path::PathBuf;
 
@@ -29,6 +29,22 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// is that the code emitted for the shipped corpus is the same code as when it
 /// was last measured, so a change that was supposed to be a refactor and moved
 /// a byte says so here instead of in a customer's transient.
+///
+/// # Where it is measured
+///
+/// On System V x86-64, by the nightly's Verilog-A job, which is the one run
+/// that executes this test. The JIT emits host-ABI code
+/// (`x64/calling_convention.rs`): Win64 passes arguments in other registers,
+/// reserves a 32-byte shadow space and saves a different XMM set, so a Windows
+/// build would digest different bytes; the census is compiled out there. A
+/// re-baseline reads the value from the `census_digest=` line of that job's
+/// log, beside the per-module lines.
+///
+/// `8cf0bc72…` below was measured on Windows and never matched a Linux run
+/// (09-08: `4eed74c6…`). `8ca45741…` is the System V census of `4f5e791a9`,
+/// read twice from nightly 40250982234 with all 43 module digests identical
+/// between the attempts. Every module differs from the Windows value by the
+/// ABI alone, so that is the attribution for this move.
 ///
 /// # How it is re-baselined
 ///
@@ -324,7 +340,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "8cf0bc72d6b42909c5124a75adf7773033e874933260120f2a7c2df9ecf5cc97";
+    "8ca457415cc38caee07a8db140e6b9f1dd18501a4d5f5409a67be564a64e5094";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {

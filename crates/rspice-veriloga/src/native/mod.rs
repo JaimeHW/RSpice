@@ -58,11 +58,14 @@ mod cfg_prelude_census;
     target_arch = "x86_64"
 ))]
 mod cfg_prelude_round_trip;
+// Not on Windows: the census's baseline is the System V image the nightly
+// measures, and the Win64 calling convention emits different machine code.
 #[cfg(all(
     test,
     feature = "native",
     feature = "rust-codegen",
-    target_arch = "x86_64"
+    target_arch = "x86_64",
+    not(windows)
 ))]
 mod code_identity;
 #[cfg(all(
