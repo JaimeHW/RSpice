@@ -65,6 +65,16 @@ impl ResultsPort for NullPorts {
         ResultViewer::default()
     }
 
+    /// A fresh session holds no results, so no retained evidence validates.
+    fn analysis_evidence_is_valid(
+        &self,
+        _model: &Model,
+        _dataset_id: rspice_vocabulary::product::DatasetId,
+        _analysis: &crate::state::AnalysisResult,
+    ) -> bool {
+        false
+    }
+
     fn histogram_selection(&self) -> Option<&str> {
         None
     }

@@ -134,6 +134,19 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         self.results.session.viewer
     }
 
+    fn analysis_evidence_is_valid(
+        &self,
+        model: &crate::workbench::app_state::Model,
+        dataset_id: crate::product::DatasetId,
+        analysis: &crate::state::AnalysisResult,
+    ) -> bool {
+        crate::workbench::documents::result_document::retained_evidence_is_valid_over(
+            &self.results,
+            model,
+            rspice_results::result_presentation::AnalysisPresentationKey::new(dataset_id, analysis),
+        )
+    }
+
     fn histogram_selection(&self) -> Option<&str> {
         self.analysis.histogram_state.selected.as_deref()
     }

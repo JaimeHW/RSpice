@@ -1213,12 +1213,20 @@ pub(crate) fn retained_evidence_is_valid(
     state: ResultsReads<'_>,
     analysis: AnalysisPresentationKey,
 ) -> bool {
-    state.results.retained_evidence_validity.get_or_insert_with(
-        &state.model.simulation,
-        analysis,
-        || {
-            state
-                .model
+    retained_evidence_is_valid_over(state.results, state.model, analysis)
+}
+
+/// The same verdict over the two things it reads: the workspace's memo and
+/// the model's retained runs.
+pub(crate) fn retained_evidence_is_valid_over(
+    results: &ResultsState,
+    model: &Model,
+    analysis: AnalysisPresentationKey,
+) -> bool {
+    results
+        .retained_evidence_validity
+        .get_or_insert_with(&model.simulation, analysis, || {
+            model
                 .simulation
                 .retained
                 .runs
@@ -1228,8 +1236,7 @@ pub(crate) fn retained_evidence_is_valid(
                     frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
                     resolved.validate_retained_evidence().is_ok()
                 })
-        },
-    )
+        })
 }
 
 pub(crate) use rspice_results::renderability::StructuralGate;
@@ -1359,11 +1366,11 @@ fn captured_ordinate(viewer: ResultViewer, view: PlotView) -> Option<(f64, f64)>
 
 /// The same question for an analysis already in hand, resolved to its key.
 ///
-/// Crate-visible because the memo is the owner of that verdict for the whole
-/// shell rather than a Results-local convenience. The Verify workspace's
-/// evidence gates ask the same question of the same immutable datasets, and a
-/// second copy of the walk there would be a second answer to keep in step as
-/// well as a second million-sample scan.
+/// The memo is the owner of that verdict for the whole shell rather than a
+/// Results-local convenience. The Verify workspace's evidence gates ask the
+/// same question of the same immutable datasets through the results port,
+/// which answers from this memo: a second copy of the walk there would be a
+/// second answer to keep in step as well as a second million-sample scan.
 pub(crate) fn analysis_evidence_is_valid(
     state: ResultsReads<'_>,
     dataset_id: DatasetId,

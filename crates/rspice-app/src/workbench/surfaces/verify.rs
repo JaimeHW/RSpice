@@ -26,6 +26,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem};
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::ports::ResultsPort as _;
 
 use super::super::commands::vocabulary::Command;
 use super::super::state::{VerificationPage, VerificationSessionState};
@@ -513,11 +514,9 @@ fn latest_validated_analysis(
 ) -> Option<&crate::state::AnalysisResult> {
     let dataset_id = app.state.model.simulation.active_run()?.dataset_id;
     latest_analysis(app, analysis_type).filter(|analysis| {
-        crate::workbench::documents::result_document::analysis_evidence_is_valid(
-            app.state.results_reads(),
-            dataset_id,
-            analysis,
-        )
+        app.state
+            .results
+            .analysis_evidence_is_valid(&app.state.model, dataset_id, analysis)
     })
 }
 

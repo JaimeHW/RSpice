@@ -38,6 +38,16 @@ pub(crate) struct DisplayedDatasetView {
 pub(crate) trait ResultsPort {
     /// The viewer the results workspace shows a dataset in.
     fn result_viewer(&self) -> ResultViewer;
+    /// Whether the retained evidence of `analysis`, an analysis of the
+    /// dataset `dataset_id` among the model's runs, passes its own
+    /// validator. The results workspace's memo answers it, so asking every
+    /// frame walks the samples once per dataset revision.
+    fn analysis_evidence_is_valid(
+        &self,
+        model: &rspice_app_state::workbench::app_state::model::Model,
+        dataset_id: rspice_vocabulary::product::DatasetId,
+        analysis: &rspice_app_state::state::AnalysisResult,
+    ) -> bool;
     /// The measurement the histogram viewer shows, when one was chosen.
     fn histogram_selection(&self) -> Option<&str>;
     /// The pane of the result document `document` the reader last selected.

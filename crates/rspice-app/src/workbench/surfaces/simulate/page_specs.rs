@@ -15,7 +15,7 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::state::{SimulationPage, SpecificationEvidenceFilter};
 
 use crate::ui::widgets::{Button, select};
@@ -716,9 +716,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         // The limits are plan-owned data with one editor; this page reads
         // them and hands off rather than giving the same records a second
         // author.
-        crate::workbench::documents::result_document::open_specification_editor(
-            &mut app.state.results_parts(),
-        );
+        app.execute_command_key(ids::EDIT_SPECIFICATIONS);
     }
     if let Some(index) = picked_class {
         app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
@@ -943,10 +941,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             "No run has been retained, so there are no results to open."
         })
     } else {
-        crate::workbench::documents::result_document::viewer_unavailability_reason(
-            app.state.results_reads(),
-            crate::workbench::ResultViewer::Specs,
-        )
+        match app.command_availability(ids::RESULT_SPECIFICATIONS) {
+            CommandAvailability::Disabled(reason) => Some(reason),
+            _ => None,
+        }
     };
     let mut picked = None;
     let mut open_evidence = false;
