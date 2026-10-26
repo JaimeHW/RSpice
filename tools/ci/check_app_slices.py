@@ -160,7 +160,7 @@ SLICE_RULES = [
     (W + r"chrome", "framework"),
     (W + r"docks/inspector/design/sheet", "sheets"),
     (W + r"docks/inspector/(design|stimulus|symbol)", "design"),
-    (W + r"docks/inspector/(code_workspace|executed_deck|veriloga)", "code"),
+    (W + r"docks/inspector/(code_workspace|veriloga)", "code"),
     (W + r"docks/inspector/models", "models"),
     (W + r"docks/inspector/project", "project"),
     (W + r"docks/inspector/(result_authority|results|run_details)", "results"),

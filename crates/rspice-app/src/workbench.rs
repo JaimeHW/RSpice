@@ -111,7 +111,6 @@ pub(crate) mod docks {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
         pub(in crate::workbench) mod code_workspace;
         pub(crate) mod design;
-        mod executed_deck;
         pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod project;
         mod result_authority;

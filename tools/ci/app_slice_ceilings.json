@@ -10,7 +10,6 @@
     "project->design": 20,
     "project->models": 6,
     "project->simulate": 3,
-    "results->code": 1,
     "simulate->design": 4,
     "simulate->models": 19,
     "simulate->project": 2

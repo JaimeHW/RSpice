@@ -186,7 +186,7 @@ class MeasurementTests(unittest.TestCase):
                 "use crate::services::session::SessionKept;\n"
                 "pub fn lean(kept: &SessionKept) -> bool { matches!(kept, SessionKept::WithoutRuns(_)) }\n"
             ),
-            "workbench/docks/inspector/executed_deck.rs": "pub fn record() {}\n",
+            "workbench/docks/inspector/run_details/executed_deck.rs": "pub fn record() {}\n",
             "simulation/controller/prepared_run.rs": (
                 "pub fn prepare() {\n    #[cfg(test)]\n    thread_preparations::record();\n}\n"
                 "#[cfg(test)]\nmod thread_preparations {\n    pub fn record() {}\n}\n"

@@ -21,7 +21,7 @@ use egui::Ui;
 
 use crate::ui::widgets::Button;
 
-use super::super::super::design_system::{property_row, property_row_wrapped};
+use super::super::super::super::design_system::{property_row, property_row_wrapped};
 
 /// The run's sealed model sources, and the control that opens its deck: the
 /// rows of Run details…'s Executed deck group.

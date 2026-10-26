@@ -9,12 +9,14 @@
 //! projection digests every sample the run retained, which is not work for
 //! every frame the dialog stays open.
 
+mod executed_deck;
+
 use egui::{Context, Ui};
 
 use super::super::super::design_system::{
     property_card, property_row, property_row_height, property_row_wrapped,
 };
-use super::{engineering_readout, executed_deck, result_authority::forced_lte_acceptances};
+use super::{engineering_readout, result_authority::forced_lte_acceptances};
 use crate::state::SimulationState;
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::app_state::Model;
