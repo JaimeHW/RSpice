@@ -10,7 +10,7 @@ use crate::state::{RetainedTrace, SoaParameterEvidence};
 #[cfg(test)]
 use crate::ui::plot::XScale;
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results_ui::{presentation::well_hint, soa as viewer};
 
@@ -335,18 +335,18 @@ fn apply_schematic_cross_probe(state: &mut ResultsParts<'_>, selection: &SoaRule
 #[cfg(test)]
 mod tests {
     use super::*;
-    pub(super) fn soa_state(rules: usize, samples: usize, peak: f64) -> AppState {
+    pub(super) fn soa_state(rules: usize, samples: usize, peak: f64) -> ResultsTestHost {
         let analysis = AnalysisResult {
             data: viewer::test_support::soa_analysis(rules, samples, peak),
         };
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         state
     }
-    pub(super) fn active_key(state: &AppState) -> AnalysisPresentationKey {
+    pub(super) fn active_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
         let run = state.model.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     }

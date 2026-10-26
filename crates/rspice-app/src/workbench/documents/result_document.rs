@@ -457,6 +457,9 @@ mod exact_evidence_quarantine_tests;
 #[cfg(test)]
 mod copied_value_tests;
 
+#[cfg(test)]
+pub(crate) mod test_host;
+
 /// Lossless source-evidence projection for one typed Data Browser artifact.
 ///
 /// This is the single adapter used by clipboard, exact-table, and file-export

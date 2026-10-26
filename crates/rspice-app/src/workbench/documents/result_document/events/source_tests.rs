@@ -4,8 +4,8 @@ use super::*;
 
 use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
-fn state_with(analysis: AnalysisResult) -> AppState {
-    let mut state = AppState::default();
+fn state_with(analysis: AnalysisResult) -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
@@ -17,7 +17,7 @@ fn state_with(analysis: AnalysisResult) -> AppState {
     state
 }
 
-fn paint(state: &mut AppState, panel: bool) {
+fn paint(state: &mut ResultsTestHost, panel: bool) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
@@ -31,7 +31,7 @@ fn paint(state: &mut AppState, panel: bool) {
     });
 }
 
-fn panel_text(state: &mut AppState) -> String {
+fn panel_text(state: &mut ResultsTestHost) -> String {
     fn collect(shape: &egui::Shape, text: &mut String) {
         match shape {
             egui::Shape::Text(value) => {
@@ -156,7 +156,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
         ],
     })
     .unwrap();
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "events")
@@ -194,7 +194,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
 }
 
 fn pick(
-    state: &mut AppState,
+    state: &mut ResultsTestHost,
     source: EventSelectionSource,
     name: &str,
     point: usize,
@@ -262,7 +262,7 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     assert_eq!(cache.order.buses()[0].events()[1].1, [Some(0), Some(4)]);
 }
 
-fn scalar_state(source: EventSelectionSource) -> (AppState, &'static str) {
+fn scalar_state(source: EventSelectionSource) -> (ResultsTestHost, &'static str) {
     let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     let name = match source {
         EventSelectionSource::ExactDigital => {
@@ -680,7 +680,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
         99_999,
     );
     let original = event_order(&mut state.results_parts()).unwrap();
-    let mut other = AppState::default();
+    let mut other = ResultsTestHost::default();
     other.model.simulation = state.model.simulation.clone();
     other.results.results = state.results.results.clone();
     let work = WorkCounts::reset();
@@ -754,7 +754,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
 #[test]
 fn event_source_failed_analysis_is_unavailable_but_live_partial_can_be_inspected() {
     let payload = viewer::test_support::committed_events(&[(0.0, 0), (1.0, 1)]);
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")

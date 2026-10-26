@@ -5,7 +5,7 @@ use crate::state::{AnalysisResult, AnalysisResultPayload, RunHistoryRevision};
 #[cfg(test)]
 use crate::state::{AnalysisType, RetainedTrace};
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results::events::projection::EventOrder;
 #[cfg(test)]
@@ -357,7 +357,7 @@ mod tests {
         run.add_analysis(other);
         let dataset_id = run.dataset_id;
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
 
         // No dataset at all: explained, and the selection is kept because the
         // dataset can come back.
@@ -464,7 +464,7 @@ mod availability_tests {
 
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         assert!(

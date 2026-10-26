@@ -8,7 +8,7 @@
 use super::*;
 use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::state::SpecializedViewerCacheProvenance;
-use crate::workbench::app_state::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results_ui::eye_diagram::{EyeTimebaseProvenance, EyeTrace};
 use rspice_results_ui::fft::data::FftBuildError;
 use rspice_results_ui::fft::{FftFailure, FftInputError, PreparedFftInput, WindowFunction};
@@ -87,8 +87,8 @@ fn locus() -> NyquistData {
 
 /// Every viewer holds data owned by some other result, so each event's
 /// effect shows against it.
-fn seeded() -> (AppState, SpecializedViewerCacheProvenance) {
-    let mut state = AppState::default();
+fn seeded() -> (ResultsTestHost, SpecializedViewerCacheProvenance) {
+    let mut state = ResultsTestHost::default();
     state
         .results
         .analysis
@@ -144,7 +144,7 @@ fn failure(error: Option<&FftFailure>) -> String {
 }
 
 /// What every viewer holds and who owns it, with `owner` named as such.
-fn snapshot(state: &AppState, owner: SpecializedViewerCacheProvenance) -> String {
+fn snapshot(state: &ResultsTestHost, owner: SpecializedViewerCacheProvenance) -> String {
     let who = |slot: Option<SpecializedViewerCacheProvenance>| match slot {
         None => "none",
         Some(found) if found == owner => "owner",

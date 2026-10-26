@@ -10,9 +10,9 @@ use egui::Ui;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, RunHistoryRevision, SimulationState,
 };
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::design_system::section_header;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
 use std::sync::Arc;
 
@@ -224,7 +224,7 @@ mod tests {
     use crate::state::{AnalysisType, RetainedTrace};
 
     /// A retained optimizer run of `iterations` candidates over one variable.
-    fn optimization_state(iterations: usize) -> AppState {
+    fn optimization_state(iterations: usize) -> ResultsTestHost {
         use crate::state::SimulationRun;
 
         let axis: Vec<f64> = (0..iterations).map(|index| index as f64).collect();
@@ -249,7 +249,7 @@ mod tests {
             ]);
         let mut run = SimulationRun::new(5);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         state.model.simulation.view.active_analysis_idx = Some(0);

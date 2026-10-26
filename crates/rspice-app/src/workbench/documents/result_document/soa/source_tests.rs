@@ -5,7 +5,7 @@ use super::*;
 use crate::ui::plot::TraceView;
 use std::sync::Arc;
 
-fn plan(state: &mut AppState) -> Arc<SoaPlan> {
+fn plan(state: &mut ResultsTestHost) -> Arc<SoaPlan> {
     let key = active_key(state);
     soa_plan(&mut state.results_parts(), key).expect("valid active SOA evidence")
 }
@@ -77,7 +77,7 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     );
 }
 
-fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
+fn replace_stress(state: &mut ResultsTestHost, samples: usize, peak: f64) {
     let mut donor = soa_state(1, samples, peak);
     let replacement = donor.model.simulation.retained.runs[0].analyses.remove(0);
     let analysis = &mut state.model.simulation.retained.runs[0].analyses[0];
@@ -86,7 +86,7 @@ fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
     analysis.family_metadata = replacement.data.family_metadata;
 }
 
-fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
+fn envelope(state: &mut ResultsTestHost) -> Arc<[[f64; 2]]> {
     let plan = plan(state);
     let facts = plan.presentation.facts(0).unwrap();
     let waveform = &state.model.simulation.retained.runs[0].analyses[0].waveforms
@@ -110,7 +110,7 @@ fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
     )
 }
 
-fn pick(state: &mut AppState) {
+fn pick(state: &mut ResultsTestHost) {
     state.results.results.session.selected_soa_rule = Some(SoaRuleSelection {
         analysis: active_key(state),
         device_id: "M0000".to_owned(),
@@ -118,7 +118,7 @@ fn pick(state: &mut AppState) {
     });
 }
 
-fn paint(state: &mut AppState, panel: bool) -> String {
+fn paint(state: &mut ResultsTestHost, panel: bool) -> String {
     fn collect(shape: &egui::Shape, text: &mut String) {
         match shape {
             egui::Shape::Text(value) => {

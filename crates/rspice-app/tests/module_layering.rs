@@ -831,7 +831,10 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Downward: a module that needs one slice of the session takes the whole
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
-    ("documents/result_document", "app_state", 36),
+    ("documents/result_document", "app_state", 22),
+    // The results feature's test host holds the results slot whose parts its
+    // tests run against, as the session does.
+    ("documents/result_document", "slots", 1),
     ("documents/netlist_document", "app_state", 2),
     ("hardcopy_adapters/sources", "app_state", 2),
     // Upward: fields whose types live in the feature that renders them, plus

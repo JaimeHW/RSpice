@@ -6,9 +6,9 @@ use super::{
     waves::cached_models,
 };
 use crate::state::{AnalysisType, RunHistoryRevision, bus_notations};
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use egui::Ui;
 use rspice_results_ui::{presentation::well_hint, table as viewer};
 use rspice_ui_kit::tokens::Tokens;
@@ -222,7 +222,7 @@ mod tests {
 
         use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let run = state.model.simulation.start_run();
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn row_activation_places_a_and_b_at_exact_samples() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         place_table_cursor(&mut state.results.results, 3, 1.25e-6);
         assert_eq!(state.results.results.session.cursor_strip, Some(3));
         assert_eq!(state.results.results.session.cursors.a, Some(1.25e-6));
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn row_activation_rearms_and_rebinds_the_cursor_without_stale_b() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.results.results.session.toggle_cursor_tool();
         assert!(!state.results.results.session.cursor_tool.is_armed());
 

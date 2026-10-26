@@ -2,7 +2,7 @@
 
 use crate::state::{AnalysisResultPayload, AnalysisType};
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 use rspice_results::pole_zero::data::{ComplexRoot, PoleZeroData};
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn retained_payload_is_the_only_pole_zero_viewer_authority() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
         state.model.simulation.retained.runs = vec![run].into();
