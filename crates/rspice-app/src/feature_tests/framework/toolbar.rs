@@ -121,9 +121,9 @@ fn running_dataset_is_never_presented_as_current() {
         crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
 
-    assert!(!results_document_is_historical(&app));
+    assert!(!results_document_is_historical(app.state.results_reads()));
     app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
-    assert!(results_document_is_historical(&app));
+    assert!(results_document_is_historical(app.state.results_reads()));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
         crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
 
-    assert!(results_document_is_historical(&app));
+    assert!(results_document_is_historical(app.state.results_reads()));
 }
 
 #[test]

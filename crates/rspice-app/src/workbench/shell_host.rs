@@ -252,10 +252,13 @@ impl Host for RSpiceApp {
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
                 use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
-                use crate::workbench::chrome::toolbar::results::results_tools;
+                use crate::workbench::chrome::toolbar::results::{
+                    offered_tool_groups, results_tracking_button,
+                };
                 use crate::workbench::chrome::toolbar::simulate::{
                     simulation_tools, verification_tools,
                 };
+                use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
 
                 match scope {
                     ToolbarScope::NoProject => no_project_tools(ui, app, layout),
@@ -287,7 +290,20 @@ impl Host for RSpiceApp {
                         Workspace::Design => design_tools(ui, app, layout),
                         Workspace::Simulate => simulation_tools(ui, app, layout),
                         Workspace::Stimulus => stimulus_tools(ui, app, layout),
-                        Workspace::Results => results_tools(ui, app, layout),
+                        Workspace::Results => {
+                            let groups = offered_tool_groups(app.state.results_reads());
+                            if results_tracking_button(ui, &mut app.state.results_parts(), layout) {
+                                context_separator(ui, layout);
+                            }
+                            for (index, group) in groups.enumerate() {
+                                if index > 0 {
+                                    context_separator(ui, layout);
+                                }
+                                for &(key, icon) in group {
+                                    toolbar_icon_command(ui, app, key, icon, layout);
+                                }
+                            }
+                        }
                         Workspace::Verify => verification_tools(ui, app, layout),
                         Workspace::Models => models_tools(ui, app, layout),
                         Workspace::Netlist => netlist_tools(ui, app, layout),

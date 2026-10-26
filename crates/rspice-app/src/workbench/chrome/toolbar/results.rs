@@ -2,76 +2,80 @@
 //! still current.
 
 use crate::product::{ContentDigest, ObjectRevision};
-use crate::workbench::RSpiceApp;
+use crate::state::command_catalog::CommandKey;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 
-use super::{
-    context_separator, explicit_label_width, take_projected_tool_slot, toolbar_icon_command,
-};
+use super::{explicit_label_width, take_projected_tool_slot};
 
-pub(in crate::workbench) fn results_tools(
-    ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
-    layout: LayoutSpec,
-) {
-    let historical = results_document_is_historical(app);
-    if results_tracking_button(ui, app, layout) {
-        context_separator(ui, layout);
-    }
-    toolbar_icon_command(
-        ui,
-        app,
-        ResultsCommand::ToggleLinkedCursors.key(),
-        WorkbenchIcon::Target,
-        layout,
-    );
-    context_separator(ui, layout);
-    if !historical {
-        toolbar_icon_command(
-            ui,
-            app,
-            ResultsCommand::WaveformCalculator.key(),
-            WorkbenchIcon::Sliders,
-            layout,
-        );
-        context_separator(ui, layout);
-    }
-    toolbar_icon_command(
-        ui,
-        app,
+/// A group of the Results toolbar's commands, drawn as icons and named by
+/// the host, with a rule between one group and the next.
+type ToolGroup = &'static [(CommandKey, WorkbenchIcon)];
+
+/// The linked A/B cursors.
+const LINKED_CURSORS: ToolGroup = &[(
+    ResultsCommand::ToggleLinkedCursors.key(),
+    WorkbenchIcon::Target,
+)];
+
+/// The waveform calculator.
+const CALCULATOR: ToolGroup = &[(
+    ResultsCommand::WaveformCalculator.key(),
+    WorkbenchIcon::Sliders,
+)];
+
+/// The dataset's comparison, import, export and print.
+const DATASET: ToolGroup = &[
+    (
         ResultsCommand::CompareResultDatasets.key(),
         WorkbenchIcon::Compare,
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
+    ),
+    (
         ResultsCommand::ImportResultDataset.key(),
         WorkbenchIcon::Folder,
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
+    ),
+    (
         ResultsCommand::ExportWaveformsCsv.key(),
         WorkbenchIcon::Export,
-        layout,
-    );
-    toolbar_icon_command(ui, app, ids::PRINT_HARDCOPY, WorkbenchIcon::File, layout);
+    ),
+    (ids::PRINT_HARDCOPY, WorkbenchIcon::File),
+];
+
+/// The Results toolbar's groups, in the order it lays them out: the linked
+/// cursors, the calculator, which a historical document is not offered, and
+/// the dataset's commands.
+pub(in crate::workbench) fn offered_tool_groups(
+    state: ResultsReads<'_>,
+) -> impl Iterator<Item = ToolGroup> + use<> {
+    let historical = results_document_is_historical(state);
+    [
+        Some(LINKED_CURSORS),
+        (!historical).then_some(CALCULATOR),
+        Some(DATASET),
+    ]
+    .into_iter()
+    .flatten()
 }
 
-fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) -> bool {
+/// The tracking control of the saved result document Results shows: Historical
+/// when no completed run matches the current design, otherwise the Latest /
+/// Pinned toggle. Whether it drew anything, for the rule after it.
+pub(in crate::workbench) fn results_tracking_button(
+    ui: &mut egui::Ui,
+    state: &mut ResultsParts<'_>,
+    layout: LayoutSpec,
+) -> bool {
     use crate::results::visualization_document::{
         DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
     };
     use crate::workbench::state::WorkspaceDocumentId;
 
-    let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) = app
-        .state
+    let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) = state
         .workbench
         .documents
         .active(Workspace::Results)
@@ -79,7 +83,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
     else {
         return false;
     };
-    if results_document_is_historical(app) {
+    if results_document_is_historical(state.results_reads()) {
         if take_projected_tool_slot(ui, layout) {
             labeled_icon_button_sized(
                 ui,
@@ -95,8 +99,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
         }
         return true;
     }
-    let Some((tracking, revision)) = app
-        .state
+    let Some((tracking, revision)) = state
         .model
         .workspace
         .content
@@ -140,8 +143,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
             ResultDocumentTrackingMode::Pinned
         };
         let next = ResultDocumentTracking::for_plan(next_mode, plan_id, analysis_id);
-        let result = app
-            .state
+        let result = state
             .model
             .workspace
             .content
@@ -153,31 +155,24 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
             .map(|_| ())
             .map_err(|error| error.to_string());
         match result {
-            Ok(()) => app.state.prompt(if pinned {
+            Ok(()) => state.workbench.prompt(if pinned {
                 "Result document now follows the latest plan run."
             } else {
                 "Result document is pinned to its current dataset."
             }),
-            Err(error) => app.state.prompt(error),
+            Err(error) => state.workbench.prompt(error),
         }
     }
     true
 }
 
-fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
-    let netlist = &app.state.model.netlist_artifacts;
+fn current_result_source_digest(model: &Model) -> Option<ContentDigest> {
+    let netlist = &model.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
-        && !app
-            .state
-            .model
-            .simulation
-            .source
-            .netlist_content
-            .trim()
-            .is_empty())
-    .then(|| crate::state::content_digest(&app.state.model.simulation.source.netlist_content))
+        && !model.simulation.source.netlist_content.trim().is_empty())
+    .then(|| crate::state::content_digest(&model.simulation.source.netlist_content))
 }
 
 pub(crate) fn run_has_current_success_authority(
@@ -193,14 +188,13 @@ pub(crate) fn run_has_current_success_authority(
         })
 }
 
-pub(crate) fn results_document_is_historical(app: &RSpiceApp) -> bool {
+pub(crate) fn results_document_is_historical(state: ResultsReads<'_>) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
-    let project_revision = app.state.model.workspace.content.project.revision();
-    let source_digest = current_result_source_digest(app);
-    match app.state.workbench.documents.active(Workspace::Results) {
-        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => app
-            .state
+    let project_revision = state.model.workspace.content.project.revision();
+    let source_digest = current_result_source_digest(state.model);
+    match state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => state
             .model
             .simulation
             .retained
@@ -210,8 +204,7 @@ pub(crate) fn results_document_is_historical(app: &RSpiceApp) -> bool {
             .max_by_key(|run| run.id)
             .is_none_or(|latest| latest.dataset_id != *dataset_id),
         Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
-            let Some(document) = app
-                .state
+            let Some(document) = state
                 .model
                 .workspace
                 .content
@@ -233,7 +226,7 @@ pub(crate) fn results_document_is_historical(app: &RSpiceApp) -> bool {
             else {
                 return true;
             };
-            app.state
+            state
                 .model.simulation
                 .retained.runs
                 .iter()
