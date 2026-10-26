@@ -1,6 +1,9 @@
 //! The platform services' runtime state: what opening, saving and recovering
 //! a project keeps between frames, the recovery catalog included.
 
+use crate::services::recent_files::RecentKind;
+use rspice_app_state::workbench::app_state::model::Model;
+
 /// What the platform services keep open between frames.
 #[derive(Debug, Clone)]
 pub struct PlatformState {
@@ -64,4 +67,22 @@ impl Default for PlatformState {
             browser_project_binding_receipt: None,
         }
     }
+}
+
+/// Drop the oldest recent projects beyond what Projects and files ▸ Recent
+/// projects listed keeps, so lowering it shortens the start page's list at
+/// once. The count is of projects, the only kind that list shows: schematics
+/// are capped at the same count on their own, so opening them never pushes a
+/// project off the page.
+pub fn trim_recent_files(model: &Model, platform: &mut PlatformState) {
+    let listed = model.preferences.recent_files_listed();
+    let (mut projects, mut schematics) = (0, 0);
+    platform.recent_files.retain(|recent| {
+        let kept = match recent.kind {
+            RecentKind::Project => &mut projects,
+            RecentKind::Schematic => &mut schematics,
+        };
+        *kept += 1;
+        *kept <= listed
+    });
 }

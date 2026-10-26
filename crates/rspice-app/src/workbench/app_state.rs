@@ -49,6 +49,7 @@ use crate::workbench::slots::{
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use rspice_app_services::workbench::slots::platform::trim_recent_files;
 
 pub(crate) use design_checks::{DesignCheckStatus, model_design_view, model_location_anchor};
 pub(crate) use design_history::{
@@ -1116,24 +1117,6 @@ impl AppState {
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
         self.model.schematic.has_pending_operation() || self.design.floating_paste.is_some()
     }
-}
-
-/// Drop the oldest recent projects beyond what Projects and files ▸ Recent
-/// projects listed keeps, so lowering it shortens the start page's list at
-/// once. The count is of projects, the only kind that list shows: schematics
-/// are capped at the same count on their own, so opening them never pushes a
-/// project off the page.
-pub(crate) fn trim_recent_files(model: &Model, platform: &mut PlatformState) {
-    let listed = model.preferences.recent_files_listed();
-    let (mut projects, mut schematics) = (0, 0);
-    platform.recent_files.retain(|recent| {
-        let kept = match recent.kind {
-            RecentKind::Project => &mut projects,
-            RecentKind::Schematic => &mut schematics,
-        };
-        *kept += 1;
-        *kept <= listed
-    });
 }
 
 fn schematic_has_authored_content(

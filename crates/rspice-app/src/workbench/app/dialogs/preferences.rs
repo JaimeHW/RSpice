@@ -29,9 +29,10 @@ use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryPublicationContinuation,
 };
 use crate::workbench::app_state::session::shortcuts::ShortcutContextMatch;
-use crate::workbench::app_state::{Model, PlatformState, trim_recent_files};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::CloudPort;
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_services::workbench::slots::platform::trim_recent_files;
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
 const SETTINGS_IMPORT_ID: &str = "rspice.preferences.settings-file.import";
