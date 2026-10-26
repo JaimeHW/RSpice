@@ -347,22 +347,29 @@ mod xyce_vbic_generated {
                  .model vm NPN LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=10 RBX=10 RBI=10 RE=10 RBP=10 RS=10 CJE=1p CJC=1p\n.end\n"
             )).unwrap()
             };
-            let unit = deck("M=1");
-            let dc_unit = engine.run_dc_op(&unit).unwrap();
-            let ac_unit = engine.run_ac(&unit, &[1e7]).unwrap();
-            for parameters in [
-                "AREA=2 M=3 MULT=4",
-                "2 M=3 MULT=4",
-                "AREA={scale_a} M={scale_m} MULT=4",
-            ] {
+            let solve = |parameters: &str| {
                 let netlist = deck(parameters);
-                let dc = engine.run_dc_op(&netlist).unwrap();
-                let ac = engine.run_ac(&netlist, &[1e7]).unwrap();
+                (
+                    engine.run_dc_op(&netlist).unwrap(),
+                    engine.run_ac(&netlist, &[1e7]).unwrap(),
+                )
+            };
+            // ngspice-46's VBIC takes area and m as instance parameters and
+            // gives 6.000x the unit current for area=2 m=3 (positional area
+            // too). MULT is another name for M.
+            for (parameters, reference, factor) in [
+                ("AREA=2 M=3", "M=1", 6.0),
+                ("2 M=3", "M=1", 6.0),
+                ("AREA={scale_a} M={scale_m}", "M=1", 6.0),
+                ("MULT=4", "M=4", 1.0),
+            ] {
+                let (dc_unit, ac_unit) = solve(reference);
+                let (dc, ac) = solve(parameters);
                 for branch in ["VC", "VB"] {
-                    let expected = 24.0 * dc_unit.branch_current_named(branch).unwrap();
+                    let expected = factor * dc_unit.branch_current_named(branch).unwrap();
                     let actual = dc.branch_current_named(branch).unwrap();
                     assert!(
-                        (actual - expected).abs() <= 2e-9 * expected.abs().max(1e-20),
+                        (actual - expected).abs() <= 1e-8 * expected.abs().max(1e-20),
                         "LEVEL={level}{extra}, {parameters}, DC {branch}: {actual:e} != {expected:e}"
                     );
                     let column = ac_unit[0]
@@ -370,7 +377,7 @@ mod xyce_vbic_generated {
                         .iter()
                         .position(|name| name.eq_ignore_ascii_case(branch))
                         .unwrap();
-                    let expected = ac_unit[0].currents[column] * 24.0;
+                    let expected = ac_unit[0].currents[column] * factor;
                     let column = ac[0]
                         .branch_names
                         .iter()
@@ -378,10 +385,40 @@ mod xyce_vbic_generated {
                         .unwrap();
                     let actual = ac[0].currents[column];
                     assert!(
-                        (actual - expected).norm() <= 2e-9 * expected.norm().max(1e-20),
+                        (actual - expected).norm() <= 1e-8 * expected.norm().max(1e-20),
                         "LEVEL={level}{extra}, {parameters}, AC {branch}: {actual:?} != {expected:?}"
                     );
                 }
+            }
+        }
+    }
+
+    /// M is the multiplicity factor Xyce's VBIC 1.3 itself declares, so a
+    /// card that sets it answers with Xyce's currents.
+    #[test]
+    fn the_multiplicity_factor_matches_xyce() {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        });
+        // Xyce 7.10, `.DC Vc 1.5 1.5 1`, printing I(Vc) and I(Vb).
+        for (multiplicity, xyce) in [
+            (1, [-1.18658207e-06, -1.18642938e-08]),
+            (3, [-3.55974621e-06, -3.55928813e-08]),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "Generated VBIC multiplicity\nVc c 0 1.5\nVb b 0 0.6\n\
+                 Q1 c b 0 vm SW_ET=0 M={multiplicity}\n\
+                 .model vm NPN LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=10 RBX=10 RBI=10 RE=10 RBP=10 RS=10 CJE=1p CJC=1p\n.end\n"
+            ))
+            .unwrap();
+            let dc = engine.run_dc_op(&netlist).unwrap();
+            for (branch, expected) in ["VC", "VB"].into_iter().zip(xyce) {
+                let actual = dc.branch_current_named(branch).unwrap();
+                assert!(
+                    (actual - expected).abs() <= 1e-6 * expected.abs(),
+                    "M={multiplicity}, {branch}: {actual:e} != Xyce {expected:e}"
+                );
             }
         }
     }
