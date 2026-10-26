@@ -512,8 +512,7 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
         "surface",
         &[
             "Workspace::Simulate => simulate::show(ui, app),",
-            "Workspace::Results => crate::workbench::results::show_surface(\
-             &mut features::cx::<ResultsFeature>(app), ui,),",
+            "Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),",
             "app.after_contribution();",
             "Point::SplitResults =>",
         ],
@@ -521,7 +520,7 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
     (
         "split",
         &[
-            "crate::workbench::results::show_split(&mut features::cx::<ResultsFeature>(app), ui);\
+            "features::show_split::<ResultsFeature>(app, ui);\
              app.after_contribution();",
             "Point::Navigator(workspace) =>",
         ],

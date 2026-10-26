@@ -116,10 +116,7 @@ impl Host for RSpiceApp {
                     Workspace::Design => design::show(ui, app),
                     Workspace::Simulate => simulate::show(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-                    Workspace::Results => crate::workbench::results::show_surface(
-                        &mut features::cx::<ResultsFeature>(app),
-                        ui,
-                    ),
+                    Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),
                     Workspace::Verify => verify::show(ui, app),
                     Workspace::Models => models::show(ui, app),
                     Workspace::Netlist => {
@@ -140,7 +137,7 @@ impl Host for RSpiceApp {
                 app.after_contribution();
             }
             Point::SplitResults => {
-                crate::workbench::results::show_split(&mut features::cx::<ResultsFeature>(app), ui);
+                features::show_split::<ResultsFeature>(app, ui);
                 app.after_contribution();
             }
             // A workspace's navigator, below the heading and the filter field.

@@ -302,6 +302,14 @@ pub(super) fn show_navigator<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::
     }
 }
 
+/// Draw `F`'s split projection in the split's `ui`. The caller answers what
+/// it raised straight after.
+pub(super) fn show_split<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) {
+    if let Some(split) = F::registry().split_section() {
+        (split.show)(&mut cx::<F>(app), ui);
+    }
+}
+
 /// The tools `F` puts on the context toolbar, in order.
 pub(super) fn toolbar_tools<F: Registered>() -> &'static [ToolbarTool] {
     F::registry().toolbar_tools()

@@ -22,8 +22,8 @@ use crate::workbench::documents::result_document::{
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, Reads,
-    RoutedCommand, Session,
+    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, FeatureSplit,
+    FeatureSurface, Reads, RoutedCommand, Session,
 };
 use crate::workbench::framework::requests::{
     ClipboardText, ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
@@ -54,6 +54,8 @@ impl Feature for ResultsFeature {
             show: show_inspector,
             commit_pending_edit: keep_axis_drafts,
         });
+        registry.surface(FeatureSurface { show: show_surface });
+        registry.split(FeatureSplit { show: show_split });
     }
 }
 
@@ -78,7 +80,7 @@ fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 /// The Results stage, over the workspace's parts, the run controller its
 /// derived viewers load through, and the specification simulate has
 /// selected.
-pub(super) fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
+fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
     let mut parts = cx
         .state
         .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
@@ -92,7 +94,7 @@ pub(super) fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 
 /// The compact Results projection beside another workspace's document, over
 /// the same.
-pub(super) fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
+fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
     let mut parts = cx
         .state
         .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
