@@ -3348,7 +3348,11 @@ fn write_registry(
         out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
     }
     out.push_str("    }\n\n");
-    for (method, empty) in [("limiter_converged", true), ("discontinuity_rising", false)] {
+    for (method, empty) in [
+        ("limiter_converged", true),
+        ("limits_newton_steps", false),
+        ("discontinuity_rising", false),
+    ] {
         writeln!(out, "    pub fn {method}(&self) -> bool {{")?;
         if devices.is_empty() {
             writeln!(out, "        let _ = self;\n        {empty}")?;

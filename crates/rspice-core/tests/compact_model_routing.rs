@@ -464,6 +464,70 @@ mod xyce_vbic_generated {
         }
     }
 
+    #[cfg(feature = "veriloga-builtins-noise")]
+    #[test]
+    fn default_card_common_emitter_stages_reach_xyce_noise() {
+        // A default-card VBIC 1.3 stage reaches its operating point only when
+        // the model's own pnjlim limiting owns the Newton steps.
+        // Xyce 7.10, OutputData/VANOISE/<deck>.cir.NOISE.prn: frequency,
+        // sqrt(ONOISE) and sqrt(INOISE) at the first and last rows.
+        let rows = [
+            (1.0e-2, 1.10013248e-07, 8.27098679e-05),
+            (9.93340009e+02, 1.26368536e-08, 3.20339250e-09),
+        ];
+        for (name, source) in [
+            (
+                "commonEmitterBjt_vbic13",
+                include_str!("../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13.cir"),
+            ),
+            (
+                "commonEmitterBjt_vbic13_3T",
+                include_str!("../../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir"),
+            ),
+        ] {
+            let netlist = Netlist::parse_with_options(
+                source,
+                rspice_core::netlist::NetlistParseOptions {
+                    expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{name} parses: {error}"));
+            // The Xyce suite's solver settings: device RELTOL=1e-4.
+            let mut convergence_config = ConvergenceConfig::robust();
+            convergence_config.voltage_reltol = 1.0e-4;
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: SpiceDialect::Xyce,
+                convergence_config,
+                max_iterations: SimulationConfig::default().max_iterations.max(1200),
+                temperature: 300.15,
+                ..Default::default()
+            });
+            let frequencies = rows.map(|(frequency, _, _)| frequency);
+            let points = engine
+                .run_noise_named_with_input_source(
+                    &netlist,
+                    "OUT",
+                    None,
+                    "V1",
+                    &frequencies,
+                    300.15,
+                )
+                .unwrap_or_else(|error| panic!("{name} noise runs: {error}"));
+            for (point, (frequency, onoise, inoise)) in points.iter().zip(rows) {
+                for (label, got, expected) in [
+                    ("sqrt(ONOISE)", point.output_noise_density.sqrt(), onoise),
+                    ("sqrt(INOISE)", point.input_referred_density.sqrt(), inoise),
+                ] {
+                    assert!(
+                        ((got - expected) / expected).abs() <= 1e-3,
+                        "{name} {label} at {frequency} Hz: {got:e}, Xyce 7.10 gives {expected:e}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn too_many_optional_q_terminals_are_rejected() {
         let engine = Engine::new(SimulationConfig {

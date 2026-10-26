@@ -1,0 +1,3 @@
+# These are ngspice's VA-Models sources. Its branch is the one with SPICE
+# junction limiting ($limit pnjlim); the plain branch takes raw Newton steps.
+define __NGSPICE__

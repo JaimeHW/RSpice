@@ -1488,6 +1488,14 @@ impl BuiltinVerilogAInstance {
         self.kind.limiter_converged()
     }
 
+    /// Whether the model limits its own junction iterates through an active
+    /// `$limit`, as a SPICE device does with pnjlim.
+    #[inline]
+    #[doc(hidden)]
+    pub fn limits_newton_steps(&self) -> bool {
+        self.kind.limits_newton_steps()
+    }
+
     #[inline]
     pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
         Arc::make_mut(&mut self.static_stamp_cache).link(

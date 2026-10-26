@@ -1063,6 +1063,10 @@ impl Instance {
 		true
 	}
 	#[inline]
+	pub fn limits_newton_steps(&self) -> bool {
+		false
+	}
+	#[inline]
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
 	#[inline]
 	pub fn discontinuity_rising(&self) -> bool { false }

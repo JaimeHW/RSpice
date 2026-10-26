@@ -64,6 +64,8 @@ pub(super) struct StateFileExtensions {
     pub set_multiplicity_hook: String,
     pub impl_methods: String,
     pub limiter_converged_expr: String,
+    /// The model limits its own Newton iterates through an active `$limit`.
+    pub limits_newton_steps: bool,
     pub rollback_value_count: usize,
     pub rollback_flag_count: usize,
     pub rollback_capture_values: String,
@@ -105,6 +107,7 @@ impl Default for StateFileExtensions {
             set_multiplicity_hook: String::new(),
             impl_methods: String::new(),
             limiter_converged_expr: "true".to_string(),
+            limits_newton_steps: false,
             rollback_value_count: 0,
             rollback_flag_count: 0,
             rollback_capture_values: String::new(),
@@ -1353,6 +1356,14 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        ");
     out.push_str(&extensions.limiter_converged_expr);
     out.push_str("\n    }\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    pub fn limits_newton_steps(&self) -> bool {\n");
+    out.push_str(if extensions.limits_newton_steps {
+        "        true\n"
+    } else {
+        "        false\n"
+    });
+    out.push_str("    }\n");
     out.push_str(&extensions.impl_methods);
     out.push_str("}\n");
     if out.contains("integer::") {

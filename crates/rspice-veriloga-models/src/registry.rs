@@ -1943,6 +1943,98 @@ impl GeneratedBuiltinKind {
         }
     }
 
+    pub fn limits_newton_steps(&self) -> bool {
+        match self {
+            #[cfg(feature = "veriloga-model-diode-cmc")]
+            Self::Device0(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+            Self::Device1(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-juncap200")]
+            Self::Device2(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-psp104tva")]
+            Self::Device3(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-psp104va")]
+            Self::Device4(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-pspnqs104va")]
+            Self::Device5(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-angelov")]
+            Self::Device6(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-angelov-gan")]
+            Self::Device7(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-asmesd")]
+            Self::Device8(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-asmesd-dio")]
+            Self::Device9(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-asmhemt")]
+            Self::Device10(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bjt505-va")]
+            Self::Device11(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bjt505t-va")]
+            Self::Device12(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bjtd505-va")]
+            Self::Device13(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bjtd505t-va")]
+            Self::Device14(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bsimbulk")]
+            Self::Device15(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bsimcmg-va")]
+            Self::Device16(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bsimimg")]
+            Self::Device17(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+            Self::Device18(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+            Self::Device19(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-bsimsoi-va")]
+            Self::Device20(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
+            Self::Device21(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-ekv-va")]
+            Self::Device22(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hicuml0va")]
+            Self::Device23(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hicuml2va")]
+            Self::Device24(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            Self::Device25(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            Self::Device26(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            Self::Device27(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            Self::Device28(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            Self::Device29(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            Self::Device30(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            Self::Device31(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            Self::Device32(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            Self::Device33(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-mosvar")]
+            Self::Device34(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            Self::Device35(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-r2-cmc")]
+            Self::Device36(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            Self::Device37(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-r3-cmc")]
+            Self::Device38(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-vbic13")]
+            Self::Device39(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            Self::Device40(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            Self::Device41(device) => device.limits_newton_steps(),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.limits_newton_steps(),
+            Self::__NonExhaustive(value) => match *value {},
+        }
+    }
+
     pub fn discontinuity_rising(&self) -> bool {
         match self {
             #[cfg(feature = "veriloga-model-diode-cmc")]
@@ -3802,13 +3894,13 @@ pub const BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[
     #[cfg(feature = "veriloga-model-r3-cmc")]
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "r3_cmc", module_name: "r3_cmc", source_digest: "e0b57afb696e58ce", source_identity: "37a893c8b4507b467fbb98a17e72b43a4e758cc661d679ef8ad1374c7ace6043", checkpoint_identity: r3_cmc__r3_cmc__2e3554ae::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: r3_cmc__r3_cmc__2e3554ae::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &r3_cmc__r3_cmc__2e3554ae::Instance::TERMINALS, parameters: &r3_cmc__r3_cmc__2e3554ae::Instance::PARAMETER_DESCRIPTORS, total_node_count: r3_cmc__r3_cmc__2e3554ae::Instance::NODE_COUNT, internal_node_names: &r3_cmc__r3_cmc__2e3554ae::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: r3_cmc__r3_cmc__2e3554ae::Instance::INTERNAL_STATE_NODES, branch_count: r3_cmc__r3_cmc__2e3554ae::Instance::BRANCH_COUNT, stamp_pattern: r3_cmc__r3_cmc__2e3554ae::Instance::STAMP_PATTERN },
     #[cfg(feature = "veriloga-model-vbic13")]
-    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic13", module_name: "vbic13", source_digest: "aa00e2e747501388", source_identity: "9aa27a36b6c1eb4e70f914f5fa012694cb0eaa26fd21bb11ca0c01618d3a764d", checkpoint_identity: vbic_3t__vbic13__aa00e2e7::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_3t__vbic13__aa00e2e7::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_3t__vbic13__aa00e2e7::Instance::TERMINALS, parameters: &vbic_3t__vbic13__aa00e2e7::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_3t__vbic13__aa00e2e7::Instance::NODE_COUNT, internal_node_names: &vbic_3t__vbic13__aa00e2e7::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_3t__vbic13__aa00e2e7::Instance::INTERNAL_STATE_NODES, branch_count: vbic_3t__vbic13__aa00e2e7::Instance::BRANCH_COUNT, stamp_pattern: vbic_3t__vbic13__aa00e2e7::Instance::STAMP_PATTERN },
+    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic13", module_name: "vbic13", source_digest: "9e2915958aff0441", source_identity: "4392b3b1d16e2625bef5b43fcda1e6adf6ec4e937a0143f6044a15cfbe05eebe", checkpoint_identity: vbic_3t__vbic13__aa00e2e7::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_3t__vbic13__aa00e2e7::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_3t__vbic13__aa00e2e7::Instance::TERMINALS, parameters: &vbic_3t__vbic13__aa00e2e7::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_3t__vbic13__aa00e2e7::Instance::NODE_COUNT, internal_node_names: &vbic_3t__vbic13__aa00e2e7::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_3t__vbic13__aa00e2e7::Instance::INTERNAL_STATE_NODES, branch_count: vbic_3t__vbic13__aa00e2e7::Instance::BRANCH_COUNT, stamp_pattern: vbic_3t__vbic13__aa00e2e7::Instance::STAMP_PATTERN },
     #[cfg(feature = "veriloga-model-vbic13-3t-et")]
-    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic13_3t_et", module_name: "vbic13_3t_et", source_digest: "bd2f63d48ee7a724", source_identity: "66bf76297ac764e2c4d7502b2839427109d0525e26cfdb4c35c2d43a48a92e0b", checkpoint_identity: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::TERMINALS, parameters: &vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::NODE_COUNT, internal_node_names: &vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::INTERNAL_STATE_NODES, branch_count: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::BRANCH_COUNT, stamp_pattern: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::STAMP_PATTERN },
+    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic13_3t_et", module_name: "vbic13_3t_et", source_digest: "8b85b1304e811dd5", source_identity: "4f7249fa02a70d78a6076a1e947c5dc22d742bda635c680c14fb404a4048c4ec", checkpoint_identity: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::TERMINALS, parameters: &vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::NODE_COUNT, internal_node_names: &vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::INTERNAL_STATE_NODES, branch_count: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::BRANCH_COUNT, stamp_pattern: vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::STAMP_PATTERN },
     #[cfg(feature = "veriloga-model-vbic13-4t")]
-    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic13_4t", module_name: "vbic13_4t", source_digest: "132cb4e082958b63", source_identity: "8040736b52830a81e558339e0ecf145ade73abd6c8b03d6d9cd43e2b3c9c0725", checkpoint_identity: vbic_1p3__vbic13_4t__132cb4e0::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_1p3__vbic13_4t__132cb4e0::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_1p3__vbic13_4t__132cb4e0::Instance::TERMINALS, parameters: &vbic_1p3__vbic13_4t__132cb4e0::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_1p3__vbic13_4t__132cb4e0::Instance::NODE_COUNT, internal_node_names: &vbic_1p3__vbic13_4t__132cb4e0::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_1p3__vbic13_4t__132cb4e0::Instance::INTERNAL_STATE_NODES, branch_count: vbic_1p3__vbic13_4t__132cb4e0::Instance::BRANCH_COUNT, stamp_pattern: vbic_1p3__vbic13_4t__132cb4e0::Instance::STAMP_PATTERN },
+    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic13_4t", module_name: "vbic13_4t", source_digest: "e3ce06a0a03c050a", source_identity: "893c161243b9a4db769aed4a30c8c24c224d43b3eee8e12cf71f539d98edf54d", checkpoint_identity: vbic_1p3__vbic13_4t__132cb4e0::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_1p3__vbic13_4t__132cb4e0::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_1p3__vbic13_4t__132cb4e0::Instance::TERMINALS, parameters: &vbic_1p3__vbic13_4t__132cb4e0::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_1p3__vbic13_4t__132cb4e0::Instance::NODE_COUNT, internal_node_names: &vbic_1p3__vbic13_4t__132cb4e0::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_1p3__vbic13_4t__132cb4e0::Instance::INTERNAL_STATE_NODES, branch_count: vbic_1p3__vbic13_4t__132cb4e0::Instance::BRANCH_COUNT, stamp_pattern: vbic_1p3__vbic13_4t__132cb4e0::Instance::STAMP_PATTERN },
     #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
-    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic_4T_et_cf", module_name: "vbic_4T_et_cf", source_digest: "3990c5a17b49c59e", source_identity: "d8330fe64713c0abc404be1cd7e9bc2678e821c93a5268c0552e017e961c723f", checkpoint_identity: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::TERMINALS, parameters: &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::NODE_COUNT, internal_node_names: &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_STATE_NODES, branch_count: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::BRANCH_COUNT, stamp_pattern: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::STAMP_PATTERN },
+    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "vbic_4T_et_cf", module_name: "vbic_4T_et_cf", source_digest: "e29bffdf6c6303e8", source_identity: "f8272cea8196b4ab391c4f312f9dda935a86e85a9eeaf3a1eab69435bcc5221f", checkpoint_identity: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::TERMINALS, parameters: &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::PARAMETER_DESCRIPTORS, total_node_count: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::NODE_COUNT, internal_node_names: &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_STATE_NODES, branch_count: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::BRANCH_COUNT, stamp_pattern: vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::STAMP_PATTERN },
 ];
 
 pub fn builtin_descriptors() -> &'static [super::GeneratedVerilogAModelDescriptor] {

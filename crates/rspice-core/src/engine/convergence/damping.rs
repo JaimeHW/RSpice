@@ -200,6 +200,26 @@ impl Engine {
                 .devices
                 .iter()
                 .any(|vdmos| vdmos.xyce_level18)
+            || Self::generated_limiting_owns_newton_steps(circuit)
+    }
+
+    /// A generated Verilog-A model with an active `$limit` (VBIC's ngspice
+    /// branch applies pnjlim to every junction) limits its iterates against
+    /// the previous one exactly as a native SPICE device does, so the same
+    /// full-step policy applies.
+    fn generated_limiting_owns_newton_steps(circuit: &CircuitData) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            circuit
+                .generated_veriloga_devices()
+                .iter()
+                .any(|device| device.limits_newton_steps())
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        {
+            let _ = circuit;
+            false
+        }
     }
 
     pub(in crate::engine) fn b3soi_limiter_owns_global_damping(

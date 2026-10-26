@@ -399,6 +399,24 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
+#[derive(Clone)]
+pub(crate) struct CanonicalLimitState<const N: usize> {
+	pub(crate) previous: [f64; N],
+	pub(crate) initialized: [bool; N],
+	pub(crate) active: bool,
+}
+
+impl<const N: usize> CanonicalLimitState<N> {
+	fn new_box() -> Box<Self> {
+		let mut boxed = Box::<Self>::new_uninit();
+		unsafe {
+			// SAFETY: every field is an f64, a bool, or an array of them; all-zero bytes are valid values.
+			std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+			boxed.assume_init()
+		}
+	}
+}
+
 pub struct Instance {
 	pub nodes: [usize; 14],
 	pub branches: [usize; 0],
@@ -414,6 +432,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) event_state_accepted: Box<[f64; 20]>,
 	pub(crate) event_state_candidate: Box<[f64; 20]>,
+	pub(crate) canonical_limit: Box<CanonicalLimitState<14>>,
 	pub(crate) canonical_reactive: Box<[f64; 74]>,
 }
 
@@ -435,6 +454,7 @@ impl Clone for Instance {
 			ddt_coefficients: self.ddt_coefficients,
 			event_state_accepted: self.event_state_accepted.clone(),
 			event_state_candidate: self.event_state_candidate.clone(),
+			canonical_limit: self.canonical_limit.clone(),
 			canonical_reactive: self.canonical_reactive.clone(),
 		}
 	}
@@ -584,16 +604,16 @@ impl Instance {
 	pub const INTERNAL_STATE_NODES: &[usize] = &[];
 	pub const BRANCH_COUNT: usize = 0;
 	pub const PARAMETER_COUNT: usize = 133;
-	pub const VARIABLE_COUNT: usize = 360;
+	pub const VARIABLE_COUNT: usize = 361;
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([80, 61, 139, 84, 33, 208, 145, 79, 22, 23, 125, 86, 250, 162, 20, 95, 34, 67, 168, 39, 156, 30, 229, 240, 226, 105, 198, 218, 125, 205, 178, 149]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([28, 48, 70, 137, 164, 181, 183, 103, 61, 50, 11, 6, 231, 156, 229, 29, 238, 12, 225, 168, 76, 183, 134, 42, 251, 53, 25, 176, 43, 167, 124, 37]);
 	pub const EVENT_STATE_COUNT: usize = 20;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "441b009ae72b6476a88bc7ac00f58d13b887544da14dd0844786ac716db1d627";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "47a67e0ac0f3948281da7fdee465cb53de776f9cca24f97b26d3f1d3abde563b";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -627,6 +647,7 @@ impl Instance {
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
 			event_state_accepted: boxed_zero_f64_array(),
 			event_state_candidate: boxed_zero_f64_array(),
+			canonical_limit: CanonicalLimitState::new_box(),
 			canonical_reactive: boxed_zero_f64_array(),
 		};
 		instance.apply_parameters(assignments)?;
@@ -635,7 +656,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
-		let mut values = Vec::with_capacity(95);
+		let mut values = Vec::with_capacity(109);
 		values.extend_from_slice(&self.stamp_state.ddt_current);
 		values.extend_from_slice(&self.stamp_state.ddt_previous);
 		values.extend_from_slice(&self.stamp_state.ddt_older);
@@ -649,18 +670,21 @@ impl Instance {
 		values.extend_from_slice(&self.stamp_state.idt_input_previous);
 		values.extend_from_slice(&*self.event_state_accepted);
 		values.extend_from_slice(&*self.event_state_candidate);
-		let mut flags = Vec::with_capacity(22);
+		values.extend_from_slice(&self.canonical_limit.previous);
+		let mut flags = Vec::with_capacity(37);
 		flags.extend_from_slice(&self.stamp_state.ddt_initialized);
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
 		flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);
 		flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);
+		flags.extend_from_slice(&self.canonical_limit.initialized);
+		flags.push(self.canonical_limit.active);
 		GeneratedVerilogARollbackState { values, flags, ..Default::default() }
 	}
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
-		debug_assert_eq!(state.values.len(), 95);
-		debug_assert_eq!(state.flags.len(), 22);
+		debug_assert_eq!(state.values.len(), 109);
+		debug_assert_eq!(state.flags.len(), 37);
 		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
 		let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
@@ -715,6 +739,15 @@ impl Instance {
 		let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_candidate_valid.copy_from_slice(field);
 		rollback_flags = remaining;
+		let (field, remaining) = rollback_values.split_at(14);
+		self.canonical_limit.previous.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_flags.split_at(14);
+		self.canonical_limit.initialized.copy_from_slice(field);
+		rollback_flags = remaining;
+		let (active, remaining) = rollback_flags.split_first().expect("generated limiter rollback active flag");
+		self.canonical_limit.active = *active;
+		rollback_flags = remaining;
 		debug_assert!(rollback_values.is_empty());
 		debug_assert!(rollback_flags.is_empty());
 	}
@@ -749,6 +782,9 @@ impl Instance {
 		self.event_state_accepted.fill(0.0);
 		self.event_state_candidate.fill(0.0);
 		self.reset_analog_tasks();
+		self.canonical_limit.previous.fill(0.0);
+		self.canonical_limit.initialized.fill(false);
+		self.canonical_limit.active = false;
 		self.time = 0.0;
 		self.timestep = 0.0;
 		self.ddt_coefficients = GeneratedDdtCoefficients::inactive();
@@ -769,8 +805,8 @@ impl Instance {
 			idt_initialized: self.stamp_state.idt_initialized.to_vec(),
 			idtmod: Vec::new(),
 			event_variables,
-			limiter_anchor: Vec::new(),
-			limiter_initialized: Vec::new(),
+			limiter_anchor: self.canonical_limit.previous.to_vec(),
+			limiter_initialized: self.canonical_limit.initialized.to_vec(),
 		}
 	}
 
@@ -791,6 +827,9 @@ impl Instance {
 		}
 		if state.event_variables.iter().any(|value| value.is_nan()) {
 			return Err("generated Verilog-A checkpoint event state contains NaN".to_string());
+		}
+		if state.limiter_anchor.len() != 14 || state.limiter_initialized.len() != 14 {
+			return Err(format!("generated limiter checkpoint shape mismatch: expected 14, found {} / {}", state.limiter_anchor.len(), state.limiter_initialized.len()));
 		}
 		Ok(())
 	}
@@ -815,6 +854,9 @@ impl Instance {
 		self.event_state_candidate.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);
 		self.stamp_state.ddt_candidate_valid.fill(false);
 		self.stamp_state.idt_candidate_valid.fill(false);
+		self.canonical_limit.previous.copy_from_slice(&state.limiter_anchor);
+		self.canonical_limit.initialized.copy_from_slice(&state.limiter_initialized);
+		self.canonical_limit.active = false;
 		self.reset_analog_tasks();
 		Ok(())
 	}
@@ -1143,6 +1185,10 @@ impl Instance {
 
 	#[inline]
 	pub fn limiter_converged(&self) -> bool {
+		!self.canonical_limit.active
+	}
+	#[inline]
+	pub fn limits_newton_steps(&self) -> bool {
 		true
 	}
 	#[inline]

@@ -498,7 +498,10 @@ const MAX_PUBLIC_ITEMS: usize = 5234;
 // Deleting the probe-spelling check only the Python bindings reached brings it to 1,604.
 // B3SOI's shared `SoiInstanceCore` holds one `set_self_heating_startup_disabled`
 // for the three variants, which brings it to 1,602.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1602;
+// `BuiltinVerilogAInstance::limits_newton_steps` adds one: the engine's
+// Newton policy asks a generated device whether its own `$limit` is active.
+// The census is 1,603, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1603;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

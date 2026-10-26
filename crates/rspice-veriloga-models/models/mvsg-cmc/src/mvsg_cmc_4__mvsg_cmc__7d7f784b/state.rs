@@ -1622,6 +1622,10 @@ impl Instance {
 		true
 	}
 	#[inline]
+	pub fn limits_newton_steps(&self) -> bool {
+		false
+	}
+	#[inline]
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
 	#[inline]
 	pub fn discontinuity_rising(&self) -> bool { self.event_state_candidate[0] != self.event_state_accepted[0] || self.event_state_candidate[1] != self.event_state_accepted[1] || self.event_state_candidate[2] != self.event_state_accepted[2] || self.event_state_candidate[3] != self.event_state_accepted[3] || self.event_state_candidate[4] != self.event_state_accepted[4] || self.event_state_candidate[5] != self.event_state_accepted[5] || self.event_state_candidate[6] != self.event_state_accepted[6] || self.event_state_candidate[7] != self.event_state_accepted[7] || self.event_state_candidate[8] != self.event_state_accepted[8] || self.event_state_candidate[9] != self.event_state_accepted[9] || self.event_state_candidate[10] != self.event_state_accepted[10] || self.event_state_candidate[11] != self.event_state_accepted[11] || self.event_state_candidate[12] != self.event_state_accepted[12] || self.event_state_candidate[13] != self.event_state_accepted[13] || self.event_state_candidate[14] != self.event_state_accepted[14] || self.event_state_candidate[15] != self.event_state_accepted[15] || self.event_state_candidate[16] != self.event_state_accepted[16] || self.event_state_candidate[17] != self.event_state_accepted[17] || self.event_state_candidate[18] != self.event_state_accepted[18] || self.event_state_candidate[19] != self.event_state_accepted[19] || self.event_state_candidate[20] != self.event_state_accepted[20] || self.event_state_candidate[21] != self.event_state_accepted[21] }

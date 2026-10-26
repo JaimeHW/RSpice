@@ -4720,6 +4720,7 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
             .new_initializers
             .push_str("            canonical_limit: CanonicalLimitState::new_box(),\n");
         extensions.limiter_converged_expr = "!self.canonical_limit.active".to_string();
+        extensions.limits_newton_steps = true;
         extensions.reset_analysis_state.push_str("        self.canonical_limit.previous.fill(0.0);\n        self.canonical_limit.initialized.fill(false);\n        self.canonical_limit.active = false;\n");
         extensions.rollback_value_count = count;
         extensions.rollback_flag_count = count + 1;
