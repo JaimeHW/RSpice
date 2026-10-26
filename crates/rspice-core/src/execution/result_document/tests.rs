@@ -546,14 +546,22 @@ fn monte_carlo_documents_validate_trial_accounting() {
     result.num_runs = 7;
     result.num_failures = 4;
     result.all_converged = false;
-    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_ok());
+    assert!(
+        AnalysisResultDocument::from_monte_carlo_with_units(analysis, &result, |_| None).is_ok()
+    );
     result.num_failures = 8;
-    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_err());
+    assert!(
+        AnalysisResultDocument::from_monte_carlo_with_units(analysis, &result, |_| None).is_err()
+    );
     result.num_failures = 3;
-    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_err());
+    assert!(
+        AnalysisResultDocument::from_monte_carlo_with_units(analysis, &result, |_| None).is_err()
+    );
     result.num_failures = 7;
     result.variables.clear();
-    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_ok());
+    assert!(
+        AnalysisResultDocument::from_monte_carlo_with_units(analysis, &result, |_| None).is_ok()
+    );
 }
 
 #[test]
@@ -568,11 +576,14 @@ fn monte_carlo_documents_retain_exact_seed_and_sampling_policy() {
         seed: u64::MAX,
         policy: "parameter-xoroshiro128plus-2018-v1",
     });
-    let document =
-        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
-            .unwrap()
-            .build()
-            .unwrap();
+    let document = AnalysisResultDocument::from_monte_carlo_with_units(
+        instance(AnalysisKind::MonteCarlo),
+        &result,
+        |_| None,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
     let ResultPayload::MonteCarlo(payload) = restored.payload() else {
         panic!("MC");
@@ -583,8 +594,12 @@ fn monte_carlo_documents_retain_exact_seed_and_sampling_policy() {
     );
     result.successful_trial_indices.as_mut().unwrap()[2] = 41;
     assert!(
-        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
-            .is_err()
+        AnalysisResultDocument::from_monte_carlo_with_units(
+            instance(AnalysisKind::MonteCarlo),
+            &result,
+            |_| None
+        )
+        .is_err()
     );
     assert_eq!(
         scalar_of(&restored, "first_trial").value(),
@@ -618,11 +633,14 @@ fn monte_carlo_documents_retain_mean_confidence_and_reject_unqualified_intervals
             &NoAbort,
         )
         .unwrap();
-    let document =
-        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
-            .unwrap()
-            .build()
-            .unwrap();
+    let document = AnalysisResultDocument::from_monte_carlo_with_units(
+        instance(AnalysisKind::MonteCarlo),
+        &result,
+        |_| None,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
     assert_eq!(
         scalar_of(&restored, "mean_confidence_level_pct").value(),
@@ -652,8 +670,12 @@ fn monte_carlo_documents_retain_mean_confidence_and_reject_unqualified_intervals
     );
     result.confidence = None;
     assert!(
-        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result,)
-            .is_err()
+        AnalysisResultDocument::from_monte_carlo_with_units(
+            instance(AnalysisKind::MonteCarlo),
+            &result,
+            |_| None,
+        )
+        .is_err()
     );
 }
 
@@ -763,10 +785,13 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
             let points = engine
                 .run_dc_sweep_with_report_and_abort(&netlist, "V1", 0.0, 1.0, 0.5, &NoAbort)
                 .expect("DC sweep runs");
-            AnalysisResultDocument::from_dc_sweep(
+            AnalysisResultDocument::from_nested_dc_sweep(
                 instance(AnalysisKind::Dc),
-                "V1",
-                SignalUnit::Volt,
+                &[DcSweepAxisDocument {
+                    name: "v1".to_owned(),
+                    unit: SignalUnit::Volt,
+                    value_count: points.len(),
+                }],
                 &points,
             )
         }
@@ -829,9 +854,10 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
             SignalUnit::Volt,
             &transient_fft_result(),
         ),
-        AnalysisResultKind::MonteCarlo => AnalysisResultDocument::from_monte_carlo(
+        AnalysisResultKind::MonteCarlo => AnalysisResultDocument::from_monte_carlo_with_units(
             instance(AnalysisKind::MonteCarlo),
             &monte_carlo_result(),
+            |_| None,
         ),
         AnalysisResultKind::Pss => {
             AnalysisResultDocument::from_pss(instance(AnalysisKind::Pss), &pss_result())

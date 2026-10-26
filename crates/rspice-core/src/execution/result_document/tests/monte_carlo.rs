@@ -166,9 +166,10 @@ fn monte_carlo_rejects_contradictory_campaigns_and_confidence() {
 
 #[test]
 fn monte_carlo_histogram_validation_preserves_missingness_and_legacy_intervals() {
-    let document = AnalysisResultDocument::from_monte_carlo(
+    let document = AnalysisResultDocument::from_monte_carlo_with_units(
         instance(AnalysisKind::MonteCarlo),
         &monte_carlo_result(),
+        |_| None,
     )
     .unwrap()
     .build()
@@ -200,11 +201,14 @@ fn monte_carlo_histogram_validation_preserves_missingness_and_legacy_intervals()
             "out".into(),
             VariableStatistics::from_samples("out", samples, 20),
         );
-        let document =
-            AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
-                .unwrap()
-                .build()
-                .unwrap();
+        let document = AnalysisResultDocument::from_monte_carlo_with_units(
+            instance(AnalysisKind::MonteCarlo),
+            &result,
+            |_| None,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
         assert_eq!(restored, document);
     }
@@ -233,11 +237,14 @@ fn monte_carlo_population_validation_honors_cancellation() {
         "out".into(),
         VariableStatistics::from_samples("out", (0..512).map(f64::from).collect(), 128),
     );
-    let document =
-        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
-            .unwrap()
-            .build()
-            .unwrap();
+    let document = AnalysisResultDocument::from_monte_carlo_with_units(
+        instance(AnalysisKind::MonteCarlo),
+        &result,
+        |_| None,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     let count = CountingAbort::new(usize::MAX);
     document.validate_with_abort(&count).unwrap();
     for threshold in 0..count.count() {

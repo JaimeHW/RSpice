@@ -846,9 +846,7 @@ pub struct TransientResultCompressed {
     /// The solver entry points do not receive planning identity, so they
     /// leave this empty rather than inventing an ordinal. A caller that
     /// planned the run — the execution layer, or a frontend that owns the
-    /// analysis cardinality — attaches it, and
-    /// `AnalysisResultDocument::from_compressed_transient` then refuses to
-    /// publish the container under a different analysis.
+    /// analysis cardinality — attaches it.
     pub identity: TransientResultIdentity,
 
     /// Compression ratio achieved
