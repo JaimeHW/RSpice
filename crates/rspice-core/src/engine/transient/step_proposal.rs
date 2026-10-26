@@ -138,18 +138,26 @@ pub(super) fn fit_physical_event_approach(
     }))
 }
 
+/// Xyce 7.10 ends a transient once its clock is within this fraction of the
+/// analysis span of the final time (`StepErrorControl::isFinished`,
+/// N_TIA_StepErrorControl.h), so it never solves a remainder that small.
+pub(super) const XYCE_FINISH_TOLERANCE: Value = 1.0e-10;
+
 /// Fit a rounding-sized final remainder before solving an exact-history step.
 /// Such histories cannot use the ordinary post-solve breakpoint snap: that
 /// would label state evaluated at another clock as the requested endpoint.
 /// Land exactly when the current bound permits it; otherwise divide the last
 /// two intervals so both obey the bound without a near-zero final solve.
 /// Real event endpoints and proposals at the clock's own resolution retain
-/// their original owner/policy.
+/// their original owner/policy. `finish_tolerance` widens the rounding
+/// window to a dialect's own end-of-run tolerance.
 pub(super) fn fit_roundoff_stop_approach(
     window: PhysicalStepWindow,
     proposal: StepProposal,
+    finish_tolerance: Value,
 ) -> Option<StepProposal> {
-    let roundoff = 64.0 * Value::EPSILON * window.accepted_time.abs().max(window.stop_time.abs());
+    let roundoff = (64.0 * Value::EPSILON * window.accepted_time.abs().max(window.stop_time.abs()))
+        .max(finish_tolerance);
     let tail = window.stop_time - proposal.time;
     if proposal.exact_event_time.is_some()
         || tail <= 0.0
@@ -293,7 +301,7 @@ mod tests {
             time: window.accepted_time + 4e-12,
             exact_event_time: None,
         };
-        let fitted = fit_roundoff_stop_approach(window, proposal).unwrap();
+        let fitted = fit_roundoff_stop_approach(window, proposal, 0.0).unwrap();
         assert!(fitted.dt <= window.controller_maximum);
         assert!(fitted.dt > 1.9e-12);
         assert!(window.stop_time - fitted.time > 1.9e-12);
@@ -320,7 +328,7 @@ mod tests {
             time: 2.0 - Value::EPSILON,
             exact_event_time: None,
         };
-        let fitted = fit_roundoff_stop_approach(window, proposal).unwrap();
+        let fitted = fit_roundoff_stop_approach(window, proposal, 0.0).unwrap();
         assert_eq!(fitted.dt, 1.0);
         assert_eq!(fitted.time, 2.0);
         assert!(
@@ -329,7 +337,8 @@ mod tests {
                 StepProposal {
                     exact_event_time: Some(proposal.time),
                     ..proposal
-                }
+                },
+                0.0
             )
             .is_none()
         );
@@ -340,7 +349,8 @@ mod tests {
                     dt: 0.5,
                     time: 1.5,
                     exact_event_time: None
-                }
+                },
+                0.0
             )
             .is_none()
         );

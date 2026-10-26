@@ -382,7 +382,17 @@ fn run_tran_in(
     deck: &str,
     stop: f64,
 ) -> rspice_core::engine::TransientResult {
-    let step = 0.1 * stop;
+    run_tran_with_max_step(config, deck, stop, 0.1 * stop)
+}
+
+/// Run a deck under its configuration's dialect, parsing it as that dialect
+/// reads it.
+fn run_tran_with_max_step(
+    config: rspice_core::engine::SimulationConfig,
+    deck: &str,
+    stop: f64,
+    step: f64,
+) -> rspice_core::engine::TransientResult {
     let dialect = config.spice_dialect;
     let netlist = Netlist::parse_with_options(
         deck,
@@ -446,6 +456,47 @@ R1 1 2 0.001
                 assert!(
                     (actual - expected).abs() <= 1e-6 * expected.abs() + 1e-9,
                     "{dialect:?} V({node}) at {time:e} s: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+/// The same ramp under the Xyce deck's own options at a small maximum step.
+/// A fixed step added up from the 12 ms corner stops a few ulps short of the
+/// 20 ms horizon (0.1 ms: 4.9e-17 s, above Xyce's floor there), and solving
+/// that remainder made the inductor's companion singular. Xyce 7.10 never
+/// solves it (`StepErrorControl::isFinished`); with `.options timeint
+/// delmax=1e-4` (and 4e-5, 2e-5) it prints V(1), V(2) = -50.005, -50 at
+/// 1 ms; -0.005, 0 at 11 ms; 50, 50 at 12 ms; and 0, 0 within 2e-14 at 20 ms.
+#[test]
+fn a_current_ramp_into_an_inductor_reaches_the_horizon_at_small_xyce_steps() {
+    use rspice_core::engine::SpiceDialect;
+    let deck = "Netlist to Test the Xyce Inductor Model
+I1 1 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L1 2 0 10mH
+R1 1 2 0.001
+.options timeint newbpstepping=0 reltol=1.0e-4
+.TRAN 0.1MS 20MS
+.PRINT TRAN V(1) V(2)
+.END
+";
+    for max_step in [1e-4, 4e-5, 2e-5] {
+        let config =
+            rspice_core::engine::SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        let result = run_tran_with_max_step(config, deck, 20e-3, max_step);
+        assert_eq!(result.time.last().copied(), Some(20e-3));
+        for (time, v1, v2) in [
+            (1e-3, -50.005, -50.0),
+            (11e-3, -0.005, 0.0),
+            (12e-3, 50.0, 50.0),
+            (20e-3, 0.0, 0.0),
+        ] {
+            for (node, expected) in [("1", v1), ("2", v2)] {
+                let actual = published_at(&result, node, time);
+                assert!(
+                    (actual - expected).abs() <= 1e-6 * expected.abs() + 1e-9,
+                    "max step {max_step:e}: V({node}) at {time:e} s: {actual} != {expected}"
                 );
             }
         }

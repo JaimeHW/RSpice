@@ -1025,7 +1025,7 @@ mod state_transmission_lines;
 mod step_control;
 mod step_proposal;
 use step_proposal::{
-    PhysicalStepWindow, StepProposal, canonical_transient_step_time,
+    PhysicalStepWindow, StepProposal, XYCE_FINISH_TOLERANCE, canonical_transient_step_time,
     canonical_transient_step_time_with_device_event, fit_physical_event_approach,
     fit_roundoff_stop_approach,
 };
@@ -8242,8 +8242,17 @@ impl Engine {
                     Self::max_expected_source_delta(&circuit, t, candidate_step_time);
             }
             // Exact histories cannot be snapped to the horizon after solving.
-            // Avoid a separate near-zero solve for accumulated clock roundoff.
-            if has_exact_transient_history
+            // Xyce's policy never balances the steps before a breakpoint, so
+            // repeated additions of one step can stop a few ulps short of the
+            // horizon, a remainder Xyce never solves: its run is finished once
+            // the clock is that close (`XYCE_FINISH_TOLERANCE`). Avoid a
+            // separate near-zero solve for accumulated clock roundoff.
+            let xyce_finish_tolerance = if self.config.spice_dialect == SpiceDialect::Xyce {
+                XYCE_FINISH_TOLERANCE * tstop.abs()
+            } else {
+                0.0
+            };
+            if (has_exact_transient_history || xyce_finish_tolerance > 0.0)
                 && locked_grid.is_none()
                 && let Some(fitted) = fit_roundoff_stop_approach(
                     PhysicalStepWindow {
@@ -8259,6 +8268,7 @@ impl Engine {
                         time: candidate_step_time,
                         exact_event_time: exact_device_event_time,
                     },
+                    xyce_finish_tolerance,
                 )
             {
                 dt = fitted.dt;
