@@ -30,7 +30,7 @@ impl StackHost for WaveStackHost<'_> {
         expr_editor_row(ui, self.0, model.analysis_key, model.analysis_index);
     }
     fn resolve_expressions(&mut self, model: &StripModel, tokens: &Tokens) -> Vec<ResolvedExpr> {
-        resolve_strip_exprs(self.0, model, tokens)
+        resolve_strip_exprs(&mut self.0.results_parts(), model, tokens)
     }
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
         self.0
@@ -45,7 +45,7 @@ impl StackHost for WaveStackHost<'_> {
         pane: &UnitPane,
         tokens: &Tokens,
     ) -> Vec<plot::LimitLine> {
-        matching_spec_limits(self.0, model, pane, tokens)
+        matching_spec_limits(self.0.results_reads(), model, pane, tokens)
     }
     fn pane_header(
         &mut self,

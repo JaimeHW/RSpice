@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 fn plan(state: &mut AppState) -> Arc<SoaPlan> {
     let key = active_key(state);
-    soa_plan(state, key).expect("valid active SOA evidence")
+    soa_plan(&mut state.results_parts(), key).expect("valid active SOA evidence")
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn paint(state: &mut AppState, panel: bool) -> String {
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 if panel {
-                    right_panel(ui, state);
+                    right_panel(ui, &mut state.results_parts());
                 } else {
                     show(ui, state);
                 }
@@ -207,7 +207,7 @@ fn soa_source_cached_analysis_must_still_be_active() {
     let key = active_key(&state);
     plan(&mut state);
     state.model.simulation.view.active_analysis_idx = Some(1);
-    assert!(soa_plan(&mut state, key).is_none());
+    assert!(soa_plan(&mut state.results_parts(), key).is_none());
 }
 
 #[test]

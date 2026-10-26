@@ -5,6 +5,7 @@ use super::{
     frame_work::{self, DatasetWalk},
 };
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 use rspice_results_ui::eye_diagram::view;
 
@@ -21,9 +22,8 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn selected_source(state: &AppState) -> &str {
+fn selected_source(state: ResultsReads<'_>) -> &str {
     state
-        .results
         .analysis
         .fft_state
         .selected_source
@@ -34,7 +34,7 @@ fn selected_source(state: &AppState) -> &str {
 pub fn unavailable_hint(state: &AppState) -> Option<String> {
     view::unavailable_hint(
         &state.results.analysis.eye_diagram_state,
-        selected_source(state),
+        selected_source(state.results_reads()),
     )
 }
 
@@ -75,11 +75,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     view::right_panel(
         ui,
-        &state.results.analysis.eye_diagram_state,
-        selected_source(state),
+        &state.analysis.eye_diagram_state,
+        selected_source(state.results_reads()),
     );
 }
 

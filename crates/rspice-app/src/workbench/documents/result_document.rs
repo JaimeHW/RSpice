@@ -584,12 +584,12 @@ pub(super) struct SheetContext<'a> {
 }
 
 impl<'a> SheetContext<'a> {
-    fn of(state: &'a mut AppState) -> Self {
+    fn of(state: &'a mut ResultsParts<'_>) -> Self {
         Self {
             policy: state.model.preferences.quantity_presentation_policy(),
             simulation: &state.model.simulation,
             workspace: &state.model.workspace,
-            results: &mut state.results.results,
+            results: &mut *state.results,
         }
     }
 }
@@ -1382,7 +1382,7 @@ pub(crate) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
 pub(crate) fn active_histogram(
     state: &AppState,
 ) -> Option<std::sync::Arc<rspice_results::histogram::Histogram>> {
-    hist::active_histogram(state)
+    hist::active_histogram(state.results_reads())
 }
 
 pub(crate) fn active_histogram_display(
@@ -1398,11 +1398,11 @@ pub(crate) fn active_histogram_display(
 /// state. Readers that show the reason go through here rather than calling the
 /// validator and discarding the answer on every good frame.
 pub(crate) fn analysis_evidence_failure(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: DatasetId,
     analysis: &AnalysisResult,
 ) -> Option<String> {
-    if analysis_evidence_is_valid(state.results_reads(), dataset_id, analysis) {
+    if analysis_evidence_is_valid(state, dataset_id, analysis) {
         return None;
     }
     Some(
@@ -1991,25 +1991,19 @@ pub(super) fn record_drawn_axes(
 
 /// The interval the active sheet's axis is showing, pinned or fitted.
 pub(crate) fn active_axis_range(
-    state: &AppState,
+    state: ResultsReads<'_>,
     facts: &waves::ActivePaneFacts,
     axis: PaneAxis,
 ) -> Option<(f64, f64)> {
-    let viewer = state.results.results.session.viewer;
+    let viewer = state.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return match axis {
             PaneAxis::X => facts.x_extent,
             PaneAxis::Y => facts.y_extent,
         };
     }
-    let drawn = state
-        .results
-        .results
-        .session
-        .drawn_axes
-        .get(&viewer)
-        .copied();
-    let pinned = state.results.results.session.plot_view(viewer, 0);
+    let drawn = state.results.session.drawn_axes.get(&viewer).copied();
+    let pinned = state.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
         PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
@@ -2018,12 +2012,12 @@ pub(crate) fn active_axis_range(
 
 /// Whether the active sheet's axis is pinned to an explicit interval rather
 /// than fitting its data.
-pub(crate) fn active_axis_is_pinned(state: &AppState, axis: PaneAxis) -> bool {
-    let viewer = state.results.results.session.viewer;
+pub(crate) fn active_axis_is_pinned(state: ResultsReads<'_>, axis: PaneAxis) -> bool {
+    let viewer = state.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
-        return waves::active_pane_axis_is_pinned(&state.results.results, axis);
+        return waves::active_pane_axis_is_pinned(state.results, axis);
     }
-    let pinned = state.results.results.session.plot_view(viewer, 0);
+    let pinned = state.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.is_some(),
         PaneAxis::Y => pinned.y.is_some(),
@@ -2038,19 +2032,19 @@ pub(crate) fn active_axis_is_pinned(state: &AppState, axis: PaneAxis) -> bool {
 /// write to the single-canvas store would land where the sheet never reads.
 pub(crate) fn set_active_axis_range(
     tokens: &Tokens,
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     axis: PaneAxis,
     range: Option<(f64, f64)>,
 ) -> bool {
-    let viewer = state.results.results.session.viewer;
+    let viewer = state.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return waves::set_active_pane_axis_range(tokens, state, axis, range);
     }
-    let view = state.results.results.session.plot_view_pane_mut_for(
-        viewer,
-        PlotPresentationKey::Global(0),
-        0,
-    );
+    let view =
+        state
+            .results
+            .session
+            .plot_view_pane_mut_for(viewer, PlotPresentationKey::Global(0), 0);
     match axis {
         PaneAxis::X => view.x = range,
         PaneAxis::Y => view.y = range,
@@ -2127,13 +2121,19 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Table => table::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
-        ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(&mut app.state)),
+        ResultViewer::Polar => {
+            polar::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
+        }
         ResultViewer::NetworkMatrix => {
-            network_matrix::show(ui, &mut SheetContext::of(&mut app.state))
+            network_matrix::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
         }
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
-        ResultViewer::Scatter => scatter::show(ui, &mut SheetContext::of(&mut app.state)),
-        ResultViewer::BoxViolin => box_violin::show(ui, &mut SheetContext::of(&mut app.state)),
+        ResultViewer::Scatter => {
+            scatter::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
+        }
+        ResultViewer::BoxViolin => {
+            box_violin::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
+        }
         ResultViewer::Events => events::show(ui, &mut app.state),
         ResultViewer::Soa => soa::show(ui, &mut app.state),
         ResultViewer::Optimization => optimization::show(ui, &mut app.state),
@@ -2223,7 +2223,8 @@ fn show_docbar_for_family(
 /// is the only place that knows what the retained result can offer.
 fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
     let viewer = state.results.results.session.viewer;
-    let mut context = SheetContext::of(state);
+    let mut parts = state.results_parts();
+    let mut context = SheetContext::of(&mut parts);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
         ResultViewer::Contribution => sensitivity::domain_bar(ui, &mut context),
@@ -2720,7 +2721,7 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
 // ---------------------------------------------------------------------------
 
 /// Render the Results context right panel for the active viewer.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if let Ok(view) = view_context::resolve_displayed_result_view(state.results_reads())
         && let Some(analysis) = view.primary_analysis(state.results_reads())
         && let Some(crate::state::AnalysisResultPayload::Qpnoise { response }) =
@@ -2733,7 +2734,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             return;
         }
     }
-    match state.results.results.session.viewer {
+    match state.results.session.viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => waves::right_panel(ui, state),
         ResultViewer::Bode => bode::right_panel(ui, state),
         ResultViewer::Fft => fft::right_panel(ui, state),

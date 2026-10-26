@@ -1,6 +1,6 @@
 //! Event source validation, history cache lifetime and selection recovery.
 
-use super::{AnalysisPresentationKey, ResultsReads, SheetContext};
+use super::{AnalysisPresentationKey, ResultsParts, ResultsReads, SheetContext};
 #[cfg(test)]
 use crate::state::{AnalysisType, RetainedTrace};
 use crate::{
@@ -22,7 +22,7 @@ use std::sync::Arc;
 use viewer::EventRowSelection;
 #[cfg(test)]
 mod source_tests;
-fn active_event_origin(state: &AppState) -> EventOrigin<'_> {
+fn active_event_origin(state: ResultsReads<'_>) -> EventOrigin<'_> {
     if let Some(source) = state
         .model
         .simulation
@@ -54,7 +54,7 @@ pub(crate) struct EventOrderCache {
     expanded: std::collections::BTreeSet<String>,
     order: Arc<EventOrder>,
 }
-fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
+fn event_order(state: &mut ResultsParts<'_>) -> Option<Arc<EventOrder>> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
@@ -62,8 +62,8 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
     );
-    let expanded = &state.results.results.session.expanded_event_buses;
-    if let Some(cache) = &state.results.results.event_order_cache
+    let expanded = &state.results.session.expanded_event_buses;
+    if let Some(cache) = &state.results.event_order_cache
         && cache.analysis == key
         && cache.source == source
         && &cache.expanded == expanded
@@ -76,7 +76,7 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
         return None;
     }
     let order = Arc::new(build_event_order(analysis, expanded));
-    state.results.results.event_order_cache = Some(EventOrderCache {
+    state.results.event_order_cache = Some(EventOrderCache {
         analysis: key,
         source,
         expanded: expanded.clone(),
@@ -152,7 +152,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewer::show_absent(ui, EventAbsence::InvalidEvidence);
         return;
     }
-    let Some(cache) = event_order(state) else {
+    let Some(cache) = event_order(&mut state.results_parts()) else {
         return;
     };
     let analysis = state
@@ -166,7 +166,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             analysis_key,
             analysis: &analysis.data,
             order: &cache,
-            origin: active_event_origin(state),
+            origin: active_event_origin(state.results_reads()),
             radix: state.results.results.session.event_bus_radix,
             expanded: &state.results.results.session.expanded_event_buses,
             selected: state
@@ -228,7 +228,7 @@ struct EventSelectionBlock {
     stale: bool,
 }
 fn event_selection_block(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     selection: &DigitalEventSelection,
 ) -> Option<EventSelectionBlock> {
     let block = |reason, stale| Some(EventSelectionBlock { reason, stale });
@@ -258,7 +258,7 @@ fn event_selection_block(
     if event_row_for_selection(
         analysis,
         order.buses(),
-        state.results.results.session.event_bus_radix,
+        state.results.session.event_bus_radix,
         selection,
     )
     .is_none()
@@ -267,19 +267,19 @@ fn event_selection_block(
     }
     None
 }
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(selection) = state.results.results.session.selected_digital_event.clone() else {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let Some(selection) = state.results.session.selected_digital_event.clone() else {
         viewer::selection_absent(ui, SelectionAbsence::Unselected);
         return;
     };
     if let Some(block) = event_selection_block(state, &selection) {
         if block.stale {
-            state.results.results.session.selected_digital_event = None;
+            state.results.session.selected_digital_event = None;
         }
         viewer::selection_absent(ui, block.reason);
         return;
     }
-    let radix = state.results.results.session.event_bus_radix;
+    let radix = state.results.session.event_bus_radix;
     let Some(order) = event_order(state) else {
         return;
     };
@@ -304,7 +304,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         &selection,
         buses,
         radix,
-        active_event_origin(state),
+        active_event_origin(state.results_reads()),
     );
 }
 #[cfg(test)]
@@ -381,7 +381,7 @@ mod tests {
             .selection(AnalysisPresentationKey::new(dataset_id, &analysis), &[])
             .unwrap();
         assert_eq!(
-            event_selection_block(&mut state, &selection),
+            event_selection_block(&mut state.results_parts(), &selection),
             Some(EventSelectionBlock {
                 reason: SelectionAbsence::NoDataset,
                 stale: false,
@@ -393,7 +393,10 @@ mod tests {
         assert!(state.model.simulation.select_analysis(0));
 
         // The row resolves: nothing blocks the inspector.
-        assert_eq!(event_selection_block(&mut state, &selection), None);
+        assert_eq!(
+            event_selection_block(&mut state.results_parts(), &selection),
+            None
+        );
 
         // A selection naming an analysis this dataset never retained.
         let mut unretained = selection.clone();
@@ -402,7 +405,7 @@ mod tests {
             &AnalysisResult::new(99, AnalysisType::Transient, "GONE"),
         );
         assert_eq!(
-            event_selection_block(&mut state, &unretained),
+            event_selection_block(&mut state.results_parts(), &unretained),
             Some(EventSelectionBlock {
                 reason: SelectionAbsence::UnretainedAnalysis,
                 stale: true,
@@ -413,7 +416,7 @@ mod tests {
         let mut past_the_end = selection.clone();
         past_the_end.point_index = 97;
         assert_eq!(
-            event_selection_block(&mut state, &past_the_end),
+            event_selection_block(&mut state.results_parts(), &past_the_end),
             Some(EventSelectionBlock {
                 reason: SelectionAbsence::UnretainedRow,
                 stale: true,
@@ -423,7 +426,7 @@ mod tests {
         // A selection on a retained analysis that is not the active one.
         assert!(state.model.simulation.select_analysis(1));
         assert_eq!(
-            event_selection_block(&mut state, &selection),
+            event_selection_block(&mut state.results_parts(), &selection),
             Some(EventSelectionBlock {
                 reason: SelectionAbsence::OtherAnalysis,
                 stale: false,

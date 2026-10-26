@@ -4,6 +4,7 @@ use super::{
     AnalysisPresentationKey,
     frame_work::{self, DatasetWalk},
 };
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::{
     state::{
         AnalysisResultPayload, AnalysisType, BusNotations, RunHistoryRevision,
@@ -33,7 +34,7 @@ fn retained_detail(analysis: &crate::state::AnalysisResult) -> Option<RetainedDe
         _ => None,
     }
 }
-fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
+fn selected_op_evidence(state: ResultsReads<'_>) -> Option<OpEvidence> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     if analysis.analysis_type != AnalysisType::DcOp {
@@ -148,7 +149,7 @@ pub(crate) fn export_csv(analysis: &crate::state::AnalysisResult) -> Option<supe
         contents: csv.into_string(),
     })
 }
-fn result_mapping_is_current(state: &AppState) -> bool {
+fn result_mapping_is_current(state: ResultsReads<'_>) -> bool {
     let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
@@ -160,7 +161,7 @@ fn result_mapping_is_current(state: &AppState) -> bool {
     )
 }
 fn node_target_available(state: &AppState, name: &str) -> bool {
-    if !result_mapping_is_current(state) {
+    if !result_mapping_is_current(state.results_reads()) {
         return false;
     }
     let name = signal_leaf(name);
@@ -173,7 +174,7 @@ fn node_target_available(state: &AppState, name: &str) -> bool {
             .any(|(candidate, points)| candidate.eq_ignore_ascii_case(name) && !points.is_empty())
 }
 fn device_target(state: &AppState, name: &str) -> Option<u64> {
-    if !result_mapping_is_current(state) {
+    if !result_mapping_is_current(state.results_reads()) {
         return None;
     }
     rspice_design::schematic::component::component_for_engine_device(
@@ -311,7 +312,7 @@ impl viewer::SchematicMapping for OpMapping<'_> {
     }
 }
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let Some(evidence) = selected_op_evidence(state) else {
+    let Some(evidence) = selected_op_evidence(state.results_reads()) else {
         let absence = match state.model.simulation.active_analysis() {
             Some(_) => OpAbsence::OtherAnalysis,
             None => OpAbsence::Missing,
@@ -387,11 +388,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         };
     }
 }
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(evidence) = selected_op_evidence(state) else {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let Some(evidence) = selected_op_evidence(state.results_reads()) else {
         return;
     };
-    viewer::right_panel(ui, &evidence, result_mapping_is_current(state));
+    viewer::right_panel(
+        ui,
+        &evidence,
+        result_mapping_is_current(state.results_reads()),
+    );
 }
 #[cfg(test)]
 mod tests {
@@ -437,9 +442,9 @@ mod tests {
         state.model.simulation.view.active_run_idx = Some(0);
 
         state.model.simulation.view.active_analysis_idx = Some(1);
-        assert!(selected_op_evidence(&state).is_none());
+        assert!(selected_op_evidence(state.results_reads()).is_none());
         state.model.simulation.view.active_analysis_idx = Some(0);
-        let evidence = selected_op_evidence(&state).expect("selected OP evidence");
+        let evidence = selected_op_evidence(state.results_reads()).expect("selected OP evidence");
         assert_eq!(evidence.run_id, 9);
         assert_eq!(evidence.label, "OP 1");
         assert_eq!(evidence.node_count, 1);
@@ -464,7 +469,7 @@ mod tests {
         state.model.simulation.view.active_run_idx = Some(0);
         state.model.simulation.view.active_analysis_idx = Some(0);
 
-        let evidence = selected_op_evidence(&state).expect("retained OP evidence");
+        let evidence = selected_op_evidence(state.results_reads()).expect("retained OP evidence");
         assert_eq!(evidence.node_count, 1);
         let dc = state.model.simulation.retained.runs[0].analyses[0]
             .dc_op
@@ -511,7 +516,7 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 show(ui, &mut state);
-                right_panel(ui, &mut state);
+                right_panel(ui, &mut state.results_parts());
             });
         });
         assert_eq!(state.model.simulation.view.data_version, version);

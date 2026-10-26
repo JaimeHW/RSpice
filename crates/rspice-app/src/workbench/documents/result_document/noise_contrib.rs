@@ -2,7 +2,9 @@
 
 use super::bode;
 use crate::state::SimulationState;
+#[cfg(test)]
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
 use rspice_results_ui::noise_contrib as view;
 
@@ -27,9 +29,9 @@ fn selected_evidence(
 }
 
 /// Bind the contributor inspector to the same qualified analysis as the noise spectrum.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     bode::noise_spectrum_right_panel(ui, state);
-    let index = bode::selected_noise_analysis_index(state);
+    let index = bode::selected_noise_analysis_index(state.results_reads());
     let evidence = selected_evidence(&state.model.simulation, index);
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     view::right_panel(ui, evidence, &quantity_policy);
@@ -167,7 +169,7 @@ mod tests {
 
         let view::ContributorEvidence::Retained { summary, label } = selected_evidence(
             &state.model.simulation,
-            bode::selected_noise_analysis_index(&state),
+            bode::selected_noise_analysis_index(state.results_reads()),
         ) else {
             panic!("selected noise summary");
         };

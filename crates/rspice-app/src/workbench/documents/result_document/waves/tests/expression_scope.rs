@@ -43,7 +43,7 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
 #[test]
 fn excluded_family_members_cannot_change_a_selected_maximum() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
-    let curves = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(curves.len(), 1);
     assert_eq!(curves[0].x.as_slice(), &[3.0, 4.0]);
     assert_eq!(curves[0].y.as_slice(), &[1.0, 1.0]);
@@ -52,7 +52,7 @@ fn excluded_family_members_cannot_change_a_selected_maximum() {
 #[test]
 fn reductions_are_evaluated_independently_for_each_selected_member() {
     let (mut state, models) = fixture((0..6).collect(), "max(V(out))");
-    let curves = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(curves.len(), 3);
     for (member, expected) in [("SS", 10.0), ("TT", 1.0), ("FF", 7.0)] {
         let curve = curves
@@ -66,7 +66,7 @@ fn reductions_are_evaluated_independently_for_each_selected_member() {
 #[test]
 fn stateful_expressions_restart_at_each_member_and_use_the_displayed_axis() {
     let (mut state, models) = fixture((0..6).collect(), "integ(V(out))");
-    let curves = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(curves.len(), 3);
     for (member, expected, axis) in [
         ("SS", 10.0, [1.0, 2.0]),
@@ -82,7 +82,7 @@ fn stateful_expressions_restart_at_each_member_and_use_the_displayed_axis() {
     }
 
     let (mut state, models) = fixture(vec![2, 3], "xval(V(out))");
-    let curves = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(curves[0].y.as_slice(), &[3.0, 4.0]);
 }
 
@@ -102,7 +102,7 @@ fn empty_family_selection_is_an_error_instead_of_a_successful_empty_trace() {
 #[test]
 fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
-    let first = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let first = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(first[0].y.as_slice(), &[1.0, 1.0]);
     let version = state.model.simulation.view.data_version;
     let run = state.model.simulation.active_run().unwrap();
@@ -118,11 +118,11 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
         .with_family_presentation(&manifest, &family_policy())
         .unwrap();
     state.results.results.set_sample_selection(Some(next));
-    let second = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let second = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(second[0].x.as_slice(), &[1.0, 2.0]);
     assert_eq!(second[0].y.as_slice(), &[10.0, 10.0]);
     toggle_visibility(&mut state.results_parts(), 0, 0);
-    let hidden = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
+    let hidden = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(hidden[0].y, second[0].y);
     assert_eq!(state.model.simulation.view.data_version, version);
     assert_eq!(
@@ -181,7 +181,11 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
         .results
         .results
         .set_sample_selection(Some(selection));
-    let curves = resolve_strip_exprs(&mut reopened, &models[0], &Tokens::default());
+    let curves = resolve_strip_exprs(
+        &mut reopened.results_parts(),
+        &models[0],
+        &Tokens::default(),
+    );
     assert_eq!(curves.len(), 1);
     assert_eq!(curves[0].x.as_slice(), &[3.0, 4.0]);
     assert_eq!(curves[0].y.as_slice(), &[1.0, 1.0]);

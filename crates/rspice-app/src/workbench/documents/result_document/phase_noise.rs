@@ -4,6 +4,7 @@ use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SharedWaveformVa
 #[cfg(test)]
 use crate::state::{AnalysisResultFamilyMetadata, PeriodicNoiseOutputQuantity};
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 #[cfg(test)]
 use rspice_results::phase_noise::retained_measurement;
@@ -53,13 +54,13 @@ pub(super) fn phase_noise_is_renderable(analysis: &AnalysisResult) -> bool {
     )
 }
 
-fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
+fn selected_phase_noise_analysis_index(state: ResultsReads<'_>) -> Option<usize> {
     let run = state.model.simulation.active_run()?;
     // Through the workspace memo: the predicate walks every retained offset
     // and level, and this resolves on every frame the sheet is open.
     let renderable = |analysis: &AnalysisResult| {
         super::analysis_answers_structural_gate(
-            state.results_reads(),
+            state,
             run.dataset_id,
             analysis,
             super::StructuralGate::PhaseNoiseSpectrum,
@@ -100,7 +101,7 @@ fn model_from_analysis(
     })
 }
 
-fn build_model(state: &AppState) -> Option<PhaseNoiseModel> {
+fn build_model(state: ResultsReads<'_>) -> Option<PhaseNoiseModel> {
     let run = state.model.simulation.active_run()?;
     let analysis_index = selected_phase_noise_analysis_index(state)?;
     model_from_analysis(analysis_index, run.analyses.get(analysis_index)?)
@@ -130,7 +131,7 @@ fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantities = state.model.preferences.quantity_presentation_policy();
     let presentation = state.result_presentation_policy().readout();
-    let Some(model) = build_model(state) else {
+    let Some(model) = build_model(state.results_reads()) else {
         view::show_absent(ui, active_periodic_noise_without_phase_trace(state));
         return;
     };
@@ -174,11 +175,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Bind inspector measurements to the selected phase-noise trace.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantities = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
-    let model = build_model(state);
+    let model = build_model(state.results_reads());
     let input = model.as_ref().map(|model| view::PhaseNoiseInspector {
         trace: model.trace(),
         analysis: &state.model.simulation.active_run().unwrap().analyses[model.analysis_index].data,

@@ -1,7 +1,7 @@
 //! Selected sensitivity evidence and history-bound presentation cache.
 
 use super::frame_work::{self, DatasetWalk};
-use super::{AnalysisPresentationKey, ResultsReads};
+use super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 use crate::workbench::AppState;
 use egui::Ui;
@@ -55,7 +55,7 @@ pub(super) struct SensitivityPlan {
     analysis: AnalysisPresentationKey,
     display: viewer::SensitivityPlan,
 }
-fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
+fn sensitivity_plan(state: &mut ResultsParts<'_>) -> Option<Arc<SensitivityPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
@@ -63,7 +63,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
-    if let Some(plan) = state.results.results.plans.sensitivity.as_ref()
+    if let Some(plan) = state.results.plans.sensitivity.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
     {
@@ -78,7 +78,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
         analysis: analysis_key,
         display: viewer::SensitivityPlan::new(view.rows),
     });
-    state.results.results.plans.sensitivity = Some(Arc::clone(&built));
+    state.results.plans.sensitivity = Some(Arc::clone(&built));
     Some(built)
 }
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -90,20 +90,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         mismatch::show(ui, state);
         return;
     }
-    let plan = sensitivity_plan(state);
+    let plan = sensitivity_plan(&mut state.results_parts());
     viewer::show(
         ui,
         active_sensitivity(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if study::serves_active_analysis(state.results_reads()) {
         study::right_panel(ui, state);
         return;
     }
     if mismatch::serves_active_analysis(state.results_reads()) {
-        mismatch::right_panel(ui, state);
+        mismatch::right_panel(ui, state.results_reads());
         return;
     }
     let plan = sensitivity_plan(state);
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn retained_view_source_sensitivity_rebuilds_shortened_rows_and_rejects_invalid_evidence() {
         let mut state = ranked_state(64);
-        let original = sensitivity_plan(&mut state).unwrap();
+        let original = sensitivity_plan(&mut state.results_parts()).unwrap();
         let version = state.model.simulation.view.data_version;
         state.model.simulation.retained.runs[0].analyses[0] = sensitivity_result(
             1,
@@ -209,7 +209,7 @@ mod tests {
                 normalized: (-2.0).into(),
             }],
         );
-        let changed = sensitivity_plan(&mut state).unwrap();
+        let changed = sensitivity_plan(&mut state.results_parts()).unwrap();
         assert_eq!(changed.analysis, original.analysis);
         assert_eq!(changed.display.order(), [0]);
         assert_eq!(changed.display.offsets().rows(), 1);
@@ -221,20 +221,28 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 show(ui, &mut state);
-                right_panel(ui, &mut state);
+                right_panel(ui, &mut state.results_parts());
             });
         });
         state.model.simulation.retained.runs[0].analyses[0].success = false;
-        assert!(sensitivity_plan(&mut state).is_none());
+        assert!(sensitivity_plan(&mut state.results_parts()).is_none());
         state.model.simulation.retained.runs[0].analyses[0].success = true;
-        assert_eq!(sensitivity_plan(&mut state).unwrap().display.order(), [0]);
+        assert_eq!(
+            sensitivity_plan(&mut state.results_parts())
+                .unwrap()
+                .display
+                .order(),
+            [0]
+        );
         assert_eq!(state.model.simulation.view.data_version, version);
     }
     #[test]
     fn the_ranking_is_sorted_once_per_dataset_generation() {
         let mut state = ranked_state(64);
-        let first = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
-        let again = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
+        let first =
+            sensitivity_plan(&mut state.results_parts()).expect("a ranked sensitivity plan");
+        let again =
+            sensitivity_plan(&mut state.results_parts()).expect("a ranked sensitivity plan");
         assert!(Arc::ptr_eq(&first, &again));
 
         let ActiveSensitivity::Ready(view) = active_sensitivity(state.results_reads()) else {
@@ -265,7 +273,8 @@ mod tests {
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 
-        let after = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
+        let after =
+            sensitivity_plan(&mut state.results_parts()).expect("a ranked sensitivity plan");
         assert_eq!(after.display.order(), [0]);
         assert_eq!(after.display.max_magnitude(), 2.0);
     }
@@ -314,7 +323,8 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| right_panel(ui, &mut state.results_parts()));
             },
         );
         let drawn = output
@@ -337,7 +347,8 @@ mod tests {
     #[test]
     fn the_chart_row_offsets_are_built_once_beside_the_ranking_they_address() {
         let mut state = ranked_state(2_000);
-        let plan = sensitivity_plan(&mut state).expect("a retained sensitivity result");
+        let plan =
+            sensitivity_plan(&mut state.results_parts()).expect("a retained sensitivity result");
 
         assert_eq!(plan.display.offsets().rows(), plan.display.order().len());
         assert!(
@@ -348,7 +359,7 @@ mod tests {
         assert!(
             std::sync::Arc::ptr_eq(
                 &plan,
-                &sensitivity_plan(&mut state).expect("the memo is served")
+                &sensitivity_plan(&mut state.results_parts()).expect("the memo is served")
             ),
             "a second frame rebuilt the plan the offsets travel in"
         );

@@ -395,8 +395,9 @@ pub(crate) mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        egui::CentralPanel::default()
-                            .show(ui, |ui| show(ui, &mut SheetContext::of(&mut app)));
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            show(ui, &mut SheetContext::of(&mut app.results_parts()))
+                        });
                     },
                 )
             };
@@ -506,8 +507,9 @@ pub(crate) mod tests {
             };
             crate::ui::Theme::default().apply(&egui);
             let output = egui.run_ui(input, |ui| {
-                egui::CentralPanel::default()
-                    .show(ui, |ui| show(ui, &mut SheetContext::of(&mut app)));
+                egui::CentralPanel::default().show(ui, |ui| {
+                    show(ui, &mut SheetContext::of(&mut app.results_parts()))
+                });
             });
             assert!(!output.shapes.is_empty());
             assert_eq!(

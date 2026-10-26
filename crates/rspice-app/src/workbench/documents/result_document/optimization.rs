@@ -16,7 +16,7 @@ use crate::workbench::design_system::section_header;
 use std::sync::Arc;
 
 use super::frame_work::{self, DatasetWalk};
-use super::{AnalysisPresentationKey, OptimizationSelection, ResultsReads};
+use super::{AnalysisPresentationKey, OptimizationSelection, ResultsParts, ResultsReads};
 
 use rspice_results::optimization::history::{OptimizationIndices, OptimizationView};
 
@@ -168,21 +168,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     // Every way of losing the selection ends the same way: the selection is
     // cleared and the reader picks another row. Five sentences for one state
     // were five ways of saying "Select an iteration."
-    if paint_selected_candidate(ui, state) {
+    if paint_selected_candidate(ui, state.results_reads()) {
         return;
     }
-    state.results.results.session.selected_optimization = None;
+    state.results.session.selected_optimization = None;
     section_header(ui, "Candidate selection", None);
     panel_note(ui, "Select an iteration.");
 }
 
 /// Paint the selected candidate, or report that there is none to paint.
-fn paint_selected_candidate(ui: &mut Ui, state: &AppState) -> bool {
-    let Some(selection) = state.results.results.session.selected_optimization else {
+fn paint_selected_candidate(ui: &mut Ui, state: ResultsReads<'_>) -> bool {
+    let Some(selection) = state.results.session.selected_optimization else {
         return false;
     };
     let Some(run) = state.model.simulation.active_run() else {

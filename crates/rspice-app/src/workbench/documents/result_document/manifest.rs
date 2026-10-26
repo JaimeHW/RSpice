@@ -1,6 +1,7 @@
 //! Dataset-manifest cache ownership, exact export and application actions.
 
 use super::frame_work::{self, DatasetWalk};
+use crate::workbench::documents::result_document::ResultsParts;
 use crate::{
     state::{RunHistoryRevision, SimulationRun},
     workbench::AppState,
@@ -20,13 +21,13 @@ pub(crate) struct ManifestPlan {
     run: u64,
     pub(crate) model: ManifestViewModel,
 }
-pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
+pub(crate) fn active_manifest(state: &mut ResultsParts<'_>) -> Option<Arc<ManifestPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
     );
     let run_id = state.model.simulation.active_run()?.id;
-    if let Some(plan) = state.results.results.plans.manifest.as_ref()
+    if let Some(plan) = state.results.plans.manifest.as_ref()
         && plan.source == source
         && plan.run == run_id
     {
@@ -38,14 +39,14 @@ pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>>
         run: run_id,
         model,
     });
-    state.results.results.plans.manifest = Some(Arc::clone(&built));
+    state.results.plans.manifest = Some(Arc::clone(&built));
     Some(built)
 }
 pub(crate) fn show(ui: &mut Ui, state: &mut AppState) {
-    let plan = active_manifest(state);
+    let plan = active_manifest(&mut state.results_parts());
     viewer::show(ui, plan.as_ref().map(|plan| &plan.model));
 }
-pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub(crate) fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(plan) = active_manifest(state) else {
         return;
     };
@@ -98,9 +99,8 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ) {
             Ok(()) => {
                 state
-                    .results
                     .analysis
-                    .synchronize_specialized_viewer_cache_authority(&state.model);
+                    .synchronize_specialized_viewer_cache_authority(state.model);
                 state.record(
                     crate::diagnostics::LogSeverity::Info,
                     crate::diagnostics::LogSource::Studio,
@@ -212,7 +212,7 @@ mod tests {
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .unwrap();
         state.model.simulation.complete_run();
-        let original = active_manifest(&mut state).unwrap();
+        let original = active_manifest(&mut state.results_parts()).unwrap();
         let version = state.model.simulation.view.data_version;
         let mut replacement = state.model.simulation.clone();
         replacement.retained.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
@@ -221,7 +221,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(state.model.simulation.view.data_version, version);
-        let restored = active_manifest(&mut state).unwrap();
+        let restored = active_manifest(&mut state.results_parts()).unwrap();
         assert_eq!(restored.model.dataset_id, original.model.dataset_id);
         assert_ne!(restored.model.dataset_digest, original.model.dataset_digest);
         assert_eq!(
@@ -237,7 +237,7 @@ mod tests {
                 vec![0.0, -0.01],
                 "#55aaff",
             ));
-        let edited = active_manifest(&mut state).unwrap();
+        let edited = active_manifest(&mut state.results_parts()).unwrap();
         assert_eq!(
             edited.model,
             manifest_for_run(state.model.simulation.active_run().unwrap())
@@ -254,7 +254,7 @@ mod tests {
             vec![2.0; 100_000],
             "#ffbd2e",
         )];
-        let original = active_manifest(&mut state).unwrap();
+        let original = active_manifest(&mut state.results_parts()).unwrap();
         let mut other = AppState::default();
         other.model.simulation = state.model.simulation.clone();
         other.results.results = state.results.results.clone();
@@ -262,23 +262,26 @@ mod tests {
         for _ in 0..12 {
             assert!(Arc::ptr_eq(
                 &original,
-                &active_manifest(&mut state).unwrap()
+                &active_manifest(&mut state.results_parts()).unwrap()
             ));
             assert!(Arc::ptr_eq(
                 &original,
-                &active_manifest(&mut other).unwrap()
+                &active_manifest(&mut other.results_parts()).unwrap()
             ));
         }
         assert_eq!(work.since().total(), 0);
         other.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
             Arc::new(vec![3.0; 100_000]);
         assert_ne!(
-            active_manifest(&mut other).unwrap().model.dataset_digest,
+            active_manifest(&mut other.results_parts())
+                .unwrap()
+                .model
+                .dataset_digest,
             original.model.dataset_digest
         );
         assert!(Arc::ptr_eq(
             &original,
-            &active_manifest(&mut state).unwrap()
+            &active_manifest(&mut state.results_parts()).unwrap()
         ));
     }
     #[test]
@@ -292,7 +295,8 @@ mod tests {
                 .expect("the fixture selects a run"),
         );
 
-        let plan = active_manifest(&mut state).expect("a manifest for the active run");
+        let plan =
+            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         assert_eq!(plan.model, direct);
         assert_eq!(
             plan.model.dataset_digest,
@@ -306,13 +310,15 @@ mod tests {
         );
 
         // Asking again is the same answer from the same allocation.
-        let again = active_manifest(&mut state).expect("a manifest for the active run");
+        let again =
+            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         assert!(Arc::ptr_eq(&plan, &again));
     }
     #[test]
     fn a_new_dataset_generation_reprojects_the_manifest() {
         let mut state = state_with_run("Transient");
-        let before = active_manifest(&mut state).expect("a manifest for the active run");
+        let before =
+            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         let before_digest = before.model.dataset_digest.clone();
 
         state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
@@ -320,7 +326,8 @@ mod tests {
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 
-        let after = active_manifest(&mut state).expect("a manifest for the active run");
+        let after =
+            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         assert_ne!(
             after.model.dataset_digest, before_digest,
             "the sheet kept the previous dataset generation's content digest"
@@ -335,7 +342,7 @@ mod tests {
     #[test]
     fn selecting_another_run_reprojects_the_manifest() {
         let mut state = state_with_run("First");
-        let first = active_manifest(&mut state)
+        let first = active_manifest(&mut state.results_parts())
             .expect("a manifest for the active run")
             .model
             .clone();
@@ -350,7 +357,8 @@ mod tests {
         state.model.simulation.retained.runs.push(second);
         assert!(state.model.simulation.select_run(1));
 
-        let after = active_manifest(&mut state).expect("a manifest for the active run");
+        let after =
+            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         assert_ne!(after.model.run_sequence, first.run_sequence);
         assert_ne!(after.model.dataset_digest, first.dataset_digest);
     }

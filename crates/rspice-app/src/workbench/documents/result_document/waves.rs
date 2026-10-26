@@ -69,8 +69,9 @@ use rspice_results_ui::waves::navigation::model_x_axis;
 use super::frame_work::{self, FrameSampleRead};
 use super::{
     AnalysisPresentationKey, ExprSeries, ExprTrace, ExpressionSeriesResult, ExpressionSource,
-    ExpressionWaveform, MarkerSelector, ResultsState, SelectedResultTrace,
-    SourceWaveformPresentationKey, WavePanePresentationKey, WaveformPresentationKey,
+    ExpressionWaveform, MarkerSelector, ResultsParts, ResultsReads, ResultsState,
+    SelectedResultTrace, SourceWaveformPresentationKey, WavePanePresentationKey,
+    WaveformPresentationKey,
 };
 #[cfg(test)]
 use rspice_results_ui::waves::stack::set_pane_log_y;
@@ -189,7 +190,7 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
 }
 
 fn matching_spec_limits(
-    state: &AppState,
+    state: ResultsReads<'_>,
     model: &StripModel,
     pane: &UnitPane,
     t: &Tokens,
@@ -261,8 +262,9 @@ pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
         presentation.complex_number_display(),
         t,
     );
-    active_pane(&models, &state.results.results.session)
-        .is_some_and(|(model, _, pane)| !matching_spec_limits(state, model, &pane, t).is_empty())
+    active_pane(&models, &state.results.results.session).is_some_and(|(model, _, pane)| {
+        !matching_spec_limits(state.results_reads(), model, &pane, t).is_empty()
+    })
 }
 
 pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> bool {
@@ -507,17 +509,17 @@ pub(crate) struct ActivePaneFacts {
     pub y_extent: Option<(f64, f64)>,
 }
 
-pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> ActivePaneFacts {
+pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> ActivePaneFacts {
     let x_unit = active_pane_x_unit(tokens, state);
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let analysis = active_pane_analysis(tokens, state);
-    let key = state.results.results.session.active_wave_pane.as_ref();
+    let key = state.results.session.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         // One owner: the pane’s own log-Y flag on ResultsState. This read
         // used to reach into egui’s persisted memory with a hand-built id,
         // which is a second copy of a fact and drifts the moment either side
         // changes its key.
-        if state.results.results.session.log_y_panes.contains(key) {
+        if state.results.session.log_y_panes.contains(key) {
             "logarithmic"
         } else {
             "linear"
@@ -528,7 +530,7 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
         x_unit,
         analysis,
         scale,
-        limit_mask: if state.results.results.session.show_spec_limits {
+        limit_mask: if state.results.session.show_spec_limits {
             "project specification limits"
         } else {
             "none bound"
@@ -608,12 +610,12 @@ fn x_range_text(
 ///
 /// A sheet that is not the waveform stack picks its own analysis, so the
 /// run's analysis selector is not the authority here: the pane is.
-fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String> {
-    let key = state.results.results.session.active_wave_pane.clone()?;
-    let presentation = state.result_presentation_policy();
+fn active_pane_analysis(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option<String> {
+    let key = state.results.session.active_wave_pane.clone()?;
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -636,15 +638,15 @@ fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String>
 /// limit can never open on a different interval than the one displayed.
 fn active_pane_extents(
     tokens: &Tokens,
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
 ) -> (Option<super::AxisExtent>, Option<super::AxisExtent>) {
-    let Some(key) = state.results.results.session.active_wave_pane.clone() else {
+    let Some(key) = state.results.session.active_wave_pane.clone() else {
         return (None, None);
     };
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -663,10 +665,9 @@ fn active_pane_extents(
         return (None, None);
     };
     let x = model.x_range.map(|full| {
-        shared_x_view(&state.results.results.session, key.analysis, panes.len()).unwrap_or(full)
+        shared_x_view(&state.results.session, key.analysis, panes.len()).unwrap_or(full)
     });
     let pinned = state
-        .results
         .results
         .session
         .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
@@ -700,17 +701,17 @@ pub(crate) fn active_pane_axis_is_pinned(results: &ResultsState, axis: super::Pa
 /// its own unit and one interval across volts and amps would mean nothing.
 pub(crate) fn set_active_pane_axis_range(
     tokens: &Tokens,
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     axis: super::PaneAxis,
     range: Option<(f64, f64)>,
 ) -> bool {
-    let Some(key) = state.results.results.session.active_wave_pane.clone() else {
+    let Some(key) = state.results.session.active_wave_pane.clone() else {
         return false;
     };
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -726,16 +727,10 @@ pub(crate) fn set_active_pane_axis_range(
     };
     match axis {
         super::PaneAxis::X => {
-            set_shared_x_view(
-                &mut state.results.results.session,
-                key.analysis,
-                panes.len(),
-                range,
-            );
+            set_shared_x_view(&mut state.results.session, key.analysis, panes.len(), range);
         }
         super::PaneAxis::Y => {
             state
-                .results
                 .results
                 .session
                 .analysis_plot_view_pane_mut(super::ResultViewer::Waves, key.analysis, ordinal)
@@ -746,12 +741,12 @@ pub(crate) fn set_active_pane_axis_range(
 }
 
 /// The unit the active pane's shared X axis is measured in.
-fn active_pane_x_unit(tokens: &Tokens, state: &mut AppState) -> Option<String> {
-    let key = state.results.results.session.active_wave_pane.clone()?;
-    let presentation = state.result_presentation_policy();
+fn active_pane_x_unit(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option<String> {
+    let key = state.results.session.active_wave_pane.clone()?;
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -773,19 +768,15 @@ fn active_pane_x_unit(tokens: &Tokens, state: &mut AppState) -> Option<String> {
 /// specification limit widens the drawn axis, and reporting the narrower
 /// interval meant the typed limits opened on numbers that were not on screen.
 pub(super) fn displayed_pane_auto_y(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     model: &StripModel,
     pane: &UnitPane,
     ordinal: usize,
     t: &Tokens,
 ) -> Option<(f64, f64)> {
-    let pane_range = pane_y_range(
-        &mut state.results.results.session.derived,
-        model,
-        &pane.traces,
-    );
-    let limits = if state.results.results.session.show_spec_limits {
-        matching_spec_limits(state, model, pane, t)
+    let pane_range = pane_y_range(&mut state.results.session.derived, model, &pane.traces);
+    let limits = if state.results.session.show_spec_limits {
+        matching_spec_limits(state.results_reads(), model, pane, t)
     } else {
         Vec::new()
     };

@@ -1,7 +1,7 @@
 //! Selected study evidence and history-bound presentation cache.
 
 use super::super::frame_work::{self, DatasetWalk};
-use super::super::{AnalysisPresentationKey, ResultsReads};
+use super::super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResultPayload, RunHistoryRevision};
 use crate::workbench::AppState;
 use egui::Ui;
@@ -49,7 +49,7 @@ pub(in crate::workbench::documents::result_document) struct StudyPlan {
     analysis: AnalysisPresentationKey,
     display: viewer::StudyPlan,
 }
-fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
+fn study_plan(state: &mut ResultsParts<'_>) -> Option<Arc<StudyPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
@@ -60,13 +60,8 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
     let ActiveStudy::Ready(view) = active_study(state.results_reads()) else {
         return None;
     };
-    let index = state
-        .results
-        .results
-        .session
-        .study
-        .read_index(view.evidence);
-    if let Some(plan) = state.results.results.plans.study.as_ref()
+    let index = state.results.session.study.read_index(view.evidence);
+    if let Some(plan) = state.results.plans.study.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
         && plan.display.index() == index
@@ -79,7 +74,7 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
         analysis: analysis_key,
         display: viewer::StudyPlan::new(view.evidence, index),
     });
-    state.results.results.plans.study = Some(Arc::clone(&built));
+    state.results.plans.study = Some(Arc::clone(&built));
     Some(built)
 }
 pub(in crate::workbench::documents::result_document) fn domain_bar(
@@ -102,14 +97,14 @@ pub(in crate::workbench::documents::result_document) fn domain_bar(
     )
 }
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
-    let plan = study_plan(state);
+    let plan = study_plan(&mut state.results_parts());
     viewer::show(
         ui,
         active_study(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
     );
 }
-pub(super) fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let plan = study_plan(state);
     viewer::right_panel(
         ui,
@@ -144,8 +139,8 @@ mod tests {
     #[test]
     fn a_study_is_ranked_once_per_dataset_generation() {
         let mut state = state_with(swept_evidence());
-        let first = study_plan(&mut state).expect("a retained study ranks");
-        let again = study_plan(&mut state).expect("the memo is served");
+        let first = study_plan(&mut state.results_parts()).expect("a retained study ranks");
+        let again = study_plan(&mut state.results_parts()).expect("the memo is served");
         assert!(Arc::ptr_eq(&first, &again));
         // Read at the sweep's first frequency, where R1 has the larger
         // magnitude even though PARAM:GAIN dominates further up the band.
@@ -156,11 +151,18 @@ mod tests {
     #[test]
     fn the_contribution_sheet_ranks_a_sweep_at_the_selected_frequency() {
         let mut state = state_with(swept_evidence());
-        assert_eq!(study_plan(&mut state).unwrap().display.order(), [1, 0]);
+        assert_eq!(
+            study_plan(&mut state.results_parts())
+                .unwrap()
+                .display
+                .order(),
+            [1, 0]
+        );
 
         // At the middle frequency PARAM:GAIN dominates the band.
         state.results.results.session.study.frequency_index = 1;
-        let middle = study_plan(&mut state).expect("the ranking follows the reader");
+        let middle =
+            study_plan(&mut state.results_parts()).expect("the ranking follows the reader");
         assert_eq!(middle.display.index(), 1);
         assert_eq!(middle.display.order(), [0, 1]);
         assert_eq!(middle.display.max_magnitude(), 9.0);
@@ -168,7 +170,8 @@ mod tests {
         // A selection past the end of a shorter study is clamped on read, and
         // the stored index is left exactly as the reader set it.
         state.results.results.session.study.frequency_index = 97;
-        let clamped = study_plan(&mut state).expect("a clamped selection still ranks");
+        let clamped =
+            study_plan(&mut state.results_parts()).expect("a clamped selection still ranks");
         assert_eq!(clamped.display.index(), 2);
         assert_eq!(state.results.results.session.study.frequency_index, 97);
     }
@@ -187,7 +190,7 @@ mod tests {
             active_study(state.results_reads()),
             ActiveStudy::Invalid
         ));
-        assert!(study_plan(&mut state).is_none());
+        assert!(study_plan(&mut state.results_parts()).is_none());
     }
     #[test]
     fn the_panel_lists_only_the_rows_its_viewport_shows() {
@@ -218,7 +221,8 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| right_panel(ui, &mut state.results_parts()));
             },
         );
         let drawn = output
@@ -252,7 +256,7 @@ mod tests {
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     show(ui, &mut state);
-                    right_panel(ui, &mut state);
+                    right_panel(ui, &mut state.results_parts());
                 });
             },
         );

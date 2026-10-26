@@ -350,7 +350,7 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
     );
     let model = Arc::clone(&models);
     drop(models);
-    let resolved = resolve_strip_exprs(&mut state, &model[0], &tokens);
+    let resolved = resolve_strip_exprs(&mut state.results_parts(), &model[0], &tokens);
     assert_eq!(
         resolved.len(),
         1,

@@ -1,7 +1,7 @@
 //! SOA source qualification, cached presentation lifetime and shared application actions.
 
 use super::{
-    AnalysisPresentationKey, ResultsReads, SoaRuleSelection,
+    AnalysisPresentationKey, ResultsParts, ResultsReads, SoaRuleSelection,
     frame_work::{self, DatasetWalk},
 };
 #[cfg(test)]
@@ -76,7 +76,7 @@ pub(super) struct SoaPlan {
 /// only for the currently active, successful, validated analysis. The plot
 /// cache shares its source boundary so rebuilding facts also refreshes samples.
 fn soa_plan(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     analysis_key: AnalysisPresentationKey,
 ) -> Option<std::sync::Arc<SoaPlan>> {
     // Eligibility and validation precede even a cache hit. Neither a stable
@@ -91,8 +91,8 @@ fn soa_plan(
     }
     let source = state.model.simulation.retained.runs.revision();
     let version = state.model.simulation.view.data_version;
-    state.results.results.session.cache.ensure_source(&source);
-    if let Some(plan) = state.results.results.plans.soa.as_ref()
+    state.results.session.cache.ensure_source(&source);
+    if let Some(plan) = state.results.plans.soa.as_ref()
         && plan.source == source
         && plan.version == version
         && plan.analysis == analysis_key
@@ -111,7 +111,7 @@ fn soa_plan(
             || frame_work::note(DatasetWalk::SoaStressScan),
         ),
     });
-    state.results.results.plans.soa = Some(std::sync::Arc::clone(&built));
+    state.results.plans.soa = Some(std::sync::Arc::clone(&built));
     Some(built)
 }
 
@@ -137,7 +137,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     // Built before the retained evidence is borrowed, so the scan happens at
     // most once per dataset generation rather than once per row per frame.
-    let Some(plan) = soa_plan(state, analysis_key) else {
+    let Some(plan) = soa_plan(&mut state.results_parts(), analysis_key) else {
         well_hint(ui, "Select a validated safe-operating-area analysis");
         return;
     };
@@ -206,12 +206,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         state.results.results.session.selected_soa_rule = response.selection;
     }
     if let Some(selection) = response.cross_probe {
-        apply_schematic_cross_probe(state, &selection);
+        apply_schematic_cross_probe(&mut state.results_parts(), &selection);
     }
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(selection) = state.results.results.session.selected_soa_rule.clone() else {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let Some(selection) = state.results.session.selected_soa_rule.clone() else {
         viewer::selection_note(ui, viewer::SoaSelectionAbsence::Unselected);
         return;
     };
@@ -236,7 +236,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some((rule, evaluation)) = evaluations.iter().enumerate().find(|(_, evaluation)| {
         evaluation.device_id == selection.device_id && evaluation.parameter == selection.parameter
     }) else {
-        state.results.results.session.selected_soa_rule = None;
+        state.results.session.selected_soa_rule = None;
         viewer::selection_note(ui, viewer::SoaSelectionAbsence::Removed);
         return;
     };
@@ -264,7 +264,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         },
     );
     if response.open_trace {
-        state.results.results.session.soa_stress_trace_open = true;
+        state.results.session.soa_stress_trace_open = true;
     }
     if response.locate_device {
         apply_schematic_cross_probe(state, &selection);
@@ -308,7 +308,7 @@ fn soa_device_target(
     .map(|component| (component.id, component.pos))
 }
 
-fn apply_schematic_cross_probe(state: &mut AppState, selection: &SoaRuleSelection) {
+fn apply_schematic_cross_probe(state: &mut ResultsParts<'_>, selection: &SoaRuleSelection) {
     let Some((component_id, position)) = soa_device_target(
         &state.model.simulation,
         &state.model.workspace,
@@ -330,8 +330,11 @@ fn apply_schematic_cross_probe(state: &mut AppState, selection: &SoaRuleSelectio
         .selection
         .select_only_component(component_id);
     state.model.schematic.session.editor.center_request = Some(position);
-    state.design.schematic_visibility.annotations =
-        crate::state::SchematicAnnotationVisibility::ViolationsOnly;
+    state.workbench.outbox.push(
+        crate::workbench::framework::requests::ShowSchematicAnnotations(
+            crate::state::SchematicAnnotationVisibility::ViolationsOnly,
+        ),
+    );
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
@@ -360,7 +363,7 @@ mod tests {
     fn a_new_dataset_generation_rebuilds_the_stress_facts() {
         let mut state = soa_state(2, 32, 3.0);
         let key = active_key(&state);
-        let before = soa_plan(&mut state, key).expect("a validated SOA plan");
+        let before = soa_plan(&mut state.results_parts(), key).expect("a validated SOA plan");
         let before_interval = before
             .presentation
             .facts(0)
@@ -376,7 +379,7 @@ mod tests {
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 
-        let after = soa_plan(&mut state, key).expect("a validated SOA plan");
+        let after = soa_plan(&mut state.results_parts(), key).expect("a validated SOA plan");
         assert_ne!(
             after
                 .presentation
@@ -419,7 +422,7 @@ mod tests {
             "the fixture retains two distinguishable analyses"
         );
 
-        let plan = soa_plan(&mut state, inactive);
+        let plan = soa_plan(&mut state.results_parts(), inactive);
         assert!(
             plan.is_none(),
             "a plan was served for an analysis whose evidence the build never read"
@@ -432,7 +435,7 @@ mod tests {
         // A key check, not a shutdown: the analysis that is active still gets
         // its plan, and it is stamped with its own key.
         let active = active_key(&state);
-        let served = soa_plan(&mut state, active).expect("a validated SOA plan");
+        let served = soa_plan(&mut state.results_parts(), active).expect("a validated SOA plan");
         assert_eq!(served.analysis, active);
     }
 

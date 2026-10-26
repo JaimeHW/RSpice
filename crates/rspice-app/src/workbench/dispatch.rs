@@ -35,7 +35,7 @@ use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ExportDataset, FollowSchematicGrid, PrintActiveView,
     PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter,
-    ShowWaveforms,
+    ShowSchematicAnnotations, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -138,8 +138,9 @@ impl RSpiceApp {
     /// shortcut resolver's reset when a shortcut library was put in use, the
     /// open waveform view starting again from changed defaults, the dataset
     /// export, the analysis instance and the executed deck a results command
-    /// asked for, and the waveforms and the family member a hand-off into
-    /// Results opens its viewer or form on.
+    /// asked for, the waveforms and the family member a hand-off into Results
+    /// opens its viewer or form on, and the annotations a result viewer shows
+    /// on the schematic it locates something on.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -221,6 +222,13 @@ impl RSpiceApp {
                     &mut app.state,
                     filter,
                 );
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ShowSchematicAnnotations(annotations)| {
+                app.state.design.schematic_visibility.annotations = annotations;
             },
         );
     }

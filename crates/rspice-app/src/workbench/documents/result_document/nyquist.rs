@@ -5,6 +5,7 @@ mod agreement;
 
 use crate::ui::plot;
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 use rspice_results_ui::nyquist::NyquistData;
 use rspice_results_ui::nyquist::view::{
@@ -12,9 +13,8 @@ use rspice_results_ui::nyquist::view::{
 };
 
 /// The retained loop-gain locus.
-fn active_curve(state: &AppState) -> Option<&NyquistData> {
+fn active_curve(state: ResultsReads<'_>) -> Option<&NyquistData> {
     state
-        .results
         .analysis
         .nyquist_state
         .curve()
@@ -28,14 +28,14 @@ pub struct NyquistDerived {
     stability: NyquistStability,
 }
 
-fn derived(state: &mut AppState) -> Option<NyquistDerived> {
+fn derived(state: &mut ResultsParts<'_>) -> Option<NyquistDerived> {
     let version = state.model.simulation.view.data_version;
-    if let Some(cached) = state.results.results.nyquist
+    if let Some(cached) = state.results.nyquist
         && cached.version == version
     {
         return Some(cached);
     }
-    let curve = active_curve(state)?;
+    let curve = active_curve(state.results_reads())?;
     let computed = NyquistDerived {
         version,
         stability: NyquistStability {
@@ -45,7 +45,7 @@ fn derived(state: &mut AppState) -> Option<NyquistDerived> {
             phase_margin: curve.phase_margin(),
         },
     };
-    state.results.results.nyquist = Some(computed);
+    state.results.nyquist = Some(computed);
     Some(computed)
 }
 
@@ -58,7 +58,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // arrays are built by reference. Copying the whole contour out first —
     // purely to release the borrow — meant every frame paid for a complete
     // copy of the locus before finding out the cache already held it.
-    let prepared = if active_curve(state).is_some() {
+    let prepared = if active_curve(state.results_reads()).is_some() {
         let nyquist = &state.results.analysis.nyquist_state;
         let points = nyquist
             .curve()
@@ -73,7 +73,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plot::trace_cache_key(NYQUIST_CACHE_BASE, IMAGINARY_SERIES),
             || std::sync::Arc::new(points.iter().map(|p| p.imag).collect::<Vec<_>>()),
         );
-        let stats = derived(state).map(|cached| cached.stability);
+        let stats = derived(&mut state.results_parts()).map(|cached| cached.stability);
         Some((re, im, stats))
     } else {
         None
@@ -121,7 +121,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Read the cached stability of the selected source into the inspector.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     view::right_panel(
         ui,
@@ -145,7 +145,8 @@ mod tests {
             .nyquist_state
             .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[0.0], &[0.0]));
 
-        let first = derived(&mut state).expect("a loaded locus has stability numbers");
+        let first =
+            derived(&mut state.results_parts()).expect("a loaded locus has stability numbers");
         assert_eq!(first.stability.min_distance, Some(1.0));
 
         state
@@ -155,7 +156,8 @@ mod tests {
             .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[-1.0], &[2.0]));
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
-        let second = derived(&mut state).expect("the replacement locus is derived afresh");
+        let second =
+            derived(&mut state.results_parts()).expect("the replacement locus is derived afresh");
         assert_eq!(second.stability.min_distance, Some(2.0));
     }
 }

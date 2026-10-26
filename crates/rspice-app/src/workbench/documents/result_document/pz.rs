@@ -1,5 +1,6 @@
 //! Active pole-zero source qualification and shared plot-view action ownership.
 
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::{
     state::{AnalysisResultPayload, AnalysisType},
     workbench::AppState,
@@ -8,7 +9,7 @@ use egui::Ui;
 use rspice_results::pole_zero::data::{ComplexRoot, PoleZeroData};
 use rspice_results_ui::pole_zero as view;
 
-fn active_data(state: &AppState) -> Option<PoleZeroData> {
+fn active_data(state: ResultsReads<'_>) -> Option<PoleZeroData> {
     let analysis = state.model.simulation.active_analysis()?;
     if !analysis.success || analysis.analysis_type != AnalysisType::PoleZero {
         return None;
@@ -46,7 +47,7 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let data = active_data(state);
+    let data = active_data(state.results_reads());
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.result_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
@@ -83,10 +84,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let data = active_data(state);
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let data = active_data(state.results_reads());
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     view::right_panel(ui, data.as_ref(), &quantity_policy, digits);
 }
@@ -124,7 +125,7 @@ mod tests {
         run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
-        assert!(active_data(&state).is_none());
+        assert!(active_data(state.results_reads()).is_none());
 
         state.model.simulation.retained.runs[0].analyses[0] =
             AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7").with_result_payload(
@@ -149,7 +150,7 @@ mod tests {
                 },
             );
 
-        let data = active_data(&state).expect("retained PZ payload");
+        let data = active_data(state.results_reads()).expect("retained PZ payload");
         assert_eq!(data.name, "PZ 7");
         assert_eq!(data.gain, Some(4.25));
         assert_eq!(data.roots.len(), 3);

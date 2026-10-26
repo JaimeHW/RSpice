@@ -7,7 +7,7 @@ mod source_tests;
 use egui::Ui;
 use std::sync::Arc;
 
-use super::ResultsReads;
+use super::{ResultsParts, ResultsReads};
 use crate::product::DatasetId;
 use crate::source_revision::SourceRevision;
 use crate::state::{
@@ -216,7 +216,7 @@ fn active_monte_carlo_authority<'a>(
     })
 }
 
-fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments> {
+fn exact_moments(state: ResultsReads<'_>, histogram_name: &str) -> Option<SampleMoments> {
     if state
         .model
         .simulation
@@ -224,7 +224,7 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments
         .and_then(|analysis| analysis.family_metadata.as_ref())
         .is_some()
     {
-        let authority = active_monte_carlo_authority(state.results_reads(), histogram_name)?;
+        let authority = active_monte_carlo_authority(state, histogram_name)?;
         let variable = authority.variable;
         return moments_from_samples(&variable.samples).filter(|moments| {
             moments_match(
@@ -238,7 +238,7 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments
         });
     }
 
-    if !legacy_yield_is_eligible(state.results_reads()) {
+    if !legacy_yield_is_eligible(state) {
         return None;
     }
     let result = matching_yield_result(&state.model.simulation, histogram_name)
@@ -272,7 +272,7 @@ pub(super) struct HistPlan {
 
 /// Resolve bins and statistics together. Source tokens also cover nested edits,
 /// wholesale replacement and clones whose numeric generations happen to match.
-fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
+fn hist_plan(state: ResultsReads<'_>, histogram: &str) -> Arc<HistPlan> {
     let version = state.model.simulation.view.data_version;
     let source = state.model.simulation.retained.runs.revision();
     let yield_source = state.model.simulation.retained.yield_evidence.revision();
@@ -284,12 +284,12 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     let analysis = dataset
         .zip(state.model.simulation.active_analysis())
         .map(|(dataset, analysis)| super::AnalysisPresentationKey::new(dataset, analysis));
-    let settings = &state.results.analysis.histogram_state;
+    let settings = &state.analysis.histogram_state;
     let bin_count = settings.bin_count.clamp(1, 1000);
     let range = settings
         .custom_range
         .then_some((settings.custom_min.to_bits(), settings.custom_max.to_bits()));
-    if let Some(plan) = state.results.results.plans.hist.borrow().as_ref()
+    if let Some(plan) = state.results.plans.hist.borrow().as_ref()
         && plan.version == version
         && plan.source == source
         && plan.yield_source == yield_source
@@ -302,7 +302,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     {
         return Arc::clone(plan);
     }
-    let authority = active_monte_carlo_authority(state.results_reads(), histogram);
+    let authority = active_monte_carlo_authority(state, histogram);
     let yield_result = matching_yield_result(&state.model.simulation, histogram);
     let yield_is_consistent = yield_result.is_some_and(|result| {
         if !yield_result_is_consistent(result) {
@@ -325,7 +325,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
                             .zip(&authority.variable.samples)
                             .all(|(a, b)| a.to_bits() == b.to_bits())
                 }),
-            None => legacy_yield_is_eligible(state.results_reads()),
+            None => legacy_yield_is_eligible(state),
         }
     });
     let moments = exact_moments(state, histogram);
@@ -370,7 +370,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
         moments,
         yield_is_consistent,
     });
-    *state.results.results.plans.hist.borrow_mut() = Some(Arc::clone(&built));
+    *state.results.plans.hist.borrow_mut() = Some(Arc::clone(&built));
     built
 }
 
@@ -431,14 +431,14 @@ pub(super) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
     })
 }
 
-pub(super) fn active_histogram(state: &AppState) -> Option<Arc<Histogram>> {
+pub(super) fn active_histogram(state: ResultsReads<'_>) -> Option<Arc<Histogram>> {
     let name = selected_histogram_name(state)?;
     hist_plan(state, &name).histogram.clone()
 }
 
 pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<HistogramDisplay>> {
-    let name = selected_histogram_name(state)?;
-    hist_plan(state, &name)
+    let name = selected_histogram_name(state.results_reads())?;
+    hist_plan(state.results_reads(), &name)
         .display
         .as_ref()
         .ok()
@@ -446,10 +446,10 @@ pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<Histogram
 }
 
 /// The distribution the reader has selected, by name.
-fn selected_histogram_name(state: &AppState) -> Option<String> {
-    let names = histogram_names(state.results_reads());
+fn selected_histogram_name(state: ResultsReads<'_>) -> Option<String> {
+    let names = histogram_names(state);
     let index = rspice_results_ui::histogram::state::measurement_index(
-        state.results.analysis.histogram_state.selected.as_deref(),
+        state.analysis.histogram_state.selected.as_deref(),
         0,
         &names,
     )?;
@@ -469,7 +469,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
-    let plan = selected_histogram_name(state).map(|name| hist_plan(state, &name));
+    let plan = selected_histogram_name(state.results_reads())
+        .map(|name| hist_plan(state.results_reads(), &name));
     let model = match &plan {
         None => Err(HistogramUnavailable::NoSelection {
             has_measurements: !names.is_empty(),
@@ -531,8 +532,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Resolve source authority around range controls and render the qualified facts.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(name) = selected_histogram_name(state) else {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let Some(name) = selected_histogram_name(state.results_reads()) else {
         view::right_panel(
             ui,
             Err(HistogramUnavailable::NoSelection {
@@ -541,19 +542,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
-    let current_range = active_histogram(state).map(|histogram| histogram.range());
-    if view::range_controls(
-        ui,
-        &mut state.results.analysis.histogram_state,
-        current_range,
-    ) {
+    let current_range = active_histogram(state.results_reads()).map(|histogram| histogram.range());
+    if view::range_controls(ui, &mut state.analysis.histogram_state, current_range) {
         state
-            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
-    let plan = hist_plan(state, &name);
+    let plan = hist_plan(state.results_reads(), &name);
     let model = plan
         .histogram
         .as_deref()
@@ -728,7 +724,10 @@ mod tests {
         assert_eq!(authority.seed, 0x73a4);
         assert_eq!(authority.runs_completed, 3);
         assert_eq!(authority.failures, 1);
-        assert_eq!(exact_moments(&state, "offset").unwrap().mean, 2.0);
+        assert_eq!(
+            exact_moments(state.results_reads(), "offset").unwrap().mean,
+            2.0
+        );
         assert!(active_monte_carlo_authority(state.results_reads(), "missing").is_none());
     }
 
@@ -774,7 +773,7 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        assert!(exact_moments(&state, "gain").is_none());
+        assert!(exact_moments(state.results_reads(), "gain").is_none());
     }
 
     #[test]
@@ -812,19 +811,22 @@ mod tests {
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
 
-        let first = hist_plan(&state, "gain");
-        assert!(std::sync::Arc::ptr_eq(&first, &hist_plan(&state, "gain")));
+        let first = hist_plan(state.results_reads(), "gain");
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &hist_plan(state.results_reads(), "gain")
+        ));
         assert_eq!(first.moments.expect("retained moments").mean, 2.0);
         // The memo is the projection it replaced.
         assert_eq!(
             first.moments.expect("retained moments").std_dev,
-            exact_moments(&state, "gain")
+            exact_moments(state.results_reads(), "gain")
                 .expect("retained moments")
                 .std_dev
         );
 
         // Another distribution is another answer, at the same generation.
-        let other = hist_plan(&state, "offset");
+        let other = hist_plan(state.results_reads(), "offset");
         assert!(!std::sync::Arc::ptr_eq(&first, &other));
 
         // A new generation of the population is a new answer.
@@ -844,7 +846,7 @@ mod tests {
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 
-        let after = hist_plan(&state, "gain");
+        let after = hist_plan(state.results_reads(), "gain");
         assert_eq!(
             after.moments.expect("retained moments").mean,
             20.0,

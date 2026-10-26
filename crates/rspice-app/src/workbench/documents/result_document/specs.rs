@@ -270,7 +270,7 @@ pub fn open_editor(state: &mut ResultsParts<'_>) {
 }
 
 /// Right panel: the same active-dataset projection shown in the document.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     rspice_results_ui::specs::right_panel(
         ui,
         state.model.simulation.active_run().map(|run| &run.data),

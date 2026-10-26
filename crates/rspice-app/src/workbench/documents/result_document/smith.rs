@@ -240,13 +240,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Present the selected source's trace summary and marker.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let presentation = state.result_presentation_policy();
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let presentation = state.results_reads().presentation_policy();
     view::right_panel(
         ui,
-        &state.results.analysis.smith_chart_state,
+        &state.analysis.smith_chart_state,
         state
-            .results
             .results
             .session
             .rf_pin

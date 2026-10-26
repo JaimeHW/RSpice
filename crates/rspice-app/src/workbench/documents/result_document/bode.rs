@@ -9,10 +9,11 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
+#[cfg(test)]
 use crate::workbench::AppState;
 use rspice_results_ui::bode::inspector::{self, BodeInspector, NoiseSpectrumModel};
 
-use super::{BodeDerived, ResultsReads};
+use super::{BodeDerived, ResultsParts, ResultsReads};
 
 /// The selected frequency-response signal pair's computed stability numbers.
 struct BodeModel {
@@ -95,7 +96,7 @@ enum NoMargins {
     AnalysisFailed(Option<String>),
 }
 
-fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
+fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
     let simulation = &state.model.simulation;
     if simulation.active_analysis().is_some_and(|a| {
         matches!(
@@ -132,7 +133,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     // magnitude waveform) — the crossings and folds are O(points) and both
     // panels read them every frame.
     let version = simulation.view.data_version;
-    let margins = match state.results.results.bode {
+    let margins = match state.results.bode {
         Some(d)
             if d.version == version
                 && d.analysis_index == shape.analysis_index
@@ -152,7 +153,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
                 mag_index: shape.mag_index,
                 metrics,
             };
-            state.results.results.bode = Some(d);
+            state.results.bode = Some(d);
             d
         }
     };
@@ -171,31 +172,25 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
 /// would put a different analysis's contributors under the reader's
 /// selection. The run-wide fallback applies only when the selection expresses
 /// no noise intent for the binding to honour.
-pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
+pub(super) fn selected_noise_analysis_index(state: ResultsReads<'_>) -> Option<usize> {
     let run = state.model.simulation.active_run()?;
     rspice_results::renderability::select_ordinary_noise_analysis(
         state.model.simulation.view.active_analysis_idx,
         &run.analyses,
-        |analysis| {
-            ordinary_noise_spectrum_is_renderable_in(
-                state.results_reads(),
-                run.dataset_id,
-                analysis,
-            )
-        },
+        |analysis| ordinary_noise_spectrum_is_renderable_in(state, run.dataset_id, analysis),
     )
 }
 
-fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)> {
+fn selected_noise_analysis(state: ResultsReads<'_>) -> Option<(usize, &AnalysisResult)> {
     let run = state.model.simulation.active_run()?;
     let selected = selected_noise_analysis_index(state)?;
     Some((selected, &run.analyses[selected]))
 }
 
-fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
+fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
     let run = state.model.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
-    let shape = noise_spectrum_shape(state.results_reads(), run.dataset_id, analysis)?;
+    let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
     let frequency = Arc::clone(&analysis.waveforms.get(shape.anchor)?.x);
     let (total_rms, input_rms, band) = analysis
         .noise_summary
@@ -218,9 +213,9 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
     })
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let digits = significant_digits(state);
+    let digits = significant_digits(state.results_reads());
     if let Some(analysis) = state.model.simulation.active_analysis() {
         let specialized = match analysis.analysis_type {
             AnalysisType::Qpxf => Some(BodeInspector::Qpxf(match &analysis.result_payload {
@@ -251,19 +246,19 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     inspector::right_panel(ui, inspector, &quantity_policy, digits);
 }
 
-pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
-    let model = build_noise_model(state);
+pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let model = build_noise_model(state.results_reads());
     inspector::noise_spectrum_right_panel(
         ui,
         model.as_ref(),
         &state.model.preferences.quantity_presentation_policy(),
-        significant_digits(state),
+        significant_digits(state.results_reads()),
     );
 }
 
 /// Results ▸ Displayed significant digits, or the open result document's own.
-fn significant_digits(state: &AppState) -> usize {
-    let presentation = state.result_presentation_policy();
+fn significant_digits(state: ResultsReads<'_>) -> usize {
+    let presentation = state.presentation_policy();
     usize::from(presentation.displayed_significant_digits().get())
 }
 
@@ -279,7 +274,7 @@ mod tests {
     /// stopped stating the count, so the shape is asked directly.
     fn selected_noise_trace_count(state: &AppState) -> Option<usize> {
         let run = state.model.simulation.active_run()?;
-        let (_, analysis) = selected_noise_analysis(state)?;
+        let (_, analysis) = selected_noise_analysis(state.results_reads())?;
         Some(noise_spectrum_shape(state.results_reads(), run.dataset_id, analysis)?.trace_count)
     }
 
@@ -319,12 +314,12 @@ mod tests {
         assert!(state.model.simulation.select_run(0));
 
         assert!(state.model.simulation.select_analysis(0));
-        let first = build_model(&mut state).expect("first model");
+        let first = build_model(&mut state.results_parts()).expect("first model");
         assert_eq!(first.margins.analysis_index, 0);
         assert_eq!(first.margins.metrics.adc_db, Some(20.0));
 
         assert!(state.model.simulation.select_analysis(1));
-        let second = build_model(&mut state).expect("second model");
+        let second = build_model(&mut state.results_parts()).expect("second model");
         assert_eq!(second.margins.analysis_index, 1);
         assert_eq!(second.margins.metrics.adc_db, Some(40.0));
     }
@@ -361,7 +356,7 @@ mod tests {
         let mut state = AppState::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
-        let model = build_model(&mut state).expect("Bode model");
+        let model = build_model(&mut state.results_parts()).expect("Bode model");
 
         assert!(!model.margins.metrics.adc_is_dc);
         fn collect(shape: &egui::Shape, text: &mut Vec<String>) {
@@ -382,7 +377,8 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| right_panel(ui, &mut state.results_parts()));
             },
         );
         let mut text = Vec::new();
@@ -412,7 +408,7 @@ mod tests {
         assert!(state.model.simulation.select_run(0));
         assert!(state.model.simulation.select_analysis(0));
 
-        match build_model(&mut state) {
+        match build_model(&mut state.results_parts()) {
             Err(NoMargins::AnalysisFailed(reason)) => {
                 assert_eq!(reason.as_deref(), Some("AC analysis did not converge"));
             }
@@ -450,19 +446,28 @@ mod tests {
         // The selection is a noise analysis with no ordinary spectrum: the
         // card is empty, not filled from the neighbouring NOISE result.
         assert!(state.model.simulation.select_analysis(0));
-        assert_eq!(selected_noise_analysis_index(&state), None);
+        assert_eq!(selected_noise_analysis_index(state.results_reads()), None);
 
         // The selection is the ordinary-noise result itself.
         assert!(state.model.simulation.select_analysis(1));
-        assert_eq!(selected_noise_analysis_index(&state), Some(1));
+        assert_eq!(
+            selected_noise_analysis_index(state.results_reads()),
+            Some(1)
+        );
 
         // The selection carries no noise intent at all, so the run's own
         // spectrum is the only available answer and is used.
         assert!(state.model.simulation.select_analysis(2));
-        assert_eq!(selected_noise_analysis_index(&state), Some(1));
+        assert_eq!(
+            selected_noise_analysis_index(state.results_reads()),
+            Some(1)
+        );
 
         state.model.simulation.view.active_analysis_idx = None;
-        assert_eq!(selected_noise_analysis_index(&state), Some(1));
+        assert_eq!(
+            selected_noise_analysis_index(state.results_reads()),
+            Some(1)
+        );
     }
 
     #[test]
@@ -487,13 +492,13 @@ mod tests {
         // phase-noise trace must not be relabelled as one, and neither may
         // the neighbouring NOISE result be substituted for it.
         assert!(state.model.simulation.select_analysis(0));
-        assert!(build_noise_model(&state).is_none());
+        assert!(build_noise_model(state.results_reads()).is_none());
 
         // Selecting the ordinary-noise result gives the card its evidence.
         // The nV/√Hz conversion itself is pinned by the waves pane-stack
         // projection tests.
         assert!(state.model.simulation.select_analysis(1));
-        let model = build_noise_model(&state).expect("ordinary noise spectrum");
+        let model = build_noise_model(state.results_reads()).expect("ordinary noise spectrum");
         assert_eq!(model.frequency.as_slice(), &[1.0, 10.0]);
         assert_eq!(selected_noise_trace_count(&state), Some(1));
     }
@@ -522,7 +527,7 @@ mod tests {
         let mut state = AppState::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
-        let _ = build_noise_model(&state).expect("input-referred noise model");
+        let _ = build_noise_model(state.results_reads()).expect("input-referred noise model");
         // Input-referred evidence takes the card without mixing in output
         // or contributor traces.
         assert_eq!(selected_noise_trace_count(&state), Some(1));

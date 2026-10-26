@@ -272,7 +272,9 @@ fn window_statistics_measure_each_branch_between_the_cursors() {
     state.results.results.session.cursors.a = Some(0.0);
     state.results.results.session.cursors.b = Some(0.5);
 
-    let painted = super::interaction::painted_texts(&mut state, right_panel);
+    let painted = super::interaction::painted_texts(&mut state, |ui, state| {
+        right_panel(ui, &mut state.results_parts());
+    });
     // x ≤ 0.5 selects indices {0, 1} on the way out and {3, 4} on the way
     // back: y ∈ {0, 1, 3, 4}. A contiguous slice stops at the turnaround and
     // never sees the 4 V the return leg ends on.

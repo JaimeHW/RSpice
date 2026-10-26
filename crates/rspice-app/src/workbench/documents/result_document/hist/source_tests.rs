@@ -53,7 +53,7 @@ fn paint(state: &mut AppState, panel: bool) -> String {
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 if panel {
-                    right_panel(ui, state);
+                    right_panel(ui, &mut state.results_parts());
                 } else {
                     show(ui, state);
                 }
@@ -115,7 +115,7 @@ fn hist_selection_preserves_the_measurement_name_across_reordering_and_removal()
     other.min = 99.0;
     other.max = 99.0;
     variables.insert(0, other);
-    let histogram = active_histogram(&state).unwrap();
+    let histogram = active_histogram(state.results_reads()).unwrap();
     assert_eq!(histogram.name, "gain");
     assert_eq!(histogram.data_max, 3.0);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
@@ -126,19 +126,22 @@ fn hist_selection_preserves_the_measurement_name_across_reordering_and_removal()
         unreachable!()
     };
     variables.remove(1);
-    assert!(active_histogram(&state).is_none());
+    assert!(active_histogram(state.results_reads()).is_none());
     assert!(paint(&mut state, false).contains("selected measurement is unavailable"));
     state.results.analysis.histogram_state.selected = Some("offset".to_owned());
-    assert_eq!(active_histogram(&state).unwrap().data_max, 99.0);
+    assert_eq!(
+        active_histogram(state.results_reads()).unwrap().data_max,
+        99.0
+    );
 }
 
 #[test]
 fn hist_modes_refresh_projection_and_keep_point_density_unavailable() {
     let mut state = state_with(super::tests::mc_variable("gain"));
-    let count = hist_plan(&state, "gain");
+    let count = hist_plan(state.results_reads(), "gain");
     for mode in HistogramDisplayMode::ALL {
         state.results.analysis.histogram_state.mode = mode;
-        let plan = hist_plan(&state, "gain");
+        let plan = hist_plan(state.results_reads(), "gain");
         assert_eq!(plan.display.as_ref().unwrap().mode, mode);
         if mode != HistogramDisplayMode::Count {
             assert_ne!(plan.display_source, count.display_source);
@@ -199,7 +202,13 @@ fn hist_source_statistics_follow_nested_edits_and_active_analysis_changes() {
     other.id = 2;
     state.model.simulation.retained.runs[0].add_analysis(other);
     let version = state.model.simulation.view.data_version;
-    assert_eq!(hist_plan(&state, "gain").moments.unwrap().mean, 2.0);
+    assert_eq!(
+        hist_plan(state.results_reads(), "gain")
+            .moments
+            .unwrap()
+            .mean,
+        2.0
+    );
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
         state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
@@ -214,9 +223,21 @@ fn hist_source_statistics_follow_nested_edits_and_active_analysis_changes() {
     variable.min = 10.0;
     variable.max = 30.0;
     assert_eq!(state.model.simulation.view.data_version, version);
-    assert_eq!(hist_plan(&state, "gain").moments.unwrap().mean, 20.0);
+    assert_eq!(
+        hist_plan(state.results_reads(), "gain")
+            .moments
+            .unwrap()
+            .mean,
+        20.0
+    );
     state.model.simulation.view.active_analysis_idx = Some(1);
-    assert_eq!(hist_plan(&state, "gain").moments.unwrap().mean, 2.0);
+    assert_eq!(
+        hist_plan(state.results_reads(), "gain")
+            .moments
+            .unwrap()
+            .mean,
+        2.0
+    );
 }
 
 #[test]
@@ -230,7 +251,7 @@ fn hist_source_yield_replacement_cannot_reuse_a_wrapped_generation() {
         .simulation
         .replace_yield_evidence(vec![valid.clone()], Some(provenance));
     let version = state.model.simulation.view.data_version;
-    assert!(hist_plan(&state, "gain").yield_is_consistent);
+    assert!(hist_plan(state.results_reads(), "gain").yield_is_consistent);
     let mut invalid = valid;
     invalid.stats.mean += 1.0;
     state
@@ -238,7 +259,7 @@ fn hist_source_yield_replacement_cannot_reuse_a_wrapped_generation() {
         .simulation
         .replace_yield_evidence(vec![invalid], Some(provenance));
     state.model.simulation.view.data_version = version;
-    assert!(!hist_plan(&state, "gain").yield_is_consistent);
+    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
 }
 
 #[test]
@@ -251,7 +272,7 @@ fn hist_source_yield_must_describe_the_displayed_monte_carlo_population() {
         .model
         .simulation
         .replace_yield_evidence(vec![unrelated], Some(provenance));
-    assert!(!hist_plan(&state, "gain").yield_is_consistent);
+    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
 }
 
 #[test]
@@ -294,7 +315,7 @@ fn hist_source_unchanged_large_histories_do_not_repeat_population_walks() {
                 .viewer_capability(ActiveViewer::Histogram)
                 .available
         );
-        assert!(active_histogram(&state).is_some());
+        assert!(active_histogram(state.results_reads()).is_some());
         paint(&mut state, false);
         paint(&mut state, true);
     }
@@ -309,12 +330,15 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
     let mut state = state_with(super::tests::mc_variable("gain"));
     state.results.analysis.histogram_state.bin_count = 2;
     state.results.analysis.histogram_state.selected = Some("gain".to_owned());
-    let first = active_histogram(&state).unwrap();
+    let first = active_histogram(state.results_reads()).unwrap();
     assert_eq!(first.bins.len(), 2);
     assert_eq!(first.total_count, 3);
-    assert!(Arc::ptr_eq(&first, &active_histogram(&state).unwrap()));
+    assert!(Arc::ptr_eq(
+        &first,
+        &active_histogram(state.results_reads()).unwrap()
+    ));
     state.results.analysis.histogram_state.bin_count = 3;
-    let rebuilt = active_histogram(&state).unwrap();
+    let rebuilt = active_histogram(state.results_reads()).unwrap();
     assert_eq!(
         rebuilt.bins.iter().map(|bin| bin.count).collect::<Vec<_>>(),
         vec![1, 1, 1]
@@ -323,17 +347,20 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
     state.results.analysis.histogram_state.custom_range = true;
     state.results.analysis.histogram_state.custom_min = 1.0;
     state.results.analysis.histogram_state.custom_max = 2.0;
-    let cropped = active_histogram(&state).unwrap();
+    let cropped = active_histogram(state.results_reads()).unwrap();
     assert_eq!(cropped.range(), (1.0, 2.0));
     assert_eq!(cropped.overflow, 1);
     state.results.analysis.histogram_state.custom_max = f64::NAN;
-    assert!(active_histogram(&state).is_none());
+    assert!(active_histogram(state.results_reads()).is_none());
     state.results.analysis.histogram_state.custom_range = false;
     state.model.simulation.retained.runs[0].analyses[0].success = false;
     assert!(!histogram_is_available(state.results_reads()));
-    assert!(active_histogram(&state).is_none());
+    assert!(active_histogram(state.results_reads()).is_none());
     state.model.simulation.retained.runs[0].analyses[0].success = true;
-    assert_eq!(active_histogram(&state).unwrap().total_count, 3);
+    assert_eq!(
+        active_histogram(state.results_reads()).unwrap().total_count,
+        3
+    );
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
         state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
@@ -342,7 +369,7 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
         unreachable!()
     };
     variables[0].samples[0] = f64::NAN;
-    assert!(active_histogram(&state).is_none());
+    assert!(active_histogram(state.results_reads()).is_none());
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
         state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
@@ -351,7 +378,10 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
         unreachable!()
     };
     variables[0].samples[0] = 1.0;
-    assert_eq!(active_histogram(&state).unwrap().total_count, 3);
+    assert_eq!(
+        active_histogram(state.results_reads()).unwrap().total_count,
+        3
+    );
 }
 
 #[test]
@@ -371,14 +401,14 @@ fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
         .model
         .simulation
         .replace_yield_evidence(vec![result.clone()], Some(provenance));
-    assert!(hist_plan(&state, "gain").yield_is_consistent);
+    assert!(hist_plan(state.results_reads(), "gain").yield_is_consistent);
     let mut wrong_seed = provenance;
     wrong_seed.seed += 1;
     state
         .model
         .simulation
         .replace_yield_evidence(vec![result.clone()], Some(wrong_seed));
-    assert!(!hist_plan(&state, "gain").yield_is_consistent);
+    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
     let mut reordered = result;
     reordered.samples.reverse();
     reordered.trail.reverse();
@@ -387,7 +417,7 @@ fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
         .model
         .simulation
         .replace_yield_evidence(vec![reordered], Some(provenance));
-    assert!(!hist_plan(&state, "gain").yield_is_consistent);
+    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
 }
 
 #[test]

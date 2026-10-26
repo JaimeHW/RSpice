@@ -81,7 +81,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
     let y = match current.y {
         Some(range) => Some(range),
-        None => displayed_pane_auto_y(state, model, &pane, ordinal, t),
+        None => displayed_pane_auto_y(&mut state.results_parts(), model, &pane, ordinal, t),
     }
     .and_then(|range| scaled_range(range, factor, logarithmic_y));
     if let Some(x) = x {

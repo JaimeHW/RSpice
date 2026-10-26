@@ -488,6 +488,13 @@ const AFTER_CONTRIBUTION: &[Step] = &[
             "crate::workbench::documents::result_document::set_family_filter(",
         ],
     ),
+    (
+        "11",
+        &[
+            "|app, ShowSchematicAnnotations(annotations)|",
+            "app.state.design.schematic_visibility.annotations = annotations;",
+        ],
+    ),
 ];
 
 /// The shell's `contribute`, at the points that draw the results workspace
@@ -858,8 +865,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        10,
-        "`after_contribution` answers exactly the ten requests it lists"
+        11,
+        "`after_contribution` answers exactly the eleven requests it lists"
     );
 }
 

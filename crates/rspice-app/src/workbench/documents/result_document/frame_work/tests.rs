@@ -609,31 +609,31 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
         ResultViewer::Eye => eye::show(ui, state),
         ResultViewer::Contribution => {
             sensitivity::show(ui, state);
-            sensitivity::right_panel(ui, state);
+            sensitivity::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Optimization => {
             optimization::show(ui, state);
-            optimization::right_panel(ui, state);
+            optimization::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Bode => {
             waves::show_bode(ui, state);
-            bode::right_panel(ui, state);
+            bode::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::NoiseContrib => {
             waves::show_noise(ui, state);
-            noise_contrib::right_panel(ui, state);
+            noise_contrib::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Nyquist => {
             nyquist::show(ui, state);
-            nyquist::right_panel(ui, state);
+            nyquist::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Fft => {
             fft::show(ui, state);
-            fft::right_panel(ui, state);
+            fft::right_panel(ui, &mut state.results_parts());
         }
         ResultViewer::Events => {
             events::show(ui, state);
-            events::right_panel(ui, state);
+            events::right_panel(ui, &mut state.results_parts());
         }
         other => panic!("{other:?} is not a measured surface"),
     }

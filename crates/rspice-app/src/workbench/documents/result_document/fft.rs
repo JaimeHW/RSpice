@@ -2,6 +2,7 @@
 
 use super::{ResultViewer, frame_work};
 use crate::workbench::AppState;
+use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
 use rspice_results_ui::fft::view;
 
@@ -49,12 +50,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let presentation = state.result_presentation_policy();
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let presentation = state.results_reads().presentation_policy();
     view::right_panel(
         ui,
-        &state.results.analysis.fft_state,
-        &mut state.results.results.session.fft_series,
+        &state.analysis.fft_state,
+        &mut state.results.session.fft_series,
         &state.model.preferences.quantity_presentation_policy(),
         usize::from(presentation.displayed_significant_digits().get()),
     );

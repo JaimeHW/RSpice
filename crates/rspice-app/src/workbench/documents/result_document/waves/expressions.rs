@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::state::ComplexExpressionPolicy;
+use crate::workbench::documents::result_document::ResultsParts;
 use rspice_results_ui::waves::cache::apply_waveform_visibility;
 use rspice_results_ui::waves::expression_editor::Action;
 pub(super) use rspice_results_ui::waves::stack::{expr_color, expr_palette_slot, expression_label};
@@ -133,12 +134,11 @@ pub(super) use rspice_results_ui::waves::pane::ResolvedExpr;
 /// Refresh the expression cache for a strip at the current data version and
 /// hand back plottable series (visible expressions, successful evaluations).
 pub(super) fn resolve_strip_exprs(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     model: &StripModel,
     tokens: &Tokens,
 ) -> Vec<ResolvedExpr> {
     let exprs: Vec<(usize, ExprTrace)> = state
-        .results
         .results
         .session
         .analysis_exprs
@@ -149,7 +149,7 @@ pub(super) fn resolve_strip_exprs(
         return Vec::new();
     }
 
-    let sample_selection = state.results.results.session.sample_selection.clone();
+    let sample_selection = state.results.session.sample_selection.clone();
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
@@ -159,7 +159,6 @@ pub(super) fn resolve_strip_exprs(
         );
         let key = (model.analysis_key, expr.text.clone());
         let fresh = state
-            .results
             .results
             .analysis_expr_cache
             .get(&key)
@@ -181,7 +180,6 @@ pub(super) fn resolve_strip_exprs(
             }
             state
                 .results
-                .results
                 .analysis_expr_cache
                 .insert(key.clone(), ExprSeries { version, series });
         }
@@ -189,7 +187,6 @@ pub(super) fn resolve_strip_exprs(
             continue;
         }
         let cached = state
-            .results
             .results
             .analysis_expr_cache
             .get(&key)
@@ -231,7 +228,6 @@ pub(super) fn resolve_strip_exprs(
             // is no longer there.
             let shape = state
                 .results
-                .results
                 .session
                 .derived
                 .shape_or(cache_key, || SweepShape::of(&x));
@@ -240,7 +236,6 @@ pub(super) fn resolve_strip_exprs(
             // resolving a strip happens twice per frame, so scanning for them
             // here cost two full passes over the evaluated series each time.
             let y_extremes = state
-                .results
                 .results
                 .session
                 .derived
@@ -459,7 +454,7 @@ mod tests {
             .results
             .session
             .sync_expression_projection(model.analysis_key, 0);
-        let old = resolve_strip_exprs(&mut state, model, &Tokens::default());
+        let old = resolve_strip_exprs(&mut state.results_parts(), model, &Tokens::default());
         assert_eq!(old[0].y.as_slice(), &[0.0; 2]);
         assert!(old[0].label.starts_with("legacy magnitude"));
         assert!(
@@ -473,7 +468,7 @@ mod tests {
                 )
                 .unwrap()
         );
-        let current = resolve_strip_exprs(&mut state, model, &Tokens::default());
+        let current = resolve_strip_exprs(&mut state.results_parts(), model, &Tokens::default());
         assert_eq!(current[0].y.as_slice(), &[2.0; 2]);
         assert_eq!(current[0].label, "mag(V(a)-V(b))");
         assert_ne!(old[0].cache_key, current[0].cache_key);

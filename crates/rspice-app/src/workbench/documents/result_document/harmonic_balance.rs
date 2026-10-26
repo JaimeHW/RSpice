@@ -1,6 +1,6 @@
 //! Coefficient-spectrum source qualification and application viewport ownership.
 
-use super::ResultsReads;
+use super::{ResultsParts, ResultsReads};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::ui::tokens::Tokens;
 use crate::workbench::AppState;
@@ -38,7 +38,7 @@ pub(super) fn active_analysis_is_renderable(state: ResultsReads<'_>) -> bool {
     })
 }
 
-fn selected_hb_analysis(state: &AppState) -> Option<&AnalysisResult> {
+fn selected_hb_analysis(state: ResultsReads<'_>) -> Option<&AnalysisResult> {
     let run = state.model.simulation.active_run()?;
     state
         .model
@@ -54,7 +54,7 @@ fn selected_hb_analysis(state: &AppState) -> Option<&AnalysisResult> {
         })
 }
 
-fn build_model(state: &AppState, tokens: &Tokens) -> Option<HarmonicBalanceModel> {
+fn build_model(state: ResultsReads<'_>, tokens: &Tokens) -> Option<HarmonicBalanceModel> {
     let analysis = selected_hb_analysis(state)?;
 
     let palette = &tokens.color.traces;
@@ -127,14 +127,14 @@ const fn harmonic_trace_cache_key(analysis_id: u64, waveform_index: usize) -> u6
     0x48B0_0000_0000_0000_u64 ^ analysis_id.rotate_left(23) ^ (waveform_index as u64).rotate_left(7)
 }
 
-fn active_incomplete_fft(state: &AppState) -> Option<String> {
+fn active_incomplete_fft(state: ResultsReads<'_>) -> Option<String> {
     let analysis = state.model.simulation.active_analysis()?;
     analysis
         .success
         .then(|| recorded_fft::incomplete_history_sentence(&analysis.data))?
 }
 
-fn active_hb_failure(state: &AppState) -> Option<&str> {
+fn active_hb_failure(state: ResultsReads<'_>) -> Option<&str> {
     let analysis = state.model.simulation.active_analysis()?;
     (matches!(
         analysis.analysis_type,
@@ -148,7 +148,7 @@ fn active_hb_failure(state: &AppState) -> Option<&str> {
         })
 }
 
-fn absence(state: &AppState) -> view::SpectrumAbsence<'_> {
+fn absence(state: ResultsReads<'_>) -> view::SpectrumAbsence<'_> {
     if let Some(error) = active_hb_failure(state) {
         view::SpectrumAbsence::Failed(error)
     } else if let Some(sentence) = active_incomplete_fft(state) {
@@ -163,8 +163,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let tokens = Tokens::get(ui.ctx());
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.result_presentation_policy().readout();
-    let Some(model) = build_model(state, &tokens) else {
-        view::show_absent(ui, absence(state));
+    let Some(model) = build_model(state.results_reads(), &tokens) else {
+        view::show_absent(ui, absence(state.results_reads()));
         return;
     };
     let viewport = state
@@ -205,12 +205,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Bind the inspector to the same qualified spectrum and recorded payload.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let tokens = Tokens::get(ui.ctx());
-    let model = build_model(state, &tokens);
-    let source = model.as_ref().ok_or_else(|| absence(state));
+    let model = build_model(state.results_reads(), &tokens);
+    let source = model.as_ref().ok_or_else(|| absence(state.results_reads()));
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     view::right_panel(ui, source, &quantity_policy, digits);
 }

@@ -1079,7 +1079,8 @@ fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
     // reader actually spends their time on.
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
-            egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, &mut app.state));
+            egui::Panel::right("inspector")
+                .show(ctx, |ui| right_panel(ui, &mut app.state.results_parts()));
             egui::CentralPanel::default()
                 .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer, None));
         });
@@ -1218,7 +1219,8 @@ fn sheet_route_nodes(
                 ..Default::default()
             },
             |ctx| {
-                egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, &mut app.state));
+                egui::Panel::right("inspector")
+                    .show(ctx, |ui| right_panel(ui, &mut app.state.results_parts()));
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| show(ui, &mut app));
@@ -1439,7 +1441,7 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
 
     assert!(set_active_axis_range(
         &tokens,
-        &mut app.state,
+        &mut app.state.results_parts(),
         PaneAxis::X,
         Some((1.0e-6, 4.0e-6))
     ));
@@ -1453,16 +1455,22 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
         Some((1.0e-6, 4.0e-6)),
         "the waveform stack must read its own analysis-keyed viewport"
     );
-    assert!(active_axis_is_pinned(&app.state, PaneAxis::X));
+    assert!(active_axis_is_pinned(
+        app.state.results_reads(),
+        PaneAxis::X
+    ));
 
-    set_active_axis_range(&tokens, &mut app.state, PaneAxis::X, None);
-    assert!(!active_axis_is_pinned(&app.state, PaneAxis::X));
+    set_active_axis_range(&tokens, &mut app.state.results_parts(), PaneAxis::X, None);
+    assert!(!active_axis_is_pinned(
+        app.state.results_reads(),
+        PaneAxis::X
+    ));
 
     let mut app = app_showing(ResultViewer::Smith);
     app.state.results.results.session.viewer = ResultViewer::Smith;
     assert!(set_active_axis_range(
         &tokens,
-        &mut app.state,
+        &mut app.state.results_parts(),
         PaneAxis::Y,
         Some((-0.5, 0.5))
     ));
@@ -1476,7 +1484,10 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
         Some((-0.5, 0.5)),
         "a single-canvas sheet keeps its viewport under the plot ordinal"
     );
-    assert!(active_axis_is_pinned(&app.state, PaneAxis::Y));
+    assert!(active_axis_is_pinned(
+        app.state.results_reads(),
+        PaneAxis::Y
+    ));
 }
 
 /// The editor has to open on the interval the reader can see, including
@@ -1496,14 +1507,14 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
         x_extent: None,
         y_extent: None,
     };
-    let x = active_axis_range(&app.state, &facts, PaneAxis::X)
+    let x = active_axis_range(app.state.results_reads(), &facts, PaneAxis::X)
         .expect("the Smith sheet recorded the interval it drew");
     assert!(
         x.0 < x.1 && x.0.is_finite() && x.1.is_finite(),
         "recorded a degenerate interval: {x:?}"
     );
     assert!(
-        !active_axis_is_pinned(&app.state, PaneAxis::X),
+        !active_axis_is_pinned(app.state.results_reads(), PaneAxis::X),
         "a fitted sheet must not report itself pinned just because it drew"
     );
 }

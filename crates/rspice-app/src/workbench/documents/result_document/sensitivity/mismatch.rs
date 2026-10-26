@@ -82,8 +82,8 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
         plan.as_deref().map(|plan| &plan.display),
     );
 }
-pub(super) fn right_panel(ui: &mut Ui, state: &AppState) {
-    viewer::right_panel(ui, active_mismatch(state.results_reads()));
+pub(super) fn right_panel(ui: &mut Ui, state: ResultsReads<'_>) {
+    viewer::right_panel(ui, active_mismatch(state));
 }
 
 #[cfg(test)]

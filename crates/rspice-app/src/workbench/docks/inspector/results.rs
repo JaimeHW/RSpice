@@ -51,7 +51,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     // The workspace's memoized projection: taking it fresh re-digested the run.
-    let manifest = active_manifest(&mut app.state);
+    let manifest = active_manifest(&mut app.state.results_parts());
     let details = match app
         .state
         .model
@@ -78,7 +78,10 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // the trace and pane controls, matching the upgraded mockup's hierarchy
     // without creating a second result-data owner here.
     if app.state.results.results.session.viewer != ResultViewer::Manifest {
-        crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
+        crate::workbench::documents::result_document::right_panel(
+            ui,
+            &mut app.state.results_parts(),
+        );
     }
 
     let Some(run) = app.state.model.simulation.active_run() else {
@@ -105,7 +108,7 @@ fn selected_result_artifact(
     let run = &app.state.model.simulation.retained.runs[run_index];
     // Memoized per dataset generation: the validator walks every retained
     // sample. Intact data is the normal state and says nothing.
-    let corrupted = analysis_evidence_failure(&app.state, run.dataset_id, analysis);
+    let corrupted = analysis_evidence_failure(app.state.results_reads(), run.dataset_id, analysis);
     let analysis_label = analysis.label.clone();
 
     section_header(ui, "Selected result", None);
@@ -243,8 +246,10 @@ fn active_result_pane(
     // The unit names the pane in a unit-scoped stack; the viewer name is
     // already on the sheet tab above.
     let tokens = Tokens::get(ui.ctx());
-    let facts =
-        crate::workbench::documents::result_document::active_pane_facts(&tokens, &mut app.state);
+    let facts = crate::workbench::documents::result_document::active_pane_facts(
+        &tokens,
+        &mut app.state.results_parts(),
+    );
     section_header(
         ui,
         "Active pane",
@@ -284,8 +289,8 @@ fn axis_limit_row(
     };
 
     let viewer = app.state.results.results.session.viewer;
-    let current = active_axis_range(&app.state, facts, axis);
-    let pinned = active_axis_is_pinned(&app.state, axis);
+    let current = active_axis_range(app.state.results_reads(), facts, axis);
+    let pinned = active_axis_is_pinned(app.state.results_reads(), axis);
     // The unit the field writes after its numbers, and strips before reading
     // them back. Only the waveform stack knows its axes' units; every other
     // sheet's field states bare engineering numbers, as it always has.
@@ -335,16 +340,16 @@ fn axis_limit_row(
             // pinned one, by the rounding alone.
             app.state.results.results.session.axis_limit_draft = None;
         } else if text.trim().is_empty() {
-            set_active_axis_range(&tokens, &mut app.state, axis, None);
+            set_active_axis_range(&tokens, &mut app.state.results_parts(), axis, None);
             app.state.results.results.session.axis_limit_draft = None;
         } else if let Some(range) = parse_axis_range(&text, unit) {
-            set_active_axis_range(&tokens, &mut app.state, axis, Some(range));
+            set_active_axis_range(&tokens, &mut app.state.results_parts(), axis, Some(range));
             app.state.results.results.session.axis_limit_draft = None;
         }
     }
     if reset.clicked() {
         let tokens = Tokens::get(ui.ctx());
-        set_active_axis_range(&tokens, &mut app.state, axis, None);
+        set_active_axis_range(&tokens, &mut app.state.results_parts(), axis, None);
         app.state.results.results.session.axis_limit_draft = None;
     }
 }

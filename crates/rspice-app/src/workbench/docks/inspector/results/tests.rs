@@ -377,7 +377,7 @@ pub(crate) fn waves_details_app() -> RSpiceApp {
     // Y held at the 4…6 V the field showed James as `4.0000000 … 6.000`.
     crate::workbench::documents::result_document::set_active_axis_range(
         &Tokens::default(),
-        &mut app.state,
+        &mut app.state.results_parts(),
         PaneAxis::Y,
         Some((4.0, 6.0)),
     );

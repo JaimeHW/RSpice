@@ -294,6 +294,18 @@ impl Request for PromptAfterCommands {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Show these annotations on the schematic. Raised by a result viewer that
+/// locates what it reports on the schematic, as it opens Design, and taken
+/// straight after the call that raised it, before the schematic draws.
+#[derive(Clone, Copy, Debug)]
+pub struct ShowSchematicAnnotations(
+    pub rspice_schematic_editor::session::visibility::SchematicAnnotationVisibility,
+);
+
+impl Request for ShowSchematicAnnotations {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section

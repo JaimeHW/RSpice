@@ -23,7 +23,7 @@ fn paint(state: &mut AppState, panel: bool) {
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             if panel {
-                right_panel(ui, state);
+                right_panel(ui, &mut state.results_parts());
             } else {
                 show(ui, state);
             }
@@ -53,7 +53,8 @@ fn panel_text(state: &mut AppState) -> String {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, state));
+            egui::CentralPanel::default()
+                .show(ctx, |ui| right_panel(ui, &mut state.results_parts()));
         },
     );
     let mut text = String::new();
@@ -358,7 +359,7 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
                 }
             }
             assert!(
-                event_selection_block(&mut state, &selection).is_some(),
+                event_selection_block(&mut state.results_parts(), &selection).is_some(),
                 "{source:?}, change_time={change_time}"
             );
             paint(&mut state, true);
@@ -391,7 +392,7 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
             .validate_retained_evidence()
             .is_err()
     );
-    let block = event_selection_block(&mut state, &selection)
+    let block = event_selection_block(&mut state.results_parts(), &selection)
         .expect("invalid evidence cannot be inspected");
     assert!(!block.stale, "repair can restore the selected event");
     paint(&mut state, true);
@@ -407,7 +408,7 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
     state.model.simulation.retained.runs[0].analyses[0]
         .waveforms
         .clear();
-    assert!(event_selection_block(&mut state, &selection).is_none());
+    assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
 }
 
 #[test]
@@ -430,7 +431,7 @@ fn event_source_bus_selection_detects_changed_members_before_a_frame() {
             .is_ok()
     );
     assert!(
-        event_selection_block(&mut state, &selection).is_some(),
+        event_selection_block(&mut state.results_parts(), &selection).is_some(),
         "the word is still 00, but its bits now name different members"
     );
     paint(&mut state, true);
@@ -463,7 +464,7 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
             time_s: 20.0e-9,
             value_code: 0,
         });
-    assert!(event_selection_block(&mut state, &selection).is_none());
+    assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
     assert_eq!(
         state
             .results
@@ -597,8 +598,8 @@ fn event_source_same_time_selection_survives_trace_reordering() {
         unreachable!()
     };
     digital_traces.swap(0, 1);
-    assert!(event_selection_block(&mut state, &selection).is_none());
-    let order = event_order(&mut state).unwrap();
+    assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
+    let order = event_order(&mut state.results_parts()).unwrap();
     let event = event_row_for_selection(
         state.model.simulation.active_analysis().unwrap(),
         order.buses(),
@@ -639,7 +640,7 @@ fn event_source_bus_selection_detects_strength_and_range_changes() {
                 .validate_retained_evidence()
                 .is_ok()
         );
-        let order = event_order(&mut state).unwrap();
+        let order = event_order(&mut state.results_parts()).unwrap();
         assert_eq!(
             event_row_at_name(
                 state.model.simulation.active_analysis().unwrap(),
@@ -655,7 +656,7 @@ fn event_source_bus_selection_detects_strength_and_range_changes() {
             "01"
         );
         assert!(
-            event_selection_block(&mut state, &selection).is_some(),
+            event_selection_block(&mut state.results_parts(), &selection).is_some(),
             "equal binary text is not equal retained identity"
         );
     }
@@ -678,23 +679,29 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
         "clk",
         99_999,
     );
-    let original = event_order(&mut state).unwrap();
+    let original = event_order(&mut state.results_parts()).unwrap();
     let mut other = AppState::default();
     other.model.simulation = state.model.simulation.clone();
     other.results.results = state.results.results.clone();
     let work = WorkCounts::reset();
     for _ in 0..12 {
-        assert!(event_selection_block(&mut state, &selection).is_none());
-        assert!(event_selection_block(&mut other, &selection).is_none());
-        assert!(Arc::ptr_eq(&original, &event_order(&mut other).unwrap()));
+        assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
+        assert!(event_selection_block(&mut other.results_parts(), &selection).is_none());
+        assert!(Arc::ptr_eq(
+            &original,
+            &event_order(&mut other.results_parts()).unwrap()
+        ));
     }
     assert_eq!(work.since().total(), 0);
     other.model.simulation.view.data_version =
         other.model.simulation.view.data_version.wrapping_add(1);
     let work = WorkCounts::reset();
-    assert!(event_selection_block(&mut other, &selection).is_none());
+    assert!(event_selection_block(&mut other.results_parts(), &selection).is_none());
     assert_eq!(work.since().get(DatasetWalk::EventOrder), 1);
-    assert!(Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
+    assert!(Arc::ptr_eq(
+        &original,
+        &event_order(&mut state.results_parts()).unwrap()
+    ));
 
     let version = state.model.simulation.view.data_version;
     state.model.simulation = crate::io::simulation_state_from_results(
@@ -702,11 +709,14 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     )
     .unwrap();
     assert_eq!(state.model.simulation.view.data_version, version);
-    assert!(event_selection_block(&mut state, &selection).is_none());
-    assert!(!Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
+    assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
+    assert!(!Arc::ptr_eq(
+        &original,
+        &event_order(&mut state.results_parts()).unwrap()
+    ));
 
     // Retention must release a large event order without drawing EVENTS again.
-    let cached = Arc::downgrade(&event_order(&mut state).unwrap());
+    let cached = Arc::downgrade(&event_order(&mut state.results_parts()).unwrap());
     state
         .model
         .simulation
@@ -755,12 +765,12 @@ fn event_source_failed_analysis_is_unavailable_but_live_partial_can_be_inspected
     run.mark_running().unwrap();
     state.model.simulation.view.active_analysis_idx = Some(0);
     let selection = pick(&mut state, EventSelectionSource::ExactDigital, "clk", 1);
-    assert!(event_selection_block(&mut state, &selection).is_none());
+    assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
     state.model.simulation.retained.runs[0].analyses[0] =
         AnalysisResult::failed(1, AnalysisType::Transient, "TRAN", "convergence")
             .with_result_payload(payload);
     assert_eq!(
-        event_selection_block(&mut state, &selection)
+        event_selection_block(&mut state.results_parts(), &selection)
             .unwrap()
             .reason,
         SelectionAbsence::InvalidEvidence
@@ -794,7 +804,7 @@ fn event_source_projected_idle_reads_do_not_rescan_the_trace() {
     let work = WorkCounts::reset();
     for _ in 0..12 {
         assert!(active_analysis_is_renderable(state.results_reads()));
-        assert!(event_selection_block(&mut state, &selection).is_none());
+        assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
         paint(&mut state, false);
         paint(&mut state, true);
     }
@@ -823,7 +833,7 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
             .is_err()
     );
     assert!(!active_analysis_is_renderable(state.results_reads()));
-    assert!(event_order(&mut state).is_none());
+    assert!(event_order(&mut state.results_parts()).is_none());
     assert!(
         crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
             &state.model.simulation
@@ -846,7 +856,7 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
     assert_eq!(selection.time_bits(), 99_999.0_f64.to_bits());
     let work = WorkCounts::reset();
     for _ in 0..12 {
-        assert!(event_selection_block(&mut state, &selection).is_none());
+        assert!(event_selection_block(&mut state.results_parts(), &selection).is_none());
     }
     assert_eq!(work.since().total(), 0);
 }
