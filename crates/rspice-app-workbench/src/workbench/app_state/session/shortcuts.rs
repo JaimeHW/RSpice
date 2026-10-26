@@ -14,6 +14,7 @@ use crate::workbench::framework::command_registry::Registry;
 
 mod canvas_focus;
 pub mod category;
+mod context_match;
 mod input_snapshot;
 mod platform;
 pub mod resolver;
@@ -25,6 +26,7 @@ pub use canvas_focus::{
     request_engineering_canvas_focus_in_this_pass,
 };
 pub use category::ShortcutCategory;
+pub use context_match::ShortcutContextMatch;
 pub use input_snapshot::ShortcutInputSnapshot;
 pub use platform::runtime_command_platform;
 pub use resolver::ShortcutEnvironment;

@@ -28,7 +28,8 @@ use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryParts, ShortcutLibraryPersistenceRuntime, ShortcutLibraryPublication,
     ShortcutLibraryPublicationContinuation,
 };
-use crate::workbench::app_state::{Model, PlatformState, ShortcutContextMatch, trim_recent_files};
+use crate::workbench::app_state::session::shortcuts::ShortcutContextMatch;
+use crate::workbench::app_state::{Model, PlatformState, trim_recent_files};
 use crate::workbench::framework::feature::CloudPort;
 use crate::workbench::state::WorkbenchSession;
 

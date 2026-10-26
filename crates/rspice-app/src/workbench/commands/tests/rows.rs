@@ -18,7 +18,7 @@ use crate::state::shortcuts::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
     shortcut_context_precedence_rank,
 };
-use crate::workbench::app_state::ShortcutContextMatch;
+use crate::workbench::app_state::session::shortcuts::ShortcutContextMatch;
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
