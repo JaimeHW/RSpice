@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn each_way_storage_can_disappoint_reaches_a_rung_that_names_the_recovery() {
         use crate::state::model_hub::durable::{HydrationReport, RejectedArchive};
-        use crate::workbench::surfaces::models::workspace_state::ModelsOperationalState as State;
+        use crate::workbench::models::workspace_state::ModelsOperationalState as State;
 
         let discarded = HydrationReport {
             restored: 0,

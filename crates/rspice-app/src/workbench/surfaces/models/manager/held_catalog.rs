@@ -19,7 +19,7 @@
 
 use super::*;
 
-use crate::workbench::surfaces::models::workspace_state::ModelsAttemptedOperation;
+use crate::workbench::models::workspace_state::ModelsAttemptedOperation;
 
 /// The held catalog's identity, its acceptance contract, and the last attempt.
 pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubCatalog) {

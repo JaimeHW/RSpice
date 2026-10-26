@@ -802,7 +802,7 @@ fn catalog_clock_failure_is_announced_without_hiding_installed_pack_actions() {
 /// to whatever the ledger's ordinary projection says about it.
 #[test]
 fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
-    use crate::workbench::surfaces::models::workspace_state::ModelsAttemptedOperation;
+    use crate::workbench::models::workspace_state::ModelsAttemptedOperation;
 
     let landing = pack(vec![row("Proving", "1.0.0", HubPackState::Available)], None);
     let other = {
@@ -957,7 +957,7 @@ fn a_browser_session_states_the_lifetime_of_what_it_installs() {
 /// can act on.
 #[test]
 fn every_operational_state_paints_its_word_and_its_consequence() {
-    use crate::workbench::surfaces::models::workspace_state::{
+    use crate::workbench::models::workspace_state::{
         ModelsAttemptedOperation, ModelsOperationalState,
     };
 
@@ -1008,7 +1008,7 @@ fn every_operational_state_paints_its_word_and_its_consequence() {
 
 #[test]
 fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
-    use crate::workbench::surfaces::models::workspace_state::{
+    use crate::workbench::models::workspace_state::{
         ModelsAttemptedOperation, ModelsOperationalState,
     };
 

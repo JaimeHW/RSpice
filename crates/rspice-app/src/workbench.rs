@@ -203,6 +203,7 @@ pub(crate) mod live_session;
 pub(crate) use rspice_app_workbench::workbench::localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
+pub(crate) mod models;
 pub(crate) use rspice_app_runs::workbench::preflight;
 pub(crate) use rspice_app_state::workbench::preferences;
 pub(crate) mod results;

@@ -24,7 +24,7 @@ use egui::Context;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_hub::durable::{PersistedHubState, start_browser_pack_restore};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::surfaces::models::workspace_state::ModelsOperationalState;
+use crate::workbench::models::workspace_state::ModelsOperationalState;
 
 thread_local! {
     /// The restore, once storage has answered. At most one ever arrives.
@@ -100,7 +100,7 @@ impl RSpiceApp {
         // refusal.
         if let Some(refusal) = report.refusal() {
             self.state.models.models_view.attempted_operation = Some(
-                crate::workbench::surfaces::models::workspace_state::ModelsAttemptedOperation {
+                crate::workbench::models::workspace_state::ModelsAttemptedOperation {
                     label: "restoring model packs kept by this browser".to_owned(),
                     // Nothing to re-issue: the bytes are gone, and the remedy
                     // is to install the release again from the hub, which is a

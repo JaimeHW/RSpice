@@ -614,6 +614,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // value of a lower crate or names the session, so the code that answers
     // it sits anywhere above the session.
     "framework/ports",
+    // What the Models & PDKs workspace keeps between frames. The models slot
+    // holds it and the session wire persists it, so it ranks below both; it
+    // names only the session's vocabulary and lower crates.
+    "models/workspace_state",
     "logging",
     "layout",
     // The interface text catalog and its locales. It names nothing of the
@@ -728,6 +732,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The cloud feature: its commands' answers over its own slot, the model,
     // the session, and the account service and live-session engine it runs.
     "cloud",
+    // The models feature's home.
+    "models",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",

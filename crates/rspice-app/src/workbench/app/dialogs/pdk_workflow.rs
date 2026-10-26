@@ -23,9 +23,7 @@ use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
 };
 use crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogResult;
-use crate::workbench::surfaces::models::workspace_state::{
-    ModelsAttemptedOperation, ModelsOperationalState,
-};
+use crate::workbench::models::workspace_state::{ModelsAttemptedOperation, ModelsOperationalState};
 
 /// The refusal every model operation gives while another one is running.
 const MODEL_OPERATION_RUNNING: &str = "A model import or refresh is already running.";
@@ -711,7 +709,7 @@ impl RSpiceApp {
     /// solves exactly as it did — which is the whole of decision D-E, and the
     /// reason this is a warning and not a blocked project.
     fn report_recalled_pins(&mut self, ctx: &Context) {
-        use crate::workbench::surfaces::models::workspace_state::RecallNoticeScope;
+        use crate::workbench::models::workspace_state::RecallNoticeScope;
 
         let Some(identity) = self
             .model_hub

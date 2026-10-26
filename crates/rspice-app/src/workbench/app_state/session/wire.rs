@@ -26,6 +26,9 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use crate::workbench::lifecycle::session::normalize_autosave_minutes;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
+use crate::workbench::models::workspace_state::{
+    ModelsWorkbenchViewState, PdkTechnologyAuthoringRecovery,
+};
 use crate::workbench::preferences::UserPreferences;
 use crate::workbench::slots::{
     CodeState, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
@@ -37,9 +40,6 @@ use crate::workbench::state::{
     Workspace, WorkspaceDocumentId, WorkspaceDocumentRegistry, WorkspaceLayoutState,
     default_analysis_index, default_console_height, default_inspector_width,
     default_navigator_width,
-};
-use crate::workbench::surfaces::models::workspace_state::{
-    ModelsWorkbenchViewState, PdkTechnologyAuthoringRecovery,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 

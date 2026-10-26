@@ -29,7 +29,7 @@
 
 use super::*;
 
-use crate::workbench::surfaces::models::workspace_state::{
+use crate::workbench::models::workspace_state::{
     ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope,
 };
 
