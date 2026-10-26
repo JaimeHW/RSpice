@@ -56,9 +56,14 @@ const COARSE_STEP: f64 = 1.0e-3;
 /// `COMPLEX_TOLERANCE` is 1e-11 because the fixtures are a handful of
 /// operations and nothing but arithmetic reordering can separate the rule from
 /// the oracle. A shipped compact model is tens of thousands of operations, and
-/// the same reordering accumulates: BSIM-CMG agrees to 5.7e-11, which is eleven
-/// correct digits and not a wrong chain rule. Holding the corpus to the fixture
-/// figure would be measuring float associativity.
+/// the same reordering accumulates: L-UTSOI's NQS source agrees to 1.5e-10,
+/// which is ten correct digits and not a wrong chain rule. Holding the corpus to
+/// the fixture figure would be measuring float associativity.
+///
+/// Every shipped device meets it. The per-device allowances this census once
+/// carried measured entries with no valid oracle, which [`oracle_drifts`] now
+/// leaves uncompared, and points the generator never builds: dependent
+/// parameter defaults read as zero and the model root's own constants.
 const CORPUS_COMPLEX_TOLERANCE: f64 = 1.0e-9;
 
 /// How far above the stamped block an oracle reading may sit before it is read
@@ -69,99 +74,6 @@ const CORPUS_COMPLEX_TOLERANCE: f64 = 1.0e-9;
 /// fails. What this excludes is the perturbed evaluation overflowing, which
 /// reports as 1e197 and is not a statement about the chain rule at all.
 const ORACLE_DIVERGENCE_FACTOR: f64 = 1.0e12;
-
-/// Models that do not meet [`CORPUS_COMPLEX_TOLERANCE`], with what they measure.
-///
-/// Two different things, and worth keeping apart rather than averaging into one
-/// number:
-///
-/// - `PSPNQS104VA` misses by a factor of ten on a single entry. That is the
-///   accumulated float reordering the corpus tolerance already exists for,
-///   arriving one model later than the tolerance anticipated.
-/// - `bsimcmg_va` has three entries at 2.6e-3 on equation 1 at one drawn bias,
-///   alongside three at 1e-9. 2.6e-3 is not arithmetic, and
-///   [`the_complex_oracle_preserves_the_value_it_perturbs`] says why: **the
-///   oracle is not valid there.** That census evaluates each residual for real
-///   and again under an imaginary perturbation and compares the *values*, and
-///   `bsimcmg_va` drifts on 51 of them. Complex step is a derivative only where
-///   the function is analytic; where a `floor`, a selection on the real part, or
-///   a `pow` at its branch cut intervenes, the real part moves and the imaginary
-///   part stops being the derivative of anything. `PSPNQS104VA` drifts on 42.
-///
-/// Both allowlisted models are in the drift census and no model outside it needs
-/// an allowance, which is the evidence that these two entries are the oracle's
-/// limits rather than the chain rule's.
-/// Drawing parameters as well as bias moves four more models off 1e-9, and the
-/// same census sorts them into two kinds rather than one.
-///
-/// `ekv_va` and `l_utsoi` are the oracle again. Neither drifts at declared
-/// defaults — `ekv_va` is absent from the default-parameter census entirely —
-/// and both appear the moment parameters are drawn, on 8 and 20 evaluations.
-/// That is the mechanism this list already documents, reached from a new
-/// direction: a drawn parameter puts the model in a regime where a `floor`, a
-/// real-part selection or a `pow` at its branch cut intervenes, and the
-/// imaginary part stops being a derivative. `ekv_va`'s 3.0e-1 is not a chain
-/// rule that is thirty percent wrong; it is a measurement of something else.
-///
-/// `asmhemt` and `PSP104VA` are **not** in the drift census, so their oracle is
-/// valid and these two numbers are real. They are also small and they scale with
-/// the model: `asmhemt` is the widest device in the corpus at 23 nodes and 57
-/// branches, and 7.5e-8 is accumulated reordering across that, the same argument
-/// that put the corpus tolerance at 1e-9 rather than the fixtures' 1e-11.
-/// `PSP104VA` at 1.3e-9 is a rounding's width from the tolerance itself.
-/// Keyed by the profile's own `SOURCE::MODULE` selector, and carrying its
-/// reason as a field rather than as a comment above it. Three module names in
-/// the corpus name more than one source — `hisimsoi_va` three times, `l_utsoi`
-/// and `bsimsoi` twice each — so a bare name is not an identity, and a reason
-/// that lives in a comment can be dropped by an edit that keeps the number.
-/// [`every_shipped_device_has_one_identity`] holds every key here to a real
-/// namespace declaration, because a selector that matches nothing silently
-/// restores the strict tolerance.
-const KNOWN_COMPLEX_STEP_DEVIATIONS: &[(&str, f64, &str)] = &[
-    (
-        "cmc/BSIM-CMG_112.1.0_04282026/code/bsimcmg.va::bsimcmg_va",
-        3.0e-3,
-        "oracle non-analytic: drifts on 51 evaluations of the value census",
-    ),
-    (
-        "cmc/PSP104.1.0_vacode/vacode/psp104_nqs.va::PSPNQS104VA",
-        1.0e-8,
-        "oracle non-analytic: drifts on 42 evaluations of the value census",
-    ),
-    (
-        "ekv26_2.6/ekv26_SDext_Verilog-A.va::ekv_va",
-        4.0e-1,
-        "oracle non-analytic once parameters are drawn: 8 evaluations drift",
-    ),
-    (
-        "cmc/L_UTSOI_102.9.0_code_package/vacode/L_UTSOI_102.va::l_utsoi",
-        5.0e-7,
-        "oracle non-analytic once parameters are drawn: 20 evaluations drift",
-    ),
-    (
-        "cmc/L_UTSOI_102.9.0_code_package/vacode/L_UTSOI_102_nqs.va::l_utsoi",
-        5.0e-7,
-        "the same body through the NQS source, which the bare-name key also \
-         covered and which no measurement has separated from it",
-    ),
-    (
-        "cmc/ASM-HEMT101.6.0_05132026/vacode/asmhemt.va::asmhemt",
-        1.0e-7,
-        "valid oracle; reordering accumulated over 23 nodes, worst 7.457e-8",
-    ),
-    (
-        "cmc/PSP104.1.0_vacode/vacode/psp104.va::PSP104VA",
-        2.0e-9,
-        "valid oracle; accumulated reordering, worst 1.304e-9",
-    ),
-];
-
-fn corpus_tolerance(key: &str) -> f64 {
-    KNOWN_COMPLEX_STEP_DEVIATIONS
-        .iter()
-        .find(|(selector, _, _)| *selector == key)
-        .map_or(CORPUS_COMPLEX_TOLERANCE, |(_, tolerance, _)| *tolerance)
-}
 
 /// Neither oracle here is seeded with [`AdSeed::LimiterCorrection`], and neither
 /// could be: the correction is a displacement Newton limiting chose, not a
@@ -1834,6 +1746,12 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
     eprintln!("compared {compared} entries across {POINTS} drawn points per fixture");
 }
 
+/// How many points each corpus census evaluates a shipped device at: one at
+/// the declared parameters, then three drawn ones (see
+/// [`the_whole_corpus_matches_complex_step_at_drawn_bias_points`]). Shared, so
+/// the value census measures the points the derivative census compares.
+const CORPUS_POINTS: usize = 4;
+
 /// The same property, over every shipped model rather than the fixtures.
 ///
 /// This is what the plan asks for by name — every model, every lane, against
@@ -1867,8 +1785,7 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
 #[test]
 #[ignore = "compiles the whole shipped corpus"]
 fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
-    // One point at the declared parameters, then three drawn ones.
-    const POINTS: usize = 4;
+    const POINTS: usize = CORPUS_POINTS;
 
     let root = model_root();
     let candidates = discover_veriloga_sources(&root).expect("model tree");
@@ -1965,8 +1882,12 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             // Point 0 keeps the declared parameters. Drawing every parameter
             // independently often yields a vector the runtime itself refuses:
             // VBIC bounds `nen` below by `nei`, and ASM-HEMT and HiSIM-SOI
-            // reach a non-finite operating point at every draw this seed
-            // makes. The model as it ships is compared whatever the draws do.
+            // reach a non-finite `ddx` operand while their defaults resolve.
+            // Four devices compare at point 0 alone, because the runtime
+            // refuses all three of their draws: `asmhemt` and the three
+            // `hisimsoi_va` sources. The model as it ships is compared
+            // whatever the draws do; a draw that respected each range's
+            // dependence on other parameters would reach further.
             let draw_parameters = point > 0;
             let bias =
                 match random_bias_point(&artifact, Some(&runtime), draw_parameters, &mut state) {
@@ -2019,7 +1940,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
                 &format!("{key}: point {point}"),
                 &lanes,
                 &block,
-                corpus_tolerance(&key),
+                CORPUS_COMPLEX_TOLERANCE,
                 &mut violations,
             );
         }
@@ -2092,18 +2013,15 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
 /// A shipped device is `(source, module)`, and the generated manifest agrees.
 ///
 /// [`the_whole_corpus_matches_complex_step_at_drawn_bias_points`] keys its
-/// seed, its tolerance, its report row and its per-device assertion on that
-/// pair. Keying is only correct if the pair is unique, and it is only
+/// seed, its report row and its per-device assertion on that pair. Keying is only correct if the pair is unique, and it is only
 /// *necessary* if the bare module name is not — three sources publish
 /// `hisimsoi_va`, and the manifest says so itself in the folder names
 /// `hisimsoi__hisimsoi_va__5be18005`, `hisimsoi_n4__hisimsoi_va__242bc21d` and
 /// `hisimsoi_n5__hisimsoi_va__38074d06`.
 ///
 /// This is the runnable half of that census. It compiles nothing, so it runs in
-/// every `cargo test`, and it fails if the key set drifts, if a source in the
-/// profile disappears, or if a tolerance allowance names a device that is not
-/// shipped — which would silently restore the strict tolerance in the one run
-/// nobody watches.
+/// every `cargo test`, and it fails if the key set drifts or if a source in the
+/// profile disappears.
 #[test]
 fn every_shipped_device_has_one_identity() {
     let root = model_root();
@@ -2202,27 +2120,6 @@ fn every_shipped_device_has_one_identity() {
         declared.len() - bare.len(),
         declared.len()
     );
-
-    let mut allowed = BTreeSet::new();
-    for (selector, tolerance, reason) in KNOWN_COMPLEX_STEP_DEVIATIONS {
-        assert!(
-            declared.contains_key(*selector),
-            "the tolerance allowance for {selector} names no shipped device, so \
-             it applies to nothing and the strict tolerance is what runs"
-        );
-        assert!(
-            *tolerance > CORPUS_COMPLEX_TOLERANCE,
-            "the allowance for {selector} is not looser than the corpus tolerance"
-        );
-        assert!(
-            !reason.trim().is_empty(),
-            "the allowance for {selector} carries no reason"
-        );
-        assert!(
-            allowed.insert(*selector),
-            "{selector} carries two tolerance allowances"
-        );
-    }
 }
 
 /// A source in the profile's own spelling: forward slashes, relative to the
@@ -2306,7 +2203,8 @@ fn compare_block(
     compared
 }
 
-/// The oracle's own validity check, and the reason `bsimcmg_va` is allowlisted.
+/// The oracle's own validity check, which the derivative census applies to each
+/// entry through [`oracle_drifts`].
 ///
 /// Complex step is only a derivative if the imaginary perturbation left the
 /// value alone. `f(x + ih) = f(x) + i h f'(x) + O(h^2)` holds when `f` is
@@ -2355,38 +2253,42 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
         };
         let function = numerical_only(&function.function);
 
-        let mut state = seed_for(&module);
-        for point in 0..3 {
-            let Ok(bias) = random_bias_point(&artifact, Some(&runtime), true, &mut state) else {
+        // The derivative census's own key and point schedule, so the points
+        // measured here are the points compared there.
+        let key = format!("{}::{module}", relative_source(&root, &candidate.path));
+        let mut state = seed_for(&key);
+        for point in 0..CORPUS_POINTS {
+            let Ok(bias) = random_bias_point(&artifact, Some(&runtime), point > 0, &mut state)
+            else {
                 continue;
             };
             let Ok(snapshot) = evaluate_cfg(&function, &inputs(&bias)) else {
                 continue;
             };
-            for (equation, residual) in cfg.residuals.iter().enumerate() {
-                let Some(real) = snapshot.value(*residual) else {
+            // One perturbed evaluation per lane carries every equation.
+            for seed in &lanes {
+                let mut complex = complex_inputs(&bias);
+                match seed {
+                    AdSeed::NodePotential(node) => {
+                        let index = usize::from(*node);
+                        complex.node_potentials[index] =
+                            ComplexStep::seed(bias.node_potentials[index]);
+                    }
+                    _ => continue,
+                }
+                let Ok(perturbed) = evaluate_cfg(&function, &complex) else {
                     continue;
                 };
-                for seed in &lanes {
-                    let mut complex = complex_inputs(&bias);
-                    match seed {
-                        AdSeed::NodePotential(node) => {
-                            let index = usize::from(*node);
-                            complex.node_potentials[index] =
-                                ComplexStep::seed(bias.node_potentials[index]);
-                        }
-                        _ => continue,
-                    }
-                    let Ok(perturbed) = evaluate_cfg(&function, &complex) else {
-                        continue;
-                    };
-                    let Some(value) = perturbed.value(*residual) else {
+                for (equation, residual) in cfg.residuals.iter().enumerate() {
+                    let (Some(real), Some(value)) =
+                        (snapshot.value(*residual), perturbed.value(*residual))
+                    else {
                         continue;
                     };
                     checked += 1;
                     if oracle_drifts(real, value.real()) {
                         drifted.push(format!(
-                            "{module}: point {point}: equation {equation} under {seed:?} is \
+                            "{key}: point {point}: equation {equation} under {seed:?} is \
                              {real} for real and {} under an imaginary perturbation",
                             value.real()
                         ));
@@ -2400,10 +2302,10 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
     assert!(checked > 0, "no evaluation was checked");
     // Reported rather than asserted empty: a model that is not analytic
     // everywhere is a fact about the model, and the list is the evidence for
-    // which allowlist entries are the oracle's fault rather than the rule's.
+    // which entries the derivative census leaves uncompared.
     let mut per_model: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for line in &drifted {
-        let model = line.split(':').next().unwrap_or("?");
+        let model = line.split(": point").next().unwrap_or("?");
         *per_model.entry(model).or_default() += 1;
     }
     for (model, count) in &per_model {
