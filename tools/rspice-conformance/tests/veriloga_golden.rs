@@ -249,6 +249,22 @@ fn known_capacitance(model: &str) -> Option<&'static KnownCapacitanceDeviation> 
         .find(|deviation| deviation.model == model)
 }
 
+/// Whether a model's audit came out clean enough to have no allowance at all.
+///
+/// `aborted` counts the evaluations that failed at any probe point. A point
+/// that aborted was never audited, so whatever it would have found is unknown,
+/// and an allowance must not be read as stale on the strength of the points
+/// that happened to survive.
+fn meets_the_gate(aborted: usize, gaps: usize, strict: usize) -> bool {
+    aborted == 0 && gaps == 0 && strict == 0
+}
+
+#[test]
+fn an_aborted_point_never_meets_the_gate() {
+    assert!(meets_the_gate(0, 0, 0));
+    assert!(!meets_the_gate(1, 0, 0));
+}
+
 #[test]
 fn every_builtin_evaluates_finitely_at_its_probe_points() {
     let mut failures = Vec::new();
@@ -402,6 +418,7 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
         let mut entries = 0usize;
         let mut tight = 0usize;
         let mut strict = 0usize;
+        let mut aborted = 0usize;
 
         let Ok(points) = harness.settled_probe_points(PROBE_POINTS) else {
             continue;
@@ -410,6 +427,7 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
             let audit = match harness.jacobian_audit(&point) {
                 Ok(audit) => audit,
                 Err(error) => {
+                    aborted += 1;
                     failures.push(format!(
                         "{model_name}: point {index}: audit failed: {error}"
                     ));
@@ -450,8 +468,7 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
         // convergence by a hair can fail the gate while leaving `worst` clean,
         // and a model can then be dropped from the list and immediately fail.
         if let Some(allowance) = allowance
-            && gaps == 0
-            && strict == 0
+            && meets_the_gate(aborted, gaps, strict)
         {
             clean.push((*model_name, allowance.why));
         }
@@ -494,6 +511,7 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
         let mut strict = 0usize;
         let mut stamped_anything = false;
         let mut stored_charge = 0.0_f64;
+        let mut aborted = 0usize;
 
         let Ok(points) = harness.settled_probe_points(PROBE_POINTS) else {
             continue;
@@ -506,14 +524,18 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
                         .filter(|charge| charge.is_finite())
                         .fold(stored_charge, |worst, charge| worst.max(charge.abs()));
                 }
-                Err(error) => failures.push(format!(
-                    "{model_name}: point {index}: charge recovery failed: {error}"
-                )),
+                Err(error) => {
+                    aborted += 1;
+                    failures.push(format!(
+                        "{model_name}: point {index}: charge recovery failed: {error}"
+                    ));
+                }
             }
 
             let audit = match harness.charge_audit(&point) {
                 Ok(audit) => audit,
                 Err(error) => {
+                    aborted += 1;
                     failures.push(format!(
                         "{model_name}: point {index}: audit failed: {error}"
                     ));
@@ -570,8 +592,7 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
             ));
         }
         if let Some(allowance) = allowance
-            && gaps == 0
-            && strict == 0
+            && meets_the_gate(aborted, gaps, strict)
         {
             clean.push((*model_name, allowance.why));
         }
