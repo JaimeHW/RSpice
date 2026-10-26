@@ -363,11 +363,16 @@ mod tests {
 
     #[test]
     fn the_tool_epilogue_after_the_end_marker_is_kept_but_not_compared() {
-        let output = format!("{GOOD}- rspice_verilog_tb.v:84: Verilog $finish\n");
+        let output = format!(
+            "{GOOD}- rspice_verilog_tb.v:84: Verilog $finish\n\
+             - S i m u l a t i o n   R e p o r t: Verilator 5.020 2024-01-01\n\
+             - Verilator: $finish at 2ps; walltime 0.001 s; speed 0.000 s/s\n"
+        );
         let trace = parse_trace(&output).expect("parses");
 
         assert_eq!(trace.rows.len(), 2);
         assert!(trace.epilogue.contains("Verilog $finish"), "{trace:?}");
+        assert!(trace.epilogue.contains("R e p o r t"), "{trace:?}");
         assert!(compare_traces(&trace, &parse_trace(GOOD).expect("parses")).is_empty());
     }
 

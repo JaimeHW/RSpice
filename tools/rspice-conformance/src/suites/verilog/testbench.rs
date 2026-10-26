@@ -47,8 +47,8 @@ pub const TRACE_HEADER: &str = "# RSPICE-VERILOG-TRACE 1";
 /// The last line of a trace, written immediately before `$finish(0)`.
 ///
 /// Simulators print their own end-of-run lines after the bench is done —
-/// Verilator always reports `- <file>:<line>: Verilog $finish`, even with
-/// `+verilator+quiet` — so the bench marks where its trace ends rather than
+/// Verilator reports `- <file>:<line>: Verilog $finish` and then its run
+/// summary — so the bench marks where its trace ends rather than
 /// the parser learning each tool's epilogue. A trace without the marker is a
 /// run that stopped early, which a bare end of output cannot distinguish.
 pub const TRACE_END: &str = "# RSPICE-VERILOG-TRACE-END";

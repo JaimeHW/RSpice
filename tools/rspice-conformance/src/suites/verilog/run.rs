@@ -395,15 +395,11 @@ fn run_verilator(
             ),
         });
     }
-    // `+verilator+quiet` drops the run summary; the `Verilog $finish` line it
-    // still prints lands after the bench's end marker.
-    let simulated = run_process(
-        &path_arg(&executable),
-        &["+verilator+quiet".to_string()],
-        Some(dir),
-        timeout_ms,
-    )
-    .map_err(|err| simulate_error(VerilogEngine::Verilator, executable_name, &err))?;
+    // No runtime arguments. The run summary and the `Verilog $finish` line land
+    // after the bench's end marker, and `+verilator+quiet` aborts the 5.020
+    // that Ubuntu ships as an unknown argument.
+    let simulated = run_process(&path_arg(&executable), &[], Some(dir), timeout_ms)
+        .map_err(|err| simulate_error(VerilogEngine::Verilator, executable_name, &err))?;
     if !simulated.success {
         return Err(RunError::Simulate {
             engine: VerilogEngine::Verilator,
