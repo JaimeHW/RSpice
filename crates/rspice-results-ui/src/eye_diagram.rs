@@ -6,8 +6,8 @@
 pub mod state;
 pub mod view;
 
-pub use rspice_core::analysis::signal_integrity::EyeTrace;
-pub use rspice_core::analysis::signal_integrity::{
+pub use rspice_results::engine_evidence::EyeTrace;
+pub use rspice_results::engine_evidence::{
     EyeData, EyeDataBuilder, EyeMeasurements, UiEstimateRejection, calculate_eye_measurements,
     crossing_phase_at, estimate_unit_interval, fold_anchor,
 };

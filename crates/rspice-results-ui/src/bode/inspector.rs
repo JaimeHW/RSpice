@@ -2,8 +2,10 @@
 
 use crate::presentation::{angle_readout, frequency_readout, plain_readout};
 use egui::Ui;
-use rspice_core::engine::{QpacAnalysisResult, QpxfAnalysisResult};
 use rspice_results::bode::AcBodeMetrics;
+use rspice_results::engine_evidence::{
+    QpacAnalysisResult, QpxfAnalysisResult, QpxfGroupDelay, QpxfOutput,
+};
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::panels::section_header;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -76,7 +78,7 @@ pub fn right_panel(
                         .iter()
                         .filter_map(|t| t.group_delay.as_ref())
                         .flatten()
-                        .filter(|d| !matches!(d, rspice_core::engine::QpxfGroupDelay::Finite(_)))
+                        .filter(|d| !matches!(d, QpxfGroupDelay::Finite(_)))
                         .count();
                     if undefined > 0 {
                         rows.push((
@@ -187,16 +189,16 @@ fn tuple_label(tuple: &[i32]) -> String {
 }
 
 /// A QPXF output as a signal accessor, never the Rust enum behind it.
-fn qpxf_output_label(output: &rspice_core::engine::QpxfOutput) -> String {
+fn qpxf_output_label(output: &QpxfOutput) -> String {
     match output {
-        rspice_core::engine::QpxfOutput::Voltage { positive, negative } => {
+        QpxfOutput::Voltage { positive, negative } => {
             if negative.is_empty() || negative == "0" {
                 format!("V({positive})")
             } else {
                 format!("V({positive},{negative})")
             }
         }
-        rspice_core::engine::QpxfOutput::BranchCurrent { branch } => format!("I({branch})"),
+        QpxfOutput::BranchCurrent { branch } => format!("I({branch})"),
     }
 }
 

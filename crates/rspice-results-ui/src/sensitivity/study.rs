@@ -247,7 +247,7 @@ fn column_at(column: &[SensitivityValue<f64>], index: usize) -> SensitivityValue
         .get(index)
         .copied()
         .unwrap_or(SensitivityValue::unavailable(
-            rspice_core::analysis::sensitivity::SensitivityUnavailability::OutOfRange,
+            rspice_results::sensitivity::SensitivityUnavailability::OutOfRange,
         ))
 }
 

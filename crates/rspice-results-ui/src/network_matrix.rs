@@ -1,6 +1,9 @@
 //! Network-matrix controls, exact cell display and sampled diagnostic presentation.
 
 use egui::Ui;
+use rspice_results::engine_evidence::{
+    MAX_NETWORK_DIAGNOSTIC_PORTS, NoAbort, network_quality_with_abort,
+};
 use rspice_results::waveform::RetainedTrace;
 use rspice_results::{
     analysis_result::AnalysisResult,
@@ -208,8 +211,7 @@ pub fn show(
     if analysis.analysis_type == AnalysisType::SParameter {
         if ui
             .add_enabled(
-                matrix.references().len()
-                    <= rspice_core::analysis::s_param::MAX_NETWORK_DIAGNOSTIC_PORTS,
+                matrix.references().len() <= MAX_NETWORK_DIAGNOSTIC_PORTS,
                 egui::Button::new("Check sampled passivity / reciprocity"),
             )
             .on_disabled_hover_text("Interactive dense diagnostics support up to 128 ports")
@@ -232,11 +234,7 @@ pub fn show(
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
-            let result = rspice_core::analysis::s_param::network_quality_with_abort(
-                &values,
-                1e-10,
-                &rspice_core::abort_signal::NoAbort,
-            );
+            let result = network_quality_with_abort(&values, 1e-10, &NoAbort);
             let text = match result {
                 Ok(quality) => format!(
                     "Sampled passivity: {:?} · largest singular value {:.17e} · normalized reciprocity residual {:.17e} · tolerance {:.3e}. Applies only at this frequency.",

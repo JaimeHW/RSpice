@@ -23,6 +23,8 @@ pub mod dc_mismatch;
 pub mod dc_sweep;
 pub mod display_preferences;
 pub mod document_creation;
+#[cfg(feature = "engine-evidence")]
+pub mod engine_evidence;
 pub mod engineering_table;
 #[cfg(feature = "engine-evidence")]
 pub mod events;

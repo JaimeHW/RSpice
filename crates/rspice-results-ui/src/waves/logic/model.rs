@@ -8,8 +8,9 @@
 //! Every lane reads right-continuously. At an event instant it holds the new
 //! value, which is what a measure, a probe and the cursor all agree on.
 
-use rspice_core::execution::{BusMemberHistory, bus_events, event_code_to_vcd_bit};
-use rspice_core::io::VcdBit;
+use rspice_results::engine_evidence::{
+    BusMemberHistory, VcdBit, bus_events, event_code_to_vcd_bit,
+};
 use rspice_results::events::projection::{BusRadix, BusWord, bus_word};
 use rspice_results::events::{
     DigitalBusEvidence, DigitalEventTraceEvidence, RealEventTraceEvidence,
@@ -192,7 +193,7 @@ pub struct BusLane {
 impl BusLane {
     /// Reassemble a bus from its members' committed points, MSB first.
     ///
-    /// The word at each instant is `rspice_core::execution::bus_events`
+    /// The word at each instant is `rspice_results::engine_evidence::bus_events`
     /// reading the member histories, the same reassembly the Events sheet
     /// shows. A bus too large to reassemble keeps its row and says why.
     pub fn assemble(

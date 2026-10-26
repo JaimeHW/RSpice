@@ -193,7 +193,7 @@ pub fn lane_signal(row: &LaneRow<'_>, member: Option<usize>) -> Option<String> {
         (LaneRow::Logic { lane, .. }, _) => lane.name(),
         (LaneRow::Bus { members, .. }, Some(member)) => members.get(member)?.name(),
         (LaneRow::Bus { lane, .. }, None) => {
-            rspice_core::execution::split_bus_notation(lane.name()).0
+            rspice_results::engine_evidence::split_bus_notation(lane.name()).0
         }
     };
     Some(format!("D({net})"))

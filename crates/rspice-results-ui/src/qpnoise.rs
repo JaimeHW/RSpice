@@ -1,6 +1,6 @@
 //! Retained QPNOISE integrals and contributor rankings alongside the plots.
 use crate::presentation::{frequency_readout, panel_note};
-use rspice_core::engine::{
+use rspice_results::engine_evidence::{
     QpnoiseAnalysisResult, QpnoiseIntegrationMethod, QpnoiseObservation, QpnoiseUnavailable,
     QpnoiseValue, QpxfQuantity,
 };

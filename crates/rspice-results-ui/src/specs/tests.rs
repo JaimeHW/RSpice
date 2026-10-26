@@ -122,8 +122,9 @@ fn seven_column_geometry_is_stable_and_does_not_depend_on_row_state() {
 fn row_accessibility_carries_every_visible_engineering_value() {
     let mut run = Run::new(9, 0.0, ExecutionTarget::LocalDesktop);
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
-            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_measurements(vec![
+            rspice_results::engine_evidence::MeasureResult::success("gain", 1.5),
+        ]),
     );
     let spec = SpecEntry {
         measurement: "gain".to_owned(),

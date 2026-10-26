@@ -34,7 +34,7 @@ pub struct HarmonicBalanceModel {
     /// Absent for HB, `.FOUR` and the PSS spectrum, which is what keeps their
     /// rendering exactly what it was.
     pub fft: Option<rspice_results::fft::spectrum::FftSpectrumEvidence>,
-    pub qpss: Option<Arc<rspice_core::engine::QpssOperatingPoint>>,
+    pub qpss: Option<Arc<rspice_results::engine_evidence::QpssOperatingPoint>>,
     /// The smallest positive magnitude retained, for the decade ordinate.
     pub smallest_positive_magnitude: Option<f64>,
 }

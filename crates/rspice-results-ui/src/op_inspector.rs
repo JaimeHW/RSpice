@@ -2,6 +2,7 @@
 
 use crate::{presentation::well_hint, virtual_rows::RowOffsets};
 use egui::Ui;
+use rspice_results::engine_evidence::{DeviceOpEntry, DeviceOpReport};
 use rspice_results::operating_point::{
     DcOpResult, OperatingPointDeviceDetailEvidence, OperatingPointValue,
     report::{
@@ -67,7 +68,7 @@ pub struct OpControls<'a> {
 pub struct OpView<'a, M> {
     pub evidence: &'a OpEvidence,
     pub dc: Option<&'a DcOpResult>,
-    pub devices: Option<&'a rspice_core::circuit::DeviceOpReport>,
+    pub devices: Option<&'a DeviceOpReport>,
     pub controls: OpControls<'a>,
     pub mapping: &'a M,
 }
@@ -135,7 +136,7 @@ fn node_matches(row: &OperatingPointValue, filter: &str, root: &str) -> bool {
         || leaf.to_ascii_lowercase().contains(&filter)
         || row.unit.to_ascii_lowercase().contains(&filter)
 }
-fn device_matches(entry: &rspice_core::circuit::DeviceOpEntry, filter: &str, root: &str) -> bool {
+fn device_matches(entry: &DeviceOpEntry, filter: &str, root: &str) -> bool {
     if filter.trim().is_empty() {
         return true;
     }
@@ -179,7 +180,7 @@ fn grouped_nodes(
     groups
 }
 fn grouped_devices(
-    report: &rspice_core::circuit::DeviceOpReport,
+    report: &DeviceOpReport,
     detail: Option<&RetainedDetail>,
     filter: &str,
     sort: Option<&(String, bool)>,
@@ -319,7 +320,7 @@ impl OpPlan {
     pub fn new(
         controls: OpControls<'_>,
         dc: Option<&DcOpResult>,
-        devices: Option<&rspice_core::circuit::DeviceOpReport>,
+        devices: Option<&DeviceOpReport>,
         detail: Option<&RetainedDetail>,
     ) -> OpPlan {
         let mut node_scopes = Vec::new();
@@ -388,7 +389,7 @@ impl OpPlan {
     }
 }
 const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
-fn device_sort_value(entry: &rspice_core::circuit::DeviceOpEntry, key: &str) -> Option<f64> {
+fn device_sort_value(entry: &DeviceOpEntry, key: &str) -> Option<f64> {
     entry
         .params
         .iter()
@@ -403,7 +404,7 @@ fn device_family_rank(family: &str) -> usize {
         .unwrap_or(DEVICE_FAMILY_ORDER.len())
 }
 fn device_columns(
-    report: &rspice_core::circuit::DeviceOpReport,
+    report: &DeviceOpReport,
     rows: &[(String, usize)],
 ) -> Vec<(&'static str, &'static str)> {
     let mut shown: Vec<usize> = rows.iter().map(|(_, index)| *index).collect();
@@ -1266,10 +1267,7 @@ pub fn right_panel(ui: &mut Ui, evidence: &OpEvidence, current: bool) {
     }
 }
 #[cfg(any(test, feature = "test-support"))]
-pub fn evidence_fixture(
-    nodes: usize,
-    devices: usize,
-) -> (DcOpResult, rspice_core::circuit::DeviceOpReport) {
+pub fn evidence_fixture(nodes: usize, devices: usize) -> (DcOpResult, DeviceOpReport) {
     let dc = DcOpResult {
         node_voltages: (0..nodes)
             .map(|index| OperatingPointValue {
@@ -1280,9 +1278,9 @@ pub fn evidence_fixture(
             .collect(),
         ..DcOpResult::default()
     };
-    let report = rspice_core::circuit::DeviceOpReport {
+    let report = DeviceOpReport {
         entries: (0..devices)
-            .map(|index| rspice_core::circuit::DeviceOpEntry {
+            .map(|index| DeviceOpEntry {
                 name: format!("x{}.m{index}", index % 4),
                 device_kind: "MOSFET",
                 region: Some("saturation"),
@@ -1352,7 +1350,7 @@ mod tests {
     }
     #[test]
     fn shared_filter_covers_hierarchy_family_region_and_quantity() {
-        let entry = rspice_core::circuit::DeviceOpEntry {
+        let entry = DeviceOpEntry {
             name: "xafe.m1".to_owned(),
             device_kind: "MOSFET",
             region: Some("saturation"),
@@ -1383,27 +1381,27 @@ mod tests {
     }
     #[test]
     fn device_quantity_sort_is_numeric_stable_and_keeps_missing_values_last() {
-        let report = rspice_core::circuit::DeviceOpReport {
+        let report = DeviceOpReport {
             entries: vec![
-                rspice_core::circuit::DeviceOpEntry {
+                DeviceOpEntry {
                     name: "M_missing".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("cutoff"),
                     params: vec![],
                 },
-                rspice_core::circuit::DeviceOpEntry {
+                DeviceOpEntry {
                     name: "M_low".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: vec![("gm", 1.0e-3)],
                 },
-                rspice_core::circuit::DeviceOpEntry {
+                DeviceOpEntry {
                     name: "M_high".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: vec![("gm", 3.0e-3)],
                 },
-                rspice_core::circuit::DeviceOpEntry {
+                DeviceOpEntry {
                     name: "M_negative".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
@@ -1435,15 +1433,15 @@ mod tests {
     }
     #[test]
     fn the_device_column_schema_does_not_move_when_the_sort_does() {
-        let report = rspice_core::circuit::DeviceOpReport {
+        let report = DeviceOpReport {
             entries: vec![
-                rspice_core::circuit::DeviceOpEntry {
+                DeviceOpEntry {
                     name: "q_first".to_owned(),
                     device_kind: "BJT",
                     region: Some("forward"),
                     params: vec![("ic", 1.0e-3), ("vbe", 0.7)],
                 },
-                rspice_core::circuit::DeviceOpEntry {
+                DeviceOpEntry {
                     name: "m_second".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),

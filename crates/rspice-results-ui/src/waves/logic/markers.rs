@@ -10,7 +10,7 @@
 
 use super::plan::TimeMapping;
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
-use rspice_core::config::{HdlOutputRecord, HdlSeverity, HdlStream};
+use rspice_results::engine_evidence::{HdlOutputRecord, HdlSeverity, HdlStream};
 use rspice_ui_kit::tokens::Tokens;
 
 /// Height of the marker strip, in points.

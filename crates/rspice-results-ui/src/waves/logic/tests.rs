@@ -432,16 +432,16 @@ fn a_lane_names_the_digital_quantity_of_its_net_for_cross_probing() {
 
 fn hdl_record(
     seconds: f64,
-    stream: rspice_core::config::HdlStream,
+    stream: rspice_results::engine_evidence::HdlStream,
     text: &str,
-) -> rspice_core::config::HdlOutputRecord {
-    rspice_core::config::HdlOutputRecord {
-        point: rspice_core::config::HdlPoint::Transient { time: seconds },
+) -> rspice_results::engine_evidence::HdlOutputRecord {
+    rspice_results::engine_evidence::HdlOutputRecord {
+        point: rspice_results::engine_evidence::HdlPoint::Transient { time: seconds },
         tick: 0,
         seconds,
         stream,
         text: text.to_owned(),
-        origin: rspice_core::config::HdlOrigin {
+        origin: rspice_results::engine_evidence::HdlOrigin {
             scope: "tb".to_owned(),
             file: "tb_ldo_full.vams".to_owned(),
             line: 40,
@@ -453,7 +453,7 @@ fn hdl_record(
 /// `$info` stay in the Console.
 #[test]
 fn hdl_severity_and_end_of_run_records_make_markers_and_console_output_does_not() {
-    use rspice_core::config::{HdlSeverity, HdlStream};
+    use rspice_results::engine_evidence::{HdlSeverity, HdlStream};
     let diagnostic = |severity| HdlStream::Diagnostic { severity };
     let cases = [
         (diagnostic(HdlSeverity::Fatal), Some(MarkerSeverity::Fatal)),
