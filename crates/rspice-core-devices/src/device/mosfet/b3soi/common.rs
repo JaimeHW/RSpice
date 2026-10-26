@@ -3,6 +3,7 @@
 //! Values are transcribed from ngspice-46 `b3soiddld.c` / `b3soiddset.c` /
 //! `b3soiddtemp.c` (the FD and PD sources use the same numeric constants).
 
+use crate::op_label::OpLabel;
 use crate::{NodeId, Value, device::traits::MatrixStamper};
 use std::collections::HashMap;
 
@@ -128,6 +129,23 @@ pub(crate) fn biases_match(a: SoiBias, b: SoiBias) -> bool {
         && a.ves == b.ves
         && a.vps == b.vps
         && a.del_temp == b.del_temp
+}
+
+/// The OP-report region, judged in the channel's operating frame: `vgs`/`vds`
+/// in normal mode, `vgd`/`vsd` in inverse mode (`mode < 0`).
+pub(crate) fn op_report_region(bias: SoiBias, mode: i32, von: Value, vdsat: Value) -> OpLabel {
+    let (vgs_mode, vds_mode) = if mode >= 0 {
+        (bias.vgs, bias.vds)
+    } else {
+        (bias.vgs - bias.vds, -bias.vds)
+    };
+    if vgs_mode < von {
+        OpLabel::SUBTHRESHOLD
+    } else if vds_mode > vdsat {
+        OpLabel::SATURATION
+    } else {
+        OpLabel::LINEAR
+    }
 }
 
 /// Instance geometry inputs needed by the B3SOIDD and B3SOIPD sizing passes.

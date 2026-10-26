@@ -546,18 +546,7 @@ impl B3SoiFd {
     ) {
         let op = &self.op;
         let bias = self.bias;
-        let (vgs_mode, vds_mode) = if op.mode >= 0 {
-            (bias.vgs, bias.vds)
-        } else {
-            (bias.vgs - bias.vds, -bias.vds)
-        };
-        let region = if vgs_mode < op.von {
-            crate::op_label::OpLabel::SUBTHRESHOLD
-        } else if vds_mode > op.vdsat {
-            crate::op_label::OpLabel::SATURATION
-        } else {
-            crate::op_label::OpLabel::LINEAR
-        };
+        let region = common::op_report_region(bias, op.mode, op.von, op.vdsat);
         (
             op.ids, bias.vgs, bias.vds, bias.vbs, op.von, op.vdsat, op.gm, op.gds, op.gmbs, region,
         )
