@@ -1,7 +1,6 @@
 //! Cross-format result-import adapter tests and binary fixture builders.
 
 use super::*;
-use crate::workbench::app_state::AppState;
 use arrow_array::{ArrayRef, Float64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use std::collections::HashMap;
@@ -497,44 +496,6 @@ fn generated_fst() -> Vec<u8> {
     let bytes = std::fs::read(&path).expect("read FST fixture");
     let _ = std::fs::remove_file(&path);
     bytes
-}
-
-#[test]
-fn event_source_fst_import_keeps_detected_format_through_project_reload() {
-    let mut state = AppState::default();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    crate::workbench::app_state::services_access::accept_loaded_project(&mut state, project, None);
-    apply_imported_result_dataset(&mut state.results_parts(), "capture.fst", &generated_fst())
-        .unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    assert!(restored.file.simulation_results_warning.is_none());
-    let restored =
-        crate::io::simulation_state_from_results(restored.file.simulation_results).unwrap();
-    let analysis = restored.active_analysis().unwrap();
-    assert_eq!(
-        analysis.import_source.as_ref().unwrap().format,
-        ResultImportFormat::Fst
-    );
-    assert_eq!(
-        analysis.result_payload,
-        state
-            .model
-            .simulation
-            .active_analysis()
-            .unwrap()
-            .result_payload
-    );
-    assert_eq!(
-        analysis.result_data_digest(),
-        state
-            .model
-            .simulation
-            .active_analysis()
-            .unwrap()
-            .result_data_digest()
-    );
 }
 
 fn fst_test_blocks(bytes: &[u8]) -> Vec<(u8, usize, usize)> {

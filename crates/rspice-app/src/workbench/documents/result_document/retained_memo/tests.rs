@@ -22,8 +22,8 @@ fn analysis(kind: AnalysisType, id: u64, samples: usize) -> AnalysisResult {
     )])
 }
 
-fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
-    let mut state = AppState::default();
+fn retained_state(kind: AnalysisType, samples: usize) -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(analysis(kind, 1, samples));
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
@@ -46,7 +46,7 @@ fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
     state
 }
 
-fn key(state: &AppState) -> AnalysisPresentationKey {
+fn key(state: &ResultsTestHost) -> AnalysisPresentationKey {
     let run = &state.model.simulation.retained.runs[0];
     AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
 }
@@ -94,7 +94,7 @@ fn retained_memo_absent_analysis_becomes_available_without_frame_preparation() {
 
 fn gate_tracks_coordinates(kind: AnalysisType, gate: StructuralGate) {
     let mut state = retained_state(kind, 3);
-    let answer = |state: &AppState| {
+    let answer = |state: &ResultsTestHost| {
         let run = &state.model.simulation.retained.runs[0];
         analysis_answers_structural_gate(
             state.results_reads(),
@@ -161,40 +161,7 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
     assert!(current.run(state.results_reads()).is_some());
 }
 
-#[test]
-fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
-    let mut app = RSpiceApp::test_instance();
-    app.state = retained_state(AnalysisType::Transient, 3);
-    app.state.results.create_result_document =
-        rspice_results_ui::create_document::CreateResultDocumentDialogState {
-            open: true,
-            name: "Pinned evidence".to_owned(),
-            name_touched: true,
-            dataset_id: Some(app.state.model.simulation.retained.runs[0].dataset_id),
-            family_id: "waveform-worksheet".to_owned(),
-            viewer_id: "viewer-waveform".to_owned(),
-            layout_id: "single-pane".to_owned(),
-            validation_error: None,
-        };
-    let document = create_document::commit(&mut app.state.results_parts()).unwrap();
-    let bound = view_context::resolve_displayed_result_view(app.state.results_reads()).unwrap();
-    assert!(
-        matches!(bound.owner, view_context::ResultViewOwner::VisualizationPane { document_id, .. } if document_id == document)
-    );
-    let version = app.state.model.simulation.view.data_version;
-    Arc::make_mut(&mut app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
-        .fill(2.0);
-    let error = view_context::resolve_displayed_result_view(app.state.results_reads())
-        .expect_err("the immutable pane must reject changed content even before the next frame");
-    assert!(
-        error.contains("no longer match the ones this pane was bound to"),
-        "{error}"
-    );
-    assert!(bound.run(app.state.results_reads()).is_none());
-    assert_eq!(app.state.model.simulation.view.data_version, version);
-}
-
-fn read_all(state: &AppState) {
+fn read_all(state: &ResultsTestHost) {
     let run = &state.model.simulation.retained.runs[0];
     assert!(retained_evidence_is_valid(
         state.results_reads(),
@@ -224,7 +191,7 @@ fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
             analysis(AnalysisType::Disto, 3, samples),
         ]);
         read_all(&state);
-        let mut clone = AppState::default();
+        let mut clone = ResultsTestHost::default();
         clone.model.simulation = state.model.simulation.clone();
         clone.results.results = state.results.results.clone();
         let work = frame_work::WorkCounts::reset();

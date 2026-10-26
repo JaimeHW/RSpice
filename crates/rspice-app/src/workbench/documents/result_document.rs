@@ -24,7 +24,7 @@ pub(crate) mod manifest;
 pub(crate) mod network_matrix;
 mod noise_contrib;
 mod nyquist;
-mod op_inspector;
+pub(crate) mod op_inspector;
 pub(crate) mod operational_state;
 mod optimization;
 pub(crate) mod persistent_document;

@@ -9,7 +9,7 @@ use crate::state::{
     SchematicAnnotationVisibility, bus_notations,
 };
 #[cfg(test)]
-use crate::workbench::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::framework::requests::ShowSchematicAnnotations;
 use egui::Ui;
@@ -184,7 +184,7 @@ fn device_target(state: ResultsReads<'_>, name: &str) -> Option<u64> {
     )
     .map(|component| component.id)
 }
-fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
+pub(crate) fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
     match action {
         OpAction::LocateNode(name) => {
             let signal = if name
@@ -406,7 +406,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 mod tests {
     use super::*;
     use rspice_results::operating_point::DcOpResult;
-    fn op_state(nodes: usize, devices: usize) -> AppState {
+    fn op_state(nodes: usize, devices: usize) -> ResultsTestHost {
         use crate::state::{AnalysisResult, SimulationRun};
 
         let (dc, report) = viewer::evidence_fixture(nodes, devices);
@@ -415,13 +415,13 @@ mod tests {
         analysis.device_op = Some(report);
         let mut run = SimulationRun::new(3);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
         state.model.simulation.view.active_analysis_idx = Some(0);
         state
     }
-    fn active_key(state: &AppState) -> AnalysisPresentationKey {
+    fn active_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
         let run = state.model.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     }
@@ -429,7 +429,7 @@ mod tests {
     fn selection_never_falls_back_to_another_analysis() {
         use crate::state::{AnalysisResult, SimulationRun};
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(9);
         let mut first = AnalysisResult::new(1, AnalysisType::DcOp, "OP 1");
         first.dc_op = Some(DcOpResult {
@@ -457,7 +457,7 @@ mod tests {
     fn node_evidence_does_not_depend_on_a_device_report() {
         use crate::state::{AnalysisResult, SimulationRun};
 
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         let mut run = SimulationRun::new(4);
         let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
         analysis.dc_op = Some(DcOpResult {
@@ -578,19 +578,5 @@ mod tests {
             after.display.node_offset_count(),
             after.display.node_row_count()
         );
-    }
-
-    /// A locate that cannot be made is a refused gesture: the status bar
-    /// says why, and nothing is toasted.
-    #[test]
-    fn a_device_that_cannot_be_located_is_answered_on_the_status_bar() {
-        let mut state = AppState::default();
-        apply_action(&mut state.results_parts(), OpAction::LocateDevice(u64::MAX));
-        state.drain_notices(&egui::Context::default());
-        assert_eq!(
-            state.prompt_text(),
-            Some("The retained device no longer resolves to the active schematic.")
-        );
-        assert!(state.workbench.toasts.activity().is_empty());
     }
 }
