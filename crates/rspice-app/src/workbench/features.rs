@@ -5,8 +5,9 @@
 //! application state it owns. Each feature's registry is built once. A call
 //! into one of its commands borrows the feature's slot, the model, the
 //! session, the platform services' state and the peers it reads from the
-//! application state for that one call: a context is references only, so
-//! building one allocates nothing.
+//! application state, and the application's handles on the services below
+//! the workbench beside it, for that one call: a context is references
+//! only, so building one allocates nothing.
 
 use std::sync::LazyLock;
 
@@ -16,7 +17,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    Cx, Feature, FeatureRegistry, Peers, Reads, ToolbarTool,
+    Cx, Feature, FeatureRegistry, LowerHandles, Peers, Reads, ToolbarTool,
 };
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::results::ResultsFeature;
@@ -32,8 +33,29 @@ pub(super) trait Registered: Feature {
     /// What the feature reads to answer whether a command can run.
     fn reads(state: &AppState) -> Reads<'_, Self>;
 
-    /// The context the feature's command runs in.
-    fn cx(state: &mut AppState) -> Cx<'_, Self>;
+    /// The context the feature's command runs in, over `state` and the
+    /// `handles` lent beside it.
+    fn cx<'a>(state: &'a mut AppState, handles: LowerHandles<'a>) -> Cx<'a, Self>;
+}
+
+/// The context `F`'s call runs in, borrowed from `app`: its state, and its
+/// handles on the services below the workbench beside it.
+pub(super) fn cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
+    let handles = LowerHandles {
+        export_io: app.export_workflow_io.as_ref(),
+    };
+    F::cx(&mut app.state, handles)
+}
+
+/// The results peer a context over `state` holds for the feature whose slot
+/// is `slot`: none for the results feature itself, whose slot it is.
+macro_rules! results_peer {
+    (results, $state:ident) => {
+        None
+    };
+    ($slot:ident, $state:ident) => {
+        Some(&*$state.results)
+    };
 }
 
 /// Register each `slot: Feature` pair: the feature `Feature`, whose state is
@@ -58,13 +80,14 @@ macro_rules! features {
                     )
                 }
 
-                fn cx(state: &mut AppState) -> Cx<'_, Self> {
+                fn cx<'a>(state: &'a mut AppState, handles: LowerHandles<'a>) -> Cx<'a, Self> {
                     Cx::new(
                         &mut *state.$slot,
                         &mut state.model,
                         &mut *state.workbench,
                         &mut *state.platform,
-                        Peers::new(&mut *state.design, &*state.cloud),
+                        handles,
+                        Peers::new(&mut *state.design, &*state.cloud, results_peer!($slot, state)),
                     )
                 }
             }
@@ -110,12 +133,12 @@ macro_rules! features {
         /// Carry out the routed command `key` in the feature that takes it
         /// here, and say whether one did. What the feature raises waits in
         /// the outbox as what the shell's own branch raises does.
-        pub(super) fn route(state: &mut AppState, key: CommandKey) -> bool {
+        pub(super) fn route(app: &mut RSpiceApp, key: CommandKey) -> bool {
             $(
                 if let Some(routed) = <$feature as Registered>::registry().routed_command(key)
-                    && (routed.takes)(&<$feature as Registered>::reads(state))
+                    && (routed.takes)(&<$feature as Registered>::reads(&app.state))
                 {
-                    (routed.execute)(&mut <$feature as Registered>::cx(state));
+                    (routed.execute)(&mut cx::<$feature>(app));
                     return true;
                 }
             )+
@@ -163,7 +186,7 @@ macro_rules! features {
         pub(super) fn render_dialog(app: &mut RSpiceApp, ctx: &egui::Context, key: DialogKey) {
             $(
                 if let Some(dialog) = <$feature as Registered>::registry().dialog(key) {
-                    (dialog.render)(&mut <$feature as Registered>::cx(&mut app.state), ctx);
+                    (dialog.render)(&mut cx::<$feature>(app), ctx);
                 }
             )else+
             app.after_contribution();
@@ -171,10 +194,10 @@ macro_rules! features {
 
         /// Carry out the feature command `key` names, once the shell's
         /// prologue has let it through.
-        pub(super) fn execute(state: &mut AppState, key: CommandKey) {
+        pub(super) fn execute(app: &mut RSpiceApp, key: CommandKey) {
             $(
                 if let Some(command) = <$feature as Registered>::registry().command(key) {
-                    command.execute(&mut <$feature as Registered>::cx(state));
+                    command.execute(&mut cx::<$feature>(app));
                 }
             )else+
         }
@@ -190,17 +213,17 @@ features! {
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers
 /// what it raised straight after.
-pub(super) fn show_inspector<F: Registered>(state: &mut AppState, ui: &mut egui::Ui) {
+pub(super) fn show_inspector<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) {
     if let Some(inspector) = F::registry().inspector_section() {
-        (inspector.show)(&mut F::cx(state), ui);
+        (inspector.show)(&mut cx::<F>(app), ui);
     }
 }
 
 /// Draw `F`'s surface on the stage's `ui`. The caller answers what it raised
 /// straight after.
-pub(super) fn show_surface<F: Registered>(state: &mut AppState, ui: &mut egui::Ui) {
+pub(super) fn show_surface<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) {
     if let Some(surface) = F::registry().surface_section() {
-        (surface.show)(&mut F::cx(state), ui);
+        (surface.show)(&mut cx::<F>(app), ui);
     }
 }
 
@@ -211,9 +234,9 @@ pub(super) fn toolbar_tools<F: Registered>() -> &'static [ToolbarTool] {
 
 /// Commit what `F`'s inspector section holds typed and not yet committed.
 /// The caller answers what that raised straight after.
-pub(super) fn commit_inspector<F: Registered>(state: &mut AppState, ctx: &egui::Context) {
+pub(super) fn commit_inspector<F: Registered>(app: &mut RSpiceApp, ctx: &egui::Context) {
     if let Some(inspector) = F::registry().inspector_section() {
-        (inspector.commit_pending_edit)(&mut F::cx(state), ctx);
+        (inspector.commit_pending_edit)(&mut cx::<F>(app), ctx);
     }
 }
 
@@ -309,7 +332,7 @@ mod tests {
         let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.set_width(312.0);
-                show_inspector::<SheetsFeature>(&mut app.state, ui);
+                show_inspector::<SheetsFeature>(&mut app, ui);
             });
         });
         assert!(

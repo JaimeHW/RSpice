@@ -310,8 +310,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("hardcopy.hardcopy"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.hardcopy.hardcopy.open),
-        render: |app, ctx| app.render_hardcopy_dialog(ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("hardcopy.hardcopy"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("hardcopy.hardcopy")),
     },
     DialogSpec {
         key: DialogKey("design.object_properties"),

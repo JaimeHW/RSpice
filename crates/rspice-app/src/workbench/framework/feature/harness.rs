@@ -1,6 +1,6 @@
 //! One feature on its own, for its tests: its state, a model, a session and
 //! the platform services' state, with every peer it reads showing what a
-//! fresh session shows.
+//! fresh session shows, and an export IO that writes nothing.
 //!
 //! The harness answers and runs the feature's own commands as the feature
 //! does, in the same context. The shell's prologue (a project operation in
@@ -27,14 +27,44 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::CommandAvailability;
 
+use rspice_app_services::io::WaveformDataset;
+use rspice_app_services::workbench::workflows::export_workflow::{
+    ExportWorkflowIo, SaveDialogConfig,
+};
+
 use super::{
-    CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry, Peers,
-    Reads,
+    CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry,
+    LowerHandles, Peers, Reads,
 };
 use crate::workbench::framework::ports::{DisplayedDatasetView, ResultsPort};
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
+
+/// The export IO a feature's own test runs with: its save picker is
+/// cancelled, and it writes no file.
+struct NullExportIo;
+
+impl ExportWorkflowIo for NullExportIo {
+    fn show_save_dialog(
+        &self,
+        _config: SaveDialogConfig<'_>,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        Ok(None)
+    }
+
+    fn write_text_file(&self, _path: &std::path::Path, _contents: &str) -> Result<(), String> {
+        Err("a feature's own test writes no file".to_owned())
+    }
+
+    fn write_waveform_csv(
+        &self,
+        _dataset: &WaveformDataset,
+        _path: &std::path::Path,
+    ) -> Result<(), String> {
+        Err("a feature's own test writes no file".to_owned())
+    }
+}
 
 impl DesignPort for NullPorts {
     fn review_markers(&self) -> SchematicReviewMarkerVisibility {
@@ -176,7 +206,10 @@ where
             &mut self.model,
             &mut self.wb,
             &mut self.platform,
-            Peers::new(&mut NullPorts, &NullPorts),
+            LowerHandles {
+                export_io: &NullExportIo,
+            },
+            Peers::new(&mut NullPorts, &NullPorts, Some(&NullPorts)),
         ));
     }
 }

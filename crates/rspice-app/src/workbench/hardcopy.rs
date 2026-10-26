@@ -3,9 +3,16 @@
 //!
 //! Its commands are answered and carried out in a [`Cx`] over the feature's
 //! own slot, the model, the session and the platform services' state, and
-//! read what the results workspace shows through its port. The exports and
-//! the print and export workflows still run in the shell, on the request a
-//! command raises, straight after the command in the same dispatch.
+//! read what the results workspace shows through its port. Print and Export
+//! active view open their workflow in that context, through the export IO
+//! the context lends. The schematic and publication exports still run in
+//! the shell, on the request a command raises, straight after the command in
+//! the same dispatch.
+//!
+//! The hardcopy dialog is the feature's dialog step, drawn in the same
+//! context. The shell opens its workflow, in the same context, for the
+//! requests other parts raise: a result document's figure export, and the
+//! print another feature offers as its dialog's next step.
 //!
 //! The report route is the feature's too: it draws the route's stage in the
 //! same context, and declares the tools the route's toolbar shows, which
@@ -16,13 +23,16 @@ pub(crate) mod report;
 pub(crate) mod report_authoring;
 
 use crate::ui::panels::WorkbenchIcon;
+use crate::workbench::app::{
+    HardcopyParts, HardcopyWorkflow, open_hardcopy_workflow, render_hardcopy_dialog,
+};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, FeatureSurface, Reads, Session, ToolbarTool,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, FeatureSurface, Reads, Session,
+    ToolbarTool,
 };
-use crate::workbench::framework::requests::{
-    ExportActiveView, ExportPublicationSnapshot, ExportSchematicSvg, PrintActiveView,
-};
+use crate::workbench::framework::requests::{ExportPublicationSnapshot, ExportSchematicSvg};
 use crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available;
 use crate::workbench::slots::HardcopyState;
 use crate::workbench::state::WorkbenchSession;
@@ -38,11 +48,46 @@ impl Feature for HardcopyFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<HardcopyCommand>();
+        registry.dialogs(DIALOGS);
         registry.surface(FeatureSurface {
             show: report_authoring::show,
         });
         registry.toolbar(REPORT_TOOLS);
     }
+}
+
+/// The dialog step the feature draws, under the key the shell's dialog order
+/// lists it by: Page Setup, Print and Export. It runs every frame, open or
+/// not: closed, it lets go of the work the dialog started.
+const DIALOGS: &[FeatureDialog<HardcopyFeature>] = &[FeatureDialog {
+    key: DialogKey("hardcopy.hardcopy"),
+    is_open: |hardcopy| hardcopy.hardcopy.open,
+    render: |cx, ctx| render_hardcopy_dialog(&mut workflow_parts(cx), ctx),
+}];
+
+/// What the hardcopy workflow reads and writes, borrowed from the feature's
+/// context.
+fn workflow_parts<'a>(cx: &'a mut Cx<'_, HardcopyFeature>) -> HardcopyParts<'a> {
+    let hardcopy = &mut *cx.state;
+    HardcopyParts {
+        dialog: &mut hardcopy.hardcopy,
+        report_authoring: &hardcopy.report_authoring,
+        model: cx.model,
+        workbench: cx.wb,
+        results: cx.peers.results(),
+        export_io: cx.handles.export_io,
+    }
+}
+
+/// Open `workflow` on the active view, in the feature's context: for Print
+/// and Export active view, and, as the shell asks, for a request another part
+/// raised, the export workflow for a result document's figure or the print
+/// workflow another feature offers as its dialog's next step.
+pub(in crate::workbench) fn open_workflow(
+    cx: &mut Cx<'_, HardcopyFeature>,
+    workflow: HardcopyWorkflow,
+) {
+    open_hardcopy_workflow(&mut workflow_parts(cx), workflow);
 }
 
 /// The report route's toolbar: its document actions, in the order the
@@ -123,8 +168,8 @@ impl CommandSet for HardcopyCommand {
         match self {
             Self::ExportSchematicSvg => cx.wb.outbox().push(ExportSchematicSvg),
             Self::ExportPublicationSnapshot => cx.wb.outbox().push(ExportPublicationSnapshot),
-            Self::PrintHardcopy => cx.wb.outbox().push(PrintActiveView),
-            Self::ExportActiveView => cx.wb.outbox().push(ExportActiveView),
+            Self::PrintHardcopy => open_workflow(cx, HardcopyWorkflow::Print),
+            Self::ExportActiveView => open_workflow(cx, HardcopyWorkflow::Export),
             Self::ReportAuthoring => report::open(cx.wb),
             // Saving the report is saving the project, behind its own
             // prologue; nothing follows it here.

@@ -20,6 +20,7 @@
 //! the pin command's id and runs that command.
 
 use crate::state::command_catalog::CommandKey;
+use crate::workbench::app::HardcopyWorkflow;
 use crate::workbench::app_state::PlatformState;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
@@ -32,10 +33,10 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ExportActiveView, ExportDataset, ExportPublicationSnapshot,
-    ExportSchematicSvg, FollowSchematicGrid, PrintActiveView, RevealExecutedDeck,
-    SelectAnalysisInstance,
+    self, ApplyWaveformDefaults, ExportDataset, ExportPublicationSnapshot, ExportSchematicSvg,
+    FollowSchematicGrid, PrintActiveView, RevealExecutedDeck, SelectAnalysisInstance,
 };
+use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
@@ -90,7 +91,7 @@ impl RSpiceApp {
     /// the reader is working, and say whether one did. The shell's own arm
     /// for the command asks it where that feature's turn comes.
     pub(crate) fn route_command_key(&mut self, key: CommandKey) -> bool {
-        features::route(&mut self.state, key)
+        features::route(self, key)
     }
 
     /// Whether the routed command `key` can run in the feature that takes it
@@ -120,16 +121,27 @@ impl RSpiceApp {
         {
             return;
         }
-        features::execute(&mut self.state, spec.key);
+        features::execute(self, spec.key);
         self.after_contribution();
     }
 
+    /// Open the hardcopy feature's `workflow` on the active view, in its
+    /// context, for a request another part raised: a result document's
+    /// figure export, or the print another feature offers as its dialog's
+    /// next step.
+    pub(in crate::workbench) fn open_requested_hardcopy_workflow(
+        &mut self,
+        workflow: HardcopyWorkflow,
+    ) {
+        hardcopy::open_workflow(&mut features::cx(self), workflow);
+    }
+
     /// Answer what a feature's call raised for straight after it: the
-    /// commands it ran next, the print or export workflow it opened, the
-    /// schematic or publication snapshot it exported, the snap that follows a
-    /// new schematic grid, the shortcut resolver's reset when a shortcut
-    /// library was put in use, the open waveform view starting again from
-    /// changed defaults, and the dataset export, the analysis instance and the
+    /// commands it ran next, the print workflow it asked for, the schematic
+    /// or publication snapshot it exported, the snap that follows a new
+    /// schematic grid, the shortcut resolver's reset when a shortcut library
+    /// was put in use, the open waveform view starting again from changed
+    /// defaults, and the dataset export, the analysis instance and the
     /// executed deck a results command asked for.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
@@ -141,20 +153,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, PrintActiveView| {
-                crate::workbench::app::open_hardcopy_workflow(
-                    app,
-                    crate::workbench::app::HardcopyWorkflow::Print,
-                );
-            },
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, ExportActiveView| {
-                crate::workbench::app::open_hardcopy_workflow(
-                    app,
-                    crate::workbench::app::HardcopyWorkflow::Export,
-                );
+                app.open_requested_hardcopy_workflow(HardcopyWorkflow::Print);
             },
         );
         requests::drain(

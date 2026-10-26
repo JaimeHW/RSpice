@@ -16,7 +16,7 @@ use crate::workbench::results::commands::ResultsCommand;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
-use super::features::Registered;
+use super::features;
 use super::framework::requests::{
     self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox,
 };
@@ -132,7 +132,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     chrome::document_bar::show(root, app, layout);
     // The sheet strip hangs from the document row: allocated after it, so the
     // sheets of a drawing read beneath the document that owns them.
-    SheetsFeature::show_sheet_strip(&mut SheetsFeature::cx(&mut app.state), root, layout);
+    SheetsFeature::show_sheet_strip(&mut features::cx::<SheetsFeature>(app), root, layout);
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
@@ -718,7 +718,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         docks::show_inspector(root, app, layout);
     }
     chrome::document_bar::show(root, app, layout);
-    SheetsFeature::show_sheet_strip(&mut SheetsFeature::cx(&mut app.state), root, layout);
+    SheetsFeature::show_sheet_strip(&mut features::cx::<SheetsFeature>(app), root, layout);
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);

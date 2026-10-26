@@ -83,7 +83,7 @@ impl Host for RSpiceApp {
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::ReportAuthoring
                 {
-                    features::show_surface::<HardcopyFeature>(&mut app.state, ui);
+                    features::show_surface::<HardcopyFeature>(app, ui);
                     app.after_contribution();
                     return;
                 }
@@ -227,7 +227,7 @@ impl Host for RSpiceApp {
             // The section that inspects a workspace's document itself: the
             // drawing sheet, which the sheets feature draws.
             Point::Inspector(InspectorScope::Document(Workspace::Design)) => {
-                features::show_inspector::<SheetsFeature>(&mut app.state, ui);
+                features::show_inspector::<SheetsFeature>(app, ui);
                 app.after_contribution();
             }
             Point::Inspector(InspectorScope::Document(_)) => {}
@@ -380,7 +380,7 @@ impl Host for RSpiceApp {
 
     fn commit_inspector_section(&mut self, scope: InspectorScope<Workspace>, ctx: &egui::Context) {
         if scope == InspectorScope::Document(Workspace::Design) {
-            features::commit_inspector::<SheetsFeature>(&mut self.state, ctx);
+            features::commit_inspector::<SheetsFeature>(self, ctx);
             self.after_contribution();
         }
     }

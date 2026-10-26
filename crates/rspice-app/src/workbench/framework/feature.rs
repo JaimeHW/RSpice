@@ -4,10 +4,11 @@
 //! A feature's code never holds the whole application. Each command it
 //! declares is answered and carried out in a [`Cx`]: its own state, the
 //! model every feature shares, the session, the platform services' state,
-//! and narrow views of the other features it reads, read-only but for
-//! letting go of design's canvas gesture. The shell builds that context
-//! from the application's parts for each call; it is four references and
-//! a view, so building one allocates nothing.
+//! the application's handles on the services below the workbench, and
+//! narrow views of the other features it reads, read-only but for letting
+//! go of design's canvas gesture. The shell builds that context from the
+//! application's parts for each call; it is references and views only, so
+//! building one allocates nothing.
 //!
 //! The shell's dispatcher runs every command's prologue, whoever owns it;
 //! the feature answers only whether its command can run here and what it
@@ -124,11 +125,22 @@ impl Default for PublicationDraft {
 pub(crate) struct Peers<'a> {
     design: &'a mut dyn DesignPeer,
     cloud: &'a dyn CloudPort,
+    /// `None` in the results feature's own context: a feature reads its own
+    /// state, never itself as a peer.
+    results: Option<&'a dyn ResultsPort>,
 }
 
 impl<'a> Peers<'a> {
-    pub(crate) fn new(design: &'a mut dyn DesignPeer, cloud: &'a dyn CloudPort) -> Self {
-        Self { design, cloud }
+    pub(crate) fn new(
+        design: &'a mut dyn DesignPeer,
+        cloud: &'a dyn CloudPort,
+        results: Option<&'a dyn ResultsPort>,
+    ) -> Self {
+        Self {
+            design,
+            cloud,
+            results,
+        }
     }
 
     pub(crate) fn design(&self) -> &dyn DesignPort {
@@ -138,6 +150,24 @@ impl<'a> Peers<'a> {
     pub(crate) fn cloud(&self) -> &'a dyn CloudPort {
         self.cloud
     }
+
+    /// What the results workspace shows. The results feature's own context
+    /// holds no such peer, because the feature reads its own state; its code
+    /// asking for one is a fault in that code.
+    pub(crate) fn results(&self) -> &'a dyn ResultsPort {
+        self.results
+            .expect("the results feature reads its own state, never itself as a peer")
+    }
+}
+
+/// The application's handles on the services below the workbench that a
+/// feature's command reaches through: the export IO that asks where a file
+/// goes and writes it. The shell lends them beside the application state for
+/// the one call.
+#[derive(Clone, Copy)]
+pub(crate) struct LowerHandles<'a> {
+    pub(crate) export_io:
+        &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
 }
 
 impl CanvasGesturePort for Peers<'_> {
@@ -154,6 +184,7 @@ pub(crate) struct Cx<'a, F: Feature> {
     /// What the platform services keep between frames: the autosave
     /// interval and the recent files among them.
     pub(crate) platform: &'a mut PlatformState,
+    pub(crate) handles: LowerHandles<'a>,
     pub(crate) peers: Peers<'a>,
 }
 
@@ -163,6 +194,7 @@ impl<'a, F: Feature> Cx<'a, F> {
         model: &'a mut Model,
         wb: &'a mut F::Session,
         platform: &'a mut PlatformState,
+        handles: LowerHandles<'a>,
         peers: Peers<'a>,
     ) -> Self {
         Self {
@@ -170,6 +202,7 @@ impl<'a, F: Feature> Cx<'a, F> {
             model,
             wb,
             platform,
+            handles,
             peers,
         }
     }

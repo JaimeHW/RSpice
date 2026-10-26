@@ -14,21 +14,25 @@ use rspice_results::report_document::{
 };
 use rspice_results_ui::report::page_marker;
 
-use crate::workbench::framework::feature::Peers;
+use crate::workbench::framework::feature::{LowerHandles, Peers};
 use crate::workbench::{AppState, RSpiceApp};
 
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 
 /// The hardcopy feature's context over `state`, built as the shell builds
-/// it.
+/// it, with the export IO the application uses.
 fn cx(state: &mut AppState) -> Cx<'_, HardcopyFeature> {
     Cx::new(
         &mut *state.hardcopy,
         &mut state.model,
         &mut *state.workbench,
         &mut state.platform,
-        Peers::new(&mut *state.design, &*state.cloud),
+        LowerHandles {
+            export_io:
+                &rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+        },
+        Peers::new(&mut *state.design, &*state.cloud, Some(&*state.results)),
     )
 }
 

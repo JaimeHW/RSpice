@@ -7,7 +7,7 @@ use super::*;
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn start_browser_publication(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     plan: std::sync::Arc<HardcopyPlan>,
     source: std::sync::Arc<ResolvedHardcopyDocument>,
     metadata: HardcopySceneMetadata,
@@ -29,8 +29,8 @@ pub(super) fn start_browser_publication(
         &source,
         metadata,
         package_multi_part,
-        app.state.hardcopy.hardcopy.source_resolution_generation,
-        app.state.hardcopy.hardcopy.preview_generation,
+        parts.dialog.source_resolution_generation,
+        parts.dialog.preview_generation,
         repaint_context(),
     )?;
     PUBLICATION.with(|active| {
@@ -46,7 +46,9 @@ pub(super) fn start_browser_publication(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut RSpiceApp) {
+pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(
+    parts: &mut HardcopyParts<'_>,
+) {
     let completed = PUBLICATION.with(|active| {
         let mut active = active.borrow_mut();
         let result = active
@@ -64,7 +66,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let Some((publication, result)) = completed else {
         return;
     };
-    let current = &app.state.hardcopy.hardcopy;
+    let current = &*parts.dialog;
     if !current.open
         || current.source_resolution_generation != publication.ticket.epoch
         || current.preview_generation != publication.ticket.generation
@@ -79,9 +81,9 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
             .map(|source| source.authority().content_digest())
             != Some(publication.ticket_source_digest())
     {
-        app.state.hardcopy.hardcopy.busy = false;
-        if app.state.hardcopy.hardcopy.open {
-            app.state.hardcopy.hardcopy.error = Some(
+        parts.dialog.busy = false;
+        if parts.dialog.open {
+            parts.dialog.error = Some(
                 "The hardcopy source or plan changed before browser publication completed."
                     .to_owned(),
             );
@@ -93,8 +95,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let buffers = match result {
         Ok(buffers) => buffers,
         Err(error) => {
-            app.state.hardcopy.hardcopy.busy = false;
-            app.state.hardcopy.hardcopy.error = Some(record_render_failure(app, &plan, error));
+            parts.dialog.busy = false;
+            parts.dialog.error = Some(record_render_failure(parts, &plan, error));
             return;
         }
     };
@@ -102,14 +104,14 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let completion = match publication.destination {
         BrowserPublicationDestination::Print { reservation } => (|| {
             let rendered = decode_browser_publication(&plan, &source, buffers)
-                .map_err(|error| record_render_failure(app, &plan, error))?;
+                .map_err(|error| record_render_failure(parts, &plan, error))?;
             let outcome = finalize_browser_print(reservation, &plan, &rendered)
-                .map_err(|error| record_print_failure(app, &plan, error, 0));
+                .map_err(|error| record_print_failure(parts, &plan, error, 0));
             outcome.and_then(|outcome| {
                 let receipt =
                     HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
-                retain_hardcopy_receipt(app, receipt)?;
-                commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                retain_hardcopy_receipt(parts, receipt)?;
+                commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 let pages = rendered.page_count();
                 Ok(format!(
                     "Browser print handoff accepted for {pages} page{}; confirm the browser print dialog.",
@@ -125,14 +127,15 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
         } => {
             if multi_part {
                 super::super::worker::decode_packaged_publication(&plan, &source, buffers)
-                    .map_err(|error| record_render_failure(app, &plan, error))
+                    .map_err(|error| record_render_failure(parts, &plan, error))
                     .and_then(|packaged| {
                         let (bytes, artifact, page_count) = packaged.into_parts();
-                        app.export_workflow_io
+                        parts
+                            .export_io
                             .write_bytes_file_observed(&destination, &bytes, media_type)
                             .map_err(|error| {
                                 record_export_failure(
-                                    app,
+                                    parts,
                                     &plan,
                                     format!("Could not publish hardcopy: {error}"),
                                 )
@@ -142,8 +145,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                             HardcopyOutcome::ArtifactExported { artifact },
                         )
                         .map_err(|error| error.to_string())?;
-                        retain_hardcopy_receipt(app, receipt)?;
-                        commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                        retain_hardcopy_receipt(parts, receipt)?;
+                        commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                         Ok(export_completion_message(
                             "hardcopy",
                             &path,
@@ -152,19 +155,20 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                                 page_count,
                                 if page_count == 1 { "" } else { "s" },
                             )),
-                            app.export_workflow_io.as_ref(),
+                            parts.export_io,
                         ))
                     })
             } else {
                 decode_browser_publication(&plan, &source, buffers)
-                    .map_err(|error| record_render_failure(app, &plan, error))
+                    .map_err(|error| record_render_failure(parts, &plan, error))
                     .and_then(|rendered| {
                         export_bytes_and_identity(&rendered).and_then(|(bytes, artifact)| {
-                            app.export_workflow_io
+                            parts
+                                .export_io
                                 .write_bytes_file_observed(&destination, &bytes, media_type)
                                 .map_err(|error| {
                                     record_export_failure(
-                                        app,
+                                        parts,
                                         &plan,
                                         format!("Could not publish hardcopy: {error}"),
                                     )
@@ -174,8 +178,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                                 HardcopyOutcome::ArtifactExported { artifact },
                             )
                             .map_err(|error| error.to_string())?;
-                            retain_hardcopy_receipt(app, receipt)?;
-                            commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                            retain_hardcopy_receipt(parts, receipt)?;
+                            commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                             Ok(export_completion_message(
                                 "hardcopy",
                                 &path,
@@ -189,27 +193,28 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                                         "raster"
                                     }
                                 )),
-                                app.export_workflow_io.as_ref(),
+                                parts.export_io,
                             ))
                         })
                     })
             }
         }
     };
-    app.state.hardcopy.hardcopy.busy = false;
+    parts.dialog.busy = false;
     match completion {
         Ok(message) => {
-            let message = if app.state.hardcopy.hardcopy.last_receipt.is_some() {
+            let message = if parts.dialog.last_receipt.is_some() {
                 format!("{message} It is recorded in the project history.")
             } else {
                 message
             };
-            app.state
+            parts
+                .model
                 .record(LogSeverity::Info, LogSource::Studio, message);
-            app.state.hardcopy.hardcopy.close();
+            parts.dialog.close();
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.error = Some(error);
+            parts.dialog.error = Some(error);
         }
     }
 }
@@ -230,7 +235,7 @@ fn decode_browser_publication(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn start_native_publication(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     plan: std::sync::Arc<HardcopyPlan>,
     source: std::sync::Arc<ResolvedHardcopyDocument>,
     metadata: HardcopySceneMetadata,
@@ -249,7 +254,7 @@ pub(super) fn start_native_publication(
         plan.clone(),
         source.clone(),
         metadata,
-        app.state.hardcopy.hardcopy.preview_generation,
+        parts.dialog.preview_generation,
         operation,
         repaint_context(),
     )?;
@@ -265,8 +270,10 @@ pub(super) fn start_native_publication(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut RSpiceApp) {
-    if poll_native_finalization(app) {
+pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(
+    parts: &mut HardcopyParts<'_>,
+) {
+    if poll_native_finalization(parts) {
         return;
     }
     let completed = PUBLICATION.with(|active| {
@@ -286,7 +293,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let Some((publication, result)) = completed else {
         return;
     };
-    let current = &app.state.hardcopy.hardcopy;
+    let current = &*parts.dialog;
     if current.open
         && (current.preview_generation != publication.ticket.generation
             || current
@@ -300,9 +307,9 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                 .map(|source| source.authority().content_digest())
                 != Some(publication.ticket.source_digest))
     {
-        app.state.hardcopy.hardcopy.busy = false;
-        if app.state.hardcopy.hardcopy.open {
-            app.state.hardcopy.hardcopy.error = Some(
+        parts.dialog.busy = false;
+        if parts.dialog.open {
+            parts.dialog.error = Some(
                 "The hardcopy source or plan changed before native rendering completed.".to_owned(),
             );
         }
@@ -310,9 +317,9 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     }
     let plan = publication.plan;
     let operation = match result {
-        Err(error) => Err(record_render_failure(app, &plan, error)),
+        Err(error) => Err(record_render_failure(parts, &plan, error)),
         Ok(completion) if completion.ticket != publication.ticket => Err(record_render_failure(
-            app,
+            parts,
             &plan,
             "Native hardcopy rendering returned a stale completion ticket.".to_owned(),
         )),
@@ -369,7 +376,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                 },
             )),
             _ => Err(record_render_failure(
-                app,
+                parts,
                 &plan,
                 "Native hardcopy rendering returned the wrong payload type.".to_owned(),
             )),
@@ -377,22 +384,24 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     };
     match operation {
         Ok((operation, destination)) => {
-            let ticket =
-                match super::super::finalize::start(
-                    plan.clone(),
-                    publication.ticket.generation,
-                    operation,
-                    repaint_context(),
-                ) {
-                    Ok(ticket) => ticket,
-                    Err(error) => {
-                        app.state.hardcopy.hardcopy.busy = false;
-                        app.state.hardcopy.hardcopy.error = Some(
-                            record_native_finalization_failure(app, &plan, &destination, error),
-                        );
-                        return;
-                    }
-                };
+            let ticket = match super::super::finalize::start(
+                plan.clone(),
+                publication.ticket.generation,
+                operation,
+                repaint_context(),
+            ) {
+                Ok(ticket) => ticket,
+                Err(error) => {
+                    parts.dialog.busy = false;
+                    parts.dialog.error = Some(record_native_finalization_failure(
+                        parts,
+                        &plan,
+                        &destination,
+                        error,
+                    ));
+                    return;
+                }
+            };
             FINALIZATION.with(|active| {
                 *active.borrow_mut() = Some(ActiveNativeFinalization {
                     ticket,
@@ -404,8 +413,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
             });
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.busy = false;
-            app.state.hardcopy.hardcopy.error = Some(error);
+            parts.dialog.busy = false;
+            parts.dialog.error = Some(error);
         }
     }
 }

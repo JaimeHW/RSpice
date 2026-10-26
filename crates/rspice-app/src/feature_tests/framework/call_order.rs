@@ -14,6 +14,7 @@ const APP: &str = include_str!("../../workbench/app.rs");
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
+const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -238,7 +239,7 @@ const SHOW: &[Step] = &[
     ("11.19", &["chrome::document_bar::show(root, app, layout)"]),
     (
         "11.20",
-        &["SheetsFeature::show_sheet_strip(&mut SheetsFeature::cx(&mut app.state), root, layout)"],
+        &["SheetsFeature::show_sheet_strip(&mut features::cx::<SheetsFeature>(app), root, layout)"],
     ),
     ("11.21", &["docks::show_console(root, app, layout)"]),
     (
@@ -345,7 +346,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "sheets"),
     ("features::render_dialog", "sheets"),
     ("features::render_dialog", "sheets"),
-    ("render_hardcopy_dialog", "hardcopy"),
+    ("features::render_dialog", "hardcopy"),
     ("render_object_properties_dialog", "design"),
     ("render_rename_selection_dialog", "design"),
     ("render_find_replace_dialog", "design"),
@@ -417,7 +418,7 @@ const DISPATCH_FEATURE_COMMAND: &[Step] = &[
     ("2", &["lacks_open_project(flags, &self.state.platform)"]),
     ("3", &["self.state.deny_read_only_edit()"]),
     ("4", &["self.state.commit_pending_inspector_edit()"]),
-    ("5", &["features::execute(&mut self.state, spec.key)"]),
+    ("5", &["features::execute(self, spec.key)"]),
     ("6", &["self.after_contribution()"]),
 ];
 
@@ -430,58 +431,63 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "2",
         &[
             "|app, PrintActiveView|",
-            "crate::workbench::app::HardcopyWorkflow::Print",
+            "app.open_requested_hardcopy_workflow(HardcopyWorkflow::Print)",
         ],
     ),
     (
         "3",
-        &[
-            "|app, ExportActiveView|",
-            "crate::workbench::app::HardcopyWorkflow::Export",
-        ],
-    ),
-    (
-        "4",
         &["|app, ExportSchematicSvg| file_action(app, FileMenuAction::ExportSvg)"],
     ),
     (
-        "5",
+        "4",
         &[
             "|app, ExportPublicationSnapshot|",
             "file_action(app, FileMenuAction::ExportPublicationSnapshot)",
         ],
     ),
     (
-        "6",
+        "5",
         &[
             "|app, FollowSchematicGrid|",
             "state.design.follow_schematic_grid(&state.model)",
         ],
     ),
-    ("7", &["self.state.take_shortcut_resolver_reset()"]),
+    ("6", &["self.state.take_shortcut_resolver_reset()"]),
     (
-        "8",
+        "7",
         &["|app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session()"],
     ),
     (
-        "9",
+        "8",
         &["|app, ExportDataset| file_action(app, FileMenuAction::ExportCsvWaveforms)"],
     ),
     (
-        "10",
+        "9",
         &[
             "|app, SelectAnalysisInstance(instance)|",
             "app.state.simulate.active_analysis_instance = instance",
         ],
     ),
     (
-        "11",
+        "10",
         &[
             "|app, RevealExecutedDeck(sequence)|",
             "crate::workbench::commands::result_navigation::open_task_deck(",
         ],
     ),
 ];
+
+/// `RSpiceApp::handle_image_export`, the last step of the frame's
+/// preparation: the figure a result document asked to export while it was
+/// drawn opens the hardcopy feature's export workflow, in its context.
+const HANDLE_IMAGE_EXPORT: &[Step] = &[(
+    "1",
+    &[
+        "|app, ExportFigure|",
+        "app.open_requested_hardcopy_workflow(",
+        "HardcopyWorkflow::Export",
+    ],
+)];
 
 /// The body of the one function `signature` opens in `source`'s shipped half,
 /// without its comment lines.
@@ -799,7 +805,25 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        10,
-        "`after_contribution` answers exactly the ten requests it lists"
+        9,
+        "`after_contribution` answers exactly the nine requests it lists"
+    );
+}
+
+#[test]
+fn another_part_opens_a_hardcopy_workflow_in_the_feature_context_where_it_did() {
+    let open = body(DISPATCH, "fn open_requested_hardcopy_workflow(");
+    assert_eq!(
+        without_whitespace(&open),
+        without_whitespace("hardcopy::open_workflow(&mut features::cx(self), workflow);"),
+        "a request another part raised opens the workflow in the hardcopy feature's context"
+    );
+
+    let pump = body(EXPORT_IMAGE, "fn handle_image_export(");
+    assert_runs_in_order("RSpiceApp::handle_image_export", &pump, HANDLE_IMAGE_EXPORT);
+    assert_eq!(
+        pump.matches("requests::drain(").count(),
+        1,
+        "the frame's preparation answers only the figure export there"
     );
 }

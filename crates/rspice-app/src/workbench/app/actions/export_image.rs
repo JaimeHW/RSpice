@@ -25,14 +25,14 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::framework::requests::{self, ExportFigure};
 
 impl RSpiceApp {
-    /// Pump a pending figure-export request.
+    /// Pump a pending figure-export request: the hardcopy feature opens its
+    /// export workflow on the active view.
     pub(in crate::workbench) fn handle_image_export(&mut self) {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ExportFigure| {
-                crate::workbench::app::open_hardcopy_workflow(
-                    app,
+                app.open_requested_hardcopy_workflow(
                     crate::workbench::app::HardcopyWorkflow::Export,
                 );
             },

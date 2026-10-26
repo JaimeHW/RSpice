@@ -34,6 +34,48 @@ mod worker;
 pub(crate) const DEFAULT_RASTER_DPI: u16 = 600;
 
 pub(crate) use publish::open_hardcopy_workflow;
+pub(crate) use render::render_hardcopy_dialog;
+
+/// What the hardcopy workflow reads and writes, borrowed for one call: the
+/// dialog's draft, the report editor's selection, the model, the session,
+/// what the results workspace shows, and the export IO that asks where a
+/// file goes and writes it.
+pub(crate) struct HardcopyParts<'a> {
+    pub(crate) dialog: &'a mut HardcopyDialogState,
+    pub(crate) report_authoring: &'a rspice_results_ui::report::session::ReportAuthoringState,
+    pub(crate) model: &'a mut crate::workbench::app_state::Model,
+    pub(crate) workbench: &'a mut crate::workbench::state::WorkbenchSession,
+    pub(crate) results: &'a dyn crate::workbench::framework::ports::ResultsPort,
+    pub(crate) export_io: &'a dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
+}
+
+impl HardcopyParts<'_> {
+    /// What a retained source is enumerated and resolved from.
+    pub(crate) fn source_reads(
+        &self,
+    ) -> crate::workbench::hardcopy_adapters::sources::SourceReads<'_> {
+        crate::workbench::hardcopy_adapters::sources::SourceReads {
+            model: self.model,
+            workbench: self.workbench,
+            report_authoring: self.report_authoring,
+            results: self.results,
+        }
+    }
+}
+
+/// The workflow's parts over `app`, for a test that drives the workflow
+/// without the feature's context.
+#[cfg(test)]
+pub(crate) fn hardcopy_parts(app: &mut crate::workbench::app::RSpiceApp) -> HardcopyParts<'_> {
+    HardcopyParts {
+        dialog: &mut app.state.hardcopy.hardcopy,
+        report_authoring: &app.state.hardcopy.report_authoring,
+        model: &mut app.state.model,
+        workbench: &mut app.state.workbench,
+        results: &*app.state.results,
+        export_io: app.export_workflow_io.as_ref(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum HardcopyDialogPage {

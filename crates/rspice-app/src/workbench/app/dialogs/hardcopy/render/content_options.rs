@@ -1120,7 +1120,10 @@ mod tests {
             app.state.workbench.documents.activate(
                 crate::workbench::state::WorkspaceDocumentId::CellView(reference),
             );
-            publish::open_hardcopy_workflow(&mut app, HardcopyWorkflow::Export);
+            publish::open_hardcopy_workflow(
+                &mut hardcopy_parts(&mut app),
+                HardcopyWorkflow::Export,
+            );
             let mut studio = Self {
                 ctx,
                 app,
@@ -1159,7 +1162,7 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ui| app.render_hardcopy_dialog(ui),
+                |ui| render_hardcopy_dialog(&mut hardcopy_parts(app), ui),
             )
         }
 

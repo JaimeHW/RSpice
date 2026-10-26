@@ -5,9 +5,9 @@
 //! authority, compiles a fresh immutable plan, and only then crosses the file,
 //! browser-print, or native-spool boundary.
 
+use super::HardcopyParts;
 use super::HardcopyWorkflow;
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app::RSpiceApp;
 
 thread_local! {
     static REPAINT_CONTEXT: std::cell::RefCell<Option<egui::Context>> =
@@ -58,14 +58,17 @@ use rspice_hardcopy_contract::{
     OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
 };
 
-fn retain_hardcopy_receipt(app: &mut RSpiceApp, receipt: HardcopyReceipt) -> Result<(), String> {
-    app.state
+fn retain_hardcopy_receipt(
+    parts: &mut HardcopyParts<'_>,
+    receipt: HardcopyReceipt,
+) -> Result<(), String> {
+    parts
         .model
         .workspace
         .content
         .record_hardcopy_receipt(receipt.clone())
         .map_err(|error| error.to_string())?;
-    app.state.hardcopy.hardcopy.last_receipt = Some(receipt);
+    parts.dialog.last_receipt = Some(receipt);
     Ok(())
 }
 
@@ -215,38 +218,36 @@ enum SourceResolutionPurpose {
     SavePageSetup,
 }
 
-pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWorkflow) {
-    let (source_key, scope) = match active_retained_source_selection(app) {
+pub(crate) fn open_hardcopy_workflow(parts: &mut HardcopyParts<'_>, workflow: HardcopyWorkflow) {
+    let (source_key, scope) = match active_retained_source_selection(parts) {
         Ok(selection) => selection,
         Err(error) => {
-            app.state
+            parts
+                .workbench
                 .prompt(format!("{} is unavailable: {error}.", workflow.title()));
             return;
         }
     };
     let prepared =
         match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
             &source_key,
             scope.clone(),
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
-                app.state
+                parts
+                    .workbench
                     .prompt(format!("{} is unavailable: {error}.", workflow.title()));
                 return;
             }
         };
     let candidates =
         crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
         );
-    app.state.hardcopy.hardcopy.begin_open(workflow, candidates);
-    let generation = app
-        .state
-        .hardcopy
-        .hardcopy
-        .next_source_resolution_generation();
+    parts.dialog.begin_open(workflow, candidates);
+    let generation = parts.dialog.next_source_resolution_generation();
     if let Err(error) = start_source_resolution(
         prepared,
         SourceResolutionPurpose::Open(workflow),
@@ -255,35 +256,31 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
         scope,
         None,
     ) {
-        app.state.hardcopy.hardcopy.busy = false;
-        app.state.hardcopy.hardcopy.error = Some(error);
+        parts.dialog.busy = false;
+        parts.dialog.error = Some(error);
     }
 }
 
 pub(super) fn select_retained_source(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     source_key: &str,
     scope: rspice_hardcopy_contract::HardcopyScope,
 ) {
     let prepared =
         match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
             source_key,
             scope.clone(),
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
-                app.state.hardcopy.hardcopy.error = Some(error.to_string());
+                parts.dialog.error = Some(error.to_string());
                 return;
             }
         };
-    app.state.hardcopy.hardcopy.busy = true;
-    app.state.hardcopy.hardcopy.error = None;
-    let generation = app
-        .state
-        .hardcopy
-        .hardcopy
-        .next_source_resolution_generation();
+    parts.dialog.busy = true;
+    parts.dialog.error = None;
+    let generation = parts.dialog.next_source_resolution_generation();
     if let Err(error) = start_source_resolution(
         prepared,
         SourceResolutionPurpose::Select,
@@ -292,8 +289,8 @@ pub(super) fn select_retained_source(
         scope,
         None,
     ) {
-        app.state.hardcopy.hardcopy.busy = false;
-        app.state.hardcopy.hardcopy.error = Some(error);
+        parts.dialog.busy = false;
+        parts.dialog.error = Some(error);
     }
 }
 
@@ -367,7 +364,7 @@ fn start_source_resolution(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
+pub(super) fn poll_source_resolution(parts: &mut HardcopyParts<'_>) {
     let completed = SOURCE_RESOLUTION.with(|active| {
         let mut active = active.borrow_mut();
         let result = active
@@ -399,12 +396,10 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
     let Some((generation, purpose, source_key, scope, expected, result)) = completed else {
         return;
     };
-    if !app.state.hardcopy.hardcopy.open
-        || app.state.hardcopy.hardcopy.source_resolution_generation != generation
-    {
+    if !parts.dialog.open || parts.dialog.source_resolution_generation != generation {
         clear_pending_authentication(purpose);
-        if app.state.hardcopy.hardcopy.open {
-            app.state.hardcopy.hardcopy.busy = false;
+        if parts.dialog.open {
+            parts.dialog.busy = false;
         }
         return;
     }
@@ -412,15 +407,15 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
         Ok(resolved) if expected.is_none() => {
             let prepared =
                 match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-                    crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+                    parts.source_reads(),
                     &source_key,
                     scope.clone(),
                 ) {
                     Ok(prepared) => prepared,
                     Err(error) => {
-                        app.state.hardcopy.hardcopy.busy = false;
+                        parts.dialog.busy = false;
                         clear_pending_authentication(purpose);
-                        app.state.hardcopy.hardcopy.error = Some(error.to_string());
+                        parts.dialog.error = Some(error.to_string());
                         return;
                     }
                 };
@@ -432,9 +427,9 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 scope,
                 Some(resolved),
             ) {
-                app.state.hardcopy.hardcopy.busy = false;
+                parts.dialog.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.hardcopy.hardcopy.error = Some(error);
+                parts.dialog.error = Some(error);
             }
         }
         Ok(resolved) => {
@@ -442,59 +437,59 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 purpose,
                 SourceResolutionPurpose::Open(_) | SourceResolutionPurpose::Select
             ) {
-                app.state.hardcopy.hardcopy.busy = false;
+                parts.dialog.busy = false;
             }
             if expected.as_ref() != Some(&resolved) {
-                app.state.hardcopy.hardcopy.busy = false;
+                parts.dialog.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.hardcopy.hardcopy.error =
+                parts.dialog.error =
                     Some("The source document changed while it was being checked.".to_owned());
                 return;
             }
             match purpose {
                 SourceResolutionPurpose::Open(workflow) => {
-                    if let Err(error) = apply_open_resolved(app, workflow, resolved) {
-                        app.state.hardcopy.hardcopy.error = Some(error);
+                    if let Err(error) = apply_open_resolved(parts, workflow, resolved) {
+                        parts.dialog.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Select => {
-                    if let Err(error) = apply_selected_resolved(app, resolved) {
-                        app.state.hardcopy.hardcopy.error = Some(error);
+                    if let Err(error) = apply_selected_resolved(parts, resolved) {
+                        parts.dialog.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Publish => {
-                    if let Err(error) = finish_publication_authentication(app, resolved) {
-                        app.state.hardcopy.hardcopy.busy = false;
+                    if let Err(error) = finish_publication_authentication(parts, resolved) {
+                        parts.dialog.busy = false;
                         clear_pending_publication();
-                        app.state.hardcopy.hardcopy.error = Some(error);
+                        parts.dialog.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::SavePageSetup => {
-                    match finish_page_setup_authentication(app, resolved) {
+                    match finish_page_setup_authentication(parts, resolved) {
                         Ok(message) => {
-                            app.state.hardcopy.hardcopy.busy = false;
-                            app.state.prompt(message);
-                            app.state.hardcopy.hardcopy.close();
+                            parts.dialog.busy = false;
+                            parts.workbench.prompt(message);
+                            parts.dialog.close();
                         }
                         Err(error) => {
-                            app.state.hardcopy.hardcopy.busy = false;
+                            parts.dialog.busy = false;
                             clear_pending_authentication(purpose);
-                            app.state.hardcopy.hardcopy.error = Some(error);
+                            parts.dialog.error = Some(error);
                         }
                     }
                 }
             }
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.busy = false;
+            parts.dialog.busy = false;
             clear_pending_authentication(purpose);
-            app.state.hardcopy.hardcopy.error = Some(error);
+            parts.dialog.error = Some(error);
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
+pub(super) fn poll_source_resolution(parts: &mut HardcopyParts<'_>) {
     let completed = SOURCE_RESOLUTION.with(|active| {
         let mut active = active.borrow_mut();
         let result = active.as_ref().and_then(|worker| {
@@ -526,12 +521,10 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
     let Some((generation, purpose, source_key, scope, expected, result)) = completed else {
         return;
     };
-    if !app.state.hardcopy.hardcopy.open
-        || app.state.hardcopy.hardcopy.source_resolution_generation != generation
-    {
+    if !parts.dialog.open || parts.dialog.source_resolution_generation != generation {
         clear_pending_authentication(purpose);
-        if app.state.hardcopy.hardcopy.open {
-            app.state.hardcopy.hardcopy.busy = false;
+        if parts.dialog.open {
+            parts.dialog.busy = false;
         }
         return;
     }
@@ -539,15 +532,15 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
         Ok(resolved) if expected.is_none() => {
             let prepared =
                 match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-                    crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+                    parts.source_reads(),
                     &source_key,
                     scope.clone(),
                 ) {
                     Ok(prepared) => prepared,
                     Err(error) => {
-                        app.state.hardcopy.hardcopy.busy = false;
+                        parts.dialog.busy = false;
                         clear_pending_authentication(purpose);
-                        app.state.hardcopy.hardcopy.error = Some(error.to_string());
+                        parts.dialog.error = Some(error.to_string());
                         return;
                     }
                 };
@@ -559,9 +552,9 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 scope,
                 Some(resolved),
             ) {
-                app.state.hardcopy.hardcopy.busy = false;
+                parts.dialog.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.hardcopy.hardcopy.error = Some(error);
+                parts.dialog.error = Some(error);
             }
         }
         Ok(resolved) => {
@@ -569,53 +562,53 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 purpose,
                 SourceResolutionPurpose::Open(_) | SourceResolutionPurpose::Select
             ) {
-                app.state.hardcopy.hardcopy.busy = false;
+                parts.dialog.busy = false;
             }
             if expected.as_ref() != Some(&resolved) {
-                app.state.hardcopy.hardcopy.busy = false;
+                parts.dialog.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.hardcopy.hardcopy.error =
+                parts.dialog.error =
                     Some("The source document changed while it was being checked.".to_owned());
                 return;
             }
             match purpose {
                 SourceResolutionPurpose::Open(workflow) => {
-                    if let Err(error) = apply_open_resolved(app, workflow, resolved) {
-                        app.state.hardcopy.hardcopy.error = Some(error);
+                    if let Err(error) = apply_open_resolved(parts, workflow, resolved) {
+                        parts.dialog.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Select => {
-                    if let Err(error) = apply_selected_resolved(app, resolved) {
-                        app.state.hardcopy.hardcopy.error = Some(error);
+                    if let Err(error) = apply_selected_resolved(parts, resolved) {
+                        parts.dialog.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Publish => {
-                    if let Err(error) = finish_publication_authentication(app, resolved) {
-                        app.state.hardcopy.hardcopy.busy = false;
+                    if let Err(error) = finish_publication_authentication(parts, resolved) {
+                        parts.dialog.busy = false;
                         clear_pending_publication();
-                        app.state.hardcopy.hardcopy.error = Some(error);
+                        parts.dialog.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::SavePageSetup => {
-                    match finish_page_setup_authentication(app, resolved) {
+                    match finish_page_setup_authentication(parts, resolved) {
                         Ok(message) => {
-                            app.state.hardcopy.hardcopy.busy = false;
-                            app.state.prompt(message);
-                            app.state.hardcopy.hardcopy.close();
+                            parts.dialog.busy = false;
+                            parts.workbench.prompt(message);
+                            parts.dialog.close();
                         }
                         Err(error) => {
-                            app.state.hardcopy.hardcopy.busy = false;
+                            parts.dialog.busy = false;
                             clear_pending_authentication(purpose);
-                            app.state.hardcopy.hardcopy.error = Some(error);
+                            parts.dialog.error = Some(error);
                         }
                     }
                 }
             }
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.busy = false;
+            parts.dialog.busy = false;
             clear_pending_authentication(purpose);
-            app.state.hardcopy.hardcopy.error = Some(error);
+            parts.dialog.error = Some(error);
         }
     }
 }
@@ -641,12 +634,11 @@ pub(super) fn cancel_source_resolution() {
 }
 
 fn apply_open_resolved(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     workflow: HardcopyWorkflow,
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
-    let saved = app
-        .state
+    let saved = parts
         .model
         .workspace
         .content
@@ -655,7 +647,7 @@ fn apply_open_resolved(
         .map_err(|error| error.to_string())?
         .map(|saved| saved.setup().clone());
     let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
-        active_schematic_page_authority(app, &resolved)
+        active_schematic_page_authority(parts, &resolved)
     } else {
         None
     };
@@ -663,46 +655,43 @@ fn apply_open_resolved(
         schematic_authority
             .as_ref()
             .map(|authority| {
-                authored_sheet_format(&app.state, authority)
+                authored_sheet_format(parts.model, authority)
                     .and_then(setup_seeded_from_sheet_format)
             })
             .transpose()?
     } else {
         None
     };
-    let metadata = metadata_for(app, &resolved).map_err(|error| error.to_string())?;
-    let source_candidates = app.state.hardcopy.hardcopy.source_candidates.clone();
-    app.state
-        .hardcopy
-        .hardcopy
+    let metadata = metadata_for(parts, &resolved).map_err(|error| error.to_string())?;
+    let source_candidates = parts.dialog.source_candidates.clone();
+    parts
+        .dialog
         .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
         .map_err(|error| error.to_string())?;
-    app.state.hardcopy.hardcopy.schematic_page_authority = schematic_authority;
-    app.state.hardcopy.hardcopy.metadata = Some(metadata);
-    app.state.hardcopy.hardcopy.source_candidates = source_candidates;
+    parts.dialog.schematic_page_authority = schematic_authority;
+    parts.dialog.metadata = Some(metadata);
+    parts.dialog.source_candidates = source_candidates;
     #[cfg(not(target_arch = "wasm32"))]
-    if (workflow == HardcopyWorkflow::Print
-        || app.state.hardcopy.hardcopy.format == OutputFormat::NativePrinter)
+    if (workflow == HardcopyWorkflow::Print || parts.dialog.format == OutputFormat::NativePrinter)
         && crate::workbench::hardcopy_adapters::print::native_print_platform_support()
             == crate::workbench::hardcopy_adapters::print::NativePrintPlatformSupport::Available
     {
-        refresh_printer_catalog(app);
+        refresh_printer_catalog(parts);
     }
     Ok(())
 }
 
 fn apply_selected_resolved(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
-    let workflow = app.state.hardcopy.hardcopy.workflow;
+    let workflow = parts.dialog.workflow;
     let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
-        active_schematic_page_authority(app, &resolved)
+        active_schematic_page_authority(parts, &resolved)
     } else {
         None
     };
-    let saved = app
-        .state
+    let saved = parts
         .model
         .workspace
         .content
@@ -714,28 +703,27 @@ fn apply_selected_resolved(
         schematic_authority
             .as_ref()
             .map(|authority| {
-                authored_sheet_format(&app.state, authority)
+                authored_sheet_format(parts.model, authority)
                     .and_then(setup_seeded_from_sheet_format)
             })
             .transpose()?
     } else {
         None
     };
-    let metadata = metadata_for(app, &resolved).map_err(|error| error.to_string())?;
-    let source_candidates = app.state.hardcopy.hardcopy.source_candidates.clone();
-    app.state
-        .hardcopy
-        .hardcopy
+    let metadata = metadata_for(parts, &resolved).map_err(|error| error.to_string())?;
+    let source_candidates = parts.dialog.source_candidates.clone();
+    parts
+        .dialog
         .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
         .map_err(|error| error.to_string())?;
-    app.state.hardcopy.hardcopy.schematic_page_authority = schematic_authority;
-    app.state.hardcopy.hardcopy.metadata = Some(metadata);
-    app.state.hardcopy.hardcopy.source_candidates = source_candidates;
+    parts.dialog.schematic_page_authority = schematic_authority;
+    parts.dialog.metadata = Some(metadata);
+    parts.dialog.source_candidates = source_candidates;
     Ok(())
 }
 
 fn active_schematic_page_authority(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     resolved: &ResolvedHardcopyDocument,
 ) -> Option<super::SchematicPageSetupAuthority> {
     use crate::state::ViewType;
@@ -743,9 +731,9 @@ fn active_schematic_page_authority(
     use crate::workbench::hardcopy_adapters::sources::HardcopySemanticDocument;
     use rspice_hardcopy_contract::HardcopyScope;
 
-    if app.state.workbench.current_route().surface_id() != SurfaceId::Design
+    if parts.workbench.current_route().surface_id() != SurfaceId::Design
         || !matches!(
-            app.state.model.workspace.content.active_view_type(),
+            parts.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
         || !matches!(
@@ -756,13 +744,12 @@ fn active_schematic_page_authority(
         return None;
     }
 
-    let cell_view_key = app.state.model.workspace.content.active_key();
+    let cell_view_key = parts.model.workspace.content.active_key();
     let base_source_key = format!(
         "project:{}:cell-view:{cell_view_key}",
-        app.state.model.workspace.content.project.id().as_uuid()
+        parts.model.workspace.content.project.id().as_uuid()
     );
-    let governed_sheet = app
-        .state
+    let governed_sheet = parts
         .model
         .workspace
         .content
@@ -793,25 +780,24 @@ fn active_schematic_page_authority(
     };
 
     Some(super::SchematicPageSetupAuthority {
-        edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
+        edit: crate::workbench::app::SchematicEditAuthority::capture(&*parts.model),
         governed_sheet,
     })
 }
 
 fn validate_schematic_page_authority(
-    state: &crate::workbench::app_state::AppState,
+    model: &crate::workbench::app_state::Model,
     authority: &super::SchematicPageSetupAuthority,
 ) -> Result<(), String> {
     let Some(governed) = &authority.governed_sheet else {
-        let active_governed_sheet = state
-            .model
+        let active_governed_sheet = model
             .workspace
             .content
             .design_management
-            .sheet_catalog(&state.model.workspace.content.active_key())
+            .sheet_catalog(&model.workspace.content.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
         return if active_governed_sheet.is_none() {
-            authority.edit.validate(state, "Page Setup")
+            authority.edit.validate(model, "Page Setup")
         } else {
             Err(
                 "The active schematic acquired governed sheet authority. Close and reopen Page Setup."
@@ -819,11 +805,10 @@ fn validate_schematic_page_authority(
             )
         };
     };
-    if state.model.workspace.content.active_key() != governed.cell_view_key {
+    if model.workspace.content.active_key() != governed.cell_view_key {
         return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
     }
-    let catalog = state
-        .model
+    let catalog = model
         .workspace
         .content
         .design_management
@@ -839,17 +824,16 @@ fn validate_schematic_page_authority(
     {
         return Err("The governed active sheet changed. Close and reopen Page Setup.".to_owned());
     }
-    authority.edit.validate(state, "Page Setup")
+    authority.edit.validate(model, "Page Setup")
 }
 
 fn authored_sheet_format(
-    state: &crate::workbench::app_state::AppState,
+    model: &crate::workbench::app_state::Model,
     authority: &super::SchematicPageSetupAuthority,
 ) -> Result<crate::state::SchematicSheetFormat, String> {
-    validate_schematic_page_authority(state, authority)?;
+    validate_schematic_page_authority(model, authority)?;
     if let Some(governed) = &authority.governed_sheet {
-        return state
-            .model
+        return model
             .workspace
             .content
             .design_management
@@ -858,7 +842,7 @@ fn authored_sheet_format(
             .map(|sheet| sheet.page_format().clone())
             .ok_or_else(|| "The governed active sheet is unavailable.".to_owned());
     }
-    let policy = state.model.schematic.document().document_policy;
+    let policy = model.schematic.document().document_policy;
     if let Some(custom) = policy.custom_page_size {
         return crate::state::SchematicSheetFormat::try_custom(
             "Custom",
@@ -963,24 +947,23 @@ fn setup_seeded_from_sheet_format(
 }
 
 fn active_retained_source_selection(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
 ) -> Result<(String, rspice_hardcopy_contract::HardcopyScope), String> {
     use crate::workbench::SurfaceId;
     use rspice_hardcopy_contract::HardcopyScope;
 
     let candidates =
         crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
         );
-    let selected = match app.state.workbench.current_route().surface_id() {
+    let selected = match parts.workbench.current_route().surface_id() {
         SurfaceId::Design => {
-            let active_sheet_suffix = app
-                .state
+            let active_sheet_suffix = parts
                 .model
                 .workspace
                 .content
                 .design_management
-                .sheet_catalog(&app.state.model.workspace.content.active_key())
+                .sheet_catalog(&parts.model.workspace.content.active_key())
                 .and_then(|catalog| catalog.active_sheet_id())
                 .map(|sheet_id| format!(":sheet:{sheet_id}"));
             active_sheet_suffix
@@ -997,8 +980,7 @@ fn active_retained_source_selection(
                     })
                 })
         }
-        SurfaceId::Results => match app
-            .state
+        SurfaceId::Results => match parts
             .workbench
             .documents
             .active(crate::workbench::state::Workspace::Results)
@@ -1006,11 +988,8 @@ fn active_retained_source_selection(
             Some(crate::workbench::state::WorkspaceDocumentId::VisualizationDocument(
                 document_id,
             )) => {
-                let pane_id = app
-                    .state
+                let pane_id = parts
                     .results
-                    .results
-                    .session
                     .persistent_document_pane(*document_id)
                     .ok_or_else(|| "No result-document pane is active.".to_owned())?
                     .get();
@@ -1051,7 +1030,7 @@ fn active_retained_source_selection(
 }
 
 fn metadata_for(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     resolved: &ResolvedHardcopyDocument,
 ) -> Result<HardcopySceneMetadata, rspice_hardcopy::render::HardcopyRenderError> {
     let mut metadata =
@@ -1060,8 +1039,8 @@ fn metadata_for(
         crate::time_compat::unix_epoch().as_secs(),
     )?);
     let (header, provenance) = identity_lines(
-        app.state.model.workspace.content.project.display_name(),
-        &app.state
+        parts.model.workspace.content.project.display_name(),
+        &parts
             .model
             .workspace
             .content
@@ -1098,18 +1077,18 @@ fn identity_lines(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn refresh_printer_catalog(app: &mut RSpiceApp) {
+pub(super) fn refresh_printer_catalog(parts: &mut HardcopyParts<'_>) {
     if crate::workbench::hardcopy_adapters::print::native_print_platform_support()
         != crate::workbench::hardcopy_adapters::print::NativePrintPlatformSupport::Available
     {
-        app.state.hardcopy.hardcopy.printer_report = None;
-        app.state.hardcopy.hardcopy.printer_capabilities = None;
-        app.state.hardcopy.hardcopy.clear_printer();
-        app.state.hardcopy.hardcopy.error =
+        parts.dialog.printer_report = None;
+        parts.dialog.printer_capabilities = None;
+        parts.dialog.clear_printer();
+        parts.dialog.error =
             Some("Native printer discovery is available on Windows only.".to_owned());
         return;
     }
-    if app.state.hardcopy.hardcopy.printer_discovery_busy {
+    if parts.dialog.printer_discovery_busy {
         return;
     }
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -1119,18 +1098,17 @@ pub(super) fn refresh_printer_catalog(app: &mut RSpiceApp) {
             let _ = sender.send(discover_native_printers().map_err(|error| error.to_string()));
         }) {
         Ok(_) => {
-            app.state.hardcopy.hardcopy.printer_discovery_busy = true;
+            parts.dialog.printer_discovery_busy = true;
             PRINTER_DISCOVERY.with(|slot| *slot.borrow_mut() = Some(receiver));
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.error =
-                Some(format!("Could not start printer discovery: {error}"));
+            parts.dialog.error = Some(format!("Could not start printer discovery: {error}"));
         }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn poll_printer_catalog(app: &mut RSpiceApp) {
+pub(super) fn poll_printer_catalog(parts: &mut HardcopyParts<'_>) {
     let result = PRINTER_DISCOVERY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let result = slot
@@ -1150,25 +1128,23 @@ pub(super) fn poll_printer_catalog(app: &mut RSpiceApp) {
     let Some(result) = result else {
         return;
     };
-    app.state.hardcopy.hardcopy.printer_discovery_busy = false;
+    parts.dialog.printer_discovery_busy = false;
     match result {
         Ok(report) => {
             let preferred = report
                 .printers()
                 .iter()
-                .find(|entry| {
-                    entry.capabilities().device_id() == app.state.hardcopy.hardcopy.printer_id
-                })
+                .find(|entry| entry.capabilities().device_id() == parts.dialog.printer_id)
                 .or_else(|| report.printers().iter().find(|entry| entry.is_default()))
                 .or_else(|| report.printers().first())
                 .map(|entry| entry.capabilities().clone());
-            app.state.hardcopy.hardcopy.printer_report = Some(report);
+            parts.dialog.printer_report = Some(report);
             match preferred {
-                Some(capabilities) => select_printer_capabilities(app, capabilities, None),
+                Some(capabilities) => select_printer_capabilities(parts, capabilities, None),
                 None => {
-                    app.state.hardcopy.hardcopy.clear_printer();
-                    app.state.hardcopy.hardcopy.printer_capabilities = None;
-                    app.state.hardcopy.hardcopy.error = Some(
+                    parts.dialog.clear_printer();
+                    parts.dialog.printer_capabilities = None;
+                    parts.dialog.error = Some(
                         "Windows did not report an available printer whose capabilities could be read."
                             .to_owned(),
                     );
@@ -1176,23 +1152,23 @@ pub(super) fn poll_printer_catalog(app: &mut RSpiceApp) {
             }
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.printer_report = None;
-            app.state.hardcopy.hardcopy.printer_capabilities = None;
-            app.state.hardcopy.hardcopy.clear_printer();
-            app.state.hardcopy.hardcopy.error = Some(error);
+            parts.dialog.printer_report = None;
+            parts.dialog.printer_capabilities = None;
+            parts.dialog.clear_printer();
+            parts.dialog.error = Some(error);
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn poll_printer_catalog(_app: &mut RSpiceApp) {}
+pub(super) fn poll_printer_catalog(_parts: &mut HardcopyParts<'_>) {}
 
 pub(super) fn select_printer_capabilities(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     capabilities: PrinterCapabilitySnapshot,
     suggested: Option<crate::workbench::hardcopy_adapters::print::PrinterDriverSettingsSuggestion>,
 ) {
-    let previous = app.state.hardcopy.hardcopy.printer_job.clone();
+    let previous = parts.dialog.printer_job.clone();
     let media_source = suggested
         .as_ref()
         .map(|value| value.media_source.clone())
@@ -1233,17 +1209,17 @@ pub(super) fn select_printer_capabilities(
         .as_ref()
         .and_then(|value| value.paper_platform_id)
         .map(|value| value.to_string())
-        .or_else(|| selected_printer_paper_id(app, &capabilities));
+        .or_else(|| selected_printer_paper_id(parts, &capabilities));
     let Some(selected_paper_id) = selected_paper_id else {
-        app.state.hardcopy.hardcopy.printer_capabilities = Some(capabilities);
-        app.state.hardcopy.hardcopy.clear_printer();
-        app.state.hardcopy.hardcopy.error = Some(
+        parts.dialog.printer_capabilities = Some(capabilities);
+        parts.dialog.clear_printer();
+        parts.dialog.error = Some(
             "The selected printer does not report the page size configured in Custom paper and margins."
                 .to_owned(),
         );
         return;
     };
-    let orientation = resolved_orientation(app);
+    let orientation = resolved_orientation(parts);
     let raster_geometry =
         match crate::workbench::hardcopy_adapters::print::resolve_native_printer_mode(
             &capabilities,
@@ -1253,9 +1229,9 @@ pub(super) fn select_printer_capabilities(
         ) {
             Ok(geometry) => geometry,
             Err(error) => {
-                app.state.hardcopy.hardcopy.printer_capabilities = Some(capabilities);
-                app.state.hardcopy.hardcopy.clear_printer();
-                app.state.hardcopy.hardcopy.error = Some(error.to_string());
+                parts.dialog.printer_capabilities = Some(capabilities);
+                parts.dialog.clear_printer();
+                parts.dialog.error = Some(error.to_string());
                 return;
             }
         };
@@ -1271,13 +1247,13 @@ pub(super) fn select_printer_capabilities(
     ) {
         Ok(job) => {
             let id = capabilities.device_id().to_owned();
-            app.state.hardcopy.hardcopy.printer_capabilities = Some(capabilities);
-            app.state.hardcopy.hardcopy.set_printer(id, job);
+            parts.dialog.printer_capabilities = Some(capabilities);
+            parts.dialog.set_printer(id, job);
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.printer_capabilities = None;
-            app.state.hardcopy.hardcopy.clear_printer();
-            app.state.hardcopy.hardcopy.error = Some(error.to_string());
+            parts.dialog.printer_capabilities = None;
+            parts.dialog.clear_printer();
+            parts.dialog.error = Some(error.to_string());
         }
     }
 }
@@ -1309,19 +1285,16 @@ fn preferred_resolution(mut square: Vec<u16>) -> Option<u16> {
 }
 
 fn selected_printer_paper_id(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     capabilities: &PrinterCapabilitySnapshot,
 ) -> Option<String> {
-    let paper = app
-        .state
-        .hardcopy
-        .hardcopy
+    let paper = parts
+        .dialog
         .paper
         .build(
-            app.state.hardcopy.hardcopy.display_unit,
-            app.state
-                .hardcopy
-                .hardcopy
+            parts.dialog.display_unit,
+            parts
+                .dialog
                 .resolved_document
                 .as_ref()
                 .and_then(|document| document.authored_sheet_output_media().ok()),
@@ -1339,15 +1312,13 @@ fn selected_printer_paper_id(
         .map(|paper| paper.platform_id().to_string())
 }
 
-fn resolved_orientation(app: &RSpiceApp) -> ResolvedOrientation {
-    match app.state.hardcopy.hardcopy.orientation {
+fn resolved_orientation(parts: &HardcopyParts<'_>) -> ResolvedOrientation {
+    match parts.dialog.orientation {
         Orientation::Portrait => ResolvedOrientation::Portrait,
         Orientation::Landscape => ResolvedOrientation::Landscape,
         Orientation::AutomaticPerPage => {
-            if app
-                .state
-                .hardcopy
-                .hardcopy
+            if parts
+                .dialog
                 .content_extent
                 .is_some_and(|extent| extent.width() > extent.height())
             {
@@ -1377,23 +1348,23 @@ fn media_supported(source: &PrinterMediaSource, capabilities: &PrinterCapability
     }
 }
 
-pub(super) fn commit_hardcopy_workflow(app: &mut RSpiceApp) {
-    if app.state.hardcopy.hardcopy.busy {
+pub(super) fn commit_hardcopy_workflow(parts: &mut HardcopyParts<'_>) {
+    if parts.dialog.busy {
         return;
     }
-    app.state.hardcopy.hardcopy.busy = true;
-    app.state.hardcopy.hardcopy.error = None;
-    app.state.hardcopy.hardcopy.cancellation = HardcopyCancellationToken::default();
-    let workflow = app.state.hardcopy.hardcopy.workflow;
+    parts.dialog.busy = true;
+    parts.dialog.error = None;
+    parts.dialog.cancellation = HardcopyCancellationToken::default();
+    let workflow = parts.dialog.workflow;
     #[cfg(target_arch = "wasm32")]
     let browser_print_reservation = if workflow == HardcopyWorkflow::Print
-        && app.state.hardcopy.hardcopy.format == OutputFormat::BrowserPrintDocument
+        && parts.dialog.format == OutputFormat::BrowserPrintDocument
     {
         match reserve_browser_print_window() {
             Ok(reservation) => Some(reservation),
             Err(error) => {
-                app.state.hardcopy.hardcopy.busy = false;
-                app.state.hardcopy.hardcopy.error = Some(error.to_string());
+                parts.dialog.busy = false;
+                parts.dialog.error = Some(error.to_string());
                 return;
             }
         }
@@ -1401,27 +1372,27 @@ pub(super) fn commit_hardcopy_workflow(app: &mut RSpiceApp) {
         None
     };
     let result = match workflow {
-        HardcopyWorkflow::PageSetup => save_page_setup(app),
+        HardcopyWorkflow::PageSetup => save_page_setup(parts),
         HardcopyWorkflow::Print => {
             #[cfg(target_arch = "wasm32")]
             {
-                publish_print(app, browser_print_reservation)
+                publish_print(parts, browser_print_reservation)
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                publish_print(app)
+                publish_print(parts)
             }
         }
-        HardcopyWorkflow::Export => publish_export(app),
+        HardcopyWorkflow::Export => publish_export(parts),
     };
     match result {
         Ok(PublicationCompletion::Pending) => {}
         Ok(PublicationCompletion::Cancelled) => {
-            app.state.hardcopy.hardcopy.busy = false;
+            parts.dialog.busy = false;
         }
         Err(error) => {
-            app.state.hardcopy.hardcopy.busy = false;
-            app.state.hardcopy.hardcopy.error = Some(error);
+            parts.dialog.busy = false;
+            parts.dialog.error = Some(error);
         }
     }
 }
@@ -1441,7 +1412,7 @@ enum StagedPrintMappingPersistence {
 }
 
 fn stage_print_mapping_persistence(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     mapping: &rspice_hardcopy_contract::PrintMappingTable,
 ) -> Result<StagedPrintMappingPersistence, String> {
     match mapping.save_scope() {
@@ -1449,13 +1420,7 @@ fn stage_print_mapping_persistence(
             Ok(StagedPrintMappingPersistence::Document)
         }
         rspice_hardcopy_contract::PrintMappingSaveScope::ProjectPrintSet(_) => {
-            let mut catalog = app
-                .state
-                .model
-                .workspace
-                .content
-                .project_print_mappings
-                .clone();
+            let mut catalog = parts.model.workspace.content.project_print_mappings.clone();
             let receipt = catalog
                 .save(mapping.clone())
                 .map_err(|error| error.to_string())?;
@@ -1466,8 +1431,7 @@ fn stage_print_mapping_persistence(
             })
         }
         rspice_hardcopy_contract::PrintMappingSaveScope::PortablePersonalPreset(_) => {
-            let mut catalog = app
-                .state
+            let mut catalog = parts
                 .model
                 .preferences
                 .personal_print_mapping_presets()
@@ -1484,22 +1448,17 @@ fn stage_print_mapping_persistence(
 }
 
 fn commit_print_mapping_persistence(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     staged: StagedPrintMappingPersistence,
 ) -> Result<(), String> {
     match staged {
         StagedPrintMappingPersistence::Document => Ok(()),
         StagedPrintMappingPersistence::Project { catalog, changed } => {
-            app.state.model.workspace.content.project_print_mappings = catalog;
-            app.state
-                .model
-                .workspace
-                .content
-                .project_print_mappings_dirty |= changed;
+            parts.model.workspace.content.project_print_mappings = catalog;
+            parts.model.workspace.content.project_print_mappings_dirty |= changed;
             Ok(())
         }
-        StagedPrintMappingPersistence::Personal(catalog) => app
-            .state
+        StagedPrintMappingPersistence::Personal(catalog) => parts
             .model
             .preferences
             .replace_personal_print_mapping_presets(catalog)
@@ -1508,19 +1467,15 @@ fn commit_print_mapping_persistence(
 }
 
 fn current_plan(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     source: &ResolvedHardcopyDocument,
 ) -> Result<std::sync::Arc<HardcopyPlan>, String> {
-    let setup = app
-        .state
-        .hardcopy
-        .hardcopy
+    let setup = parts
+        .dialog
         .build_setup()
         .map_err(|error| error.to_string())?;
-    let preview_plan = app
-        .state
-        .hardcopy
-        .hardcopy
+    let preview_plan = parts
+        .dialog
         .preview_plan
         .as_ref()
         .ok_or_else(|| "The hardcopy preview has no sealed publication plan.".to_owned())?;
@@ -1556,10 +1511,9 @@ fn current_plan(
     Ok(preview_plan.clone())
 }
 
-fn current_metadata(app: &RSpiceApp) -> Result<HardcopySceneMetadata, String> {
-    app.state
-        .hardcopy
-        .hardcopy
+fn current_metadata(parts: &HardcopyParts<'_>) -> Result<HardcopySceneMetadata, String> {
+    parts
+        .dialog
         .metadata
         .clone()
         .ok_or_else(|| "The dialog has no validated hardcopy identity block.".to_owned())
@@ -1567,7 +1521,7 @@ fn current_metadata(app: &RSpiceApp) -> Result<HardcopySceneMetadata, String> {
 
 #[cfg(target_arch = "wasm32")]
 fn begin_publication_authentication(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     pending: PendingBrowserPublication,
 ) -> Result<(), String> {
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
@@ -1575,16 +1529,12 @@ fn begin_publication_authentication(
     }
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
             pending.opened_source.source_key(),
             pending.opened_source.authority().scope().clone(),
         )
         .map_err(|error| error.to_string())?;
-    let generation = app
-        .state
-        .hardcopy
-        .hardcopy
-        .next_source_resolution_generation();
+    let generation = parts.dialog.next_source_resolution_generation();
     start_source_resolution(
         prepared,
         SourceResolutionPurpose::Publish,
@@ -1599,7 +1549,7 @@ fn begin_publication_authentication(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn begin_publication_authentication(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     pending: PendingNativePublication,
 ) -> Result<(), String> {
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
@@ -1607,16 +1557,12 @@ fn begin_publication_authentication(
     }
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
             pending.opened_source.source_key(),
             pending.opened_source.authority().scope().clone(),
         )
         .map_err(|error| error.to_string())?;
-    let generation = app
-        .state
-        .hardcopy
-        .hardcopy
-        .next_source_resolution_generation();
+    let generation = parts.dialog.next_source_resolution_generation();
     start_source_resolution(
         prepared,
         SourceResolutionPurpose::Publish,
@@ -1631,7 +1577,7 @@ fn begin_publication_authentication(
 
 #[cfg(target_arch = "wasm32")]
 fn finish_publication_authentication(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
     let pending = PENDING_PUBLICATION
@@ -1640,12 +1586,12 @@ fn finish_publication_authentication(
     if resolved != *pending.opened_source {
         return Err("The source document changed while the output was being prepared.".to_owned());
     }
-    let plan = current_plan(app, &resolved)?;
+    let plan = current_plan(parts, &resolved)?;
     if plan != pending.plan {
         return Err("The print settings changed while the output was being prepared.".to_owned());
     }
     start_browser_publication(
-        app,
+        parts,
         plan,
         std::sync::Arc::new(resolved),
         pending.metadata,
@@ -1656,7 +1602,7 @@ fn finish_publication_authentication(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn finish_publication_authentication(
-    app: &RSpiceApp,
+    parts: &HardcopyParts<'_>,
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
     let pending = PENDING_PUBLICATION
@@ -1665,12 +1611,12 @@ fn finish_publication_authentication(
     if resolved != *pending.opened_source {
         return Err("The source document changed while the output was being prepared.".to_owned());
     }
-    let plan = current_plan(app, &resolved)?;
+    let plan = current_plan(parts, &resolved)?;
     if plan != pending.plan {
         return Err("The print settings changed while the output was being prepared.".to_owned());
     }
     start_native_publication(
-        app,
+        parts,
         plan,
         std::sync::Arc::new(resolved),
         pending.metadata,
@@ -1698,40 +1644,32 @@ fn clear_pending_authentication(purpose: SourceResolutionPurpose) {
     }
 }
 
-fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> {
+fn save_page_setup(parts: &mut HardcopyParts<'_>) -> Result<PublicationCompletion, String> {
     if PENDING_PAGE_SETUP.with(|slot| slot.borrow().is_some()) {
         return Err("Page setup is already being saved.".to_owned());
     }
-    let source = app
-        .state
-        .hardcopy
-        .hardcopy
+    let source = parts
+        .dialog
         .resolved_document
         .clone()
         .ok_or_else(|| "The dialog has no source document.".to_owned())?;
-    let setup = app
-        .state
-        .hardcopy
-        .hardcopy
+    let setup = parts
+        .dialog
         .build_setup()
         .map_err(|error| error.to_string())?;
-    let schematic_authority = app.state.hardcopy.hardcopy.schematic_page_authority.clone();
+    let schematic_authority = parts.dialog.schematic_page_authority.clone();
     if let Some(authority) = &schematic_authority {
-        validate_schematic_page_authority(&app.state, authority)?;
+        validate_schematic_page_authority(parts.model, authority)?;
     }
-    let staged_mapping = stage_print_mapping_persistence(app, setup.print_mapping())?;
+    let staged_mapping = stage_print_mapping_persistence(parts, setup.print_mapping())?;
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            crate::workbench::hardcopy_adapters::sources::SourceReads::of(&app.state),
+            parts.source_reads(),
             source.source_key(),
             source.authority().scope().clone(),
         )
         .map_err(|error| error.to_string())?;
-    let generation = app
-        .state
-        .hardcopy
-        .hardcopy
-        .next_source_resolution_generation();
+    let generation = parts.dialog.next_source_resolution_generation();
     start_source_resolution(
         prepared,
         SourceResolutionPurpose::SavePageSetup,
@@ -1752,7 +1690,7 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
 }
 
 fn finish_page_setup_authentication(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     source: ResolvedHardcopyDocument,
 ) -> Result<String, String> {
     let pending = PENDING_PAGE_SETUP
@@ -1761,27 +1699,27 @@ fn finish_page_setup_authentication(
     if source != *pending.opened_source {
         return Err("The source document changed while page setup was being saved.".to_owned());
     }
-    commit_authenticated_page_setup(app, source, pending)
+    commit_authenticated_page_setup(parts, source, pending)
 }
 
 fn commit_authenticated_page_setup(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     source: ResolvedHardcopyDocument,
     pending: PendingPageSetup,
 ) -> Result<String, String> {
     if let Some(authority) = pending.schematic_authority.as_ref() {
-        validate_schematic_page_authority(&app.state, authority)?;
+        validate_schematic_page_authority(parts.model, authority)?;
     }
 
-    let mut staged_setups = app.state.model.workspace.content.hardcopy_setups.clone();
+    let mut staged_setups = parts.model.workspace.content.hardcopy_setups.clone();
     let outcome = staged_setups
         .save(source.authority(), pending.setup)
         .map_err(|error| error.to_string())?;
 
-    commit_print_mapping_persistence(app, pending.staged_mapping)?;
-    app.state.model.workspace.content.hardcopy_setups = staged_setups;
+    commit_print_mapping_persistence(parts, pending.staged_mapping)?;
+    parts.model.workspace.content.hardcopy_setups = staged_setups;
     if outcome.disposition() != rspice_hardcopy_contract::SetupSaveDisposition::Unchanged {
-        app.state.model.workspace.content.hardcopy_setups_dirty = true;
+        parts.model.workspace.content.hardcopy_setups_dirty = true;
     }
     Ok(format!(
         "Page setup {} for {}.",
@@ -1795,32 +1733,30 @@ fn commit_authenticated_page_setup(
 }
 
 fn publish_print(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     #[cfg(target_arch = "wasm32")] reservation: Option<BrowserPrintReservation>,
 ) -> Result<PublicationCompletion, String> {
     if !matches!(
-        app.state.hardcopy.hardcopy.format,
+        parts.dialog.format,
         OutputFormat::NativePrinter | OutputFormat::BrowserPrintDocument
     ) {
-        return publish_export(app);
+        return publish_export(parts);
     }
-    let source = app
-        .state
-        .hardcopy
-        .hardcopy
+    let source = parts
+        .dialog
         .resolved_document
         .clone()
         .ok_or_else(|| "The dialog has no source document.".to_owned())?;
-    let plan = current_plan(app, &source)?;
-    let metadata = current_metadata(app)?;
-    let staged_mapping = stage_print_mapping_persistence(app, plan.setup().print_mapping())?;
+    let plan = current_plan(parts, &source)?;
+    let metadata = current_metadata(parts)?;
+    let staged_mapping = stage_print_mapping_persistence(parts, plan.setup().print_mapping())?;
     #[cfg(target_arch = "wasm32")]
     {
         let reservation = reservation.ok_or_else(|| {
             "The browser print window was not reserved by the user action.".to_owned()
         })?;
         begin_publication_authentication(
-            app,
+            parts,
             PendingBrowserPublication {
                 plan,
                 opened_source: source,
@@ -1835,7 +1771,7 @@ fn publish_print(
     {
         if plan.setup().render().format() == OutputFormat::BrowserPrintDocument {
             begin_publication_authentication(
-                app,
+                parts,
                 PendingNativePublication {
                     plan,
                     opened_source: source,
@@ -1850,29 +1786,25 @@ fn publish_print(
         // Rendering uses the exact capability snapshot already authenticated
         // by the dialog. The finalizer re-discovers and digest-checks the
         // device off the UI thread immediately before the spool boundary.
-        let capabilities = app
-            .state
-            .hardcopy
-            .hardcopy
+        let capabilities = parts
+            .dialog
             .printer_capabilities
             .clone()
             .ok_or_else(|| "The selected printer has no capability snapshot.".to_owned())?;
-        if capabilities.device_id() != app.state.hardcopy.hardcopy.printer_id {
+        if capabilities.device_id() != parts.dialog.printer_id {
             return Err(
                 "The selected printer does not match the capabilities read for it.".to_owned(),
             );
         }
-        let dpi = app
-            .state
-            .hardcopy
-            .hardcopy
+        let dpi = parts
+            .dialog
             .printer_job
             .as_ref()
             .ok_or_else(|| "Select printer properties before printing.".to_owned())?
             .resolution_dpi();
-        let cancellation = app.state.hardcopy.hardcopy.cancellation.clone();
+        let cancellation = parts.dialog.cancellation.clone();
         begin_publication_authentication(
-            app,
+            parts,
             PendingNativePublication {
                 plan,
                 opened_source: source,
@@ -1890,15 +1822,13 @@ fn publish_print(
     }
 }
 
-fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> {
-    let initial_source = app
-        .state
-        .hardcopy
-        .hardcopy
+fn publish_export(parts: &mut HardcopyParts<'_>) -> Result<PublicationCompletion, String> {
+    let initial_source = parts
+        .dialog
         .resolved_document
         .clone()
         .ok_or_else(|| "The dialog has no source document.".to_owned())?;
-    let draft_plan = current_plan(app, &initial_source)?;
+    let draft_plan = current_plan(parts, &initial_source)?;
     let format = draft_plan.setup().render().format();
     let multi_part = matches!(format, OutputFormat::SvgVector | OutputFormat::Png { .. })
         && draft_plan.pagination().pages().len() > 1;
@@ -1909,7 +1839,7 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
     };
     let stem = safe_filename(initial_source.authority().display_name());
     let default_name = format!("{stem}.{extension}");
-    let Some(mut path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
+    let Some(mut path) = parts.export_io.show_save_dialog(SaveDialogConfig {
         title: "Export active view",
         default_name: &default_name,
         filter_name,
@@ -1919,17 +1849,18 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
         return Ok(PublicationCompletion::Cancelled);
     };
     crate::io::file_exchange::ensure_file_extension(&mut path, extension);
-    let destination = app.export_workflow_io.observe_destination(&path)?;
+    let destination = parts.export_io.observe_destination(&path)?;
 
     // The picker may have yielded. The exact current source is authenticated
     // twice off-thread before rendering; the original preview plan remains
     // the immutable authority for that continuation.
-    let staged_mapping = stage_print_mapping_persistence(app, draft_plan.setup().print_mapping())?;
+    let staged_mapping =
+        stage_print_mapping_persistence(parts, draft_plan.setup().print_mapping())?;
     #[cfg(target_arch = "wasm32")]
     {
-        let metadata = current_metadata(app)?;
+        let metadata = current_metadata(parts)?;
         begin_publication_authentication(
-            app,
+            parts,
             PendingBrowserPublication {
                 plan: draft_plan,
                 opened_source: initial_source,
@@ -1947,9 +1878,9 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let metadata = current_metadata(app)?;
+        let metadata = current_metadata(parts)?;
         begin_publication_authentication(
-            app,
+            parts,
             PendingNativePublication {
                 plan: draft_plan,
                 opened_source: initial_source,
@@ -1976,7 +1907,7 @@ use execution::start_native_publication;
 
 pub(super) use execution::poll_publication;
 #[cfg(not(target_arch = "wasm32"))]
-fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
+fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
     let completed = FINALIZATION.with(|active| {
         let mut active = active.borrow_mut();
         let result = active
@@ -1994,7 +1925,7 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
     let Some((publication, result)) = completed else {
         return false;
     };
-    let current = &app.state.hardcopy.hardcopy;
+    let current = &*parts.dialog;
     if current.open
         && (current.preview_generation != publication.ticket.generation
             || current
@@ -2008,9 +1939,9 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 .map(|source| source.authority().content_digest())
                 != Some(publication.source_digest))
     {
-        app.state.hardcopy.hardcopy.busy = false;
-        if app.state.hardcopy.hardcopy.open {
-            app.state.hardcopy.hardcopy.error = Some(
+        parts.dialog.busy = false;
+        if parts.dialog.open {
+            parts.dialog.error = Some(
                 "The hardcopy source or plan changed before native finalization completed."
                     .to_owned(),
             );
@@ -2020,13 +1951,13 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
     let plan = publication.plan;
     let completion = match result {
         Err(error) => Err(record_native_finalization_failure(
-            app,
+            parts,
             &plan,
             &publication.destination,
             error,
         )),
         Ok(completion) if completion.ticket != publication.ticket => Err(record_render_failure(
-            app,
+            parts,
             &plan,
             "Native hardcopy finalization returned a stale completion ticket.".to_owned(),
         )),
@@ -2069,9 +2000,9 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 };
                 let receipt =
                     HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
-                retain_hardcopy_receipt(app, receipt)?;
+                retain_hardcopy_receipt(parts, receipt)?;
                 if commit_mapping {
-                    commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                    commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 }
                 Ok(message)
             })(),
@@ -2094,8 +2025,8 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 }
                 let receipt =
                     HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
-                retain_hardcopy_receipt(app, receipt)?;
-                commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                retain_hardcopy_receipt(parts, receipt)?;
+                commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 Ok(format!(
                     "Opened a print-ready document containing {accepted} page{} in the system browser. Use the browser's Print command to continue.",
                     if accepted == 1 { "" } else { "s" }
@@ -2114,8 +2045,8 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 let receipt =
                     HardcopyReceipt::record(&plan, HardcopyOutcome::ArtifactExported { artifact })
                         .map_err(|error| error.to_string())?;
-                retain_hardcopy_receipt(app, receipt)?;
-                commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                retain_hardcopy_receipt(parts, receipt)?;
+                commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 Ok(export_completion_message(
                     "hardcopy",
                     &path,
@@ -2130,17 +2061,17 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                             "raster"
                         }
                     )),
-                    app.export_workflow_io.as_ref(),
+                    parts.export_io,
                 ))
             })(),
             _ => Err(record_render_failure(
-                app,
+                parts,
                 &plan,
                 "Native hardcopy finalization returned the wrong payload type.".to_owned(),
             )),
         },
     };
-    conclude_native_finalization(app, completion);
+    conclude_native_finalization(parts, completion);
     true
 }
 
@@ -2150,26 +2081,27 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
 /// would, so a write that failed after the reader closed it is reported, the
 /// way a failed export is; one the reader cancelled by closing is not.
 #[cfg(not(target_arch = "wasm32"))]
-fn conclude_native_finalization(app: &mut RSpiceApp, completion: Result<String, String>) {
-    app.state.hardcopy.hardcopy.busy = false;
+fn conclude_native_finalization(parts: &mut HardcopyParts<'_>, completion: Result<String, String>) {
+    parts.dialog.busy = false;
     match completion {
         Ok(message) => {
-            let message = if app.state.hardcopy.hardcopy.last_receipt.is_some() {
+            let message = if parts.dialog.last_receipt.is_some() {
                 format!("{message} It is recorded in the project history.")
             } else {
                 message
             };
-            app.state
+            parts
+                .model
                 .record(LogSeverity::Info, LogSource::Studio, message);
-            if app.state.hardcopy.hardcopy.open {
-                app.state.hardcopy.hardcopy.close();
+            if parts.dialog.open {
+                parts.dialog.close();
             }
         }
         Err(error) => {
-            if app.state.hardcopy.hardcopy.open {
-                app.state.hardcopy.hardcopy.error = Some(error);
+            if parts.dialog.open {
+                parts.dialog.error = Some(error);
             } else if !error.contains("was cancelled") {
-                app.state.report_failure("Hardcopy failed", error);
+                parts.model.report_failure("Hardcopy failed", error);
             }
         }
     }
@@ -2177,7 +2109,7 @@ fn conclude_native_finalization(app: &mut RSpiceApp, completion: Result<String, 
 
 #[cfg(not(target_arch = "wasm32"))]
 fn record_native_finalization_failure(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     plan: &HardcopyPlan,
     destination: &NativePublicationDestination,
     error: super::finalize::FinalizationFailure,
@@ -2189,7 +2121,7 @@ fn record_native_finalization_failure(
     ) && let Some(outcome) = error.hardcopy_outcome()
     {
         return match HardcopyReceipt::record(plan, outcome) {
-            Ok(receipt) => match retain_hardcopy_receipt(app, receipt) {
+            Ok(receipt) => match retain_hardcopy_receipt(parts, receipt) {
                 Ok(()) => error.to_string(),
                 Err(receipt_error) => {
                     format!("{error}; hardcopy outcome history failed: {receipt_error}")
@@ -2202,13 +2134,13 @@ fn record_native_finalization_failure(
     }
     match destination {
         NativePublicationDestination::Print { .. } => {
-            record_render_failure(app, plan, error.to_string())
+            record_render_failure(parts, plan, error.to_string())
         }
         NativePublicationDestination::DesktopPrintHandoff => {
-            record_render_failure(app, plan, error.to_string())
+            record_render_failure(parts, plan, error.to_string())
         }
         NativePublicationDestination::Export { .. } => {
-            record_export_failure(app, plan, error.to_string())
+            record_export_failure(parts, plan, error.to_string())
         }
     }
 }
@@ -2302,9 +2234,13 @@ fn safe_filename(value: &str) -> String {
     }
 }
 
-fn record_render_failure(app: &mut RSpiceApp, plan: &HardcopyPlan, message: String) -> String {
+fn record_render_failure(
+    parts: &mut HardcopyParts<'_>,
+    plan: &HardcopyPlan,
+    message: String,
+) -> String {
     record_failure(
-        app,
+        parts,
         plan,
         HardcopyFailureCode::RenderFailure,
         message,
@@ -2314,21 +2250,25 @@ fn record_render_failure(app: &mut RSpiceApp, plan: &HardcopyPlan, message: Stri
 
 #[cfg(target_arch = "wasm32")]
 fn record_print_failure(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     plan: &HardcopyPlan,
     error: crate::workbench::hardcopy_adapters::print::HardcopyPrintError,
     pages_completed: u32,
 ) -> String {
     let message = error.to_string();
     if let Ok(receipt) = HardcopyReceipt::record(plan, error.failure_outcome(pages_completed)) {
-        let _ = retain_hardcopy_receipt(app, receipt);
+        let _ = retain_hardcopy_receipt(parts, receipt);
     }
     message
 }
 
-fn record_export_failure(app: &mut RSpiceApp, plan: &HardcopyPlan, message: String) -> String {
+fn record_export_failure(
+    parts: &mut HardcopyParts<'_>,
+    plan: &HardcopyPlan,
+    message: String,
+) -> String {
     record_failure(
-        app,
+        parts,
         plan,
         HardcopyFailureCode::DestinationWriteFailed,
         message,
@@ -2337,7 +2277,7 @@ fn record_export_failure(app: &mut RSpiceApp, plan: &HardcopyPlan, message: Stri
 }
 
 fn record_failure(
-    app: &mut RSpiceApp,
+    parts: &mut HardcopyParts<'_>,
     plan: &HardcopyPlan,
     code: HardcopyFailureCode,
     message: String,
@@ -2350,7 +2290,7 @@ fn record_failure(
         retryable,
     };
     if let Ok(receipt) = HardcopyReceipt::record(plan, outcome) {
-        let _ = retain_hardcopy_receipt(app, receipt);
+        let _ = retain_hardcopy_receipt(parts, receipt);
     }
     message
 }

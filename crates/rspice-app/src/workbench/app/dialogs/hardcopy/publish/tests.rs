@@ -3,13 +3,16 @@
 //! The cases pin that the dialog never misrepresents a print target, and that
 //! the mapping stage stays transactional until publication actually commits.
 
-use super::super::{GovernedSheetPageAuthority, SchematicPageSetupAuthority};
+use super::super::{
+    GovernedSheetPageAuthority, SchematicPageSetupAuthority, hardcopy_parts, render_hardcopy_dialog,
+};
 use super::*;
+use crate::workbench::app::RSpiceApp;
 
 /// The active document as File > Print opens it: the dialog's own source
 /// selection, resolved through the retained path its worker runs.
-fn resolve_active_source(app: &RSpiceApp) -> Result<ResolvedHardcopyDocument, String> {
-    let (source_key, scope) = active_retained_source_selection(app)?;
+fn resolve_active_source(app: &mut RSpiceApp) -> Result<ResolvedHardcopyDocument, String> {
+    let (source_key, scope) = active_retained_source_selection(&hardcopy_parts(app))?;
     crate::workbench::hardcopy_adapters::sources::resolve_retained_hardcopy_source(
         &app.state,
         &source_key,
@@ -38,7 +41,7 @@ fn governed_design_print_selects_the_active_sheet_identity() {
         .bootstrap_for_cell_view(&key, "Main", [])
         .unwrap();
 
-    let (source_key, scope) = active_retained_source_selection(&app).unwrap();
+    let (source_key, scope) = active_retained_source_selection(&hardcopy_parts(&mut app)).unwrap();
 
     assert!(source_key.ends_with(&format!(":sheet:{sheet_id}")));
     assert_eq!(scope, rspice_hardcopy_contract::HardcopyScope::CurrentSheet);
@@ -100,7 +103,7 @@ fn results_export_selects_the_active_project_document_pane_authority() {
         .session
         .select_persistent_document_pane(document_id, pane_id);
 
-    let (source_key, scope) = active_retained_source_selection(&app).unwrap();
+    let (source_key, scope) = active_retained_source_selection(&hardcopy_parts(&mut app)).unwrap();
 
     assert!(source_key.contains(&format!(
         ":result-document:{document_id}:pane:{}",
@@ -266,7 +269,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
             sheet_revision: catalog.find(sheet_id).unwrap().revision(),
         }),
     };
-    let resolved = resolve_active_source(&app).expect("active governed sheet resolves");
+    let resolved = resolve_active_source(&mut app).expect("active governed sheet resolves");
     let format = SchematicSheetFormat::try_custom(
         "Review board",
         304_800,
@@ -282,7 +285,8 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         schematic_authority: Some(authority),
     };
 
-    commit_authenticated_page_setup(&mut app, resolved.clone(), pending).unwrap();
+    commit_authenticated_page_setup(&mut hardcopy_parts(&mut app), resolved.clone(), pending)
+        .unwrap();
 
     assert_eq!(
         app.state
@@ -334,7 +338,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved = resolve_active_source(&app).expect("legacy schematic resolves");
+    let resolved = resolve_active_source(&mut app).expect("legacy schematic resolves");
     let policy_before = app.state.model.schematic.document().document_policy;
     let format = SchematicSheetFormat::try_custom(
         "Custom",
@@ -353,7 +357,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
         }),
     };
 
-    commit_authenticated_page_setup(&mut app, resolved, pending).unwrap();
+    commit_authenticated_page_setup(&mut hardcopy_parts(&mut app), resolved, pending).unwrap();
 
     assert_eq!(
         app.state.model.schematic.document().document_policy,
@@ -384,7 +388,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved = resolve_active_source(&app).expect("legacy schematic resolves");
+    let resolved = resolve_active_source(&mut app).expect("legacy schematic resolves");
     let authority = SchematicPageSetupAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
         governed_sheet: None,
@@ -408,7 +412,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
     };
 
     assert!(
-        commit_authenticated_page_setup(&mut app, resolved.clone(), pending)
+        commit_authenticated_page_setup(&mut hardcopy_parts(&mut app), resolved.clone(), pending)
             .expect_err("late read-only activation revokes Page Setup")
             .contains("read-only")
     );
@@ -489,7 +493,7 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
         .unwrap();
 
     assert!(
-        validate_schematic_page_authority(&app.state, &authority)
+        validate_schematic_page_authority(&app.state.model, &authority)
             .expect_err("catalog drift revokes authority")
             .contains("governed active sheet changed")
     );
@@ -513,7 +517,7 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved = resolve_active_source(&app).expect("active schematic resolves");
+    let resolved = resolve_active_source(&mut app).expect("active schematic resolves");
     app.state
         .hardcopy
         .hardcopy
@@ -528,12 +532,12 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
         .as_ref()
         .expect("sealed preview")
         .clone();
-    let publication = current_plan(&app, &resolved).expect("unchanged plan");
+    let publication = current_plan(&hardcopy_parts(&mut app), &resolved).expect("unchanged plan");
     assert!(std::sync::Arc::ptr_eq(&preview, &publication));
 
     app.state.hardcopy.hardcopy.margin_left = "0.5".to_owned();
     assert!(
-        current_plan(&app, &resolved)
+        current_plan(&hardcopy_parts(&mut app), &resolved)
             .expect_err("unpreviewed settings must fail closed")
             .contains("sealed preview plan")
     );
@@ -558,7 +562,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved = resolve_active_source(&app).expect("active schematic resolves");
+    let resolved = resolve_active_source(&mut app).expect("active schematic resolves");
     app.state
         .hardcopy
         .hardcopy
@@ -666,7 +670,7 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
     )
     .unwrap();
 
-    let staged = stage_print_mapping_persistence(&app, &mapping).unwrap();
+    let staged = stage_print_mapping_persistence(&hardcopy_parts(&mut app), &mapping).unwrap();
     assert_eq!(
         app.state.model.workspace.content.project_print_mappings,
         before
@@ -691,8 +695,8 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
             .project_print_mappings_dirty
     );
 
-    let staged = stage_print_mapping_persistence(&app, &mapping).unwrap();
-    commit_print_mapping_persistence(&mut app, staged).unwrap();
+    let staged = stage_print_mapping_persistence(&hardcopy_parts(&mut app), &mapping).unwrap();
+    commit_print_mapping_persistence(&mut hardcopy_parts(&mut app), staged).unwrap();
     assert_eq!(
         app.state
             .model
@@ -772,8 +776,13 @@ fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let resolved = resolve_active_source(&app).expect("active schematic resolves");
-    apply_open_resolved(&mut app, HardcopyWorkflow::Export, resolved).expect("dialog opens");
+    let resolved = resolve_active_source(&mut app).expect("active schematic resolves");
+    apply_open_resolved(
+        &mut hardcopy_parts(&mut app),
+        HardcopyWorkflow::Export,
+        resolved,
+    )
+    .expect("dialog opens");
     app
 }
 
@@ -898,15 +907,17 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         .resolved_document
         .clone()
         .expect("the dialog holds its source");
-    let plan = current_plan(&app, &source).expect("the sealed plan publishes");
+    let plan = current_plan(&hardcopy_parts(&mut app), &source).expect("the sealed plan publishes");
     let (_, media_type, _) =
         format_file_contract(plan.setup().render().format()).expect("an export format");
-    let staged_mapping = stage_print_mapping_persistence(&app, plan.setup().print_mapping())
-        .expect("the print mapping stages");
-    let metadata = current_metadata(&app).expect("the identity block is validated");
+    let staged_mapping =
+        stage_print_mapping_persistence(&hardcopy_parts(&mut app), plan.setup().print_mapping())
+            .expect("the print mapping stages");
+    let metadata =
+        current_metadata(&hardcopy_parts(&mut app)).expect("the identity block is validated");
     app.state.hardcopy.hardcopy.busy = true;
     begin_publication_authentication(
-        &mut app,
+        &mut hardcopy_parts(&mut app),
         PendingNativePublication {
             plan,
             opened_source: source,
@@ -939,7 +950,9 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         )),
         ..Default::default()
     };
-    let _ = ctx.run_ui(input(), |ui| app.render_hardcopy_dialog(ui));
+    let _ = ctx.run_ui(input(), |ui| {
+        render_hardcopy_dialog(&mut hardcopy_parts(&mut app), ui)
+    });
     let job_active = PENDING_PUBLICATION.with(|slot| slot.borrow().is_some())
         || PUBLICATION.with(|slot| slot.borrow().is_some())
         || FINALIZATION.with(|slot| slot.borrow().is_some());
@@ -956,7 +969,9 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
             "the export never finished"
         );
         std::thread::sleep(std::time::Duration::from_millis(5));
-        let _ = ctx.run_ui(input(), |ui| app.render_hardcopy_dialog(ui));
+        let _ = ctx.run_ui(input(), |ui| {
+            render_hardcopy_dialog(&mut hardcopy_parts(&mut app), ui)
+        });
     }
 
     assert_eq!(app.state.hardcopy.hardcopy.error, None);
@@ -990,14 +1005,17 @@ fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();
     conclude_native_finalization(
-        &mut app,
+        &mut hardcopy_parts(&mut app),
         Err("Hardcopy export was cancelled before it was written.".to_owned()),
     );
     app.state.drain_notices(&ctx);
     assert!(app.state.workbench.toasts.activity().is_empty());
 
     app.state.hardcopy.hardcopy.open = true;
-    conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
+    conclude_native_finalization(
+        &mut hardcopy_parts(&mut app),
+        Err("The disk is full.".to_owned()),
+    );
     app.state.drain_notices(&ctx);
     assert_eq!(
         app.state.hardcopy.hardcopy.error.as_deref(),
@@ -1006,7 +1024,10 @@ fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
     assert!(app.state.workbench.toasts.activity().is_empty());
 
     app.state.hardcopy.hardcopy.close();
-    conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
+    conclude_native_finalization(
+        &mut hardcopy_parts(&mut app),
+        Err("The disk is full.".to_owned()),
+    );
     app.state.drain_notices(&ctx);
     let activity = app.state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);

@@ -25,7 +25,6 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
 };
-use crate::workbench::app::RSpiceApp;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_hardcopy::render::HardcopyRenderer;
 use rspice_hardcopy::render::{HardcopyPreviewPage, HardcopyRenderError, max_raster_dpi};
@@ -39,10 +38,14 @@ use rspice_hardcopy_contract::{
 #[cfg(target_os = "windows")]
 use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource};
 
+#[cfg(test)]
+use super::hardcopy_parts;
 use super::{
-    BlockedSetup, DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyRegion,
-    HardcopySection, HardcopyWorkflow, PaperDraft, publish,
+    BlockedSetup, DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyParts,
+    HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft, publish,
 };
+#[cfg(test)]
+use crate::workbench::app::RSpiceApp;
 
 #[derive(Clone)]
 struct PreviewTexture {
@@ -157,235 +160,221 @@ struct RenderingInputs {
     decorations: (bool, bool, bool, Watermark),
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_hardcopy_dialog(&mut self, ctx: &Context) {
-        publish::register_repaint_context(ctx);
-        if !self.state.hardcopy.hardcopy.open {
+/// Draw the hardcopy dialog for this frame over its `parts`. It runs every
+/// frame, open or not: closed, it lets go of the work the dialog started.
+pub(crate) fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
+    publish::register_repaint_context(ctx);
+    if !parts.dialog.open {
+        publish::cancel_source_resolution();
+        publish::cancel_publication();
+        publish::poll_publication(parts);
+        cancel_preview_worker();
+        clear_preview_textures(ctx);
+        return;
+    }
+    publish::poll_source_resolution(parts);
+    publish::poll_printer_catalog(parts);
+    publish::poll_publication(parts);
+    if !parts.dialog.open {
+        clear_preview_textures(ctx);
+        return;
+    }
+    if parts.dialog.printer_discovery_busy || parts.dialog.busy {
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+    ensure_preview(ctx, parts.dialog);
+    let page = parts.dialog.page;
+    let (title, primary, secondary): (&str, &str, Option<&str>) = match page {
+        HardcopyDialogPage::Main => (
+            parts.dialog.workflow.title(),
+            parts.dialog.workflow.primary_label(),
+            None,
+        ),
+        HardcopyDialogPage::PrinterProperties => {
+            ("Printer properties", "Apply printer properties", None)
+        }
+        HardcopyDialogPage::CustomPaperMargins => {
+            ("Custom paper and margins", "Use custom page", None)
+        }
+        HardcopyDialogPage::PrintMapping => (
+            "Layer, trace, and marker print mapping",
+            "Save print mapping",
+            None,
+        ),
+    };
+    let error = parts.dialog.error.clone();
+    let busy = parts.dialog.busy;
+    let plan_valid = parts.dialog.preview_plan.is_some();
+    let description = match page {
+        HardcopyDialogPage::Main => {
+            "Choose the source document, page, styling, and output target before previewing or publishing."
+        }
+        HardcopyDialogPage::PrinterProperties => {
+            "Review and apply the capabilities reported by the selected physical printer."
+        }
+        HardcopyDialogPage::CustomPaperMargins => {
+            "Define a custom physical page and safe printable margins for this hardcopy operation."
+        }
+        HardcopyDialogPage::PrintMapping => {
+            "Map schematic layers, traces, and markers to accessible hardcopy styles."
+        }
+    };
+    let mut body_scroll_offset = parts.dialog.body_scroll_offset;
+    let mut body_action = BodyAction::None;
+    // The main page is a studio, not a form: a fixed section rail, one
+    // section's fields, and a full-height preview beside them. Showing
+    // every control at once could only ever fit the surface by accident,
+    // and did not — the settings ran off the bottom and took the preview
+    // and the command row with them. Showing one section at a time fits by
+    // construction, so the dialog never scrolls no matter how many
+    // controls a hardcopy grows.
+    let mut dialog = Dialog::new(title, primary)
+        .description(description)
+        .size(match page {
+            HardcopyDialogPage::Main => DialogSize::SchematicPageSetup,
+            _ => DialogSize::SimulationWorkflow,
+        })
+        .flush_body()
+        .primary_on_enter(false)
+        .primary_enabled(!busy && (plan_valid || page != HardcopyDialogPage::Main))
+        .ghost("Cancel");
+    // `SchematicPageSetup` already fills its surface at the authored height
+    // clamped to the viewport, so the studio only has to claim the body
+    // track: it divides that track itself and owns whatever scrolling any
+    // region of it ever needs.
+    dialog = if page == HardcopyDialogPage::Main {
+        dialog.manual_body_scroll()
+    } else {
+        dialog.body_scroll_offset(&mut body_scroll_offset)
+    };
+    if let Some(label) = secondary {
+        dialog = dialog.secondary(label);
+    }
+    if let Some(error) = error.as_deref() {
+        // The strip is the only thing on screen that explains a disabled
+        // primary, so where the refusal has an owner it names it. It names
+        // one only on the page that has a rail to send the operator to; a
+        // subflow keeps the dialog-level wording.
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            parts
+                .dialog
+                .error_section
+                .filter(|_| page == HardcopyDialogPage::Main)
+                .map_or_else(
+                    || "Hardcopy configuration blocked".to_owned(),
+                    |section| format!("Blocked in {}", section.label()),
+                ),
+            error,
+        );
+    }
+    let choice = dialog.show(ctx, |ui| {
+        ui.add_enabled_ui(!busy, |ui| {
+            body_action = match page {
+                HardcopyDialogPage::Main => main_body(ui, parts.dialog),
+                HardcopyDialogPage::PrinterProperties => printer_properties_body(ui, parts.dialog),
+                HardcopyDialogPage::CustomPaperMargins => {
+                    custom_paper_body(ui, parts.dialog);
+                    BodyAction::None
+                }
+                HardcopyDialogPage::PrintMapping => {
+                    print_mapping_body(ui, parts.dialog);
+                    BodyAction::None
+                }
+            };
+        });
+    });
+    parts.dialog.body_scroll_offset = body_scroll_offset;
+
+    match body_action {
+        BodyAction::None => {}
+        BodyAction::PrinterProperties => parts
+            .dialog
+            .open_subflow(HardcopyDialogPage::PrinterProperties),
+        BodyAction::CustomPaper => parts
+            .dialog
+            .open_subflow(HardcopyDialogPage::CustomPaperMargins),
+        BodyAction::PrintMapping => parts.dialog.open_subflow(HardcopyDialogPage::PrintMapping),
+        BodyAction::SelectPrinter(device_id) => {
+            let capabilities = parts
+                .dialog
+                .printer_report
+                .as_ref()
+                .and_then(|report| {
+                    report
+                        .printers()
+                        .iter()
+                        .find(|entry| entry.capabilities().device_id() == device_id)
+                })
+                .map(|entry| entry.capabilities().clone());
+            if let Some(capabilities) = capabilities {
+                publish::select_printer_capabilities(parts, capabilities, None);
+            }
+        }
+        BodyAction::DriverProperties => {
+            #[cfg(target_os = "windows")]
+            {
+                let printer_id = parts.dialog.printer_id.clone();
+                match crate::workbench::hardcopy_adapters::print::show_native_printer_properties(
+                    &printer_id,
+                    None,
+                ) {
+                    Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Accepted {
+                        capabilities,
+                        suggestion,
+                    }) => {
+                        apply_suggested_paper(
+                            parts.dialog,
+                            &capabilities,
+                            suggestion.paper_platform_id,
+                        );
+                        publish::select_printer_capabilities(
+                            parts,
+                            *capabilities,
+                            Some(suggestion),
+                        );
+                    }
+                    Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Cancelled) => {}
+                    Err(error) => {
+                        parts.dialog.error = Some(error.to_string());
+                    }
+                }
+            }
+        }
+        BodyAction::SelectSource { source_key, scope } => {
+            publish::select_retained_source(parts, &source_key, scope);
+        }
+    }
+    match choice {
+        DialogChoice::Primary if page == HardcopyDialogPage::Main => {
+            publish::commit_hardcopy_workflow(parts);
+        }
+        DialogChoice::Primary => {
+            if page == HardcopyDialogPage::PrinterProperties
+                && parts.dialog.format == OutputFormat::NativePrinter
+                && !reconcile_native_printer_job(parts.dialog)
+            {
+                parts.dialog.error = Some(
+                    "The selected paper, orientation, and resolution are not supported by the current printer."
+                        .to_owned(),
+                );
+                return;
+            }
+            if let Err(error) = parts.dialog.accept_subflow() {
+                parts.dialog.error = Some(error.to_string());
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled if page != HardcopyDialogPage::Main => {
+            parts.dialog.cancel_subflow();
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
             publish::cancel_source_resolution();
             publish::cancel_publication();
-            publish::poll_publication(self);
             cancel_preview_worker();
             clear_preview_textures(ctx);
-            return;
+            parts.dialog.close();
         }
-        publish::poll_source_resolution(self);
-        publish::poll_printer_catalog(self);
-        publish::poll_publication(self);
-        if !self.state.hardcopy.hardcopy.open {
-            clear_preview_textures(ctx);
-            return;
-        }
-        if self.state.hardcopy.hardcopy.printer_discovery_busy || self.state.hardcopy.hardcopy.busy
-        {
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
-        }
-        ensure_preview(ctx, &mut self.state.hardcopy.hardcopy);
-        let page = self.state.hardcopy.hardcopy.page;
-        let (title, primary, secondary): (&str, &str, Option<&str>) = match page {
-            HardcopyDialogPage::Main => (
-                self.state.hardcopy.hardcopy.workflow.title(),
-                self.state.hardcopy.hardcopy.workflow.primary_label(),
-                None,
-            ),
-            HardcopyDialogPage::PrinterProperties => {
-                ("Printer properties", "Apply printer properties", None)
-            }
-            HardcopyDialogPage::CustomPaperMargins => {
-                ("Custom paper and margins", "Use custom page", None)
-            }
-            HardcopyDialogPage::PrintMapping => (
-                "Layer, trace, and marker print mapping",
-                "Save print mapping",
-                None,
-            ),
-        };
-        let error = self.state.hardcopy.hardcopy.error.clone();
-        let busy = self.state.hardcopy.hardcopy.busy;
-        let plan_valid = self.state.hardcopy.hardcopy.preview_plan.is_some();
-        let description = match page {
-            HardcopyDialogPage::Main => {
-                "Choose the source document, page, styling, and output target before previewing or publishing."
-            }
-            HardcopyDialogPage::PrinterProperties => {
-                "Review and apply the capabilities reported by the selected physical printer."
-            }
-            HardcopyDialogPage::CustomPaperMargins => {
-                "Define a custom physical page and safe printable margins for this hardcopy operation."
-            }
-            HardcopyDialogPage::PrintMapping => {
-                "Map schematic layers, traces, and markers to accessible hardcopy styles."
-            }
-        };
-        let mut body_scroll_offset = self.state.hardcopy.hardcopy.body_scroll_offset;
-        let mut body_action = BodyAction::None;
-        // The main page is a studio, not a form: a fixed section rail, one
-        // section's fields, and a full-height preview beside them. Showing
-        // every control at once could only ever fit the surface by accident,
-        // and did not — the settings ran off the bottom and took the preview
-        // and the command row with them. Showing one section at a time fits by
-        // construction, so the dialog never scrolls no matter how many
-        // controls a hardcopy grows.
-        let mut dialog = Dialog::new(title, primary)
-            .description(description)
-            .size(match page {
-                HardcopyDialogPage::Main => DialogSize::SchematicPageSetup,
-                _ => DialogSize::SimulationWorkflow,
-            })
-            .flush_body()
-            .primary_on_enter(false)
-            .primary_enabled(!busy && (plan_valid || page != HardcopyDialogPage::Main))
-            .ghost("Cancel");
-        // `SchematicPageSetup` already fills its surface at the authored height
-        // clamped to the viewport, so the studio only has to claim the body
-        // track: it divides that track itself and owns whatever scrolling any
-        // region of it ever needs.
-        dialog = if page == HardcopyDialogPage::Main {
-            dialog.manual_body_scroll()
-        } else {
-            dialog.body_scroll_offset(&mut body_scroll_offset)
-        };
-        if let Some(label) = secondary {
-            dialog = dialog.secondary(label);
-        }
-        if let Some(error) = error.as_deref() {
-            // The strip is the only thing on screen that explains a disabled
-            // primary, so where the refusal has an owner it names it. It names
-            // one only on the page that has a rail to send the operator to; a
-            // subflow keeps the dialog-level wording.
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                self.state
-                    .hardcopy
-                    .hardcopy
-                    .error_section
-                    .filter(|_| page == HardcopyDialogPage::Main)
-                    .map_or_else(
-                        || "Hardcopy configuration blocked".to_owned(),
-                        |section| format!("Blocked in {}", section.label()),
-                    ),
-                error,
-            );
-        }
-        let choice = dialog.show(ctx, |ui| {
-            ui.add_enabled_ui(!busy, |ui| {
-                body_action = match page {
-                    HardcopyDialogPage::Main => main_body(ui, &mut self.state.hardcopy.hardcopy),
-                    HardcopyDialogPage::PrinterProperties => {
-                        printer_properties_body(ui, &mut self.state.hardcopy.hardcopy)
-                    }
-                    HardcopyDialogPage::CustomPaperMargins => {
-                        custom_paper_body(ui, &mut self.state.hardcopy.hardcopy);
-                        BodyAction::None
-                    }
-                    HardcopyDialogPage::PrintMapping => {
-                        print_mapping_body(ui, &mut self.state.hardcopy.hardcopy);
-                        BodyAction::None
-                    }
-                };
-            });
-        });
-        self.state.hardcopy.hardcopy.body_scroll_offset = body_scroll_offset;
-
-        match body_action {
-            BodyAction::None => {}
-            BodyAction::PrinterProperties => self
-                .state
-                .hardcopy
-                .hardcopy
-                .open_subflow(HardcopyDialogPage::PrinterProperties),
-            BodyAction::CustomPaper => self
-                .state
-                .hardcopy
-                .hardcopy
-                .open_subflow(HardcopyDialogPage::CustomPaperMargins),
-            BodyAction::PrintMapping => self
-                .state
-                .hardcopy
-                .hardcopy
-                .open_subflow(HardcopyDialogPage::PrintMapping),
-            BodyAction::SelectPrinter(device_id) => {
-                let capabilities = self
-                    .state
-                    .hardcopy
-                    .hardcopy
-                    .printer_report
-                    .as_ref()
-                    .and_then(|report| {
-                        report
-                            .printers()
-                            .iter()
-                            .find(|entry| entry.capabilities().device_id() == device_id)
-                    })
-                    .map(|entry| entry.capabilities().clone());
-                if let Some(capabilities) = capabilities {
-                    publish::select_printer_capabilities(self, capabilities, None);
-                }
-            }
-            BodyAction::DriverProperties => {
-                #[cfg(target_os = "windows")]
-                {
-                    let printer_id = self.state.hardcopy.hardcopy.printer_id.clone();
-                    match crate::workbench::hardcopy_adapters::print::show_native_printer_properties(
-                        &printer_id,
-                        None,
-                    ) {
-                        Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Accepted {
-                            capabilities,
-                            suggestion,
-                        }) => {
-                            apply_suggested_paper(
-                                &mut self.state.hardcopy.hardcopy,
-                                &capabilities,
-                                suggestion.paper_platform_id,
-                            );
-                            publish::select_printer_capabilities(
-                                self,
-                                *capabilities,
-                                Some(suggestion),
-                            );
-                        }
-                        Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Cancelled) => {}
-                        Err(error) => {
-                            self.state.hardcopy.hardcopy.error = Some(error.to_string());
-                        }
-                    }
-                }
-            }
-            BodyAction::SelectSource { source_key, scope } => {
-                publish::select_retained_source(self, &source_key, scope);
-            }
-        }
-        match choice {
-            DialogChoice::Primary if page == HardcopyDialogPage::Main => {
-                publish::commit_hardcopy_workflow(self);
-            }
-            DialogChoice::Primary => {
-                if page == HardcopyDialogPage::PrinterProperties
-                    && self.state.hardcopy.hardcopy.format == OutputFormat::NativePrinter
-                    && !reconcile_native_printer_job(&mut self.state.hardcopy.hardcopy)
-                {
-                    self.state.hardcopy.hardcopy.error = Some(
-                        "The selected paper, orientation, and resolution are not supported by the current printer."
-                            .to_owned(),
-                    );
-                    return;
-                }
-                if let Err(error) = self.state.hardcopy.hardcopy.accept_subflow() {
-                    self.state.hardcopy.hardcopy.error = Some(error.to_string());
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled if page != HardcopyDialogPage::Main => {
-                self.state.hardcopy.hardcopy.cancel_subflow();
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                publish::cancel_source_resolution();
-                publish::cancel_publication();
-                cancel_preview_worker();
-                clear_preview_textures(ctx);
-                self.state.hardcopy.hardcopy.close();
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
-        }
+        DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 

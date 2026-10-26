@@ -186,7 +186,7 @@ fn studio_app() -> RSpiceApp {
         .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
             reference,
         ));
-    publish::open_hardcopy_workflow(&mut app, HardcopyWorkflow::Export);
+    publish::open_hardcopy_workflow(&mut hardcopy_parts(&mut app), HardcopyWorkflow::Export);
     app
 }
 
@@ -197,7 +197,7 @@ fn render_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::Fu
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, viewport)),
             ..Default::default()
         },
-        |ui| app.render_hardcopy_dialog(ui),
+        |ui| render_hardcopy_dialog(&mut hardcopy_parts(app), ui),
     )
 }
 
