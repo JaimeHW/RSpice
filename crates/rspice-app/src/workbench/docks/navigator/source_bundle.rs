@@ -16,6 +16,11 @@
 //! where the cell is placed.
 
 use super::*;
+use egui::{Response, ScrollArea, Ui, Vec2};
+
+use crate::ui::panels::{WorkbenchIcon, section_header};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};

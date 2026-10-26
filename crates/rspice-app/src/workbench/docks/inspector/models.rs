@@ -16,7 +16,7 @@ use crate::quantity::format_engineering_value;
 use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::property_row;
-use super::section_header;
+use rspice_ui_kit::panels::section_header;
 
 /// A library field the reader can act on, or nothing when it is blank.
 fn declared(ui: &mut Ui, label: &str, value: &str) {

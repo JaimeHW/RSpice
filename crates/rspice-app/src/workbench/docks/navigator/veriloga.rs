@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::workbench::RSpiceApp;
+use egui::Ui;
 
 use crate::workbench::documents::code_workspace;
 

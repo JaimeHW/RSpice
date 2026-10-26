@@ -18,9 +18,8 @@ pub(in crate::workbench) mod veriloga;
 
 use netlist::*;
 
-use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Key, Modifiers, Response, ScrollArea, Sense, Ui};
 
-use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::host::Point;
@@ -28,9 +27,7 @@ use crate::workbench::framework::requests::{FocusNavigatorSearch, Outbox, Reques
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::state::Workspace;
-use crate::state::ModelsPage;
-use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon, section_header};
-use crate::ui::widgets::paint_problem_mark;
+use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon};
 
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
 /// The right inset a filter field keeps while it holds a query, so its text

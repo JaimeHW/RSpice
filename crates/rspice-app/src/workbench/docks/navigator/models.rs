@@ -1,6 +1,10 @@
 //! The Models workspace's navigator: its pages and the loaded model libraries.
 
 use super::*;
+use egui::Ui;
+
+use crate::state::ModelsPage;
+use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::workbench::RSpiceApp;
 
 pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {

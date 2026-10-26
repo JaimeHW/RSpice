@@ -44,10 +44,10 @@ use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use rspice_design::drc::{DrcLocation, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
 
-use super::muted_inspector_copy;
 use super::shared::{
     action_stack, checks_current, count_label, current_findings, findings_problem,
 };
+use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
     panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
     section_header_explained,

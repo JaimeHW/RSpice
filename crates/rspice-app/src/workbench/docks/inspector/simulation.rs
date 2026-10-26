@@ -14,7 +14,8 @@ use crate::workbench::state::Workspace;
 use super::super::super::design_system::{
     property_row, property_row_problem, section_header, section_header_action,
 };
-use super::{Problem, muted_inspector_copy};
+use rspice_ui_kit::panels::Problem;
+use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
 /// The selected analysis's last run, as the inspector states it.
 struct LastRun {

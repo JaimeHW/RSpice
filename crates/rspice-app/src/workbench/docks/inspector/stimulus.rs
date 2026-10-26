@@ -30,7 +30,8 @@ use super::super::super::design_system::{
     card_well, elide_text, panel_bleed, property_row, property_row_input_with_hint,
     property_row_wrapped,
 };
-use super::{muted_inspector_copy, section_header};
+use rspice_ui_kit::panels::inspector::muted_inspector_copy;
+use rspice_ui_kit::panels::section_header;
 
 /// The line that names one adopter, and the air an entry keeps either side of
 /// the rule that separates it from the next.

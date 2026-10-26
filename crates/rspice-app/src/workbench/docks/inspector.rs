@@ -24,8 +24,7 @@ pub(in crate::workbench) mod veriloga;
 /// states, read the same way.
 pub(super) use design::analysis_soa_display;
 
-use rspice_ui_kit::panels::inspector::muted_inspector_copy;
-use rspice_ui_kit::panels::{PANEL_INSET, Problem, panel_body, section_block_gap, section_header};
+use rspice_ui_kit::panels::{PANEL_INSET, panel_body};
 
 use egui::{ScrollArea, Ui};
 

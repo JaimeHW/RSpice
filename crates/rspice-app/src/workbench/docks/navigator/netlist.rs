@@ -16,7 +16,13 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use egui::{Response, ScrollArea, Sense, Stroke, Ui, Vec2};
+
+use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::state::{OutlineSection, OutlineSectionKind};
+use crate::ui::panels::{WorkbenchIcon, section_header};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageCatalog, MessageId};

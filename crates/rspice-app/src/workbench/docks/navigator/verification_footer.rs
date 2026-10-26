@@ -2,6 +2,12 @@
 
 use super::verify::VerificationFlowPresentation;
 use super::*;
+use egui::{Align, Response, Ui};
+
+use crate::ui::panels::WorkbenchIcon;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::paint_problem_mark;
 
 #[cfg(test)]
 pub(super) fn active_mc_sample_trail(simulation: &crate::state::SimulationState) -> usize {

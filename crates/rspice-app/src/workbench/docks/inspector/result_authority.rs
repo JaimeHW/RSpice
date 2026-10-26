@@ -6,9 +6,9 @@
 use egui::Ui;
 
 use super::super::super::design_system::{property_row, property_row_problem, section_header};
-use super::section_block_gap;
 use crate::ui::widgets::Button;
 use rspice_ui_kit::panels::Problem;
+use rspice_ui_kit::panels::section_block_gap;
 
 /// The Run section: the run's name and duration, its state when it did not
 /// complete, and the route to its details. Returns the run whose details
