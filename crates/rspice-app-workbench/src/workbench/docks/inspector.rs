@@ -1,28 +1,6 @@
 //! Context inspector with authoritative object and provenance details.
 
-pub(in crate::workbench) mod code_workspace;
-pub(crate) mod design;
-mod executed_deck;
-pub(in crate::workbench) mod models;
-pub(in crate::workbench) mod project;
-mod result_authority;
-pub(crate) mod results;
-/// Visible to the dock layer: the data browser opens it from a run's row, and
-/// the frame draws it whichever dock is showing.
-pub(crate) mod run_details;
-mod shared;
-pub(in crate::workbench) mod simulation;
-/// Visible to the dock layer so the library browser's own gate can render this
-/// pane beside it: the two docks state the same counts about the same design,
-/// and a review that only ever opened one of them would not see them disagree.
-pub(in crate::workbench) mod stimulus;
-pub(in crate::workbench) mod symbol;
-pub(in crate::workbench) mod verify;
-pub(in crate::workbench) mod veriloga;
-
-/// The SOA verdict the Verify flow states is the one an instance's Checks row
-/// states, read the same way.
-pub(super) use design::analysis_soa_display;
+pub mod shared;
 
 use rspice_ui_kit::panels::{PANEL_INSET, panel_body};
 

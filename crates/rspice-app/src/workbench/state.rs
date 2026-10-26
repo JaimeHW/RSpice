@@ -4,20 +4,21 @@
 //! for navigation, dock visibility, responsive drawers, and the selection of
 //! the task surface inside each canonical workspace.
 
-mod console_views;
-pub(in crate::workbench) mod navigator_tree;
+use rspice_app_workbench::workbench::state::console_views;
+pub(in crate::workbench) use rspice_app_workbench::workbench::state::navigator_tree;
 pub(crate) mod plan_provenance;
-pub(crate) mod retired_documents;
 mod session_views;
 mod stimulus_editor;
-pub(crate) mod workbench_session;
+pub(crate) use rspice_app_workbench::workbench::state::workbench_session;
 mod workflow_drafts;
 
 // The workbench's own session and the views over its records, which the
 // workbench reads by these paths.
+pub use console_views::{ConsoleChannel, InlineEditField, SpecialistToolBrowserState};
+#[cfg(test)]
 pub use console_views::{
-    ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleSeverity, ConsoleView, InlineEditField,
-    NotificationFilter, SpecialistToolBrowserState, SpecialistToolFilter,
+    ConsoleReveal, ConsoleSelection, ConsoleSeverity, ConsoleView, NotificationFilter,
+    SpecialistToolFilter,
 };
 pub(crate) use console_views::{InlineEditAuthority, InlineEditSession};
 pub use navigator_tree::*;
@@ -27,9 +28,11 @@ pub use stimulus_editor::*;
 use workbench_session::LAYOUT_SCHEMA_VERSION;
 pub(crate) use workbench_session::{ActiveSourceEditor, default_console_height};
 pub use workbench_session::{
-    ConsolePage, Drawer, StatusPrompt, WidthClass, WorkbenchSession, WorkspaceDocumentId,
-    WorkspaceDocumentRegistry, WorkspaceLayoutState,
+    ConsolePage, Drawer, WorkbenchSession, WorkspaceDocumentId, WorkspaceDocumentRegistry,
+    WorkspaceLayoutState,
 };
+#[cfg(test)]
+pub use workbench_session::{StatusPrompt, WidthClass};
 pub(in crate::workbench) use workbench_session::{
     default_inspector_width, default_navigator_width,
 };

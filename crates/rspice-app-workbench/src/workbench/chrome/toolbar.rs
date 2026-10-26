@@ -1,14 +1,7 @@
 //! Context toolbar.  Tool groups change with the canonical workspace while
 //! global run state remains visible at the trailing edge.
 
-pub(in crate::workbench) mod code;
-pub(crate) mod design;
-pub(in crate::workbench) mod models;
-pub(crate) mod overflow;
-pub(in crate::workbench) mod project;
-pub(crate) mod results;
-pub(in crate::workbench) mod run_config_chip;
-pub(crate) mod simulate;
+pub mod overflow;
 
 use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 

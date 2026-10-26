@@ -1,8 +1,8 @@
 //! Unified console, problems, measurements, and task history.
 
-pub(crate) mod log_anchor;
-pub(crate) mod problems;
-pub(crate) mod transcript;
+pub mod log_anchor;
+pub mod problems;
+pub mod transcript;
 
 use problems::{ProblemCount, active_problem_count, problems};
 

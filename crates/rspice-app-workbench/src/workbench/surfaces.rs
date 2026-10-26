@@ -1,26 +1,5 @@
 //! Canonical task-owner surfaces.
 
-pub(super) mod automation;
-pub(super) mod design;
-pub(super) mod library_cellview_manager;
-pub(super) mod model_correlation;
-mod model_correlation_controller;
-pub(super) mod model_editor;
-pub(super) mod models;
-pub(super) mod netlist;
-pub(super) mod pdk_technology_admin;
-pub(super) mod project;
-pub(super) mod results;
-pub(super) mod simulate;
-pub(super) mod stimulus;
-pub(super) mod verify;
-mod veriloga;
-
-/// The simulation plan workflows are opened from global chrome, so the frame
-/// hosts them rather than the Simulate surface. See
-/// [`simulate::show_workflow_dialogs`].
-pub(in crate::workbench) use simulate::show_workflow_dialogs as show_simulation_workflow_dialogs;
-
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;

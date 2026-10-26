@@ -6,11 +6,9 @@
 //! is present in every workspace; what it shows changes, whether it is drawn
 //! does not.
 
-pub(crate) mod activity_rail;
-pub(crate) mod document_bar;
-pub(crate) mod phone_navigation;
-pub(in crate::workbench) mod presence;
-pub(crate) mod sheet_strip;
-pub(crate) mod status_bar;
-pub(crate) mod title_bar;
-pub(crate) mod toolbar;
+pub mod activity_rail;
+pub mod document_bar;
+pub mod phone_navigation;
+pub mod status_bar;
+pub mod title_bar;
+pub mod toolbar;

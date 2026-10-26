@@ -1,13 +1,6 @@
 //! Workspace-scoped document tabs. Stable project identities drive every tab;
 //! the shell never fabricates datasets, source files, or verification records.
 
-pub(crate) mod code;
-pub(crate) mod design;
-pub(in crate::workbench) mod models;
-pub(in crate::workbench) mod project;
-pub(in crate::workbench) mod results;
-pub(in crate::workbench) mod simulate;
-
 use egui::containers::menu::MenuButton;
 use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 

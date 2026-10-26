@@ -90,7 +90,7 @@ pub(crate) mod simulation {
 pub(crate) mod properties;
 
 /// Shared UI kit exports used by application presentation.
-pub(crate) mod ui;
+pub(crate) use rspice_app_workbench::ui;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.

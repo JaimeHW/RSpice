@@ -21,7 +21,7 @@ use super::retired_documents;
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::localization::{MessageCatalog, UiTextLocale};
 use crate::workbench::routing::availability::SurfaceRouteUnavailable;
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 use crate::workbench::routing::navigation::BrowserHistoryEffect;
 use crate::workbench::routing::navigation::{
     RouteTransition, RouteTransitionSource, SurfaceNavigation,
@@ -817,7 +817,7 @@ impl WorkbenchSession {
     /// foreground surface only once from the original route to the final
     /// destination. Only the browser build's history pop jumps several
     /// routes at once.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", test, feature = "test-support"))]
     pub fn navigate_back_steps(
         &mut self,
         count: usize,
@@ -843,7 +843,7 @@ impl WorkbenchSession {
     /// Atomically advance across up to `count` known routes, reconciling the
     /// foreground surface only once from the original route to the final
     /// destination.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn navigate_forward_steps(
         &mut self,
         count: usize,
@@ -878,22 +878,22 @@ impl WorkbenchSession {
         }
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn take_browser_history_effect(&mut self) -> Option<BrowserHistoryEffect> {
         self.navigation.take_browser_effect()
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn has_pending_browser_history_effects(&self) -> bool {
         self.navigation.has_pending_browser_effects()
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn clear_browser_history_effects(&mut self) {
         self.navigation.clear_browser_effects();
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn take_browser_history_effect_queue_overflowed(&mut self) -> bool {
         self.navigation.take_browser_effect_queue_overflowed()
     }
@@ -901,7 +901,7 @@ impl WorkbenchSession {
     /// Drop restored traversal stacks when a new browser process takes
     /// ownership of the current URL. The active route and workspace remain
     /// unchanged; only host-history authority is reset.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn reset_navigation_history_for_fresh_browser_session(&mut self) {
         self.navigation.reset_history();
     }

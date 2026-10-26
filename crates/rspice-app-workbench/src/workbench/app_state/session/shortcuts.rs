@@ -13,10 +13,10 @@ use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::framework::command_registry::Registry;
 
 mod canvas_focus;
-pub(crate) mod category;
+pub mod category;
 mod input_snapshot;
 mod platform;
-pub(crate) mod resolver;
+pub mod resolver;
 
 pub use canvas_focus::engineering_canvas_has_focus;
 pub use canvas_focus::report_engineering_canvas_focus;

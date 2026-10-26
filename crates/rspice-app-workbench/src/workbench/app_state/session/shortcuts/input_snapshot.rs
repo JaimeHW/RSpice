@@ -62,7 +62,7 @@ impl ShortcutInputSnapshot {
         self.non_canvas_focus
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn from_events_for_test(events: &[Event], non_canvas_focus: bool) -> Self {
         Self {
             key_presses: collect_key_presses(events),
@@ -70,7 +70,7 @@ impl ShortcutInputSnapshot {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn empty_for_test(non_canvas_focus: bool) -> Self {
         Self {
             key_presses: Vec::new(),

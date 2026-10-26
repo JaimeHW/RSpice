@@ -107,7 +107,7 @@ impl Outbox {
     }
 
     /// The waiting `R`, left where it is.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn peek<R: Request>(&self) -> Option<&R> {
         self.waiting
             .iter()

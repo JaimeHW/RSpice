@@ -46,6 +46,7 @@ LOWER_CRATES = {
     "model": ROOT / "crates" / "rspice-app-state" / "src",
     "services": ROOT / "crates" / "rspice-app-services" / "src",
     "run": ROOT / "crates" / "rspice-app-runs" / "src",
+    "framework": ROOT / "crates" / "rspice-app-workbench" / "src",
 }
 
 LOWER = ("model", "services", "run", "framework")
@@ -293,6 +294,23 @@ MOD_DECL = re.compile(
 )
 PATH_ATTR = re.compile(r'#\[\s*path\s*=\s*"([^"]+)"\s*\]')
 CFG_TEST_ATTR = re.compile(r"#\[\s*cfg\s*\(\s*(?:test\b|all\s*\([^]]*\btest\b)")
+INLINE_MOD = re.compile(
+    r"^(?P<attrs>(?:[ \t]*#\[[^\n]*\][ \t]*\n)*)(?P<indent>[ \t]*)(?:pub(?:\([^)]*\))?\s+)?"
+    r"mod\s+(?P<name>r#\w+|\w+)\s*\{[ \t]*$",
+    re.M,
+)
+
+
+def inline_modules(text: str) -> list[tuple[int, int, str, bool]]:
+    """(start, end, name, test-only) of each inline `mod name {` block, which closes at the first
+    `}` line at its own indent (rustfmt's layout)."""
+    blocks = []
+    for match in INLINE_MOD.finditer(text):
+        close = re.compile(rf"^{re.escape(match.group('indent'))}\}}[ \t]*$", re.M).search(text, match.end())
+        if close:
+            blocks.append((match.end(), close.start(), match.group("name").replace("r#", ""),
+                           bool(CFG_TEST_ATTR.search(match.group("attrs")))))
+    return blocks
 
 
 def test_files(sources: dict[str, str]) -> dict[str, bool]:
@@ -302,17 +320,22 @@ def test_files(sources: dict[str, str]) -> dict[str, bool]:
         directory, _, base = path.rpartition("/")
         child_dir = directory if base in ("lib.rs", "main.rs", "mod.rs") else path[:-3]
         prefix = f"{child_dir}/" if child_dir else ""
+        blocks = inline_modules(text)
         for match in MOD_DECL.finditer(text):
             attrs = match.group("attrs")
             name = match.group("name").replace("r#", "")
+            # A declaration inside inline modules names a file beneath them.
+            enclosing = [block for block in blocks if block[0] <= match.start() < block[1]]
+            nested = "".join(f"{block[2]}/" for block in enclosing)
             explicit = PATH_ATTR.search(attrs)
             if explicit:
                 candidates = [posixpath.normpath(posixpath.join(directory, explicit.group(1)))]
             else:
-                candidates = [f"{prefix}{name}.rs", f"{prefix}{name}/mod.rs"]
+                candidates = [f"{prefix}{nested}{name}.rs", f"{prefix}{nested}{name}/mod.rs"]
             found = next((c for c in candidates if c in sources), None)
             if found:
-                children[path].append((found, bool(CFG_TEST_ATTR.search(attrs))))
+                test = bool(CFG_TEST_ATTR.search(attrs)) or any(block[3] for block in enclosing)
+                children[path].append((found, test))
 
     def reachable(through_tests: bool) -> set[str]:
         found, stack = set(), [root for root in ("lib.rs", "main.rs") if root in sources]

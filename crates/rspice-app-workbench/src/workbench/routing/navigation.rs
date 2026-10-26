@@ -14,7 +14,7 @@ use crate::workbench::routing::surface_route::SurfaceRoute;
 
 const HISTORY_LIMIT: usize = 32;
 const RECENT_LIMIT: usize = 16;
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 const BROWSER_EFFECT_LIMIT: usize = 64;
 
 /// Browser-history effect requested by a committed navigation transition.
@@ -175,13 +175,13 @@ impl SurfaceNavigation {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn forward_entries(&self) -> &[SurfaceRoute] {
         &self.forward
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn recent_entries(&self) -> &[SurfaceRoute] {
         &self.recent
     }
@@ -359,7 +359,7 @@ impl SurfaceNavigation {
 
     /// Atomically traverse up to `count` known forward entries and emit one
     /// browser traversal effect for the final destination.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub(crate) fn go_forward_steps(
         &mut self,
         count: usize,
@@ -396,17 +396,17 @@ impl SurfaceNavigation {
         })
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub(crate) fn take_browser_effect(&mut self) -> Option<BrowserHistoryEffect> {
         self.pending_browser_effects.pop_front()
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub(crate) fn has_pending_browser_effects(&self) -> bool {
         self.browser_effect_queue_overflowed || !self.pending_browser_effects.is_empty()
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub(crate) fn take_browser_effect_queue_overflowed(&mut self) -> bool {
         std::mem::take(&mut self.browser_effect_queue_overflowed)
     }
@@ -417,7 +417,7 @@ impl SurfaceNavigation {
     }
 
     fn enqueue_browser_effect(&mut self, effect: BrowserHistoryEffect) {
-        #[cfg(any(test, target_arch = "wasm32"))]
+        #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
         {
             if self.browser_effect_queue_overflowed {
                 return;
@@ -429,7 +429,7 @@ impl SurfaceNavigation {
             }
             self.pending_browser_effects.push_back(effect);
         }
-        #[cfg(not(any(test, target_arch = "wasm32")))]
+        #[cfg(not(any(test, feature = "test-support", target_arch = "wasm32")))]
         let _ = effect;
     }
 
@@ -437,7 +437,7 @@ impl SurfaceNavigation {
     /// history remains useful on native targets, but it must never authorize a
     /// newly loaded browser tab to traverse entries owned by the embedding
     /// page or a prior process.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub(crate) fn reset_history(&mut self) {
         self.back.clear();
         self.forward.clear();

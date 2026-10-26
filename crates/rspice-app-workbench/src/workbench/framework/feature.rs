@@ -25,8 +25,8 @@ use super::dialogs::DialogKey;
 use super::ports::ResultsPort;
 use super::requests::{Drain, Outbox, Request};
 
-#[cfg(test)]
-pub(crate) mod harness;
+#[cfg(any(test, feature = "test-support"))]
+pub mod harness;
 
 /// The session a feature's context holds. The framework asks of it only
 /// where requests wait.
@@ -101,7 +101,7 @@ pub struct PublicationDraft {
 }
 
 /// What the hardcopy feature builds that another feature reads.
-pub(crate) trait HardcopyPort {
+pub trait HardcopyPort {
     /// The validated publication snapshot `draft` describes, built from the
     /// open project: every printable schematic sheet and plot pane, the
     /// active run's analyses, datasets and measurements, and the effective
@@ -114,7 +114,7 @@ pub(crate) trait HardcopyPort {
 
 /// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
 /// the hardcopy pipeline's exact civil-date transform.
-pub(crate) fn publication_timestamp_utc() -> String {
+pub fn publication_timestamp_utc() -> String {
     let seconds = crate::time_compat::unix_epoch().as_secs();
     rspice_hardcopy::render::HardcopyPublicationTimestamp::from_unix_seconds(seconds)
         .map(|stamp| {
@@ -213,7 +213,7 @@ pub struct Cx<'a, F: Feature> {
     pub platform: &'a mut PlatformState,
     /// What the run tier keeps between frames: the runs in flight, the run
     /// preflight, and the deck the last manual run executed.
-    pub(crate) runs: &'a mut RunsState,
+    pub runs: &'a mut RunsState,
     pub handles: LowerHandles<'a>,
     pub peers: Peers<'a>,
 }
@@ -458,7 +458,7 @@ impl<F: Feature> FeatureRegistry<F> {
     }
 
     /// Every dialog step the feature registered.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn registered_dialogs(&self) -> &'static [FeatureDialog<F>] {
         self.dialogs
     }
@@ -502,7 +502,7 @@ impl<F: Feature> FeatureRegistry<F> {
     }
 
     /// Every routed command the feature takes a part in.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn registered_routed(&self) -> &'static [RoutedCommand<F>] {
         self.routed
     }

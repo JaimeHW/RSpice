@@ -1,7 +1,5 @@
 //! Desktop/tablet primary workspace rail.
 
-pub(in crate::workbench) mod results;
-
 use egui::{Frame, Panel, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};

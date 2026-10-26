@@ -60,7 +60,9 @@ const LAYERS: &[(&str, u32)] = &[
     // lifecycle, recovery, the managed runtime and the build identity) in
     // `rspice-app-services`, and the run tier (the controller, its prepared
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
-    // every module here; each may reference them.
+    // every module here; each may reference them. The workbench framework
+    // compiles as `rspice-app-workbench`, inside `workbench`, where the
+    // interior order below ranks it.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -875,6 +877,31 @@ fn workbench_dir() -> PathBuf {
     src_dir().join("workbench")
 }
 
+/// The workbench's framework modules compile as `rspice-app-workbench`, at the
+/// paths they had here, and keep their rank in the same order: its
+/// `src/workbench` is scanned beside this crate's.
+fn workbench_roots() -> [PathBuf; 2] {
+    [
+        workbench_dir(),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
+    ]
+}
+
+/// A source's path under whichever workbench root holds it.
+fn workbench_relative(file: &Path) -> Option<PathBuf> {
+    workbench_roots()
+        .iter()
+        .find_map(|root| file.strip_prefix(root).ok().map(Path::to_path_buf))
+}
+
+/// Every source under either workbench root.
+fn workbench_sources() -> Vec<PathBuf> {
+    workbench_roots()
+        .iter()
+        .flat_map(|root| rust_sources(root))
+        .collect()
+}
+
 fn workbench_rank(module: &str) -> usize {
     WORKBENCH_LAYERS
         .iter()
@@ -899,7 +926,7 @@ fn workbench_rank(module: &str) -> usize {
 /// declared prefix wins, which keeps `hardcopy/render` distinct from
 /// `hardcopy/print` while a bare `app` still owns everything beneath it.
 fn workbench_owning_module(file: &Path) -> Option<String> {
-    let relative = file.strip_prefix(workbench_dir()).ok()?;
+    let relative = workbench_relative(file)?;
     let path = relative
         .to_str()?
         .replace('\\', "/")
@@ -989,7 +1016,7 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
     let reexports = workbench_reexports();
     let mut edges: BTreeMap<(String, String), usize> = BTreeMap::new();
 
-    for file in rust_sources(&workbench_dir()) {
+    for file in workbench_sources() {
         let Some(from) = workbench_owning_module(&file) else {
             continue;
         };
@@ -1003,7 +1030,7 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
         // the file's own parent module so grouping files into a directory
         // cannot hide the edges between them: in `workbench/lifecycle/x.rs`,
         // `super::y` is `crate::workbench::lifecycle::y`.
-        if let Ok(relative) = file.strip_prefix(workbench_dir()) {
+        if let Some(relative) = workbench_relative(&file) {
             let mut parent: Vec<&str> = relative
                 .to_str()
                 .unwrap_or_default()
@@ -1112,10 +1139,9 @@ fn is_module_declaration(line: &str) -> bool {
 #[test]
 fn every_workbench_module_declares_a_layer() {
     let mut undeclared = Vec::new();
-    for file in rust_sources(&workbench_dir()) {
+    for file in workbench_sources() {
         if workbench_owning_module(&file).is_none() && !declares_only_submodules(&file) {
-            let relative = file
-                .strip_prefix(workbench_dir())
+            let relative = workbench_relative(&file)
                 .expect("a source under src/workbench/")
                 .with_extension("");
             undeclared.push(relative.to_string_lossy().replace('\\', "/"));
@@ -1422,7 +1448,10 @@ fn source_files_have_no_byte_order_mark() {
 ///
 /// 13 -> 12: `workbench::simulation_analysis_tabs` and its blanket allow are
 /// deleted. Saved indices decode through `AnalysisKind::legacy_index`.
-const MAX_LINT_SUPPRESSIONS: usize = 12;
+///
+/// 12 -> 11: the shortcut platform's allow moves with the workbench framework
+/// to `rspice-app-workbench`, whose own guard counts it.
+const MAX_LINT_SUPPRESSIONS: usize = 11;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
@@ -1848,6 +1877,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-state/src",
     "rspice-app-services/src",
     "rspice-app-runs/src",
+    "rspice-app-workbench/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",
@@ -1871,15 +1901,16 @@ const PAINTED_UI_CRATES: &[&str] = &[
 /// every property of every card in that workspace and published nothing at
 /// all — and this is what was left.
 const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
+    "rspice-app-workbench/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
+    "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
+    "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
+    "rspice-app-workbench/src/workbench/tools/notification_center.rs::foot",
     "rspice-app/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
     "rspice-app/src/workbench/app/dialogs/design_review_comments.rs::review_message",
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
     "rspice-app/src/workbench/app/dialogs/hierarchy/create.rs::table_row",
     "rspice-app/src/workbench/app/dialogs/library/cell_ops_dialogs.rs::process_copy_cell_dialog",
     "rspice-app/src/workbench/app/dialogs/library/new_cell_dialog.rs::process_new_cell_dialog",
-    "rspice-app/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
-    "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
-    "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_group",
     "rspice-app/src/workbench/docks/inspector/results.rs::trace_colour_row",
     "rspice-app/src/workbench/docks/navigator/design.rs::tabs",
     "rspice-app/src/workbench/surfaces/design/layout_editor.rs::show_canvas",
@@ -1915,7 +1946,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/surfaces/stimulus/pwl.rs::table_header",
     "rspice-app/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
     "rspice-app/src/workbench/surfaces/veriloga.rs::source_editor",
-    "rspice-app/src/workbench/tools/notification_center.rs::foot",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
     "rspice-schematic-editor/src/property_values.rs::render_value_editor",

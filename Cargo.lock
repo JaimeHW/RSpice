@@ -5198,6 +5198,7 @@ dependencies = [
  "rspice-app-runs",
  "rspice-app-services",
  "rspice-app-state",
+ "rspice-app-workbench",
  "rspice-automation-protocol",
  "rspice-automation-runtime",
  "rspice-cloud-client",
@@ -5361,6 +5362,35 @@ dependencies = [
  "web-sys",
  "web-time",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-app-workbench"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "ron",
+ "rspice-app-runs",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-core",
+ "rspice-design",
+ "rspice-hardcopy",
+ "rspice-publication-contract",
+ "rspice-results",
+ "rspice-results-ui",
+ "rspice-schematic-editor",
+ "rspice-ui-kit",
+ "rspice-vocabulary",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "thiserror 2.0.21",
+ "time",
+ "unicode-segmentation",
+ "uuid",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

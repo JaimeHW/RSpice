@@ -8,7 +8,7 @@
 //! Only the rows in view are laid out ([`lines`] keeps the rest as heights),
 //! and the body follows new lines only while the reader is at its end.
 
-pub(crate) mod lines;
+pub mod lines;
 mod toolbar;
 
 pub use toolbar::toolbar;

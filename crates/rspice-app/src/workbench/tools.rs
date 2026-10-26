@@ -10,6 +10,6 @@ pub(crate) mod calculator_tool;
 pub(crate) mod examples_browser;
 pub(crate) mod expression_diagnostics;
 pub(crate) mod jobs_manager;
-pub(crate) mod notification_center;
+pub(crate) use rspice_app_workbench::workbench::tools::notification_center;
 pub(crate) mod project_launcher;
-pub(crate) mod specialist_tool_browser;
+pub(crate) use rspice_app_workbench::workbench::tools::specialist_tool_browser;

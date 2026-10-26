@@ -52,18 +52,115 @@ pub(crate) mod browser {
     pub(crate) use rspice_app_services::workbench::browser::download;
     #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) use rspice_app_services::workbench::browser::file_import;
-    pub(crate) mod navigation;
     #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
     pub(crate) use rspice_app_services::workbench::browser::qualification;
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) use rspice_app_workbench::workbench::browser::navigation;
 }
-pub(crate) mod chrome;
+pub(crate) mod chrome {
+    pub use rspice_app_workbench::workbench::chrome::*;
+    pub(in crate::workbench) mod presence;
+    pub(crate) mod sheet_strip;
+    pub(crate) mod activity_rail {
+        pub use rspice_app_workbench::workbench::chrome::activity_rail::*;
+        pub(in crate::workbench) mod results;
+    }
+    pub(crate) mod document_bar {
+        pub use rspice_app_workbench::workbench::chrome::document_bar::*;
+        pub(crate) mod code;
+        pub(crate) mod design;
+        pub(in crate::workbench) mod models;
+        pub(in crate::workbench) mod project;
+        pub(in crate::workbench) mod results;
+        pub(in crate::workbench) mod simulate;
+    }
+    pub(crate) mod status_bar {
+        pub use rspice_app_workbench::workbench::chrome::status_bar::*;
+        pub(crate) mod design;
+        pub(crate) mod results;
+        pub(crate) mod sheets;
+        pub(in crate::workbench) mod shell;
+    }
+    pub(crate) mod title_bar {
+        pub use rspice_app_workbench::workbench::chrome::title_bar::*;
+        pub(in crate::workbench) mod code;
+        pub(in crate::workbench) mod design;
+    }
+    pub(crate) mod toolbar {
+        pub use rspice_app_workbench::workbench::chrome::toolbar::*;
+        pub(in crate::workbench) mod code;
+        pub(crate) mod design;
+        pub(in crate::workbench) mod models;
+        pub(in crate::workbench) mod project;
+        pub(crate) mod results;
+        pub(in crate::workbench) mod run_config_chip;
+        pub(crate) mod simulate;
+    }
+}
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
-pub(crate) mod docks;
-pub(crate) mod documents;
+pub(crate) mod docks {
+    pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_details};
+    pub(crate) use navigator::stimulus::browser_state::StimulusBrowserState;
+    pub use rspice_app_workbench::workbench::docks::*;
+    pub(crate) mod inspector {
+        pub use rspice_app_workbench::workbench::docks::inspector::*;
+        pub(in crate::workbench) mod code_workspace;
+        pub(crate) mod design;
+        mod executed_deck;
+        pub(in crate::workbench) mod models;
+        pub(in crate::workbench) mod project;
+        mod result_authority;
+        pub(crate) mod results;
+        /// Visible to the dock layer: the data browser opens it from a run's row, and
+        /// the frame draws it whichever dock is showing.
+        pub(crate) mod run_details;
+        pub(in crate::workbench) mod simulation;
+        /// Visible to the dock layer so the library browser's own gate can render this
+        /// pane beside it: the two docks state the same counts about the same design,
+        /// and a review that only ever opened one of them would not see them disagree.
+        pub(in crate::workbench) mod stimulus;
+        pub(in crate::workbench) mod symbol;
+        pub(in crate::workbench) mod verify;
+        pub(in crate::workbench) mod veriloga;
+        /// The SOA verdict the Verify flow states is the one an instance's Checks row
+        /// states, read the same way.
+        pub(super) use design::analysis_soa_display;
+    }
+    pub(super) mod navigator {
+        pub use rspice_app_workbench::workbench::docks::navigator::*;
+        pub(in crate::workbench) mod design;
+        pub(in crate::workbench) mod models;
+        pub(in crate::workbench) mod netlist;
+        pub(in crate::workbench) mod project;
+        pub(in crate::workbench) mod results;
+        mod results_actions;
+        mod results_rows;
+        pub(in crate::workbench) mod simulate;
+        pub(in crate::workbench) mod source_bundle;
+        pub(in crate::workbench) mod stimulus;
+        pub(in crate::workbench) mod symbol;
+        pub(in crate::workbench) mod verify;
+        pub(in crate::workbench) mod veriloga;
+        use netlist::*;
+        mod verification_footer;
+        use verification_footer::*;
+    }
+}
+pub(crate) mod documents {
+    pub use rspice_app_workbench::workbench::documents::*;
+    pub(crate) mod code_workspace;
+    pub(crate) mod model_correlation;
+    pub(crate) mod model_editor;
+    pub(crate) mod netlist_document;
+    pub(crate) mod result_document;
+    pub(crate) mod text_document_model;
+    pub(crate) mod text_editor_commands;
+    pub(crate) mod virtual_text_editor;
+}
 // The bundled circuits Help's Examples dialog opens as projects are model
 // logic in `rspice_app_state::workbench::examples`. The test fixtures beside
 // them build through the application's own APIs, so they stay here.
@@ -79,10 +176,10 @@ pub(crate) mod examples {
 }
 mod features;
 pub(crate) mod frame;
-pub(crate) mod framework;
+pub(crate) use rspice_app_workbench::workbench::framework;
 pub(crate) mod hardcopy;
 pub(crate) mod hardcopy_adapters;
-pub(crate) mod layout;
+pub(crate) use rspice_app_workbench::workbench::layout;
 pub(crate) mod lifecycle {
     //! Opening, checkpointing, and recovering a working session.
     //!
@@ -99,23 +196,44 @@ pub(crate) mod lifecycle {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) use rspice_app_services::workbench::lifecycle::recovery_checkpoint;
     pub(crate) mod session;
-    pub(crate) mod window_session;
+    pub(crate) use rspice_app_workbench::workbench::lifecycle::window_session;
 }
 pub(crate) mod live_session;
-pub(crate) mod localization;
+pub(crate) use rspice_app_workbench::workbench::localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) use rspice_app_runs::workbench::preflight;
 pub(crate) use rspice_app_state::workbench::preferences;
 pub(crate) mod results;
-pub(crate) mod routing;
+pub(crate) use rspice_app_workbench::workbench::routing;
 pub(crate) mod settings;
 pub(crate) mod sheets;
 mod shell_host;
 pub(crate) mod shortcuts;
 pub(crate) mod slots;
 pub(crate) mod state;
-pub(crate) mod surfaces;
+pub(crate) mod surfaces {
+    pub use rspice_app_workbench::workbench::surfaces::*;
+    pub(super) mod automation;
+    pub(super) mod design;
+    pub(super) mod library_cellview_manager;
+    pub(super) mod model_correlation;
+    mod model_correlation_controller;
+    pub(super) mod model_editor;
+    pub(super) mod models;
+    pub(super) mod netlist;
+    pub(super) mod pdk_technology_admin;
+    pub(super) mod project;
+    pub(super) mod results;
+    pub(super) mod simulate;
+    pub(super) mod stimulus;
+    pub(super) mod verify;
+    mod veriloga;
+    /// The simulation plan workflows are opened from global chrome, so the frame
+    /// hosts them rather than the Simulate surface. See
+    /// [`simulate::show_workflow_dialogs`].
+    pub(in crate::workbench) use simulate::show_workflow_dialogs as show_simulation_workflow_dialogs;
+}
 pub(crate) mod tools;
 pub(crate) mod user_identity;
 pub(crate) mod workflows;

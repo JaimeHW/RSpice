@@ -27,6 +27,7 @@ def measure_tree(
     lower_model: dict[str, str] | None = None,
     lower_services: dict[str, str] | None = None,
     lower_runs: dict[str, str] | None = None,
+    lower_workbench: dict[str, str] | None = None,
 ):
     with tempfile.TemporaryDirectory() as directory:
         trees = {
@@ -34,6 +35,7 @@ def measure_tree(
             "state": lower_model or {},
             "services": lower_services or {},
             "runs": lower_runs or {},
+            "workbench": lower_workbench or {},
         }
         for tree, contents in trees.items():
             for path, text in contents.items():
@@ -46,6 +48,7 @@ def measure_tree(
                 ("model", "state", lower_model),
                 ("services", "services", lower_services),
                 ("run", "runs", lower_runs),
+                ("framework", "workbench", lower_workbench),
             )
             if contents
         }
@@ -148,6 +151,27 @@ class MeasurementTests(unittest.TestCase):
         })
         self.assertEqual(values["feature->feature"], {})
         self.assertEqual((stats["files"], stats["production"]), (6, 5))
+
+    def test_a_file_declared_inside_an_inline_module_is_found_beneath_it(self) -> None:
+        values, _, stats = measure_tree({
+            "lib.rs": "mod workbench;\n",
+            "workbench.rs": (
+                "mod surfaces {\n"
+                "    pub use rspice_app_workbench::workbench::surfaces::*;\n"
+                "    pub mod project;\n"
+                "    #[cfg(test)]\n"
+                "    mod results;\n"
+                "}\n"
+            ),
+            "workbench/surfaces/project.rs": PROJECT,
+            "workbench/surfaces/results.rs": (
+                "use crate::workbench::surfaces::project::project_title;\n"
+                "pub fn helper() { project_title(); }\n"
+            ),
+        })
+        # The test-only child is reached beneath its inline parent, so its reference is a test's.
+        self.assertEqual(values["feature->feature"], {})
+        self.assertEqual((stats["files"], stats["production"]), (4, 3))
 
     def test_a_variant_or_test_item_spelled_like_another_slices_item_is_not_coupling(self) -> None:
         values, _, _ = measure_tree({
@@ -269,6 +293,30 @@ class MeasurementTests(unittest.TestCase):
         # The run crate's definition takes its name from results; the glob import remains.
         self.assertEqual(values["feature->feature"], {"simulate->results": 1})
         self.assertEqual(stats["files"], 3)
+
+    def test_the_workbench_crate_lends_its_names_to_the_framework_slice(self) -> None:
+        app = {
+            "lib.rs": "pub use rspice_app_state::state;\nmod analysis;\nmod workbench;\n",
+            "workbench.rs": "pub use rspice_app_workbench::workbench::routing;\nmod surfaces;\n",
+            "analysis.rs": "pub fn route_label() {}\npub fn surface_label() {}\n",
+            "workbench/surfaces/verify.rs": (
+                "use crate::analysis::*;\n"
+                "pub fn show() {\n"
+                "    route_label();\n"
+                "    surface_label();\n"
+                "}\n"
+            ),
+        }
+        state = {"lib.rs": "pub mod state;\n", "state.rs": "pub fn route_label() {}\n"}
+        workbench = {
+            "lib.rs": "pub mod workbench;\n",
+            "workbench.rs": "pub mod routing;\n",
+            "workbench/routing.rs": "pub fn surface_label() {}\n",
+        }
+        self.assertEqual(measure_tree(app, state)[0]["feature->feature"], {"simulate->results": 2})
+        values, _, _ = measure_tree(app, state, lower_workbench=workbench)
+        # The workbench crate's definition takes its name from results; the glob import remains.
+        self.assertEqual(values["feature->feature"], {"simulate->results": 1})
 
     def test_whole_app_methods_and_parameters_outside_their_home_are_counted(self) -> None:
         values, _, _ = measure_tree({

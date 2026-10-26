@@ -16,11 +16,9 @@ use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::ids;
 
-pub(crate) mod application_menus;
-pub(in crate::workbench) mod code;
-pub(in crate::workbench) mod design;
+pub mod application_menus;
 mod keyboard;
-pub(crate) mod menu_entries;
+pub mod menu_entries;
 mod menu_row;
 pub use application_menus::source_editor_context_menu;
 use application_menus::{

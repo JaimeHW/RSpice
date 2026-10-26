@@ -1,13 +1,11 @@
 //! Context docks for the clean-room workbench.
 
-pub(crate) mod console;
-pub(crate) mod drawers;
-pub(crate) mod inspector;
-pub(super) mod navigator;
+pub mod console;
+pub mod drawers;
+pub mod inspector;
+pub mod navigator;
 
-pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_details};
 pub use inspector::validate_component_model_catalog_binding;
-pub(crate) use navigator::stimulus::browser_state::StimulusBrowserState;
 
 use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 

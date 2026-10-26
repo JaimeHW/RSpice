@@ -60,12 +60,12 @@ pub struct LayoutSpec {
 }
 
 impl LayoutSpec {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn resolve(viewport_width: f32, viewport_height: f32, state: &WorkbenchSession) -> Self {
         Self::resolve_with_pointer(viewport_width, viewport_height, false, state)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn resolve_with_pointer(
         viewport_width: f32,
         viewport_height: f32,
@@ -81,7 +81,7 @@ impl LayoutSpec {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn resolve_with_pointer_and_document_strip(
         viewport_width: f32,
         viewport_height: f32,

@@ -954,7 +954,7 @@ impl Clock {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// The zone the panel reads wall times in under test; see
     /// [`local_date_time`].
@@ -965,7 +965,7 @@ thread_local! {
 /// A Unix time on the reader's clock. Tests read it in a zone they pin, so a
 /// render reviewed in one zone is the render every machine draws.
 fn local_date_time(unix_ms: u64) -> Option<time::OffsetDateTime> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(zone) = PINNED_ZONE.with(std::cell::Cell::get) {
         let utc = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_ms) * 1_000_000)
             .ok()?;

@@ -1,0 +1,61 @@
+[package]
+name = "rspice-app-workbench"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's workbench framework: commands, feature registration, routing, the workbench session and its chrome, docks and tools"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# The feature harness and its null ports, for the application's own tests.
+# Enabled only through rspice-app's dev-dependency.
+test-support = ["rspice-app-state/test-support", "rspice-app-services/test-support", "rspice-app-runs/test-support", "rspice-ui-kit/test-support"]
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-runs.workspace = true
+rspice-vocabulary.workspace = true
+rspice-ui-kit = { workspace = true, features = ["plot"] }
+rspice-schematic-editor.workspace = true
+rspice-results-ui.workspace = true
+rspice-design = { workspace = true, features = ["symbol-artwork"] }
+rspice-results = { workspace = true, features = ["engine-evidence"] }
+rspice-publication-contract.workspace = true
+rspice-hardcopy.workspace = true
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+thiserror.workspace = true
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+unicode-segmentation = "1.12"
+egui = { version = "0.35.0", default-features = false }
+time = { workspace = true }
+
+[dev-dependencies]
+rspice-app-state = { workspace = true, features = ["test-support"] }
+rspice-app-services = { workspace = true, features = ["test-support"] }
+rspice-app-runs = { workspace = true, features = ["test-support"] }
+rspice-ui-kit = { workspace = true, features = ["test-support"] }
+rspice-results-ui = { workspace = true, features = ["test-support"] }
+rspice-schematic-editor = { workspace = true, features = ["test-support"] }
+ron = { version = "0.12.2", features = ["integer128"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent"] }
+
+[lints]
+workspace = true

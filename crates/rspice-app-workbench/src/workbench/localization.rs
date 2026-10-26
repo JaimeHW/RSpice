@@ -20,7 +20,7 @@ pub enum UiTextLocale {
 }
 
 impl UiTextLocale {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const ALL: [Self; 2] = [Self::EnglishUnitedStates, Self::PseudoExpanded];
 
     #[cfg(test)]
@@ -40,7 +40,7 @@ macro_rules! define_messages {
         }
 
         impl MessageId {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             pub const ALL: &'static [Self] = &[$(Self::$id,)+];
 
             const fn english_template(self) -> &'static str {

@@ -1,22 +1,6 @@
 //! Workspace-aware navigation tree.
 
-pub(in crate::workbench) mod design;
-pub(in crate::workbench) mod symbol;
-
-pub(in crate::workbench) mod models;
-pub(in crate::workbench) mod netlist;
-pub(in crate::workbench) mod project;
-mod rail;
-pub(in crate::workbench) mod results;
-mod results_actions;
-mod results_rows;
-pub(in crate::workbench) mod simulate;
-pub(in crate::workbench) mod source_bundle;
-pub(in crate::workbench) mod stimulus;
-pub(in crate::workbench) mod verify;
-pub(in crate::workbench) mod veriloga;
-
-use netlist::*;
+pub mod rail;
 
 use egui::{Key, Modifiers, Response, ScrollArea, Sense, Ui};
 
@@ -329,7 +313,3 @@ pub fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
     }
     (popup, keyboard_open)
 }
-
-mod verification_footer;
-
-use verification_footer::*;

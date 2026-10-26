@@ -258,7 +258,7 @@ impl PaletteScope {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn contains(self, spec: &CommandSpec) -> bool {
         self == Self::All || Self::for_command(spec) == self
     }

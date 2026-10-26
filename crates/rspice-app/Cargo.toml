@@ -38,6 +38,7 @@ rspice-design-model = { workspace = true }
 rspice-app-state.workspace = true
 rspice-app-services.workspace = true
 rspice-app-runs.workspace = true
+rspice-app-workbench.workspace = true
 rspice-vocabulary.workspace = true
 rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-schematic-editor.workspace = true
@@ -101,6 +102,7 @@ dirs = "7.0"
 rspice-app-state = { workspace = true, features = ["test-support"] }
 rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-app-runs = { workspace = true, features = ["test-support"] }
+rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
 rspice-schematic-editor = { workspace = true, features = ["test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }

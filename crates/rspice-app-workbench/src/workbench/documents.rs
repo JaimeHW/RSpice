@@ -29,12 +29,3 @@ pub enum CodeSourceFileAction {
     Duplicate,
     Delete,
 }
-
-pub(crate) mod code_workspace;
-pub(crate) mod model_correlation;
-pub(crate) mod model_editor;
-pub(crate) mod netlist_document;
-pub(crate) mod result_document;
-pub(crate) mod text_document_model;
-pub(crate) mod text_editor_commands;
-pub(crate) mod virtual_text_editor;

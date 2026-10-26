@@ -37,9 +37,9 @@
 //! the drawing gives it to the canvas, so the canvas's own keys act on what
 //! the finding named without a second click to reach it.
 
-pub(crate) mod arrange;
-pub(crate) mod detail;
-pub(crate) mod grid;
+pub mod arrange;
+pub mod detail;
+pub mod grid;
 mod strip;
 
 use std::borrow::Cow;

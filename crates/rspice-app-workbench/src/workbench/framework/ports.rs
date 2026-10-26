@@ -37,7 +37,7 @@ pub struct DisplayedDatasetView {
 /// The two halves of a pinned view: the abscissa window, then the ordinate
 /// window. Either may be absent — the reader can pin one axis and leave the
 /// other to the page — which is why the pair is not one `Option`.
-pub(crate) type CapturedViewport = (Option<(f64, f64)>, Option<(f64, f64)>);
+pub type CapturedViewport = (Option<(f64, f64)>, Option<(f64, f64)>);
 
 /// What the results workspace shows that another feature reads.
 pub trait ResultsPort {

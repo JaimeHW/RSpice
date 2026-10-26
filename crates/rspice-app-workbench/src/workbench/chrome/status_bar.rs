@@ -1,10 +1,5 @@
 //! Compact application status with exact engineering context.
 
-pub(crate) mod design;
-pub(crate) mod results;
-pub(crate) mod sheets;
-pub(in crate::workbench) mod shell;
-
 use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::simulation::status::EngineAvailability;

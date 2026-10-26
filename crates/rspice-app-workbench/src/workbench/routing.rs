@@ -7,7 +7,7 @@
 //! answers whether a route may be entered at all, which is licensing and
 //! capability, not layout.
 
-pub(crate) mod availability;
-pub(crate) mod navigation;
-pub(crate) mod surface_catalog;
-pub(crate) mod surface_route;
+pub mod availability;
+pub mod navigation;
+pub mod surface_catalog;
+pub mod surface_route;

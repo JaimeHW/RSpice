@@ -266,7 +266,7 @@ impl Registry {
 /// The commands framework code raises or asks about by name rather than
 /// reading them from a table an owner hands it. Each is the key of a
 /// registered command, which the registry's check asserts.
-pub(crate) mod ids {
+pub mod ids {
     use crate::state::command_catalog::CommandKey;
 
     macro_rules! ids {

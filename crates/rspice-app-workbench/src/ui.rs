@@ -1,8 +1,8 @@
 //! Application access to shared UI primitives and result plotting.
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_ui_kit::raster;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use rspice_ui_kit::tokens::Direction;
 pub use rspice_ui_kit::{Density, EngineeringCanvasTheme, Mode, Theme};
 pub use rspice_ui_kit::{

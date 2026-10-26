@@ -328,6 +328,11 @@ fn app_runs_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-runs/src")
 }
 
+/// The application's workbench framework, named the same way.
+fn app_workbench_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src")
+}
+
 fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
@@ -507,6 +512,7 @@ fn path_grammar_is_owned_by_one_module() {
         ("", app_state_src_dir()),
         ("", app_services_src_dir()),
         ("", app_runs_src_dir()),
+        ("", app_workbench_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
     ] {
@@ -638,6 +644,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
         app_state_src_dir(),
         app_services_src_dir(),
         app_runs_src_dir(),
+        app_workbench_src_dir(),
     ] {
         for (path, file) in production_files(&root) {
             let code = Source::read(&file).code;
@@ -1029,6 +1036,9 @@ fn skip_payload(after: &str) -> &str {
 #[test]
 fn every_command_has_a_user_route() {
     let root = src_dir();
+    // The chrome's menus and toolbar and the framework's command ids compile
+    // in the workbench crate, at the same paths under its `src`.
+    let workbench_root = app_workbench_src_dir();
     let mut registry_code = None;
     let mut routing_code = None;
     let mut routes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -1037,12 +1047,15 @@ fn every_command_has_a_user_route() {
         .map(|file| Source::read(&root.join(file)).production)
         .collect::<Vec<_>>();
     let ids = command_ids(
-        &Source::read(&root.join(COMMAND_IDS_FILE)).production,
+        &Source::read(&workbench_root.join(COMMAND_IDS_FILE)).production,
         &Source::read(&root.join(COMMAND_REGISTRY_FILE)).production,
         &features,
     );
 
-    for (path, file) in production_files(&root) {
+    for (path, file) in production_files(&root)
+        .into_iter()
+        .chain(production_files(&workbench_root))
+    {
         let code = Source::read(&file).code;
         if path == COMMAND_REGISTRY_FILE {
             registry_code = Some(code.clone());
@@ -1360,6 +1373,7 @@ fn persisted_policies_reach_a_projection() {
         ("", app_state_src_dir()),
         ("", app_services_src_dir()),
         ("", app_runs_src_dir()),
+        ("", app_workbench_src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
