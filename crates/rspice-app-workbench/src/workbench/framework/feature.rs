@@ -198,6 +198,12 @@ impl Default for PublicationDraft {
     }
 }
 
+/// What simulate shows that another feature reads.
+pub trait SimulatePort {
+    /// The specification the reader selected in the plan, if any.
+    fn selected_specification(&self) -> Option<&str>;
+}
+
 /// The other features a feature reads, as live references, never a copy
 /// taken earlier; and the one thing it may ask of one, letting go of
 /// design's canvas gesture.
@@ -212,6 +218,7 @@ pub struct Peers<'a> {
     /// `None` in the results feature's own context: a feature reads its own
     /// state, never itself as a peer.
     results: Option<&'a dyn ResultsPort>,
+    simulate: &'a dyn SimulatePort,
 }
 
 impl<'a> Peers<'a> {
@@ -220,12 +227,14 @@ impl<'a> Peers<'a> {
         cloud: Option<&'a dyn CloudPort>,
         hardcopy: Option<&'a dyn HardcopyPort>,
         results: Option<&'a dyn ResultsPort>,
+        simulate: &'a dyn SimulatePort,
     ) -> Self {
         Self {
             design,
             cloud,
             hardcopy,
             results,
+            simulate,
         }
     }
 
@@ -256,16 +265,22 @@ impl<'a> Peers<'a> {
         self.results
             .expect("the results feature reads its own state, never itself as a peer")
     }
+
+    /// What simulate shows.
+    pub fn simulate(&self) -> &'a dyn SimulatePort {
+        self.simulate
+    }
 }
 
 /// The application's handles on the services below the workbench that a
 /// feature's command reaches through: the export IO that asks where a file
-/// goes and writes it. The shell lends them beside the application state for
-/// the one call.
-#[derive(Clone, Copy)]
+/// goes and writes it, and the run controller, which holds the prepared run
+/// and loads the transient viewers' derived data. The shell lends them
+/// beside the application state for the one call.
 pub struct LowerHandles<'a> {
     pub export_io:
         &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
+    pub run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
 }
 
 impl CanvasGesturePort for Peers<'_> {

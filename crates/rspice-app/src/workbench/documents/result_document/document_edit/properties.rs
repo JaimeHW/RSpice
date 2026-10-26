@@ -40,8 +40,8 @@ pub(crate) fn open_properties(state: &mut ResultsParts<'_>) {
 }
 
 /// What the properties apply to: the open document, or every quick view.
-pub(super) fn scope(state: &AppState) -> String {
-    active_document_id(state.results_reads())
+pub(super) fn scope(state: ResultsReads<'_>) -> String {
+    active_document_id(state)
         .and_then(|document_id| {
             state
                 .model
@@ -58,12 +58,12 @@ pub(super) fn scope(state: &AppState) -> String {
 /// Keep the draft with the open document, or as the reader's own over a
 /// quick view. The form closes once they land.
 pub(super) fn commit(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     draft: PropertiesDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
     if let Some(document_id) = active_document_id(state.results_reads()) {
         transact(
-            &mut state.results_parts(),
+            state,
             document_id,
             vec![DocumentEdit::SetPresentation(
                 VisualizationPresentationPolicy {
@@ -81,7 +81,7 @@ pub(super) fn commit(
                 u32::from(draft.significant_digits),
             )
             .map_err(str::to_owned)?;
-        state.results.results.session.phase_continuous = draft.phase_continuous;
+        state.results.session.phase_continuous = draft.phase_continuous;
     }
     Ok(None)
 }

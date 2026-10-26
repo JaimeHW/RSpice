@@ -19,8 +19,8 @@ use crate::results::visualization_document::{
     PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace, TypedValue,
     VisualizationDocument,
 };
+use crate::simulation::SimulationController;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
-use crate::workbench::{AppState, RSpiceApp};
 
 use super::{ResultViewer, ResultsParts, ResultsReads};
 
@@ -55,11 +55,17 @@ impl std::ops::Deref for PaneProjection {
     }
 }
 
-pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocumentId) {
+pub(crate) fn show(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
+    document_id: ResultDocumentId,
+) {
     // A document that cannot advance onto the newest run is still a document
     // about a real dataset. Blanking it withheld the evidence the reader
     // already had over a decision about which evidence to show next.
-    match refresh_latest_binding(&mut app.state, document_id) {
+    match refresh_latest_binding(state, document_id) {
         LatestBinding::Current => {}
         LatestBinding::Degraded(reason) => tracking_banner(ui, &reason),
         LatestBinding::Missing(reason) => {
@@ -67,7 +73,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
             return;
         }
     }
-    let Some(document) = projection(&app.state, document_id) else {
+    let Some(document) = projection(state.results_reads(), document_id) else {
         unavailable_surface(
             ui,
             "Result document unavailable",
@@ -77,8 +83,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     };
     // The document's digits and phase stand in for the reader's own while it
     // is shown; leaving it for a quick view drops them.
-    app.state.results.results.session.document_presentation = app
-        .state
+    state.results.session.document_presentation = state
         .model
         .workspace
         .content
@@ -92,17 +97,14 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         );
         return;
     };
-    let selected_page_id = app
-        .state
-        .results
+    let selected_page_id = state
         .results
         .session
         .persistent_document_page(document_id)
         .filter(|selected| document.pages.iter().any(|page| page.page.id == *selected))
         .unwrap_or(first_page.page.id);
 
-    app.state
-        .results
+    state
         .results
         .session
         .select_persistent_document_page(document_id, selected_page_id);
@@ -130,9 +132,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
 
     // Which pane the reader is working in belongs to this document, not to
     // whichever document was last shown.
-    let requested_active_pane = app
-        .state
-        .results
+    let requested_active_pane = state
         .results
         .session
         .persistent_document_pane(document_id)
@@ -147,18 +147,19 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .iter()
         .find(|pane| pane.id.get() == active_pane_id)
         .expect("the resolved active pane belongs to the selected page");
-    app.state
-        .results
+    state
         .results
         .session
         .select_persistent_document_pane(document_id, active_pane.id);
-    if let Err(reason) = select_pane_binding(&mut app.state.results_parts(), active_pane) {
+    if let Err(reason) = select_pane_binding(state, active_pane) {
         unavailable_surface(ui, &active_pane.title, &reason);
         return;
     }
-    super::prepare_viewer_state(&mut app.state.results_parts());
-    if let Some(viewer) = compatible_active_viewer(&app.state, &page.page.title, active_pane) {
-        app.state.results.results.session.viewer = viewer;
+    super::prepare_viewer_state(state);
+    if let Some(viewer) =
+        compatible_active_viewer(state.results_reads(), &page.page.title, active_pane)
+    {
+        state.results.session.viewer = viewer;
     }
     let page_titles = document
         .pages
@@ -171,38 +172,32 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .position(|candidate| candidate.page.id == selected_page_id)
         .unwrap_or_default();
     if let Some(picked) =
-        super::show_persistent_docbar(ui, app, &page.page.title, &page_titles, page_index)
+        super::show_persistent_docbar(ui, state, &page.page.title, &page_titles, page_index)
         && picked != page_index
     {
-        select_page(&mut app.state, document_id, picked);
+        select_page(state, document_id, picked);
         ui.ctx().request_repaint();
     }
-    let active_viewer = compatible_active_viewer(&app.state, &page.page.title, active_pane);
+    let active_viewer =
+        compatible_active_viewer(state.results_reads(), &page.page.title, active_pane);
     if let Some(viewer) = active_viewer {
-        app.state.results.results.session.viewer = viewer;
-        if let Err(reason) = project_pane_presentation(&mut app.state, active_pane, viewer) {
+        state.results.session.viewer = viewer;
+        if let Err(reason) = project_pane_presentation(state, active_pane, viewer) {
             unavailable_surface(ui, &active_pane.title, &reason);
             return;
         }
         if super::viewer_has_sheet_bar(viewer) {
-            super::show_sheet_bar(ui, &mut app.state.results_parts());
+            super::show_sheet_bar(ui, state);
         }
         crate::ui::plot::set_interaction_mode(
             ui.ctx(),
-            app.state
-                .results
-                .results
-                .session
-                .plot_tool
-                .interaction_mode(),
+            state.results.session.plot_tool.interaction_mode(),
         );
     }
 
     // Persistent pages own exactly one stage-level readout, just like quick
     // Results. Individual panes never reserve their own instrument chrome.
-    let strip_height = active_viewer.map_or(0.0, |_| {
-        super::readout_strip_height(&mut app.state.results_parts())
-    });
+    let strip_height = active_viewer.map_or(0.0, |_| super::readout_strip_height(state));
     let available = ui.available_rect_before_wrap();
     let well_height = (available.height() - strip_height).max(0.0);
     let activated_pane_id = ui
@@ -212,10 +207,25 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
                 // Manifest is a dataset-native document, so it replaces the
                 // page projection instead of masquerading as one retained
                 // visualization pane.
-                super::show_persistent_pane_viewer(ui, app, ResultViewer::Manifest, None);
+                super::show_persistent_pane_viewer(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    ResultViewer::Manifest,
+                    None,
+                );
                 None
             } else {
-                render_page(ui, app, page, active_pane_id, active_viewer)
+                render_page(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    page,
+                    active_pane_id,
+                    active_viewer,
+                )
             }
         })
         .inner;
@@ -229,9 +239,8 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .iter()
         .find(|pane| pane.id.get() == restored_pane_id)
         .expect("a pane activated from this page remains in this page");
-    if select_pane_binding(&mut app.state.results_parts(), restored_pane).is_ok() {
-        app.state
-            .results
+    if select_pane_binding(state, restored_pane).is_ok() {
+        state
             .results
             .session
             .select_persistent_document_pane(document_id, restored_pane.id);
@@ -241,28 +250,34 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
             active_viewer
         };
         if let Some(viewer) = restored_viewer {
-            app.state.results.results.session.viewer = viewer;
+            state.results.session.viewer = viewer;
         }
     }
-    if let Some(fresh_pane) = projection(&app.state, document_id).and_then(|projection| {
-        projection
-            .pages
-            .into_iter()
-            .flat_map(|page| page.panes)
-            .find(|pane| pane.id.get() == restored_pane_id)
-    }) && let Some(viewer) = ResultViewer::from_viewer_document_id(&fresh_pane.viewer_id)
+    if let Some(fresh_pane) =
+        projection(state.results_reads(), document_id).and_then(|projection| {
+            projection
+                .pages
+                .into_iter()
+                .flat_map(|page| page.panes)
+                .find(|pane| pane.id.get() == restored_pane_id)
+        })
+        && let Some(viewer) = ResultViewer::from_viewer_document_id(&fresh_pane.viewer_id)
     {
-        let viewer = bound_viewer_projection(&app.state, viewer);
-        let _ = project_pane_presentation(&mut app.state, &fresh_pane, viewer);
+        let viewer = bound_viewer_projection(state.results_reads(), viewer);
+        let _ = project_pane_presentation(state, &fresh_pane, viewer);
     }
     if strip_height > 0.0 {
-        super::waves::readout_strip(ui, &mut app.state.results_parts(), strip_height);
+        super::waves::readout_strip(ui, state, strip_height);
     }
 }
 
 /// Show the document's page at `index`, in document order, from the next
 /// frame. The pane the reader works in moves to that page's first pane.
-pub(super) fn select_page(state: &mut AppState, document_id: ResultDocumentId, index: usize) {
+pub(super) fn select_page(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+    index: usize,
+) {
     let Some(page_id) = state
         .model
         .workspace
@@ -273,7 +288,6 @@ pub(super) fn select_page(state: &mut AppState, document_id: ResultDocumentId, i
         return;
     };
     state
-        .results
         .results
         .session
         .select_persistent_document_page(document_id, page_id);
@@ -325,23 +339,23 @@ fn resolved_active_pane_id(
 }
 
 fn compatible_active_viewer(
-    state: &AppState,
+    state: ResultsReads<'_>,
     family_label: &str,
     pane: &Pane,
 ) -> Option<ResultViewer> {
-    let selected = state.results.results.session.viewer;
+    let selected = state.results.session.viewer;
     if super::family_allows_viewer(family_label, selected)
-        && super::viewer_is_available(state.results_reads(), selected)
+        && super::viewer_is_available(state, selected)
     {
         return Some(selected);
     }
     ResultViewer::from_viewer_document_id(&pane.viewer_id).filter(|viewer| {
         super::family_allows_viewer(family_label, *viewer)
-            && super::viewer_is_available(state.results_reads(), *viewer)
+            && super::viewer_is_available(state, *viewer)
     })
 }
 
-pub(crate) fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
+pub(crate) fn current_result_source_digest(state: ResultsReads<'_>) -> Option<ContentDigest> {
     let netlist = &state.model.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
@@ -403,7 +417,7 @@ fn degraded_tracking_reason(cause: &str) -> String {
 }
 
 pub(crate) fn refresh_latest_binding(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
 ) -> LatestBinding {
     use crate::results::visualization_document::{DocumentEdit, ResultDocumentTrackingMode};
@@ -420,10 +434,7 @@ pub(crate) fn refresh_latest_binding(
     };
     let tracking = document.tracking();
     if tracking.mode != ResultDocumentTrackingMode::Latest {
-        state
-            .results
-            .results
-            .clear_latest_retarget_failure(document_id);
+        state.results.clear_latest_retarget_failure(document_id);
         return LatestBinding::Current;
     }
     // A tracking claim the document cannot substantiate is a reason to stop
@@ -449,7 +460,7 @@ pub(crate) fn refresh_latest_binding(
         ));
     };
     let project_revision = state.model.workspace.content.project.revision();
-    let source_digest = current_result_source_digest(state);
+    let source_digest = current_result_source_digest(state.results_reads());
 
     let Some(candidate) = state
         .model
@@ -479,10 +490,7 @@ pub(crate) fn refresh_latest_binding(
     let (candidate_dataset, candidate_digest, _) = candidate;
     let next = crate::product::DatasetBinding::new(candidate_dataset, candidate_digest);
     if next == previous {
-        state
-            .results
-            .results
-            .clear_latest_retarget_failure(document_id);
+        state.results.clear_latest_retarget_failure(document_id);
         return LatestBinding::Current;
     }
     // Retargeting rebuilds the retained source dataset from the run. Re-trying
@@ -491,7 +499,6 @@ pub(crate) fn refresh_latest_binding(
     // against the exact candidate that produced it and re-tried only when a
     // different run becomes the candidate.
     if let Some(reason) = state
-        .results
         .results
         .latest_retarget_failure(document_id, candidate_dataset)
     {
@@ -516,9 +523,9 @@ pub(crate) fn refresh_latest_binding(
     let Some((source, analysis_id)) = prepared else {
         return LatestBinding::Current;
     };
-    let refuse = |state: &mut AppState, cause: String| {
+    let refuse = |state: &mut ResultsParts<'_>, cause: String| {
         let reason = degraded_tracking_reason(&cause);
-        state.results.results.record_latest_retarget_failure(
+        state.results.record_latest_retarget_failure(
             document_id,
             candidate_dataset,
             reason.clone(),
@@ -566,10 +573,7 @@ pub(crate) fn refresh_latest_binding(
             format!("This document could not be retargeted onto the newest run: {error}."),
         );
     }
-    state
-        .results
-        .results
-        .clear_latest_retarget_failure(document_id);
+    state.results.clear_latest_retarget_failure(document_id);
     LatestBinding::Current
 }
 
@@ -621,7 +625,10 @@ pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocument
     true
 }
 
-fn projection(state: &AppState, document_id: ResultDocumentId) -> Option<DocumentProjection> {
+fn projection(
+    state: ResultsReads<'_>,
+    document_id: ResultDocumentId,
+) -> Option<DocumentProjection> {
     let document = state
         .model
         .workspace
@@ -700,7 +707,9 @@ const fn placement_rank(placement: PanePlacement) -> u8 {
 
 fn render_page(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
     page: &PageProjection,
     active_pane_id: u64,
     active_viewer: Option<ResultViewer>,
@@ -718,13 +727,25 @@ fn render_page(
         ui,
         page.page.layout,
         page.panes.iter().map(|pane| pane.id),
-        |ui, index| render_pane(ui, app, &page.panes[index], active_pane_id, active_viewer),
+        |ui, index| {
+            render_pane(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                &page.panes[index],
+                active_pane_id,
+                active_viewer,
+            )
+        },
     )
 }
 
 fn render_pane(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
     pane: &PaneProjection,
     active_pane_id: u64,
     active_viewer: Option<ResultViewer>,
@@ -732,9 +753,8 @@ fn render_pane(
     let is_active = pane.id.get() == active_pane_id;
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
     persistent::pane_frame(ui, pane.id, is_active, |ui| {
-        let activated_pane_id = pane_header(ui, app, pane, viewer, is_active);
-        let digits = app
-            .state
+        let activated_pane_id = pane_header(ui, state, pane, viewer, is_active);
+        let digits = state
             .model
             .workspace
             .content
@@ -753,7 +773,17 @@ fn render_pane(
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), viewer_height),
             Layout::top_down(Align::Min),
-            |ui| render_pane_viewer(ui, app, pane, viewer, is_active),
+            |ui| {
+                render_pane_viewer(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    pane,
+                    viewer,
+                    is_active,
+                )
+            },
         );
         activated_pane_id
     })
@@ -775,12 +805,12 @@ fn pane_viewer(
 /// the pane's serial when the reader activated it.
 fn pane_header(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     pane: &PaneProjection,
     viewer: Option<ResultViewer>,
     is_active: bool,
 ) -> Option<u64> {
-    let menu = super::document_edit::pane_menu(&app.state, pane.document_id, pane.id);
+    let menu = super::document_edit::pane_menu(state.results_reads(), pane.document_id, pane.id);
     let viewer_title = viewer.map_or_else(
         || pane.viewer_id.as_str(),
         |viewer| {
@@ -806,25 +836,25 @@ fn pane_header(
         menu,
     );
     match action? {
-        persistent::PaneHeaderAction::Activate => select_pane_context(&mut app.state, pane)
+        persistent::PaneHeaderAction::Activate => select_pane_context(state, pane)
             .is_ok()
             .then_some(pane.id.get()),
         persistent::PaneHeaderAction::MoveEarlier => {
             let direction = super::document_edit::PaneMove::Earlier;
-            super::document_edit::move_pane(&mut app.state, pane.document_id, pane.id, direction);
+            super::document_edit::move_pane(state, pane.document_id, pane.id, direction);
             None
         }
         persistent::PaneHeaderAction::MoveLater => {
             let direction = super::document_edit::PaneMove::Later;
-            super::document_edit::move_pane(&mut app.state, pane.document_id, pane.id, direction);
+            super::document_edit::move_pane(state, pane.document_id, pane.id, direction);
             None
         }
         persistent::PaneHeaderAction::ToggleLinkX => {
-            super::document_edit::toggle_pane_x_link(&mut app.state, pane.document_id, pane.id);
+            super::document_edit::toggle_pane_x_link(state, pane.document_id, pane.id);
             None
         }
         persistent::PaneHeaderAction::Remove => {
-            super::document_edit::remove_pane(&mut app.state, pane.document_id, pane.id);
+            super::document_edit::remove_pane(state, pane.document_id, pane.id);
             None
         }
     }
@@ -832,12 +862,14 @@ fn pane_header(
 
 fn render_pane_viewer(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
     pane: &PaneProjection,
     viewer: Option<ResultViewer>,
     is_active: bool,
 ) {
-    if let Err(reason) = select_pane_binding(&mut app.state.results_parts(), pane) {
+    if let Err(reason) = select_pane_binding(state, pane) {
         unavailable_surface(ui, &pane.title, &reason);
         return;
     }
@@ -864,12 +896,12 @@ fn render_pane_viewer(
         unavailable_surface(ui, &pane.title, &definition.unavailable_reason());
         return;
     }
-    let viewer = bound_viewer_projection(&app.state, viewer);
-    if !super::viewer_is_available(app.state.results_reads(), viewer) {
+    let viewer = bound_viewer_projection(state.results_reads(), viewer);
+    if !super::viewer_is_available(state.results_reads(), viewer) {
         unavailable_surface(
             ui,
             &pane.title,
-            super::viewer_unavailability_reason(app.state.results_reads(), viewer)
+            super::viewer_unavailability_reason(state.results_reads(), viewer)
                 .unwrap_or("The retained analysis does not satisfy this viewer contract."),
         );
         return;
@@ -882,23 +914,31 @@ fn render_pane_viewer(
         );
         return;
     }
-    let family = match super::document_edit::family::pane_selection(&app.state, pane, viewer) {
-        Ok(family) => family,
-        Err(reason) => {
-            unavailable_surface(ui, &pane.title, &reason);
-            return;
-        }
-    };
-    if let Err(reason) = project_pane_presentation(&mut app.state, pane, viewer) {
+    let family =
+        match super::document_edit::family::pane_selection(state.results_reads(), pane, viewer) {
+            Ok(family) => family,
+            Err(reason) => {
+                unavailable_surface(ui, &pane.title, &reason);
+                return;
+            }
+        };
+    if let Err(reason) = project_pane_presentation(state, pane, viewer) {
         unavailable_surface(ui, &pane.title, &reason);
         return;
     }
-    super::show_persistent_pane_viewer(ui, app, viewer, family);
-    capture_pane_presentation(&mut app.state, pane, viewer);
+    super::show_persistent_pane_viewer(
+        ui,
+        state,
+        run_controller,
+        selected_specification,
+        viewer,
+        family,
+    );
+    capture_pane_presentation(state, pane, viewer);
 }
 
 fn project_pane_presentation(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     pane: &PaneProjection,
     viewer: ResultViewer,
 ) -> Result<(), String> {
@@ -925,11 +965,9 @@ fn project_pane_presentation(
         .collect::<Vec<_>>();
     state
         .results
-        .results
         .session
         .enter_persistent_pane(pane.document_id, pane.id, analysis_key);
     state
-        .results
         .results
         .project_waveform_visibility(analysis_key, visibility);
 
@@ -940,7 +978,7 @@ fn project_pane_presentation(
             .and_then(|axis| axis.range)
             .map(|range| (range.minimum, range.maximum))
     };
-    state.results.results.session.project_persistent_plot_view(
+    state.results.session.project_persistent_plot_view(
         viewer,
         axis_range(AxisOrientation::Horizontal),
         axis_range(AxisOrientation::VerticalLeft),
@@ -955,9 +993,9 @@ fn project_pane_presentation(
                 _ => None,
             })
     };
-    state.results.results.session.cursors.a = cursor_position("A");
-    state.results.results.session.cursors.b = cursor_position("B");
-    state.results.results.session.cursor_strip = state.model.simulation.view.active_analysis_idx;
+    state.results.session.cursors.a = cursor_position("A");
+    state.results.session.cursors.b = cursor_position("B");
+    state.results.session.cursor_strip = state.model.simulation.view.active_analysis_idx;
     // Retained markers project into their own overlay. They are entities of
     // this document, not quick-view annotations of the dataset, so they carry
     // the document's full-width serial and never enter the project's
@@ -1000,11 +1038,7 @@ fn project_pane_presentation(
             note: marker.label.clone(),
         });
     }
-    state
-        .results
-        .results
-        .session
-        .project_document_markers(markers);
+    state.results.session.project_document_markers(markers);
     Ok(())
 }
 
@@ -1022,9 +1056,13 @@ fn project_pane_presentation(
 /// the frame may already have moved this pane's X range or cursors. Writing
 /// the stale snapshot back would undo that link. An X range or cursor the
 /// reader did change carries every axis or cursor linked with it along.
-fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer: ResultViewer) {
-    let view = state.results.results.session.persistent_plot_view(viewer);
-    let cursors = state.results.results.session.cursors;
+fn capture_pane_presentation(
+    state: &mut ResultsParts<'_>,
+    pane: &PaneProjection,
+    viewer: ResultViewer,
+) {
+    let view = state.results.session.persistent_plot_view(viewer);
+    let cursors = state.results.session.cursors;
     let Some(document) = state
         .model
         .workspace
@@ -1113,20 +1151,19 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
     }
 }
 
-fn select_pane_context(state: &mut AppState, pane: &PaneProjection) -> Result<(), String> {
-    select_pane_binding(&mut state.results_parts(), pane)?;
+fn select_pane_context(state: &mut ResultsParts<'_>, pane: &PaneProjection) -> Result<(), String> {
+    select_pane_binding(state, pane)?;
     state
-        .results
         .results
         .session
         .select_persistent_document_pane(pane.document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.results.results.session.viewer = bound_viewer_projection(state, viewer);
+        state.results.session.viewer = bound_viewer_projection(state.results_reads(), viewer);
     }
     Ok(())
 }
 
-fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultViewer {
+fn bound_viewer_projection(state: ResultsReads<'_>, viewer: ResultViewer) -> ResultViewer {
     state
         .model
         .simulation

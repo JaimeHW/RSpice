@@ -3,6 +3,8 @@
 //! Studios' session: their pages, selections, drafts and filters, the
 //! analysis lifecycle outcome and the Jobs manager's review context.
 
+use crate::workbench::framework::feature::SimulatePort;
+
 /// What the simulate feature keeps between frames.
 #[derive(Debug, Clone)]
 pub(crate) struct SimulateState {
@@ -140,5 +142,13 @@ impl Default for SimulateState {
             specification_evidence_filter: Default::default(),
             jobs_manager: Default::default(),
         }
+    }
+}
+
+/// The specification the verification matrix has selected is what another
+/// feature reads of simulate.
+impl SimulatePort for SimulateState {
+    fn selected_specification(&self) -> Option<&str> {
+        self.selected_specification.as_deref()
     }
 }

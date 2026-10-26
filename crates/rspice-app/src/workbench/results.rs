@@ -9,6 +9,7 @@
 //! draws in the same context.
 
 pub(crate) mod commands;
+mod surface;
 
 use crate::workbench::commands::result_navigation::{
     dataset_export_is_resolvable, open_run_log, producer_log_hop, producing_plan_hop, task_deck_hop,
@@ -72,6 +73,35 @@ fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
         cx.state
             .parts_and_run_details(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
     crate::workbench::docks::inspector::results::results(ui, &mut parts, run_details);
+}
+
+/// The Results stage, over the workspace's parts, the run controller its
+/// derived viewers load through, and the specification simulate has
+/// selected.
+pub(super) fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
+    let mut parts = cx
+        .state
+        .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
+    surface::show(
+        ui,
+        &mut parts,
+        cx.handles.run_controller,
+        cx.peers.simulate().selected_specification(),
+    );
+}
+
+/// The compact Results projection beside another workspace's document, over
+/// the same.
+pub(super) fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
+    let mut parts = cx
+        .state
+        .parts(cx.model, cx.wb, cx.platform, &mut cx.runs.preflight);
+    crate::workbench::documents::result_document::show_compact_split(
+        ui,
+        &mut parts,
+        cx.handles.run_controller,
+        cx.peers.simulate().selected_specification(),
+    );
 }
 
 /// Nothing to commit when another section shows in the inspector's place:

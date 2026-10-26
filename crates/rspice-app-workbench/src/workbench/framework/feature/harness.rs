@@ -1,6 +1,7 @@
 //! One feature on its own, for its tests: its state, a model, a session and
 //! the platform services' state, with every peer it reads showing what a
-//! fresh session shows, and an export IO that writes nothing.
+//! fresh session shows, an export IO that writes nothing, and a run
+//! controller of its own with no run prepared.
 //!
 //! The harness answers and runs the feature's own commands as the feature
 //! does, in the same context. The shell's prologue (a project operation in
@@ -26,6 +27,7 @@ use rspice_vocabulary::product::ResultDocumentId;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 use rspice_app_services::io::WaveformDataset;
@@ -35,7 +37,7 @@ use rspice_app_services::workbench::workflows::export_workflow::{
 
 use super::{
     CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry,
-    HardcopyPort, LowerHandles, Peers, PublicationDraft, Reads,
+    HardcopyPort, LowerHandles, Peers, PublicationDraft, Reads, SimulatePort,
 };
 use crate::workbench::framework::ports::{CapturedViewport, DisplayedDatasetView, ResultsPort};
 
@@ -105,6 +107,13 @@ impl HardcopyPort for NullPorts {
         _draft: &PublicationDraft,
     ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
         Err("a feature's own test builds no publication snapshot".to_owned())
+    }
+}
+
+/// A fresh session has selected no specification.
+impl SimulatePort for NullPorts {
+    fn selected_specification(&self) -> Option<&str> {
+        None
     }
 }
 
@@ -202,6 +211,7 @@ pub struct FeatureHarness<F: Feature> {
     pub wb: F::Session,
     pub(crate) platform: PlatformState,
     pub(crate) runs: RunsState,
+    pub(crate) run_controller: SimulationController,
 }
 
 impl<F: Feature> FeatureHarness<F>
@@ -218,6 +228,7 @@ where
             wb,
             platform: PlatformState::default(),
             runs: RunsState::default(),
+            run_controller: SimulationController::new(),
         }
     }
 
@@ -246,12 +257,14 @@ where
             &mut self.runs,
             LowerHandles {
                 export_io: &NullExportIo,
+                run_controller: &mut self.run_controller,
             },
             Peers::new(
                 &mut NullPorts,
                 Some(&NullPorts),
                 Some(&NullPorts),
                 Some(&NullPorts),
+                &NullPorts,
             ),
         ));
     }

@@ -130,8 +130,8 @@ fn numbers(draft: &CompareDraft) -> Result<CompareNumbers, String> {
 
 /// Resolve the form's choices against the retained datasets, moving a
 /// baseline or signal that no longer exists onto the first one that does.
-pub(super) fn choices(state: &AppState, draft: &mut CompareDraft) -> CompareChoices {
-    let (run, analysis) = match reading_analysis(state.results_reads()) {
+pub(super) fn choices(state: ResultsReads<'_>, draft: &mut CompareDraft) -> CompareChoices {
+    let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {
             return CompareChoices {
@@ -142,7 +142,7 @@ pub(super) fn choices(state: &AppState, draft: &mut CompareDraft) -> CompareChoi
             };
         }
     };
-    let baselines = baselines(state.results_reads(), run, analysis);
+    let baselines = baselines(state, run, analysis);
     let selected = draft
         .baseline
         .and_then(|id| {
@@ -175,7 +175,7 @@ pub(super) fn choices(state: &AppState, draft: &mut CompareDraft) -> CompareChoi
 /// Run the comparison and keep its outcome in the form, recording the
 /// receipt with the open document. Once the outcome shows, `Done` closes.
 pub(super) fn commit(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     mut draft: CompareDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
     if draft.outcome.is_some() {
@@ -212,7 +212,14 @@ pub(super) fn commit(
                 relative_tolerance: numbers.relative_tolerance,
             },
         )?;
-        let outcome = outcome(state, analysis, baseline, &receipt, &signal_names, &numbers);
+        let outcome = outcome(
+            state.results_reads(),
+            analysis,
+            baseline,
+            &receipt,
+            &signal_names,
+            &numbers,
+        );
         let edits = match active_document_id(state.results_reads()) {
             Some(document_id) => {
                 let document = project_document(state.results_reads(), document_id)?;
@@ -241,7 +248,7 @@ pub(super) fn commit(
         (outcome, edits)
     };
     if let Some((document_id, edits)) = edits {
-        transact(&mut state.results_parts(), document_id, edits)?;
+        transact(state, document_id, edits)?;
     }
     draft.outcome = Some(outcome);
     Ok(Some(ResultDocumentDialog::Compare(draft)))
@@ -250,7 +257,7 @@ pub(super) fn commit(
 /// The receipt as the form shows it: each signal by name, its worst error in
 /// the signal's own unit, and its verdict.
 fn outcome(
-    state: &AppState,
+    state: ResultsReads<'_>,
     analysis: &AnalysisResult,
     baseline: &SimulationRun,
     receipt: &ComparisonReceipt,
@@ -259,7 +266,7 @@ fn outcome(
 ) -> CompareOutcome {
     let digits = usize::from(
         state
-            .result_presentation_policy()
+            .presentation_policy()
             .displayed_significant_digits()
             .get(),
     );

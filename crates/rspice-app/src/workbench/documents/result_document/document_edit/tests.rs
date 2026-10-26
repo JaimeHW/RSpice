@@ -1,5 +1,6 @@
 //! Pins for the edits the result viewer makes to a project result document.
 
+use super::super::RSpiceApp;
 use super::*;
 use crate::results::visualization_document::{LinkKind, Pane};
 use crate::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
@@ -36,8 +37,8 @@ fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
         layout_id: layout_id.to_owned(),
         validation_error: None,
     };
-    let document_id =
-        super::super::create_document::commit(&mut app).expect("the document commits");
+    let document_id = super::super::create_document::commit(&mut app.state.results_parts())
+        .expect("the document commits");
     (app, document_id)
 }
 
@@ -68,7 +69,20 @@ fn drive_frame(body: impl FnMut(&mut egui::Ui)) {
 }
 
 fn show_document(app: &mut RSpiceApp, document_id: ResultDocumentId) {
-    drive_frame(|ui| super::super::show_persistent_document(ui, app, document_id));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            app,
+            |state, run_controller, selected_specification| {
+                super::super::show_persistent_document(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
 }
 
 fn commit_add_pane(app: &mut RSpiceApp) {
@@ -78,10 +92,10 @@ fn commit_add_pane(app: &mut RSpiceApp) {
     else {
         panic!("Add pane opens its form");
     };
-    let choices = add_pane_choices(&app.state, &mut draft);
+    let choices = add_pane_choices(app.state.results_reads(), &mut draft);
     assert_eq!(choices.refusal, None);
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(
         app.state.results.result_document_dialog.is_none(),
         "a landed Add closes its form"
@@ -135,11 +149,11 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
     };
     draft.dataset = Some(second_dataset);
     draft.analysis = None;
-    let choices = add_pane_choices(&app.state, &mut draft);
+    let choices = add_pane_choices(app.state.results_reads(), &mut draft);
     assert_eq!(choices.datasets.len(), 2);
     assert_eq!(choices.refusal, None);
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
 
     let document = retained(&app, document_id);
     assert!(
@@ -161,7 +175,7 @@ fn the_add_pane_form_draws_over_the_document() {
     let (mut app, document_id) = document_fixture("two-linked-panes");
     show_document(&mut app, document_id);
     open_add_pane(&mut app.state.results_parts());
-    drive_frame(|ui| show(ui.ctx(), &mut app));
+    drive_frame(|ui| show(ui.ctx(), &mut app.state.results_parts()));
     assert!(matches!(
         app.state.results.result_document_dialog,
         Some(ResultDocumentDialog::AddPane(_))
@@ -195,12 +209,12 @@ fn removing_a_linked_pane_takes_it_out_of_its_link_group() {
     assert_eq!(horizontal_link_members(&app, document_id)[0].len(), 3);
     let panes = ordered_panes(&app, document_id);
 
-    remove_pane(&mut app.state, document_id, panes[2].id);
+    remove_pane(&mut app.state.results_parts(), document_id, panes[2].id);
     assert_eq!(ordered_panes(&app, document_id).len(), 2);
     assert_eq!(horizontal_link_members(&app, document_id)[0].len(), 2);
 
     // A group cannot link one axis, so it goes with the second-last member.
-    remove_pane(&mut app.state, document_id, panes[1].id);
+    remove_pane(&mut app.state.results_parts(), document_id, panes[1].id);
     assert_eq!(ordered_panes(&app, document_id).len(), 1);
     assert!(horizontal_link_members(&app, document_id).is_empty());
     show_document(&mut app, document_id);
@@ -271,7 +285,7 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
         Some(second_page)
     );
 
-    super::super::persistent_document::select_page(&mut app.state, document_id, 1);
+    super::super::persistent_document::select_page(&mut app.state.results_parts(), document_id, 1);
     show_document(&mut app, document_id);
 
     let session = &app.state.results.results.session;
@@ -293,10 +307,15 @@ fn a_moved_pane_keeps_its_place_in_the_saved_document() {
     show_document(&mut app, document_id);
     let before = ordered_panes(&app, document_id);
     let (first, second) = (before[0].id, before[1].id);
-    let menu = pane_menu(&app.state, document_id, second);
+    let menu = pane_menu(app.state.results_reads(), document_id, second);
     assert!(menu.earlier && !menu.later);
 
-    move_pane(&mut app.state, document_id, second, PaneMove::Earlier);
+    move_pane(
+        &mut app.state.results_parts(),
+        document_id,
+        second,
+        PaneMove::Earlier,
+    );
     reload(&mut app, document_id);
     show_document(&mut app, document_id);
 
@@ -305,10 +324,15 @@ fn a_moved_pane_keeps_its_place_in_the_saved_document() {
         .map(|pane| pane.id)
         .collect::<Vec<_>>();
     assert_eq!(after, vec![second, first]);
-    let menu = pane_menu(&app.state, document_id, second);
+    let menu = pane_menu(app.state.results_reads(), document_id, second);
     assert!(!menu.earlier && menu.later);
     let revision = retained(&app, document_id).revision();
-    move_pane(&mut app.state, document_id, second, PaneMove::Earlier);
+    move_pane(
+        &mut app.state.results_parts(),
+        document_id,
+        second,
+        PaneMove::Earlier,
+    );
     assert_eq!(
         retained(&app, document_id).revision(),
         revision,
@@ -320,8 +344,8 @@ fn a_moved_pane_keeps_its_place_in_the_saved_document() {
 fn the_last_pane_on_a_page_is_not_removable() {
     let (mut app, document_id) = document_fixture("single-pane");
     let pane = ordered_panes(&app, document_id)[0].id;
-    assert!(!pane_menu(&app.state, document_id, pane).removable);
-    remove_pane(&mut app.state, document_id, pane);
+    assert!(!pane_menu(app.state.results_reads(), document_id, pane).removable);
+    remove_pane(&mut app.state.results_parts(), document_id, pane);
     assert_eq!(ordered_panes(&app, document_id).len(), 1);
 }
 
@@ -356,10 +380,10 @@ fn run_comparison(
     };
     draft.alignment = rspice_results::waveform_comparison::ComparisonAlignmentDraft::AbsoluteXAxis;
     draft.absolute_tolerance = "100m".to_owned();
-    let choices = compare::choices(&app.state, &mut draft);
+    let choices = compare::choices(app.state.results_reads(), &mut draft);
     assert_eq!(choices.refusal, None);
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Compare(draft)) =
         app.state.results.result_document_dialog.clone()
     else {
@@ -411,7 +435,7 @@ fn a_comparison_over_a_document_is_kept_with_it() {
     show_document(&mut app, document_id);
 
     // Done closes the outcome.
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(app.state.results.result_document_dialog.is_none());
 }
 
@@ -500,7 +524,7 @@ fn measurement_preview(
         panic!("Add measurement opens its form");
     };
     draft.expression = expression.to_owned();
-    let preview = measurement::preview(&app.state, &draft);
+    let preview = measurement::preview(app.state.results_reads(), &draft);
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::Measurement(draft));
     preview
 }
@@ -522,7 +546,7 @@ fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     let preview = measurement_preview(&mut app, "rms(V(out))");
     assert_eq!(preview.refusal, None);
     assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(
         app.state.results.result_document_dialog.is_none(),
         "a kept measurement closes its form"
@@ -565,7 +589,7 @@ fn a_measurement_must_reduce_to_a_number() {
         "{:?}",
         preview.value
     );
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(retained(&app, document_id).measurements().is_empty());
 }
 
@@ -584,7 +608,7 @@ fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
         Some("Create a result document to keep measurements.")
     );
     assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(
         matches!(
             app.state.results.result_document_dialog,
@@ -640,11 +664,11 @@ fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
         panic!("Family slicing opens its form");
     };
     draft.filter = filter.to_owned();
-    let choices = family::choices(&app.state, &draft);
+    let choices = family::choices(app.state.results_reads(), &draft);
     assert_eq!(choices.refusal, None);
     assert_eq!(choices.points, Ok("3 of 5 points".to_owned()));
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(
         app.state.results.result_document_dialog.is_none(),
         "an applied slice closes its form"
@@ -673,7 +697,14 @@ fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
 
     apply_family_slice(&mut app, "time <= 0.5");
     assert_eq!(app.state.results.results.session.family_policies.len(), 1);
-    drive_frame(|ui| super::super::show(ui, &mut app));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                super::super::show(ui, state, run_controller, selected_specification)
+            },
+        )
+    });
     assert_eq!(drawn_rows(&app), Some(vec![0, 1, 2]));
 }
 
@@ -856,7 +887,7 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
     };
     // Status is not a column of this document's copy of the result.
     draft.filter = "status != not-run".to_owned();
-    let choices = family::choices(&app.state, &draft);
+    let choices = family::choices(app.state.results_reads(), &draft);
     assert_eq!(
         choices.refusal.as_deref(),
         Some("The document keeps no Status values for this pane to slice by.")
@@ -880,7 +911,7 @@ fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
     draft.significant_digits = digits;
     draft.phase_continuous = phase_continuous;
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
-    commit_open_dialog(&mut app.state);
+    commit_open_dialog(&mut app.state.results_parts());
     assert!(
         app.state.results.result_document_dialog.is_none(),
         "applied properties close their form"
@@ -929,7 +960,14 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
         "the reader's own phase setting is left alone"
     );
 
-    drive_frame(|ui| super::super::show(ui, &mut app));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                super::super::show(ui, state, run_controller, selected_specification)
+            },
+        )
+    });
     assert_eq!(shown_digits(&app), own_digits);
     assert!(
         !app.state

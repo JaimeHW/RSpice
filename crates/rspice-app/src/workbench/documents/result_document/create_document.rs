@@ -26,8 +26,7 @@ use crate::results::visualization_document::{
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
-use crate::workbench::state::{Workspace, WorkspaceDocumentId};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::state::Workspace;
 
 use super::{ResultsParts, ResultsReads};
 
@@ -78,37 +77,35 @@ pub(crate) fn open(state: &mut ResultsParts<'_>) {
 }
 
 /// Render the modal transaction editor.
-pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.results.create_result_document.open {
+pub(crate) fn show(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
+    if !state.create_result_document.open {
         return;
     }
-    let mut draft = app.state.results.create_result_document.clone();
-    let submit = create_document::show(ctx, &mut draft, &CreateDocumentSources(&app.state));
-    app.state.results.create_result_document = draft;
+    let mut draft = state.create_result_document.clone();
+    let submit = create_document::show(
+        ctx,
+        &mut draft,
+        &CreateDocumentSources(state.results_reads()),
+    );
+    *state.create_result_document = draft;
     if submit {
-        let name = app
-            .state
-            .results
-            .create_result_document
-            .name
-            .trim()
-            .to_owned();
-        match commit(app) {
+        let name = state.create_result_document.name.trim().to_owned();
+        match commit(state) {
             Ok(_) => {
-                app.state.record(
+                state.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     format!("Created result document {name}."),
                 );
             }
             Err(error) => {
-                app.state.results.create_result_document.validation_error = Some(error.to_string());
+                state.create_result_document.validation_error = Some(error.to_string());
             }
         }
     }
 }
 
-struct CreateDocumentSources<'a>(&'a AppState);
+struct CreateDocumentSources<'a>(ResultsReads<'a>);
 
 impl CreateDocumentHost for CreateDocumentSources<'_> {
     fn validation_message(&self, draft: &CreateResultDocumentDialogState) -> Option<String> {
@@ -129,13 +126,12 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
     ) {
         draft.family_id = family.id().to_owned();
         if !draft.name_touched {
-            draft.name = next_document_name(self.0.results_reads(), family);
+            draft.name = next_document_name(self.0, family);
         }
         if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
-            draft.viewer_id =
-                first_compatible_viewer(self.0.results_reads(), draft.dataset_id, family)
-                    .unwrap_or_default()
-                    .to_owned();
+            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
+                .unwrap_or_default()
+                .to_owned();
         }
         draft.validation_error = None;
     }
@@ -145,17 +141,16 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
         let family = ResultDocumentFamily::from_id(&draft.family_id)
             .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
         if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
-            draft.viewer_id =
-                first_compatible_viewer(self.0.results_reads(), draft.dataset_id, family)
-                    .unwrap_or_default()
-                    .to_owned();
+            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
+                .unwrap_or_default()
+                .to_owned();
         }
         draft.validation_error = None;
     }
 
     fn dataset_label(&self, dataset_id: Option<DatasetId>) -> String {
         dataset_id
-            .and_then(|id| retained_run(self.0.results_reads(), id))
+            .and_then(|id| retained_run(self.0, id))
             .map_or_else(|| "Select retained dataset".to_owned(), dataset_label)
     }
 
@@ -171,7 +166,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
 
     fn viewer_catalog(&self, dataset_id: Option<DatasetId>) -> impl Iterator<Item = ViewerChoice> {
         let capabilities = dataset_id
-            .and_then(|id| retained_run(self.0.results_reads(), id))
+            .and_then(|id| retained_run(self.0, id))
             .map(run_analysis_ids)
             .unwrap_or_default();
         VIEWER_DOCUMENTS.iter().map(move |viewer| {
@@ -183,7 +178,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
                 },
             );
             let renderer_available = dataset_id
-                .and_then(|id| retained_run(self.0.results_reads(), id))
+                .and_then(|id| retained_run(self.0, id))
                 .is_some_and(|run| {
                     run.analyses.iter().any(|analysis| {
                         super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
@@ -306,12 +301,12 @@ fn first_compatible_viewer(
 }
 
 fn viewer_is_creatable(
-    state: &AppState,
+    state: ResultsReads<'_>,
     dataset_id: Option<DatasetId>,
     family: ResultDocumentFamily,
     viewer_id: &str,
 ) -> bool {
-    let Some(run) = dataset_id.and_then(|id| retained_run(state.results_reads(), id)) else {
+    let Some(run) = dataset_id.and_then(|id| retained_run(state, id)) else {
         return false;
     };
     let Some(viewer) = viewer_document(viewer_id) else {
@@ -360,7 +355,7 @@ fn next_document_name(state: ResultsReads<'_>, family: ResultDocumentFamily) -> 
 }
 
 fn resolve_draft<'a>(
-    state: &'a AppState,
+    state: ResultsReads<'a>,
     draft: &'a CreateResultDocumentDialogState,
 ) -> Result<ResolvedDraft<'a>, CreateResultDocumentError> {
     let name = draft.name.as_str();
@@ -410,7 +405,7 @@ fn resolve_draft<'a>(
     let dataset_id = draft.dataset_id.ok_or_else(|| {
         CreateResultDocumentError::InvalidDraft("Select a retained result dataset.".to_owned())
     })?;
-    let run = retained_run(state.results_reads(), dataset_id).ok_or_else(|| {
+    let run = retained_run(state, dataset_id).ok_or_else(|| {
         CreateResultDocumentError::InvalidDraft(
             "The selected result dataset is no longer retained.".to_owned(),
         )
@@ -1026,38 +1021,32 @@ fn document_tracking(
 }
 
 /// Revalidate and commit the current draft into the project authority.
-pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResultDocumentError> {
-    let resolved = resolve_draft(&app.state, &app.state.results.create_result_document)?;
+pub(crate) fn commit(
+    state: &mut ResultsParts<'_>,
+) -> Result<ResultDocumentId, CreateResultDocumentError> {
+    let resolved = resolve_draft(state.results_reads(), state.create_result_document)?;
     let tracking = document_tracking(
-        &app.state.model.simulation.retained.runs,
+        &state.model.simulation.retained.runs,
         resolved.run,
         resolved.analysis,
     );
     let document = build_document(resolved, tracking)?;
-    let previous_documents_dirty = app
-        .state
-        .model
-        .workspace
-        .content
-        .visualization_documents_dirty;
-    let previous_workspace = app.state.workbench.workspace;
-    let document_id = app
-        .state
+    let previous_documents_dirty = state.model.workspace.content.visualization_documents_dirty;
+    let previous_workspace = state.workbench.workspace;
+    let document_id = state
         .model
         .workspace
         .content
         .insert_visualization_document(document)?;
 
-    let workspace_document = WorkspaceDocumentId::VisualizationDocument(document_id);
-    if app.state.workbench.current_route().surface_id() != crate::workbench::SurfaceId::Results {
-        app.state.workbench.activate(Workspace::Results);
+    if state.workbench.current_route().surface_id() != crate::workbench::SurfaceId::Results {
+        state.workbench.activate(Workspace::Results);
     }
-    if !crate::workbench::chrome::document_bar::activate_document_by_id(
-        &mut app.state,
-        &workspace_document,
+    if !crate::workbench::chrome::document_bar::results::show_visualization_document(
+        state,
+        &document_id,
     ) {
-        if let Some(index) = app
-            .state
+        if let Some(index) = state
             .model
             .workspace
             .content
@@ -1065,26 +1054,22 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
             .iter()
             .position(|document| document.id() == document_id)
         {
-            app.state
+            state
                 .model
                 .workspace
                 .content
                 .visualization_documents
                 .remove(index);
         }
-        app.state
-            .model
-            .workspace
-            .content
-            .visualization_documents_dirty = previous_documents_dirty;
-        app.state.workbench.activate(previous_workspace);
+        state.model.workspace.content.visualization_documents_dirty = previous_documents_dirty;
+        state.workbench.activate(previous_workspace);
         return Err(CreateResultDocumentError::InvalidDraft(
             "The created result document could not resolve its retained dataset binding."
                 .to_owned(),
         ));
     }
-    app.state.results.create_result_document.open = false;
-    app.state.results.create_result_document.validation_error = None;
+    state.create_result_document.open = false;
+    state.create_result_document.validation_error = None;
     Ok(document_id)
 }
 
@@ -1097,6 +1082,8 @@ mod tests {
         SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
         SoaViolationEvidence, SoaViolationSeverityEvidence,
     };
+    use crate::workbench::RSpiceApp;
+    use crate::workbench::state::WorkspaceDocumentId;
 
     fn retained_run_with(analysis_type: AnalysisType) -> SimulationRun {
         let mut run = SimulationRun::new(7);
@@ -1151,7 +1138,7 @@ mod tests {
         app.state.model.simulation.retained.runs = vec![run].into();
         let family = ResultDocumentFamily::WaveformWorksheet;
         assert!(viewer_is_creatable(
-            &app.state,
+            app.state.results_reads(),
             Some(dataset_id),
             family,
             "eye-viewer",
@@ -1167,7 +1154,8 @@ mod tests {
             validation_error: None,
         };
 
-        let resolved = resolve_draft(&app.state, &draft).expect("explicit viewer resolves");
+        let resolved =
+            resolve_draft(app.state.results_reads(), &draft).expect("explicit viewer resolves");
 
         assert_eq!(resolved.viewer.id, "eye-viewer");
     }
@@ -1179,7 +1167,7 @@ mod tests {
         let mut draft = app.state.results.create_result_document.clone();
         let family = ResultDocumentFamily::FrequencyAndStability;
 
-        CreateDocumentSources(&app.state).select_family(&mut draft, family);
+        CreateDocumentSources(app.state.results_reads()).select_family(&mut draft, family);
 
         assert_eq!(draft.name, format!("{} · 01", family.label()));
         assert!(!draft.name_touched);
@@ -1193,7 +1181,7 @@ mod tests {
         draft.name = "Loop gain review".to_owned();
         draft.name_touched = true;
 
-        CreateDocumentSources(&app.state)
+        CreateDocumentSources(app.state.results_reads())
             .select_family(&mut draft, ResultDocumentFamily::FrequencyAndStability);
 
         assert_eq!(draft.name, "Loop gain review");
@@ -1221,7 +1209,7 @@ mod tests {
             validation_error: None,
         };
 
-        let document_id = commit(&mut app).expect("document commits");
+        let document_id = commit(&mut app.state.results_parts()).expect("document commits");
 
         assert!(
             app.state
@@ -1291,7 +1279,7 @@ mod tests {
             validation_error: None,
         };
 
-        let document_id = commit(&mut app).expect("typed OP table commits");
+        let document_id = commit(&mut app.state.results_parts()).expect("typed OP table commits");
         let document = app
             .state
             .model
@@ -1430,7 +1418,8 @@ mod tests {
                 validation_error: None,
             };
 
-            let document_id = commit(&mut app).expect("typed release-target viewer commits");
+            let document_id = commit(&mut app.state.results_parts())
+                .expect("typed release-target viewer commits");
             let document = app
                 .state
                 .model
@@ -1462,7 +1451,7 @@ mod tests {
             validation_error: None,
         };
         app.state.results.create_result_document = draft.clone();
-        commit(&mut app).expect("first document commits");
+        commit(&mut app.state.results_parts()).expect("first document commits");
         app.state.results.create_result_document = draft;
         let before = app
             .state
@@ -1472,7 +1461,7 @@ mod tests {
             .visualization_documents
             .len();
 
-        assert!(commit(&mut app).is_err());
+        assert!(commit(&mut app.state.results_parts()).is_err());
         assert_eq!(
             app.state
                 .model

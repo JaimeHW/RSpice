@@ -6,6 +6,7 @@ use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::host::DocumentHost;
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 
@@ -413,6 +414,20 @@ pub fn active_document_id(state: &impl DocumentSession) -> Option<WorkspaceDocum
     authoritative_active_document(state, &available)
 }
 
+/// The active document of the workspace `workbench` shows, as
+/// [`active_document_id`] resolves it, for a caller that holds the session,
+/// the model, and that workspace's `documents` and `page_document` rather
+/// than the whole host.
+pub fn active_document_among(
+    workbench: &WorkbenchSession,
+    model: &Model,
+    documents: Vec<WorkspaceDocument>,
+    page_document: Option<WorkspaceDocumentId>,
+) -> Option<WorkspaceDocumentId> {
+    let available = owned_documents(workbench, documents);
+    resolve_active_document(workbench, model, page_document, &available)
+}
+
 pub fn activate_document_by_id(
     state: &mut impl DocumentSession,
     document: &WorkspaceDocumentId,
@@ -495,21 +510,23 @@ pub fn available_documents_for_workspace(
 }
 
 fn owned_available_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
-    let current = state.workbench().window_session.current();
-    let order = state
-        .workbench()
+    owned_documents(state.workbench(), available_documents(state))
+}
+
+/// The `documents` the current window holds, in its order.
+fn owned_documents(
+    workbench: &WorkbenchSession,
+    documents: Vec<WorkspaceDocument>,
+) -> Vec<WorkspaceDocument> {
+    let current = workbench.window_session.current();
+    let order = workbench
         .window_session
         .state(current)
         .map(|window| window.documents.clone())
         .unwrap_or_default();
-    let mut documents = available_documents(state)
+    let mut documents = documents
         .into_iter()
-        .filter(|document| {
-            state
-                .workbench()
-                .window_session
-                .belongs_to_current(&document.id)
-        })
+        .filter(|document| workbench.window_session.belongs_to_current(&document.id))
         .collect::<Vec<_>>();
     documents.sort_by_key(|document| {
         order
@@ -530,45 +547,58 @@ fn authoritative_active_document(
     state: &impl DocumentSession,
     available: &[WorkspaceDocument],
 ) -> Option<WorkspaceDocumentId> {
-    if let Some(document) = state.page_document(state.workbench().workspace)
+    resolve_active_document(
+        state.workbench(),
+        state.model(),
+        state.page_document(state.workbench().workspace),
+        available,
+    )
+}
+
+/// Which of the `available` documents of the workspace `workbench` shows is
+/// active: the page's own document, then the window's choice, then the
+/// workspace's own candidate, then the window's first.
+fn resolve_active_document(
+    workbench: &WorkbenchSession,
+    model: &Model,
+    page_document: Option<WorkspaceDocumentId>,
+    available: &[WorkspaceDocument],
+) -> Option<WorkspaceDocumentId> {
+    if let Some(document) = page_document
         && available.iter().any(|candidate| candidate.id == document)
     {
         return Some(document);
     }
-    let current_window = state.workbench().window_session.current();
-    if let Some(document) = state
-        .workbench()
+    let current_window = workbench.window_session.current();
+    if let Some(document) = workbench
         .window_session
-        .active_document(current_window, state.workbench().workspace)
+        .active_document(current_window, workbench.workspace)
         .filter(|document| {
             available.iter().any(|candidate| candidate.id == **document)
-                && state.workbench().window_session.owner(document) == current_window
+                && workbench.window_session.owner(document) == current_window
         })
     {
         return Some(document.clone());
     }
-    let candidate = match state.workbench().workspace {
+    let candidate = match workbench.workspace {
         Workspace::Design => Some(WorkspaceDocumentId::CellView(
-            state.model().workspace.content.active_view.clone(),
+            model.workspace.content.active_view.clone(),
         )),
-        Workspace::Results => state
-            .model()
+        Workspace::Results => model
             .simulation
             .active_run()
             .map(|run| WorkspaceDocumentId::ResultDataset(run.dataset_id)),
-        workspace => state.workbench().documents.active(workspace).cloned(),
+        workspace => workbench.documents.active(workspace).cloned(),
     };
     candidate
         .filter(|candidate| {
             available.iter().any(|document| document.id == *candidate)
-                && state.workbench().window_session.owner(candidate) == current_window
+                && workbench.window_session.owner(candidate) == current_window
         })
         .or_else(|| {
             available
                 .iter()
-                .find(|document| {
-                    state.workbench().window_session.owner(&document.id) == current_window
-                })
+                .find(|document| workbench.window_session.owner(&document.id) == current_window)
                 .map(|document| document.id.clone())
         })
 }

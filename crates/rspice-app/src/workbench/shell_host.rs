@@ -78,8 +78,7 @@ impl Host for RSpiceApp {
             Point::Surface(workspace) => {
                 use crate::workbench::surfaces::{
                     automation, design, library_cellview_manager, model_correlation, model_editor,
-                    models, netlist, pdk_technology_admin, project, results, simulate, stimulus,
-                    verify,
+                    models, netlist, pdk_technology_admin, project, simulate, stimulus, verify,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -117,7 +116,10 @@ impl Host for RSpiceApp {
                     Workspace::Design => design::show(ui, app),
                     Workspace::Simulate => simulate::show(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-                    Workspace::Results => results::show(ui, app),
+                    Workspace::Results => crate::workbench::results::show_surface(
+                        &mut features::cx::<ResultsFeature>(app),
+                        ui,
+                    ),
                     Workspace::Verify => verify::show(ui, app),
                     Workspace::Models => models::show(ui, app),
                     Workspace::Netlist => {
@@ -138,7 +140,7 @@ impl Host for RSpiceApp {
                 app.after_contribution();
             }
             Point::SplitResults => {
-                crate::workbench::documents::result_document::show_compact_split(ui, app);
+                crate::workbench::results::show_split(&mut features::cx::<ResultsFeature>(app), ui);
                 app.after_contribution();
             }
             // A workspace's navigator, below the heading and the filter field.

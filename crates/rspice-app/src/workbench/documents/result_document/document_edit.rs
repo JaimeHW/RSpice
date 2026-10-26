@@ -24,7 +24,7 @@ use crate::results::visualization_document::{
 use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-use super::{AppState, RSpiceApp, ResultViewer, ResultsParts, ResultsReads};
+use super::{AppState, ResultViewer, ResultsParts, ResultsReads};
 
 /// The project result document the Results workspace is showing, if any.
 pub(super) fn active_document_id(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
@@ -107,46 +107,46 @@ fn report(state: &mut ResultsParts<'_>, result: Result<(), String>) {
 }
 
 /// Draw the open form, if any, and commit what it asks for.
-pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(dialog) = app.state.results.result_document_dialog.clone() else {
+pub(crate) fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
+    let Some(dialog) = state.result_document_dialog.clone() else {
         return;
     };
     let (dialog, choice) = match dialog {
         ResultDocumentDialog::AddPane(mut draft) => {
-            let choices = add_pane_choices(&app.state, &mut draft);
+            let choices = add_pane_choices(state.results_reads(), &mut draft);
             let choice = add_pane::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::AddPane(draft), choice)
         }
         ResultDocumentDialog::Compare(mut draft) => {
-            let choices = compare::choices(&app.state, &mut draft);
+            let choices = compare::choices(state.results_reads(), &mut draft);
             let choice =
                 rspice_results_ui::document_dialogs::compare::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::Compare(draft), choice)
         }
         ResultDocumentDialog::Measurement(mut draft) => {
-            let preview = measurement::preview(&app.state, &draft);
+            let preview = measurement::preview(state.results_reads(), &draft);
             let choice =
                 rspice_results_ui::document_dialogs::measurement::show(ctx, &mut draft, &preview);
             (ResultDocumentDialog::Measurement(draft), choice)
         }
         ResultDocumentDialog::Family(mut draft) => {
-            let choices = family::choices(&app.state, &draft);
+            let choices = family::choices(state.results_reads(), &draft);
             let choice =
                 rspice_results_ui::document_dialogs::family::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::Family(draft), choice)
         }
         ResultDocumentDialog::Properties(mut draft) => {
-            let scope = properties::scope(&app.state);
+            let scope = properties::scope(state.results_reads());
             let choice =
                 rspice_results_ui::document_dialogs::properties::show(ctx, &mut draft, &scope);
             (ResultDocumentDialog::Properties(draft), choice)
         }
     };
-    app.state.results.result_document_dialog = Some(dialog);
+    *state.result_document_dialog = Some(dialog);
     match choice {
-        DialogChoice::Primary => commit_open_dialog(&mut app.state),
+        DialogChoice::Primary => commit_open_dialog(state),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.results.result_document_dialog = None;
+            *state.result_document_dialog = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
@@ -154,8 +154,8 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
 /// Commit the open form's draft. The form closes when its edit lands, or
 /// moves on to what it shows next.
-fn commit_open_dialog(state: &mut AppState) {
-    let result = match state.results.result_document_dialog.clone() {
+fn commit_open_dialog(state: &mut ResultsParts<'_>) {
+    let result = match state.result_document_dialog.clone() {
         Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
         Some(ResultDocumentDialog::Measurement(draft)) => measurement::commit(state, &draft),
@@ -164,7 +164,7 @@ fn commit_open_dialog(state: &mut AppState) {
         None => return,
     };
     match result {
-        Ok(next) => state.results.result_document_dialog = next,
+        Ok(next) => *state.result_document_dialog = next,
         Err(error) => state.prompt(error),
     }
 }
@@ -222,7 +222,7 @@ fn pane_viewers(analysis: &AnalysisResult) -> Vec<(ResultViewer, String)> {
 
 /// Resolve the form's choices against the retained datasets, moving any
 /// selection that no longer exists onto the first one that does.
-fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoices {
+fn add_pane_choices(state: ResultsReads<'_>, draft: &mut AddPaneDraft) -> AddPaneChoices {
     let runs = &state.model.simulation.retained.runs;
     let datasets = runs
         .iter()
@@ -253,9 +253,8 @@ fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoice
     {
         draft.viewer = viewers.first().map(|(viewer, _)| *viewer);
     }
-    let position = active_document_id(state.results_reads()).and_then(|document_id| {
-        let (_, pane_id) =
-            super::persistent_document::reading_position(state.results_reads(), document_id)?;
+    let position = active_document_id(state).and_then(|document_id| {
+        let (_, pane_id) = super::persistent_document::reading_position(state, document_id)?;
         let document = state
             .model
             .workspace
@@ -285,7 +284,7 @@ fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoice
 /// Bind a new pane to the draft's dataset and analysis, after the selected
 /// pane. A single-pane page becomes a page of rows, since it can only ever
 /// hold one.
-fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
+fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), String> {
     let document_id = active_document_id(state.results_reads())
         .ok_or_else(|| "No result document is open.".to_owned())?;
     let (page_id, anchor) =
@@ -360,24 +359,23 @@ fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
             anchor_pane_id: anchor,
         },
     }));
-    let receipt = transact(&mut state.results_parts(), document_id, edits)?;
+    let receipt = transact(state, document_id, edits)?;
     if let Some(pane_id) = receipt.created.iter().find_map(|entity| match entity {
         EntityRef::Pane(id) => Some(*id),
         _ => None,
     }) {
         state
             .results
-            .results
             .session
             .select_persistent_document_pane(document_id, pane_id);
-        state.results.results.session.viewer = viewer;
+        state.results.session.viewer = viewer;
     }
     Ok(())
 }
 
 /// The context-menu edits one pane's header offers.
 pub(super) fn pane_menu(
-    state: &AppState,
+    state: ResultsReads<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) -> PaneMenu {
@@ -402,12 +400,12 @@ pub(super) fn pane_menu(
 
 /// Link or unlink one pane's X axis with the rest of its page.
 pub(super) fn toggle_pane_x_link(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) {
     let result = links::toggle_x_link(state, document_id, pane_id);
-    report(&mut state.results_parts(), result);
+    report(state, result);
 }
 
 /// Link or unlink A/B cursors. Over a project result document the document
@@ -459,23 +457,23 @@ pub(super) enum PaneMove {
 /// Change places with the pane's neighbour in its page's order. The page
 /// keeps its layout; the panes fill its slots in the new order.
 pub(super) fn move_pane(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
     direction: PaneMove,
 ) {
-    let result = move_pane_edit(state, document_id, pane_id, direction)
-        .and_then(|edit| transact(&mut state.results_parts(), document_id, vec![edit]).map(|_| ()));
-    report(&mut state.results_parts(), result);
+    let result = move_pane_edit(state.results_reads(), document_id, pane_id, direction)
+        .and_then(|edit| transact(state, document_id, vec![edit]).map(|_| ()));
+    report(state, result);
 }
 
 fn move_pane_edit(
-    state: &AppState,
+    state: ResultsReads<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
     direction: PaneMove,
 ) -> Result<DocumentEdit, String> {
-    let document = project_document(state.results_reads(), document_id)?;
+    let document = project_document(state, document_id)?;
     let (position, mut order) = page_order(document, pane_id)
         .ok_or_else(|| "The pane is no longer in this document.".to_owned())?;
     let neighbour = match direction {
@@ -502,18 +500,22 @@ fn move_pane_edit(
 /// Take one pane out of the document, with its axes, traces, cursors,
 /// markers, measurements and notes. Link groups lose the pane's members in
 /// the same transaction, and a group left with one member goes too.
-pub(super) fn remove_pane(state: &mut AppState, document_id: ResultDocumentId, pane_id: PaneId) {
-    let result = remove_pane_edits(state, document_id, pane_id)
-        .and_then(|edits| transact(&mut state.results_parts(), document_id, edits).map(|_| ()));
-    report(&mut state.results_parts(), result);
+pub(super) fn remove_pane(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+    pane_id: PaneId,
+) {
+    let result = remove_pane_edits(state.results_reads(), document_id, pane_id)
+        .and_then(|edits| transact(state, document_id, edits).map(|_| ()));
+    report(state, result);
 }
 
 fn remove_pane_edits(
-    state: &AppState,
+    state: ResultsReads<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) -> Result<Vec<DocumentEdit>, String> {
-    let document = project_document(state.results_reads(), document_id)?;
+    let document = project_document(state, document_id)?;
     if !document.panes().iter().any(|pane| pane.id == pane_id) {
         return Err("The pane is no longer in this document.".to_owned());
     }

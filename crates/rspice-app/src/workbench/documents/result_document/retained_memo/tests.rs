@@ -176,7 +176,7 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
             layout_id: "single-pane".to_owned(),
             validation_error: None,
         };
-    let document = create_document::commit(&mut app).unwrap();
+    let document = create_document::commit(&mut app.state.results_parts()).unwrap();
     let bound = view_context::resolve_displayed_result_view(app.state.results_reads()).unwrap();
     assert!(
         matches!(bound.owner, view_context::ResultViewOwner::VisualizationPane { document_id, .. } if document_id == document)

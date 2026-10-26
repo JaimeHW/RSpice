@@ -186,12 +186,14 @@ use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
+use crate::workbench::AppState;
+#[cfg(test)]
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{
     Model, PlatformState, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
 };
 use crate::workbench::framework::ports::{CapturedViewport, ResultsPort};
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
-use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
@@ -1498,12 +1500,23 @@ pub use rspice_results_ui::waveform::waveform_color;
 // ---------------------------------------------------------------------------
 
 /// Render the Results workspace center view (docbar + active viewer).
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    results_keymap(ui, app);
-    show_with_chrome(ui, app, ResultChrome::Full);
-    waves::marker_dialog::show(ui.ctx(), &mut app.state.results_parts());
-    create_document::show(ui.ctx(), app);
-    document_edit::show(ui.ctx(), app);
+pub fn show(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
+) {
+    results_keymap(ui, state);
+    show_with_chrome(
+        ui,
+        state,
+        run_controller,
+        selected_specification,
+        ResultChrome::Full,
+    );
+    waves::marker_dialog::show(ui.ctx(), state);
+    create_document::show(ui.ctx(), state);
+    document_edit::show(ui.ctx(), state);
 }
 
 /// The workspace's own single-key gestures, as the mockup's results keymap
@@ -1518,7 +1531,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// Everything is a bare key, so the map stands down whenever a widget wants
 /// the keyboard or a modifier is held: nothing here may fire while the reader
 /// is typing into a filter, an expression, or a marker label.
-fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
+fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
     let ctx = ui.ctx();
     // A focused widget owns the keyboard: a filter, an expression, or a
     // marker label must never have a letter stolen from it by this map.
@@ -1526,10 +1539,10 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         return;
     }
     // Nor may the map fire underneath a dialog.
-    if app.state.results.results.session.marker_edit.is_some() {
+    if state.results.session.marker_edit.is_some() {
         return;
     }
-    if !app.state.model.simulation.retained.has_results() {
+    if !state.model.simulation.retained.has_results() {
         return;
     }
     let plain = ctx
@@ -1559,34 +1572,33 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         ),
     ] {
         let permitted = match gesture {
-            ViewGesture::Fit => fit_gesture_available(app.state.results_reads()),
+            ViewGesture::Fit => fit_gesture_available(state.results_reads()),
             ViewGesture::ZoomIn | ViewGesture::ZoomOut => {
-                zoom_gesture_available(app.state.results_reads())
+                zoom_gesture_available(state.results_reads())
             }
         };
-        if permitted && consume_command_key(ctx, app.state.results_reads(), command) {
-            request_view_gesture(&mut app.state.results.results, gesture);
+        if permitted && consume_command_key(ctx, state.results_reads(), command) {
+            request_view_gesture(state.results, gesture);
         }
     }
-    if viewer_uses_wave_stack(app.state.results.results.session.viewer)
+    if viewer_uses_wave_stack(state.results.session.viewer)
         && consume_command_key(
             ctx,
-            app.state.results_reads(),
+            state.results_reads(),
             crate::workbench::commands::vocabulary::Command::CycleGrid,
         )
     {
-        app.state.results.results.session.show_minor_grid =
-            !app.state.results.results.session.show_minor_grid;
+        state.results.session.show_minor_grid = !state.results.session.show_minor_grid;
     }
 
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
-        app.state.results.results.session.toggle_cursor_tool();
+        state.results.session.toggle_cursor_tool();
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
-        hide_selected_trace(&mut app.state.results_parts());
+        hide_selected_trace(state);
     }
     // Arrow nudging is a cursor gesture, so it only exists while cursors do.
-    if app.state.results.results.session.cursor_readout_active() {
+    if state.results.session.cursor_readout_active() {
         let shift = ctx.input(|input| input.modifiers.shift);
         let modifiers = if shift {
             egui::Modifiers::SHIFT
@@ -1602,7 +1614,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         };
         if steps != 0.0 {
             let t = Tokens::get(ctx);
-            waves::nudge_cursor(&mut app.state.results_parts(), &t, shift, steps);
+            waves::nudge_cursor(state, &t, shift, steps);
         }
     }
 }
@@ -1677,6 +1689,21 @@ fn hide_selected_trace(state: &mut ResultsParts<'_>) {
     }
 }
 
+/// Lend `app`'s results parts, run controller and selected specification to
+/// `draw`, as the shell lends them to the results surface.
+#[cfg(test)]
+pub(crate) fn with_surface_parts<R>(
+    app: &mut RSpiceApp,
+    draw: impl FnOnce(&mut ResultsParts<'_>, &mut SimulationController, Option<&str>) -> R,
+) -> R {
+    let selected_specification = app.state.simulate.selected_specification.clone();
+    draw(
+        &mut app.state.results_parts(),
+        &mut app.simulation_controller,
+        selected_specification.as_deref(),
+    )
+}
+
 /// Render one project-owned result document selected by its stable identity.
 ///
 /// Unlike the dataset quick-view, this projection is driven by the exact
@@ -1684,16 +1711,24 @@ fn hide_selected_trace(state: &mut ResultsParts<'_>) {
 /// project document.
 pub(crate) fn show_persistent_document(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
     document_id: crate::product::ResultDocumentId,
 ) {
     // A project-owned document is the same workspace with a retained page
     // layout, so it answers the same keys and owns the same marker dialog.
-    results_keymap(ui, app);
-    persistent_document::show(ui, app, document_id);
-    waves::marker_dialog::show(ui.ctx(), &mut app.state.results_parts());
-    create_document::show(ui.ctx(), app);
-    document_edit::show(ui.ctx(), app);
+    results_keymap(ui, state);
+    persistent_document::show(
+        ui,
+        state,
+        run_controller,
+        selected_specification,
+        document_id,
+    );
+    waves::marker_dialog::show(ui.ctx(), state);
+    create_document::show(ui.ctx(), state);
+    document_edit::show(ui.ctx(), state);
 }
 
 /// Resolve and select the primary binding of a project-owned result document.
@@ -1711,8 +1746,19 @@ pub(crate) fn activate_persistent_document(
 /// Render the compact upgraded-mockup projection used beside another
 /// engineering document. This is the same canonical retained result state,
 /// not a second result document.
-pub fn show_compact_split(ui: &mut Ui, app: &mut RSpiceApp) {
-    show_with_chrome(ui, app, ResultChrome::CompactSplit);
+pub fn show_compact_split(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
+) {
+    show_with_chrome(
+        ui,
+        state,
+        run_controller,
+        selected_specification,
+        ResultChrome::CompactSplit,
+    );
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1721,21 +1767,22 @@ enum ResultChrome {
     CompactSplit,
 }
 
-fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
+fn show_with_chrome(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
+    chrome: ResultChrome,
+) {
     // Every quick-style entry into the workspace leaves the persistent
     // projection here, not just the full one: the compact split renders the
     // same strips, and a pane context left over from a project-owned document
     // would scope its plot views, cursors and marker edits onto them.
-    app.state
-        .results
-        .results
-        .session
-        .leave_persistent_document();
-    let family = document_edit::family::quick_view_selection(app.state.results_reads());
-    app.state.results.results.set_sample_selection(family);
-    prepare_viewer_state(&mut app.state.results_parts());
-    let plan_before_docbar = app
-        .state
+    state.results.session.leave_persistent_document();
+    let family = document_edit::family::quick_view_selection(state.results_reads());
+    state.results.set_sample_selection(family);
+    prepare_viewer_state(state);
+    let plan_before_docbar = state
         .model
         .sim_setup
         .analysis_plan
@@ -1743,48 +1790,43 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         .map(|plan| (plan.id(), plan.revision()));
     match chrome {
         ResultChrome::Full => {
-            show_docbar(ui, app);
-            if result_stage_bar_visible(app.state.results_reads()) {
-                show_sheet_bar(ui, &mut app.state.results_parts());
+            show_docbar(ui, state);
+            if result_stage_bar_visible(state.results_reads()) {
+                show_sheet_bar(ui, state);
             }
         }
-        ResultChrome::CompactSplit => show_compact_docbar(ui, &mut app.state.results_parts()),
+        ResultChrome::CompactSplit => show_compact_docbar(ui, state),
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
-        app.state
-            .results
-            .results
-            .session
-            .plot_tool
-            .interaction_mode(),
+        state.results.session.plot_tool.interaction_mode(),
     );
-    let plan_after_docbar = app
-        .state
+    let plan_after_docbar = state
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(|plan| (plan.id(), plan.revision()));
     if plan_after_docbar != plan_before_docbar {
-        app.invalidate_simulation_preflight();
+        state.preflight.invalidate();
+        run_controller.clear_prepared_run();
     }
 
     // The stage bottom holds one bounded cursor/marker dock. Its header and
     // owning scroll body are content-fit, so a stage with nothing to report
     // gives the whole area back to the document.
     let strip_height = match chrome {
-        ResultChrome::Full => readout_strip_height(&mut app.state.results_parts()),
+        ResultChrome::Full => readout_strip_height(state),
         ResultChrome::CompactSplit => 0.0,
     };
     let available = ui.available_rect_before_wrap();
     let well_height = (available.height() - strip_height).max(0.0);
     ui.allocate_ui(egui::vec2(available.width(), well_height), |ui| {
         ui.set_min_height(well_height);
-        show_viewer_well(ui, app, chrome);
+        show_viewer_well(ui, state, run_controller, selected_specification, chrome);
     });
     if strip_height > 0.0 {
-        waves::readout_strip(ui, &mut app.state.results_parts(), strip_height);
+        waves::readout_strip(ui, state, strip_height);
     }
 }
 
@@ -1874,18 +1916,20 @@ pub(crate) fn viewer_unavailability_reason(
 /// and have to survive it, or capturing the pane would delete them.
 pub(super) fn show_persistent_pane_viewer(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
     viewer: ResultViewer,
     family: Option<SourceSampleSelection>,
 ) {
-    let session = &app.state.results.results.session;
+    let session = &state.results.session;
     let cursors = (
         session.cursors,
         session.cursor_strip,
         session.cursor_a_anchor.clone(),
     );
     let hidden = session.hidden_family_traces.clone();
-    let results = &mut app.state.results.results;
+    let results = &mut state.results;
     results.set_sample_selection(family);
     (
         results.session.cursors,
@@ -1893,9 +1937,15 @@ pub(super) fn show_persistent_pane_viewer(
         results.session.cursor_a_anchor,
     ) = cursors;
     results.session.hidden_family_traces = hidden;
-    prepare_viewer_state(&mut app.state.results_parts());
-    app.state.results.results.session.viewer = viewer;
-    show_viewer_well(ui, app, ResultChrome::Full);
+    prepare_viewer_state(state);
+    state.results.session.viewer = viewer;
+    show_viewer_well(
+        ui,
+        state,
+        run_controller,
+        selected_specification,
+        ResultChrome::Full,
+    );
 }
 
 pub(crate) fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
@@ -2035,13 +2085,19 @@ pub(crate) fn set_active_axis_range(
     true
 }
 
-fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
-    apply_pending_view_gesture(ui, &mut app.state.results_parts());
+fn show_viewer_well(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    selected_specification: Option<&str>,
+    chrome: ResultChrome,
+) {
+    apply_pending_view_gesture(ui, state);
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top.
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
-    let viewer = app.state.results.results.session.viewer;
+    let viewer = state.results.session.viewer;
     let panel = ui.interact(
         well,
         ui.id().with(("result-viewer-panel", viewer)),
@@ -2054,19 +2110,13 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         node.set_label(panel_label);
     });
 
-    let operational = operational_state::classify_viewer(&mut app.state.results_parts(), viewer);
-    if operational_state::show_result_operational_status(
-        ui,
-        &mut app.state.results_parts(),
-        &operational,
-    ) {
+    let operational = operational_state::classify_viewer(state, viewer);
+    if operational_state::show_result_operational_status(ui, state, &operational) {
         return;
     }
 
-    if viewer_requires_retained_results(viewer)
-        && !app.state.model.simulation.retained.has_results()
-    {
-        let shortcut = app.state.model.preferences.shortcuts().resolved_label(
+    if viewer_requires_retained_results(viewer) && !state.model.simulation.retained.has_results() {
+        let shortcut = state.model.preferences.shortcuts().resolved_label(
             &crate::workbench::commands::vocabulary::CommandRegistry,
             crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
             runtime_command_platform(ui.ctx()),
@@ -2083,67 +2133,42 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 
     match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => match chrome {
-            ResultChrome::Full => waves::show(ui, &mut app.state.results_parts()),
-            ResultChrome::CompactSplit => waves::show_compact(ui, &mut app.state.results_parts()),
+            ResultChrome::Full => waves::show(ui, state),
+            ResultChrome::CompactSplit => waves::show_compact(ui, state),
         },
-        ResultViewer::Bode => waves::show_bode(ui, &mut app.state.results_parts()),
+        ResultViewer::Bode => waves::show_bode(ui, state),
         ResultViewer::Fft => {
-            if ensure_derived(
-                ui,
-                &mut app.state.results_parts(),
-                &mut app.simulation_controller,
-                ActiveViewer::Fft,
-            ) {
-                fft::show(ui, &mut app.state.results_parts());
+            if ensure_derived(ui, state, run_controller, ActiveViewer::Fft) {
+                fft::show(ui, state);
             }
         }
-        ResultViewer::HarmonicBalance => harmonic_balance::show(ui, &mut app.state.results_parts()),
-        ResultViewer::PhaseNoise => phase_noise::show(ui, &mut app.state.results_parts()),
+        ResultViewer::HarmonicBalance => harmonic_balance::show(ui, state),
+        ResultViewer::PhaseNoise => phase_noise::show(ui, state),
         ResultViewer::Eye => {
-            if ensure_derived(
-                ui,
-                &mut app.state.results_parts(),
-                &mut app.simulation_controller,
-                ActiveViewer::EyeDiagram,
-            ) {
-                eye::show(ui, &mut app.state.results_parts());
+            if ensure_derived(ui, state, run_controller, ActiveViewer::EyeDiagram) {
+                eye::show(ui, state);
             }
         }
-        ResultViewer::Hist => hist::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Op => op_inspector::show(ui, &mut app.state.results_parts()),
-        ResultViewer::NoiseContrib => waves::show_noise(ui, &mut app.state.results_parts()),
-        ResultViewer::Contribution => sensitivity::show(ui, &mut app.state.results_parts()),
-        ResultViewer::TransferFunction => {
-            transfer_function::show(ui, &mut app.state.results_parts())
-        }
+        ResultViewer::Hist => hist::show(ui, state),
+        ResultViewer::Op => op_inspector::show(ui, state),
+        ResultViewer::NoiseContrib => waves::show_noise(ui, state),
+        ResultViewer::Contribution => sensitivity::show(ui, state),
+        ResultViewer::TransferFunction => transfer_function::show(ui, state),
         ResultViewer::Specs => {
-            let selected_specification = app.state.simulate.selected_specification.clone();
-            specs::show(
-                ui,
-                &mut app.state.results_parts(),
-                selected_specification.as_deref(),
-            );
+            specs::show(ui, state, selected_specification);
         }
-        ResultViewer::Table => table::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Nyquist => nyquist::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Smith => smith::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Polar => {
-            polar::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
-        }
-        ResultViewer::NetworkMatrix => {
-            network_matrix::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
-        }
-        ResultViewer::PoleZero => pz::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Scatter => {
-            scatter::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
-        }
-        ResultViewer::BoxViolin => {
-            box_violin::show(ui, &mut SheetContext::of(&mut app.state.results_parts()))
-        }
-        ResultViewer::Events => events::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Soa => soa::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Optimization => optimization::show(ui, &mut app.state.results_parts()),
-        ResultViewer::Manifest => manifest::show(ui, &mut app.state.results_parts()),
+        ResultViewer::Table => table::show(ui, state),
+        ResultViewer::Nyquist => nyquist::show(ui, state),
+        ResultViewer::Smith => smith::show(ui, state),
+        ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(state)),
+        ResultViewer::NetworkMatrix => network_matrix::show(ui, &mut SheetContext::of(state)),
+        ResultViewer::PoleZero => pz::show(ui, state),
+        ResultViewer::Scatter => scatter::show(ui, &mut SheetContext::of(state)),
+        ResultViewer::BoxViolin => box_violin::show(ui, &mut SheetContext::of(state)),
+        ResultViewer::Events => events::show(ui, state),
+        ResultViewer::Soa => soa::show(ui, state),
+        ResultViewer::Optimization => optimization::show(ui, state),
+        ResultViewer::Manifest => manifest::show(ui, state),
     }
 }
 
@@ -2170,22 +2195,22 @@ fn show_compact_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
 }
 
-fn show_docbar(ui: &mut Ui, app: &mut RSpiceApp) {
-    show_docbar_for_family(ui, app, None, chrome::bars::DocumentBarSource::QuickView);
+fn show_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    show_docbar_for_family(ui, state, None, chrome::bars::DocumentBarSource::QuickView);
 }
 
 /// The docbar over a project result document. Returns the index of the page
 /// the reader picked, when they picked one.
 pub(super) fn show_persistent_docbar(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     family_label: &str,
     pages: &[String],
     page: usize,
 ) -> Option<usize> {
     show_docbar_for_family(
         ui,
-        app,
+        state,
         Some(family_label),
         chrome::bars::DocumentBarSource::Document { pages, page },
     )
@@ -2193,29 +2218,24 @@ pub(super) fn show_persistent_docbar(
 
 fn show_docbar_for_family(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     family_label: Option<&str>,
     source: chrome::bars::DocumentBarSource<'_>,
 ) -> Option<usize> {
     let available = ResultViewer::all().filter(|&viewer| {
         family_label.is_none_or(|family| family_allows_viewer(family, viewer))
-            && viewer_availability(app.state.results_reads(), viewer).available
+            && viewer_availability(state.results_reads(), viewer).available
     });
-    let actions = chrome::bars::document_bar(
-        ui,
-        app.state.results.results.session.viewer,
-        available,
-        source,
-    );
+    let actions = chrome::bars::document_bar(ui, state.results.session.viewer, available, source);
     if let Some(viewer) = actions.viewer {
-        app.state.results.results.session.viewer = viewer;
+        state.results.session.viewer = viewer;
     }
     if actions.create_document {
-        create_document::open(&mut app.state.results_parts());
+        create_document::open(state);
     } else if actions.add_pane {
-        document_edit::open_add_pane(&mut app.state.results_parts());
+        document_edit::open_add_pane(state);
     } else if actions.open_properties {
-        document_edit::open_properties(&mut app.state.results_parts());
+        document_edit::open_properties(state);
     }
     actions.page
 }

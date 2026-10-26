@@ -73,7 +73,7 @@ fn latest_tracking_fixture() -> LatestFixture {
         .model
         .netlist_artifacts
         .current_generation_input_digest = Some(input_digest);
-    let source_digest = current_result_source_digest(&app.state)
+    let source_digest = current_result_source_digest(app.state.results_reads())
         .expect("the fixture states a current authored source");
 
     let plan_id = SimulationPlanId::new();
@@ -101,7 +101,8 @@ fn latest_tracking_fixture() -> LatestFixture {
         layout_id: "single-pane".to_owned(),
         validation_error: None,
     };
-    let document_id = create_document::commit(&mut app).expect("persistent document commits");
+    let document_id = create_document::commit(&mut app.state.results_parts())
+        .expect("persistent document commits");
     let revision = app
         .state
         .model
@@ -162,7 +163,8 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
     assert_ne!(good_dataset, stale_dataset);
 
-    let LatestBinding::Degraded(reason) = refresh_latest_binding(&mut app.state, document_id)
+    let LatestBinding::Degraded(reason) =
+        refresh_latest_binding(&mut app.state.results_parts(), document_id)
     else {
         panic!("a document that cannot retarget must degrade, not advance or blank");
     };
@@ -178,7 +180,20 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
 
     // The document still draws: the pane resolves, against the binding it
     // last had.
-    drive_frame(|ui| show(ui, &mut app, document_id));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
     let context = app
         .state
         .results
@@ -223,7 +238,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
     let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
 
     assert!(matches!(
-        refresh_latest_binding(&mut app.state, document_id),
+        refresh_latest_binding(&mut app.state.results_parts(), document_id),
         LatestBinding::Degraded(_)
     ));
     let first = app
@@ -244,7 +259,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
 
     for _ in 0..3 {
         assert!(matches!(
-            refresh_latest_binding(&mut app.state, document_id),
+            refresh_latest_binding(&mut app.state.results_parts(), document_id),
             LatestBinding::Degraded(_)
         ));
     }

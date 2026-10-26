@@ -7,6 +7,7 @@ use crate::state::{
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunLifecycle,
     SimulationRunProvenance,
 };
+use crate::workbench::{AppState, RSpiceApp};
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 pub(crate) fn digest(byte: u8) -> ContentDigest {
@@ -45,8 +46,8 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
         layout_id: layout_id.to_owned(),
         validation_error: None,
     };
-    let document_id =
-        super::super::create_document::commit(&mut app).expect("persistent document commits");
+    let document_id = super::super::create_document::commit(&mut app.state.results_parts())
+        .expect("persistent document commits");
     (app, document_id)
 }
 
@@ -69,11 +70,37 @@ pub(crate) fn drive_frame(body: impl FnMut(&mut Ui)) {
 #[test]
 fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
     let (mut app, document_id) = persistent_transient_fixture();
-    drive_frame(|ui| show(ui, &mut app, document_id));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
     let settled = app.state.model.simulation.view.data_version;
 
     for frame in 0..4 {
-        drive_frame(|ui| show(ui, &mut app, document_id));
+        drive_frame(|ui| {
+            crate::workbench::documents::result_document::with_surface_parts(
+                &mut app,
+                |state, run_controller, selected_specification| {
+                    show(
+                        ui,
+                        state,
+                        run_controller,
+                        selected_specification,
+                        document_id,
+                    )
+                },
+            )
+        });
         assert_eq!(
             app.state.model.simulation.view.data_version, settled,
             "idle frame {frame} of an open persistent document advanced the data version"
@@ -87,7 +114,20 @@ fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
 #[test]
 fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection() {
     let (mut app, document_id) = persistent_transient_fixture();
-    drive_frame(|ui| show(ui, &mut app, document_id));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
     let analysis = super::super::AnalysisPresentationKey::new(
         app.state.model.simulation.retained.runs[0].dataset_id,
         &app.state.model.simulation.retained.runs[0].analyses[0],
@@ -103,7 +143,20 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
         .insert(ResultViewer::Smith, (0, 3));
 
     for frame in 0..3 {
-        drive_frame(|ui| show(ui, &mut app, document_id));
+        drive_frame(|ui| {
+            crate::workbench::documents::result_document::with_surface_parts(
+                &mut app,
+                |state, run_controller, selected_specification| {
+                    show(
+                        ui,
+                        state,
+                        run_controller,
+                        selected_specification,
+                        document_id,
+                    )
+                },
+            )
+        });
         assert!(
             app.state.results.results.session.selected_trace.is_some(),
             "idle frame {frame} cleared the selected trace"
@@ -127,11 +180,13 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
 /// Project the fixture's one pane, exactly as a drawn frame does, and
 /// hand back the pane so the test can keep transacting against it.
 fn projected_pane(state: &mut AppState, document_id: ResultDocumentId) -> PaneProjection {
-    let mut projected = projection(state, document_id).expect("document projection");
+    let mut projected =
+        projection(state.results_reads(), document_id).expect("document projection");
     let mut page = projected.pages.remove(0);
     let pane = page.panes.remove(0);
     select_pane_binding(&mut state.results_parts(), &pane).expect("pane binding");
-    project_pane_presentation(state, &pane, ResultViewer::Waves).expect("presentation projects");
+    project_pane_presentation(&mut state.results_parts(), &pane, ResultViewer::Waves)
+        .expect("presentation projects");
     pane
 }
 
@@ -141,7 +196,7 @@ fn active_analysis_anchor(
     super::super::AnalysisPresentationKey,
     super::super::WaveformPresentationKey,
 ) {
-    super::super::waves::source_waveform_anchor(state, "V(out)")
+    super::super::waves::source_waveform_anchor(&mut state.results_parts(), "V(out)")
         .expect("the fixture retains V(out)")
 }
 
@@ -350,7 +405,20 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
     .expect("the document retains its own marker");
 
     for _ in 0..3 {
-        drive_frame(|ui| show(ui, &mut app, document_id));
+        drive_frame(|ui| {
+            crate::workbench::documents::result_document::with_surface_parts(
+                &mut app,
+                |state, run_controller, selected_specification| {
+                    show(
+                        ui,
+                        state,
+                        run_controller,
+                        selected_specification,
+                        document_id,
+                    )
+                },
+            )
+        });
     }
 
     assert_eq!(app.state.results.results.session.markers.len(), 1);
@@ -371,7 +439,14 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
 
     // Back on a quick surface the overlay is gone and the quick marker is
     // exactly what it was.
-    drive_frame(|ui| super::super::show_compact_split(ui, &mut app));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                super::super::show_compact_split(ui, state, run_controller, selected_specification)
+            },
+        )
+    });
     assert!(
         app.state
             .results
@@ -695,7 +770,8 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
 #[test]
 fn projection_carries_every_document_owned_pane_entity() {
     let (app, document_id) = persistent_transient_fixture();
-    let projected = projection(&app.state, document_id).expect("document projection");
+    let projected =
+        projection(app.state.results_reads(), document_id).expect("document projection");
     let pane = &projected.pages[0].panes[0];
     let document = app
         .state
@@ -716,11 +792,12 @@ fn projection_carries_every_document_owned_pane_entity() {
 #[test]
 fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results() {
     let (mut app, document_id) = persistent_transient_fixture();
-    let mut projected = projection(&app.state, document_id).expect("document projection");
+    let mut projected =
+        projection(app.state.results_reads(), document_id).expect("document projection");
     let mut page = projected.pages.remove(0);
     let pane = page.panes.remove(0);
     select_pane_binding(&mut app.state.results_parts(), &pane).expect("pane binding");
-    project_pane_presentation(&mut app.state, &pane, ResultViewer::Waves)
+    project_pane_presentation(&mut app.state.results_parts(), &pane, ResultViewer::Waves)
         .expect("presentation projects");
     let retained_default =
         app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
@@ -754,7 +831,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     view.x = Some((0.2, 0.8));
     view.y = Some((-0.25, 1.25));
     app.state.results.results.session.cursors.a = Some(0.5);
-    capture_pane_presentation(&mut app.state, &pane, ResultViewer::Waves);
+    capture_pane_presentation(&mut app.state.results_parts(), &pane, ResultViewer::Waves);
 
     let document = app
         .state
@@ -843,10 +920,17 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         layout_id: "two-linked-panes".to_owned(),
         validation_error: None,
     };
-    let second =
-        super::super::create_document::commit(&mut app).expect("a second document commits");
+    let second = super::super::create_document::commit(&mut app.state.results_parts())
+        .expect("a second document commits");
 
-    drive_frame(|ui| show(ui, &mut app, first));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(ui, state, run_controller, selected_specification, first)
+            },
+        )
+    });
     let first_pane = app
         .state
         .results
@@ -874,7 +958,14 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         .results
         .session
         .select_persistent_document_pane(second, working_pane);
-    drive_frame(|ui| show(ui, &mut app, second));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(ui, state, run_controller, selected_specification, second)
+            },
+        )
+    });
     assert_eq!(
         app.state
             .results
@@ -895,7 +986,14 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
 
     // Coming back to each finds the reader where they were, rather than
     // wherever the other document last left one global selection.
-    drive_frame(|ui| show(ui, &mut app, first));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(ui, state, run_controller, selected_specification, first)
+            },
+        )
+    });
     assert_eq!(
         app.state
             .results
@@ -904,7 +1002,14 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
             .persistent_document_pane(first),
         Some(first_pane)
     );
-    drive_frame(|ui| show(ui, &mut app, second));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(ui, state, run_controller, selected_specification, second)
+            },
+        )
+    });
     assert_eq!(
         app.state
             .results
@@ -922,7 +1027,20 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
 #[test]
 fn closing_and_reopening_a_document_holds_the_readers_place() {
     let (mut app, document_id) = persistent_transient_fixture();
-    drive_frame(|ui| show(ui, &mut app, document_id));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
     let pane = app
         .state
         .results
@@ -953,7 +1071,14 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
 
     // Close: the reader goes back to the dataset quick view, which leaves
     // the persistent projection behind.
-    drive_frame(|ui| super::super::show_compact_split(ui, &mut app));
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                super::super::show_compact_split(ui, state, run_controller, selected_specification)
+            },
+        )
+    });
     assert!(
         app.state
             .results
@@ -965,7 +1090,20 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
 
     // Re-open, and hold it open.
     for frame in 0..3 {
-        drive_frame(|ui| show(ui, &mut app, document_id));
+        drive_frame(|ui| {
+            crate::workbench::documents::result_document::with_surface_parts(
+                &mut app,
+                |state, run_controller, selected_specification| {
+                    show(
+                        ui,
+                        state,
+                        run_controller,
+                        selected_specification,
+                        document_id,
+                    )
+                },
+            )
+        });
         assert!(
             app.state.results.results.session.selected_trace.is_some(),
             "frame {frame} after re-opening lost the selected trace"
@@ -1033,7 +1171,7 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 1);
     amps.y = Some((-5.0e-3, 5.0e-3));
 
-    capture_pane_presentation(&mut app.state, &pane, ResultViewer::Waves);
+    capture_pane_presentation(&mut app.state.results_parts(), &pane, ResultViewer::Waves);
 
     let vertical = app
         .state
@@ -1097,10 +1235,10 @@ fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
 /// `edit` standing in for what the reader does in its viewer.
 fn draw_pane(app: &mut RSpiceApp, pane: &PaneProjection, edit: impl FnOnce(&mut AppState)) {
     select_pane_binding(&mut app.state.results_parts(), pane).expect("pane binding");
-    project_pane_presentation(&mut app.state, pane, ResultViewer::Waves)
+    project_pane_presentation(&mut app.state.results_parts(), pane, ResultViewer::Waves)
         .expect("presentation projects");
     edit(&mut app.state);
-    capture_pane_presentation(&mut app.state, pane, ResultViewer::Waves);
+    capture_pane_presentation(&mut app.state.results_parts(), pane, ResultViewer::Waves);
 }
 
 fn saved_x_range(
@@ -1142,8 +1280,21 @@ fn saved_cursor_a(app: &RSpiceApp, document_id: ResultDocumentId, pane_id: PaneI
 fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
     let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
     reload(&mut app, document_id);
-    drive_frame(|ui| show(ui, &mut app, document_id));
-    let page = projection(&app.state, document_id)
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
+    let page = projection(app.state.results_reads(), document_id)
         .expect("document projection")
         .pages
         .remove(0);
@@ -1181,8 +1332,21 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
 #[test]
 fn linked_cursors_are_kept_by_the_document_and_move_together() {
     let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
-    drive_frame(|ui| show(ui, &mut app, document_id));
-    let page = projection(&app.state, document_id)
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
+    let page = projection(app.state.results_reads(), document_id)
         .expect("document projection")
         .pages
         .remove(0);
@@ -1204,8 +1368,21 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
     assert_eq!(saved_cursor_a(&app, document_id, second.id), reference);
 
     reload(&mut app, document_id);
-    drive_frame(|ui| show(ui, &mut app, document_id));
-    let page = projection(&app.state, document_id)
+    drive_frame(|ui| {
+        crate::workbench::documents::result_document::with_surface_parts(
+            &mut app,
+            |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            },
+        )
+    });
+    let page = projection(app.state.results_reads(), document_id)
         .expect("document projection")
         .pages
         .remove(0);
@@ -1403,7 +1580,7 @@ fn retained_frequency_document_restores_its_noise_projection() {
     assert!(state.model.simulation.select_run(0));
 
     assert_eq!(
-        bound_viewer_projection(&state, ResultViewer::Bode),
+        bound_viewer_projection(state.results_reads(), ResultViewer::Bode),
         ResultViewer::NoiseContrib
     );
 }

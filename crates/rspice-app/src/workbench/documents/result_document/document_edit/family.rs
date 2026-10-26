@@ -96,7 +96,7 @@ pub(crate) fn set_family_filter(state: &mut AppState, filter: String) {
 }
 
 /// Resolve the form's choices against the family's manifest.
-pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
+pub(super) fn choices(state: ResultsReads<'_>, draft: &FamilyDraft) -> FamilyChoices {
     let refused = |refusal: String| FamilyChoices {
         scope: String::new(),
         x_dimensions: Vec::new(),
@@ -104,7 +104,7 @@ pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
         points: Ok(String::new()),
         refusal: Some(refusal),
     };
-    let (scope, run, analysis) = match scope(state.results_reads()) {
+    let (scope, run, analysis) = match scope(state) {
         Ok(found) => found,
         Err(refusal) => return refused(refusal),
     };
@@ -142,7 +142,7 @@ pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
             }
             points
         });
-    let refusal = if state.results.results.session.viewer == ResultViewer::Waves {
+    let refusal = if state.results.session.viewer == ResultViewer::Waves {
         policy(&manifest, draft)
             .and_then(|policy| {
                 selection(run, analysis, &manifest, &policy)?;
@@ -185,7 +185,7 @@ pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
 /// Keep the draft's policy with the selected pane, or with the analysis for
 /// the session over a quick view. The form closes once it lands.
 pub(super) fn commit(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     draft: &FamilyDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
     let (scope, policy) = {
@@ -198,7 +198,7 @@ pub(super) fn commit(
     match scope {
         Scope::Pane(document_id, pane_id) => {
             transact(
-                &mut state.results_parts(),
+                state,
                 document_id,
                 vec![DocumentEdit::SetPaneFamilyPresentation {
                     pane_id,
@@ -207,12 +207,7 @@ pub(super) fn commit(
             )?;
         }
         Scope::QuickView(key) => {
-            state
-                .results
-                .results
-                .session
-                .family_policies
-                .insert(key, policy);
+            state.results.session.family_policies.insert(key, policy);
         }
     }
     Ok(None)
@@ -221,7 +216,7 @@ pub(super) fn commit(
 /// The rows a pane's kept family policy shows. Only the waveform view draws
 /// a family slice, so any other sheet shows every row.
 pub(in super::super) fn pane_selection(
-    state: &AppState,
+    state: ResultsReads<'_>,
     pane: &Pane,
     viewer: ResultViewer,
 ) -> Result<Option<SourceSampleSelection>, String> {
@@ -234,8 +229,7 @@ pub(in super::super) fn pane_selection(
     let binding = pane
         .binding
         .ok_or_else(|| "The pane shows no dataset to slice.".to_owned())?;
-    let (run, analysis) =
-        super::super::persistent_document::resolve_binding(state.results_reads(), binding)?;
+    let (run, analysis) = super::super::persistent_document::resolve_binding(state, binding)?;
     let run = &state.model.simulation.retained.runs[run];
     let analysis = &run.analyses[analysis];
     selection(run, analysis, &manifest(analysis)?, policy).map(Some)
@@ -280,13 +274,13 @@ fn selection(
 /// A document keeps a family policy only over dimensions its copy of the
 /// result declares, so a slice it cannot keep is refused before Apply.
 fn undeclared_dimension(
-    state: &AppState,
+    state: ResultsReads<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
     policy: &FamilyPresentationPolicy,
     manifest: &FamilyManifest,
 ) -> Result<(), String> {
-    let document = project_document(state.results_reads(), document_id)?;
+    let document = project_document(state, document_id)?;
     let binding = document
         .panes()
         .iter()

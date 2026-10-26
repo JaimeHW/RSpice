@@ -230,7 +230,6 @@ pub(crate) mod surfaces {
     pub(super) mod netlist;
     pub(super) mod pdk_technology_admin;
     pub(super) mod project;
-    pub(super) mod results;
     pub(super) mod simulate;
     pub(super) mod stimulus;
     pub(super) mod verify;

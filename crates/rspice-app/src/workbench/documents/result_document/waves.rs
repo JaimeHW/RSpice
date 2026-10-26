@@ -109,13 +109,13 @@ pub(super) fn build_models(
 }
 
 pub(super) fn source_waveform_anchor(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     source_name: &str,
 ) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
-    let presentation = state.result_presentation_policy();
+    let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.results.results,
+        state.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );

@@ -124,6 +124,7 @@ macro_rules! features {
                 fn cx(app: &mut RSpiceApp) -> Cx<'_, Self> {
                     let handles = LowerHandles {
                         export_io: app.export_workflow_io.as_ref(),
+                        run_controller: &mut app.simulation_controller,
                     };
                     let state = &mut app.state;
                     Cx::new(
@@ -139,6 +140,7 @@ macro_rules! features {
                             cloud_peer!($slot, state),
                             hardcopy_peer!($slot, state),
                             results_peer!($slot, state),
+                            &*state.simulate,
                         ),
                     )
                 }

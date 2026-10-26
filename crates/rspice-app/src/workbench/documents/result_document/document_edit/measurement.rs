@@ -22,8 +22,8 @@ pub(crate) fn open_measurement(state: &mut ResultsParts<'_>) {
 }
 
 /// What the form shows for `draft` on this frame.
-pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> MeasurementPreview {
-    let (run, analysis) = match reading_analysis(state.results_reads()) {
+pub(super) fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> MeasurementPreview {
+    let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {
             return MeasurementPreview {
@@ -33,11 +33,8 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
             };
         }
     };
-    let pane = active_document_id(state.results_reads()).and_then(|document_id| {
-        let (_, pane_id) = super::super::persistent_document::reading_position(
-            state.results_reads(),
-            document_id,
-        )?;
+    let pane = active_document_id(state).and_then(|document_id| {
+        let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)?;
         let document = state
             .model
             .workspace
@@ -49,7 +46,7 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
     let expression = draft.expression.trim();
     let digits = usize::from(
         state
-            .result_presentation_policy()
+            .presentation_policy()
             .displayed_significant_digits()
             .get(),
     );
@@ -70,7 +67,7 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
 /// Keep the draft's measurement on the selected pane. The form closes once
 /// it lands.
 pub(super) fn commit(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     draft: &MeasurementDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
     let document_id =
@@ -90,7 +87,7 @@ pub(super) fn commit(
         &expression,
     )?;
     transact(
-        &mut state.results_parts(),
+        state,
         document_id,
         vec![DocumentEdit::AddScalarMeasurement {
             pane_id,

@@ -77,7 +77,7 @@ pub(super) fn x_link_state(document: &VisualizationDocument, pane_id: PaneId) ->
 /// compatible X axis on the page; the joining axis takes the group's range
 /// in the same transaction, so the panes line up at once.
 pub(super) fn toggle_x_link(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) -> Result<(), String> {
@@ -88,7 +88,7 @@ pub(super) fn toggle_x_link(
     if edits.is_empty() {
         return Ok(());
     }
-    transact(&mut state.results_parts(), document_id, edits).map(|_| ())
+    transact(state, document_id, edits).map(|_| ())
 }
 
 fn x_link_edits(
