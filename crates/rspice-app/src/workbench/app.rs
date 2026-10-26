@@ -509,14 +509,9 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         pack_persistence::initialize_browser_pack_restore(&cc.egui_ctx);
 
-        // A license file on disk wins over (or backfills) the session copy.
+        // A license file on disk backfills a session that holds none.
         #[cfg(not(target_arch = "wasm32"))]
-        if state.cloud.license.is_none()
-            && let Some((key, info)) = crate::services::license::load_stored()
-        {
-            state.cloud.license_key = Some(key);
-            state.cloud.license = Some(info);
-        }
+        state.cloud.restore_stored_license();
 
         // Load symbol library
         let symbol_library = match crate::schematic::symbols::SymbolLibrary::load_embedded() {

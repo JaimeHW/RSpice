@@ -28,6 +28,20 @@ pub(crate) struct CloudState {
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
 }
 
+impl CloudState {
+    /// Take the license kept on this computer when the session holds none:
+    /// its key and the grant it verifies to.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn restore_stored_license(&mut self) {
+        if self.license.is_none()
+            && let Some((key, info)) = crate::services::license::load_stored()
+        {
+            self.license_key = Some(key);
+            self.license = Some(info);
+        }
+    }
+}
+
 impl CloudPort for CloudState {
     fn license_dialog_open(&self) -> bool {
         self.license_dialog.open
