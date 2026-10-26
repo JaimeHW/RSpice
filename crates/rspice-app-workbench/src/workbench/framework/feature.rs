@@ -21,7 +21,7 @@ use crate::workbench::state::workbench_session::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
-use super::command_registry::{CommandAvailability, CommandFlags, CommandSpec};
+use super::command_registry::{CommandAvailability, CommandFlags, CommandSpec, Registry};
 use super::dialogs::DialogKey;
 use super::ports::ResultsPort;
 use super::requests::{Drain, Outbox, Request};
@@ -307,6 +307,10 @@ pub struct Cx<'a, F: Feature> {
     pub runs: &'a mut RunsState,
     pub handles: LowerHandles<'a>,
     pub peers: Peers<'a>,
+    /// Every command the application registers, the other features' too:
+    /// what a shortcut profile is checked against and a command is labelled
+    /// by.
+    pub commands: &'static Registry,
 }
 
 impl<'a, F: Feature> Cx<'a, F> {
@@ -319,6 +323,7 @@ impl<'a, F: Feature> Cx<'a, F> {
         runs: &'a mut RunsState,
         handles: LowerHandles<'a>,
         peers: Peers<'a>,
+        commands: &'static Registry,
     ) -> Self {
         Self {
             state,
@@ -329,6 +334,7 @@ impl<'a, F: Feature> Cx<'a, F> {
             runs,
             handles,
             peers,
+            commands,
         }
     }
 
@@ -351,6 +357,8 @@ pub struct Reads<'a, F: Feature> {
     pub platform: &'a PlatformState,
     /// What the results workspace shows.
     pub results: &'a dyn ResultsPort,
+    /// Every command the application registers, the other features' too.
+    pub commands: &'static Registry,
 }
 
 impl<'a, F: Feature> Reads<'a, F> {
@@ -361,6 +369,7 @@ impl<'a, F: Feature> Reads<'a, F> {
         wb: &'a F::Session,
         platform: &'a PlatformState,
         results: &'a dyn ResultsPort,
+        commands: &'static Registry,
     ) -> Self {
         Self {
             state,
@@ -369,6 +378,7 @@ impl<'a, F: Feature> Reads<'a, F> {
             wb,
             platform,
             results,
+            commands,
         }
     }
 }

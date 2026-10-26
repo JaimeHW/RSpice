@@ -11,7 +11,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::state::command_catalog::{CommandKey, ShortcutBinding, ShortcutContext};
+use crate::state::command_catalog::{
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
+};
 
 /// The part of the product that declares a command and carries it out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +262,34 @@ impl Registry {
         } else {
             Err(problems.join("\n"))
         }
+    }
+}
+
+/// The registry as the catalog a shortcut profile reads command facts
+/// through.
+impl CommandCatalog for Registry {
+    fn commands(&self) -> &[CommandKey] {
+        self.order()
+    }
+
+    fn resolve(&self, id: &str) -> Option<CommandKey> {
+        Registry::resolve(self, id)
+    }
+
+    fn context(&self, command: CommandKey) -> Option<ShortcutContext> {
+        self.spec(command).map(|spec| spec.context)
+    }
+
+    fn default_bindings(&self, command: CommandKey) -> &'static [ShortcutBinding] {
+        self.spec(command).map_or(&[], |spec| spec.bindings)
+    }
+
+    fn primary_is_reserved_on(&self, command: CommandKey, platform: CommandPlatform) -> bool {
+        platform.has_browser_reserved_primary()
+            && self.spec(command).is_some_and(|spec| {
+                spec.flags
+                    .contains(CommandFlags::PRIMARY_RESERVED_BY_BROWSER)
+            })
     }
 }
 

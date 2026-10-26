@@ -1501,35 +1501,30 @@ pub(crate) fn legacy_command(key: CommandKey) -> Option<Command> {
 }
 
 /// The command registry as the catalog a shortcut profile reads command facts
-/// through.
+/// through: the application's [`command_registry`], read as the catalog it
+/// is.
 #[derive(Debug, Clone, Copy)]
 pub struct CommandRegistry;
 
 impl CommandCatalog for CommandRegistry {
     fn commands(&self) -> &[CommandKey] {
-        command_registry().order()
+        command_registry().commands()
     }
 
     fn resolve(&self, id: &str) -> Option<CommandKey> {
-        command_registry().resolve(id)
+        CommandCatalog::resolve(command_registry(), id)
     }
 
     fn context(&self, command: CommandKey) -> Option<ShortcutContext> {
-        command_registry().spec(command).map(|spec| spec.context)
+        command_registry().context(command)
     }
 
     fn default_bindings(&self, command: CommandKey) -> &'static [ShortcutBinding] {
-        command_registry()
-            .spec(command)
-            .map_or(&[], |spec| spec.bindings)
+        command_registry().default_bindings(command)
     }
 
     fn primary_is_reserved_on(&self, command: CommandKey, platform: CommandPlatform) -> bool {
-        platform.has_browser_reserved_primary()
-            && command_registry().spec(command).is_some_and(|spec| {
-                spec.flags
-                    .contains(CommandFlags::PRIMARY_RESERVED_BY_BROWSER)
-            })
+        command_registry().primary_is_reserved_on(command, platform)
     }
 }
 

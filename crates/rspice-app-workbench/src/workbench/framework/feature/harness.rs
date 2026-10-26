@@ -26,7 +26,7 @@ use rspice_vocabulary::product::ResultDocumentId;
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::command_registry::{CommandAvailability, Registry};
 use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
@@ -43,6 +43,11 @@ use crate::workbench::framework::ports::{CapturedViewport, DisplayedDatasetView,
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
+
+/// The commands a feature tested on its own reads: none is registered, so a
+/// command's label is its key. A test that needs the application's commands
+/// lends the shell's registry through [`FeatureHarness::commands`].
+static NO_COMMANDS: LazyLock<Registry> = LazyLock::new(|| Registry::new(&[], Vec::new(), &[]));
 
 /// The export IO a feature's own test runs with: its save picker is
 /// cancelled, and it writes no file.
@@ -212,6 +217,8 @@ pub struct FeatureHarness<F: Feature> {
     pub(crate) platform: PlatformState,
     pub(crate) runs: RunsState,
     pub(crate) run_controller: SimulationController,
+    /// Every command the feature reads as registered.
+    pub commands: &'static Registry,
 }
 
 impl<F: Feature> FeatureHarness<F>
@@ -229,6 +236,7 @@ where
             platform: PlatformState::default(),
             runs: RunsState::default(),
             run_controller: SimulationController::new(),
+            commands: &NO_COMMANDS,
         }
     }
 
@@ -242,6 +250,7 @@ where
             &self.wb,
             &self.platform,
             &NullPorts,
+            self.commands,
         ))
     }
 
@@ -266,6 +275,7 @@ where
                 Some(&NullPorts),
                 &NullPorts,
             ),
+            self.commands,
         ));
     }
 }

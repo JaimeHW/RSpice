@@ -46,6 +46,7 @@ fn cx<'a>(
             Some(&*state.results),
             &*state.simulate,
         ),
+        command_registry(),
     )
 }
 

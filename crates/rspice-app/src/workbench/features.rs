@@ -17,6 +17,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::cloud::CloudFeature;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -118,6 +119,7 @@ macro_rules! features {
                         &*state.workbench,
                         &*state.platform,
                         &*state.results,
+                        command_registry(),
                     )
                 }
 
@@ -142,6 +144,7 @@ macro_rules! features {
                             results_peer!($slot, state),
                             &*state.simulate,
                         ),
+                        command_registry(),
                     )
                 }
             }
