@@ -145,10 +145,14 @@ struct KnownCapacitanceDeviation {
 /// counts below rose by exactly the number of formerly-failing entries in each
 /// model, which is the reclassification and not new blindness.
 const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
+    // Four more of the gaps are row b1 at probe point 1. That point drives
+    // about 2.2e5 A through b1 and b2, so the charge recovered at 1e10 and at
+    // 1e12 agrees only to rounding: b1's linearity sits at 4.3e-7 against the
+    // 1e-7 tolerance. Its entries are unverifiable there, not wrong.
     KnownCapacitanceDeviation {
         model: "bjt505_va",
         relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 9,
+        unverified_significant: 13,
         why: "coverage gaps only; four of them are the epilayer kink at \
               equilibrium, where Mextram's `abs(Vc1c2) < 1e-5 * Vt` guard leaves \
               the charge continuous but not differentiable",
