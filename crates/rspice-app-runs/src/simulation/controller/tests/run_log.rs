@@ -24,6 +24,19 @@ fn start_manual_batch(source: &str) -> (RunTestHost, SimulationController) {
         .expect("the fixture deck prepares");
     state.model.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &MockExportWorkflowIo::default());
+    // A refused dispatch says why in a prompt, which this host drops, so
+    // a deck that starts no run states the status and log it left.
+    assert!(
+        controller.current_run_id.is_some(),
+        "the fixture deck started no run: status {:?}, log {:?}",
+        state.model.simulation.execution.status,
+        state
+            .model
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.as_str())
+            .collect::<Vec<_>>()
+    );
     (state, controller)
 }
 
