@@ -8,6 +8,7 @@
 use super::*;
 use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::state::SpecializedViewerCacheProvenance;
+use crate::workbench::app_state::AppState;
 use rspice_results_ui::eye_diagram::{EyeTimebaseProvenance, EyeTrace};
 use rspice_results_ui::fft::data::FftBuildError;
 use rspice_results_ui::fft::{FftFailure, FftInputError, PreparedFftInput, WindowFunction};

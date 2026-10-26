@@ -43,6 +43,7 @@ pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::NoticeKind;
+use crate::state::{RunEvent, RunEventSink};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
@@ -116,6 +117,13 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         session::state_init::default_app_state()
+    }
+}
+
+/// The application's viewers are the Results workspace's.
+impl RunEventSink for AppState {
+    fn apply_run_event(&mut self, event: RunEvent) {
+        self.results_parts().apply_run_event(event);
     }
 }
 

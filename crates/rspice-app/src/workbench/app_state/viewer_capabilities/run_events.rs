@@ -14,7 +14,7 @@ use rspice_results_ui::fft::FftInputOptions;
 
 use crate::simulation::{ViewerHost, ViewerReading};
 use crate::state::{ActiveViewer, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 
 impl ResultsReads<'_> {
@@ -57,13 +57,6 @@ impl ViewerHost for ResultsParts<'_> {
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results_reads().eye_timebase_for(owner)
-    }
-}
-
-/// The application's viewers are the Results workspace's.
-impl RunEventSink for AppState {
-    fn apply_run_event(&mut self, event: RunEvent) {
-        self.results_parts().apply_run_event(event);
     }
 }
 
