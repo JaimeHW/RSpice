@@ -18,11 +18,14 @@ egui = { version = "0.35.0", default-features = false }
 egui_extras = { version = "0.35.0", default-features = false }
 rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-vocabulary.workspace = true
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 num-complex.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# The measurement builder's tests check the cards it writes against the
+# engine's own parser and measure engine; the viewers name the engine's result
+# types only through rspice-results.
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-ui-kit = { workspace = true, features = ["plot", "test-support"] }

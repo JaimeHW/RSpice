@@ -47,6 +47,24 @@ class DependencyPolicyTests(unittest.TestCase):
             [],
         )
 
+    def test_the_viewers_name_the_engine_only_in_their_tests(self) -> None:
+        self.assertEqual(
+            violations(
+                {"rspice-results-ui": {"rspice-results", "rspice-core"}},
+                {"rspice-results-ui": {"rspice-results-ui", "rspice-results", "rspice-core"}},
+                normal_direct={"rspice-results-ui": {"rspice-results", "rspice-vocabulary"}},
+            ),
+            [],
+        )
+        self.assertEqual(
+            violations(
+                {"rspice-results-ui": {"rspice-results", "rspice-core"}},
+                {"rspice-results-ui": {"rspice-results-ui", "rspice-results", "rspice-core"}},
+                normal_direct={"rspice-results-ui": {"rspice-results", "rspice-core"}},
+            ),
+            ["rspice-results-ui names engine package rspice-core as a normal dependency"],
+        )
+
     def test_an_upward_edge_or_transitive_gui_and_engine_dependency_fails(self) -> None:
         issues = violations(
             {"rspice-vocabulary": {"rspice-results"}},

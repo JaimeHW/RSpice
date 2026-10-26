@@ -99,9 +99,14 @@ def violations(
     portable_formats: set[str] | None = None,
     native_bundle_formats: set[str] | None = None,
     table_schema_formats: set[str] | None = None,
+    normal_direct: dict[str, set[str]] | None = None,
 ) -> list[str]:
     """Validate the package graph; absent planned crates need no placeholder."""
     issues = []
+    # The viewers name the engine's result types through rspice-results; only
+    # their tests check what they build against the engine itself.
+    for dep in sorted((normal_direct or {}).get("rspice-results-ui", set()) & ENGINE_PACKAGES):
+        issues.append(f"rspice-results-ui names engine package {dep} as a normal dependency")
     application_names = set(ALLOWED) | {"rspice-app"}
     for name, deps in sorted(direct.items()):
         unexpected = (deps & application_names) - ALLOWED[name]
@@ -169,6 +174,7 @@ def run(*args: str) -> str:
 def main() -> int:
     metadata = json.loads(run("cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"))
     direct = {}
+    normal_direct = {}
     closures = {}
     for package in metadata["packages"]:
         name = package["name"]
@@ -177,6 +183,9 @@ def main() -> int:
         direct[name] = {
             dep["name"] for dep in package["dependencies"]
             if dep["kind"] != "dev" or name in INCLUDE_DEV
+        }
+        normal_direct[name] = {
+            dep["name"] for dep in package["dependencies"] if dep["kind"] is None
         }
         tree = run(
             "cargo", "tree", "--locked", "-p", name, "--all-features",
@@ -205,7 +214,7 @@ def main() -> int:
             }
     issues = violations(
         direct, closures, portable_formats.get(""), portable_formats.get("native-bundle"),
-        portable_formats.get("table-schema"),
+        portable_formats.get("table-schema"), normal_direct,
     )
     if issues:
         print("\n".join(issues))
