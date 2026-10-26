@@ -427,6 +427,12 @@ mod xyce_vbic_generated {
     fn every_optional_node_connects_to_the_generated_equations() {
         let engine = Engine::new(SimulationConfig {
             spice_dialect: SpiceDialect::Xyce,
+            convergence_config: ConvergenceConfig {
+                // The final GMIN floor shunts a circuit node but not a net the
+                // instance owns, and neither Xyce nor ngspice adds that floor.
+                gmin_target: 0.0,
+                ..Default::default()
+            },
             ..Default::default()
         });
         let exposed_name = |index| {
