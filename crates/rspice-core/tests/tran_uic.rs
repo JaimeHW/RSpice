@@ -2,10 +2,11 @@
 //! initial conditions, ngspice-style. Without `UIC` the same `.IC` card
 //! instead constrains the bias solution that starts the transient.
 
+use rspice_core::config::ExpressionDialect;
 use rspice_core::engine::{
     ConvergenceConfig, Engine, SimulationConfig, SpiceDialect, TransientStartupMode,
 };
-use rspice_core::netlist::{AnalysisCommand, Netlist};
+use rspice_core::netlist::{AnalysisCommand, Netlist, NetlistParseOptions};
 use rspice_core::numerics::integration::IntegrationMethod;
 
 fn out_waveform(deck: &str) -> (Vec<f64>, Vec<f64>) {
@@ -402,6 +403,48 @@ fn xyce_inductor_ic_preserves_a_valid_nonlinear_operating_point() {
     let initial_voltage = result.try_voltage_waveform_named("out").unwrap()[0];
     assert!((initial_current - 0.0002).abs() < 1e-14);
     assert!((0.5..0.7).contains(&initial_voltage));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_nodeset_holds_a_latch_whose_input_has_no_dc_path() {
+    // Each latch input is reached only through a capacitor and a
+    // controlled-source sense, so only its NODESET defines it at DC.
+    let deck = Netlist::parse_with_options(
+        include_str!("../../../tests/xyce/Netlists/Certification_Tests/BUG_1962/nodeset.cir"),
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        },
+    )
+    .expect("BUG_1962 nodeset deck parses");
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let result = engine
+        .run_tran(&deck, 1e-3, 2e-4)
+        .expect("BUG_1962 nodeset transient runs");
+    // Xyce 7.10, OutputData/Certification_Tests/BUG_1962/nodeset.cir.prn:
+    // every printed node is 5 V at every row from 0 to 1 ms. A subcircuit
+    // port prints under its inner name and flattens to the outer net.
+    for (node, flattened) in [
+        ("in_1", "in_1"),
+        ("out_1", "out_1"),
+        ("out_2", "out_2"),
+        ("X1:in_1", "5"),
+        ("X1:out_1", "x1.out_1"),
+        ("X1:out_2", "x1.out_2"),
+        ("X2:X1:in_1", "x2.foo"),
+        ("X2:X1:out_1", "x2.x1.out_1"),
+    ] {
+        let waveform = result
+            .try_voltage_waveform_named(flattened)
+            .unwrap_or_else(|| panic!("missing waveform for {node} ({flattened})"));
+        for (time, value) in result.time.iter().zip(waveform) {
+            assert!(
+                (value - 5.0).abs() <= 1e-6,
+                "V({node}) at {time:e} s is {value}; Xyce 7.10 holds 5 V"
+            );
+        }
+    }
 }
 
 #[test]

@@ -2298,6 +2298,7 @@ impl Engine {
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
 
         solution = Self::sanitize_initial_guess(&solution, size);
+        let mut nodeset_startup_solution = None;
         if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
                 self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
@@ -2305,6 +2306,7 @@ impl Engine {
                 )
             }) {
                 Ok(nodeset_solution) => {
+                    nodeset_startup_solution = Some(nodeset_solution.clone());
                     solution = nodeset_solution;
                 }
                 Err(err) if Self::is_recoverable_startup_error(&err) => {
@@ -2412,6 +2414,25 @@ impl Engine {
                     continue;
                 }
                 Err(err) => {
+                    // A node with no DC path, such as a latch input reached
+                    // only through a capacitor and a controlled-source sense,
+                    // leaves the released equations singular: its NODESET is
+                    // the only thing that defines it, so the converged NODESET
+                    // startup is the operating point. A solvable released
+                    // system that finds no equilibrium is still refused below.
+                    if matches!(
+                        err,
+                        SimulationError::Solver(crate::solver::SolverError::SingularMatrix)
+                    ) && let Some(values) = nodeset_startup_solution
+                    {
+                        log::debug!(
+                            "Released transient operating-point matrix is singular after NODESET startup; using the NODESET startup state."
+                        );
+                        return Ok(TransientOperatingPointSolution {
+                            values,
+                            accepted_contract: None,
+                        });
+                    }
                     return Err(err);
                 }
             }
