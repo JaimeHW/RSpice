@@ -20,14 +20,6 @@ fn format_float(value: f64) -> String {
     format!("{value:.17e}")
 }
 
-/// Reject an option value with the list of what is accepted.
-pub(crate) fn unknown_option(kind: &str, value: &str, accepted: &[&str]) -> String {
-    format!(
-        "unknown {kind} '{value}'; expected one of: {}",
-        accepted.join(", ")
-    )
-}
-
 /// Complex-value encoding in a Touchstone data line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TouchstoneFormat {
@@ -37,19 +29,6 @@ pub enum TouchstoneFormat {
 }
 
 impl TouchstoneFormat {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value.to_ascii_lowercase().as_str() {
-            "ri" | "real_imaginary" => Ok(Self::RealImaginary),
-            "ma" | "magnitude_angle" => Ok(Self::MagnitudeAngle),
-            "db" | "decibel_angle" => Ok(Self::DecibelAngle),
-            other => Err(unknown_option(
-                "Touchstone format",
-                other,
-                &["ri", "ma", "db"],
-            )),
-        }
-    }
-
     fn keyword(self) -> &'static str {
         match self {
             Self::RealImaginary => "RI",
@@ -90,20 +69,6 @@ pub enum TouchstoneFrequencyUnit {
 }
 
 impl TouchstoneFrequencyUnit {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value.to_ascii_lowercase().as_str() {
-            "hz" => Ok(Self::Hz),
-            "khz" => Ok(Self::KHz),
-            "mhz" => Ok(Self::MHz),
-            "ghz" => Ok(Self::GHz),
-            other => Err(unknown_option(
-                "Touchstone frequency unit",
-                other,
-                &["hz", "khz", "mhz", "ghz"],
-            )),
-        }
-    }
-
     fn keyword(self) -> &'static str {
         match self {
             Self::Hz => "HZ",
@@ -347,9 +312,4 @@ pub fn touchstone_with_version(
         let _ = writeln!(output, "[End]");
     }
     Ok(output)
-}
-
-/// Conventional Touchstone file extension for a port count.
-pub fn touchstone_extension(ports: usize) -> String {
-    format!("s{ports}p")
 }

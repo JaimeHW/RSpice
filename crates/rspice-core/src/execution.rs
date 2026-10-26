@@ -33,7 +33,6 @@ mod projection;
 pub mod result_document;
 mod schema;
 mod seed;
-mod sole_analysis;
 mod topology;
 
 pub use crate::{
@@ -89,5 +88,4 @@ pub use schema::{
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
 pub use seed::monte_carlo_seed_at_coordinate;
-pub use sole_analysis::{analysis_instance_identity, sole_analysis_identity};
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};

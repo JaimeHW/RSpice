@@ -67,5 +67,5 @@ pub use quality::{
 pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{
     TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, TouchstoneVersion, touchstone,
-    touchstone_extension, touchstone_with_version,
+    touchstone_with_version,
 };
