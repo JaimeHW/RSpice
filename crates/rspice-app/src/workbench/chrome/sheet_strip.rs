@@ -28,7 +28,7 @@ use super::super::layout::LayoutSpec;
 const CHIP_MAX_WIDTH: f32 = 190.0;
 const CHIP_PADDING_X: f32 = 10.0;
 const CHIP_CONTENT_GAP: f32 = 7.0;
-const CHIP_ACTIVE_EDGE: f32 = 2.0;
+pub const CHIP_ACTIVE_EDGE: f32 = 2.0;
 const ADD_CHIP_WIDTH: f32 = 30.0;
 const ADD_ICON_SIZE: f32 = 14.0;
 const CARET_WIDTH: f32 = 2.0;
@@ -36,23 +36,23 @@ const RENAME_WIDTH: f32 = 132.0;
 
 /// Whether the active cell view has enough sheets for the strip to mean
 /// anything. One sheet is a drawing, not a set of them.
-pub(in crate::workbench) fn is_visible(model: &Model) -> bool {
+pub fn is_visible(model: &Model) -> bool {
     sheet_actions::sheet_count(model) > 1
 }
 
 /// What the strip reads and writes: the model whose sheets it shows and
 /// edits, the session that states what an action did, and the sheets
 /// feature's request that the inspector bring its Sheet section into view.
-pub(in crate::workbench) struct SheetStrip<'a> {
-    pub(in crate::workbench) model: &'a mut Model,
-    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
-    pub(in crate::workbench) reveal_sheet_section: &'a mut bool,
+pub struct SheetStrip<'a> {
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub reveal_sheet_section: &'a mut bool,
     /// What a switch to another sheet lets go of first.
-    pub(in crate::workbench) gesture: &'a mut dyn CanvasGesturePort,
+    pub gesture: &'a mut dyn CanvasGesturePort,
 }
 
 /// Draw the strip beneath the document row.
-pub(in crate::workbench) fn show(root: &mut Ui, mut strip: SheetStrip<'_>, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, mut strip: SheetStrip<'_>, layout: LayoutSpec) {
     if !is_visible(strip.model) {
         clear_gestures(root.ctx());
         return;
@@ -121,7 +121,7 @@ pub(in crate::workbench) fn show(root: &mut Ui, mut strip: SheetStrip<'_>, layou
 /// What one frame of the strip asked for. The chips paint while the catalog is
 /// borrowed for reading, so the mutation is named here and run afterwards.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum StripAction {
+pub enum StripAction {
     None,
     Activate(crate::state::SheetId),
     NewSheetAfter(Option<crate::state::SheetId>),
@@ -138,7 +138,7 @@ enum StripAction {
     },
 }
 
-fn apply(strip: &mut SheetStrip<'_>, action: StripAction, entries: &[SheetEntry]) {
+pub fn apply(strip: &mut SheetStrip<'_>, action: StripAction, entries: &[SheetEntry]) {
     let (model, workbench, gesture) = (
         &mut *strip.model,
         &mut *strip.workbench,
@@ -579,6 +579,3 @@ fn add_chip(ui: &mut Ui, height: f32) -> egui::Response {
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text("New sheet")
 }
-
-#[cfg(test)]
-mod tests;

@@ -65,7 +65,7 @@ type PanelEdit = Result<DrawingSheetEdit, String>;
 /// 7200's form, ASME Y14.1's on an ANSI or ARCH sheet or one already on it,
 /// or none. The organization block is assigned by the organization, never
 /// chosen here.
-fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlockTemplate> {
+pub fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlockTemplate> {
     let current = format.title_block.template;
     let asme_format =
         format.frame_convention() == crate::state::DrawingSheetFrameConvention::AsmeY141;
@@ -165,7 +165,7 @@ fn choice_row<T: Copy + PartialEq>(
 
 /// A change to a property the whole schematic shares, every sheet of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SchematicEdit {
+pub enum SchematicEdit {
     Grid(SchematicGridPitch),
     NetNameCharacters(NetNamingPolicy),
 }
@@ -202,7 +202,11 @@ fn schematic_section(ui: &mut Ui, model: &Model, editable: bool, edit: &mut Opti
 /// Apply a schematic-wide change as one undo step. A new grid moves the
 /// editor's snap with it, as Grid, snap and wire routing does, and asks that
 /// design's snap follow it.
-fn apply_schematic_edit(model: &mut Model, workbench: &mut WorkbenchSession, edit: SchematicEdit) {
+pub fn apply_schematic_edit(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    edit: SchematicEdit,
+) {
     let changed = match edit {
         SchematicEdit::Grid(pitch) => {
             let changed = model.schematic.change_grid_pitch(pitch);
@@ -524,7 +528,7 @@ fn locked_by_organization(format: &SchematicSheetFormat, field: DrawingSheetTitl
 
 /// What `field` holds where it is kept — the document control, the project,
 /// or this sheet — as the panel edits it.
-fn stored_title_value(
+pub fn stored_title_value(
     model: &Model,
     format: &SchematicSheetFormat,
     field: DrawingSheetTitleFieldId,
@@ -761,14 +765,9 @@ fn checks_section(ui: &mut Ui, model: &Model) {
 }
 
 /// The template's one name on `format`'s sheet, as every surface gives it.
-fn template_name(
+pub fn template_name(
     format: &SchematicSheetFormat,
     template: DrawingSheetTitleBlockTemplate,
 ) -> &'static str {
     format.title_block_template_label(template)
 }
-
-// The panel's tests paint through the native-only inspector harness, and
-// the browser runner runs no plain test.
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests;

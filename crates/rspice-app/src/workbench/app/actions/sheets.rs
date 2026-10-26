@@ -23,16 +23,16 @@ use crate::workbench::state::WorkbenchSession;
 
 /// One sheet as the navigation surfaces present it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) struct SheetEntry {
-    pub(in crate::workbench) id: SheetId,
-    pub(in crate::workbench) name: String,
-    pub(in crate::workbench) page: u32,
+pub struct SheetEntry {
+    pub id: SheetId,
+    pub name: String,
+    pub page: u32,
 }
 
 /// What deleting a sheet would do, resolved before anything is committed so a
 /// confirmation can state the outcome instead of describing the button.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum SheetDeletePlan {
+pub enum SheetDeletePlan {
     LastSheet,
     Empty,
     Blocked {
@@ -45,13 +45,11 @@ pub(in crate::workbench) enum SheetDeletePlan {
     },
 }
 
-pub(in crate::workbench) fn active_sheet_catalog(
-    state: &impl AsRef<Model>,
-) -> Option<&SheetCatalog> {
+pub fn active_sheet_catalog(state: &impl AsRef<Model>) -> Option<&SheetCatalog> {
     state.as_ref().active_sheet_catalog()
 }
 
-pub(in crate::workbench) fn sheet_entries(state: &impl AsRef<Model>) -> Vec<SheetEntry> {
+pub fn sheet_entries(state: &impl AsRef<Model>) -> Vec<SheetEntry> {
     let Some(catalog) = active_sheet_catalog(state) else {
         return Vec::new();
     };
@@ -92,13 +90,13 @@ pub(crate) fn reveal_sheet_properties_on(
     *reveal_sheet_section = true;
 }
 
-pub(in crate::workbench) fn active_sheet_id(state: &impl AsRef<Model>) -> Option<SheetId> {
+pub fn active_sheet_id(state: &impl AsRef<Model>) -> Option<SheetId> {
     state.as_ref().active_sheet_id()
 }
 
 /// How many sheets the open drawing has. A drawing with no sheet catalog is
 /// one sheet drawn without one, and counts none here.
-pub(in crate::workbench) fn sheet_count(state: &impl AsRef<Model>) -> usize {
+pub fn sheet_count(state: &impl AsRef<Model>) -> usize {
     active_sheet_catalog(state).map_or(0, |catalog| catalog.sheets().len())
 }
 
@@ -114,7 +112,7 @@ pub(crate) fn activate_sheet(
     workbench.report(outcome)
 }
 
-pub(in crate::workbench) fn next_sheet(
+pub fn next_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     gesture: &mut (impl CanvasGesturePort + ?Sized),
@@ -123,7 +121,7 @@ pub(in crate::workbench) fn next_sheet(
     workbench.report(outcome)
 }
 
-pub(in crate::workbench) fn previous_sheet(
+pub fn previous_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     gesture: &mut (impl CanvasGesturePort + ?Sized),
@@ -132,21 +130,8 @@ pub(in crate::workbench) fn previous_sheet(
     workbench.report(outcome)
 }
 
-/// [`Model::go_to_sheet`], stated on the status bar. Page navigation reaches
-/// it through [`next_sheet`] and [`previous_sheet`].
-#[cfg(test)]
-fn go_to_sheet(
-    model: &mut Model,
-    workbench: &mut WorkbenchSession,
-    gesture: &mut (impl CanvasGesturePort + ?Sized),
-    index: usize,
-) -> Result<String, String> {
-    let outcome = model.go_to_sheet(index, |model| gesture.let_go_of_canvas_gesture(model));
-    workbench.report(outcome)
-}
-
 /// Create a sheet after the active one and enter it.
-pub(in crate::workbench) fn new_sheet(
+pub fn new_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     gesture: &mut (impl CanvasGesturePort + ?Sized),
@@ -189,7 +174,7 @@ fn settle_drawing(
     }
 }
 
-pub(in crate::workbench) fn rename_sheet(
+pub fn rename_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     id: SheetId,
@@ -211,7 +196,7 @@ pub(in crate::workbench) fn rename_sheet(
 }
 
 /// What [`delete_sheet`] would do, under the catalog's own delete policy.
-pub(in crate::workbench) fn plan_delete(model: &Model, id: SheetId) -> SheetDeletePlan {
+pub fn plan_delete(model: &Model, id: SheetId) -> SheetDeletePlan {
     let Some(catalog) = model.active_sheet_catalog() else {
         return SheetDeletePlan::LastSheet;
     };
@@ -244,7 +229,7 @@ pub(in crate::workbench) fn plan_delete(model: &Model, id: SheetId) -> SheetDele
 /// The outcome is resolved first. A delete that would move objects onto the
 /// neighbouring sheet waits for a confirmation naming how many and where;
 /// any other outcome (an empty sheet, a refusal) is run, or reported, now.
-pub(in crate::workbench) fn delete_sheet(
+pub fn delete_sheet(
     pending: &mut Option<PendingSheetDelete>,
     model: &mut Model,
     workbench: &mut WorkbenchSession,
@@ -314,7 +299,7 @@ pub(in crate::workbench) fn commit_delete_sheet(
     outcome
 }
 
-pub(in crate::workbench) fn move_sheet(
+pub fn move_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     id: SheetId,
@@ -604,6 +589,3 @@ fn live_object_ids(model: &Model) -> Vec<u64> {
     ids.extend(schematic.document().probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
-
-#[cfg(test)]
-mod tests;

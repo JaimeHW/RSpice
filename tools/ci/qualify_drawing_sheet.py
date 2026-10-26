@@ -53,6 +53,8 @@ SHEET_SOURCE_SCOPES = (
     "crates/rspice-app/src/workbench/app/drawing_sheet_edit",
     "crates/rspice-app/src/workbench/docks/inspector/design/sheet.rs",
     "crates/rspice-app/src/workbench/docks/inspector/design/sheet",
+    "crates/rspice-app/src/feature_tests/sheets/sheet_edit.rs",
+    "crates/rspice-app/src/feature_tests/sheets/sheet_inspector.rs",
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy.rs",
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy",
     "crates/rspice-app/src/workbench/hardcopy_adapters",
@@ -383,8 +385,10 @@ def command_gates(
                 "--lib",
                 "--",
                 "drawing_sheet",
-                # The sheet's properties are edited in the inspector.
-                "inspector::design::sheet",
+                # The sheet's properties are edited in the inspector, one edit
+                # at a time; those cases run through the whole application.
+                "sheets::sheet_inspector",
+                "sheets::sheet_edit",
             ),
             97,
         ),

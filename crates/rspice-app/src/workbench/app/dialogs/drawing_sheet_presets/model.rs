@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 // The editor and its renderer both name these; they are the model's, not the
 // dialog's, so they are imported rather than defined and passed straight on.
-pub(super) use rspice_design_model::sheet_authoring::{StartingFrame, custom_format};
+pub use rspice_design_model::sheet_authoring::{StartingFrame, custom_format};
 use rspice_design_model::sheet_package::{
     DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPresetPackage,
     PortableDrawingSheetPreset, portable_from_preset,
@@ -111,7 +111,7 @@ pub(super) enum TransferMode {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) enum ImportResolution {
+pub enum ImportResolution {
     #[default]
     NewIdentity,
     MatchesByDigest,
@@ -123,22 +123,22 @@ pub(super) enum ImportResolution {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ImportCandidate {
-    pub(super) portable: PortableDrawingSheetPreset,
-    pub(super) selected: bool,
-    pub(super) resolution: ImportResolution,
+pub struct ImportCandidate {
+    pub portable: PortableDrawingSheetPreset,
+    pub selected: bool,
+    pub resolution: ImportResolution,
     pub(super) existing_id: Option<String>,
     pub(super) missing_managed_dependency: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PresetTransferState {
+pub struct PresetTransferState {
     pub(super) open: bool,
     pub(super) mode: TransferMode,
     pub(super) package_name: String,
-    pub(super) json: String,
+    pub json: String,
     pub(super) export_ids: BTreeSet<String>,
-    pub(super) import_candidates: Vec<ImportCandidate>,
+    pub import_candidates: Vec<ImportCandidate>,
     pub(super) reviewed_digest: Option<String>,
     pub(super) package_format: PresetPackageFormat,
     pub(super) include_builtin_frame_references: bool,
@@ -431,7 +431,7 @@ pub(super) fn imported_project_preset(
     }))
 }
 
-pub(super) fn all_visible_presets(
+pub fn all_visible_presets(
     project: &DesignManagementCatalog,
     personal: &DrawingSheetPersonalPreferences,
 ) -> Vec<DrawingSheetPreset> {

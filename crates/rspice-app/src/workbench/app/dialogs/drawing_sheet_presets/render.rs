@@ -17,7 +17,7 @@ use super::model::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PresetKey {
+pub struct PresetKey {
     pub(super) id: String,
     pub(super) scope: DrawingSheetPresetScope,
 }
@@ -36,7 +36,7 @@ pub(super) fn usage_key(scope: DrawingSheetPresetScope, id: &str) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum LibraryBodyAction {
+pub enum LibraryBodyAction {
     New,
     Import,
     Export,

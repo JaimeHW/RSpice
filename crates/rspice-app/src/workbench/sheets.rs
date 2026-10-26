@@ -8,8 +8,6 @@
 //! [`DesignPort`](crate::workbench::framework::feature::DesignPort).
 
 pub(crate) mod commands;
-#[cfg(test)]
-mod tests;
 
 use egui::Context;
 
@@ -188,7 +186,7 @@ fn schematic_editor_open(workbench: &WorkbenchSession, model: &Model) -> bool {
 
 /// How many sheets the open drawing has. A drawing with no sheet catalog is
 /// one sheet drawn without one, and counts none here.
-fn sheet_count(model: &Model) -> usize {
+pub fn sheet_count(model: &Model) -> usize {
     model
         .active_sheet_catalog()
         .map_or(0, |catalog| catalog.sheets().len())

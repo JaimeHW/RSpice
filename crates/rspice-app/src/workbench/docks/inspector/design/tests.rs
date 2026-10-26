@@ -113,7 +113,7 @@ fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     assert!(!editing_parameter_field(&app.state, id));
 }
 
-pub(super) fn accesskit_nodes(
+pub(crate) fn accesskit_nodes(
     mut add_contents: impl FnMut(&mut egui::Ui),
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
@@ -130,7 +130,7 @@ pub(super) fn accesskit_nodes(
 
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
+pub(crate) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
     fn walk(shape: &egui::epaint::Shape, into: &mut String) {
         match shape {
             egui::epaint::Shape::Text(painted) => {

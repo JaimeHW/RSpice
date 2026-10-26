@@ -70,15 +70,6 @@ pub(crate) enum DrawingSheetEdit {
     ChangeReference(String),
 }
 
-/// [`apply_drawing_sheet_edit_on`] over the whole state, as tests hold it.
-#[cfg(test)]
-pub(crate) fn apply_drawing_sheet_edit(
-    state: &mut crate::workbench::app_state::AppState,
-    edit: DrawingSheetEdit,
-) -> Result<String, String> {
-    apply_drawing_sheet_edit_on(&mut state.model, &state.workbench, edit)
-}
-
 /// Apply one property of the active sheet as one transaction, over the parts
 /// it reads and writes: the model the sheet is published into, and the
 /// session that says whether the sheet can be edited at all.
@@ -957,6 +948,3 @@ fn all_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
     ids.extend(document.probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
-
-#[cfg(test)]
-mod tests;

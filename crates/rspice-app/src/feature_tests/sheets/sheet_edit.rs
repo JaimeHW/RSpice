@@ -1,8 +1,15 @@
 //! What one sheet edit lands, as one undo entry, and what it refuses.
 
-use super::*;
-use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+use super::apply_drawing_sheet_edit;
+use crate::state::{
+    AuthoredDrawingSheetSize, DRAWING_SHEET_MIXED_SIZES_ADVISORY, DrawingSheetInheritance,
+    DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetStandard,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTransactionKind,
+    DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition, SheetId,
+    SheetPortPolicy, SheetTemplate,
+};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::drawing_sheet_edit::transaction::*;
 
 fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
     let mut app = RSpiceApp::test_instance();

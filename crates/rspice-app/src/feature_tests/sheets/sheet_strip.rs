@@ -8,14 +8,16 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use egui::{Context, Id, RawInput, Rect, Vec2, containers::panel::PanelState};
+use egui::{Context, Id, RawInput, Rect, Ui, Vec2, containers::panel::PanelState};
 
-use super::*;
 use crate::state::{
     Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::app_state::AppState;
+use crate::workbench::chrome::sheet_strip::*;
+use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 
 const VIEWPORT: Vec2 = Vec2::new(1_440.0, 900.0);
@@ -71,7 +73,7 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
 
 fn chrome_rows(ui: &mut Ui, app: &mut RSpiceApp) {
     let layout = LayoutSpec::resolve(VIEWPORT.x, VIEWPORT.y, &app.state.workbench);
-    super::super::document_bar::show(ui, app, layout);
+    crate::workbench::chrome::document_bar::show(ui, app, layout);
     show(ui, strip(&mut app.state), layout);
 }
 

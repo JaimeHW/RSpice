@@ -81,7 +81,7 @@ pub(in crate::workbench) mod actions;
 mod browser_history;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
-pub(in crate::workbench) mod drawing_sheet_edit;
+pub(crate) mod drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
 #[cfg(target_arch = "wasm32")]

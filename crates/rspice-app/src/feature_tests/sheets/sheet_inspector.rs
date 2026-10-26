@@ -2,21 +2,24 @@
 
 use std::collections::HashMap;
 
-use super::super::tests::{accesskit_nodes, painted_panel};
-use super::*;
+use super::apply_drawing_sheet_edit;
 use crate::state::{
-    DrawingSheetStandard, SchematicPageOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
+    DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition,
+    SheetPortPolicy, SheetTemplate,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::drawing_sheet_edit::apply_drawing_sheet_edit;
+use crate::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::docks::inspector::design::sheet::*;
+use crate::workbench::docks::inspector::design::tests::{accesskit_nodes, painted_panel};
 
 /// The sheet's section over `state`'s parts, as the sheets feature hands
 /// them to it.
 fn sheet_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let review_markers = state.design.schematic_visibility.review_markers;
-    super::sheet_panel(
+    crate::workbench::docks::inspector::design::sheet::sheet_panel(
         ui,
         SheetInspector {
             model: &mut state.model,

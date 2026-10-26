@@ -608,7 +608,7 @@ mod inline_instance;
 use inline_instance::*;
 
 // The sheet inspector, shown with nothing selected, lives in `design/sheet.rs`.
-pub(in crate::workbench) mod sheet;
+pub(crate) mod sheet;
 
 // =============================================================================
 // Multi-selection inspector
@@ -858,4 +858,4 @@ impl AppState {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

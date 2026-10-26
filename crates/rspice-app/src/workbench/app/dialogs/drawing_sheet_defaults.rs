@@ -54,9 +54,9 @@ pub(crate) struct DrawingSheetDefaultsDialogState {
     edit: Option<SchematicEditAuthority>,
     catalog_revision: u64,
     baseline_project: DrawingSheetProjectSettings,
-    draft_project: DrawingSheetProjectSettings,
+    pub draft_project: DrawingSheetProjectSettings,
     baseline_personal: DrawingSheetPersonalPreferences,
-    draft_personal: DrawingSheetPersonalPreferences,
+    pub draft_personal: DrawingSheetPersonalPreferences,
     target: DrawingSheetDefaultsTarget,
     error: Option<String>,
 }
@@ -194,15 +194,15 @@ pub(crate) fn render_drawing_sheet_defaults_dialog(
 /// ones drawn from it, which a new default redraws, and the ones with a
 /// format of their own, which it leaves as they are.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct DefaultReach {
-    following: Vec<String>,
-    own: Vec<String>,
+pub struct DefaultReach {
+    pub following: Vec<String>,
+    pub own: Vec<String>,
 }
 
 impl DefaultReach {
     /// The reach of the project default into the active schematic, when it
     /// has sheets for it to reach.
-    fn of(model: &Model) -> Option<Self> {
+    pub fn of(model: &Model) -> Option<Self> {
         let catalog = model
             .workspace
             .content
@@ -222,7 +222,7 @@ impl DefaultReach {
     }
 
     /// Which sheets follow the default, as the preview says it.
-    fn following_text(&self) -> String {
+    pub fn following_text(&self) -> String {
         match (self.following.is_empty(), self.own.is_empty()) {
             (true, _) => "no sheet".to_owned(),
             (false, true) if self.following.len() > 1 => "every sheet".to_owned(),
@@ -231,13 +231,13 @@ impl DefaultReach {
     }
 
     /// Which sheets keep a format of their own, when any do.
-    fn own_text(&self) -> Option<String> {
+    pub fn own_text(&self) -> Option<String> {
         (!self.own.is_empty()).then(|| sheet_names(&self.own))
     }
 }
 
 /// Up to three sheet names, and how many more there are.
-fn sheet_names(names: &[String]) -> String {
+pub fn sheet_names(names: &[String]) -> String {
     const SHOWN: usize = 3;
     let listed = names
         .iter()
@@ -255,7 +255,7 @@ fn sheet_names(names: &[String]) -> String {
 
 const SHELL_ROW1_H: f32 = 84.0;
 const CHIP_H: f32 = 26.0;
-const CHIP_GAP: f32 = 5.0;
+pub const CHIP_GAP: f32 = 5.0;
 const SERIES_LABEL_H: f32 = 15.0;
 const SERIES_GAP: f32 = 6.0;
 const CATALOG_PAD_X: f32 = 11.0;
@@ -266,18 +266,18 @@ const PREVIEW_W_NARROW: f32 = 252.0;
 const STACK_BREAKPOINT: f32 = 900.0;
 
 #[derive(Clone, Copy, PartialEq)]
-enum ChipAction {
+pub enum ChipAction {
     Standard(DrawingSheetStandard),
     Preset(usize),
     NewPreset,
 }
 
-struct ChipSpec {
-    strong: String,
-    dims: String,
-    action: ChipAction,
-    selected: bool,
-    natural_w: f32,
+pub struct ChipSpec {
+    pub strong: String,
+    pub dims: String,
+    pub action: ChipAction,
+    pub selected: bool,
+    pub natural_w: f32,
 }
 
 struct ChipSeries {
@@ -820,7 +820,7 @@ fn build_chip_series(
     series_list
 }
 
-fn pack_chip_rows(chips: &[ChipSpec], avail: f32) -> Vec<Vec<usize>> {
+pub fn pack_chip_rows(chips: &[ChipSpec], avail: f32) -> Vec<Vec<usize>> {
     let mut rows: Vec<Vec<usize>> = Vec::new();
     let mut row: Vec<usize> = Vec::new();
     let mut used = 0.0;
@@ -1605,7 +1605,7 @@ fn new_sheet_policy_note(value: DrawingSheetNewSheetPolicy) -> &'static str {
 /// Keep the requested presentation whenever it still fits. The fallback is
 /// the base's own valid title block; format selection must never panic or
 /// leave a corrupt draft.
-fn retarget_default_to_standard(
+pub fn retarget_default_to_standard(
     source: &SchematicSheetFormat,
     standard: DrawingSheetStandard,
 ) -> SchematicSheetFormat {
@@ -1615,7 +1615,7 @@ fn retarget_default_to_standard(
     )
 }
 
-fn retarget_default(
+pub fn retarget_default(
     source: &SchematicSheetFormat,
     base: SchematicSheetFormat,
 ) -> SchematicSheetFormat {
@@ -1684,7 +1684,7 @@ fn validate_project_authority(
     Ok(())
 }
 
-fn apply_drawing_sheet_defaults(
+pub fn apply_drawing_sheet_defaults(
     defaults: &DrawingSheetDefaultsDialogState,
     model: &mut Model,
 ) -> Result<String, String> {
@@ -1755,7 +1755,7 @@ fn apply_drawing_sheet_defaults(
     })
 }
 
-fn enforce_managed_default_authority(
+pub fn enforce_managed_default_authority(
     candidate: &mut SchematicSheetFormat,
     authority: &SchematicSheetFormat,
 ) {
@@ -1796,417 +1796,4 @@ pub(super) fn commit_project_candidate(
         committed_revision,
     });
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workbench::app::RSpiceApp;
-
-    /// A format reaches several sheets through the project default: a new
-    /// default is the new format of every sheet that follows it, a sheet with
-    /// a format of its own keeps it, and the dialog names both.
-    #[test]
-    fn a_new_project_default_redraws_the_sheets_that_follow_it() {
-        use crate::state::{
-            DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy, SheetTemplate,
-        };
-
-        let mut app = RSpiceApp::test_instance();
-        assert_eq!(DefaultReach::of(&app.state.model), None);
-        let key = app.state.model.workspace.content.active_key();
-        let designs = &mut app.state.model.workspace.content.design_management;
-        let first = designs
-            .bootstrap_for_cell_view(&key, "Sheet 1", [])
-            .unwrap();
-        let default = designs.drawing_sheet_settings().default_format.clone();
-        let catalog = designs.sheet_catalog_mut(&key).unwrap();
-        let second = catalog
-            .create_sheet(
-                SheetDefinition {
-                    name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
-                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                    explicit_page_number: Some(2),
-                },
-                Some(first),
-            )
-            .unwrap();
-        let titled = |format: &SchematicSheetFormat, title: &str, inheritance| {
-            format
-                .try_update(|draft| {
-                    draft.inheritance = inheritance;
-                    draft
-                        .title_block
-                        .fields
-                        .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
-                        .unwrap()
-                        .value = title.to_owned();
-                })
-                .unwrap()
-        };
-        let following = titled(&default, "Sheet 1", DrawingSheetInheritance::ProjectDefault);
-        let own = titled(
-            &SchematicSheetFormat::from_standard(
-                DrawingSheetStandard::IsoA3,
-                SchematicPageOrientation::Landscape,
-            ),
-            "Sheet 2",
-            DrawingSheetInheritance::Explicit,
-        );
-        for (sheet, format) in [(first, following), (second, own)] {
-            let current = catalog.find(sheet).unwrap();
-            if current.page_format() != &format {
-                let revision = current.revision();
-                catalog
-                    .update_sheet_page_format(sheet, revision, format)
-                    .unwrap();
-            }
-        }
-        catalog.set_active(first).unwrap();
-
-        let reach = DefaultReach::of(&app.state.model).unwrap();
-        assert_eq!(reach.following_text(), "Sheet 1");
-        assert_eq!(reach.own_text().as_deref(), Some("Sheet 2"));
-
-        open_drawing_sheet_defaults(
-            &mut app.state.sheets.drawing_sheet_defaults,
-            &app.state.model,
-        );
-        app.state
-            .sheets
-            .drawing_sheet_defaults
-            .draft_project
-            .default_format = SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::AnsiA,
-            SchematicPageOrientation::Landscape,
-        )
-        .try_update(|draft| draft.inheritance = DrawingSheetInheritance::ProjectDefault)
-        .unwrap();
-        apply_drawing_sheet_defaults(
-            &app.state.sheets.drawing_sheet_defaults,
-            &mut app.state.model,
-        )
-        .unwrap();
-
-        let drawn = |app: &RSpiceApp| {
-            app.state
-                .model
-                .active_drawing_sheet()
-                .format
-                .authored_size
-                .label()
-                .to_owned()
-        };
-        assert_eq!(drawn(&app), "ANSI A");
-        app.state
-            .model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog_mut(&key)
-            .unwrap()
-            .set_active(second)
-            .unwrap();
-        assert_eq!(drawn(&app), "ISO A3");
-    }
-
-    /// The preview names the sheets a default reaches briefly enough to read
-    /// under it.
-    #[test]
-    fn the_sheets_a_default_reaches_are_named_briefly() {
-        let names = |count: usize| {
-            (1..=count)
-                .map(|page| format!("Sheet {page}"))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            sheet_names(&names(5)),
-            "Sheet 1, Sheet 2, Sheet 3 and 2 more"
-        );
-        let every = DefaultReach {
-            following: names(4),
-            own: Vec::new(),
-        };
-        assert_eq!(every.following_text(), "every sheet");
-        assert_eq!(every.own_text(), None);
-        let none = DefaultReach {
-            following: Vec::new(),
-            own: names(2),
-        };
-        assert_eq!(none.following_text(), "no sheet");
-        assert_eq!(none.own_text().as_deref(), Some("Sheet 1, Sheet 2"));
-    }
-
-    #[test]
-    fn unchanged_defaults_are_a_real_no_op() {
-        let mut app = RSpiceApp::test_instance();
-        open_drawing_sheet_defaults(
-            &mut app.state.sheets.drawing_sheet_defaults,
-            &app.state.model,
-        );
-        let revision = app
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .revision();
-
-        assert_eq!(
-            apply_drawing_sheet_defaults(
-                &app.state.sheets.drawing_sheet_defaults,
-                &mut app.state.model
-            )
-            .unwrap(),
-            "Drawing-sheet defaults already matched the saved values."
-        );
-        assert_eq!(
-            app.state
-                .model
-                .workspace
-                .content
-                .design_management
-                .revision(),
-            revision
-        );
-    }
-
-    #[test]
-    fn project_default_is_one_history_transaction_and_personal_uses_preferences() {
-        let mut app = RSpiceApp::test_instance();
-        open_drawing_sheet_defaults(
-            &mut app.state.sheets.drawing_sheet_defaults,
-            &app.state.model,
-        );
-        app.state
-            .sheets
-            .drawing_sheet_defaults
-            .draft_project
-            .default_format = SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::AnsiA,
-            SchematicPageOrientation::Landscape,
-        )
-        .try_update(|draft| {
-            draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
-        })
-        .unwrap();
-        app.state
-            .sheets
-            .drawing_sheet_defaults
-            .draft_personal
-            .default_format = SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::JisB4,
-            SchematicPageOrientation::Portrait,
-        )
-        .try_update(|draft| {
-            draft.inheritance = crate::state::DrawingSheetInheritance::UserDefault;
-        })
-        .unwrap();
-
-        let before = app
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .revision();
-        apply_drawing_sheet_defaults(
-            &app.state.sheets.drawing_sheet_defaults,
-            &mut app.state.model,
-        )
-        .unwrap();
-
-        assert_eq!(
-            app.state
-                .model
-                .workspace
-                .content
-                .design_management
-                .revision(),
-            before + 1
-        );
-        assert!(app.state.model.can_undo_project_design());
-        assert_eq!(
-            app.state
-                .model
-                .preferences
-                .drawing_sheet_personal_preferences()
-                .default_format
-                .authored_size
-                .label(),
-            "JIS B4"
-        );
-    }
-
-    #[test]
-    fn managed_default_properties_are_reapplied_at_commit_without_locking_orientation() {
-        let mut app = RSpiceApp::test_instance();
-        let mut settings = app
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .clone();
-        settings.default_format = settings
-            .default_format
-            .try_update(|draft| {
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
-            })
-            .unwrap();
-        let revision = app
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .revision();
-        app.state
-            .model
-            .workspace
-            .content
-            .design_management
-            .update_drawing_sheet_settings(revision, settings)
-            .unwrap();
-        open_drawing_sheet_defaults(
-            &mut app.state.sheets.drawing_sheet_defaults,
-            &app.state.model,
-        );
-        let draft = &mut app
-            .state
-            .sheets
-            .drawing_sheet_defaults
-            .draft_project
-            .default_format;
-        *draft = draft
-            .try_update(|draft| {
-                draft.apply_border_template(DrawingSheetBorderTemplate::None);
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::None;
-                draft.orientation = SchematicPageOrientation::Portrait;
-            })
-            .unwrap();
-
-        apply_drawing_sheet_defaults(
-            &app.state.sheets.drawing_sheet_defaults,
-            &mut app.state.model,
-        )
-        .unwrap();
-
-        let saved = &app
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .default_format;
-        // Only the title block is managed; the border stays as edited.
-        assert_eq!(saved.border, DrawingSheetBorderTemplate::None);
-        assert_eq!(
-            saved.title_block.template,
-            DrawingSheetTitleBlockTemplate::OrganizationManaged
-        );
-        assert_eq!(saved.orientation, SchematicPageOrientation::Portrait);
-    }
-
-    #[test]
-    fn a_managed_default_title_block_locks_only_the_title_block() {
-        let title_authority = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
-            })
-            .unwrap();
-        let mut title_candidate = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.apply_border_template(DrawingSheetBorderTemplate::None);
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::None;
-            })
-            .unwrap();
-        enforce_managed_default_authority(&mut title_candidate, &title_authority);
-        assert_eq!(title_candidate.border, DrawingSheetBorderTemplate::None);
-        assert_eq!(
-            title_candidate.title_block.template,
-            DrawingSheetTitleBlockTemplate::OrganizationManaged
-        );
-    }
-
-    #[test]
-    fn changing_default_standard_keeps_the_title_block() {
-        let source = SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::IsoA0,
-            SchematicPageOrientation::Landscape,
-        );
-
-        let retargeted = retarget_default_to_standard(&source, DrawingSheetStandard::IsoA4);
-
-        assert_eq!(
-            retargeted.authored_size,
-            AuthoredDrawingSheetSize::Standard {
-                standard: DrawingSheetStandard::IsoA4,
-            }
-        );
-        assert_eq!(retargeted.title_block.template, source.title_block.template);
-        retargeted.validate().unwrap();
-    }
-
-    #[test]
-    fn retargeting_to_a_preset_keeps_the_records_presentation() {
-        let source = SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::IsoA4,
-            SchematicPageOrientation::Portrait,
-        )
-        .try_update(|draft| {
-            draft.display_unit = DrawingSheetDisplayUnit::Inches;
-            draft.apply_border_template(DrawingSheetBorderTemplate::None);
-        })
-        .unwrap();
-        let base = SchematicSheetFormat::try_custom(
-            "Lab panel",
-            250_000,
-            400_000,
-            SchematicPageOrientation::Portrait,
-        )
-        .unwrap();
-
-        let retargeted = retarget_default(&source, base);
-
-        assert!(matches!(
-            retargeted.authored_size,
-            AuthoredDrawingSheetSize::Custom { .. }
-        ));
-        assert_eq!(retargeted.orientation, SchematicPageOrientation::Portrait);
-        assert_eq!(retargeted.display_unit, DrawingSheetDisplayUnit::Inches);
-        assert_eq!(retargeted.border, DrawingSheetBorderTemplate::None);
-        retargeted.validate().unwrap();
-    }
-
-    #[test]
-    fn chip_rows_pack_within_the_row_and_stretch_never_drops_a_chip() {
-        let chips: Vec<ChipSpec> = (0..7)
-            .map(|index| ChipSpec {
-                strong: format!("chip {index}"),
-                dims: String::new(),
-                action: ChipAction::NewPreset,
-                selected: false,
-                natural_w: 120.0,
-            })
-            .collect();
-        let rows = pack_chip_rows(&chips, 400.0);
-        assert_eq!(rows.iter().map(Vec::len).sum::<usize>(), chips.len());
-        assert!(rows.iter().all(|row| {
-            let natural: f32 = row.len() as f32 * 120.0 + (row.len() - 1) as f32 * CHIP_GAP;
-            natural <= 400.0
-        }));
-        // A chip wider than the whole row still lands on its own row.
-        let wide = vec![ChipSpec {
-            strong: "wide".to_owned(),
-            dims: String::new(),
-            action: ChipAction::NewPreset,
-            selected: false,
-            natural_w: 900.0,
-        }];
-        assert_eq!(pack_chip_rows(&wide, 400.0).len(), 1);
-    }
 }
