@@ -321,7 +321,7 @@ impl PstbResult {
     /// These are the result's own invariants, not a consumer's. Before this
     /// existed, one caller — the Studio's PSTB service — re-derived all of
     /// them and refused the result when they disagreed, which meant the
-    /// command line, python and the browser shipped a *weaker* guarantee than
+    /// command line and the browser shipped a *weaker* guarantee than
     /// the GUI for the same numbers. The analyzer establishes them here
     /// instead, so every route inherits the same refusal.
     ///

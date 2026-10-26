@@ -1,9 +1,9 @@
 //! One S-matrix extraction, shared by every front-end.
 //!
 //! Driving each port in turn and reading the response is identical work whether
-//! the request came from the CLI, the Python bindings, or the desktop runner,
-//! and it used to exist as three hand-rolled copies of the same sweep. They had
-//! already drifted: two discovered ports from the deck while the third injected
+//! the request came from the CLI or the desktop runner, and it used to exist
+//! as hand-rolled copies of the same sweep. They had already drifted: the CLI
+//! discovered ports from the deck while the desktop runner injected
 //! its own ideal sources at nodes named in a dialog — which would have shorted
 //! out the reference impedance of any port that was already a real one.
 //!

@@ -1,9 +1,7 @@
 //! N-port admittance-to-scattering conversion with per-port reference impedances.
 //!
-//! This is the shared implementation behind every front-end's `.SP` support.
-//! It previously existed as three independent copies — one each in the Python
-//! bindings, the CLI, and the desktop runner — which had already drifted in
-//! their handling of a singular normalization matrix.
+//! This is the shared implementation behind every front-end's `.SP` support,
+//! so a singular normalization matrix is handled the same way on every route.
 //!
 //! # Convention
 //!

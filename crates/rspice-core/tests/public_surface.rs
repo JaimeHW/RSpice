@@ -1,7 +1,7 @@
 //! Ratchet the core's public item declarations against reviewed frontend needs.
 //!
 //! New implementation helpers should use restricted visibility. Public APIs
-//! should serve a frontend contract: CLI, Studio, Python, WASM, or conformance.
+//! should serve a frontend contract: CLI, Studio, WASM, or conformance.
 //! Raising the ceiling requires explaining the intended caller in the commit,
 //! or showing that a move preserves public names and only adds re-exports.
 //!
@@ -39,13 +39,13 @@ use rspice_core::analysis::harmonic_balance::{
 ///   `rspice-simulation-contract::envelope_multirate` and the simulation
 ///   service's `engine_services::envelope_fourier::multirate` driver.
 /// - Authored DC/frequency-table execution and QPSS/QPAC/QPXF/QPNOISE payloads:
-///   CLI run commands, Python/WASM deck execution, and simulation results.
+///   CLI run commands, WASM deck execution, and simulation results.
 /// - Typed elaboration/compiler diagnostics and input-data dependencies:
-///   CLI check/run, Python errors, simulation model compilation and XSPICE.
+///   CLI check/run, simulation model compilation and XSPICE.
 /// - Bounded RAW/VCD readers, table-unit metadata and exact tick conversion:
 ///   CLI waveform import, clipping, conversion and result comparison.
 /// - Retained impulses, correlated noise and observation vocabulary:
-///   Python results, simulation transport and result-document consumers.
+///   simulation transport and result-document consumers.
 /// - Model-catalog matching and authored-analysis options:
 ///   CLI models/run and the shared frontend execution contracts.
 /// - Seven frequency-table document statements retain CLI/WASM AC/noise row
@@ -80,7 +80,7 @@ use rspice_core::analysis::harmonic_balance::{
 // - rspice-cli: control analysis naming and support checks, Touchstone
 //   versions, numeric JSON documents and decimal rounding checks, RAW axis and
 //   coordinate validation, circuit storage re-exports, circuit-pole evidence.
-// - rspice-python, rspice-results, rspice-formats, rspice-engine-adapter and
+// - rspice-results, rspice-formats, rspice-engine-adapter and
 //   rspice-simulation-contract: stability verdicts and assessments, pole
 //   spectra, voltage impulse traces, Monte Carlo documents with units, the
 //   document version, and frequency-table parameter names.
@@ -92,8 +92,7 @@ use rspice_core::analysis::harmonic_balance::{
 // Four structured-refusal statements: the `for_analysis_kind`, `for_instance`
 // and `for_module` builders on `UnsupportedCapabilityError` and the
 // `SimulationError::instance_name` accessor, read by the CLI error payload
-// (`rspice-cli` cli/error.rs), the Python error attributes
-// (`rspice-python` errors/simulation.rs) and the typed simulation refusal
+// (`rspice-cli` cli/error.rs) and the typed simulation refusal
 // (`rspice-simulation` error.rs). The census was 5,659, with no slack.
 // Moving the result-document scalars below `engine` (so the control host
 // stops reaching up into `execution`) keeps every public name and adds two
@@ -140,8 +139,7 @@ use rspice_core::analysis::harmonic_balance::{
 // `ContinuationFailure`, carried by `SimulationError::ContinuationFailed`,
 // and the `ContinuationAid` and `ContinuationStage` it names. Enum variant
 // payloads must be public; the simulation bridge (`rspice-simulation`
-// error.rs) and the Python exception mapping (`rspice-python`
-// errors/simulation.rs) read the variant. The census was 5,695 under a
+// error.rs) reads the variant. The census was 5,695 under a
 // ceiling of 5,698.
 // Small-signal analyses around a transient state (`ACTIMES=`/`CHECKPOINT=`)
 // add eight statements for the CLI run command and the simulation service:
@@ -347,14 +345,14 @@ use rspice_core::analysis::harmonic_balance::{
 // checkpointed or resumed transient ended, at its stop time with the
 // checkpoint that extends it or at a model's `$finish`, `$stop` or `$fatal`
 // with none, which `Engine::run_tran_checkpointed` and `run_tran_resume`
-// return and the CLI's `--checkpoint`, the Python bindings and the PSS and HB
-// continuations read. The census is 5,455, with no slack.
+// return and the CLI's `--checkpoint` and the PSS and HB continuations
+// read. The census is 5,455, with no slack.
 // One civil calendar and one rawfile writer add five, each replacing private
 // copies in the frontends: `time_compat::civil_from_unix_days`, which the
 // hardcopy timestamp and the app's licence dates call, and `asctime_utc`, the
-// Python binding's raw `Date:`; `raw_export::write_raw_plot`, its
-// `RawPlotLayout` and `write_raw_exponent`, through which the CLI table
-// export and the Python binding write their real and complex plots. The
+// rawfile's `Date:`; `raw_export::write_raw_plot`, its `RawPlotLayout` and
+// `write_raw_exponent`, through which the CLI table export writes its real
+// and complex plots. The
 // census is 5,460, with no slack.
 // The HSPICE `.VEC` card adds three: `netlist::VectorFileReference` (its
 // struct and its re-export), the card that `Netlist::vector_files` lists and

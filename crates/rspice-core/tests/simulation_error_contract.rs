@@ -1,7 +1,7 @@
 //! The published contract of the engine's typed error taxonomy.
 //!
-//! Every frontend — the CLI's exit codes, the Python exception classes, the
-//! WASM error objects, the engine adapter's wire codes — derives its behavior
+//! Every frontend — the CLI's exit codes, the WASM error objects, the engine
+//! adapter's wire codes — derives its behavior
 //! from [`SimulationError::descriptor`]. These tests pin the round trip from
 //! variant to code and category, exhaustively, so a new variant cannot reach a
 //! frontend without a deliberate decision about what it means.

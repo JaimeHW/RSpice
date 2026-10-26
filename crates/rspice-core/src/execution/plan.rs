@@ -924,8 +924,8 @@ impl DeckPlan {
 
     /// Plan one analysis family for a direct, non-deck run.
     ///
-    /// A frontend that runs an analysis outside a deck — a browser API call, a
-    /// Python `Engine.run_ac`, an attached `.FFT` spectrum — still publishes a
+    /// A frontend that runs an analysis outside a deck — a browser API call, an
+    /// attached `.FFT` spectrum — still publishes a
     /// result document, and that document needs the same canonical `ac-001`
     /// style identity a deck run would give it. This is the sanctioned way to
     /// get one: [`AnalysisInstanceId`] has no public constructor precisely so

@@ -3431,7 +3431,7 @@ fn discontinuous_rlc_orbit_preserves_winding_flux_in_wasm() {
         .unwrap();
     let result = &analysis.result;
     // Initial values from the exact two-state exp(A*t) periodic solution;
-    // the native and Python regressions compare the complete waveform.
+    // the native regressions compare the complete waveform.
     for (name, initial) in [("out", 0.09862296652380287), ("load", 0.07147347879650891)] {
         let node = result
             .node_names

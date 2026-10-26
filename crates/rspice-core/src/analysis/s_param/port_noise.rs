@@ -6,13 +6,10 @@
 //! converting scattering to admittance and deriving the standard noise
 //! parameters at every frequency.
 //!
-//! That assembly used to live in the CLI and the Python bindings, in two
-//! copies that agreed by inspection but disagreed about the one thing that
-//! matters: what to do when the two-port derivation has no physical solution.
-//! One surface refused the sweep, the other published NaNs next to a validity
-//! flag a caller could ignore. This module is that operation, with one
-//! validity policy: an undefined two-port parameter set is a typed failure
-//! naming the frequency it occurred at. A noise figure that is quietly wrong
+//! This module is that operation, with one validity policy for when the
+//! two-port derivation has no physical solution: an undefined two-port
+//! parameter set is a typed failure naming the frequency it occurred at, never
+//! NaNs next to a validity flag a caller could ignore. A noise figure that is quietly wrong
 //! is worse than one that is visibly absent, because it will be believed.
 
 use thiserror::Error;

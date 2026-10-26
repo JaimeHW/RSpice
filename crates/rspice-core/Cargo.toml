@@ -8,8 +8,8 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
-# parallel ships in the default set so the CLI, Python bindings,
-# and the default test configuration all exercise the fast paths;
+# parallel ships in the default set so the CLI and the default test
+# configuration both exercise the fast paths;
 # the browser builds opt out via default-features = false.
 default = ["faer-parallel", "parallel"]
 wasm = [

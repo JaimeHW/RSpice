@@ -141,7 +141,7 @@ impl AnalysisKind {
     ///
     /// `None` means that no shared result-document schema is bound to this
     /// kind. An engine or Studio entry point may exist without a
-    /// CLI/Python/WASM document projection; a registry row must not claim that
+    /// CLI/WASM document projection; a registry row must not claim that
     /// projection prematurely.
     pub const fn result_kind(self) -> Option<AnalysisResultKind> {
         Some(match self {

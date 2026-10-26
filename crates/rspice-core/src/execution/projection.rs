@@ -10,8 +10,8 @@
 //! signals the result actually materialized, and — for the two families that
 //! own a core ordered-output resolver — the columns that resolver produced for
 //! the `.PRINT`/`.PLOT` cards. Nothing else about a `.SAVE` symbol is decided
-//! outside this module, so the CLI, the Python bindings, and the engine
-//! adapter cannot disagree about what a deck asked for.
+//! outside this module, so the CLI and the engine adapter cannot disagree
+//! about what a deck asked for.
 //!
 //! An authored symbol the analysis cannot supply is a typed
 //! [`SimulationError::RequestedSignalUnavailable`] naming the original

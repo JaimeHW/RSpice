@@ -1058,8 +1058,8 @@ fn touchstone_schema(ports: usize) -> Result<SignalSchema, CliError> {
 /// Write an N-port Touchstone file through the shared core writer.
 ///
 /// Formatting, the option line, and the mixed-reference-impedance refusal all
-/// live in `rspice_core`, so a deck exported here and through the Python
-/// bindings produces the same bytes.
+/// live in `rspice_core`, so a deck exported here and through any other
+/// surface produces the same bytes.
 fn write_touchstone_nport(
     path: &std::path::Path,
     ports: &[s_param::SParameterPort],

@@ -2,11 +2,11 @@
 
 The simulation engine: netlist parsing, device models, circuit assembly,
 Newton-Raphson solving, and the analysis algorithms. The CLI, the desktop and
-browser application, the Python and WebAssembly bindings, and the cloud engine
-adapter all solve a deck through this one crate. It decides analysis identity,
-result shape and failure classification; how a result is printed, which exit
-status a failure maps to, and how a command line configures a run belong to
-the frontends.
+browser application, the WebAssembly bindings, and the cloud engine adapter
+all solve a deck through this one crate. It decides analysis identity, result
+shape and failure classification; how a result is printed, which exit status a
+failure maps to, and how a command line configures a run belong to the
+frontends.
 
 ## Architecture
 
@@ -161,7 +161,7 @@ shooting `.PSS` and takes none.
 - `Engine::new(SimulationConfig)` or `Engine::default()`, then its `run_*`
   methods. Each analysis family has variants that take an `&dyn AbortSignal`
   (`_with_abort`, `_and_abort`); frontends call those, which is what backs
-  Ctrl-C in the CLI and `KeyboardInterrupt` in Python.
+  Ctrl-C in the CLI.
 - `SimulationConfig`, `ConvergenceConfig`, `ConvergencePreset` and
   `SpiceDialect`: tolerances, convergence aids, and the dialect
   (best-available, ngspice or Xyce) whose semantics apply.
@@ -198,8 +198,8 @@ shooting `.PSS` and takes none.
 
 - **Result document.** `execution::AnalysisResultDocument`, identified by
   `ANALYSIS_RESULT_DOCUMENT_SCHEMA` and `ANALYSIS_RESULT_DOCUMENT_VERSION`, is
-  the one typed result every frontend publishes. The CLI, Python, WebAssembly
-  and engine-adapter surfaces format it and define none of their own.
+  the one typed result every frontend publishes. The CLI, WebAssembly and
+  engine-adapter surfaces format it and define none of their own.
 - **Transient checkpoints.** `engine::TransientCheckpoint` is versioned,
   line-oriented text whose floats round-trip bit-exactly;
   `TransientCheckpointEncoding::Packed` wraps a zlib-compressed copy in a

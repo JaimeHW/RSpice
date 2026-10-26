@@ -5,8 +5,8 @@
 //! [`SimulationError`] is the one typed failure channel the engine offers its
 //! frontends. Every variant answers [`SimulationError::descriptor`] with a
 //! stable [`SimulationErrorCode`] and a coarser [`SimulationErrorCategory`],
-//! and the categories are the contract a CLI exit code, a Python exception
-//! class, a WASM error object, or an engine-adapter wire code is derived from.
+//! and the categories are the contract a CLI exit code, a WASM error object,
+//! or an engine-adapter wire code is derived from.
 //! A frontend that branches on the display message is reading the wrong thing.
 //!
 //! The categories separate failures that call for different operator action:
@@ -986,8 +986,7 @@ pub enum SimulationError {
     /// a consumer reads [`ElaborationErrorKind`] instead of matching prose,
     /// and so one class of failure cannot be a circuit error at one site and
     /// a netlist error at the next. Its descriptor is the kind's, so the exit
-    /// code and the Python exception attributes follow the classification
-    /// rather than the variant.
+    /// code follows the classification rather than the variant.
     #[error(transparent)]
     Elaboration(Box<ElaborationError>),
 

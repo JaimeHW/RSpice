@@ -485,10 +485,10 @@ fn a_source_the_compiler_refuses_is_a_compile_refusal_at_that_file() {
 /// Every kind a deck reaches is a netlist failure, and the two it cannot are
 /// simulation failures.
 ///
-/// This is the classification a CLI turns into an exit status and a Python
-/// binding into an exception class. It used to follow the variant each site
-/// happened to pick, which is why a wrong terminal count exited as a failed
-/// simulation and a missing file as bad input.
+/// This is the classification a CLI turns into an exit status. It used to
+/// follow the variant each site happened to pick, which is why a wrong
+/// terminal count exited as a failed simulation and a missing file as bad
+/// input.
 #[test]
 fn the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures() {
     for kind in [
@@ -564,8 +564,8 @@ fn the_rendering_names_the_span_the_instance_and_the_master_before_the_reason() 
     );
 }
 
-/// The kind tokens are a wire contract: the UI, the Python binding and any
-/// regression suite branch on them, so they may not drift with a rename.
+/// The kind tokens are a wire contract: the UI and any regression suite
+/// branch on them, so they may not drift with a rename.
 #[test]
 fn every_kind_has_a_distinct_stable_token() {
     let tokens = [

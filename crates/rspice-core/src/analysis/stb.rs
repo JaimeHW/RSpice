@@ -124,8 +124,8 @@ impl std::error::Error for StbConfigError {}
 
 /// The one place an authored `.STB` card becomes a configuration.
 ///
-/// `rspice run`, the Python bindings, the WASM deck runner, the engine adapter
-/// and the Studio all reach the analysis through this conversion, so a keyword
+/// `rspice run`, the WASM deck runner, the engine adapter and the Studio all
+/// reach the analysis through this conversion, so a keyword
 /// the card carries cannot be honoured on one route and dropped on another —
 /// which is exactly what five hand-written builder chains used to do with the
 /// Nyquist contour. The result is validated here, so a caller that gets a

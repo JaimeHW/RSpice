@@ -68,7 +68,7 @@
 //! - **`HBINT NUMFREQ`** — read, but not on the route a Studio run takes. The
 //!   only reader is `HbConfig::from_hb_card`
 //!   (`rspice-core/src/analysis/harmonic_balance/config.rs:328`), which the
-//!   command line, the Python bindings, the browser API and the engine adapter
+//!   command line, the browser API and the engine adapter
 //!   use to translate a deck. The Studio builds its `HbConfig` from the HB
 //!   form's own per-tone Harmonics field instead
 //!   (`services/simulation_runner/hb.rs:359`), so a harmonic order authored

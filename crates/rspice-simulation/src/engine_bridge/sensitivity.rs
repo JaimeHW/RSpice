@@ -3,8 +3,8 @@
 //! The Studio runs the same two entries every other surface runs —
 //! `Engine::run_sensitivity_dc_complete_with_abort` and
 //! `…_ac_complete_with_abort` — with the card's own filter list and the
-//! card's own frequency grid. One deck therefore has one answer here, in
-//! `rspice run`, in Python and in the bindings, under one set of names.
+//! card's own frequency grid. One deck therefore has one answer here and in
+//! `rspice run`, under one set of names.
 //!
 //! What this file does not do is compute anything. It resolves the probe,
 //! builds the grid with the engine's own sweep function, hands both to the

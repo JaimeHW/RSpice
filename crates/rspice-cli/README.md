@@ -110,8 +110,8 @@ end in `ACTIMES=` or `CHECKPOINT=` linearize around a transient state instead
 of the operating point.
 
 The carrier a periodic or quasi-periodic card binds to is decided by the
-canonical deck plan, the same binding the Python, browser and engine-adapter
-surfaces use. A dependent card whose carrier is missing, such as `.PSTB` with no
+canonical deck plan, the same binding the browser and engine-adapter surfaces
+use. A dependent card whose carrier is missing, such as `.PSTB` with no
 preceding `.PSS` or `.ENVELOPE` with no preceding `.HB`, refuses the deck before
 anything is solved. Each carrier is solved once, and every card bound to it
 reuses its exact numerical state.
@@ -360,7 +360,7 @@ per operand: `.FOUR 1k V(out) I(V1)` writes `four-001` and `four-002`.
 ### `json`: the shared typed result document
 
 `-f json` publishes the shared `rspice-analysis-result` document, the typed
-result the Python, browser and engine-adapter surfaces also publish. It carries
+result the browser and engine-adapter surfaces also publish. It carries
 the analysis instance, the coordinate and topology fingerprint it was produced
 at, typed axes, one series per signal with a descriptor (canonical name, display
 spelling, kind, unit, value type and owner), family-specific scalars and a
@@ -456,9 +456,8 @@ module, is written as one `$var wire N` named `bus [msb:lsb]`, bits most
 significant first and `x` for a member not yet stated, with no member scalars
 beside it. `--expand-buses` writes the members as N one-bit `$var`s instead,
 and every other format refuses that flag. It is the same dump
-`TransientResult.to_vcd()` in Python and `WasmResultHandle.toVcd()` in the
-browser write, and the one `convert --to vcd` builds from the same run's
-rawfile or typed document.
+`WasmResultHandle.toVcd()` in the browser writes, and the one
+`convert --to vcd` builds from the same run's rawfile or typed document.
 
 Only a transient captures events, so every other analysis refuses `-f vcd`. A
 transient that captured no event node publishes an empty dump and says so on

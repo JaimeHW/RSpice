@@ -1481,7 +1481,7 @@ pub enum DiagnosticSeverity {
     Warning,
 }
 
-/// Structured parser diagnostic suitable for CLI, UI, Python, and WASM callers.
+/// Structured parser diagnostic suitable for CLI, UI, and WASM callers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseDiagnostic {
     /// 1-based input line number. `0` is reserved for diagnostics that cannot be

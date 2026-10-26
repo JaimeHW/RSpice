@@ -2,8 +2,8 @@
 //!
 //! Builds the signal-name table the [`MeasureEngine`] expects and evaluates
 //! a netlist's measurement statements against
-//! transient or DC-sweep data. Both the CLI and the Python bindings consume
-//! this module so measurement semantics cannot drift between frontends.
+//! transient or DC-sweep data. Every frontend consumes this module so
+//! measurement semantics cannot drift between them.
 //!
 //! Signal naming: voltages are reachable as `V(name)`, `name`, `V(id)`, and
 //! `id` in any case; branch currents as `I(name)`; the analysis axis as

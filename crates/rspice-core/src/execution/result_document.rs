@@ -1,6 +1,6 @@
 //! One target-neutral typed result document for every core result family.
 //!
-//! The CLI, Python, WebAssembly, and engine-adapter surfaces format this
+//! The CLI, WebAssembly, and engine-adapter surfaces format this
 //! document. They do not define their own. A surface that needs a different
 //! shape formats *from* this one, so a channel, unit, validity mask, or
 //! provenance field cannot be lost by being invented twice.

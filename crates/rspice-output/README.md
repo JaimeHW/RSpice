@@ -5,8 +5,8 @@ uniquely named sibling of the destination, and the destination changes only
 after serialization and durability work have both completed, so a failed,
 cancelled or crashed run never leaves a half-written artifact where a complete
 one used to be. The engine's rawfile, waveform-stream and transient-checkpoint
-writers, every result file the CLI's `run` and `export` commands produce, the
-Python exports and the engine adapter publish through this one crate, so none
+writers, every result file the CLI's `run` and `export` commands produce and
+the engine adapter publish through this one crate, so none
 of them can weaken the policy. It owns no serialization format; callers write
 the bytes.
 

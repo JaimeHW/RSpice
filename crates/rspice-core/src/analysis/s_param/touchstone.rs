@@ -1,9 +1,7 @@
 //! Touchstone v1.1 and v2.0 serialization for N-port scattering results.
 //!
-//! One writer, shared by every front-end. The CLI previously emitted a
-//! fixed `# HZ S RI R <z0>` line of its own while the Python bindings carried
-//! this richer implementation, so the same result exported through two
-//! products produced two different files.
+//! One writer, shared by every front-end, so the same result exported through
+//! two products produces the same file.
 //!
 //! Version 1 requires one shared reference impedance. Version 2 retains each
 //! port's reference explicitly, along with the matrix dimensions and ordering.

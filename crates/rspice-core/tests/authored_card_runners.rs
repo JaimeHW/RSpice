@@ -142,7 +142,7 @@ fn an_authored_sens_card_resolves_its_own_output_node() {
 
 /// The card runner every frontend shares carries a `PARAM:` filter through to
 /// the design-parameter traces, so a deck that asks for them gets them from
-/// `rspice run`, Python, wasm and the adapter alike. `H = 1/(1+jwRC)` with
+/// `rspice run`, wasm and the adapter alike. `H = 1/(1+jwRC)` with
 /// `C={c}` gives `d|H|/dc = dH/dC` exactly, so the design trace must equal the
 /// capacitor's own trace at every frequency.
 #[test]
