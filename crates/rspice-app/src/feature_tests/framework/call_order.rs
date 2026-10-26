@@ -11,6 +11,7 @@
 // Refactor scaffolding: deleted when the split completes.
 
 const APP: &str = include_str!("../../workbench/app.rs");
+const CLOUD: &str = include_str!("../../workbench/cloud.rs");
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
@@ -42,15 +43,7 @@ const UI: &[Step] = &[
         ],
     ),
     ("5", &["self.prepare_frame(&ctx)"]),
-    (
-        "6",
-        &[
-            "self.cloud.account.poll_for_lost_session()",
-            "self.cloud.account.take_local_error()",
-            "self.cloud.account.take_storage_failure()",
-            "self.cloud.account.take_browser_request()",
-        ],
-    ),
+    ("6", &["self.poll_cloud_account(&ctx)"]),
     ("7", &["self.record_publish_receipt()"]),
     ("8", &["self.pump_live_session()"]),
     (
@@ -609,6 +602,15 @@ const HANDLE_IMAGE_EXPORT: &[Step] = &[(
     ],
 )];
 
+/// `CloudFeature::poll_account`, step 6 of the frame: what the account
+/// service settled since the last frame, taken in this order.
+const CLOUD_ACCOUNT_POLL: &[Step] = &[
+    ("6.1", &["account.poll_for_lost_session()"]),
+    ("6.2", &["account.take_local_error()"]),
+    ("6.3", &["account.take_storage_failure()"]),
+    ("6.4", &["account.take_browser_request()"]),
+];
+
 /// `pump_live_session`, step 8 of the frame: the live-session engine's
 /// phases, with the project transactions they ask for between them where the
 /// engine ran them itself.
@@ -999,6 +1001,31 @@ fn another_part_opens_a_hardcopy_workflow_in_the_feature_context_where_it_did() 
         pump.matches("requests::drain(").count(),
         1,
         "the frame's preparation answers only the figure export there"
+    );
+}
+
+#[test]
+fn the_cloud_feature_takes_its_account_and_publish_news_where_the_frame_did() {
+    for (signature, call) in [
+        (
+            "fn poll_cloud_account(",
+            "CloudFeature::poll_account(&mut features::cx(self), ctx);",
+        ),
+        (
+            "fn record_publish_receipt(",
+            "CloudFeature::record_publish_receipt(&mut features::cx(self));",
+        ),
+    ] {
+        assert_eq!(
+            without_whitespace(&body(FRAME, signature)),
+            without_whitespace(call),
+            "the frame's `{signature}` step runs in the cloud feature's context, and only that"
+        );
+    }
+    assert_runs_in_order(
+        "CloudFeature::poll_account",
+        &body(CLOUD, "fn poll_account("),
+        CLOUD_ACCOUNT_POLL,
     );
 }
 

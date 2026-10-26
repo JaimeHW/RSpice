@@ -18,6 +18,7 @@ use crate::services::cloud_account::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
+#[cfg(test)]
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app::dialogs::unpublish_web::{
@@ -414,71 +415,70 @@ pub(crate) fn render_publish_web_dialog(parts: &mut PublishWebParts<'_>, ctx: &C
     }
 }
 
-impl RSpiceApp {
-    /// Drain the executor's publish receipt: bind the project to its page
-    /// lineage and report the URL. Runs every frame from the app loop so a
-    /// closed dialog never loses the binding, or the failure.
-    pub(in crate::workbench) fn record_publish_receipt(&mut self) {
-        self.report_unwatched_publish_failure();
-        let Some(receipt) = self.cloud.account.take_publish_receipt() else {
-            return;
-        };
-        match crate::state::ProjectCloudPublicationBinding::new(
-            receipt.workspace_id.clone(),
-            receipt.circuit_id.clone(),
-        ) {
-            Ok(binding) => {
-                if let Err(error) = self
-                    .state
-                    .model
-                    .workspace
-                    .content
-                    .bind_cloud_publication(binding)
-                {
-                    self.state.record(
-                        LogSeverity::Warning,
-                        LogSource::Studio,
-                        format!(
-                            "Published, but the project could not record which page it was \
-                             published to: {error}"
-                        ),
-                    );
-                }
-            }
-            Err(error) => {
-                self.state.record(
+/// Drain the executor's publish receipt: bind the project to its page
+/// lineage and report the URL. Runs every frame from the app loop so a
+/// closed dialog never loses the binding, or the failure.
+pub(crate) fn record_publish_receipt(
+    dialog: &mut PublishWebDialogState,
+    account: &mut CloudAccountService,
+    model: &mut Model,
+) {
+    report_unwatched_publish_failure(dialog, account, model);
+    let Some(receipt) = account.take_publish_receipt() else {
+        return;
+    };
+    match crate::state::ProjectCloudPublicationBinding::new(
+        receipt.workspace_id.clone(),
+        receipt.circuit_id.clone(),
+    ) {
+        Ok(binding) => {
+            if let Err(error) = model.workspace.content.bind_cloud_publication(binding) {
+                model.record(
                     LogSeverity::Warning,
                     LogSource::Studio,
-                    format!("Published, but the page the service returned is unusable: {error}"),
+                    format!(
+                        "Published, but the project could not record which page it was \
+                         published to: {error}"
+                    ),
                 );
             }
         }
-        self.state.record(
-            LogSeverity::Info,
-            LogSource::Studio,
-            format!(
-                "Published {}; the page is being prepared.",
-                receipt.url_path
-            ),
-        );
-    }
-
-    /// Say that a publish failed after its dialog was closed.
-    ///
-    /// The dialog shows a failure while it is open. Once it is closed nothing
-    /// else would, and a publish the user asked for must not fail silently.
-    fn report_unwatched_publish_failure(&mut self) {
-        let dialog = &self.state.cloud.publish_web;
-        if dialog.open || !dialog.submitted {
-            return;
+        Err(error) => {
+            model.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!("Published, but the page the service returned is unusable: {error}"),
+            );
         }
-        let Some(PublishState::Failed { message }) = &self.cloud.account.snapshot().publish else {
-            return;
-        };
-        let message = message.clone();
-        self.state.cloud.publish_web.submitted = false;
-        self.state.report_failure("Publish failed", message);
     }
+    model.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Published {}; the page is being prepared.",
+            receipt.url_path
+        ),
+    );
+}
+
+/// Say that a publish failed after its dialog was closed.
+///
+/// The dialog shows a failure while it is open. Once it is closed nothing
+/// else would, and a publish the user asked for must not fail silently.
+fn report_unwatched_publish_failure(
+    dialog: &mut PublishWebDialogState,
+    account: &CloudAccountService,
+    model: &mut Model,
+) {
+    if dialog.open || !dialog.submitted {
+        return;
+    }
+    let Some(PublishState::Failed { message }) = &account.snapshot().publish else {
+        return;
+    };
+    let message = message.clone();
+    dialog.submitted = false;
+    model.report_failure("Publish failed", message);
 }
 
 /// Rebuild the snapshot with the confirmed page fields and hand the

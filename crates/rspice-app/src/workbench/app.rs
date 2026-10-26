@@ -1026,35 +1026,7 @@ impl eframe::App for RSpiceApp {
             });
         }
         self.prepare_frame(&ctx);
-        if let Some(reason) = self.cloud.account.poll_for_lost_session() {
-            self.state
-                .report_warning("Signed out of RSpice Cloud", reason);
-        }
-        if let Some(refusal) = self.cloud.account.take_local_error() {
-            self.state.prompt(refusal);
-        }
-        if let Some(failure) = self.cloud.account.take_storage_failure() {
-            self.state.record(
-                crate::diagnostics::LogSeverity::Error,
-                crate::diagnostics::LogSource::Studio,
-                failure,
-            );
-        }
-        if let Some(url) = self.cloud.account.take_browser_request() {
-            #[cfg(not(target_arch = "wasm32"))]
-            ctx.open_url(egui::OpenUrl::new_tab(url));
-            #[cfg(target_arch = "wasm32")]
-            if web_sys::window()
-                .and_then(|window| window.location().assign(&url).ok())
-                .is_none()
-            {
-                self.state.record(
-                    crate::diagnostics::LogSeverity::Error,
-                    crate::diagnostics::LogSource::Studio,
-                    "Sign-in failed: the browser did not open the sign-in page.",
-                );
-            }
-        }
+        self.poll_cloud_account(&ctx);
         self.record_publish_receipt();
         self.pump_live_session();
         crate::workbench::framework::requests::drain(

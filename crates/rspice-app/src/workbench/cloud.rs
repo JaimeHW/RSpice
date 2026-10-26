@@ -9,6 +9,7 @@
 
 pub(crate) mod commands;
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::cloud_account::{
     CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, LIVE_COLLABORATION_FEATURE,
 };
@@ -20,11 +21,13 @@ use crate::workbench::app::dialogs::live_session::{
     LiveSessionParts, open_live_session_dialog, render_live_session_dialog,
 };
 use crate::workbench::app::dialogs::publish_web::{
-    PublishWebParts, SnapshotSource, open_publish_web_dialog, render_publish_web_dialog,
+    PublishWebParts, SnapshotSource, open_publish_web_dialog, record_publish_receipt,
+    render_publish_web_dialog,
 };
 use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebParts, render_unpublish_web_dialog,
 };
+use crate::workbench::app_state::Model;
 use crate::workbench::chrome::presence::{PresenceAction, PresenceReads, session_presence_cluster};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -77,6 +80,56 @@ impl CloudFeature {
                 PresenceAction::ReleaseLease(doc) => cx.own.live_session.release_lease(&doc),
             }
         }
+    }
+
+    /// Say what the account service settled since the last frame: a session
+    /// it lost, a refusal and a failure to keep the session; and open the
+    /// sign-in page it asked for.
+    pub(crate) fn poll_account(cx: &mut Cx<'_, CloudFeature>, ctx: &egui::Context) {
+        let account = &mut cx.own.account;
+        if let Some(reason) = account.poll_for_lost_session() {
+            cx.model
+                .report_warning("Signed out of RSpice Cloud", reason);
+        }
+        if let Some(refusal) = account.take_local_error() {
+            cx.wb.prompt(refusal);
+        }
+        if let Some(failure) = account.take_storage_failure() {
+            cx.model
+                .record(LogSeverity::Error, LogSource::Studio, failure);
+        }
+        if let Some(url) = account.take_browser_request() {
+            open_sign_in_page(ctx, cx.model, url);
+        }
+    }
+
+    /// Take the publish executor's receipt, and say a publish that failed
+    /// after its dialog closed. Runs every frame, so a closed dialog never
+    /// loses the binding or the failure.
+    pub(crate) fn record_publish_receipt(cx: &mut Cx<'_, CloudFeature>) {
+        record_publish_receipt(&mut cx.state.publish_web, &mut cx.own.account, cx.model);
+    }
+}
+
+/// Open the sign-in page the account service asked for in a new tab.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_sign_in_page(ctx: &egui::Context, _model: &mut Model, url: String) {
+    ctx.open_url(egui::OpenUrl::new_tab(url));
+}
+
+/// Take this tab to the sign-in page the account service asked for, and say
+/// so when the browser would not go.
+#[cfg(target_arch = "wasm32")]
+fn open_sign_in_page(_ctx: &egui::Context, model: &mut Model, url: String) {
+    if web_sys::window()
+        .and_then(|window| window.location().assign(&url).ok())
+        .is_none()
+    {
+        model.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            "Sign-in failed: the browser did not open the sign-in page.",
+        );
     }
 }
 

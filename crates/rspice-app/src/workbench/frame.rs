@@ -12,6 +12,7 @@ use egui::{CentralPanel, Context, Frame};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
+use crate::workbench::cloud::CloudFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
 
@@ -218,6 +219,20 @@ fn show_toasts(
 
 fn outbox(app: &mut RSpiceApp) -> &mut Outbox {
     &mut app.state.workbench.outbox
+}
+
+impl RSpiceApp {
+    /// Have the cloud feature say what its account service settled since
+    /// the last frame, in its context.
+    pub(in crate::workbench) fn poll_cloud_account(&mut self, ctx: &Context) {
+        CloudFeature::poll_account(&mut features::cx(self), ctx);
+    }
+
+    /// Have the cloud feature take the publish executor's receipt, in its
+    /// context.
+    pub(in crate::workbench) fn record_publish_receipt(&mut self) {
+        CloudFeature::record_publish_receipt(&mut features::cx(self));
+    }
 }
 
 /// The requests the result documents and the data browser raise while they
