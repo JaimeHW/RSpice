@@ -207,6 +207,11 @@ pub(crate) use rspice_app_runs::workbench::preflight;
 pub(crate) use rspice_app_state::workbench::preferences;
 pub(crate) mod results;
 pub(crate) use rspice_app_workbench::workbench::routing;
+/// The shell's transactions over the whole project, run where a feature's
+/// work asks for one.
+mod session {
+    pub(crate) mod project_transactions;
+}
 pub(crate) mod settings;
 pub(crate) mod sheets;
 mod shell_host;

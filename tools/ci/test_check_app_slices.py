@@ -90,7 +90,8 @@ class SliceRuleTests(unittest.TestCase):
             "settings": ["workbench/shortcuts/profile.rs", "workbench/app/dialogs/preferences.rs",
                          "workbench/settings.rs", "workbench/settings/commands.rs"],
             "shell": ["lib.rs", "workbench/app.rs", "workbench/app/dialogs/help.rs",
-                      "workbench/app_state/session/preference_runtime.rs"],
+                      "workbench/app_state/session/preference_runtime.rs",
+                      "workbench/session/project_transactions.rs"],
         }
         self.assertEqual(set(expected), set(SLICES))
         for slice_name, paths in expected.items():

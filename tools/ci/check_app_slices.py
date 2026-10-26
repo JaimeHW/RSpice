@@ -213,6 +213,9 @@ SLICE_RULES = [
     (W + r"workflows/netlist_workflow", "code"),
     (W + r"workflows/(result_import_workflow|result_import_adapters)", "results"),
     (W + r"workflows", "shell"),
+    # The shell's transactions over the whole project, run where a feature's
+    # work asks for one.
+    (W + r"session/", "shell"),
     (W + r"lifecycle/window_session", "framework"),
     (W + r"lifecycle", "services"),
     (W + r"hardcopy_adapters", "hardcopy"),

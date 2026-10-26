@@ -690,6 +690,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/netlist_workflow",
     "shortcuts/profile_workflow",
     "workflows/file_actions",
+    // The shell's transactions over the whole project, run where a feature's
+    // work asks for one: they take the project workflows and the feature that
+    // asked, so they sit above both.
+    "session/project_transactions",
     // Command dispatch.
     "commands",
     // Following a finding to the object it is about. It reads a route a page
@@ -864,9 +868,10 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("slots", "cross_probe", 1),
     // Artifacts reaching sideways into the workflows.
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
-    // The live-session engine closes the project through the project
-    // workflow, which ranks above the application that owns the engine.
-    ("live_session", "workflows/project_workflow", 5),
+    // The live-session engine closes the project for a guest entering a
+    // mirror through the project workflow, which ranks above the application
+    // that owns the engine.
+    ("live_session", "workflows/project_workflow", 1),
     // Result import opens the imported result's tab through the document
     // bar, and the dispatcher that starts an import ranks below the bar.
     ("workflows/result_import_workflow", "chrome", 1),

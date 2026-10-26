@@ -199,8 +199,43 @@ pub(crate) struct CloudHandles {
     pub(crate) live_session: LiveSessionEngine,
 }
 
+/// The mirrored project closed out of this install, asked of the shell
+/// between the pump's phases: the session that mirrored it is over and its
+/// policy keeps no copy.
+#[must_use]
+pub(crate) struct DiscardMirror;
+
+/// The host's whole-project snapshot waiting to replace a guest's mirror,
+/// and the host's name for what the replacement logs.
+pub(crate) struct MirrorSnapshot {
+    content: CompletedContent,
+    host_label: String,
+}
+
+impl MirrorSnapshot {
+    /// The snapshot's project text, as the host serialized it.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.content.bytes
+    }
+
+    pub(crate) fn host_label(&self) -> &str {
+        &self.host_label
+    }
+}
+
+/// How the shell's replacement of the project with a mirror snapshot went.
+pub(crate) enum MirrorApply {
+    Applied,
+    /// A local run or lifecycle transaction owns the project right now; the
+    /// snapshot waits for the next pump.
+    RetryLater,
+    Rejected,
+}
+
 /// The per-frame live-session pump. Owned by the application shell right
-/// next to the cloud account service it drains.
+/// next to the cloud account service it drains. The shell runs its phases
+/// in order and carries out the project transactions they ask for between
+/// them.
 pub(crate) struct LiveSessionEngine {
     connection: Option<Connection>,
     role: Role,
@@ -244,11 +279,15 @@ impl Default for LiveSessionEngine {
 }
 
 impl LiveSessionEngine {
-    /// Drive the session for one frame: adopt fresh relay ports, drain
-    /// inbound frames, broadcast local changes, and project write locks.
-    pub(crate) fn pump(&mut self, state: &mut AppState, cloud: &mut CloudAccountService) {
-        self.reconcile_role(state, cloud);
-        self.settle_mirror_discard(state);
+    /// The session's inbound half for one frame: adopt a fresh relay port,
+    /// enter the mirror a close made room for, drain inbound frames, and say
+    /// a refused lease. `false` when no session runs, once what an ended one
+    /// left behind is dropped; the frame's pump stops there.
+    pub(crate) fn pump_inbound(
+        &mut self,
+        state: &mut AppState,
+        cloud: &mut CloudAccountService,
+    ) -> bool {
         if matches!(self.role, Role::Idle) {
             if state.workbench.outbox.take::<LiveMirrorEntry>().is_some() {
                 // The close-to-mirror transaction outlived its session. Its
@@ -263,7 +302,7 @@ impl LiveSessionEngine {
             // Ports minted for a session that no longer renders are dead
             // credentials' leftovers; drop them.
             let _ = cloud.take_live_relay_port();
-            return;
+            return false;
         }
         self.adopt_port(state, cloud);
         self.finish_mirror_entry(state);
@@ -277,7 +316,13 @@ impl LiveSessionEngine {
                 "{holder} holds the write lease on {doc}; ask again once it is released."
             ));
         }
-        self.flush_pending_project(state);
+        true
+    }
+
+    /// The session's outbound half for one frame: broadcast local changes,
+    /// stream the run's status, keep presence and the cursor current, retire
+    /// quiet peers, and project write locks.
+    pub(crate) fn pump_outbound(&mut self, state: &mut AppState) {
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
@@ -473,21 +518,37 @@ impl LiveSessionEngine {
         }
     }
 
-    /// Apply the freshest stashed project snapshot; it stays stashed while
-    /// a local run or lifecycle transaction owns the project.
-    fn flush_pending_project(&mut self, state: &mut AppState) {
-        use crate::workbench::workflows::project_workflow::{
-            LiveProjectApply, apply_live_project_snapshot,
-        };
+    /// The freshest stashed project snapshot, for the shell to apply in
+    /// place of the guest's mirror; `None` unless a mirroring guest holds
+    /// one.
+    pub(crate) fn take_mirror_snapshot(&mut self) -> Option<MirrorSnapshot> {
         let host_label = self.display_name_of_host();
+        let Role::Guest(guest) = &mut self.role else {
+            return None;
+        };
+        let content = guest.pending_project.take()?;
+        Some(MirrorSnapshot {
+            content,
+            host_label,
+        })
+    }
+
+    /// Settle `snapshot` once the shell has tried it: an applied one
+    /// restarts the wire digests and re-baselines held leases, and one the
+    /// project could not take yet stays stashed while a local run or
+    /// lifecycle transaction owns the project.
+    pub(crate) fn mirror_snapshot_applied(
+        &mut self,
+        state: &mut AppState,
+        snapshot: MirrorSnapshot,
+        outcome: MirrorApply,
+    ) {
         let Role::Guest(guest) = &mut self.role else {
             return;
         };
-        let Some(pending) = guest.pending_project.take() else {
-            return;
-        };
-        match apply_live_project_snapshot(state, &pending.bytes, &host_label) {
-            LiveProjectApply::Applied => {
+        let pending = snapshot.content;
+        match outcome {
+            MirrorApply::Applied => {
                 // The snapshot replaced every document wholesale; wire
                 // digests restart so the host's next per-document
                 // broadcasts converge idempotently.
@@ -517,10 +578,10 @@ impl LiveSessionEngine {
                         .activate(crate::workbench::state::Workspace::Project);
                 }
             }
-            LiveProjectApply::RetryLater => {
+            MirrorApply::RetryLater => {
                 guest.pending_project = Some(pending);
             }
-            LiveProjectApply::Rejected => {
+            MirrorApply::Rejected => {
                 state.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -530,23 +591,40 @@ impl LiveSessionEngine {
         }
     }
 
-    /// Finish a policy-mandated mirror teardown that had to wait for the
-    /// local run to stop.
-    fn settle_mirror_discard(&mut self, state: &mut AppState) {
-        if !self.mirror_discard_pending || state.model.simulation.execution.has_active_execution() {
-            return;
-        }
-        if crate::workbench::workflows::project_workflow::close_project_discard(
-            state,
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
-        ) {
+    /// Whether a mirror teardown that waited for the local run to stop can
+    /// close the mirrored project now.
+    pub(crate) fn mirror_discard_due(&self, state: &AppState) -> Option<DiscardMirror> {
+        (self.mirror_discard_pending && !state.model.simulation.execution.has_active_execution())
+            .then_some(DiscardMirror)
+    }
+
+    /// The shell's close of a teardown that waited: once the project closes,
+    /// nothing waits any more.
+    pub(crate) fn mirror_discard_settled(&mut self, closed: bool) {
+        if closed {
             self.mirror_discard_pending = false;
+        }
+    }
+
+    /// The shell's close of the mirror a session's end retired: one it could
+    /// not close waits for the local run to stop.
+    pub(crate) fn mirror_retired(&mut self, closed: bool) {
+        if !closed {
+            self.mirror_discard_pending = true;
         }
     }
 
     // -- role and port lifecycle ---------------------------------------------
 
-    fn reconcile_role(&mut self, state: &mut AppState, cloud: &CloudAccountService) {
+    /// Settle who this install is in the session `cloud` shows: the roster,
+    /// the editors, the host, and a fresh role for a new session. Leaving a
+    /// mirror whose session's policy keeps no copy asks the shell to close
+    /// it once this returns.
+    pub(crate) fn reconcile_role(
+        &mut self,
+        state: &mut AppState,
+        cloud: &CloudAccountService,
+    ) -> Option<DiscardMirror> {
         let session = cloud.snapshot().live_session.clone();
         let (want_host, summary) = match &session {
             Some(LiveSessionState::Hosting(summary)) => (true, Some(summary)),
@@ -555,9 +633,9 @@ impl LiveSessionEngine {
         };
         let Some(summary) = summary else {
             if !matches!(self.role, Role::Idle) {
-                self.leave_session(state);
+                return self.leave_session(state);
             }
-            return;
+            return None;
         };
 
         self.roster = summary
@@ -597,11 +675,11 @@ impl LiveSessionEngine {
             _ => None,
         };
         if current == Some(&summary.session_id) {
-            return;
+            return None;
         }
         // A different session (or a superseded one) is a fresh relay room:
         // every per-session bookkeeping starts over.
-        self.leave_session(state);
+        let discard = self.leave_session(state);
         self.role = if want_host {
             Role::Host(Box::new(HostRole::new(summary.session_id.clone())))
         } else {
@@ -610,15 +688,18 @@ impl LiveSessionEngine {
                 summary.policy.allow_save_copy,
             )))
         };
+        discard
     }
 
-    fn leave_session(&mut self, state: &mut AppState) {
+    fn leave_session(&mut self, state: &mut AppState) -> Option<DiscardMirror> {
         let previous = std::mem::replace(&mut self.role, Role::Idle);
-        if let Role::Guest(guest) = previous
+        let discard = if let Role::Guest(guest) = previous
             && guest.mirroring
         {
-            self.retire_mirror(state, guest.save_copy_allowed);
-        }
+            self.retire_mirror(state, guest.save_copy_allowed)
+        } else {
+            None
+        };
         self.connection = None;
         self.peers.clear();
         self.pending_run_requests.clear();
@@ -630,18 +711,24 @@ impl LiveSessionEngine {
         // The read-only flag is this engine's to own; clearing it never
         // unlocks library or safe-mode gates, which are separate.
         state.model.schematic.session.read_only = false;
+        discard
     }
 
     /// The session is over: keep the mirror open as an unsaved copy when
-    /// the policy allows, otherwise close it out of this install.
-    fn retire_mirror(&mut self, state: &mut AppState, save_copy_allowed: bool) {
+    /// the policy allows, otherwise close it out of this install, through the
+    /// shell once the local run has stopped.
+    fn retire_mirror(
+        &mut self,
+        state: &mut AppState,
+        save_copy_allowed: bool,
+    ) -> Option<DiscardMirror> {
         if save_copy_allowed {
             state.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 "The live session ended. The mirrored project stays open; save it to keep a copy.",
             );
-            return;
+            return None;
         }
         state.record(
             LogSeverity::Warning,
@@ -660,14 +747,9 @@ impl LiveSessionEngine {
                 );
             }
             self.mirror_discard_pending = true;
-            return;
+            return None;
         }
-        if !crate::workbench::workflows::project_workflow::close_project_discard(
-            state,
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
-        ) {
-            self.mirror_discard_pending = true;
-        }
+        Some(DiscardMirror)
     }
 
     fn adopt_port(&mut self, state: &mut AppState, cloud: &mut CloudAccountService) {
@@ -1837,31 +1919,6 @@ mod tests {
             dead: false,
         });
         inbound_tx
-    }
-
-    /// A close-to-mirror transaction that outlives its session leaves the
-    /// reader where every project close does: on the no-project landing.
-    #[test]
-    fn a_mirror_entry_that_outlives_its_session_stays_on_the_no_project_landing() {
-        let mut state = AppState::default();
-        assert!(
-            crate::workbench::workflows::project_workflow::close_project_discard(
-                &mut state,
-                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
-            )
-        );
-
-        LiveSessionEngine::default().pump(&mut state, &mut CloudAccountService::unconfigured());
-
-        assert!(!state.project.project_launcher_open);
-        assert_eq!(
-            state.workbench.workspace,
-            crate::workbench::state::Workspace::Project
-        );
-        assert!(
-            state.workbench.outbox.peek::<LiveMirrorEntry>().is_none(),
-            "the pump consumes the stale entry"
-        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs")
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
 const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
+const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -48,10 +49,7 @@ const UI: &[Step] = &[
         ],
     ),
     ("7", &["self.record_publish_receipt()"]),
-    (
-        "8",
-        &["self.cloud.live_session.pump(&mut self.state, &mut self.cloud.account)"],
-    ),
+    ("8", &["self.pump_live_session()"]),
     (
         "9",
         &[
@@ -559,6 +557,38 @@ const HANDLE_IMAGE_EXPORT: &[Step] = &[(
     ],
 )];
 
+/// `pump_live_session`, step 8 of the frame: the live-session engine's
+/// phases, with the project transactions they ask for between them where the
+/// engine ran them itself.
+const LIVE_SESSION_PUMP: &[Step] = &[
+    (
+        "1",
+        &[
+            "live_session.reconcile_role(state, account)",
+            "close_project_discard(state, ProjectCloseDestination::EmptyWorkbench)",
+            "live_session.mirror_retired(closed)",
+        ],
+    ),
+    (
+        "2",
+        &[
+            "live_session.mirror_discard_due(state)",
+            "close_project_discard(state, ProjectCloseDestination::EmptyWorkbench)",
+            "live_session.mirror_discard_settled(closed)",
+        ],
+    ),
+    ("3", &["if !live_session.pump_inbound(state, account) {"]),
+    (
+        "4",
+        &[
+            "live_session.take_mirror_snapshot()",
+            "apply_live_project_snapshot(state, snapshot.bytes(), snapshot.host_label())",
+            "live_session.mirror_snapshot_applied(state, snapshot, outcome)",
+        ],
+    ),
+    ("5", &["live_session.pump_outbound(state)"]),
+];
+
 /// The body of the one function `signature` opens in `source`'s shipped half,
 /// without its comment lines.
 fn body(source: &str, signature: &str) -> String {
@@ -760,6 +790,18 @@ fn the_frame_runs_its_top_level_steps_in_todays_order() {
         top_level_calls(&body(APP, "fn render_frame_chrome(")),
         ["show"],
         "the frame's chrome step draws the workbench frame and nothing else"
+    );
+}
+
+#[test]
+fn the_live_session_runs_its_phases_and_project_transactions_in_todays_order() {
+    assert_runs_in_order(
+        "pump_live_session",
+        &body(
+            PROJECT_TRANSACTIONS,
+            "pub(crate) fn pump_live_session(state",
+        ),
+        LIVE_SESSION_PUMP,
     );
 }
 

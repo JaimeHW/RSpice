@@ -1065,9 +1065,7 @@ impl eframe::App for RSpiceApp {
             }
         }
         self.record_publish_receipt();
-        self.cloud
-            .live_session
-            .pump(&mut self.state, &mut self.cloud.account);
+        self.pump_live_session();
         crate::workbench::framework::requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
