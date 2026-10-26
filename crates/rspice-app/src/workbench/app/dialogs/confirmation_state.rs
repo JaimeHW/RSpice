@@ -100,12 +100,12 @@ pub struct ConfirmationDialogState {
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Debug, Clone)]
-pub(crate) struct PendingConfirmationContinuation {
+pub struct PendingConfirmationContinuation {
     pub(crate) transaction: crate::product::TransactionId,
-    pub(crate) action: ConfirmationAction,
-    pub(crate) path: Option<std::path::PathBuf>,
-    pub(crate) recent_kind: Option<crate::services::recent_files::RecentKind>,
-    pub(crate) example: Option<String>,
+    pub action: ConfirmationAction,
+    pub path: Option<std::path::PathBuf>,
+    pub recent_kind: Option<crate::services::recent_files::RecentKind>,
+    pub example: Option<String>,
 }
 
 impl ConfirmationDialogState {
@@ -158,7 +158,7 @@ impl ConfirmationDialogState {
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn take_canonical_save(
+    pub fn take_canonical_save(
         &mut self,
         transaction: crate::product::TransactionId,
     ) -> Option<PendingConfirmationContinuation> {
@@ -173,10 +173,7 @@ impl ConfirmationDialogState {
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn restore_continuation_for_review(
-        &mut self,
-        pending: PendingConfirmationContinuation,
-    ) {
+    pub fn restore_continuation_for_review(&mut self, pending: PendingConfirmationContinuation) {
         self.visible = true;
         self.pending_action = Some(pending.action);
         self.pending_path = pending.path;
@@ -185,7 +182,7 @@ impl ConfirmationDialogState {
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn cancel_awaiting_canonical_save(&mut self) -> bool {
+    pub fn cancel_awaiting_canonical_save(&mut self) -> bool {
         self.awaiting_canonical_save.take().is_some()
     }
 }

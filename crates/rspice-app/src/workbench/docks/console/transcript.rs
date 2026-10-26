@@ -11,7 +11,7 @@
 pub(crate) mod lines;
 mod toolbar;
 
-pub(crate) use toolbar::toolbar;
+pub use toolbar::toolbar;
 
 use std::sync::Arc;
 

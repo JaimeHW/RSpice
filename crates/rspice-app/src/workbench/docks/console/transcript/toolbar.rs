@@ -28,7 +28,7 @@ const FIND_MIN_CHARACTERS: f32 = 10.0;
 /// Every severity keeps its toggle whatever its count: a log grows while it
 /// is read, and a toggle that came and went with its first line would move
 /// the controls beside it under the pointer.
-pub(crate) fn toolbar(ui: &mut Ui, state: &mut impl ConsoleHost) {
+pub fn toolbar(ui: &mut Ui, state: &mut impl ConsoleHost) {
     let mut view = std::mem::take(&mut state.workbench_mut().console_view);
     let counts = {
         let source = source(state, &mut view);

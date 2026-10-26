@@ -95,7 +95,7 @@ impl Outbox {
 
     /// Whether a request waits to be taken at `drain`: the question a
     /// consumer asks when it does not name the type it takes there.
-    pub(crate) fn waits_at(&self, drain: Drain) -> bool {
+    pub fn waits_at(&self, drain: Drain) -> bool {
         self.waiting.iter().any(|waiting| waiting.drain == drain)
     }
 
@@ -279,14 +279,14 @@ impl Request for RevealExecutedDeck {
 /// it runs the viewer's command, and taken straight after that command
 /// returns.
 #[derive(Clone, Debug)]
-pub(crate) struct ShowWaveforms {
+pub struct ShowWaveforms {
     /// Each waveform, and whether its dataset shows it.
-    pub(crate) visibility: Vec<(
+    pub visibility: Vec<(
         rspice_results::result_presentation::SourceWaveformPresentationKey,
         bool,
     )>,
     /// The trace to select, where the hand-off names a single one.
-    pub(crate) selected: Option<rspice_results_ui::selection::SelectedResultTrace>,
+    pub selected: Option<rspice_results_ui::selection::SelectedResultTrace>,
 }
 
 impl Request for ShowWaveforms {
@@ -299,7 +299,7 @@ impl Request for ShowWaveforms {
 /// seeds its filter from the policy in force, and the member has to survive
 /// that seeding.
 #[derive(Clone, Debug)]
-pub(crate) struct SetFamilyFilter(pub(crate) String);
+pub struct SetFamilyFilter(pub String);
 
 impl Request for SetFamilyFilter {
     const DRAIN: Drain = Drain::AfterContribution;

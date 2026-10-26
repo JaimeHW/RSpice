@@ -132,7 +132,7 @@ pub struct ProblemsView {
     pub waived: bool,
     pub grouping: ProblemGrouping,
     /// The groups the reader has collapsed, by the value they group on.
-    pub(crate) collapsed: BTreeSet<String>,
+    pub collapsed: BTreeSet<String>,
     /// The group header the keyboard stands on, by the value it groups on.
     ///
     /// Only while no finding is current: the current finding is the store's,

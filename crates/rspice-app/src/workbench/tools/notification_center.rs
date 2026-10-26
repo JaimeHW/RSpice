@@ -929,9 +929,9 @@ fn group_heading(ui: &mut Ui, label: &str, pinned: Option<Rect>) {
 /// agrees.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Clock {
-    pub(crate) now: f64,
+    pub now: f64,
     /// Unix time at `now`; zero when the platform cannot say.
-    pub(crate) wall: Duration,
+    pub wall: Duration,
 }
 
 impl Clock {

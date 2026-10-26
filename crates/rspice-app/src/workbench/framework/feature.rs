@@ -154,7 +154,7 @@ impl<'a> Peers<'a> {
     /// What the results workspace shows. The results feature's own context
     /// holds no such peer, because the feature reads its own state; its code
     /// asking for one is a fault in that code.
-    pub(crate) fn results(&self) -> &'a dyn ResultsPort {
+    pub fn results(&self) -> &'a dyn ResultsPort {
         self.results
             .expect("the results feature reads its own state, never itself as a peer")
     }
@@ -165,8 +165,8 @@ impl<'a> Peers<'a> {
 /// goes and writes it. The shell lends them beside the application state for
 /// the one call.
 #[derive(Clone, Copy)]
-pub(crate) struct LowerHandles<'a> {
-    pub(crate) export_io:
+pub struct LowerHandles<'a> {
+    pub export_io:
         &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
 }
 
@@ -184,7 +184,7 @@ pub struct Cx<'a, F: Feature> {
     /// What the platform services keep between frames: the autosave
     /// interval and the recent files among them.
     pub platform: &'a mut PlatformState,
-    pub(crate) handles: LowerHandles<'a>,
+    pub handles: LowerHandles<'a>,
     pub peers: Peers<'a>,
 }
 
@@ -227,7 +227,7 @@ pub struct Reads<'a, F: Feature> {
 }
 
 impl<'a, F: Feature> Reads<'a, F> {
-    pub(crate) fn new(
+    pub fn new(
         state: &'a F::State,
         model: &'a Model,
         wb: &'a F::Session,

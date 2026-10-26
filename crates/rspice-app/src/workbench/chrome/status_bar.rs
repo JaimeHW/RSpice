@@ -245,9 +245,9 @@ pub fn current_prompt(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatusVisibility {
-    pub(crate) coordinates: bool,
-    pub(crate) selection: bool,
-    pub(crate) platform: bool,
+    pub coordinates: bool,
+    pub selection: bool,
+    pub platform: bool,
 }
 
 impl StatusVisibility {

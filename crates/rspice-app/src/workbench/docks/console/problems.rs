@@ -72,8 +72,8 @@ use grid::{Columns, RowMark};
 /// finding about a design that no longer exists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProblemCount {
-    pub(crate) errors: usize,
-    pub(crate) advisories: usize,
+    pub errors: usize,
+    pub advisories: usize,
 }
 
 impl ProblemCount {
