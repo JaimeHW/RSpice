@@ -15,6 +15,7 @@ mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
 mod owned_source;
+mod project_technology;
 mod run_specifications;
 mod schematic_sync;
 mod session_start;

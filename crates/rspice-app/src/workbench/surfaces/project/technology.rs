@@ -319,23 +319,24 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         .or(package_runtime_error.clone());
     let selected_binding = selected_binding.ok().flatten();
     let selected_package = selected_package_index.and_then(|index| packages.get(index));
-    let migration_preview =
-        app.state
-            .project_signed_technology_package()
-            .and_then(|baseline| match (baseline, selected_package) {
-                (Some(baseline), Some(candidate))
-                    if baseline.binding() != candidate.binding()
-                        || baseline.archive_digest() != candidate.archive_digest() =>
-                {
-                    crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
-                        baseline.metadata(),
-                        candidate.metadata(),
-                    )
-                    .map(Some)
-                    .map_err(|error| error.to_string())
-                }
-                _ => Ok(None),
-            });
+    let migration_preview = app
+        .state
+        .model
+        .project_signed_technology_package()
+        .and_then(|baseline| match (baseline, selected_package) {
+            (Some(baseline), Some(candidate))
+                if baseline.binding() != candidate.binding()
+                    || baseline.archive_digest() != candidate.archive_digest() =>
+            {
+                crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
+                    baseline.metadata(),
+                    candidate.metadata(),
+                )
+                .map(Some)
+                .map_err(|error| error.to_string())
+            }
+            _ => Ok(None),
+        });
     let migration_evidence = migration_preview
         .as_ref()
         .map_err(Clone::clone)
@@ -1042,7 +1043,7 @@ fn validate_migration_evidence_for_binding(
     binding: &ProjectTechnologyBinding,
     evidence: Option<&crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<(), String> {
-    let baseline = app.state.project_signed_technology_package()?;
+    let baseline = app.state.model.project_signed_technology_package()?;
     let candidate_pin = binding
         .signed_package()
         .ok_or_else(|| "The candidate binding has no signed PDK package pin.".to_owned())?;

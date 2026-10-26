@@ -213,6 +213,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
         authority_id: "test:lifecycle-callback".to_owned(),
     };
     let callback_receipt = state
+        .model
         .execute_project_pdk_callback(
             "derive-device",
             &authority,

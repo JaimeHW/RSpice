@@ -161,7 +161,7 @@ struct SymbolViewSite<'a> {
 
 pub(super) fn symbol_rows(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
     let mut rows = design_library_rows(ui, app);
-    if let Ok(Some(package)) = app.state.project_signed_technology_package() {
+    if let Ok(Some(package)) = app.state.model.project_signed_technology_package() {
         for definition in package.symbol_definitions() {
             let pins = definition
                 .pins

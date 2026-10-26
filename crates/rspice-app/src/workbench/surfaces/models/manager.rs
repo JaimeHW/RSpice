@@ -1526,6 +1526,7 @@ fn author_technology_symbol_variant(
     }
     let package = app
         .state
+        .model
         .project_signed_technology_package()?
         .ok_or_else(|| "This project has no signed technology package.".to_owned())?;
     if !package

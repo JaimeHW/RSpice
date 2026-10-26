@@ -234,27 +234,6 @@ impl AppState {
             .validate_project_technology_contract()
     }
 
-    /// Resolve the exact currently trusted signed package pinned by this
-    /// project for read-only workspace overlays.
-    pub(crate) fn project_signed_technology_package(
-        &self,
-    ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
-        self.model
-            .pdk_config
-            .technology_registry
-            .project_signed_technology_package(
-                self.model.workspace.content.project.technology_binding(),
-            )
-    }
-
-    /// Whether an attached project technology is in effect: bound, and bound
-    /// through checkpoint-backed authority receipts. Execution paths that
-    /// prefer project-sealed model sources over the plain model library key
-    /// off this, not off the binding alone.
-    pub(crate) fn project_technology_in_effect(&self) -> bool {
-        self.technology_inputs().project_technology_in_effect()
-    }
-
     /// What the authored plan needs a project technology for, computed before
     /// any netlist exists.
     #[cfg(test)]
@@ -524,130 +503,6 @@ impl AppState {
         self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
         self.model.clear_project_design_history();
         Ok(revision)
-    }
-
-    /// Seal the complete model authority selected by the project.
-    ///
-    /// The project-owned model-library closure and its exact signed PDK
-    /// package are merged into one in-memory resolver. This is the only model
-    /// source snapshot simulation and inspection may consume.
-    pub(crate) fn seal_project_execution_model_sources(
-        &self,
-    ) -> Result<crate::state::model_library::SealedModelExecutionSources, String> {
-        self.technology_inputs()
-            .seal_project_execution_model_sources()
-    }
-
-    /// Execute one signed PDK callback for the exact package pinned by the
-    /// project and commit its evidence as one project revision transaction.
-    ///
-    /// Inputs are the validated active simulation-plan variables normalized to
-    /// finite SI values. Administrative activation is never consulted. Guest
-    /// output remains derived metadata inside the immutable receipt; it does
-    /// not silently mutate models, layout, or simulation configuration.
-    pub(crate) fn execute_project_pdk_callback(
-        &mut self,
-        callback_id: &str,
-        authority: &crate::state::pdk_config::PdkAdministrativeAuthority,
-        reason: &str,
-    ) -> Result<crate::state::pdk_config::ProjectPdkCallbackReceipt, String> {
-        for (field, value, maximum) in [
-            ("actor ID", authority.actor_id.as_str(), 256_usize),
-            ("authority ID", authority.authority_id.as_str(), 256_usize),
-            ("reason", reason, 2_048_usize),
-        ] {
-            if value.is_empty()
-                || value != value.trim()
-                || value.len() > maximum
-                || value.chars().any(char::is_control)
-            {
-                return Err(format!(
-                    "Project callback {field} must be nonempty, trimmed, control-free, and at most {maximum} bytes"
-                ));
-            }
-        }
-        self.validate_project_technology_contract()?;
-
-        let project_binding = self
-            .model
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            .expect("validated project technology has an exact binding");
-        let signed_pin = project_binding
-            .signed_package()
-            .expect("validated project technology has an exact signed package");
-        let package_binding = crate::state::pdk_config::PdkTechnologyBinding {
-            package_id: signed_pin.package_id().to_owned(),
-            revision: signed_pin.revision().to_owned(),
-            manifest_digest: signed_pin.manifest_digest(),
-        };
-        let plan = self
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .map_err(|error| {
-                format!(
-                    "Project callback requires an authoritative active simulation plan: {error}"
-                )
-            })?;
-        let plan_id = plan.id();
-        let plan_revision = plan.revision();
-        let mut project_parameters = std::collections::BTreeMap::new();
-        if let Some(payload) = self.model.workspace.content.plan_data(plan_id) {
-            for (index, variable) in payload.design_variables.iter().enumerate() {
-                variable.validate().map_err(|error| {
-                    format!("Active-plan design variable[{index}] is invalid: {error}")
-                })?;
-                let value = variable.resolved_value_si().map_err(|error| {
-                    format!(
-                        "Active-plan design variable '{}' is unresolved: {error}",
-                        variable.name
-                    )
-                })?;
-                if project_parameters
-                    .insert(variable.name.clone(), format!("{value:.17e}"))
-                    .is_some()
-                {
-                    return Err(format!(
-                        "Active plan repeats project callback parameter '{}'",
-                        variable.name
-                    ));
-                }
-            }
-        }
-        let input = crate::state::pdk_config::PdkCallbackExecutionInput { project_parameters };
-        let execution = self
-            .model
-            .pdk_config
-            .technology_registry
-            .execute_callback_for_binding(
-                &package_binding,
-                signed_pin.archive_digest(),
-                callback_id,
-                &input,
-            )
-            .map_err(|error| format!("Signed PDK callback execution was rejected: {error}"))?;
-        let receipt = self
-            .model
-            .workspace
-            .content
-            .commit_pdk_callback_execution(
-                plan_id,
-                plan_revision,
-                authority,
-                reason,
-                input,
-                execution,
-            )
-            .map_err(|error| format!("Signed PDK callback result was not recorded: {error}"))?;
-
-        self.model.workspace.content.project_metadata_dirty = true;
-        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
-        self.model.netlist_artifacts.current_generation_input_digest = None;
-        self.model.clear_project_design_history();
-        Ok(receipt)
     }
 
     /// [`Model::provision_test_project_technology_contract`].
@@ -1251,6 +1106,7 @@ mod tests {
         };
 
         let receipt = state
+            .model
             .execute_project_pdk_callback(
                 "derive-device",
                 &authority,
@@ -1275,6 +1131,7 @@ mod tests {
         assert!(crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(&state));
 
         let second = state
+            .model
             .execute_project_pdk_callback(
                 "derive-device",
                 &authority,
@@ -1328,6 +1185,7 @@ mod tests {
         };
 
         let error = state
+            .model
             .execute_project_pdk_callback(
                 "derive-device",
                 &authority,

@@ -134,6 +134,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .add_library(crate::state::Library::new("signed_variant_test"));
     let initial_revision = state.model.workspace.content.project.revision();
     let package_digest = state
+        .model
         .project_signed_technology_package()
         .expect("exact package resolves")
         .expect("project has package")

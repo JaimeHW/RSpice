@@ -970,12 +970,13 @@ fn validate_current_model_execution_plan(
                 .to_owned(),
         );
     }
-    let has_project_technology = app.state.project_technology_in_effect();
+    let technology = app.state.model.technology_inputs();
+    let has_project_technology = technology.project_technology_in_effect();
     if has_project_technology {
-        app.state.technology_gate_block_reason()?;
+        technology.technology_gate_block_reason()?;
     }
     let sealed = if has_project_technology {
-        app.state.seal_project_execution_model_sources()?
+        technology.seal_project_execution_model_sources()?
     } else {
         app.state
             .model

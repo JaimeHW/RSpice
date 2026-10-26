@@ -351,7 +351,12 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
                 pin.archive_digest(),
             )
         });
-    let project_callback_blocker = app.state.validate_project_technology_contract().err();
+    let project_callback_blocker = app
+        .state
+        .model
+        .technology_inputs()
+        .validate_project_technology_contract()
+        .err();
     RegistrySnapshot {
         packages: registry.validated_packages().to_vec(),
         active: registry.active_binding().cloned(),
@@ -4266,6 +4271,7 @@ fn apply_action(
         }
         AdminAction::RunProjectCallback { callback_id } => app
             .state
+            .model
             .execute_project_pdk_callback(&callback_id, &authority(view), view.reason.trim())
             .map(|receipt| {
                 Some(format!(
