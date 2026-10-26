@@ -67,6 +67,8 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-core/Cargo.toml",
     "crates/rspice-core/tests/save_directives.rs",
     "crates/rspice-app/Cargo.toml",
+    "crates/rspice-app-state/Cargo.toml",
+    "crates/rspice-schematic-editor/Cargo.toml",
     "crates/rspice-hardcopy-contract/Cargo.toml",
     "crates/rspice-hardcopy/Cargo.toml",
     "crates/rspice-design-model/Cargo.toml",
@@ -380,6 +382,10 @@ def command_gates(
                 "--locked",
                 "-p",
                 "rspice-app",
+                # The personal drawing-sheet preferences and the grid labels
+                # printed on the sheet are model logic.
+                "-p",
+                "rspice-app-state",
                 "-j",
                 cargo_jobs,
                 "--lib",
@@ -389,6 +395,13 @@ def command_gates(
                 # at a time; those cases run through the whole application.
                 "sheets::sheet_inspector",
                 "sheets::sheet_edit",
+                # The sheet commands that open the sheet's properties and its
+                # document surfaces, by name: the paging and sheet lifecycle
+                # cases beside them were never this gate's.
+                "sheets::commands::sheet_properties_open_the_inspector_on_the_sheet",
+                "sheets::commands::document_sheet_commands_open_their_real_surfaces_only_in_schematic_context",
+                "sheets::commands::sheet_format_manager_requires_live_schematic_edit_authority",
+                "grid_labels_measure_the_pitch_on_the_printed_sheet",
             ),
             97,
         ),
@@ -401,6 +414,12 @@ def command_gates(
                 "--locked",
                 "-p",
                 "rspice-app",
+                # The workspace's page setup and source sets are model logic,
+                # and the sheet overflow's hardcopy extent is the editor's.
+                "-p",
+                "rspice-app-state",
+                "-p",
+                "rspice-schematic-editor",
                 "-j",
                 cargo_jobs,
                 "--lib",
