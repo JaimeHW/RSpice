@@ -12,20 +12,24 @@
 
 use rspice_veriloga::canonical_ir::cfg::CfgFunction;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
+use rspice_veriloga::canonical_ir::hir::HirRegion;
 use rspice_veriloga::canonical_ir::mir::MirParameterSlot;
 use rspice_veriloga::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CanonicalValueType, CfgEvalInputs, CfgScalar, ComplexStep,
-    ValueId, differentiate, evaluate_cfg,
+    AdSeed, CanonicalIrArtifact, CanonicalValueType, CfgEvalInputs, CfgScalar, CfgValueKind,
+    ComplexStep, ValueId, differentiate, evaluate_cfg,
 };
+use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::rust_backend::{
-    VERILOGA_COMPILE_PROFILE_FILE_NAME, discover_veriloga_sources, parse_generated_builtin_manifest,
+    VERILOGA_COMPILE_PROFILE_FILE_NAME, VerilogASourceCandidate, discover_veriloga_sources,
+    parse_generated_builtin_manifest,
 };
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use rspice_veriloga::{CompiledModel, CompilerOptions, VerilogACompiler};
 use rspice_veriloga_runtime::{
-    AnalogAnalysisPhase, active_analysis_query_names, analysis_query_mask,
+    AnalogAnalysisPhase, AnalogEvaluationPhase, active_analysis_query_names, analysis_query_mask,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 mod support;
 
@@ -204,8 +208,9 @@ fn every_jacobian_entry_matches_a_richardson_difference() {
             .iter()
             .map(|residual| differentiated.derivative_row(*residual))
             .collect();
+        let evaluated = numerical_only(&differentiated.function);
         let bias = bias_point(&artifact);
-        let snapshot = evaluate_cfg(&differentiated.function, &inputs(&bias))
+        let snapshot = evaluate_cfg(&evaluated, &inputs(&bias))
             .unwrap_or_else(|error| panic!("{name}: evaluation failed: {error}"));
 
         for (equation, residual) in cfg.residuals.iter().enumerate() {
@@ -218,7 +223,7 @@ fn every_jacobian_entry_matches_a_richardson_difference() {
                 .fold(0.0f64, |scale, entry| scale.max(entry.abs()));
 
             for (lane, seed) in lanes.iter().enumerate() {
-                let numeric = difference(&differentiated.function, &bias, *seed, *residual);
+                let numeric = difference(&evaluated, &bias, *seed, *residual);
                 let stamped = row[lane];
                 let floor = (scale * SIGNIFICANCE).max(f64::MIN_POSITIVE);
                 if stamped.abs() < floor && numeric.abs() < floor {
@@ -294,10 +299,13 @@ struct BiasPoint {
     node_potentials: Vec<f64>,
     branch_flows: Vec<f64>,
     branch_unknown_flows: Vec<f64>,
+    /// The accepted event state the point is evaluated from; see
+    /// [`initial_event_state`].
+    event_state: Vec<f64>,
 }
 
 fn bias_point(artifact: &CanonicalIrArtifact) -> BiasPoint {
-    BiasPoint {
+    let mut bias = BiasPoint {
         // Declared defaults, deliberately: this is the reproducible fixture
         // point. Drawing belongs to `random_bias_point`, which is seeded.
         parameters: artifact
@@ -318,6 +326,103 @@ fn bias_point(artifact: &CanonicalIrArtifact) -> BiasPoint {
         branch_unknown_flows: (0..artifact.mir.branch_unknowns.len())
             .map(|index| 1.0e-4 * (index as f64 + 1.0))
             .collect(),
+        event_state: Vec::new(),
+    };
+    assert_no_dependent_defaults(artifact);
+    bias.event_state = initial_event_state(artifact, &bias)
+        .unwrap_or_else(|reason| panic!("the declared defaults do not initialize: {reason}"));
+    bias
+}
+
+/// The accepted event state the generated runtime holds when the first DC
+/// evaluation at `bias` runs.
+///
+/// A generated instance starts every slot at zero, then its
+/// `initialize_analysis` evaluates the declaration-initializer phase and the
+/// `analog initial` phase, in that order, and stores each phase's final
+/// event-state values as accepted state. Every Newton evaluation of the first
+/// point reads that vector, so an isolated evaluation must read it too. An
+/// empty vector is not a neutral stand-in: it is a state no instance occupies,
+/// and the interpreter refuses it at the first event-state leaf, which every
+/// model with a variable read before it is assigned has.
+///
+/// A phase that does not evaluate, or leaves a slot non-finite, refuses the
+/// point, as the runtime's initialization refuses it.
+fn initial_event_state(
+    artifact: &CanonicalIrArtifact,
+    bias: &BiasPoint,
+) -> Result<Vec<f64>, String> {
+    let slots = artifact
+        .hir
+        .variables
+        .iter()
+        .filter(|variable| variable.is_state)
+        .count();
+    let mut state = BiasPoint {
+        event_state: vec![0.0; slots],
+        ..bias.clone()
+    };
+    for phase in [
+        AnalogEvaluationPhase::Declarations,
+        AnalogEvaluationPhase::Initialization,
+    ] {
+        if !artifact.hir.body.iter().any(|region| {
+            matches!(region, HirRegion::Initialization { phase: found, .. } if *found == phase)
+        }) {
+            continue;
+        }
+        let cfg = CfgModel::from_hir_for_initialization(&artifact.hir, &artifact.mir, phase)
+            .map_err(|diagnostics| format!("the {phase:?} phase did not lower: {diagnostics:?}"))?;
+        let snapshot = evaluate_cfg(&numerical_only(&cfg.function), &inputs(&state))
+            .map_err(|error| format!("the {phase:?} phase did not evaluate: {error}"))?;
+        for (slot, value) in cfg.event_state_candidates.iter().enumerate() {
+            match snapshot.value(*value) {
+                Some(value) if value.is_finite() => state.event_state[slot] = value,
+                other => {
+                    return Err(format!(
+                        "the {phase:?} phase leaves event state {slot} at {other:?}"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(state.event_state)
+}
+
+/// `function` as a numerical-only pass runs it, with every ordered analog task
+/// a no-op.
+///
+/// A generated device journals `$strobe`, `$finish` and their kin only while
+/// `ctx.analog_tasks_enabled()`, which a numerical-only pass turns off: the
+/// operands are evaluated and nothing else happens. A task has no numerical
+/// result and no derivative, so silencing it moves no residual and no Jacobian
+/// entry; the interpreter refuses one only because it has no journal to put it
+/// in. Applied to the differentiated function rather than before
+/// differentiation, so the rule under test is the one the derivative pass made
+/// from the model as written.
+fn numerical_only(function: &CfgFunction) -> CfgFunction {
+    let mut function = function.clone();
+    for value in &mut function.values {
+        if matches!(value.kind, CfgValueKind::AnalogTask(_)) {
+            value.kind = CfgValueKind::RealConstant(0.0);
+        }
+    }
+    function
+}
+
+/// The generator's front end, so a census differentiates the model the product
+/// ships rather than a near relative of it: the profile's defines, the
+/// `$strobe` family discarded as the shipped models' print calls are, and no
+/// model-root include path. The generator resolves includes beside the
+/// including file and then through the built-in headers; the root's own
+/// `constants.vams` carries different physical constants
+/// (`rust_backend::builtins`).
+fn shipped_options(candidate: &VerilogASourceCandidate) -> CompilerOptions {
+    CompilerOptions {
+        defines: candidate.compile_profile.defines.clone(),
+        undefines: candidate.compile_profile.undefines.clone(),
+        discard_output_tasks: true,
+        ..CompilerOptions::default()
     }
 }
 
@@ -326,7 +431,7 @@ fn inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
         parameters: bias.parameters.clone(),
         parameter_given: vec![false; bias.parameters.len()],
         port_connected: bias.port_connected.clone(),
-        event_state: Vec::new(),
+        event_state: bias.event_state.clone(),
         event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.clone(),
         branch_flows: bias.branch_flows.clone(),
@@ -651,6 +756,32 @@ module sampled(p, n);
 endmodule
 "#,
         ),
+        // A model that sets itself up, the way every CMC model does: a
+        // declaration initializer, model setup behind `@(initial_step)`, a
+        // report task on that path, and a variable read before it is assigned.
+        // All three are event state, which an isolated evaluation has to be
+        // given the way the runtime initializes it.
+        (
+            "model set up at the initial step",
+            r#"
+module initialized(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1.0e3 from (0:inf);
+    parameter real vt = 0.5 from (0:inf);
+    real scale = 2.0;
+    real g, last;
+    analog begin
+        @(initial_step) begin
+            g = scale / r;
+            $strobe("initialized: g = %g", g);
+        end
+        I(p, n) <+ g * V(p, n) + 1.0e-3 * last + 1.0e-6 * exp(V(p, n) / vt);
+        last = V(p, n);
+    end
+endmodule
+"#,
+        ),
     ]
 }
 
@@ -683,8 +814,9 @@ fn every_jacobian_entry_matches_complex_step() {
             .iter()
             .map(|residual| differentiated.derivative_row(*residual))
             .collect();
+        let evaluated = numerical_only(&differentiated.function);
         let bias = bias_point(&artifact);
-        let snapshot = evaluate_cfg(&differentiated.function, &inputs(&bias))
+        let snapshot = evaluate_cfg(&evaluated, &inputs(&bias))
             .unwrap_or_else(|error| panic!("{name}: evaluation failed: {error}"));
 
         for (equation, residual) in cfg.residuals.iter().enumerate() {
@@ -692,7 +824,7 @@ fn every_jacobian_entry_matches_complex_step() {
                 let stamped = rows[equation][lane]
                     .and_then(|value| snapshot.value(value))
                     .unwrap_or(0.0);
-                let exact = complex_step(&differentiated.function, &bias, *seed, *residual);
+                let exact = complex_step(&evaluated, &bias, *seed, *residual);
                 let scale = stamped.abs().max(exact.abs());
                 assert!(
                     (stamped - exact).abs() <= COMPLEX_TOLERANCE * scale.max(f64::MIN_POSITIVE),
@@ -720,6 +852,20 @@ fn complex_step_column(
     seed: AdSeed,
     residuals: &[ValueId],
 ) -> Vec<f64> {
+    complex_step_values(function, bias, seed, residuals)
+        .into_iter()
+        .map(|value| value.derivative())
+        .collect()
+}
+
+/// The perturbed residuals themselves, whose real parts say whether the
+/// oracle is valid; see [`oracle_drifts`].
+fn complex_step_values(
+    function: &CfgFunction,
+    bias: &BiasPoint,
+    seed: AdSeed,
+    residuals: &[ValueId],
+) -> Vec<ComplexStep> {
     let mut inputs = complex_inputs(bias);
     match seed {
         AdSeed::NodePotential(node) => {
@@ -742,9 +888,23 @@ fn complex_step_column(
             snapshot
                 .value(*residual)
                 .expect("the residual is defined on every path")
-                .derivative()
         })
         .collect()
+}
+
+/// Whether an imaginary perturbation moved a residual's real part, which takes
+/// away the oracle's standing for that entry.
+///
+/// `f(x + ih) = f(x) + i h f'(x) + O(h^2)` holds where `f` is analytic. Where
+/// it is not (a `floor`, a selection on the real part, a `pow` at its branch
+/// cut, or arithmetic that has left the number range, such as EKV with a drawn
+/// `TEMP` off its `1e21` "not given" sentinel, whose residuals are exactly zero
+/// for real and 4.3e6 under the perturbation), the real part moves and the
+/// imaginary part stops being a derivative of anything. Such an entry is a
+/// coverage gap, not evidence against the chain rule.
+fn oracle_drifts(real: f64, perturbed: f64) -> bool {
+    let scale = real.abs().max(perturbed.abs());
+    scale > 0.0 && (real - perturbed).abs() / scale > 1.0e-12
 }
 
 fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
@@ -753,7 +913,9 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
         parameters: lift(&bias.parameters),
         parameter_given: vec![false; bias.parameters.len()],
         port_connected: bias.port_connected.clone(),
-        event_state: Vec::new(),
+        // Accepted state is a number the runtime holds, not a function of the
+        // unknowns, so it carries no perturbation.
+        event_state: lift(&bias.event_state),
         event_controls: HashMap::new(),
         node_potentials: lift(&bias.node_potentials),
         branch_flows: lift(&bias.branch_flows),
@@ -771,6 +933,40 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
         integral_derivatives: Default::default(),
         staged: Vec::new(),
     }
+}
+
+/// Rule and oracle read the same inputs, so their agreement cannot show that
+/// the inputs are the runtime's: fed the wrong event state, a census
+/// differentiates a different model and agrees with itself. So the state is
+/// pinned directly, on the fixture that needs every part of the
+/// initialization. `g` is `scale / r` only if the declaration initializer
+/// reached the evaluation; from an all-zero state it is zero.
+#[test]
+fn the_oracle_evaluates_from_the_state_the_runtime_initializes() {
+    let (_, source) = fixtures()
+        .into_iter()
+        .find(|(name, _)| *name == "model set up at the initial step")
+        .expect("the self-initializing fixture");
+    let artifact = artifact(source);
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("the fixture lowers");
+    let slot = |name: &str| {
+        artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .position(|variable| variable.name == name)
+            .unwrap_or_else(|| panic!("`{name}` is event state"))
+    };
+
+    let bias = bias_point(&artifact);
+    assert_eq!(bias.event_state[slot("scale")], 2.0);
+    let snapshot = evaluate_cfg(&numerical_only(&cfg.function), &inputs(&bias))
+        .expect("the fixture evaluates at its declared defaults");
+    assert_eq!(
+        snapshot.value(cfg.event_state_candidates[slot("g")]),
+        Some(2.0 / 1.0e3)
+    );
 }
 
 /// `ddx` reads back a first derivative, and an equation that consumes it must
@@ -1430,13 +1626,33 @@ fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
 /// The draw is a perturbation rather than a uniform sweep for the same reason —
 /// see [`draw_parameter`], which respects exclusive bounds, excluded points and
 /// integer parameters.
-fn random_bias_point(artifact: &CanonicalIrArtifact, state: &mut u64) -> BiasPoint {
-    BiasPoint {
+///
+/// A dependent parameter default is not drawn either: given the model's
+/// runtime, it is evaluated from the drawn parameters around it (see
+/// [`resolve_dependent_defaults`]). Nor is the event state: it is what the
+/// runtime's initialization makes of the parameters (see
+/// [`initial_event_state`]). A point either refuses is an error naming why.
+///
+/// `draw_parameters` false keeps the declared parameters and draws the bias
+/// alone, which is the model as it ships at a bias nobody chose.
+fn random_bias_point(
+    artifact: &CanonicalIrArtifact,
+    runtime: Option<&Arc<CompiledModel>>,
+    draw_parameters: bool,
+    state: &mut u64,
+) -> Result<BiasPoint, String> {
+    let mut bias = BiasPoint {
         parameters: artifact
             .mir
             .parameters
             .iter()
-            .map(|parameter| draw_parameter(parameter, state))
+            .map(|parameter| {
+                if draw_parameters {
+                    draw_parameter(parameter, state)
+                } else {
+                    parameter.default.unwrap_or(0.0)
+                }
+            })
             .collect(),
         // Not drawn: connection state is structural, not a bias coordinate.
         port_connected: vec![true; artifact.hir.ports.len()],
@@ -1449,7 +1665,73 @@ fn random_bias_point(artifact: &CanonicalIrArtifact, state: &mut u64) -> BiasPoi
         branch_unknown_flows: (0..artifact.mir.branch_unknowns.len())
             .map(|_| 1.0e-3 * (2.0 * next_unit(state) - 1.0))
             .collect(),
+        event_state: Vec::new(),
+    };
+    match runtime {
+        Some(model) => resolve_dependent_defaults(model, artifact, &mut bias)?,
+        None => assert_no_dependent_defaults(artifact),
     }
+    bias.event_state = initial_event_state(artifact, &bias)?;
+    Ok(bias)
+}
+
+/// `bias` with each dependent parameter default (`parameter real TOXP = TOXE`)
+/// evaluated from the parameters around it, as the runtime's parameter
+/// finalization evaluates it.
+///
+/// The canonical IR carries a dependent default as an expression only, so
+/// reading [`MirParameterSlot::default`] gives such a parameter zero. BSIM-IMG
+/// then has a zero `TOXP` and a zero `WELLTYPE` and is not finite at its own
+/// declared defaults. The runtime model compiled from the same source resolves
+/// them, so it is asked: every literal parameter is set to the point's value
+/// and the rest are evaluated in declaration order. The CFG is still told that
+/// no parameter was given, so the point is the model with these literal
+/// defaults rather than an instance card that sets them.
+fn resolve_dependent_defaults(
+    model: &Arc<CompiledModel>,
+    artifact: &CanonicalIrArtifact,
+    bias: &mut BiasPoint,
+) -> Result<(), String> {
+    let nodes: Vec<usize> = (1..=artifact.hir.ports.len()).collect();
+    let mut device = VerilogADevice::try_new("census", Arc::clone(model), &nodes)
+        .map_err(|error| format!("the runtime model does not instantiate: {error}"))?;
+    let scalars = || {
+        artifact
+            .mir
+            .parameters
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.dimensions.is_empty())
+    };
+    for (index, slot) in scalars() {
+        if slot.default.is_some() {
+            device.set_parameter(&slot.name, bias.parameters[index]);
+        }
+    }
+    device
+        .try_resolve_parameter_defaults()
+        .map_err(|error| format!("dependent parameter defaults do not resolve: {error}"))?;
+    for (index, slot) in scalars() {
+        if let Some((value, _)) = device.parameter_state(&slot.name) {
+            bias.parameters[index] = value;
+        }
+    }
+    Ok(())
+}
+
+/// A fixture is compiled to canonical IR alone, which cannot evaluate a
+/// dependent default; one that declared any would be measured with zeros.
+fn assert_no_dependent_defaults(artifact: &CanonicalIrArtifact) {
+    let dependent = artifact
+        .mir
+        .parameters
+        .iter()
+        .find(|slot| slot.default.is_none() && slot.default_expr.is_some());
+    assert!(
+        dependent.is_none(),
+        "`{}` has a dependent default, which only a runtime model evaluates",
+        dependent.map_or("", |slot| slot.name.as_str())
+    );
 }
 
 /// Every lane of every equation, against complex step, at bias points nobody
@@ -1489,22 +1771,24 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
             .iter()
             .map(|residual| differentiated.derivative_row(*residual))
             .collect();
+        let evaluated = numerical_only(&differentiated.function);
 
         let mut state = seed_for(name);
         let mut fixture_entries = 0usize;
         for point in 0..POINTS {
-            let bias = random_bias_point(&artifact, &mut state);
-            let Ok(snapshot) = evaluate_cfg(&differentiated.function, &inputs(&bias)) else {
-                // A drawn point may sit where the model itself refuses to
-                // evaluate. That is the model's business, not the rule's.
+            // A drawn point may sit where the model itself refuses to
+            // initialize or evaluate. That is the model's business, not the
+            // rule's.
+            let Ok(bias) = random_bias_point(&artifact, None, true, &mut state) else {
+                continue;
+            };
+            let Ok(snapshot) = evaluate_cfg(&evaluated, &inputs(&bias)) else {
                 continue;
             };
 
             let columns: Vec<_> = lanes
                 .iter()
-                .map(|seed| {
-                    complex_step_column(&differentiated.function, &bias, *seed, &cfg.residuals)
-                })
+                .map(|seed| complex_step_column(&evaluated, &bias, *seed, &cfg.residuals))
                 .collect();
             let block: Vec<(Vec<f64>, Vec<f64>)> = (0..cfg.residuals.len())
                 .map(|equation| {
@@ -1583,7 +1867,8 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
 #[test]
 #[ignore = "compiles the whole shipped corpus"]
 fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
-    const POINTS: usize = 3;
+    // One point at the declared parameters, then three drawn ones.
+    const POINTS: usize = 4;
 
     let root = model_root();
     let candidates = discover_veriloga_sources(&root).expect("model tree");
@@ -1609,11 +1894,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             shipped.push((key.clone(), format!("{module} ({relative}, {id})")));
         }
 
-        let mut options = CompilerOptions::default();
-        options.include_paths.push(root.clone());
-        options.defines = candidate.compile_profile.defines.clone();
-        options.undefines = candidate.compile_profile.undefines.clone();
-        let compiled = match VerilogACompiler::new(options)
+        let compiled = match VerilogACompiler::new(shipped_options(candidate))
             .compile_file_canonical_ir_with_metadata(&candidate.path, Some(&module))
         {
             Ok(compiled) => compiled,
@@ -1624,6 +1905,21 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             }
         };
         let artifact = compiled.artifact;
+        // The same source's runtime model, for the dependent parameter
+        // defaults the canonical IR carries only as expressions.
+        let runtime = match VerilogACompiler::new(shipped_options(candidate))
+            .compile_file_runtime_with_metadata(&candidate.path, Some(&module))
+        {
+            Ok(runtime) => Arc::new(runtime.model),
+            Err(error) => {
+                uncompiled += 1;
+                outcomes.insert(
+                    key,
+                    (0, format!("did not compile a runtime model: {error}")),
+                );
+                continue;
+            }
+        };
         let cfg = match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
             Ok(cfg) => cfg,
             Err(diagnostics) => {
@@ -1653,20 +1949,36 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             .iter()
             .map(|residual| differentiated.derivative_row(*residual))
             .collect();
+        let rule = numerical_only(&differentiated.function);
 
         let mut state = seed_for(&key);
         let mut model_entries = 0usize;
         let mut evaluated = 0usize;
         let mut skipped = Vec::new();
+        let mut without_oracle = 0usize;
         for point in 0..POINTS {
-            let bias = random_bias_point(&artifact, &mut state);
-            let snapshot = match evaluate_cfg(&differentiated.function, &inputs(&bias)) {
+            // A drawn point may sit where the model itself refuses to
+            // initialize or evaluate, and which point and why is the
+            // difference between a model that is hard to bias and one that
+            // stopped evaluating at all.
+            //
+            // Point 0 keeps the declared parameters. Drawing every parameter
+            // independently often yields a vector the runtime itself refuses:
+            // VBIC bounds `nen` below by `nei`, and ASM-HEMT and HiSIM-SOI
+            // reach a non-finite operating point at every draw this seed
+            // makes. The model as it ships is compared whatever the draws do.
+            let draw_parameters = point > 0;
+            let bias =
+                match random_bias_point(&artifact, Some(&runtime), draw_parameters, &mut state) {
+                    Ok(bias) => bias,
+                    Err(reason) => {
+                        skipped.push(format!("point {point}: {reason}"));
+                        continue;
+                    }
+                };
+            let snapshot = match evaluate_cfg(&rule, &inputs(&bias)) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    // A drawn point may sit where the model itself refuses to
-                    // evaluate, and which point and why is the difference
-                    // between a model that is hard to bias and one that stopped
-                    // evaluating at all.
                     skipped.push(format!("point {point}: {error}"));
                     continue;
                 }
@@ -1674,9 +1986,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             evaluated += 1;
             let columns: Vec<_> = lanes
                 .iter()
-                .map(|seed| {
-                    complex_step_column(&differentiated.function, &bias, *seed, &cfg.residuals)
-                })
+                .map(|seed| complex_step_values(&rule, &bias, *seed, &cfg.residuals))
                 .collect();
             let block: Vec<(Vec<f64>, Vec<f64>)> = (0..cfg.residuals.len())
                 .map(|equation| {
@@ -1687,7 +1997,21 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
                                 .unwrap_or(0.0)
                         })
                         .collect();
-                    let exact = columns.iter().map(|column| column[equation]).collect();
+                    let real = snapshot.value(cfg.residuals[equation]);
+                    // An entry without a valid oracle is not compared, which
+                    // `compare_block` reads from a non-finite oracle value.
+                    let exact = columns
+                        .iter()
+                        .map(|column| {
+                            let perturbed = column[equation];
+                            if real.is_some_and(|real| oracle_drifts(real, perturbed.real())) {
+                                without_oracle += 1;
+                                f64::NAN
+                            } else {
+                                perturbed.derivative()
+                            }
+                        })
+                        .collect();
                     (stamped, exact)
                 })
                 .collect();
@@ -1702,7 +2026,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
         checked += 1;
         entries += model_entries;
         let mut outcome = format!(
-            "evaluated at {evaluated} of {POINTS} points, compared {model_entries} entries"
+            "evaluated at {evaluated} of {POINTS} points, compared {model_entries} entries,              {without_oracle} without a valid oracle"
         );
         for reason in &skipped {
             outcome.push_str("\n      skipped ");
@@ -2008,16 +2332,18 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
             .iter()
             .map(move |module| (candidate, module.to_string()))
     }) {
-        let mut options = CompilerOptions::default();
-        options.include_paths.push(root.clone());
-        options.defines = candidate.compile_profile.defines.clone();
-        options.undefines = candidate.compile_profile.undefines.clone();
-        let Ok(compiled) = VerilogACompiler::new(options)
+        let Ok(compiled) = VerilogACompiler::new(shipped_options(candidate))
             .compile_file_canonical_ir_with_metadata(&candidate.path, Some(&module))
         else {
             continue;
         };
         let artifact = compiled.artifact;
+        let Ok(runtime) = VerilogACompiler::new(shipped_options(candidate))
+            .compile_file_runtime_with_metadata(&candidate.path, Some(&module))
+            .map(|runtime| Arc::new(runtime.model))
+        else {
+            continue;
+        };
         let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
             continue;
         };
@@ -2027,11 +2353,14 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
         let Ok(function) = differentiate(&cfg.function, &lanes) else {
             continue;
         };
+        let function = numerical_only(&function.function);
 
         let mut state = seed_for(&module);
         for point in 0..3 {
-            let bias = random_bias_point(&artifact, &mut state);
-            let Ok(snapshot) = evaluate_cfg(&function.function, &inputs(&bias)) else {
+            let Ok(bias) = random_bias_point(&artifact, Some(&runtime), true, &mut state) else {
+                continue;
+            };
+            let Ok(snapshot) = evaluate_cfg(&function, &inputs(&bias)) else {
                 continue;
             };
             for (equation, residual) in cfg.residuals.iter().enumerate() {
@@ -2048,15 +2377,14 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
                         }
                         _ => continue,
                     }
-                    let Ok(perturbed) = evaluate_cfg(&function.function, &complex) else {
+                    let Ok(perturbed) = evaluate_cfg(&function, &complex) else {
                         continue;
                     };
                     let Some(value) = perturbed.value(*residual) else {
                         continue;
                     };
                     checked += 1;
-                    let scale = real.abs().max(value.real().abs());
-                    if scale > 0.0 && (real - value.real()).abs() / scale > 1.0e-12 {
+                    if oracle_drifts(real, value.real()) {
                         drifted.push(format!(
                             "{module}: point {point}: equation {equation} under {seed:?} is \
                              {real} for real and {} under an imaginary perturbation",
