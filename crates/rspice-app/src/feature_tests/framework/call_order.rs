@@ -471,7 +471,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "8",
         &[
             "|app, RevealExecutedDeck(sequence)|",
-            "crate::workbench::commands::result_navigation::open_task_deck(",
+            "open_task_deck(&mut app.state, sequence)",
         ],
     ),
     (

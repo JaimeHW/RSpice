@@ -200,10 +200,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, RevealExecutedDeck(sequence)| {
-                crate::workbench::commands::result_navigation::open_task_deck(
-                    &mut app.state,
-                    sequence,
-                );
+                open_task_deck(&mut app.state, sequence);
             },
         );
         requests::drain(
@@ -252,6 +249,23 @@ impl RSpiceApp {
             |app, CloseForLiveMirror| app.close_for_live_mirror(),
         );
     }
+}
+
+/// Open the source one run's engine was actually handed, or say why not.
+///
+/// The owner for every route to it. The Jobs manager's row reached
+/// `netlist_document::reveal_executed_deck` and spelled its own refusal beside
+/// it; a second caller spelling a second refusal for the same missing deck is
+/// how one absence acquires two names.
+pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u64) -> bool {
+    if crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
+        return true;
+    }
+    state.prompt(format!(
+        "The source Run {sequence} executed cannot be opened: {}.",
+        crate::state::absent_deck_reason()
+    ));
+    false
 }
 
 impl Command {

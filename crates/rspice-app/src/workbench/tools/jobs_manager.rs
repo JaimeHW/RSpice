@@ -467,7 +467,7 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
 /// byte-identical, and a deck released between the frame that drew the control
 /// and the click is refused by one name rather than three.
 fn open_task_deck(state: &mut AppState, sequence: u64) {
-    if crate::workbench::commands::result_navigation::open_task_deck(state, sequence) {
+    if crate::workbench::dispatch::open_task_deck(state, sequence) {
         close_to_source(state);
     }
 }

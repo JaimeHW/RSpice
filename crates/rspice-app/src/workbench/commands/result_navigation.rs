@@ -197,23 +197,6 @@ pub(crate) fn task_deck_hop(state: ResultsReads<'_>) -> Result<u64, &'static str
     Ok(run.id)
 }
 
-/// Open the source one run's engine was actually handed, or say why not.
-///
-/// The owner for every route to it. The Jobs manager's row reached
-/// `netlist_document::reveal_executed_deck` and spelled its own refusal beside
-/// it; a second caller spelling a second refusal for the same missing deck is
-/// how one absence acquires two names.
-pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u64) -> bool {
-    if crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
-        return true;
-    }
-    state.prompt(format!(
-        "The source Run {sequence} executed cannot be opened: {}.",
-        crate::state::absent_deck_reason()
-    ));
-    false
-}
-
 /// The run that produced the one check-marked Data Browser quantity, whose
 /// log the hop would open.
 ///
