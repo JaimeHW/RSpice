@@ -1739,13 +1739,17 @@ impl VerilogACompiler {
             promoted.source_specialization = analyzed.source_specialization.clone();
             let selected = self.select_analyzed_module(&promoted, Some(name))?;
             return semantic::retain_packed_parameters(semantic::lower_flow_probes(
-                semantic::elaborate_executable_module(&promoted, selected)?,
+                semantic::tie_unreached_nodes(semantic::elaborate_executable_module(
+                    &promoted, selected,
+                )?)?,
             )?)
             .map(|module| std::borrow::Cow::Owned(module.into_owned()));
         }
         let selected = self.select_analyzed_module(analyzed, module_name)?;
         semantic::retain_packed_parameters(semantic::lower_flow_probes(
-            semantic::elaborate_executable_module(analyzed, selected)?,
+            semantic::tie_unreached_nodes(semantic::elaborate_executable_module(
+                analyzed, selected,
+            )?)?,
         )?)
     }
 

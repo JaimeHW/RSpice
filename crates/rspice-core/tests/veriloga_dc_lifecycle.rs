@@ -2191,3 +2191,47 @@ fn an_unnamed_branch_unknown_keeps_a_positional_name() {
         result.dc_observables
     );
 }
+
+#[test]
+fn an_internal_node_no_contribution_reaches_is_tied_to_ground() {
+    // HiSIM-SOI's body network exists only under COBCNODE=1. With it off, `x`
+    // takes no contribution and `unused` never does, and either one left
+    // floating made the device's stamp singular.
+    let model = write_model(
+        "unreached_internal_node",
+        "module unreached(p,n); inout p,n; electrical p,n,x,unused;
+        parameter integer body=0;
+        analog begin
+            I(p,n)<+V(p,n);
+            if(body==1) begin I(p,x)<+V(p,x); I(x,n)<+V(x,n); end
+        end endmodule",
+    );
+    for (body, conductance) in [(0, 1.0), (1, 1.5)] {
+        let netlist = Netlist::parse_validated(&format!(
+            "* conditional internal node\nV1 in 0 DC 1 AC 1\nR1 in p 1\nX1 p 0 unreached body={body}\n.va \"{}\" unreached\n.end\n",
+            deck_path(&model)
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let expected = 1.0 / (1.0 + conductance);
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        assert!(
+            (node_voltage(&dc, "p") - expected).abs() < 1e-9,
+            "body={body}: {}",
+            node_voltage(&dc, "p")
+        );
+        for point in engine.run_ac(&netlist, &[1.0, 1e6]).unwrap() {
+            let p = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("p"))
+                .unwrap();
+            let value = point.voltages[p];
+            assert!(
+                (value.re - expected).abs() < 1e-9 && value.im.abs() < 1e-12,
+                "body={body}: {value}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}

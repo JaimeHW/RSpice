@@ -427,6 +427,7 @@ pub(crate) mod source_references;
 mod string_parameters;
 mod switch_branches;
 mod symbols;
+mod unreached_nodes;
 
 pub use analyzed::*;
 pub use digital::*;
@@ -435,6 +436,7 @@ pub(crate) use elaboration::elaborate_executable_module;
 pub(crate) use flow_probes::lower as lower_flow_probes;
 pub(crate) use packed_parameters::retain_packed_parameters;
 pub use symbols::*;
+pub(crate) use unreached_nodes::lower as tie_unreached_nodes;
 
 // ============================================================================
 // Semantic Analyzer

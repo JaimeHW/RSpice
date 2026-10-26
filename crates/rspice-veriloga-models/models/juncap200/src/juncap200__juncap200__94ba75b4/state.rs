@@ -492,7 +492,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "1db09f8572545dd126c347fee4b5d3aadea77144f4279d045d3e63d4e28c6847";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "005fc2123632446f80e52649d7d0c67470d681906c63cdc78cac78a60e095abf";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

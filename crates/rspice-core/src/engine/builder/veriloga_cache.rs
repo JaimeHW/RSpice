@@ -536,7 +536,9 @@ use super::*;
 // Version 178 follows the schema to 185, whose digital plan marks a net of
 // a SystemVerilog real nettype apart from a `wreal`, so that a deck's
 // `wreal_resolution` never refuses or folds one.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 178;
+// Version 179 follows the schema to 186, which ties to ground an internal node
+// that no contribution reaches.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 179;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -329,7 +329,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 9]>,
+	pub(crate) canonical_reactive: Box<[f64; 13]>,
 }
 
 impl Clone for Instance {
@@ -421,7 +421,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "02e96dd3769e2d5e67887627b75323ba5804181cd5f6d31ff185f4b721bf441c";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b38a912b86fe5bed537bf2e039bbd00d3cc6cfc3e191d7726f2c07e710aa9cf0";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

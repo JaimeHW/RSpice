@@ -1837,7 +1837,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 28 preserves finite integral candidates through intermediate range loss.
 // Version 29 shares DDT candidate history with its derivatives and recovers range loss.
 // Version 30 executes numeric parameter arrays in declaration storage.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 30;
+// Version 31 ties to ground an internal node that no contribution reaches.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 31;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();
