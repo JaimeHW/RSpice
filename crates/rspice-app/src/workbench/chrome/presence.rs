@@ -13,13 +13,13 @@
 
 use egui::{Align, Align2, Layout, Sense, Ui, Vec2};
 
-use super::title_bar::MENU_POPUP_GAP;
 use crate::services::cloud_account::CloudAccountService;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
 use crate::workbench::live_session::LiveSessionEngine;
 use crate::workbench::state::Workspace;
+use rspice_app_workbench::workbench::chrome::title_bar::MENU_POPUP_GAP;
 
 /// One roster row resolved for the presence chrome.
 struct PresencePeer {
