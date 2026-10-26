@@ -494,9 +494,19 @@ impl Host for RSpiceApp {
             // seeing them.
             Workspace::Results => RailEntry {
                 badge: Some(|app, active| {
-                    unseen_result_count(&app.state, Workspace::Results, active)
+                    unseen_result_count(
+                        app.state.results.results_seen_version,
+                        &app.state.model.simulation,
+                        Workspace::Results,
+                        active,
+                    )
                 }),
-                on_visible: Some(|app| mark_results_seen(&mut app.state)),
+                on_visible: Some(|app| {
+                    mark_results_seen(
+                        &mut app.state.results.results_seen_version,
+                        &app.state.model.simulation,
+                    )
+                }),
             },
             _ => RailEntry {
                 badge: None,
@@ -832,7 +842,7 @@ impl DocumentHost for AppState {
             // exists would put a document in the window session that nothing can
             // detach, close, or save.
             Workspace::Stimulus => Vec::new(),
-            Workspace::Results => result_documents(state),
+            Workspace::Results => result_documents(&state.model.simulation),
             Workspace::Verify => verification_documents(),
             Workspace::Models => models_documents(),
             Workspace::Netlist => netlist_workspace_documents(state),
@@ -862,10 +872,10 @@ impl DocumentHost for AppState {
         match document {
             WorkspaceDocumentId::CellView(reference) => activate_cell_view(state, reference),
             WorkspaceDocumentId::VisualizationDocument(document_id) => {
-                activate_visualization_document(state, document_id)
+                activate_visualization_document(&mut state.results_parts(), document_id)
             }
             WorkspaceDocumentId::ResultDataset(dataset_id) => {
-                activate_result_dataset(state, dataset_id)
+                activate_result_dataset(&mut state.model.simulation, dataset_id)
             }
             WorkspaceDocumentId::NetlistGenerated(document_id) => {
                 activate_generated_netlist(state, document_id)

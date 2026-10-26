@@ -300,7 +300,7 @@ fn adjacent_result_segments_never_print_the_same_sentence() {
     app.state.workbench.activate(Workspace::Results);
     app.state.open_project_session();
 
-    let coordinates = results_view_summary(&app, None);
+    let coordinates = results_view_summary(&app.state.model.simulation, None);
     let selection = selection_summary(&app);
     assert_ne!(
         coordinates, selection,

@@ -210,7 +210,7 @@ fn results_context_cell<'a>(
     readings: &'a StatusReadings,
 ) -> Option<StatusText<'a>> {
     Some(StatusText::label(results_view_summary(
-        app,
+        &app.state.model.simulation,
         readings.results_view.as_ref(),
     )))
 }

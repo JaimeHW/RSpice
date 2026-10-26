@@ -1719,7 +1719,7 @@ pub(crate) fn show_persistent_document(
 /// document can never select one retained result when created and a different
 /// one when reopened.
 pub(crate) fn activate_persistent_document(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: crate::product::ResultDocumentId,
 ) -> bool {
     persistent_document::activate(state, document_id)

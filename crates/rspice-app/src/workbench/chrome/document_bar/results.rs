@@ -1,17 +1,18 @@
 //! The document bar's Results tabs: one per retained dataset, and the
 //! activation of a dataset or a saved result document.
 
-use crate::workbench::AppState;
+use crate::state::SimulationState;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::state::WorkspaceDocumentId;
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per retained result dataset.
-pub(in crate::workbench) fn result_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    state
-        .model
-        .simulation
+pub(in crate::workbench) fn result_documents(
+    simulation: &SimulationState,
+) -> Vec<WorkspaceDocument> {
+    simulation
         .retained
         .runs
         .iter()
@@ -26,7 +27,7 @@ pub(in crate::workbench) fn result_documents(state: &AppState) -> Vec<WorkspaceD
 
 /// Show a saved result document.
 pub(in crate::workbench) fn activate_visualization_document(
-    state: &mut AppState,
+    state: &mut ResultsParts<'_>,
     document_id: &crate::product::ResultDocumentId,
 ) -> bool {
     crate::workbench::documents::result_document::activate_persistent_document(state, *document_id)
@@ -34,7 +35,7 @@ pub(in crate::workbench) fn activate_visualization_document(
 
 /// Show a retained result dataset.
 pub(in crate::workbench) fn activate_result_dataset(
-    state: &mut AppState,
+    simulation: &mut SimulationState,
     dataset_id: &crate::product::DatasetId,
 ) -> bool {
     // Re-activating the dataset that is already active must not re-select
@@ -43,15 +44,12 @@ pub(in crate::workbench) fn activate_result_dataset(
     // retires cursors, the selected trace, the active pane, and pinned
     // readouts. This path runs on every frame the document bar draws, so
     // an unguarded re-selection made those states impossible to hold.
-    state
-        .model
-        .simulation
+    simulation
         .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == *dataset_id)
         .is_some_and(|index| {
-            state.model.simulation.view.active_run_idx == Some(index)
-                || state.model.simulation.select_run(index)
+            simulation.view.active_run_idx == Some(index) || simulation.select_run(index)
         })
 }

@@ -752,7 +752,7 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
         .expect("the project keeps the document");
     app.state.workbench.activate(Workspace::Results);
     assert!(super::super::activate_persistent_document(
-        &mut app.state,
+        &mut app.state.results_parts(),
         document_id
     ));
     app.state

@@ -22,7 +22,7 @@ use crate::results::visualization_document::{
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::{ResultViewer, ResultsReads};
+use super::{ResultViewer, ResultsParts, ResultsReads};
 
 #[derive(Debug, Clone)]
 struct DocumentProjection {
@@ -152,7 +152,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .results
         .session
         .select_persistent_document_pane(document_id, active_pane.id);
-    if let Err(reason) = select_pane_binding(&mut app.state, active_pane) {
+    if let Err(reason) = select_pane_binding(&mut app.state.results_parts(), active_pane) {
         unavailable_surface(ui, &active_pane.title, &reason);
         return;
     }
@@ -227,7 +227,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .iter()
         .find(|pane| pane.id.get() == restored_pane_id)
         .expect("a pane activated from this page remains in this page");
-    if select_pane_binding(&mut app.state, restored_pane).is_ok() {
+    if select_pane_binding(&mut app.state.results_parts(), restored_pane).is_ok() {
         app.state
             .results
             .results
@@ -571,7 +571,7 @@ pub(crate) fn refresh_latest_binding(
     LatestBinding::Current
 }
 
-pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> bool {
+pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) -> bool {
     let Some(document) = state
         .model
         .workspace
@@ -581,7 +581,6 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
         return false;
     };
     let selected_page_id = state
-        .results
         .results
         .session
         .persistent_document_page(document_id)
@@ -595,7 +594,6 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     let panes = ordered_page_panes(document.panes(), page);
     let active_pane_id = resolved_active_pane_id(
         state
-            .results
             .results
             .session
             .persistent_document_pane(document_id)
@@ -613,11 +611,10 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     }
     state
         .results
-        .results
         .session
         .select_persistent_document_pane(document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.results.results.session.viewer = viewer;
+        state.results.session.viewer = viewer;
     }
     true
 }
@@ -838,7 +835,7 @@ fn render_pane_viewer(
     viewer: Option<ResultViewer>,
     is_active: bool,
 ) {
-    if let Err(reason) = select_pane_binding(&mut app.state, pane) {
+    if let Err(reason) = select_pane_binding(&mut app.state.results_parts(), pane) {
         unavailable_surface(ui, &pane.title, &reason);
         return;
     }
@@ -1115,7 +1112,7 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
 }
 
 fn select_pane_context(state: &mut AppState, pane: &PaneProjection) -> Result<(), String> {
-    select_pane_binding(state, pane)?;
+    select_pane_binding(&mut state.results_parts(), pane)?;
     state
         .results
         .results
@@ -1148,7 +1145,7 @@ fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultView
 /// active one — so an unguarded re-selection made all of those states
 /// impossible to hold at all while a project-owned document was open. The
 /// document bar's dataset activation carries the identical guard.
-fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> {
+fn select_pane_binding(state: &mut ResultsParts<'_>, pane: &Pane) -> Result<(), String> {
     let binding = pane
         .binding
         .ok_or_else(|| "This result pane is not bound to a run.".to_owned())?;

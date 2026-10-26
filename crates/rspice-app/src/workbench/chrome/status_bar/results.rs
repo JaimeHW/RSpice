@@ -1,7 +1,7 @@
 //! The status bar's Results segments: the plotted interval the panes show,
 //! and the plot magnification in the zoom chip.
 
-use crate::workbench::RSpiceApp;
+use crate::state::SimulationState;
 
 /// The zoom chip's waveform form: whole numbers once the magnification is
 /// deep, one decimal while it is shallow enough for the fraction to matter.
@@ -19,18 +19,16 @@ pub(crate) fn format_plot_zoom(zoom: f64) -> String {
 /// the interval the panes are showing. Sheets with no plotted interval — a
 /// table, or a run that has not been opened yet — name the dataset instead.
 pub(crate) fn results_view_summary(
-    app: &RSpiceApp,
+    simulation: &SimulationState,
     results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
 ) -> String {
     if let Some(view) = results_view {
         return view.span.clone();
     }
-    app.state
-        .model
-        .simulation
+    simulation
         .view
         .active_run_idx
-        .and_then(|index| app.state.model.simulation.retained.runs.get(index))
+        .and_then(|index| simulation.retained.runs.get(index))
         .map_or_else(
             // The selection segment beside this one already reports that no
             // dataset is chosen. This segment answers a different question —

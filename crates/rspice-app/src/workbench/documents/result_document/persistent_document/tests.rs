@@ -130,7 +130,7 @@ fn projected_pane(state: &mut AppState, document_id: ResultDocumentId) -> PanePr
     let mut projected = projection(state, document_id).expect("document projection");
     let mut page = projected.pages.remove(0);
     let pane = page.panes.remove(0);
-    select_pane_binding(state, &pane).expect("pane binding");
+    select_pane_binding(&mut state.results_parts(), &pane).expect("pane binding");
     project_pane_presentation(state, &pane, ResultViewer::Waves).expect("presentation projects");
     pane
 }
@@ -699,7 +699,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     let mut projected = projection(&app.state, document_id).expect("document projection");
     let mut page = projected.pages.remove(0);
     let pane = page.panes.remove(0);
-    select_pane_binding(&mut app.state, &pane).expect("pane binding");
+    select_pane_binding(&mut app.state.results_parts(), &pane).expect("pane binding");
     project_pane_presentation(&mut app.state, &pane, ResultViewer::Waves)
         .expect("presentation projects");
     let retained_default =
@@ -1076,7 +1076,7 @@ fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
 /// Draw `pane` as a frame does, from the snapshot it was projected in, with
 /// `edit` standing in for what the reader does in its viewer.
 fn draw_pane(app: &mut RSpiceApp, pane: &PaneProjection, edit: impl FnOnce(&mut AppState)) {
-    select_pane_binding(&mut app.state, pane).expect("pane binding");
+    select_pane_binding(&mut app.state.results_parts(), pane).expect("pane binding");
     project_pane_presentation(&mut app.state, pane, ResultViewer::Waves)
         .expect("presentation projects");
     edit(&mut app.state);
