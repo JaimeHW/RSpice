@@ -165,7 +165,9 @@ fn node_target_available(state: &AppState, name: &str) -> bool {
     }
     let name = signal_leaf(name);
     name != "0"
-        && crate::schematic::view::sheet_visibility::active_sheet_net_geometry(state)
+        && state
+            .model
+            .active_sheet_net_geometry()
             .net_to_points
             .iter()
             .any(|(candidate, points)| candidate.eq_ignore_ascii_case(name) && !points.is_empty())
@@ -195,7 +197,7 @@ fn apply_action(state: &mut AppState, action: OpAction) {
             } else {
                 format!("V({})", signal_leaf(&name))
             };
-            match crate::schematic::view::select_signal_conductor(state, &signal) {
+            match state.model.select_signal_conductor(&signal) {
                 Ok(_) => {
                     state.design.schematic_visibility.annotations =
                         SchematicAnnotationVisibility::OperatingPoint;

@@ -167,43 +167,6 @@ fn schematic_accessibility_shortcuts(
     )
 }
 
-/// Select a result signal only through the map belonging to the active drawing.
-pub(crate) fn select_signal_conductor(
-    state: &mut AppState,
-    signal: &str,
-) -> Result<String, LocateSignalError> {
-    let current = result_mapping_is_current(state);
-    let occurrence = state.model.workspace.content.occurrence_path();
-    let sheet = sheet_visibility::active_sheet_id(state);
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let (document, editor) = state.model.schematic.document_and_editor();
-    let view = cross_probe::CrossProbeView {
-        document,
-        sheet_catalog: state
-            .model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key),
-        occurrence: &occurrence,
-        net_to_points: current.then_some(
-            &state
-                .model
-                .simulation
-                .source
-                .cross_probe
-                .on_sheet(sheet)
-                .net_to_points,
-        ),
-    };
-    cross_probe::select_signal_conductor(&view, editor, signal)
-}
-
 /// Query the same host-authorized geometry that selection uses.
 pub(crate) fn drawn_failure_site_count(
     state: &AppState,
@@ -215,19 +178,12 @@ pub(crate) fn drawn_failure_site_count(
         document: state.model.schematic.document(),
         sheet_catalog: sheet_visibility::active_sheet_catalog(state),
         occurrence: &occurrence,
-        net_to_points: result_mapping_is_current(state)
-            .then_some(&sheet_visibility::active_sheet_net_geometry(state).net_to_points),
+        net_to_points: state
+            .model
+            .result_mapping_is_current()
+            .then_some(&state.model.active_sheet_net_geometry().net_to_points),
     };
     cross_probe::drawn_failure_site_count(&view, nets, devices)
-}
-
-/// Whether the retained cross-probe map belongs to the open cell as it is
-/// drawn right now.
-fn result_mapping_is_current(state: &AppState) -> bool {
-    state.model.simulation.source.cross_probe.is_current_for(
-        &state.model.workspace.content.active_view,
-        state.model.schematic.topology_version(),
-    )
 }
 
 /// Mark a failed run's objects while retaining app ownership of map freshness.
@@ -236,7 +192,7 @@ pub(crate) fn select_failure_sites(
     nets: &[String],
     devices: &[String],
 ) -> Result<FailureSiteSelection, LocateSignalError> {
-    let current = result_mapping_is_current(state);
+    let current = state.model.result_mapping_is_current();
     let occurrence = state.model.workspace.content.occurrence_path();
     let sheet = sheet_visibility::active_sheet_id(state);
     let key = state
@@ -597,7 +553,9 @@ mod tests {
         // Any structural edit invalidates the retained point map.
         state.model.schematic.bump_topology_version();
 
-        let error = select_signal_conductor(&mut state, "V(out)")
+        let error = state
+            .model
+            .select_signal_conductor("V(out)")
             .expect_err("the map is no longer current");
 
         assert_eq!(error, LocateSignalError::NoCurrentMap);
@@ -628,8 +586,10 @@ mod tests {
             state.model.schematic.topology_version(),
         );
 
-        let net =
-            select_signal_conductor(&mut state, "V(x1.out)").expect("the leaf is on this sheet");
+        let net = state
+            .model
+            .select_signal_conductor("V(x1.out)")
+            .expect("the leaf is on this sheet");
 
         assert_eq!(net, "OUT");
         assert!(
@@ -648,7 +608,9 @@ mod tests {
     fn a_signal_read_in_another_instance_never_selects_a_same_named_conductor() {
         let mut state = state_with_probed_wire();
 
-        let error = select_signal_conductor(&mut state, "V(x1.out)")
+        let error = state
+            .model
+            .select_signal_conductor("V(x1.out)")
             .expect_err("this tab is editing the design root");
 
         assert_eq!(error, LocateSignalError::OtherOccurrence("/x1".to_owned()));
@@ -663,7 +625,10 @@ mod tests {
     fn locate_on_a_later_sheet_reads_that_sheets_own_geometry() {
         let mut state = frame_cost::two_sheet_operating_point(true);
 
-        let net = select_signal_conductor(&mut state, "V(bias)").expect("Sheet 2 draws BIAS");
+        let net = state
+            .model
+            .select_signal_conductor("V(bias)")
+            .expect("Sheet 2 draws BIAS");
         assert_eq!(net, "BIAS");
         let editor = &state.model.schematic.session.editor;
         assert_eq!(
@@ -672,7 +637,9 @@ mod tests {
         );
         assert_eq!(editor.center_request, Some(Point::new(100, 0)));
 
-        let error = select_signal_conductor(&mut state, "V(vout)")
+        let error = state
+            .model
+            .select_signal_conductor("V(vout)")
             .expect_err("VOUT is drawn only on the hidden Sheet 1");
         assert_eq!(error, LocateSignalError::UnknownNet("vout".to_owned()));
         assert!(

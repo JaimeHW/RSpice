@@ -728,7 +728,7 @@ fn open_signal_table(
 }
 
 fn show_signal_on_schematic(app: &mut RSpiceApp, signal: &str) {
-    match crate::schematic::view::select_signal_conductor(&mut app.state, signal) {
+    match app.state.model.select_signal_conductor(signal) {
         Ok(net) => {
             Command::OpenWorkspace(Workspace::Design).execute(app);
             app.state

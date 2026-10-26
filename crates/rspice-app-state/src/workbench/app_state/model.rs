@@ -8,6 +8,7 @@
 //! application holds it inline, so moving a state carries what it carried
 //! before these fields were gathered here.
 
+mod cross_probe;
 mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
