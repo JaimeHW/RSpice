@@ -132,8 +132,9 @@ c1 out 0 159.154943091895p
 
         // The m = 0 column doubles as the per-node sideband spectra.
         let direct = result
-            .voltage(out_idx, freq_idx, 0)
-            .expect("PAC node voltage is retained");
+            .get_sideband_data(freq_idx, 0)
+            .expect("PAC node voltage is retained")
+            .node_voltages[out_idx];
         let expected = Complex64::new(1.0, 0.0) / Complex64::new(1.0, offset / fc);
         assert!(
             (direct - expected).norm() < 1e-3 * expected.norm(),
@@ -247,12 +248,11 @@ vclamp clamp 0 dc 0
     let input = result.node_index("in").expect("input node retained");
     let clamp = result.node_index("clamp").expect("clamp node retained");
     for frequency_index in 0..result.frequencies.len() {
-        let input_voltage = result
-            .voltage(input, frequency_index, 0)
-            .expect("central input voltage retained");
-        let clamp_voltage = result
-            .voltage(clamp, frequency_index, 0)
-            .expect("central clamp voltage retained");
+        let central = result
+            .get_sideband_data(frequency_index, 0)
+            .expect("central sideband retained");
+        let input_voltage = central.node_voltages[input];
+        let clamp_voltage = central.node_voltages[clamp];
         assert!((input_voltage - Complex64::new(1.0, 0.0)).norm() <= 1.0e-12);
         assert!(clamp_voltage.norm() <= 1.0e-12);
     }
@@ -429,14 +429,13 @@ r1 out 0 1k
     let analysis = run_pac(deck, config);
     let result = &analysis.result;
     assert!(result.conversion_matrix.get(0, 0, 0).is_err());
-    assert!(result.conversion_gain(0, 0, 0).is_err());
-    assert!(result.conversion_gain_db(0, 0, 0).is_err());
     assert!(result.get_transfer(0, 0).is_err());
     assert!(result.image_rejection_db(0).is_err());
     let out = result.node_index("out").expect("output node is retained");
     let voltage = result
-        .voltage(out, 0, 0)
-        .expect("no-output PAC still retains its physical node spectrum");
+        .get_sideband_data(0, 0)
+        .expect("no-output PAC still retains its physical node spectrum")
+        .node_voltages[out];
     assert!(
         (voltage - Complex64::new(1.0e3, 0.0)).norm() < 1.0e-9,
         "unit current through 1 kohm must retain 1 kV, got {voltage}"

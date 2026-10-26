@@ -436,59 +436,6 @@ impl PacResult {
         self.sideband_data.get_mut(freq_idx)?.get_mut(sb_idx)
     }
 
-    /// Get voltage at a node, frequency, and sideband
-    pub fn voltage(
-        &self,
-        node: usize,
-        freq_idx: usize,
-        sideband: i32,
-    ) -> Result<Complex64, PacError> {
-        let data = self
-            .get_sideband_data(freq_idx, sideband)
-            .ok_or_else(|| {
-                PacError::InvalidResult(format!(
-                    "PAC voltage coordinate (frequency {freq_idx}, sideband {sideband}) is outside the result axes"
-                ))
-            })?;
-        let voltage = data.node_voltages.get(node).copied().ok_or_else(|| {
-            PacError::InvalidResult(format!(
-                "node index {node} is outside this {}-node PAC result",
-                self.node_names.len()
-            ))
-        })?;
-        if !voltage.re.is_finite() || !voltage.im.is_finite() {
-            return Err(PacError::InvalidResult(format!(
-                "PAC voltage coordinate (frequency {freq_idx}, sideband {sideband}, node {node}) is non-finite ({:+.6e}{:+.6e}j)",
-                voltage.re, voltage.im
-            )));
-        }
-        Ok(voltage)
-    }
-
-    /// Get conversion gain from input sideband to output sideband
-    ///
-    /// This is the primary result for mixer analysis.
-    pub fn conversion_gain(
-        &self,
-        input_sideband: i32,
-        output_sideband: i32,
-        freq_idx: usize,
-    ) -> Result<Complex64, PacError> {
-        self.conversion_matrix
-            .get(freq_idx, output_sideband, input_sideband)
-    }
-
-    /// Get conversion gain in dB
-    pub fn conversion_gain_db(
-        &self,
-        input_sideband: i32,
-        output_sideband: i32,
-        freq_idx: usize,
-    ) -> Result<Value, PacError> {
-        let gain = self.conversion_gain(input_sideband, output_sideband, freq_idx)?;
-        Ok(20.0 * complex_log10_magnitude(gain, "PAC conversion gain")?)
-    }
-
     /// Get transfer function from one sideband to another across all frequencies
     pub fn get_transfer(
         &self,
@@ -542,8 +489,7 @@ mod tests {
         .expect("small PAC result axes are valid");
         assert_eq!(result.num_sidebands(), 3);
         assert!(!result.conversion_matrix.is_materialized());
-        assert!(result.conversion_gain(0, 0, 0).is_err());
-        assert!(result.conversion_gain_db(0, 0, 0).is_err());
+        assert!(result.conversion_matrix.get(0, 0, 0).is_err());
         assert!(result.get_transfer(0, 0).is_err());
         assert!(result.image_rejection_db(0).is_err());
         assert_eq!(
@@ -588,28 +534,10 @@ mod tests {
         data.node_voltages[0] = Complex64::new(Value::MAX, Value::MAX);
         assert!(data.voltage_magnitude(0).is_err());
         assert!(data.voltage_db(0).is_ok());
-
-        let mut result = PacResult::new(
-            1.0e6,
-            vec![1.0e3],
-            -1,
-            1,
-            vec!["OUT".to_string()],
-            Vec::new(),
-        )
-        .expect("small PAC result is valid");
-        assert!(result.voltage(1, 0, 0).is_err());
-        assert!(result.voltage(0, 1, 0).is_err());
-        assert!(result.voltage(0, 0, 2).is_err());
-        result
-            .get_sideband_data_mut(0, 0)
-            .expect("sideband exists")
-            .node_voltages[0] = Complex64::new(Value::NAN, 0.0);
-        assert!(result.voltage(0, 0, 0).is_err());
     }
 
     #[test]
-    fn conversion_gain_db_is_scale_safe() {
+    fn transfer_db_is_scale_safe() {
         let mut result = PacResult::new(
             1.0e6,
             vec![1.0e3],
@@ -624,7 +552,9 @@ mod tests {
             .set(0, 0, 1, Complex64::new(Value::MAX, Value::MAX))
             .expect("finite conversion value is accepted");
         let db = result
-            .conversion_gain_db(1, 0, 0)
+            .get_transfer(1, 0)
+            .expect("one frequency is materialized")[0]
+            .magnitude_db()
             .expect("maximum finite components have a representable dB gain");
         let expected = 20.0 * (Value::MAX.log10() + 0.5 * 2.0_f64.log10());
         assert!(

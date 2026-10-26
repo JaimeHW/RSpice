@@ -68,7 +68,7 @@ fn retained_classic_jfet_charge_drives_pac_and_authenticates_model_parameters() 
         .iter()
         .position(|name| name.eq_ignore_ascii_case("out"))
         .unwrap();
-    let gain = pac.result.conversion_gain(0, 0, 0).unwrap();
+    let gain = pac.result.conversion_matrix.get(0, 0, 0).unwrap();
     assert!((gain - ac[0].voltages[output]).norm() < 1e-8);
 
     let changed = Netlist::parse(&deck.replace("CGS=100p", "CGS=200p")).unwrap();
