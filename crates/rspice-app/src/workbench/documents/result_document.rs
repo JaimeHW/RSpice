@@ -2088,14 +2088,24 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         },
         ResultViewer::Bode => waves::show_bode(ui, &mut app.state.results_parts()),
         ResultViewer::Fft => {
-            if ensure_derived(ui, app, ActiveViewer::Fft) {
+            if ensure_derived(
+                ui,
+                &mut app.state.results_parts(),
+                &mut app.simulation_controller,
+                ActiveViewer::Fft,
+            ) {
                 fft::show(ui, &mut app.state.results_parts());
             }
         }
         ResultViewer::HarmonicBalance => harmonic_balance::show(ui, &mut app.state.results_parts()),
         ResultViewer::PhaseNoise => phase_noise::show(ui, &mut app.state.results_parts()),
         ResultViewer::Eye => {
-            if ensure_derived(ui, app, ActiveViewer::EyeDiagram) {
+            if ensure_derived(
+                ui,
+                &mut app.state.results_parts(),
+                &mut app.simulation_controller,
+                ActiveViewer::EyeDiagram,
+            ) {
                 eye::show(ui, &mut app.state.results_parts());
             }
         }
@@ -2644,9 +2654,13 @@ fn specialized_availability(state: ResultsReads<'_>, viewer: ActiveViewer) -> Vi
 
 /// Gate FFT/eye rendering on the controller's derived-data loader. Returns
 /// `true` when the viewer can render.
-fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> bool {
-    let Some(analysis_type) = app
-        .state
+fn ensure_derived(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+    viewer: ActiveViewer,
+) -> bool {
+    let Some(analysis_type) = state
         .model
         .simulation
         .active_analysis()
@@ -2659,19 +2673,16 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
         well_hint(ui, "The active analysis has no usable time-domain source");
         return false;
     }
-    match app
-        .simulation_controller
-        .ensure_transient_viewer_data(&mut app.state, viewer)
-    {
+    match run_controller.ensure_transient_viewer_data(state, viewer) {
         DerivedViewerLoadState::Ready => {
-            app.state.results.results.clear_runtime_condition(
+            state.results.clear_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
             );
             true
         }
         DerivedViewerLoadState::Loading => {
-            let data_version = app.state.model.simulation.view.data_version;
-            app.state.results.results.record_runtime_condition(
+            let data_version = state.model.simulation.view.data_version;
+            state.results.record_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
                 "Preparing and validating derived data from the active transient.",
                 data_version,
@@ -2681,7 +2692,7 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             false
         }
         DerivedViewerLoadState::Unavailable => {
-            app.state.results.results.clear_runtime_condition(
+            state.results.clear_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
             );
             // Derived viewers can be unavailable for reasons the reader can
@@ -2689,15 +2700,13 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             // eye's timebase guidance at this outer gate: the individual
             // viewer is not rendered when loading reports `Unavailable`.
             let hint = match viewer {
-                ActiveViewer::Fft => app
-                    .state
-                    .results
+                ActiveViewer::Fft => state
                     .analysis
                     .fft_state
                     .last_error
                     .as_ref()
                     .map(|error| format!("Spectrum unavailable — {error}")),
-                ActiveViewer::EyeDiagram => eye::unavailable_hint(&app.state),
+                ActiveViewer::EyeDiagram => eye::unavailable_hint(state.results_reads()),
                 _ => None,
             };
             well_hint(

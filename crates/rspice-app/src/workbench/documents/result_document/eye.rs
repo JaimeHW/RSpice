@@ -4,7 +4,6 @@ use super::{
     ResultViewer,
     frame_work::{self, DatasetWalk},
 };
-use crate::workbench::AppState;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
 use rspice_results_ui::eye_diagram::view;
@@ -30,11 +29,8 @@ fn selected_source(state: ResultsReads<'_>) -> &str {
         .unwrap_or("the active trace")
 }
 
-pub fn unavailable_hint(state: &AppState) -> Option<String> {
-    view::unavailable_hint(
-        &state.results.analysis.eye_diagram_state,
-        selected_source(state.results_reads()),
-    )
+pub fn unavailable_hint(state: ResultsReads<'_>) -> Option<String> {
+    view::unavailable_hint(&state.analysis.eye_diagram_state, selected_source(state))
 }
 
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
@@ -79,6 +75,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::AppState;
     use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
 
     /// Panning and zooming must not rebake. The bake walks every acquisition,
