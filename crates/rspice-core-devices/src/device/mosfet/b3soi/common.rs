@@ -545,6 +545,156 @@ fn stamp_voltage_constraint(
     matrix.stamp_rhs(branch, value);
 }
 
+/// The instance state every B3SOI variant keeps the same way: the terminal
+/// GMIN, the bypass and limiter flags, the `OFF`, `DEBUG` and startup flags,
+/// and the instance `IC=` constraints. Each variant embeds it as `core`, so
+/// `self.field` and these methods read the same on DD, FD and PD.
+#[derive(Debug, Clone)]
+pub struct SoiInstanceCore {
+    /// Xyce-style BSIMSOI3 terminal GMIN for the variant's GMIN branches.
+    pub(crate) eval_gmin: Value,
+    /// DC/operating-point mode, set by the engine before each analysis phase.
+    /// It gates the variant's DC-only convergence aids.
+    pub(crate) dc_mode: std::cell::Cell<bool>,
+    /// The operating-point startup holds the temperature-rise node at zero
+    /// before the self-heated solve.
+    pub(crate) self_heating_startup_disabled: std::cell::Cell<bool>,
+    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
+    /// the load's zero-junction arm.
+    pub(crate) initial_off: bool,
+    /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
+    /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
+    /// disables bypass (DC operating point never bypasses).
+    pub(crate) bypass_tolerances: std::cell::Cell<Option<(Value, Value, Value)>>,
+    /// Bypass engaged for the current Newton iterate (ngspice `ByPass`): the
+    /// device state (`bias`, `op`, mode, charge partition) is frozen and the
+    /// stamps reuse the previous evaluation.
+    pub(crate) bypass_active: std::cell::Cell<bool>,
+    /// Running count of Newton iterates this device answered from the frozen
+    /// linearization. An accuracy comparison between bypass off and on is
+    /// vacuous unless this is non-zero, so the count is the evidence that the
+    /// option did anything at all.
+    pub(crate) bypass_hits: std::cell::Cell<u64>,
+    /// Set at the start of every timestep attempt (ngspice `MODEINITPRED`):
+    /// the next `update` must perform a full evaluation so the bypass anchor
+    /// always belongs to the current timestep.
+    pub(crate) force_full_eval: std::cell::Cell<bool>,
+    /// The previous full evaluation engaged a limiter (ngspice `Check != 0`),
+    /// which disqualifies the next iterate from bypassing.
+    pub(crate) last_limited: std::cell::Cell<bool>,
+    /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
+    /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
+    /// zero before the companion assembly, so the device contributes no
+    /// dynamic charges to the matrix, RHS, or LTE - the transient runs
+    /// quasi-statically.
+    pub(crate) charges_suppressed: bool,
+    /// Xyce-style explicit instance `IC=` constraints, loaded as internal MNA
+    /// branch equations during the operating-point solve.
+    pub(crate) instance_ic: B3SoiInstanceIc,
+}
+
+impl SoiInstanceCore {
+    /// A fresh instance's state. `dc_mode` is the variant's starting mode
+    /// (cleared for DD, set for FD and PD) until the engine sets it.
+    pub(crate) fn new(dc_mode: bool) -> Self {
+        Self {
+            eval_gmin: 0.0,
+            dc_mode: std::cell::Cell::new(dc_mode),
+            self_heating_startup_disabled: std::cell::Cell::new(false),
+            initial_off: false,
+            bypass_tolerances: std::cell::Cell::new(None),
+            bypass_active: std::cell::Cell::new(false),
+            bypass_hits: std::cell::Cell::new(0),
+            force_full_eval: std::cell::Cell::new(true),
+            last_limited: std::cell::Cell::new(false),
+            charges_suppressed: false,
+            instance_ic: B3SoiInstanceIc::new(),
+        }
+    }
+
+    /// Enable the ngspice transient device bypass with the engine's
+    /// `(reltol, current abstol, vntol)` triple, or disable it with `None`.
+    ///
+    /// This is a speed option and nothing more. ngspice ships `CKTbypass = 0`
+    /// (cktinit.c:54, cktntask.c:105) and its own SOI decks never set it, so
+    /// the bypass blocks (b3soiddld.c:589-647, b3soifdld.c:560-618,
+    /// b3soipdld.c:515-565) are not on the path by which ngspice converges
+    /// anything; they are opt-in through `.options bypass`. Freezing a
+    /// stationary device trades a bounded accuracy risk for skipped
+    /// evaluations, so the default stays off and a run being compared against
+    /// another should leave it off.
+    pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
+        self.bypass_tolerances.set(tolerances);
+        self.bypass_active.set(false);
+    }
+
+    /// Newton iterates this device answered from its frozen linearization.
+    pub fn bypass_hits(&self) -> u64 {
+        self.bypass_hits.get()
+    }
+
+    /// `DEBUG=-1` (ngspice `debugMod == -1`): evaluate charges for probes but
+    /// contribute no dynamic charges to the matrix, RHS, or LTE.
+    pub fn set_debug_mod(&mut self, debug_mod: i32) {
+        self.charges_suppressed = debug_mod == -1;
+    }
+
+    /// The deck marked this instance `OFF`, so its first DC load is the
+    /// zero-junction MODEINITJCT arm (b3soiddld.c:407, b3soifdld.c:377,
+    /// b3soipdld.c:376).
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
+    }
+
+    pub fn set_instance_ic(&mut self, instance_ic: B3SoiInstanceIc) {
+        self.instance_ic = instance_ic;
+    }
+
+    pub fn instance_ic(&self) -> &B3SoiInstanceIc {
+        &self.instance_ic
+    }
+
+    pub fn resolve_instance_ic_branches(&mut self, num_nodes: NodeId) {
+        self.instance_ic.resolve_branch_matrix_indices(num_nodes);
+    }
+
+    pub fn set_eval_gmin(&mut self, gmin: Value) {
+        self.eval_gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+    }
+
+    pub fn eval_gmin(&self) -> Value {
+        self.eval_gmin
+    }
+
+    /// Whether `DEBUG=-1` suppresses this device's charge contributions.
+    pub fn charges_suppressed(&self) -> bool {
+        self.charges_suppressed
+    }
+
+    /// Hold the temperature-rise node at zero (`true`) for the isothermal
+    /// operating-point startup, or release it.
+    #[doc(hidden)]
+    pub fn set_self_heating_startup_disabled(&self, disabled: bool) {
+        self.self_heating_startup_disabled.set(disabled);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.last_limited.set(false);
+    }
+
+    pub(crate) fn stamp_instance_ic(&self, matrix: &mut impl MatrixStamper) {
+        self.instance_ic.stamp(self.dc_mode.get(), matrix);
+    }
+}
+
 #[inline]
 pub(crate) fn stamp(matrix: &mut impl MatrixStamper, row: NodeId, col: NodeId, value: Value) {
     if row != 0 && col != 0 && value != 0.0 {

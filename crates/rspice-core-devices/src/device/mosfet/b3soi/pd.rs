@@ -66,7 +66,7 @@ pub mod params;
 pub mod temp;
 
 use crate::device::mosfet::b3soi::common::{
-    SoiCompanionCurrents, biases_match, stamp, stamp_conductance, stamp_rhs,
+    SoiCompanionCurrents, SoiInstanceCore, biases_match, stamp, stamp_conductance, stamp_rhs,
 };
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
@@ -91,6 +91,8 @@ pub enum BodyMode {
 /// B3SOIPD device instance.
 #[derive(Debug, Clone)]
 pub struct B3SoiPd {
+    core: SoiInstanceCore,
+
     pub name: String,
     /// +1 NMOS / -1 PMOS (model `mtype`).
     pub mtype: Value,
@@ -118,9 +120,6 @@ pub struct B3SoiPd {
     base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
-    /// Xyce-style BSIMSOI3 terminal GMIN used for body-source and gate-drain
-    /// conductance branches.
-    eval_gmin: Value,
 
     // Operating point (current iteration).
     op: B3SoiPdOp,
@@ -135,12 +134,6 @@ pub struct B3SoiPd {
     /// Last accepted/limited self-heating temperature rise used by
     /// `B3SOIPDlimit(delTemp, oldDelTemp, 5.0)`.
     del_temp_limit_anchor: Value,
-    /// DC/operating-point mode. Cleared during transient and set by the engine
-    /// before each analysis phase.
-    dc_mode: std::cell::Cell<bool>,
-    /// During electrothermal startup, solve the electrical floating-body
-    /// operating point with the allocated thermal node anchored at zero.
-    self_heating_startup_disabled: std::cell::Cell<bool>,
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
     limit_anchor_valid: std::cell::Cell<bool>,
@@ -148,29 +141,6 @@ pub struct B3SoiPd {
     /// `stamp_nonlinear` would immediately re-evaluate from the raw node seed
     /// and discard the startup branch that ngspice loads.
     startup_seed_pending: std::cell::Cell<bool>,
-    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
-    /// b3soipdld.c's zero-junction arm rather than the gate seed.
-    initial_off: bool,
-    /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
-    /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
-    /// disables bypass (DC operating point never bypasses).
-    bypass_tolerances: std::cell::Cell<Option<(Value, Value, Value)>>,
-    /// Bypass engaged for the current Newton iterate (ngspice `ByPass`): the
-    /// device state (`bias`, `op`, mode, charge partition) is frozen and the
-    /// stamps reuse the previous evaluation.
-    bypass_active: std::cell::Cell<bool>,
-    /// Running count of Newton iterates this device answered from the frozen
-    /// linearization. An accuracy comparison between bypass off and on is
-    /// vacuous unless this is non-zero, so the count is the evidence that the
-    /// option did anything at all.
-    bypass_hits: std::cell::Cell<u64>,
-    /// Set at the start of every timestep attempt (ngspice `MODEINITPRED`):
-    /// the next `update` must perform a full evaluation so the bypass anchor
-    /// always belongs to the current timestep.
-    force_full_eval: std::cell::Cell<bool>,
-    /// The previous full evaluation engaged the body limiter (ngspice
-    /// `Check != 0`), which disqualifies the next iterate from bypassing.
-    last_limited: std::cell::Cell<bool>,
     /// Raw bias consumed by the previous DC update. Repeated evaluation of the
     /// same Newton candidate must reuse the current linearization rather than
     /// advancing the stateful limiters a second time.
@@ -178,16 +148,9 @@ pub struct B3SoiPd {
     /// One-shot permission for the next identical DC update to reuse the
     /// candidate linearization before stamping.
     dc_stamp_reuse_pending: std::cell::Cell<bool>,
-    /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
-    /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
-    /// zero before the companion assembly, so the device contributes no
-    /// dynamic charges to the matrix, RHS, or LTE - the transient runs
-    /// quasi-statically.
-    charges_suppressed: bool,
-    /// Xyce-style explicit instance `IC=` constraints, loaded as internal MNA
-    /// branch equations during the operating-point solve.
-    instance_ic: super::common::B3SoiInstanceIc,
 }
+
+super::common::deref_core!(B3SoiPd => SoiInstanceCore);
 
 impl B3SoiPd {
     /// Build an instance from a model card and instance geometry.
@@ -244,6 +207,7 @@ impl B3SoiPd {
             mtype: model.mtype,
         };
         Ok(Self {
+            core: SoiInstanceCore::new(true),
             name,
             mtype: model.mtype,
             node_drain,
@@ -258,7 +222,6 @@ impl B3SoiPd {
             sized,
             base_temp_k: temp_k,
             consts,
-            eval_gmin: 0.0,
             op: B3SoiPdOp::default(),
             bias: B3SoiPdBias::default(),
             converged_ref: B3SoiPdBias::default(),
@@ -266,20 +229,10 @@ impl B3SoiPd {
             vbs_limit_anchor: 0.0,
             vbd_limit_anchor: 0.0,
             del_temp_limit_anchor: 0.0,
-            dc_mode: std::cell::Cell::new(true),
-            self_heating_startup_disabled: std::cell::Cell::new(false),
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
-            initial_off: false,
-            bypass_tolerances: std::cell::Cell::new(None),
-            bypass_active: std::cell::Cell::new(false),
-            bypass_hits: std::cell::Cell::new(0),
-            force_full_eval: std::cell::Cell::new(true),
-            last_limited: std::cell::Cell::new(false),
             last_dc_update_bias: std::cell::Cell::new(None),
             dc_stamp_reuse_pending: std::cell::Cell::new(false),
-            charges_suppressed: false,
-            instance_ic: super::common::B3SoiInstanceIc::new(),
         })
     }
 
@@ -325,73 +278,6 @@ impl B3SoiPd {
         self.last_limited.set(false);
     }
 
-    /// Enable the ngspice transient device bypass with the engine's
-    /// `(reltol, current abstol, vntol)` triple, or disable it with `None`.
-    ///
-    /// This is a speed option and nothing more. ngspice ships `CKTbypass = 0`
-    /// (cktinit.c:54, cktntask.c:105) and its own SOI decks never set it, so
-    /// the block at b3soipdld.c:515-565 is not on the path by which ngspice
-    /// converges anything; it is opt-in through `.options bypass`. Freezing a
-    /// stationary device trades a bounded accuracy risk for skipped
-    /// evaluations, so the default stays off and a run being compared against
-    /// another should leave it off.
-    pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
-        self.bypass_tolerances.set(tolerances);
-        self.bypass_active.set(false);
-    }
-
-    /// Newton iterates this device answered from its frozen linearization.
-    pub fn bypass_hits(&self) -> u64 {
-        self.bypass_hits.get()
-    }
-
-    /// `DEBUG=-1` (the only negative debug mode accepted by the builder):
-    /// evaluate charges for probes but
-    /// contribute no dynamic charges to the matrix, RHS, or LTE.
-    pub fn set_debug_mod(&mut self, debug_mod: i32) {
-        self.charges_suppressed = debug_mod == -1;
-    }
-
-    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
-    /// b3soipdld.c:376's zero-junction arm.
-    pub fn set_initially_off(&mut self, off: bool) {
-        self.initial_off = off;
-    }
-
-    /// True when the deck marked this instance `OFF`.
-    pub fn is_initially_off(&self) -> bool {
-        self.initial_off
-    }
-
-    pub fn set_instance_ic(&mut self, instance_ic: super::common::B3SoiInstanceIc) {
-        self.instance_ic = instance_ic;
-    }
-
-    pub fn instance_ic(&self) -> &super::common::B3SoiInstanceIc {
-        &self.instance_ic
-    }
-
-    pub fn resolve_instance_ic_branches(&mut self, num_nodes: NodeId) {
-        self.instance_ic.resolve_branch_matrix_indices(num_nodes);
-    }
-
-    pub fn set_eval_gmin(&mut self, gmin: Value) {
-        self.eval_gmin = if gmin.is_finite() && gmin > 0.0 {
-            gmin
-        } else {
-            0.0
-        };
-    }
-
-    pub fn eval_gmin(&self) -> Value {
-        self.eval_gmin
-    }
-
-    /// Whether `DEBUG=-1` suppresses this device's charge contributions.
-    pub fn charges_suppressed(&self) -> bool {
-        self.charges_suppressed
-    }
-
     pub fn self_heating_active(&self) -> bool {
         !self.self_heating_startup_disabled.get() && self.has_self_heating_node()
     }
@@ -399,14 +285,6 @@ impl B3SoiPd {
     #[doc(hidden)]
     pub fn has_self_heating_node(&self) -> bool {
         self.node_temp != 0 && self.sized.rth.is_finite() && self.sized.rth > 0.0
-    }
-
-    #[doc(hidden)]
-    pub fn set_self_heating_startup_disabled(&self, disabled: bool) {
-        self.self_heating_startup_disabled.set(disabled);
-        self.bypass_active.set(false);
-        self.force_full_eval.set(true);
-        self.last_limited.set(false);
     }
 
     #[doc(hidden)]
@@ -1094,10 +972,6 @@ impl NonlinearDevice for B3SoiPd {
 }
 
 impl B3SoiPd {
-    fn stamp_instance_ic(&self, matrix: &mut impl MatrixStamper) {
-        self.instance_ic.stamp(self.dc_mode.get(), matrix);
-    }
-
     /// Stamp the linearized DC operating point.
     ///
     /// Faithful transcription of the DC portion of the B3SOIPD matrix/RHS load
