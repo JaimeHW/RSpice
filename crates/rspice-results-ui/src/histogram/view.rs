@@ -258,7 +258,7 @@ pub fn show(
         });
     }
 
-    // Spec limits from the yield manager, when present.
+    // Spec limits from the judged yield evidence, when present.
     if let Some((lsl, usl)) = spec_limits {
         if let Some(lsl) = lsl
             && lsl > x0

@@ -14,9 +14,7 @@ mod stb;
 pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod units_tests;
-mod yield_input;
 pub use checks::SimulationChecks;
-pub use yield_input::yield_provenance_from_monte_carlo_result;
 
 pub use rspice_results::fft::recorded::RecordedFftSpectrum;
 pub use rspice_results::waveform::SampledWaveform;

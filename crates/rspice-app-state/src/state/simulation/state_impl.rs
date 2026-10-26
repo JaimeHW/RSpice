@@ -1483,19 +1483,22 @@ mod tests {
     #[test]
     fn replacing_yield_evidence_keeps_dataset_authority_in_sync() {
         let run = SimulationRun::new(1);
-        let monte_carlo = rspice_simulation::results::SimulationResult::MonteCarlo {
-            member_measurements: Vec::new(),
-            seed: 19,
-            runs_requested: 3,
-            runs_completed: 2,
-            num_failures: 1,
-            all_converged: false,
-            variables: Vec::new(),
-        };
-        let provenance = rspice_simulation::results::yield_provenance_from_monte_carlo_result(
+        let monte_carlo = AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo")
+            .with_family_metadata(
+                rspice_results::family_metadata::AnalysisResultFamilyMetadata::MonteCarlo {
+                    seed: 19,
+                    runs_requested: 3,
+                    runs_completed: 2,
+                    failures: 1,
+                    all_converged: false,
+                    variables: Vec::new(),
+                    member_measurements: Vec::new(),
+                },
+            );
+        let provenance = rspice_results::yield_analysis::monte_carlo_provenance(
             run.run_id,
             run.dataset_id,
-            &monte_carlo,
+            &monte_carlo.data,
         )
         .expect("Monte Carlo result creates yield provenance");
         let source_dataset_id = run.dataset_id;

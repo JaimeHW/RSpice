@@ -42,7 +42,6 @@ use crate::state::{
 use rspice_app_services::workbench::platform::spawn_or_inline;
 use rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_app_state::workbench::app_state::model::Model;
-use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
 use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
 use rspice_simulation::execution_identity::canonical_analysis_kind;
@@ -136,8 +135,6 @@ pub struct SimulationCampaignDispatchReceipt {
 pub struct SimulationController {
     /// The background simulation runner
     pub runner: SimulationRunner,
-    /// Manager for yield analysis (Monte Carlo)
-    yield_manager: YieldAnalysisManager,
     /// Current analysis config (stored for result processing when polling completes)
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
@@ -255,7 +252,6 @@ impl SimulationController {
     pub fn new() -> Self {
         Self {
             runner: SimulationRunner::new(),
-            yield_manager: YieldAnalysisManager::new(),
             current_config: None,
             current_spec: None,
             current_analysis_label: None,

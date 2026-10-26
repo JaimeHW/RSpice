@@ -319,8 +319,6 @@ fn distribution_stats_keep_finite_samples_and_capability_limits() {
     assert!(range.cpk.is_some_and(|cpk| (cpk - 1.0).abs() < 1e-12));
 }
 
-mod manager;
-pub use manager::{YieldAnalysisManager, YieldInput};
 mod evidence;
 pub use evidence::YieldEvidence;
 #[cfg(feature = "engine-evidence")]

@@ -112,24 +112,6 @@ impl SimulationController {
                         }
                     }
                 });
-                let mut prepared_yield_evidence = self
-                    .yield_manager
-                    .analyze_monte_carlo(&sim_result)
-                    .map(|yield_results| {
-                        let provenance = target_run_id
-                            .and_then(|run_sequence| {
-                                state.model().simulation.retained.run_by_sequence(run_sequence)
-                            })
-                            .and_then(|run| {
-                                rspice_simulation::results::yield_provenance_from_monte_carlo_result(
-                                    run.run_id,
-                                    run.dataset_id,
-                                    &sim_result,
-                                )
-                            });
-                        (yield_results.values().cloned().collect(), provenance)
-                    });
-
                 self.apply_result_side_effects(state, &sim_result);
                 // A recorded FFT carries the quality of the transient it
                 // transformed, which that transient has already reported.
@@ -212,14 +194,6 @@ impl SimulationController {
                                     export_io,
                                     prepared,
                                 );
-                            }
-                            if let Some((yield_results, provenance)) =
-                                prepared_yield_evidence.take()
-                            {
-                                state
-                                    .model_mut()
-                                    .simulation
-                                    .replace_yield_evidence(yield_results, provenance);
                             }
                             if let Some(verdict) = testbench_verdict.as_deref() {
                                 self.fail_testbench_verdict(
