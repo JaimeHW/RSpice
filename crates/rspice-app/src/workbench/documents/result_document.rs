@@ -184,6 +184,7 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
+use crate::state::command_catalog::CommandKey;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
@@ -194,6 +195,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{
     Model, PlatformState, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
 };
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::ports::{CapturedViewport, ResultsPort};
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_results::family_projection::SourceSampleSelection;
@@ -1565,18 +1567,9 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
     // why the keystroke has to be claimed here rather than left to the
     // resolver.
     for (command, gesture) in [
-        (
-            crate::workbench::commands::vocabulary::Command::ZoomFit,
-            ViewGesture::Fit,
-        ),
-        (
-            crate::workbench::commands::vocabulary::Command::ZoomIn,
-            ViewGesture::ZoomIn,
-        ),
-        (
-            crate::workbench::commands::vocabulary::Command::ZoomOut,
-            ViewGesture::ZoomOut,
-        ),
+        (ids::ZOOM_FIT, ViewGesture::Fit),
+        (ids::ZOOM_IN, ViewGesture::ZoomIn),
+        (ids::ZOOM_OUT, ViewGesture::ZoomOut),
     ] {
         let permitted = match gesture {
             ViewGesture::Fit => fit_gesture_available(state.results_reads()),
@@ -1589,11 +1582,7 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
         }
     }
     if viewer_uses_wave_stack(state.results.session.viewer)
-        && consume_command_key(
-            ctx,
-            state.results_reads(),
-            crate::workbench::commands::vocabulary::Command::CycleGrid,
-        )
+        && consume_command_key(ctx, state.results_reads(), ids::CYCLE_GRID)
     {
         state.results.session.show_minor_grid = !state.results.session.show_minor_grid;
     }
@@ -1632,11 +1621,7 @@ fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
 /// pressed with one hand over the plot. A profile that moves the command onto
 /// a modifier chord simply leaves this workspace without a key for it — the
 /// menu entry is still the way in, and no key is silently invented.
-fn consume_command_key(
-    ctx: &egui::Context,
-    state: ResultsReads<'_>,
-    command: crate::workbench::commands::vocabulary::Command,
-) -> bool {
+fn consume_command_key(ctx: &egui::Context, state: ResultsReads<'_>, command: CommandKey) -> bool {
     let platform = runtime_command_platform(ctx);
     state
         .model
@@ -1644,7 +1629,7 @@ fn consume_command_key(
         .shortcuts()
         .effective_bindings(
             &crate::workbench::commands::vocabulary::CommandRegistry,
-            command.key(),
+            command,
         )
         .iter()
         .filter(|binding| binding.supports(platform))
@@ -2123,7 +2108,7 @@ fn show_viewer_well(
     if viewer_requires_retained_results(viewer) && !state.model.simulation.retained.has_results() {
         let shortcut = state.model.preferences.shortcuts().resolved_label(
             &crate::workbench::commands::vocabulary::CommandRegistry,
-            crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
+            ids::RUN_SIMULATION,
             runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );

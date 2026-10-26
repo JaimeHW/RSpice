@@ -15,11 +15,11 @@ use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::analysis_evidence_failure;
 use crate::workbench::documents::result_document::manifest::active_manifest;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::PromptAfterCommands;
 use rspice_results_ui::session::PaneAxis;
 
-use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{
     WorkbenchIcon, property_row, property_row_input_action, property_row_problem,
 };
@@ -551,10 +551,7 @@ pub(crate) fn cross_probe_trace_to_design(
         .select_signal_conductor(signal)
         .map_err(|error| error.message(signal))?;
     if state.workbench.workspace != Workspace::Design {
-        state
-            .workbench
-            .outbox
-            .push(Execute(Command::OpenWorkspace(Workspace::Design).key()));
+        state.workbench.outbox.push(Execute(ids::DESIGN_WORKSPACE));
     }
     Ok(net)
 }

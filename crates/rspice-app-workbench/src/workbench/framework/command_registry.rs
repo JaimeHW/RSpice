@@ -321,6 +321,7 @@ pub mod ids {
         CLEAR_CONSOLE = "console-clear";
         COMMAND_PALETTE = "command-palette";
         COPY = "copy-selection";
+        CYCLE_GRID = "cycle-grid";
         DESIGN_WORKSPACE = "design";
         EDIT_SPECIFICATIONS = "specifications";
         EXPORT_RESULTS = "export-results";
@@ -345,6 +346,7 @@ pub mod ids {
         RESULT_OPERATING_POINT = "result-operating-point";
         RESULT_SPECIFICATIONS = "result-specifications";
         RESULT_WAVEFORMS = "waveforms";
+        RUN_SIMULATION = "start-run";
         SAVE = "save-project";
         SHEET_PROPERTIES = "page-setup";
         SIMULATION_ANALYSES = "simulation-analyses";

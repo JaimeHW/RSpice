@@ -6,6 +6,7 @@ use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsParts, compare_availability, exact_result_artifact_text,
     exact_result_signal_last_sample, exact_result_signal_tsv,
 };
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{ExportResultQuantities, PromptAfterCommands};
 use crate::workbench::results::commands::ResultsCommand;
@@ -15,8 +16,6 @@ use rspice_results::result_presentation::{
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::commands::result_navigation::{open_run_log, producing_run};
-use super::super::super::commands::vocabulary::Command;
-use super::super::super::state::Workspace;
 use super::results::{RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT, ResultArtifact};
 use super::row_context_menu;
 
@@ -719,7 +718,7 @@ fn open_signal_table(
 fn show_signal_on_schematic(state: &mut ResultsParts<'_>, signal: &str) {
     match state.model.select_signal_conductor(signal) {
         Ok(net) => {
-            execute(state, Command::OpenWorkspace(Workspace::Design).key());
+            execute(state, ids::DESIGN_WORKSPACE);
             state.workbench.outbox.push(PromptAfterCommands(format!(
                 "Selected conductor {net} from {signal}."
             )));
