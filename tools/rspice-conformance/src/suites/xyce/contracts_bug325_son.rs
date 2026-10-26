@@ -5,15 +5,15 @@ const LABEL: &str = "BUG_325_SON VBIC multiplicity equivalence";
 const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_325_SON";
 const OWNER_CONTRACT: &str = "bug325_vbic_multiplicity_wrapper_owner";
 const GENERATED_MODEL: &str = "vbic13";
-const GENERATED_SOURCE_DIGEST: &str = "aa00e2e747501388";
-// Qualified with generated semantics v30 (8ca9e2a3b): numeric parameter
-// arrays execute in declaration storage. The checked-in bundle carried the v30
-// identity from its regeneration in 29b3b20d4. The v1 pin predates typed
+const GENERATED_SOURCE_DIGEST: &str = "9e2915958aff0441";
+// Qualified with the built-in VBIC compiled under `__NGSPICE__`, so its
+// SPICE junction limiting runs (0b4a5360f4), and with an internal node no
+// contribution reaches tied to ground (b7f8dc59ee). The v1 pin predates typed
 // parameter, branch, integration and event semantics. Keep an explicit
 // artifact pin; the complete pair/M=2/single-device oracle qualifies each
 // replacement.
 const GENERATED_CHECKPOINT_IDENTITY: &str =
-    "cbc45f5e0269ac716699dcef82f10bd8a19990dec9536ec8513bf8997cb1e5c5";
+    "27eb6713a3e4ace39e34dcec84d3fe0574a269af475ba3855952c7cb3714335b";
 
 const OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_325_SON/vbic_3T_et_cf.cir";
 const CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_325_SON/vbic_3T_et_cf_m2.cir";
