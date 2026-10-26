@@ -182,7 +182,12 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session(),
+            |app, ApplyWaveformDefaults| {
+                let state = &mut app.state;
+                state
+                    .results
+                    .start_waveform_viewer_session(&state.model.preferences);
+            },
         );
         requests::drain(
             self,

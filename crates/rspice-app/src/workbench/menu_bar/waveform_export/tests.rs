@@ -237,7 +237,10 @@ fn bind_active_fft_authority(state: &mut AppState) {
             .expect("test retains an active result analysis");
         crate::state::SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis)
     };
-    state.bind_specialized_viewer_cache(crate::state::ActiveViewer::Fft, authority);
+    state
+        .results
+        .analysis
+        .bind_specialized_viewer_cache(crate::state::ActiveViewer::Fft, authority);
 }
 
 #[test]
@@ -489,7 +492,10 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
             let foreign = AnalysisResult::new(999, AnalysisType::Transient, "FOREIGN");
             let authority =
                 crate::state::SpecializedViewerCacheProvenance::for_analysis(dataset_id, &foreign);
-            state.bind_specialized_viewer_cache(crate::state::ActiveViewer::Fft, authority);
+            state
+                .results
+                .analysis
+                .bind_specialized_viewer_cache(crate::state::ActiveViewer::Fft, authority);
         }
         state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
         let io = MockExportWorkflowIo::default();

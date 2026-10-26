@@ -95,6 +95,17 @@ impl ResultsState {
         self.results.session.ac_display = preferences.ac_display();
     }
 
+    /// Start the session's waveform viewer from Results ▸ Waveform defaults:
+    /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
+    /// both afterwards.
+    pub(crate) fn start_waveform_viewer_session(
+        &mut self,
+        preferences: &crate::workbench::preferences::UserPreferences,
+    ) {
+        self.results.session.phase_continuous = preferences.unwrapped_phase();
+        self.start_waveform_view_from_preferences(preferences);
+    }
+
     /// Give a cleared waveform view the minor grid Results ▸ Waveform
     /// defaults asks for; clearing alone would always start it without.
     pub(crate) fn start_waveform_view_from_preferences(

@@ -452,7 +452,9 @@ impl RSpiceApp {
             .map(crate::workbench::WorkspacePreferences::preset)
             .unwrap_or_default();
         state.workbench.set_workspace_preset(workspace_preset);
-        state.start_waveform_viewer_session();
+        state
+            .results
+            .start_waveform_viewer_session(&state.model.preferences);
         state.workbench.window_session.normalize_after_restore();
         state
             .model

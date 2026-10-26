@@ -44,7 +44,10 @@ fn seed_fft(state: &mut AppState, analysis: SpecializedViewerCacheProvenance) {
             decimation_factor: 1,
         })
         .expect("qualified FFT ownership fixture");
-    state.bind_specialized_viewer_cache(ActiveViewer::Fft, analysis);
+    state
+        .results
+        .analysis
+        .bind_specialized_viewer_cache(ActiveViewer::Fft, analysis);
 }
 
 fn install_fft_task(
@@ -449,17 +452,29 @@ fn the_incoherence_mark_never_makes_the_loaded_eye_stale() {
 fn a_stated_rate_is_kept_against_its_own_result() {
     let mut state = AppState::default();
     let (first, second) = (owner(), owner());
-    assert_eq!(state.eye_timebase_for(first), EyeTimebase::Auto);
+    assert_eq!(
+        state.results.results.eye_timebase_for(first),
+        EyeTimebase::Auto
+    );
 
     let stated = EyeTimebase::Explicit {
         unit_interval: 400e-12,
     };
-    state.set_eye_timebase(first, stated);
-    assert_eq!(state.eye_timebase_for(first), stated);
-    assert_eq!(state.eye_timebase_for(second), EyeTimebase::Auto);
+    state.results.results.set_eye_timebase(first, stated);
+    assert_eq!(state.results.results.eye_timebase_for(first), stated);
+    assert_eq!(
+        state.results.results.eye_timebase_for(second),
+        EyeTimebase::Auto
+    );
 
-    state.set_eye_timebase(first, EyeTimebase::Auto);
-    assert_eq!(state.eye_timebase_for(first), EyeTimebase::Auto);
+    state
+        .results
+        .results
+        .set_eye_timebase(first, EyeTimebase::Auto);
+    assert_eq!(
+        state.results.results.eye_timebase_for(first),
+        EyeTimebase::Auto
+    );
     assert!(state.results.results.session.eye_timebase.is_empty());
 }
 

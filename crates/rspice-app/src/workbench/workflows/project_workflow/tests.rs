@@ -621,7 +621,10 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         ActiveViewer::Fft,
         ActiveViewer::EyeDiagram,
     ] {
-        state.bind_specialized_viewer_cache(viewer, provenance);
+        state
+            .results
+            .analysis
+            .bind_specialized_viewer_cache(viewer, provenance);
     }
 
     assert!(!state.viewer_is_available(ActiveViewer::Histogram));

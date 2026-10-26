@@ -94,7 +94,7 @@ impl RunHost for AppState {
     }
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
-        AppState::eye_timebase_for(self, owner)
+        self.results.results.eye_timebase_for(owner)
     }
 
     fn show_problem_findings(&mut self) {

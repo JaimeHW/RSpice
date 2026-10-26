@@ -11,9 +11,11 @@ mod run_events;
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
-use crate::workbench::app_state::{AppState, Model};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::documents::result_document::{
-    ResultsParts, ResultsReads, histogram_is_available,
+    ResultsParts, ResultsReads, ResultsState, histogram_is_available,
 };
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
@@ -109,29 +111,17 @@ impl ViewerCapability {
     }
 }
 
-impl AppState {
-    /// Start the session's waveform viewer from Results ▸ Waveform defaults:
-    /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
-    /// both afterwards.
-    pub(crate) fn start_waveform_viewer_session(&mut self) {
-        self.results.results.session.phase_continuous = self.model.preferences.unwrapped_phase();
-        self.results
-            .start_waveform_view_from_preferences(&self.model.preferences);
-    }
-
+impl ResultsState {
     /// The bit period the eye folds this result at.
     ///
-    /// Lives on `AppState` rather than in the simulation controller because
-    /// the choice belongs to the Results document that offers the control,
-    /// and the controller must not reach up into `workbench::documents` to
-    /// read it.
+    /// Lives with the Results document that offers the control rather than in
+    /// the simulation controller, because the choice is the reader's and the
+    /// controller must not reach up into `workbench::documents` to read it.
     pub(crate) fn eye_timebase_for(
         &self,
         provenance: SpecializedViewerCacheProvenance,
     ) -> EyeTimebase {
-        self.results
-            .results
-            .session
+        self.session
             .eye_timebase
             .get(&eye_timebase_key(provenance))
             .copied()
@@ -151,18 +141,16 @@ impl AppState {
         let key = eye_timebase_key(provenance);
         match timebase {
             EyeTimebase::Auto => {
-                self.results.results.session.eye_timebase.remove(&key);
+                self.session.eye_timebase.remove(&key);
             }
             explicit => {
-                self.results
-                    .results
-                    .session
-                    .eye_timebase
-                    .insert(key, explicit);
+                self.session.eye_timebase.insert(key, explicit);
             }
         }
     }
+}
 
+impl AnalysisWorkspaceState {
     /// Bind a freshly populated mutable viewer cache to its immutable owner.
     pub(crate) fn bind_specialized_viewer_cache(
         &mut self,
@@ -188,14 +176,15 @@ impl AppState {
         self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
     }
 
-    /// Remove mutable viewer data that does not belong to the active result.
+    /// Remove mutable viewer data that does not belong to the model's active
+    /// result.
     ///
     /// Capability checks reject a mismatch synchronously, so a selection
     /// change cannot expose stale data even before this cleanup runs. The
     /// controller calls this after selection/polling to release the stale
     /// payload and keep every direct cache consumer safe as well.
-    pub(crate) fn synchronize_specialized_viewer_cache_authority(&mut self) {
-        let active = self.model.active_specialized_viewer_cache_provenance();
+    pub(crate) fn synchronize_specialized_viewer_cache_authority(&mut self, model: &Model) {
+        let active = model.active_specialized_viewer_cache_provenance();
         for viewer in [
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
@@ -203,7 +192,7 @@ impl AppState {
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
         ] {
-            let retained = self.results.analysis.cache_provenance(viewer);
+            let retained = self.cache_provenance(viewer);
             let unbound_data = retained.is_none() && self.specialized_viewer_cache_has_data(viewer);
             let belongs_to_another_result = retained.is_some() && retained != active;
             if unbound_data || belongs_to_another_result {
@@ -215,16 +204,12 @@ impl AppState {
     fn clear_specialized_viewer_cache(&mut self, viewer: ActiveViewer) {
         match viewer {
             ActiveViewer::BodePlot => self
-                .results
-                .analysis
                 .bode_plot_state
                 .load_data(rspice_results_ui::bode::BodeData::new()),
-            ActiveViewer::Nyquist => self.results.analysis.nyquist_state.clear(),
-            ActiveViewer::SmithChart => self.results.analysis.smith_chart_state.clear_traces(),
-            ActiveViewer::Fft => self.results.analysis.fft_state.clear(),
+            ActiveViewer::Nyquist => self.nyquist_state.clear(),
+            ActiveViewer::SmithChart => self.smith_chart_state.clear_traces(),
+            ActiveViewer::Fft => self.fft_state.clear(),
             ActiveViewer::EyeDiagram => self
-                .results
-                .analysis
                 .eye_diagram_state
                 .load_data(rspice_results_ui::eye_diagram::EyeData::default()),
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => return,
@@ -237,11 +222,11 @@ impl AppState {
         viewer: ActiveViewer,
     ) -> &mut Option<SpecializedViewerCacheProvenance> {
         match viewer {
-            ActiveViewer::BodePlot => &mut self.results.analysis.cache_authority.bode,
-            ActiveViewer::Nyquist => &mut self.results.analysis.cache_authority.nyquist,
-            ActiveViewer::SmithChart => &mut self.results.analysis.cache_authority.smith,
-            ActiveViewer::Fft => &mut self.results.analysis.cache_authority.fft,
-            ActiveViewer::EyeDiagram => &mut self.results.analysis.cache_authority.eye,
+            ActiveViewer::BodePlot => &mut self.cache_authority.bode,
+            ActiveViewer::Nyquist => &mut self.cache_authority.nyquist,
+            ActiveViewer::SmithChart => &mut self.cache_authority.smith,
+            ActiveViewer::Fft => &mut self.cache_authority.fft,
+            ActiveViewer::EyeDiagram => &mut self.cache_authority.eye,
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => {
                 panic!("this viewer does not own mutable cache provenance")
             }
@@ -250,17 +235,19 @@ impl AppState {
 
     fn specialized_viewer_cache_has_data(&self, viewer: ActiveViewer) -> bool {
         match viewer {
-            ActiveViewer::BodePlot => !self.results.analysis.bode_plot_state.is_empty(),
-            ActiveViewer::Nyquist => !self.results.analysis.nyquist_state.is_empty(),
-            ActiveViewer::SmithChart => !self.results.analysis.smith_chart_state.traces.is_empty(),
-            ActiveViewer::Fft => self.results.analysis.fft_state.has_data(),
-            ActiveViewer::EyeDiagram => self.results.analysis.eye_diagram_state.trace_count() > 0,
+            ActiveViewer::BodePlot => !self.bode_plot_state.is_empty(),
+            ActiveViewer::Nyquist => !self.nyquist_state.is_empty(),
+            ActiveViewer::SmithChart => !self.smith_chart_state.traces.is_empty(),
+            ActiveViewer::Fft => self.fft_state.has_data(),
+            ActiveViewer::EyeDiagram => self.eye_diagram_state.trace_count() > 0,
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => false,
         }
     }
+}
 
+#[cfg(test)]
+impl AppState {
     /// Whether a viewer is currently available for activation.
-    #[cfg(test)]
     pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
         self.results_reads().viewer_capability(viewer).available
     }
@@ -510,7 +497,10 @@ mod tests {
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
         ] {
-            state.bind_specialized_viewer_cache(viewer, provenance);
+            state
+                .results
+                .analysis
+                .bind_specialized_viewer_cache(viewer, provenance);
         }
     }
 
@@ -612,7 +602,7 @@ mod tests {
         seed_result_viewers(&mut state);
         let bode_authority = state.results.analysis.cache_authority.bode;
 
-        state.clear_fft_viewer_cache_authority();
+        state.results.analysis.clear_fft_viewer_cache_authority();
 
         assert_eq!(state.results.analysis.cache_authority.fft, None);
         assert_eq!(state.results.analysis.cache_authority.bode, bode_authority);
@@ -687,7 +677,10 @@ mod tests {
             );
         }
 
-        state.synchronize_specialized_viewer_cache_authority();
+        state
+            .results
+            .analysis
+            .synchronize_specialized_viewer_cache_authority(&state.model);
         assert!(state.results.analysis.bode_plot_state.is_empty());
         assert!(state.results.analysis.nyquist_state.is_empty());
         assert!(state.results.analysis.smith_chart_state.traces.is_empty());

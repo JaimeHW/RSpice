@@ -551,5 +551,7 @@ pub(super) fn derive_nyquist(app: &mut RSpiceApp) {
         rspice_results::nyquist::NyquistData::from_arrays("V(out)", &frequency, &real, &imaginary),
     );
     app.state
+        .results
+        .analysis
         .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
 }

@@ -40,7 +40,9 @@ impl RunEventSink for AppState {
                     .eye_diagram_state
                     .load_data_with_timebase(eye.unwrap_or_default(), Some(timebase));
                 if folded && let Some(owner) = owner {
-                    self.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, owner);
+                    self.results
+                        .analysis
+                        .bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, owner);
                 }
             }
             RunEvent::EyeTimebaseChanged => {
@@ -48,7 +50,9 @@ impl RunEventSink for AppState {
                     .analysis
                     .eye_diagram_state
                     .load_data_with_timebase(EyeData::default(), None);
-                self.clear_specialized_viewer_cache_authority(ActiveViewer::EyeDiagram);
+                self.results
+                    .analysis
+                    .clear_specialized_viewer_cache_authority(ActiveViewer::EyeDiagram);
             }
             RunEvent::EyeOutdated => {
                 self.results
@@ -66,36 +70,54 @@ impl RunEventSink for AppState {
                         .is_ok()
                     {
                         if let Some(owner) = owner {
-                            self.bind_specialized_viewer_cache(ActiveViewer::Fft, owner);
+                            self.results
+                                .analysis
+                                .bind_specialized_viewer_cache(ActiveViewer::Fft, owner);
                         }
                     } else {
-                        self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                        self.results
+                            .analysis
+                            .clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
                     }
                 }
                 Err(error) => {
                     self.results.analysis.fft_state.record_input_error(error);
-                    self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                    self.results
+                        .analysis
+                        .clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
                 }
             },
             RunEvent::FftWorkerLost => {
                 self.results.analysis.fft_state.record_worker_disconnect();
-                self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                self.results
+                    .analysis
+                    .clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
             }
             RunEvent::FftOutdated => self.results.analysis.fft_state.clear(),
             RunEvent::FftEmptied => {
-                self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                self.results
+                    .analysis
+                    .clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
             }
             RunEvent::ViewerCacheConfirmed { viewer, owner } => {
-                self.bind_specialized_viewer_cache(viewer, owner);
+                self.results
+                    .analysis
+                    .bind_specialized_viewer_cache(viewer, owner);
             }
             RunEvent::FrequencyResponseReplaced {
                 owner,
                 bode,
                 loop_gain,
             } => {
-                self.clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
-                self.clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
-                self.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+                self.results
+                    .analysis
+                    .clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
+                self.results
+                    .analysis
+                    .clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
+                self.results
+                    .analysis
+                    .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
                 self.results.analysis.nyquist_state.clear();
                 self.results.analysis.smith_chart_state.clear_traces();
                 if let Some(locus) = loop_gain {
@@ -113,14 +135,21 @@ impl RunEventSink for AppState {
                 }
                 if let Some(owner) = owner {
                     if has_bode {
-                        self.bind_specialized_viewer_cache(ActiveViewer::BodePlot, owner);
+                        self.results
+                            .analysis
+                            .bind_specialized_viewer_cache(ActiveViewer::BodePlot, owner);
                     }
                     if loaded_nyquist {
-                        self.bind_specialized_viewer_cache(ActiveViewer::Nyquist, owner);
+                        self.results
+                            .analysis
+                            .bind_specialized_viewer_cache(ActiveViewer::Nyquist, owner);
                     }
                 }
             }
-            RunEvent::CompletionsCollected => self.synchronize_specialized_viewer_cache_authority(),
+            RunEvent::CompletionsCollected => self
+                .results
+                .analysis
+                .synchronize_specialized_viewer_cache_authority(&self.model),
         }
     }
 }

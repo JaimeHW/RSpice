@@ -30,7 +30,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(ResultViewer::Fft, 0);
     }
     if out.rebuild_failed {
-        state.clear_fft_viewer_cache_authority();
+        state.results.analysis.clear_fft_viewer_cache_authority();
     }
     frame_work::note_samples(
         frame_work::FrameSampleRead::TraceExtremes,

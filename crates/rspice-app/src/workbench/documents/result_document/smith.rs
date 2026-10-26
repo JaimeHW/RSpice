@@ -68,19 +68,28 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
     }
     let Some(run) = state.model.simulation.active_run() else {
         state.results.analysis.smith_chart_state.clear_traces();
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        state
+            .results
+            .analysis
+            .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
     let Some(analysis) = state.model.simulation.active_analysis() else {
         state.results.analysis.smith_chart_state.clear_traces();
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        state
+            .results
+            .analysis
+            .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
     if !structure_is_renderable(analysis)
         || !super::analysis_evidence_is_valid(state.results_reads(), run.dataset_id, analysis)
     {
         state.results.analysis.smith_chart_state.clear_traces();
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        state
+            .results
+            .analysis
+            .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     }
     let provenance = SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis);
@@ -131,15 +140,24 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
             .is_err()
         {
             state.results.analysis.smith_chart_state.clear_traces();
-            state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+            state
+                .results
+                .analysis
+                .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
             return false;
         }
     }
     if state.results.analysis.smith_chart_state.traces.is_empty() {
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
+        state
+            .results
+            .analysis
+            .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     }
-    state.bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
+    state
+        .results
+        .analysis
+        .bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
     true
 }
 

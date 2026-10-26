@@ -125,7 +125,10 @@ fn seeded() -> (AppState, SpecializedViewerCacheProvenance) {
         ActiveViewer::Fft,
         ActiveViewer::EyeDiagram,
     ] {
-        state.bind_specialized_viewer_cache(viewer, other);
+        state
+            .results
+            .analysis
+            .bind_specialized_viewer_cache(viewer, other);
     }
     (state, provenance())
 }

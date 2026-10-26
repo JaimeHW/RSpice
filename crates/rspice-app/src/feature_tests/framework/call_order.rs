@@ -460,7 +460,10 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ("6", &["self.state.take_shortcut_resolver_reset()"]),
     (
         "7",
-        &["|app, ApplyWaveformDefaults| app.state.start_waveform_viewer_session()"],
+        &[
+            "|app, ApplyWaveformDefaults|",
+            "state.results.start_waveform_viewer_session(&state.model.preferences)",
+        ],
     ),
     (
         "8",

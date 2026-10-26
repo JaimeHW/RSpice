@@ -471,7 +471,10 @@ fn commit_parsed_result_dataset(
     } else {
         crate::workbench::ResultViewer::Waves
     };
-    state.synchronize_specialized_viewer_cache_authority();
+    state
+        .results
+        .analysis
+        .synchronize_specialized_viewer_cache_authority(&state.model);
     // One line says what arrived and that RSpice did not simulate it; the
     // run history carries the run as imported, so nothing more is owed here.
     state.record(

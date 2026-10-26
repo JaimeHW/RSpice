@@ -97,7 +97,10 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
             receipt_index,
         ) {
             Ok(()) => {
-                state.synchronize_specialized_viewer_cache_authority();
+                state
+                    .results
+                    .analysis
+                    .synchronize_specialized_viewer_cache_authority(&state.model);
                 state.record(
                     crate::diagnostics::LogSeverity::Info,
                     crate::diagnostics::LogSource::Studio,
