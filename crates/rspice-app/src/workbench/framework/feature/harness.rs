@@ -165,10 +165,10 @@ impl ResultsPort for NullPorts {
 
 /// A feature, its own state, and the model and session its commands run
 /// over.
-pub(crate) struct FeatureHarness<F: Feature> {
-    pub(crate) state: F::State,
-    pub(crate) model: Model,
-    pub(crate) wb: F::Session,
+pub struct FeatureHarness<F: Feature> {
+    pub state: F::State,
+    pub model: Model,
+    pub wb: F::Session,
     pub(crate) platform: PlatformState,
 }
 
@@ -177,7 +177,7 @@ where
     F::State: Default,
 {
     /// The feature with nothing of its own open, over `model` and `wb`.
-    pub(crate) fn with_model(model: Model, wb: F::Session) -> Self {
+    pub fn with_model(model: Model, wb: F::Session) -> Self {
         Self {
             state: F::State::default(),
             model,
@@ -188,7 +188,7 @@ where
 
     /// Whether the feature's command `key` can run here, as the feature
     /// answers it.
-    pub(crate) fn availability(&self, key: CommandKey) -> CommandAvailability {
+    pub fn availability(&self, key: CommandKey) -> CommandAvailability {
         command(&FeatureRegistry::<F>::build(), key).availability(&Reads::new(
             &self.state,
             &self.model,
@@ -200,7 +200,7 @@ where
 
     /// Carry out the feature's command `key`, as the prologue would have let
     /// it through.
-    pub(crate) fn execute(&mut self, key: CommandKey) {
+    pub fn execute(&mut self, key: CommandKey) {
         command(&FeatureRegistry::<F>::build(), key).execute(&mut Cx::new(
             &mut self.state,
             &mut self.model,

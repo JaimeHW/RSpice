@@ -29,7 +29,7 @@ use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 
 /// What the cells read in common on a frame, worked out before any of them.
-pub(crate) struct StatusReadings {
+pub struct StatusReadings {
     /// The pass the frame is painting, which the checks list is read in.
     pass: u64,
     /// The prompt still showing. One that expired was dropped as this was

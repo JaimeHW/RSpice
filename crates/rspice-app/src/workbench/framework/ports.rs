@@ -22,20 +22,20 @@ use crate::workbench::state::WorkbenchSession;
 /// The retained dataset the results workspace shows opened directly, as the
 /// reader sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DisplayedDatasetView {
+pub struct DisplayedDatasetView {
     /// The run's index among the model's retained runs. Its dataset is still
     /// the one the view resolved, with the same content.
-    pub(crate) run_index: usize,
+    pub run_index: usize,
     /// The viewer the dataset shows in.
-    pub(crate) viewer: ResultViewer,
+    pub viewer: ResultViewer,
     /// The run's analyses the viewer shows, in order.
-    pub(crate) analysis_indices: Vec<usize>,
+    pub analysis_indices: Vec<usize>,
     /// The analysis the viewer shows first, when it singles one out.
-    pub(crate) primary_analysis_index: Option<usize>,
+    pub primary_analysis_index: Option<usize>,
 }
 
 /// What the results workspace shows that another feature reads.
-pub(crate) trait ResultsPort {
+pub trait ResultsPort {
     /// The viewer the results workspace shows a dataset in.
     fn result_viewer(&self) -> ResultViewer;
     /// Whether the retained evidence of `analysis`, an analysis of the

@@ -32,7 +32,7 @@ const DRAIN_ROUNDS: usize = 64;
 /// there keeps that flag's timing: raised earlier in the frame, it is answered
 /// in the same frame; raised later, it waits for the next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Drain {
+pub enum Drain {
     /// The last step of the frame's preparation: after the shortcuts, the
     /// imports and the run controller, before the cloud account's polls.
     EndOfPrepare,
@@ -63,21 +63,21 @@ pub(crate) enum Drain {
 }
 
 /// A value one part of the workbench raises for another to act on once.
-pub(crate) trait Request: Clone + fmt::Debug + 'static {
+pub trait Request: Clone + fmt::Debug + 'static {
     /// Where in the frame the request is taken.
     const DRAIN: Drain;
 }
 
 /// Requests raised and not yet taken, in the order they were raised.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Outbox {
+pub struct Outbox {
     waiting: Vec<Waiting>,
 }
 
 impl Outbox {
     /// Raise `request`. A request of the same type already waiting is
     /// replaced: the later raise is the one answered.
-    pub(crate) fn push<R: Request>(&mut self, request: R) {
+    pub fn push<R: Request>(&mut self, request: R) {
         self.waiting.retain(|waiting| !waiting.holds::<R>());
         self.waiting.push(Waiting {
             drain: R::DRAIN,
@@ -87,7 +87,7 @@ impl Outbox {
 
     /// Take the waiting `R`, if one was raised. Only its consumer calls this,
     /// at `R::DRAIN`.
-    pub(crate) fn take<R: Request>(&mut self) -> Option<R> {
+    pub fn take<R: Request>(&mut self) -> Option<R> {
         let index = self.waiting.iter().position(Waiting::holds::<R>)?;
         let request = self.waiting.remove(index).request.into_any();
         request.downcast::<R>().ok().map(|request| *request)
@@ -108,7 +108,7 @@ impl Outbox {
 
     /// The waiting `R`, left where it is.
     #[cfg(test)]
-    pub(crate) fn peek<R: Request>(&self) -> Option<&R> {
+    pub fn peek<R: Request>(&self) -> Option<&R> {
         self.waiting
             .iter()
             .find_map(|waiting| waiting.request.as_any().downcast_ref::<R>())
@@ -118,7 +118,7 @@ impl Outbox {
 /// Answer the `R` waiting in `host`'s outbox, and any its answer raises
 /// again, until none is left. The shell calls this at `R::DRAIN`; a request
 /// raised after that point in the frame waits for the next frame's pass.
-pub(crate) fn drain<H, R: Request>(
+pub fn drain<H, R: Request>(
     host: &mut H,
     outbox: fn(&mut H) -> &mut Outbox,
     mut answer: impl FnMut(&mut H, R),
@@ -141,9 +141,7 @@ pub(crate) fn drain<H, R: Request>(
 /// payload, cross that boundary, so the export re-resolves immutable evidence
 /// when it publishes.
 #[derive(Clone, Debug)]
-pub(crate) struct ExportResultQuantities(
-    pub(crate) Vec<rspice_results_ui::selection::ResultBrowserSelectionKey>,
-);
+pub struct ExportResultQuantities(pub Vec<rspice_results_ui::selection::ResultBrowserSelectionKey>);
 
 impl Request for ExportResultQuantities {
     const DRAIN: Drain = Drain::BeforeToasts;
@@ -152,7 +150,7 @@ impl Request for ExportResultQuantities {
 /// Ask for a format and export the displayed dataset in it. Raised by a
 /// result document's export control.
 #[derive(Clone, Debug)]
-pub(crate) struct ExportCsv;
+pub struct ExportCsv;
 
 impl Request for ExportCsv {
     const DRAIN: Drain = Drain::BeforeToasts;
@@ -162,7 +160,7 @@ impl Request for ExportCsv {
 /// manifest and taken after the panels are drawn, so the workspace changes
 /// between frames rather than under the control that asked for it.
 #[derive(Clone, Debug)]
-pub(crate) struct OpenProducingPlan;
+pub struct OpenProducingPlan;
 
 impl Request for OpenProducingPlan {
     const DRAIN: Drain = Drain::BeforeToasts;
@@ -173,7 +171,7 @@ impl Request for OpenProducingPlan {
 /// resolution rather than a capture of the window. Raised by a result
 /// document while it is drawn, so the next frame's preparation opens it.
 #[derive(Clone, Debug)]
-pub(crate) struct ExportFigure;
+pub struct ExportFigure;
 
 impl Request for ExportFigure {
     const DRAIN: Drain = Drain::EndOfPrepare;
@@ -183,7 +181,7 @@ impl Request for ExportFigure {
 /// offers printing as the next step of its own dialog, so the workflow opens
 /// straight after that dialog is drawn, in the same frame.
 #[derive(Clone, Debug)]
-pub(crate) struct PrintActiveView;
+pub struct PrintActiveView;
 
 impl Request for PrintActiveView {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -194,7 +192,7 @@ impl Request for PrintActiveView {
 /// in the same dispatch. It goes once the command's body reads its handles
 /// from the context.
 #[derive(Clone, Debug)]
-pub(crate) struct ExportSchematicSvg;
+pub struct ExportSchematicSvg;
 
 impl Request for ExportSchematicSvg {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -205,7 +203,7 @@ impl Request for ExportSchematicSvg {
 /// after it, in the same dispatch. It goes once the command's body reads its
 /// handles from the context.
 #[derive(Clone, Debug)]
-pub(crate) struct ExportPublicationSnapshot;
+pub struct ExportPublicationSnapshot;
 
 impl Request for ExportPublicationSnapshot {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -215,7 +213,7 @@ impl Request for ExportPublicationSnapshot {
 /// that changes the grid the schematic is drawn on, so the snap follows the
 /// grid in the same frame, as it does when design changes the grid itself.
 #[derive(Clone, Debug)]
-pub(crate) struct FollowSchematicGrid;
+pub struct FollowSchematicGrid;
 
 impl Request for FollowSchematicGrid {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -227,7 +225,7 @@ impl Request for FollowSchematicGrid {
 /// taken straight after the call that raised it, before any shortcut is
 /// resolved again.
 #[derive(Clone, Debug)]
-pub(crate) struct ResetShortcutResolver;
+pub struct ResetShortcutResolver;
 
 impl Request for ResetShortcutResolver {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -239,7 +237,7 @@ impl Request for ResetShortcutResolver {
 /// defaults, and taken straight after the call that raised it, before the
 /// view is drawn again.
 #[derive(Clone, Debug)]
-pub(crate) struct ApplyWaveformDefaults;
+pub struct ApplyWaveformDefaults;
 
 impl Request for ApplyWaveformDefaults {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -249,7 +247,7 @@ impl Request for ApplyWaveformDefaults {
 /// the inspector lands, then the format is asked. Raised by the results
 /// feature's Export dataset… command, and taken straight after it returns.
 #[derive(Clone, Debug)]
-pub(crate) struct ExportDataset;
+pub struct ExportDataset;
 
 impl Request for ExportDataset {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -259,7 +257,7 @@ impl Request for ExportDataset {
 /// none. Raised by the results feature's hop back to the plan that produced
 /// a dataset, and taken straight after it returns, before the page draws.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SelectAnalysisInstance(pub(crate) Option<crate::product::AnalysisInstanceId>);
+pub struct SelectAnalysisInstance(pub Option<crate::product::AnalysisInstanceId>);
 
 impl Request for SelectAnalysisInstance {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -269,7 +267,7 @@ impl Request for SelectAnalysisInstance {
 /// say why it cannot be. Raised by the results feature's Open task deck
 /// command, and taken straight after it returns.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RevealExecutedDeck(pub(crate) u64);
+pub struct RevealExecutedDeck(pub u64);
 
 impl Request for RevealExecutedDeck {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -312,7 +310,7 @@ impl Request for SetFamilyFilter {
 /// once it has cleared the selection and opened the inspector; the section
 /// takes it as it next draws.
 #[derive(Clone, Debug)]
-pub(crate) struct RevealSheetSection;
+pub struct RevealSheetSection;
 
 impl Request for RevealSheetSection {
     const DRAIN: Drain = Drain::SheetSection;
@@ -320,7 +318,7 @@ impl Request for RevealSheetSection {
 
 /// Put this text on the platform clipboard.
 #[derive(Clone, Debug)]
-pub(crate) struct ClipboardText(pub(crate) String);
+pub struct ClipboardText(pub String);
 
 impl Request for ClipboardText {
     const DRAIN: Drain = Drain::AfterLiveSession;
@@ -330,7 +328,7 @@ impl Request for ClipboardText {
 /// backend is not sent the same viewport command every frame, and the
 /// session's own full-screen state is left to say what the host is doing.
 #[derive(Clone, Debug)]
-pub(crate) struct FullScreen(pub(crate) bool);
+pub struct FullScreen(pub bool);
 
 impl Request for FullScreen {
     const DRAIN: Drain = Drain::AfterChrome;
@@ -340,7 +338,7 @@ impl Request for FullScreen {
 /// once the close that makes room for it has landed, or at once when no
 /// project is open.
 #[derive(Clone, Debug)]
-pub(crate) struct LiveMirrorEntry;
+pub struct LiveMirrorEntry;
 
 impl Request for LiveMirrorEntry {
     const DRAIN: Drain = Drain::LiveSessionPump;
@@ -348,7 +346,7 @@ impl Request for LiveMirrorEntry {
 
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
-pub(crate) struct FocusNavigatorSearch;
+pub struct FocusNavigatorSearch;
 
 impl Request for FocusNavigatorSearch {
     const DRAIN: Drain = Drain::NavigatorFilter;
@@ -356,7 +354,7 @@ impl Request for FocusNavigatorSearch {
 
 /// Focus the component shelf's search field the next time it is drawn.
 #[derive(Clone, Debug)]
-pub(crate) struct FocusPlacementSearch;
+pub struct FocusPlacementSearch;
 
 impl Request for FocusPlacementSearch {
     const DRAIN: Drain = Drain::ShelfSearch;
@@ -364,7 +362,7 @@ impl Request for FocusPlacementSearch {
 
 /// Focus the project launcher's search field, raised as the launcher opens.
 #[derive(Clone, Debug)]
-pub(crate) struct FocusProjectLauncherSearch;
+pub struct FocusProjectLauncherSearch;
 
 impl Request for FocusProjectLauncherSearch {
     const DRAIN: Drain = Drain::LauncherSearch;

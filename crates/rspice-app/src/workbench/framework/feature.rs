@@ -29,7 +29,7 @@ pub(crate) mod harness;
 
 /// The session a feature's context holds. The framework asks of it only
 /// where requests wait.
-pub(crate) trait Session: 'static {
+pub trait Session: 'static {
     fn outbox(&mut self) -> &mut Outbox;
 }
 
@@ -40,7 +40,7 @@ impl Session for crate::workbench::state::workbench_session::WorkbenchSession {
 }
 
 /// One part of the product registered with the workbench.
-pub(crate) trait Feature: Sized + 'static {
+pub trait Feature: Sized + 'static {
     /// What the feature owns, held in its slot of the application state.
     type State: 'static;
     /// The session its context holds.
@@ -51,14 +51,14 @@ pub(crate) trait Feature: Sized + 'static {
 }
 
 /// What design shows that another feature reads.
-pub(crate) trait DesignPort {
+pub trait DesignPort {
     /// Which review markers the drawing shows, part of the view the drawing
     /// is read through.
     fn review_markers(&self) -> SchematicReviewMarkerVisibility;
 }
 
 /// What the cloud shows that another feature reads.
-pub(crate) trait CloudPort {
+pub trait CloudPort {
     /// Whether the license dialog is open, above whatever opened it.
     fn license_dialog_open(&self) -> bool;
 }
@@ -68,13 +68,13 @@ pub(crate) trait CloudPort {
 /// holds, in whichever buffer holds it, so a sheet switch or a drawing sync
 /// asks first, inside the same call, and the gesture's partial edit never
 /// reaches the project.
-pub(crate) trait CanvasGesturePort {
+pub trait CanvasGesturePort {
     fn let_go_of_canvas_gesture(&mut self, model: &mut Model);
 }
 
 /// Design as another feature reaches it: what it shows, and its canvas
 /// gesture to let go of.
-pub(crate) trait DesignPeer: DesignPort + CanvasGesturePort {}
+pub trait DesignPeer: DesignPort + CanvasGesturePort {}
 
 impl<T: DesignPort + CanvasGesturePort> DesignPeer for T {}
 
@@ -83,7 +83,7 @@ impl<T: DesignPort + CanvasGesturePort> DesignPeer for T {}
 /// here so the builder itself stays clock-free and deterministic. A feature
 /// that asks another to build a snapshot names it, so it sits below both.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PublicationDraft {
+pub struct PublicationDraft {
     pub title: String,
     pub description: String,
     pub author_display: String,
@@ -122,7 +122,7 @@ impl Default for PublicationDraft {
 /// The other features a feature reads, as live references, never a copy
 /// taken earlier; and the one thing it may ask of one, letting go of
 /// design's canvas gesture.
-pub(crate) struct Peers<'a> {
+pub struct Peers<'a> {
     design: &'a mut dyn DesignPeer,
     cloud: &'a dyn CloudPort,
     /// `None` in the results feature's own context: a feature reads its own
@@ -131,7 +131,7 @@ pub(crate) struct Peers<'a> {
 }
 
 impl<'a> Peers<'a> {
-    pub(crate) fn new(
+    pub fn new(
         design: &'a mut dyn DesignPeer,
         cloud: &'a dyn CloudPort,
         results: Option<&'a dyn ResultsPort>,
@@ -143,11 +143,11 @@ impl<'a> Peers<'a> {
         }
     }
 
-    pub(crate) fn design(&self) -> &dyn DesignPort {
+    pub fn design(&self) -> &dyn DesignPort {
         &*self.design
     }
 
-    pub(crate) fn cloud(&self) -> &'a dyn CloudPort {
+    pub fn cloud(&self) -> &'a dyn CloudPort {
         self.cloud
     }
 
@@ -177,19 +177,19 @@ impl CanvasGesturePort for Peers<'_> {
 }
 
 /// The context a feature's command runs in.
-pub(crate) struct Cx<'a, F: Feature> {
-    pub(crate) state: &'a mut F::State,
-    pub(crate) model: &'a mut Model,
-    pub(crate) wb: &'a mut F::Session,
+pub struct Cx<'a, F: Feature> {
+    pub state: &'a mut F::State,
+    pub model: &'a mut Model,
+    pub wb: &'a mut F::Session,
     /// What the platform services keep between frames: the autosave
     /// interval and the recent files among them.
-    pub(crate) platform: &'a mut PlatformState,
+    pub platform: &'a mut PlatformState,
     pub(crate) handles: LowerHandles<'a>,
-    pub(crate) peers: Peers<'a>,
+    pub peers: Peers<'a>,
 }
 
 impl<'a, F: Feature> Cx<'a, F> {
-    pub(crate) fn new(
+    pub fn new(
         state: &'a mut F::State,
         model: &'a mut Model,
         wb: &'a mut F::Session,
@@ -209,21 +209,21 @@ impl<'a, F: Feature> Cx<'a, F> {
 
     /// Run the command `key` names once this context's call returns, behind
     /// the prologue every command shares.
-    pub(crate) fn execute(&mut self, key: CommandKey) {
+    pub fn execute(&mut self, key: CommandKey) {
         self.wb.outbox().push(Execute(key));
     }
 }
 
 /// What a feature reads to answer whether one of its commands can run.
-pub(crate) struct Reads<'a, F: Feature> {
-    pub(crate) state: &'a F::State,
-    pub(crate) model: &'a Model,
-    pub(crate) wb: &'a F::Session,
+pub struct Reads<'a, F: Feature> {
+    pub state: &'a F::State,
+    pub model: &'a Model,
+    pub wb: &'a F::Session,
     /// Whether a project is open, and whether an operation on it is still
     /// in progress.
-    pub(crate) platform: &'a PlatformState,
+    pub platform: &'a PlatformState,
     /// What the results workspace shows.
-    pub(crate) results: &'a dyn ResultsPort,
+    pub results: &'a dyn ResultsPort,
 }
 
 impl<'a, F: Feature> Reads<'a, F> {
@@ -247,14 +247,14 @@ impl<'a, F: Feature> Reads<'a, F> {
 /// A command another command raised, run once the one that raised it
 /// returns.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Execute(pub(crate) CommandKey);
+pub struct Execute(pub CommandKey);
 
 impl Request for Execute {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
 /// The commands one feature declares, one value per command.
-pub(crate) trait CommandSet: Copy + 'static {
+pub trait CommandSet: Copy + 'static {
     type Feature: Feature;
     /// Every command of the set the registry lists.
     const REGISTERED: &'static [Self];
@@ -283,8 +283,8 @@ pub(crate) trait CommandSet: Copy + 'static {
 
 /// One registered command: what it declares, and its answers as plain
 /// function pointers into its set.
-pub(crate) struct FeatureCommand<F: Feature> {
-    pub(crate) spec: CommandSpec,
+pub struct FeatureCommand<F: Feature> {
+    pub spec: CommandSpec,
     index: usize,
     availability: fn(usize, &Reads<'_, F>) -> CommandAvailability,
     execute: fn(usize, &mut Cx<'_, F>),
@@ -292,15 +292,15 @@ pub(crate) struct FeatureCommand<F: Feature> {
 }
 
 impl<F: Feature> FeatureCommand<F> {
-    pub(crate) fn availability(&self, reads: &Reads<'_, F>) -> CommandAvailability {
+    pub fn availability(&self, reads: &Reads<'_, F>) -> CommandAvailability {
         (self.availability)(self.index, reads)
     }
 
-    pub(crate) fn execute(&self, cx: &mut Cx<'_, F>) {
+    pub fn execute(&self, cx: &mut Cx<'_, F>) {
         (self.execute)(self.index, cx);
     }
 
-    pub(crate) fn checked(&self, reads: &Reads<'_, F>) -> Option<bool> {
+    pub fn checked(&self, reads: &Reads<'_, F>) -> Option<bool> {
         (self.checked)(self.index, reads)
     }
 }
@@ -310,57 +310,57 @@ impl<F: Feature> FeatureCommand<F> {
 /// in. The shell asks the feature where its own precedence puts the
 /// feature's turn, so a routed command reaches its owners in the order it
 /// always has.
-pub(crate) struct RoutedCommand<F: Feature> {
-    pub(crate) key: CommandKey,
+pub struct RoutedCommand<F: Feature> {
+    pub key: CommandKey,
     /// Whether the command is the feature's here.
-    pub(crate) takes: fn(&Reads<'_, F>) -> bool,
+    pub takes: fn(&Reads<'_, F>) -> bool,
     /// Whether the feature can carry the command out, where it takes it.
-    pub(crate) enabled: fn(&Reads<'_, F>) -> bool,
+    pub enabled: fn(&Reads<'_, F>) -> bool,
     /// Carry the command out, where the feature takes it.
-    pub(crate) execute: fn(&mut Cx<'_, F>),
+    pub execute: fn(&mut Cx<'_, F>),
 }
 
 /// A step of the frame's dialogs a feature draws in its context. The shell
 /// lists it by `key` in its dialog order, which says where it is drawn and
 /// how it holds the workbench.
-pub(crate) struct FeatureDialog<F: Feature> {
-    pub(crate) key: DialogKey,
+pub struct FeatureDialog<F: Feature> {
+    pub key: DialogKey,
     /// Whether what the step draws is open, as the modal gates ask it.
-    pub(crate) is_open: fn(&F::State) -> bool,
+    pub is_open: fn(&F::State) -> bool,
     /// Run the step for this frame: draw what of it is open, and nothing
     /// when none of it is.
-    pub(crate) render: fn(&mut Cx<'_, F>, &egui::Context),
+    pub render: fn(&mut Cx<'_, F>, &egui::Context),
 }
 
 /// The inspector section a feature draws in its context, in the body the
 /// inspector container keeps for the section the shell resolves to it.
-pub(crate) struct FeatureInspector<F: Feature> {
+pub struct FeatureInspector<F: Feature> {
     /// Draw the section in the container's `Ui`.
-    pub(crate) show: fn(&mut Cx<'_, F>, &mut egui::Ui),
+    pub show: fn(&mut Cx<'_, F>, &mut egui::Ui),
     /// Commit what the section holds typed and not yet committed, because
     /// another section shows in its place.
-    pub(crate) commit_pending_edit: fn(&mut Cx<'_, F>, &egui::Context),
+    pub commit_pending_edit: fn(&mut Cx<'_, F>, &egui::Context),
 }
 
 /// The surface a feature draws in its context, on the stage of the route the
 /// shell resolves to it.
-pub(crate) struct FeatureSurface<F: Feature> {
+pub struct FeatureSurface<F: Feature> {
     /// Draw the surface in the stage's `Ui`.
-    pub(crate) show: fn(&mut Cx<'_, F>, &mut egui::Ui),
+    pub show: fn(&mut Cx<'_, F>, &mut egui::Ui),
 }
 
 /// One tool a feature puts on the context toolbar while its scope shows: a
 /// command it declares, which the toolbar draws as a labelled button and
 /// lays out, answers, dispatches and folds into its overflow like any other.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ToolbarTool {
-    pub(crate) key: CommandKey,
-    pub(crate) icon: WorkbenchIcon,
-    pub(crate) label: &'static str,
+pub struct ToolbarTool {
+    pub key: CommandKey,
+    pub icon: WorkbenchIcon,
+    pub label: &'static str,
 }
 
 /// Everything one feature registered, built once.
-pub(crate) struct FeatureRegistry<F: Feature> {
+pub struct FeatureRegistry<F: Feature> {
     commands: Vec<FeatureCommand<F>>,
     routed: &'static [RoutedCommand<F>],
     dialogs: &'static [FeatureDialog<F>],
@@ -371,7 +371,7 @@ pub(crate) struct FeatureRegistry<F: Feature> {
 
 impl<F: Feature> FeatureRegistry<F> {
     /// The registry `F` fills in.
-    pub(crate) fn build() -> Self {
+    pub fn build() -> Self {
         let mut registry = Self {
             commands: Vec::new(),
             routed: &[],
@@ -385,55 +385,55 @@ impl<F: Feature> FeatureRegistry<F> {
     }
 
     /// Register the feature's dialog steps.
-    pub(crate) fn dialogs(&mut self, dialogs: &'static [FeatureDialog<F>]) {
+    pub fn dialogs(&mut self, dialogs: &'static [FeatureDialog<F>]) {
         self.dialogs = dialogs;
     }
 
     /// Register the feature's inspector section.
-    pub(crate) fn inspector(&mut self, inspector: FeatureInspector<F>) {
+    pub fn inspector(&mut self, inspector: FeatureInspector<F>) {
         self.inspector = Some(inspector);
     }
 
     /// The inspector section the feature registered, if it draws one.
-    pub(crate) fn inspector_section(&self) -> Option<&FeatureInspector<F>> {
+    pub fn inspector_section(&self) -> Option<&FeatureInspector<F>> {
         self.inspector.as_ref()
     }
 
     /// Register the surface the feature draws on its route's stage.
-    pub(crate) fn surface(&mut self, surface: FeatureSurface<F>) {
+    pub fn surface(&mut self, surface: FeatureSurface<F>) {
         self.surface = Some(surface);
     }
 
     /// The surface the feature registered, if it draws one.
-    pub(crate) fn surface_section(&self) -> Option<&FeatureSurface<F>> {
+    pub fn surface_section(&self) -> Option<&FeatureSurface<F>> {
         self.surface.as_ref()
     }
 
     /// Register the tools the feature puts on the context toolbar, in the
     /// order the toolbar lays them out.
-    pub(crate) fn toolbar(&mut self, tools: &'static [ToolbarTool]) {
+    pub fn toolbar(&mut self, tools: &'static [ToolbarTool]) {
         self.toolbar = tools;
     }
 
     /// The tools the feature registered for the context toolbar.
-    pub(crate) fn toolbar_tools(&self) -> &'static [ToolbarTool] {
+    pub fn toolbar_tools(&self) -> &'static [ToolbarTool] {
         self.toolbar
     }
 
     /// The registered dialog step `key` names, if the feature draws one.
-    pub(crate) fn dialog(&self, key: DialogKey) -> Option<&FeatureDialog<F>> {
+    pub fn dialog(&self, key: DialogKey) -> Option<&FeatureDialog<F>> {
         self.dialogs.iter().find(|dialog| dialog.key == key)
     }
 
     /// Every dialog step the feature registered.
     #[cfg(test)]
-    pub(crate) fn registered_dialogs(&self) -> &'static [FeatureDialog<F>] {
+    pub fn registered_dialogs(&self) -> &'static [FeatureDialog<F>] {
         self.dialogs
     }
 
     /// Register every command of `C`, the ones the registry leaves out too,
     /// so the key a container holds reaches its command.
-    pub(crate) fn commands<C: CommandSet<Feature = F>>(&mut self) {
+    pub fn commands<C: CommandSet<Feature = F>>(&mut self) {
         for (index, command) in C::REGISTERED.iter().enumerate() {
             self.commands.push(FeatureCommand {
                 spec: command.spec(),
@@ -455,23 +455,23 @@ impl<F: Feature> FeatureRegistry<F> {
     }
 
     /// The registered command `key` names, if the feature declares one.
-    pub(crate) fn command(&self, key: CommandKey) -> Option<&FeatureCommand<F>> {
+    pub fn command(&self, key: CommandKey) -> Option<&FeatureCommand<F>> {
         self.commands.iter().find(|command| command.spec.key == key)
     }
 
     /// Register the feature's parts in routed commands.
-    pub(crate) fn routed(&mut self, routed: &'static [RoutedCommand<F>]) {
+    pub fn routed(&mut self, routed: &'static [RoutedCommand<F>]) {
         self.routed = routed;
     }
 
     /// The feature's part in the routed command `key`, if it has one.
-    pub(crate) fn routed_command(&self, key: CommandKey) -> Option<&RoutedCommand<F>> {
+    pub fn routed_command(&self, key: CommandKey) -> Option<&RoutedCommand<F>> {
         self.routed.iter().find(|routed| routed.key == key)
     }
 
     /// Every routed command the feature takes a part in.
     #[cfg(test)]
-    pub(crate) fn registered_routed(&self) -> &'static [RoutedCommand<F>] {
+    pub fn registered_routed(&self) -> &'static [RoutedCommand<F>] {
         self.routed
     }
 }

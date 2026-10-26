@@ -15,7 +15,7 @@ use crate::state::command_catalog::{CommandKey, ShortcutBinding, ShortcutContext
 
 /// The part of the product that declares a command and carries it out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CommandOwner {
+pub enum CommandOwner {
     /// The application frame: workspaces, help, leaving the application.
     Shell,
     /// The workbench every feature shares: panels, windows, documents, and
@@ -51,55 +51,55 @@ impl CommandAvailability {
 
 /// The yes-or-no facts a command declares about itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CommandFlags(u8);
+pub struct CommandFlags(u8);
 
 impl CommandFlags {
-    pub(crate) const NONE: Self = Self(0);
+    pub const NONE: Self = Self(0);
     /// Listed in the command palette.
-    pub(crate) const PALETTE_VISIBLE: Self = Self(1);
+    pub const PALETTE_VISIBLE: Self = Self(1);
     /// A browser keeps the command's primary chord for itself, so a browser
     /// profile needs an alternate for it.
-    pub(crate) const PRIMARY_RESERVED_BY_BROWSER: Self = Self(1 << 1);
+    pub const PRIMARY_RESERVED_BY_BROWSER: Self = Self(1 << 1);
     /// Runs only while a project is open.
-    pub(crate) const REQUIRES_OPEN_PROJECT: Self = Self(1 << 2);
+    pub const REQUIRES_OPEN_PROJECT: Self = Self(1 << 2);
     /// Held back while a project operation is still in progress.
-    pub(crate) const BLOCKED_BY_PROJECT_OPERATION: Self = Self(1 << 3);
+    pub const BLOCKED_BY_PROJECT_OPERATION: Self = Self(1 << 3);
     /// Edits the active schematic, so a read-only one refuses it.
-    pub(crate) const EDITS_ACTIVE_DOCUMENT: Self = Self(1 << 4);
+    pub const EDITS_ACTIVE_DOCUMENT: Self = Self(1 << 4);
     /// Commits the inspector's pending edit first, and does not run when that
     /// edit cannot be applied.
-    pub(crate) const COMMITS_INSPECTOR_EDIT: Self = Self(1 << 5);
+    pub const COMMITS_INSPECTOR_EDIT: Self = Self(1 << 5);
 
     /// These flags, with `flag` set when `set` holds.
     #[must_use]
-    pub(crate) const fn with(self, flag: Self, set: bool) -> Self {
+    pub const fn with(self, flag: Self, set: bool) -> Self {
         if set { Self(self.0 | flag.0) } else { self }
     }
 
     #[must_use]
-    pub(crate) const fn contains(self, flag: Self) -> bool {
+    pub const fn contains(self, flag: Self) -> bool {
         self.0 & flag.0 == flag.0
     }
 }
 
 /// What one command declares about itself.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CommandSpec {
-    pub(crate) key: CommandKey,
+pub struct CommandSpec {
+    pub key: CommandKey,
     /// What menus, the palette and the shortcut editor call the command.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The heading the command is listed under.
-    pub(crate) group: &'static str,
-    pub(crate) flags: CommandFlags,
+    pub group: &'static str,
+    pub flags: CommandFlags,
     /// The context the command's keys act in.
-    pub(crate) context: ShortcutContext,
+    pub context: ShortcutContext,
     /// The bindings the command ships with, in declaration order.
-    pub(crate) bindings: &'static [ShortcutBinding],
-    pub(crate) owner: CommandOwner,
+    pub bindings: &'static [ShortcutBinding],
+    pub owner: CommandOwner,
 }
 
 /// Every command, in order, with the ids it answers to.
-pub(crate) struct Registry {
+pub struct Registry {
     order: &'static [CommandKey],
     specs: Vec<CommandSpec>,
     /// The first spec declaring each key.
@@ -116,7 +116,7 @@ impl Registry {
     /// A registry of `specs`, listed in `order`, that also answers `aliases`.
     /// It is taken as given; [`Self::validate`] says whether it holds
     /// together.
-    pub(crate) fn new(
+    pub fn new(
         order: &'static [CommandKey],
         specs: Vec<CommandSpec>,
         aliases: &'static [(&'static str, CommandKey)],
@@ -137,7 +137,7 @@ impl Registry {
     /// This registry, knowing the commands `unlisted` declares that it leaves
     /// out, so [`Self::validate`] checks them too.
     #[must_use]
-    pub(crate) fn with_unlisted(mut self, unlisted: Vec<CommandSpec>) -> Self {
+    pub fn with_unlisted(mut self, unlisted: Vec<CommandSpec>) -> Self {
         self.unlisted = unlisted;
         self
     }
@@ -145,14 +145,14 @@ impl Registry {
     /// Every command, in the order menus list them and the shortcut resolver
     /// breaks ties by.
     #[must_use]
-    pub(crate) fn order(&self) -> &'static [CommandKey] {
+    pub fn order(&self) -> &'static [CommandKey] {
         self.order
     }
 
     /// The command a stored id names: an alias first, then a key. `None` for
     /// an id no command answers to.
     #[must_use]
-    pub(crate) fn resolve(&self, id: &str) -> Option<CommandKey> {
+    pub fn resolve(&self, id: &str) -> Option<CommandKey> {
         if let Some(&(_, key)) = self.aliases.iter().find(|(alias, _)| *alias == id) {
             return Some(key);
         }
@@ -162,21 +162,21 @@ impl Registry {
     /// What the command under `key` declares; `None` for a key no command
     /// declares.
     #[must_use]
-    pub(crate) fn spec(&self, key: CommandKey) -> Option<&CommandSpec> {
+    pub fn spec(&self, key: CommandKey) -> Option<&CommandSpec> {
         self.by_key
             .get(key.as_str())
             .map(|&index| &self.specs[index])
     }
 
     /// What every ordered command declares, in order.
-    pub(crate) fn ordered(&self) -> impl Iterator<Item = &CommandSpec> {
+    pub fn ordered(&self) -> impl Iterator<Item = &CommandSpec> {
         self.order.iter().filter_map(|key| self.spec(*key))
     }
 
     /// What the command under `key` is called; the key itself for a key no
     /// command declares.
     #[must_use]
-    pub(crate) fn label(&self, key: CommandKey) -> &'static str {
+    pub fn label(&self, key: CommandKey) -> &'static str {
         self.spec(key).map_or(key.as_str(), |spec| spec.label)
     }
 
@@ -187,7 +187,7 @@ impl Registry {
     /// out is declared once, by no listed command's key, and not ordered.
     /// `named` pairs each key a menu or framework code names a command by
     /// with what names it. The error lists every problem, one per line.
-    pub(crate) fn validate(
+    pub fn validate(
         &self,
         named: impl IntoIterator<Item = (&'static str, CommandKey)>,
     ) -> Result<(), String> {
@@ -271,7 +271,7 @@ pub(crate) mod ids {
 
     macro_rules! ids {
         ($($name:ident = $id:literal;)*) => {
-            $(pub(crate) const $name: CommandKey = CommandKey::new($id);)*
+            $(pub const $name: CommandKey = CommandKey::new($id);)*
 
             /// Every key above.
             const ALL: &[CommandKey] = &[$($name),*];
@@ -280,7 +280,7 @@ pub(crate) mod ids {
 
     /// Every key above, as [`super::Registry::validate`] is handed the keys
     /// something names.
-    pub(crate) fn named() -> impl Iterator<Item = (&'static str, CommandKey)> {
+    pub fn named() -> impl Iterator<Item = (&'static str, CommandKey)> {
         ALL.iter().map(|&key| ("framework code", key))
     }
 

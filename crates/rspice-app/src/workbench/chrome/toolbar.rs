@@ -25,7 +25,7 @@ use super::super::state::{Drawer, Workspace};
 use crate::ui::panels::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::CommandAvailability;
 
-const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
+pub const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
 
 pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
@@ -196,7 +196,7 @@ fn global_document_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout
     context_separator(ui, layout);
 }
 
-pub(crate) fn toolbar_horizontal_padding(viewport_width: f32) -> f32 {
+pub fn toolbar_horizontal_padding(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 {
         3.0
     } else if viewport_width <= 820.0 {
@@ -232,11 +232,11 @@ fn mark_drawer_focus_pending(ctx: &Context, drawer: Drawer) {
     });
 }
 
-pub(crate) fn toolbar_outer_gap(viewport_width: f32) -> f32 {
+pub fn toolbar_outer_gap(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 { 2.0 } else { 5.0 }
 }
 
-pub(crate) fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
+pub fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
     if app.run_preflight_checking() {
         "Stop".to_owned()
     } else if app.model().simulation.cancellation_is_pending() {
@@ -294,7 +294,7 @@ fn reserved_pvt_selector_width(ui: &egui::Ui, app: &impl WorkbenchHost) -> f32 {
         + 42.0
 }
 
-pub(crate) fn context_tools_width(
+pub fn context_tools_width(
     available_width: f32,
     layout: LayoutSpec,
     right_padding: f32,
@@ -315,7 +315,7 @@ pub(crate) fn context_tools_width(
         .max(1.0)
 }
 
-pub(crate) fn trailing_controls_width(
+pub fn trailing_controls_width(
     layout: LayoutSpec,
     outer_gap: f32,
     show_simulation_context: bool,
@@ -376,7 +376,7 @@ fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
 
 /// Render a canonical compact precision tool. The design mockup uses these
 /// for all direct canvas transforms and placement modes.
-fn toolbar_icon_command(
+pub fn toolbar_icon_command(
     ui: &mut egui::Ui,
     app: &mut impl WorkbenchHost,
     command: CommandKey,
@@ -386,7 +386,7 @@ fn toolbar_icon_command(
     toolbar_icon_command_selected(ui, app, command, icon, false, layout);
 }
 
-fn toolbar_icon_command_selected(
+pub fn toolbar_icon_command_selected(
     ui: &mut egui::Ui,
     app: &mut impl WorkbenchHost,
     command: CommandKey,
@@ -407,7 +407,7 @@ fn toolbar_icon_command_selected(
     );
 }
 
-fn toolbar_icon_command_selected_as(
+pub fn toolbar_icon_command_selected_as(
     ui: &mut egui::Ui,
     app: &mut impl WorkbenchHost,
     command: CommandKey,
@@ -432,7 +432,7 @@ fn toolbar_icon_command_selected_as(
 /// Render one explicitly labeled toolbar action. The design mockup reserves
 /// this treatment for checks so its state-changing validation scope remains
 /// visible without opening a menu.
-fn toolbar_text_command(
+pub fn toolbar_text_command(
     ui: &mut egui::Ui,
     app: &mut impl WorkbenchHost,
     command: CommandKey,
@@ -451,7 +451,7 @@ fn toolbar_text_command(
 
 /// Draw the tools a feature put on the toolbar, in order, each as a
 /// labelled command.
-pub(in crate::workbench) fn feature_tools(
+pub fn feature_tools(
     ui: &mut egui::Ui,
     app: &mut impl WorkbenchHost,
     tools: &[ToolbarTool],
@@ -463,7 +463,7 @@ pub(in crate::workbench) fn feature_tools(
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum ToolbarCommandPresentation {
+pub enum ToolbarCommandPresentation {
     Icon {
         icon: WorkbenchIcon,
         selected: bool,
@@ -569,7 +569,7 @@ fn label_fits_the_context_lane(ui: &egui::Ui, label_width: f32) -> bool {
 
 /// Take one of a narrow row's slots. The last is kept for More tools, so a
 /// tool that gets none sets itself aside there to stay reachable (U-11).
-fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {
+pub fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {
     let Some(limit) = layout.toolbar_tool_limit else {
         return true;
     };
@@ -579,13 +579,13 @@ fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {
     count + 1 < limit
 }
 
-fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
+pub fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
     if layout.toolbar_tool_limit.is_none() {
         separator(ui);
     }
 }
 
-fn pvt_temperature_label(
+pub fn pvt_temperature_label(
     celsius: f64,
     policy: crate::quantity::QuantityPresentationPolicy,
 ) -> String {
@@ -605,7 +605,7 @@ fn separator(ui: &mut egui::Ui) {
     );
 }
 
-pub(crate) fn toolbar_icon_button_size(layout: LayoutSpec) -> Vec2 {
+pub fn toolbar_icon_button_size(layout: LayoutSpec) -> Vec2 {
     if layout.toolbar_control_height >= 44.0 {
         Vec2::splat(44.0)
     } else {
@@ -613,7 +613,7 @@ pub(crate) fn toolbar_icon_button_size(layout: LayoutSpec) -> Vec2 {
     }
 }
 
-pub(crate) fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
+pub fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
     if layout.toolbar_control_height >= 44.0 {
         Vec2::splat(44.0)
     } else {
@@ -621,6 +621,6 @@ pub(crate) fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
     }
 }
 
-pub(crate) fn explicit_label_width(label: &str) -> f32 {
+pub fn explicit_label_width(label: &str) -> f32 {
     (label.chars().count() as f32 * 6.7 + 36.0).clamp(76.0, 224.0)
 }

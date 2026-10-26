@@ -19,7 +19,7 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 
 /// A tool the row had no slot for this frame, run over the session `S`.
-pub(crate) struct OverflowTool<S> {
+pub struct OverflowTool<S> {
     pub action: OverflowAction<S>,
     pub icon: WorkbenchIcon,
     pub label: String,
@@ -38,7 +38,7 @@ impl<S> Clone for OverflowTool<S> {
     }
 }
 
-pub(crate) enum OverflowAction<S> {
+pub enum OverflowAction<S> {
     /// A command, with the way the row draws it.
     Command(CommandKey, ToolbarCommandPresentation),
     /// A toolbar action that is not a command, such as opening the
@@ -56,7 +56,7 @@ impl<S> Clone for OverflowAction<S> {
 impl<S> Copy for OverflowAction<S> {}
 
 impl<S> OverflowTool<S> {
-    pub(super) fn command<H>(
+    pub fn command<H>(
         host: &H,
         command: CommandKey,
         presentation: ToolbarCommandPresentation,
@@ -93,12 +93,12 @@ fn overflow_id() -> egui::Id {
 }
 
 /// Start a frame's toolbar with nothing set aside for the session `S`.
-pub(crate) fn reset<S: 'static>(ui: &egui::Ui) {
+pub fn reset<S: 'static>(ui: &egui::Ui) {
     ui.data_mut(|data| data.remove::<Vec<OverflowTool<S>>>(overflow_id()));
 }
 
 /// Set aside a tool the row had no slot for.
-pub(crate) fn set_aside<S: 'static>(ui: &egui::Ui, tool: OverflowTool<S>) {
+pub fn set_aside<S: 'static>(ui: &egui::Ui, tool: OverflowTool<S>) {
     ui.data_mut(|data| {
         data.get_temp_mut_or_default::<Vec<OverflowTool<S>>>(overflow_id())
             .push(tool);
@@ -107,7 +107,7 @@ pub(crate) fn set_aside<S: 'static>(ui: &egui::Ui, tool: OverflowTool<S>) {
 
 /// The last slot: More tools when the row set two or more tools aside this
 /// frame, the one tool itself when it set one aside, nothing otherwise.
-pub(crate) fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: LayoutSpec) {
+pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: LayoutSpec) {
     let tools = ui
         .data_mut(|data| data.remove_temp::<Vec<OverflowTool<H::Session>>>(overflow_id()))
         .unwrap_or_default();

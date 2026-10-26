@@ -55,7 +55,7 @@ use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SurfaceOwner {
+pub enum SurfaceOwner {
     ReportAuthoring,
     ModelEditor,
 }
