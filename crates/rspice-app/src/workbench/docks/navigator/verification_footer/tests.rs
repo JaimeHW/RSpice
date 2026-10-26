@@ -816,7 +816,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     let mut app = result_navigator_app();
     let dataset_id = app.state.model.simulation.retained.runs[0].dataset_id;
 
-    assert!(select_result_dataset(&mut app, 0));
+    assert!(select_result_dataset(&mut app.state.results_parts(), 0));
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
     assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(0));
     assert_eq!(
@@ -825,7 +825,12 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     );
 
     let was_visible = app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
-    assert!(select_result_signal(&mut app, 0, 0, 0));
+    assert!(select_result_signal(
+        &mut app.state.results_parts(),
+        0,
+        0,
+        0
+    ));
     let selected = app
         .state
         .results
@@ -850,7 +855,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
         was_visible
     );
 
-    assert!(select_result_analysis(&mut app, 0, 1));
+    assert!(select_result_analysis(&mut app.state.results_parts(), 0, 1));
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
     assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(1));
     assert!(
@@ -924,7 +929,7 @@ fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
 #[test]
 fn batch_plot_action_moves_only_the_checked_quantities() {
     let mut app = result_navigator_app();
-    assert!(select_result_dataset(&mut app, 0));
+    assert!(select_result_dataset(&mut app.state.results_parts(), 0));
     let run = &app.state.model.simulation.retained.runs[0];
     let checked_key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
@@ -940,7 +945,11 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
     let source_default = run.analyses[0].waveforms[0].visible;
     let untouched_default = run.analyses[1].waveforms[0].visible;
 
-    super::super::results_actions::set_checked_signal_visibility(&mut app, &checked, false);
+    super::super::results_actions::set_checked_signal_visibility(
+        &mut app.state.results_parts(),
+        &checked,
+        false,
+    );
     assert!(
         !app.state
             .results
@@ -964,7 +973,11 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "browser presentation never mutates immutable retained evidence"
     );
 
-    super::super::results_actions::set_checked_signal_visibility(&mut app, &checked, true);
+    super::super::results_actions::set_checked_signal_visibility(
+        &mut app.state.results_parts(),
+        &checked,
+        true,
+    );
     assert!(
         app.state
             .results
@@ -974,7 +987,11 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "the same act returns it"
     );
     // Idempotent: repeating the request cannot toggle it back off.
-    super::super::results_actions::set_checked_signal_visibility(&mut app, &checked, true);
+    super::super::results_actions::set_checked_signal_visibility(
+        &mut app.state.results_parts(),
+        &checked,
+        true,
+    );
     assert!(
         app.state
             .results
@@ -1538,7 +1555,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
     values.insert("settling_time".to_owned(), 0.5);
     app.state.model.simulation.retained.runs[0].analyses[0].result_payload =
         Some(AnalysisResultPayload::ScalarMeasurements { values });
-    assert!(select_result_dataset(&mut app, 0));
+    assert!(select_result_dataset(&mut app.state.results_parts(), 0));
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);

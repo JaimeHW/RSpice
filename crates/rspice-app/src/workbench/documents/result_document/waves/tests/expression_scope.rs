@@ -121,7 +121,7 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     let second = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(second[0].x.as_slice(), &[1.0, 2.0]);
     assert_eq!(second[0].y.as_slice(), &[10.0, 10.0]);
-    toggle_visibility(&mut state, 0, 0);
+    toggle_visibility(&mut state.results_parts(), 0, 0);
     let hidden = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(hidden[0].y, second[0].y);
     assert_eq!(state.model.simulation.view.data_version, version);

@@ -283,6 +283,17 @@ impl Request for SetFamilyFilter {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Put this answer on the status bar once the commands the same call raised
+/// have run. Raised by a gesture that runs a command and then says what it
+/// did, so its answer is the one the bar shows, over anything the command's
+/// prologue said on the way, as when the command ran in place.
+#[derive(Clone, Debug)]
+pub struct PromptAfterCommands(pub String);
+
+impl Request for PromptAfterCommands {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Bring the drawing sheet's inspector section into view. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section

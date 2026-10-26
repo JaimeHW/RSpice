@@ -419,7 +419,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
         .first()
         .map(|waveform| waveform.visible);
 
-    toggle_visibility(&mut state, 0, 0);
+    toggle_visibility(&mut state.results_parts(), 0, 0);
 
     assert_eq!(
         state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible, retained_default,
@@ -452,7 +452,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
             .visible
     );
 
-    toggle_visibility(&mut state, 0, 0);
+    toggle_visibility(&mut state.results_parts(), 0, 0);
     assert!(state.results.results.session.waveform_visibility.is_empty());
     assert_eq!(
         state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,

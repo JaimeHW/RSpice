@@ -6,9 +6,10 @@ use egui::{Response, ScrollArea, Ui};
 use crate::product::DatasetId;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
+use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, analysis_default_unit, browser_signal_unit, retained_evidence_is_valid,
+    AnalysisPresentationKey, ResultsParts, analysis_default_unit, browser_signal_unit,
+    retained_evidence_is_valid,
 };
 use crate::workbench::framework::requests::{ExportResultQuantities, FocusNavigatorSearch};
 use crate::workbench::results::commands::ResultsCommand;
@@ -20,8 +21,8 @@ use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPr
 use super::super::super::commands::result_navigation::open_run_log;
 use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::{
-    locate_on_schematic_menu, select_result_analysis_by_key, select_result_browser_key,
-    select_result_dataset, set_checked_signal_visibility,
+    compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
+    select_result_browser_key, select_result_dataset, set_checked_signal_visibility,
 };
 use super::results_rows::{
     ResultCompletenessClass, expression_header, result_analysis_browser_status,
@@ -52,20 +53,18 @@ pub(super) fn result_browser_facets_stack(available_width: f32) -> bool {
     available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
 }
 
-pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
-    if !app
-        .state
-        .results
-        .results
-        .session
-        .checked_result_quantities
-        .is_empty()
+pub(in crate::workbench) fn results(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_details: &mut Option<Box<RunDetailsDialogState>>,
+) {
+    if !state.results.session.checked_result_quantities.is_empty()
         && !egui::Popup::is_any_open(ui.ctx())
         && ui.input(|input| input.key_pressed(egui::Key::Escape))
     {
-        app.state.results.results.session.clear_checked_signals();
+        state.results.session.clear_checked_signals();
     }
-    let query = app.state.workbench.navigator_filter().trim().to_lowercase();
+    let query = state.workbench.navigator_filter().trim().to_lowercase();
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/sort read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -105,64 +104,47 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     // A snapshot keeps the favorites predicate borrow-free inside the run map;
     // recency reads its owning accessor, which states the rank once.
-    let favorite_signals = app.state.results.results.session.favorite_signals.clone();
-    let active_run = app.state.model.simulation.view.active_run_idx.or_else(|| {
-        app.state
-            .model
-            .simulation
-            .retained
-            .runs
-            .len()
-            .checked_sub(1)
-    });
-    let active_analysis = app
-        .state
+    let favorite_signals = state.results.session.favorite_signals.clone();
+    let active_run = state
         .model
         .simulation
         .view
-        .active_analysis_idx
-        .or_else(|| {
-            active_run.and_then(|run| {
-                app.state
-                    .model
-                    .simulation
-                    .retained
-                    .runs
-                    .get(run)
-                    .is_some_and(|run| !run.analyses.is_empty())
-                    .then_some(0)
-            })
-        });
+        .active_run_idx
+        .or_else(|| state.model.simulation.retained.runs.len().checked_sub(1));
+    let active_analysis = state.model.simulation.view.active_analysis_idx.or_else(|| {
+        active_run.and_then(|run| {
+            state
+                .model
+                .simulation
+                .retained
+                .runs
+                .get(run)
+                .is_some_and(|run| !run.analyses.is_empty())
+                .then_some(0)
+        })
+    });
     let active_analysis_key = active_run
-        .and_then(|run| app.state.model.simulation.retained.runs.get(run))
+        .and_then(|run| state.model.simulation.retained.runs.get(run))
         .zip(active_analysis)
         .and_then(|(run, analysis_index)| {
             run.analyses
                 .get(analysis_index)
                 .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
         });
-    let selected_trace = app
-        .state
+    let selected_trace = state
         .results
-        .results
-        .valid_selected_trace(&app.state.model.simulation)
+        .valid_selected_trace(&state.model.simulation)
         .cloned();
-    let selected_artifact = app
-        .state
-        .results
+    let selected_artifact = state
         .results
         .session
         .selected_result_artifact
         .clone()
-        .filter(|key| {
-            key.resolve(&app.state.model.simulation.retained.runs)
-                .is_some()
-        });
+        .filter(|key| key.resolve(&state.model.simulation.retained.runs).is_some());
     let expression_source = active_analysis_key.map_or_else(Vec::new, |analysis| {
-        app.state
+        state
             .results
-            .results
-            .expression_entries_for_analysis(&app.state.model.simulation, analysis)
+            .expression_entries_for_analysis(&state.model.simulation, analysis)
     });
     let expressions = expression_source
         .iter()
@@ -175,8 +157,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
     let expression_query_match = !query.is_empty() && !expressions.is_empty();
-    let analysis_keys = app
-        .state
+    let analysis_keys = state
         .model
         .simulation
         .retained
@@ -191,13 +172,11 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let analysis_integrity = analysis_keys
         .into_iter()
         .map(|key| {
-            let valid = retained_evidence_is_valid(app.state.results_reads(), key);
+            let valid = retained_evidence_is_valid(state.results_reads(), key);
             (key, valid)
         })
         .collect::<std::collections::HashMap<_, _>>();
-    let runs = app
-        .state
-        .model.simulation
+    let runs = state.model.simulation
         .retained.runs
         .iter()
         .enumerate()
@@ -214,7 +193,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .copied()
                         .unwrap_or(false);
                     let source_currentness = crate::workbench::documents::result_document::operational_state::analysis_currentness(
-                        &app.state,
+                        state.results_reads(),
                         run,
                         analysis,
                         evidence_valid,
@@ -294,10 +273,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 ResultsBrowserScope::Favorites => {
                                     favorite_signals.contains(&identity)
                                 }
-                                ResultsBrowserScope::Recent => app
-                                    .state
-                                    .results
-                                    .results
+                                ResultsBrowserScope::Recent => state.results
                                     .session.recent_signal_rank(&identity)
                                     .is_some(),
                             };
@@ -307,10 +283,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             let samples = waveform.y.len();
                             Some(ResultSignal {
                                 waveform_index,
-                                visible: app
-                                    .state
-                                    .results
-                                    .results
+                                visible: state.results
                                     .session.waveform_visibility(&identity, waveform.visible),
                                 identity,
                                 name: waveform.name.clone(),
@@ -363,15 +336,9 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         })
                         .filter(|artifact| match scope {
                             ResultsBrowserScope::All => true,
-                            ResultsBrowserScope::Favorites => app
-                                .state
-                                .results
-                                .results
+                            ResultsBrowserScope::Favorites => state.results
                                 .session.is_favorite_result_artifact(&artifact.identity),
-                            ResultsBrowserScope::Recent => app
-                                .state
-                                .results
-                                .results
+                            ResultsBrowserScope::Recent => state.results
                                 .session.recent_result_artifact_rank(&artifact.identity)
                                 .is_some(),
                         })
@@ -379,16 +346,12 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     if scope == ResultsBrowserScope::Recent {
                         // Recent means recency order; the sort facet yields.
                         signals.sort_by_key(|signal| {
-                            app.state
-                                .results
-                                .results
+                            state.results
                                 .session.recent_signal_rank(&signal.identity)
                                 .unwrap_or(usize::MAX)
                         });
                         artifacts.sort_by_key(|artifact| {
-                            app.state
-                                .results
-                                .results
+                            state.results
                                 .session.recent_result_artifact_rank(&artifact.identity)
                                 .unwrap_or(usize::MAX)
                         });
@@ -440,7 +403,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 })
                 .collect::<Vec<_>>();
             let run_currentness = crate::workbench::documents::result_document::operational_state::run_currentness(
-                &app.state,
+                state.results_reads(),
                 run,
                 |analysis| {
                     analysis_integrity
@@ -530,7 +493,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // order, and a saved expression is found by name.
     results_browser_toolbar(
         ui,
-        app,
+        state,
         stored_kind,
         sort,
         stored_producer_facet,
@@ -549,8 +512,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             ResultsBrowserTab::Expressions => expressions.len(),
         };
         let loaded = match tab {
-            ResultsBrowserTab::Signals => app
-                .state
+            ResultsBrowserTab::Signals => state
                 .model
                 .simulation
                 .retained
@@ -570,7 +532,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .sum::<usize>()
                 })
                 .sum(),
-            ResultsBrowserTab::Datasets => app.state.model.simulation.retained.runs.len(),
+            ResultsBrowserTab::Datasets => state.model.simulation.retained.runs.len(),
             ResultsBrowserTab::Expressions => expression_source.len(),
         };
         // Two numbers, no noun: the tab band above already names what is being
@@ -645,28 +607,16 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // go. The band belongs to a selection: with nothing checked it held one
     // button, and the row checkboxes under it are how a selection starts.
     if tab == ResultsBrowserTab::Signals
-        && !app
-            .state
-            .results
-            .results
-            .session
-            .checked_result_quantities
-            .is_empty()
+        && !state.results.session.checked_result_quantities.is_empty()
     {
         let t = Tokens::get(ui.ctx());
-        let checked = app
-            .state
-            .results
-            .results
-            .session
-            .checked_result_quantities
-            .clone();
+        let checked = state.results.session.checked_result_quantities.clone();
         let checked_ordered =
-            ordered_checked_result_keys(&checked, &app.state.model.simulation.retained.runs);
+            ordered_checked_result_keys(&checked, &state.model.simulation.retained.runs);
         let exact_validation_error = checked_ordered.iter().find_map(|key| {
             crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
                 key,
-                &app.state.model.simulation.retained.runs,
+                &state.model.simulation.retained.runs,
             )
             .err()
         });
@@ -678,7 +628,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             .iter()
             .filter_map(ResultBrowserSelectionKey::waveform)
             .filter_map(|key| {
-                key.resolve(&app.state.model.simulation.retained.runs)
+                key.resolve(&state.model.simulation.retained.runs)
                     .map(|(.., waveform)| waveform.x.len())
             })
             .sum::<usize>();
@@ -698,7 +648,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 .filter_map(|key| {
                     crate::workbench::documents::result_document::result_browser_selection_canonical_name(
                         key,
-                        &app.state.model.simulation.retained.runs,
+                        &state.model.simulation.retained.runs,
                     )
                     .ok()
                 })
@@ -727,14 +677,12 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             )
                             .clicked()
                         {
-                            app.state
-                                .results
-                                .results
+                            state.results
                                 .session.select_visible_signals(&visible_result_keys);
                             ui.close();
                         }
                         if ui.button("Clear selection").clicked() {
-                            app.state.results.results.session.clear_checked_signals();
+                            state.results.session.clear_checked_signals();
                             ui.close();
                         }
                         let show = ui.add_enabled(
@@ -749,7 +697,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             );
                         }
                         if show.clicked() {
-                            set_checked_signal_visibility(app, &checked, true);
+                            set_checked_signal_visibility(state, &checked, true);
                             ui.close();
                         }
                         let hide = ui.add_enabled(
@@ -764,7 +712,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             );
                         }
                         if hide.clicked() {
-                            set_checked_signal_visibility(app, &checked, false);
+                            set_checked_signal_visibility(state, &checked, false);
                             ui.close();
                         }
                         ui.separator();
@@ -780,14 +728,14 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 .map(|key| {
                                     crate::workbench::documents::result_document::result_browser_selection_canonical_name(
                                         key,
-                                        &app.state.model.simulation.retained.runs,
+                                        &state.model.simulation.retained.runs,
                                     )
                                 })
                                 .collect::<Result<Vec<_>, _>>()
                                 .map(|names| names.join("\n"));
                             match result {
                                 Ok(names) => ui.ctx().copy_text(names),
-                                Err(error) => app.state.prompt(error),
+                                Err(error) => state.workbench.prompt(error),
                             }
                             ui.close();
                         }
@@ -805,16 +753,16 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if copy_exact.clicked() {
                             match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
                                 &checked_ordered,
-                                &app.state.model.simulation.retained.runs,
+                                &state.model.simulation.retained.runs,
                             ) {
                                 Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
                                     ui.ctx().copy_text(exact);
                                 }
-                                Ok(exact) => app.state.prompt(format!(
+                                Ok(exact) => state.workbench.prompt(format!(
                                     "The selection is {} bytes; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT} bytes. Export it instead.",
                                     exact.len()
                                 )),
-                                Err(error) => app.state.prompt(error),
+                                Err(error) => state.workbench.prompt(error),
                             }
                             ui.close();
                         }
@@ -826,8 +774,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             export_exact.clone().on_disabled_hover_text(error);
                         }
                         if export_exact.clicked() {
-                            app.state
-                                .workbench
+                            state.workbench
                                 .outbox
                                 .push(ExportResultQuantities(checked_ordered.clone()));
                             ui.close();
@@ -835,7 +782,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.separator();
                         let compare = ui.add_enabled(
                             compare_selection_compatible
-                                && app.command_key_enabled(ResultsCommand::CompareResultDatasets.key()),
+                                && compare_enabled(state),
                             egui::Button::new("Compare selected quantity across datasets..."),
                         );
                         if !checked_ordered.is_empty() && !compare_selection_compatible {
@@ -847,9 +794,9 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                         if compare.clicked() {
                             if let Some(first) = checked_ordered.first()
-                                && select_result_browser_key(app, first)
+                                && select_result_browser_key(state, first)
                             {
-                                app.execute_command_key(ResultsCommand::CompareResultDatasets.key());
+                                execute(state, ResultsCommand::CompareResultDatasets.key());
                             }
                             ui.close();
                         }
@@ -868,7 +815,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     if tab == ResultsBrowserTab::Signals {
         show_virtualized_result_signals(
             ui,
-            app,
+            state,
             &runs,
             active_run,
             active_analysis,
@@ -892,7 +839,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 if runs.is_empty() {
                     muted(
                         ui,
-                        if app.state.model.simulation.retained.runs.is_empty() {
+                        if state.model.simulation.retained.runs.is_empty() {
                             "No results yet. Run a simulation."
                         } else {
                             "No dataset or analysis matches this filter."
@@ -902,11 +849,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 for run in runs {
                     let run_active = active_run == Some(run.run_index);
                     let run_meta = data_state_meta(run.data_state);
-                    let overlaid = app
-                        .state
-                        .model
-                        .simulation
-                        .is_dataset_overlaid(run.dataset_id);
+                    let overlaid = state.model.simulation.is_dataset_overlaid(run.dataset_id);
                     let responses = result_dataset_row(
                         ui,
                         if run.success {
@@ -920,7 +863,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         overlaid,
                     );
                     if responses.selection.clicked() {
-                        select_result_dataset(app, run.run_index);
+                        select_result_dataset(state, run.run_index);
                     }
                     let mut details = false;
                     let mut log = false;
@@ -934,8 +877,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             ui.close();
                         }
                     });
-                    if let Some(run_id) = app
-                        .state
+                    if let Some(run_id) = state
                         .model
                         .simulation
                         .retained
@@ -945,22 +887,21 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     {
                         if details {
                             super::super::inspector::run_details::open(
-                                &mut app.state.results.run_details,
-                                &app.state.model.simulation,
+                                run_details,
+                                &state.model.simulation,
                                 run_id,
                             );
                         }
                         if log {
-                            open_run_log(&app.state.model, &mut app.state.workbench, run_id);
+                            open_run_log(state.model, state.workbench, run_id);
                         }
                     }
                     if responses.overlay.is_some_and(|response| response.clicked()) {
-                        let enabled = app
-                            .state
+                        let enabled = state
                             .model
                             .simulation
                             .toggle_dataset_overlay(run.dataset_id);
-                        app.state.prompt(if enabled {
+                        state.workbench.prompt(if enabled {
                             format!("Overlaying {} on the active result sheet.", run.label)
                         } else {
                             format!("Removed {} from the active result sheet.", run.label)
@@ -982,7 +923,7 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         )
                         .clicked()
                         {
-                            select_result_analysis_by_key(app, analysis.presentation_key);
+                            select_result_analysis_by_key(state, analysis.presentation_key);
                         }
                     }
                 }
@@ -990,19 +931,13 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             ResultsBrowserTab::Expressions => {
                 // Both ways of having no analysis read the same to the
                 // reader: there is one to pick and they have not picked it.
-                if app
-                    .state
-                    .model
-                    .simulation
-                    .view
-                    .active_analysis_idx
-                    .is_none()
+                if state.model.simulation.view.active_analysis_idx.is_none()
                     || active_analysis_key.is_none()
                 {
                     muted(ui, "Select an analysis to see its expressions.");
                     return;
                 }
-                expression_header(ui, app);
+                expression_header(ui, state);
                 let mut toggled_expression: Option<ResultExpressionPresentationKey> = None;
                 for (identity, expression_index, expression) in &expressions {
                     let t = Tokens::get(ui.ctx());
@@ -1023,23 +958,17 @@ pub(in crate::workbench) fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     if responses.visibility.clicked() {
                         toggled_expression = Some(identity.clone());
                     }
-                    locate_on_schematic_menu(&responses.selection, app, &expression.text);
+                    locate_on_schematic_menu(&responses.selection, state, &expression.text);
                 }
                 if let Some(identity) = toggled_expression {
-                    match app
-                        .state
+                    match state
                         .results
-                        .results
-                        .toggle_expression_visibility_by_key(&app.state.model.simulation, &identity)
+                        .toggle_expression_visibility_by_key(&state.model.simulation, &identity)
                     {
                         Ok(()) => {
-                            app.state
-                                .model
-                                .workspace
-                                .content
-                                .visualization_documents_dirty = true;
+                            state.model.workspace.content.visualization_documents_dirty = true;
                         }
-                        Err(error) => app.state.prompt(error),
+                        Err(error) => state.workbench.prompt(error),
                     }
                 }
             }
@@ -1304,7 +1233,7 @@ pub(super) const fn result_analysis_data_state(
 /// emptiness is the dataset's own — there would be no filter to clear.
 pub(super) fn results_browser_clear_filters(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
 ) {
@@ -1313,7 +1242,7 @@ pub(super) fn results_browser_clear_filters(
             .flatten()
             .is_some()
     });
-    let filtering = !app.state.workbench.navigator_filter().trim().is_empty()
+    let filtering = !state.workbench.navigator_filter().trim().is_empty()
         || kind != ResultsBrowserKind::All
         || scope != ResultsBrowserScope::All
         || producer_filtering;
@@ -1328,7 +1257,7 @@ pub(super) fn results_browser_clear_filters(
             .on_hover_text("Reset the query, the analysis, the kind, and the scope")
             .clicked()
         {
-            app.state.workbench.clear_navigator_filter();
+            state.workbench.clear_navigator_filter();
             ui.ctx().data_mut(|data| {
                 data.insert_temp(results_browser_kind_id(), ResultsBrowserKind::All);
                 data.insert_temp(results_browser_scope_id(), ResultsBrowserScope::All);
@@ -1354,7 +1283,7 @@ pub(super) fn results_browser_clear_filters(
 /// as one control stack at any dock width.
 fn results_browser_toolbar(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     kind: ResultsBrowserKind,
     sort: ResultsBrowserSort,
     producer: Option<AnalysisPresentationKey>,
@@ -1363,7 +1292,7 @@ fn results_browser_toolbar(
     const GUTTER: f32 = 5.0;
 
     let t = Tokens::get(ui.ctx());
-    let workspace = app.state.workbench.workspace;
+    let workspace = state.workbench.workspace;
     ui.add_space(7.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -1371,12 +1300,12 @@ fn results_browser_toolbar(
         let field_width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
         let placeholder = "Find signal…";
         let field_id = ui.make_persistent_id("workbench.navigator.filter");
-        if search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.state.workbench.outbox) {
+        if search_focus_requested::<FocusNavigatorSearch>(ui, &mut state.workbench.outbox) {
             ui.memory_mut(|memory| memory.request_focus(field_id));
         }
         let response = ui.add_sized(
             [field_width, t.metrics.ctl_h],
-            egui::TextEdit::singleline(app.state.workbench.navigator_trees.filter_mut(workspace))
+            egui::TextEdit::singleline(state.workbench.navigator_trees.filter_mut(workspace))
                 .id(field_id)
                 .hint_text(placeholder)
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -1405,8 +1334,7 @@ fn results_browser_toolbar(
         // retained is offered under one leading "all" entry that carries the
         // count, so a reader can see how many producers the tree spans without
         // opening the list.
-        let producers = app
-            .state
+        let producers = state
             .model
             .simulation
             .retained

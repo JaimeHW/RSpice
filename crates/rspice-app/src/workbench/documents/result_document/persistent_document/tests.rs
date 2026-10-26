@@ -705,7 +705,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     let retained_default =
         app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
 
-    super::super::waves::toggle_visibility(&mut app.state, 0, 0);
+    super::super::waves::toggle_visibility(&mut app.state.results_parts(), 0, 0);
     assert_eq!(
         app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         retained_default

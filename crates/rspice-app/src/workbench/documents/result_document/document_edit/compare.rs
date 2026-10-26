@@ -48,6 +48,23 @@ pub(crate) fn compare_available(state: ResultsReads<'_>) -> bool {
     reading_analysis(state).is_ok_and(|(run, analysis)| !baselines(state, run, analysis).is_empty())
 }
 
+/// Whether Compare datasets can run here, and why not: away from Results
+/// there is no active result document, and in it a second compatible run is
+/// missing.
+pub(crate) fn compare_availability(
+    state: ResultsReads<'_>,
+) -> crate::workbench::framework::command_registry::CommandAvailability {
+    use crate::workbench::framework::command_registry::CommandAvailability;
+
+    if compare_available(state) {
+        CommandAvailability::Available
+    } else if state.workbench.workspace != Workspace::Results {
+        CommandAvailability::Disabled("open an active result document")
+    } else {
+        CommandAvailability::Disabled("a second compatible run is required")
+    }
+}
+
 /// Open Compare datasets on the result the reader is looking at, against the
 /// first compatible baseline.
 pub(crate) fn open_compare(state: &mut ResultsParts<'_>) {

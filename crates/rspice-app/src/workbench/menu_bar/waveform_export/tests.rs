@@ -1699,7 +1699,11 @@ fn hidden_trace_state(analyses: usize) -> AppState {
     // Hide the second trace of every displayed analysis, exactly as a legend
     // chip or a navigator check-mark does.
     for index in 0..analyses {
-        crate::workbench::documents::result_document::toggle_visibility(&mut state, index, 1);
+        crate::workbench::documents::result_document::toggle_visibility(
+            &mut state.results_parts(),
+            index,
+            1,
+        );
     }
     state
 }
@@ -1855,7 +1859,11 @@ fn delimited_stacked_export_with_events_keeps_both_displayed_waveforms() {
 #[test]
 fn an_export_with_every_trace_hidden_names_the_hidden_traces() {
     let mut state = hidden_trace_state(1);
-    crate::workbench::documents::result_document::toggle_visibility(&mut state, 0, 0);
+    crate::workbench::documents::result_document::toggle_visibility(
+        &mut state.results_parts(),
+        0,
+        0,
+    );
 
     let io = MockExportWorkflowIo::default();
     action_export_csv_with_io(&mut state, &io);

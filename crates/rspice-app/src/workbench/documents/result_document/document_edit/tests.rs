@@ -347,7 +347,7 @@ fn run_comparison(
     app: &mut RSpiceApp,
 ) -> rspice_results_ui::document_dialogs::compare::CompareOutcome {
     app.state.workbench.workspace = Workspace::Results;
-    assert!(compare_available(app.state.results_reads()));
+    assert!(compare::compare_available(app.state.results_reads()));
     open_compare(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Compare(mut draft)) =
         app.state.results.result_document_dialog.clone()
@@ -478,7 +478,7 @@ fn compare_is_refused_without_a_compatible_baseline() {
     assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.workspace = Workspace::Results;
 
-    assert!(!compare_available(app.state.results_reads()));
+    assert!(!compare::compare_available(app.state.results_reads()));
     open_compare(&mut app.state.results_parts());
     assert!(app.state.results.result_document_dialog.is_none());
 }

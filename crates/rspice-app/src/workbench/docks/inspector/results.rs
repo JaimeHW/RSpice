@@ -187,7 +187,7 @@ fn selected_result_trace(
             .clicked()
         {
             crate::workbench::documents::result_document::toggle_visibility(
-                &mut app.state,
+                &mut app.state.results_parts(),
                 analysis_index,
                 waveform_index,
             );

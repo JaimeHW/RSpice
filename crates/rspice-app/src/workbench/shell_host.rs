@@ -44,6 +44,7 @@ use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
+use crate::workbench::results::ResultsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{
@@ -144,7 +145,6 @@ impl Host for RSpiceApp {
                 use crate::workbench::docks::navigator::models::models;
                 use crate::workbench::docks::navigator::netlist::{code_workspace_pages, netlist};
                 use crate::workbench::docks::navigator::project::project;
-                use crate::workbench::docks::navigator::results::results;
                 use crate::workbench::docks::navigator::simulate::simulate;
                 use crate::workbench::docks::navigator::verify::verify;
                 use crate::workbench::docks::navigator::{
@@ -182,7 +182,7 @@ impl Host for RSpiceApp {
                     }
                     Workspace::Design => design::show(ui, app),
                     Workspace::Results => {
-                        results(ui, app);
+                        features::show_navigator::<ResultsFeature>(app, ui);
                         app.after_contribution();
                     }
                     Workspace::Project => project(ui, app),

@@ -560,7 +560,11 @@ fn a_trace_hidden_on_the_sheet_is_not_printed() {
     };
     assert_eq!(plot.traces.len(), 2);
 
-    crate::workbench::documents::result_document::toggle_visibility(&mut state, 0, 1);
+    crate::workbench::documents::result_document::toggle_visibility(
+        &mut state.results_parts(),
+        0,
+        1,
+    );
     let resolved = resolve_quick_view(&state).expect("quick view resolves");
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected a semantic waveform plot")

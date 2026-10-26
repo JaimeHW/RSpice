@@ -5,7 +5,8 @@
 //! Its commands run in a [`Cx`] over the feature's own slot, the model,
 //! whose retained runs they read and clear, the session, whose workspace
 //! and route they open, and the platform services' state, which says
-//! whether a project is open.
+//! whether a project is open. The data browser, the Results navigator,
+//! draws in the same context.
 
 pub(crate) mod commands;
 
@@ -13,14 +14,14 @@ use crate::workbench::commands::result_navigation::{
     dataset_export_is_resolvable, open_run_log, producer_log_hop, producing_plan_hop, task_deck_hop,
 };
 use crate::workbench::documents::result_document::{
-    ResultsParts, ResultsReads, add_pane_available, compare_available, copy_cursor_text,
+    ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     family_available, fit_gesture_available, linked_cursors, open_create_document,
     open_dataset_browser, open_specification_editor, request_view_gesture, viewer_is_available,
     viewer_unavailability_reason, zoom_gesture_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, Reads, RoutedCommand, Session,
+    CommandSet, Cx, Feature, FeatureNavigator, FeatureRegistry, Reads, RoutedCommand, Session,
 };
 use crate::workbench::framework::requests::{
     ClipboardText, ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
@@ -43,7 +44,17 @@ impl Feature for ResultsFeature {
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ResultsCommand>();
         registry.routed(ROUTED);
+        registry.navigator(FeatureNavigator {
+            show: show_data_browser,
+        });
     }
+}
+
+/// The data browser, over the results workspace's parts and Run details…,
+/// which it opens on a retained run.
+fn show_data_browser(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
+    let (mut parts, run_details) = cx.state.parts_and_run_details(cx.model, cx.wb, cx.platform);
+    crate::workbench::docks::navigator::results::results(ui, &mut parts, run_details);
 }
 
 /// The workbench commands the results workspace answers for itself: Copy
@@ -239,14 +250,7 @@ impl CommandSet for ResultsCommand {
             Self::ExpressionDiagnostics => {
                 available_or(retained.has_results(), "no result dataset is available")
             }
-            Self::CompareResultDatasets => available_or(
-                compare_available(state),
-                if workbench.workspace != Workspace::Results {
-                    "open an active result document"
-                } else {
-                    "a second compatible run is required"
-                },
-            ),
+            Self::CompareResultDatasets => compare_availability(state),
             // Add measurement draws over the result viewer, and over a quick
             // view it evaluates without keeping, so it needs only a result.
             Self::MeasurementLibrary | Self::VisualizationDocumentProperties => {

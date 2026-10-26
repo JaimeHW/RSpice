@@ -122,7 +122,11 @@ fn show_unit_pane_header(
                     .results
                     .toggle_family_trace_visibility(key);
             } else {
-                toggle_visibility(self.state, self.model.analysis_index, trace.waveform_index);
+                toggle_visibility(
+                    &mut self.state.results_parts(),
+                    self.model.analysis_index,
+                    trace.waveform_index,
+                );
             }
         }
 

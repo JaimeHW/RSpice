@@ -72,7 +72,21 @@ impl ResultsState {
         workbench: &'a mut WorkbenchSession,
         platform: &'a PlatformState,
     ) -> ResultsParts<'a> {
-        ResultsParts {
+        self.parts_and_run_details(model, workbench, platform).0
+    }
+
+    /// The results workspace's parts, and beside them Run details…, which the
+    /// data browser opens on a retained run.
+    pub(crate) fn parts_and_run_details<'a>(
+        &'a mut self,
+        model: &'a mut Model,
+        workbench: &'a mut WorkbenchSession,
+        platform: &'a PlatformState,
+    ) -> (
+        ResultsParts<'a>,
+        &'a mut Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
+    ) {
+        let parts = ResultsParts {
             results: &mut self.results,
             analysis: &mut self.analysis,
             result_document_dialog: &mut self.result_document_dialog,
@@ -82,7 +96,8 @@ impl ResultsState {
             model,
             workbench,
             platform,
-        }
+        };
+        (parts, &mut self.run_details)
     }
 
     /// The results frame hook. How AC traces are drawn has no control but

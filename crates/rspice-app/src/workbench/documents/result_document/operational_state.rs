@@ -8,7 +8,7 @@
 use egui::Ui;
 use rspice_results_ui::operational::{self, ResultOperationalState, ResultOperationalStatus};
 
-use super::{AnalysisPresentationKey, ResultViewer, ResultsState};
+use super::{AnalysisPresentationKey, ResultViewer, ResultsReads, ResultsState};
 use crate::state::{
     AnalysisResult, AnalysisResultSourceDomain, SimulationRun, SimulationRunLifecycle,
 };
@@ -184,7 +184,7 @@ impl ResultCurrentness {
 }
 
 pub(crate) fn analysis_currentness(
-    state: &AppState,
+    state: ResultsReads<'_>,
     run: &SimulationRun,
     analysis: &AnalysisResult,
     evidence_valid: bool,
@@ -253,7 +253,7 @@ pub(crate) fn analysis_currentness(
 }
 
 pub(crate) fn run_currentness(
-    state: &AppState,
+    state: ResultsReads<'_>,
     run: &SimulationRun,
     evidence_valid: impl Fn(&AnalysisResult) -> bool,
 ) -> ResultCurrentness {
@@ -268,7 +268,6 @@ pub(crate) fn run_currentness(
         ResultCurrentness::Unresolved
     } else if currentness_rank(currentness) <= currentness_rank(ResultCurrentness::Unresolved)
         && state
-            .results
             .results
             .operational_condition
             .as_ref()
@@ -460,7 +459,7 @@ pub(crate) fn classify_viewer(
         return failed_status(run, false);
     }
 
-    let currentness = run_currentness(state, run, |_| true);
+    let currentness = run_currentness(state.results_reads(), run, |_| true);
     if matches!(
         currentness,
         ResultCurrentness::Stale | ResultCurrentness::Superseded
@@ -596,7 +595,7 @@ mod tests {
             );
         let run = completed_run_with(analysis.clone());
         assert_eq!(
-            analysis_currentness(&state, &run, &analysis, true),
+            analysis_currentness(state.results_reads(), &run, &analysis, true),
             ResultCurrentness::Current
         );
 
@@ -619,11 +618,11 @@ mod tests {
             .expect("plan revision advances");
         let stale_run = completed_run_with(stale.clone());
         assert_eq!(
-            analysis_currentness(&revised, &stale_run, &stale, true),
+            analysis_currentness(revised.results_reads(), &stale_run, &stale, true),
             ResultCurrentness::Stale
         );
         assert_eq!(
-            analysis_currentness(&revised, &stale_run, &stale, false),
+            analysis_currentness(revised.results_reads(), &stale_run, &stale, false),
             ResultCurrentness::Corrupted
         );
     }

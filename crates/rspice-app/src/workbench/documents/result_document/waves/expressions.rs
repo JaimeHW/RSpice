@@ -274,7 +274,7 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
 
 /// Flip a source waveform's quick-view visibility without mutating result data.
 pub(crate) fn toggle_visibility(
-    state: &mut AppState,
+    state: &mut crate::workbench::documents::result_document::ResultsParts<'_>,
     analysis_index: usize,
     waveform_index: usize,
 ) {
@@ -294,7 +294,6 @@ pub(crate) fn toggle_visibility(
         name.clone(),
     );
     if let Some(context) = state
-        .results
         .results
         .session
         .persistent_pane_context
@@ -336,22 +335,23 @@ pub(crate) fn toggle_visibility(
                     .content
                     .transact_visualization_document(context.document_id, revision, edits)
             {
-                state.prompt(format!("Could not change trace visibility: {error}"));
+                state
+                    .workbench
+                    .prompt(format!("Could not change trace visibility: {error}"));
                 return;
             }
             if now_visible {
-                state.results.results.session.note_recent_signal(key);
+                state.results.session.note_recent_signal(key);
             }
             return;
         }
     }
     let now_visible = state
         .results
-        .results
         .toggle_waveform_visibility(key.clone(), dataset_default);
     // Revealing a trace is a deliberate act; feed the browser's Recent scope.
     if now_visible {
-        state.results.results.session.note_recent_signal(key);
+        state.results.session.note_recent_signal(key);
     }
 }
 

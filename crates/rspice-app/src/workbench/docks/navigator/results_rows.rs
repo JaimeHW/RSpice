@@ -6,8 +6,7 @@ use egui::{Response, ScrollArea, Ui};
 use crate::state::bus_notations;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
-use crate::workbench::documents::result_document::AnalysisPresentationKey;
+use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsParts};
 use crate::workbench::results::commands::ResultsCommand;
 use rspice_results::result_presentation::ResultArtifactPresentationKey;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
@@ -20,10 +19,10 @@ use super::results::{
     set_result_browser_dataset_expanded, set_result_browser_group_expanded,
 };
 use super::results_actions::{
-    handle_result_artifact_keyboard, handle_result_signal_keyboard, result_artifact_context_menu,
-    result_signal_context_menu, result_signal_row_id, select_result_analysis_by_key,
-    select_result_artifact, select_result_signal_by_key, toggle_result_signal_visibility,
-    update_result_browser_multi_selection,
+    execute, handle_result_artifact_keyboard, handle_result_signal_keyboard,
+    result_artifact_context_menu, result_signal_context_menu, result_signal_row_id,
+    select_result_analysis_by_key, select_result_artifact, select_result_signal_by_key,
+    toggle_result_signal_visibility, update_result_browser_multi_selection,
 };
 use super::{grouped_count, muted};
 
@@ -585,7 +584,7 @@ const fn pstb_classification_navigator_label(
 
 pub(super) fn show_virtualized_result_signals(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut ResultsParts<'_>,
     runs: &[ResultRun],
     active_run: Option<usize>,
     active_analysis: Option<usize>,
@@ -598,7 +597,7 @@ pub(super) fn show_virtualized_result_signals(
 ) {
     // A row labels the conductor the design drew; its identity stays the deck
     // name the engine answered under.
-    let notations = bus_notations(&app.state.model.workspace, &app.state.model.schematic);
+    let notations = bus_notations(&state.model.workspace, &state.model.schematic);
     let mut rows = Vec::new();
     let mut signal_rows = 0_usize;
     for (run_position, run) in runs.iter().enumerate() {
@@ -810,7 +809,7 @@ pub(super) fn show_virtualized_result_signals(
                                         !expanded,
                                     );
                                 }
-                                select_result_analysis_by_key(app, analysis.presentation_key);
+                                select_result_analysis_by_key(state, analysis.presentation_key);
                             }
                             if head.has_focus() {
                                 let collapse = head.ctx.input_mut(|input| {
@@ -874,36 +873,32 @@ pub(super) fn show_virtualized_result_signals(
                                 color,
                                 signal_selected,
                                 signal.visible,
-                                app.state.results.results.session.is_favorite_signal(&signal.identity),
-                                app.state.results.results.session.is_checked_signal(&signal.identity),
+                                state.results.session.is_favorite_signal(&signal.identity),
+                                state.results.session.is_checked_signal(&signal.identity),
                             );
                             if responses.check.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
-                                update_result_browser_multi_selection(
-                                    app,
+                                update_result_browser_multi_selection(state,
                                     &ResultBrowserSelectionKey::Waveform(signal.identity.clone()),
                                     ordered_visible,
                                     modifiers,
                                 );
                             }
                             if responses.visibility.clicked() {
-                                toggle_result_signal_visibility(app, &signal.identity);
+                                toggle_result_signal_visibility(state, &signal.identity);
                             }
                             if responses
                                 .favorite
                                 .as_ref()
                                 .is_some_and(|star| star.clicked())
                             {
-                                app.state
-                                    .results
-                                    .results
+                                state.results
                                     .session.toggle_favorite_signal(signal.identity.clone());
                             }
                             if responses.selection.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
                                 if modifiers.shift || modifiers.command || modifiers.ctrl {
-                                    update_result_browser_multi_selection(
-                                        app,
+                                    update_result_browser_multi_selection(state,
                                         &ResultBrowserSelectionKey::Waveform(
                                             signal.identity.clone(),
                                         ),
@@ -911,31 +906,26 @@ pub(super) fn show_virtualized_result_signals(
                                         modifiers,
                                     );
                                 } else {
-                                    app.state
-                                        .results
-                                        .results
+                                    state.results
                                         .session.set_browser_range_anchor(
                                             ResultBrowserSelectionKey::Waveform(
                                                 signal.identity.clone(),
                                             ),
                                         );
                                 }
-                                select_result_signal_by_key(app, &signal.identity);
+                                select_result_signal_by_key(state, &signal.identity);
                             }
                             handle_result_signal_keyboard(
                                 &responses.selection,
-                                app,
+                                state,
                                 &signal.identity,
                                 ordered_visible,
                             );
-                            let favorite = app
-                                .state
-                                .results
-                                .results
+                            let favorite = state.results
                                 .session.is_favorite_signal(&signal.identity);
                             result_signal_context_menu(
                                 &responses.selection,
-                                app,
+                                state,
                                 &signal.identity,
                                 signal.visible,
                                 favorite,
@@ -951,10 +941,7 @@ pub(super) fn show_virtualized_result_signals(
                             let selection_key =
                                 ResultBrowserSelectionKey::Artifact(artifact.identity.clone());
                             let selected = selected_artifact == Some(&artifact.identity);
-                            let favorite = app
-                                .state
-                                .results
-                                .results
+                            let favorite = state.results
                                 .session.is_favorite_result_artifact(&artifact.identity);
                             let responses = result_artifact_row(
                                 ui,
@@ -965,14 +952,11 @@ pub(super) fn show_virtualized_result_signals(
                                 artifact.kind,
                                 selected,
                                 favorite,
-                                app.state
-                                    .results
-                                    .results
+                                state.results
                                     .session.is_checked_result_artifact(&artifact.identity),
                             );
                             if responses.check.clicked() {
-                                update_result_browser_multi_selection(
-                                    app,
+                                update_result_browser_multi_selection(state,
                                     &selection_key,
                                     ordered_visible,
                                     ui.input(|input| input.modifiers),
@@ -983,37 +967,32 @@ pub(super) fn show_virtualized_result_signals(
                                 .as_ref()
                                 .is_some_and(|star| star.clicked())
                             {
-                                app.state
-                                    .results
-                                    .results
+                                state.results
                                     .session.toggle_favorite_result_artifact(artifact.identity.clone());
                             }
                             if responses.selection.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
                                 if modifiers.shift || modifiers.command || modifiers.ctrl {
-                                    update_result_browser_multi_selection(
-                                        app,
+                                    update_result_browser_multi_selection(state,
                                         &selection_key,
                                         ordered_visible,
                                         modifiers,
                                     );
                                 } else {
-                                    app.state
-                                        .results
-                                        .results
+                                    state.results
                                         .session.set_browser_range_anchor(selection_key.clone());
                                 }
-                                select_result_artifact(app, &artifact.identity);
+                                select_result_artifact(state, &artifact.identity);
                             }
                             handle_result_artifact_keyboard(
                                 &responses.selection,
-                                app,
+                                state,
                                 artifact,
                                 ordered_visible,
                             );
                             result_artifact_context_menu(
                                 &responses.selection,
-                                app,
+                                state,
                                 artifact,
                                 favorite,
                             );
@@ -1027,7 +1006,7 @@ pub(super) fn show_virtualized_result_signals(
     if signal_rows == 0 {
         muted(
             ui,
-            if app.state.model.simulation.retained.runs.is_empty() {
+            if state.model.simulation.retained.runs.is_empty() {
                 "No results yet. Run a simulation."
             } else {
                 match scope {
@@ -1039,7 +1018,7 @@ pub(super) fn show_virtualized_result_signals(
                 }
             },
         );
-        results_browser_clear_filters(ui, app, kind, scope);
+        results_browser_clear_filters(ui, state, kind, scope);
     }
 }
 
@@ -1472,7 +1451,7 @@ fn result_browser_analysis_head(
     response
 }
 
-pub(super) fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn expression_header(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let t = Tokens::get(ui.ctx());
     let header_height = responsive_result_control_height(EXPRESSION_HEADER_HEIGHT, t.metrics.ctl_h);
     let (rect, _) = ui.allocate_exact_size(
@@ -1520,7 +1499,7 @@ pub(super) fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     theme::paint_focus_ring(ui, &response, add_rect);
     if response.on_hover_text("Open calculator").clicked() {
-        app.execute_command_key(ResultsCommand::WaveformCalculator.key());
+        execute(state, ResultsCommand::WaveformCalculator.key());
     }
 }
 

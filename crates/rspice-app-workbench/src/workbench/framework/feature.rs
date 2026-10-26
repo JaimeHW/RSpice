@@ -20,7 +20,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
-use super::command_registry::{CommandAvailability, CommandSpec};
+use super::command_registry::{CommandAvailability, CommandFlags, CommandSpec};
 use super::dialogs::DialogKey;
 use super::ports::ResultsPort;
 use super::requests::{Drain, Outbox, Request};
@@ -285,6 +285,25 @@ impl Request for Execute {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Why the dispatcher's prologue holds back a command that declares `flags`
+/// before its owner is asked: a project operation in flight holds back one
+/// it blocks, and one that needs an open project needs one open. `None`
+/// when the prologue lets it through to its owner.
+pub fn held_back(flags: CommandFlags, platform: &PlatformState) -> Option<&'static str> {
+    if flags.contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
+        && rspice_app_services::workbench::lifecycle::project_lifecycle::operation_in_progress(
+            platform,
+        )
+    {
+        return Some("project operation is still in progress");
+    }
+    if flags.contains(CommandFlags::REQUIRES_OPEN_PROJECT) && !platform.project_lifecycle.is_open()
+    {
+        return Some("no project is open");
+    }
+    None
+}
+
 /// The commands one feature declares, one value per command.
 pub trait CommandSet: Copy + 'static {
     type Feature: Feature;
@@ -381,6 +400,13 @@ pub struct FeatureSurface<F: Feature> {
     pub show: fn(&mut Cx<'_, F>, &mut egui::Ui),
 }
 
+/// The navigator section a feature draws in its context while its workspace
+/// shows, below the heading and the filter field the navigator keeps.
+pub struct FeatureNavigator<F: Feature> {
+    /// Draw the section in the navigator's `Ui`.
+    pub show: fn(&mut Cx<'_, F>, &mut egui::Ui),
+}
+
 /// One tool a feature puts on the context toolbar while its scope shows: a
 /// command it declares, which the toolbar draws as a labelled button and
 /// lays out, answers, dispatches and folds into its overflow like any other.
@@ -398,6 +424,7 @@ pub struct FeatureRegistry<F: Feature> {
     dialogs: &'static [FeatureDialog<F>],
     inspector: Option<FeatureInspector<F>>,
     surface: Option<FeatureSurface<F>>,
+    navigator: Option<FeatureNavigator<F>>,
     toolbar: &'static [ToolbarTool],
 }
 
@@ -410,6 +437,7 @@ impl<F: Feature> FeatureRegistry<F> {
             dialogs: &[],
             inspector: None,
             surface: None,
+            navigator: None,
             toolbar: &[],
         };
         F::register(&mut registry);
@@ -439,6 +467,16 @@ impl<F: Feature> FeatureRegistry<F> {
     /// The surface the feature registered, if it draws one.
     pub fn surface_section(&self) -> Option<&FeatureSurface<F>> {
         self.surface.as_ref()
+    }
+
+    /// Register the navigator section the feature draws in its workspace.
+    pub fn navigator(&mut self, navigator: FeatureNavigator<F>) {
+        self.navigator = Some(navigator);
+    }
+
+    /// The navigator section the feature registered, if it draws one.
+    pub fn navigator_section(&self) -> Option<&FeatureNavigator<F>> {
+        self.navigator.as_ref()
     }
 
     /// Register the tools the feature puts on the context toolbar, in the

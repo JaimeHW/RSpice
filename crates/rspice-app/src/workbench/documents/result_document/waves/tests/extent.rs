@@ -100,7 +100,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
     );
     assert_eq!(before[0].x_range, Some((0.0, 40.0)));
 
-    toggle_visibility(&mut state, 0, 1);
+    toggle_visibility(&mut state.results_parts(), 0, 1);
     assert!(
         state.model.simulation.retained.runs[0].analyses[0].waveforms[1].visible,
         "the override path must not rewrite the retained data flag"
@@ -140,8 +140,8 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
             RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
         ]),
     );
-    toggle_visibility(&mut state, 0, 0);
-    toggle_visibility(&mut state, 0, 1);
+    toggle_visibility(&mut state.results_parts(), 0, 0);
+    toggle_visibility(&mut state.results_parts(), 0, 1);
 
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(

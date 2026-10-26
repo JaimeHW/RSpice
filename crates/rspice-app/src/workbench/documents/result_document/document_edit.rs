@@ -563,7 +563,7 @@ pub(super) mod links;
 mod measurement;
 mod properties;
 
-pub(crate) use compare::{compare_available, open_compare};
+pub(crate) use compare::{compare_availability, open_compare};
 pub(crate) use family::{family_available, open_family, set_family_filter};
 pub(crate) use measurement::open_measurement;
 pub(crate) use properties::open_properties;

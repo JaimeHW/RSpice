@@ -416,15 +416,11 @@ const ROUTE_OVERLAYS: &[(&str, &str)] = &[
 /// the shared prologue, and what it raised is answered straight after it, in
 /// the same dispatch.
 const DISPATCH_FEATURE_COMMAND: &[Step] = &[
-    (
-        "1",
-        &["held_by_project_operation(flags, &self.state.platform)"],
-    ),
-    ("2", &["lacks_open_project(flags, &self.state.platform)"]),
-    ("3", &["self.state.deny_read_only_edit()"]),
-    ("4", &["self.state.commit_pending_inspector_edit()"]),
-    ("5", &["features::execute(self, spec.key)"]),
-    ("6", &["self.after_contribution()"]),
+    ("1", &["held_back(flags, &self.state.platform).is_some()"]),
+    ("2", &["self.state.deny_read_only_edit()"]),
+    ("3", &["self.state.commit_pending_inspector_edit()"]),
+    ("4", &["features::execute(self, spec.key)"]),
+    ("5", &["self.after_contribution()"]),
 ];
 
 /// `RSpiceApp::after_contribution`, in the order a feature's call has what
@@ -432,6 +428,10 @@ const DISPATCH_FEATURE_COMMAND: &[Step] = &[
 /// Save is carried out before anything else the call raised.
 const AFTER_CONTRIBUTION: &[Step] = &[
     ("1", &["|app, Execute(key)| app.execute_command_key(key)"]),
+    (
+        "1.1",
+        &["|app, PromptAfterCommands(text)| app.state.workbench.prompt(text)"],
+    ),
     (
         "2",
         &[
@@ -514,7 +514,9 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
     ),
     (
         "navigator",
-        &["Workspace::Results => { results(ui, app); app.after_contribution(); }"],
+        &["Workspace::Results => {\
+             features::show_navigator::<ResultsFeature>(app, ui);\
+             app.after_contribution(); }"],
     ),
     (
         "inspector beside any workspace",
@@ -856,8 +858,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        9,
-        "`after_contribution` answers exactly the nine requests it lists"
+        10,
+        "`after_contribution` answers exactly the ten requests it lists"
     );
 }
 

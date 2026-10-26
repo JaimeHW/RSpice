@@ -141,7 +141,7 @@ pub(crate) fn add_selected_result_as_pane(state: &mut ResultsParts<'_>) {
 }
 
 pub(crate) use document_edit::{
-    add_pane_available, compare_available, family_available, linked_cursors, open_add_pane,
+    add_pane_available, compare_availability, family_available, linked_cursors, open_add_pane,
     open_compare, open_family, open_measurement, open_properties, set_family_filter,
     toggle_linked_cursors,
 };
@@ -1689,7 +1689,7 @@ fn hide_selected_trace(state: &mut AppState) {
             })?
         });
     if let Some((analysis_index, waveform_index)) = located {
-        waves::toggle_visibility(state, analysis_index, waveform_index);
+        waves::toggle_visibility(&mut state.results_parts(), analysis_index, waveform_index);
         state.results.results.session.selected_trace = None;
     }
 }

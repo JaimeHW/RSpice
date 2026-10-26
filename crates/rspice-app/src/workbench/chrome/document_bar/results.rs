@@ -4,7 +4,7 @@
 use crate::state::SimulationState;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::result_document::ResultsParts;
-use crate::workbench::state::WorkspaceDocumentId;
+use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
@@ -52,4 +52,21 @@ pub(in crate::workbench) fn activate_result_dataset(
         .is_some_and(|index| {
             simulation.view.active_run_idx == Some(index) || simulation.select_run(index)
         })
+}
+
+/// Show a retained result dataset as the document Results reads, as
+/// choosing its tab does: only while Results is the workspace showing.
+pub(in crate::workbench) fn show_result_dataset(
+    simulation: &mut SimulationState,
+    workbench: &mut WorkbenchSession,
+    dataset_id: &crate::product::DatasetId,
+) -> bool {
+    let document = WorkspaceDocumentId::ResultDataset(*dataset_id);
+    if document.workspace() != workbench.workspace
+        || !activate_result_dataset(simulation, dataset_id)
+    {
+        return false;
+    }
+    super::record_active_document(workbench, &document);
+    true
 }

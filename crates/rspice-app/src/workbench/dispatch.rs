@@ -31,10 +31,11 @@ use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec,
 };
-use crate::workbench::framework::feature::Execute;
+use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ExportDataset, FollowSchematicGrid, PrintActiveView,
-    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowWaveforms,
+    PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter,
+    ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -62,11 +63,8 @@ impl RSpiceApp {
                 command.availability(self)
             });
         };
-        if held_by_project_operation(spec.flags, &self.state.platform) {
-            return CommandAvailability::Disabled("project operation is still in progress");
-        }
-        if lacks_open_project(spec.flags, &self.state.platform) {
-            return CommandAvailability::Disabled("no project is open");
+        if let Some(reason) = held_back(spec.flags, &self.state.platform) {
+            return CommandAvailability::Disabled(reason);
         }
         features::availability(&self.state, key).unwrap_or(CommandAvailability::Hidden)
     }
@@ -104,9 +102,7 @@ impl RSpiceApp {
     /// prologue as [`Command::dispatch`], then every command it raised.
     fn dispatch_feature_command(&mut self, spec: &CommandSpec) {
         let flags = spec.flags;
-        if held_by_project_operation(flags, &self.state.platform)
-            || lacks_open_project(flags, &self.state.platform)
-        {
+        if held_back(flags, &self.state.platform).is_some() {
             return;
         }
         if flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT)
@@ -137,17 +133,23 @@ impl RSpiceApp {
     }
 
     /// Answer what a feature's call raised for straight after it: the
-    /// commands it ran next, the print workflow it asked for, the snap that
-    /// follows a new schematic grid, the shortcut resolver's reset when a
-    /// shortcut library was put in use, the open waveform view starting again
-    /// from changed defaults, the dataset export, the analysis instance and
-    /// the executed deck a results command asked for, and the waveforms and
-    /// the family member a hand-off into Results opens its viewer or form on.
+    /// commands it ran next and what it said once they had run, the print
+    /// workflow it asked for, the snap that follows a new schematic grid, the
+    /// shortcut resolver's reset when a shortcut library was put in use, the
+    /// open waveform view starting again from changed defaults, the dataset
+    /// export, the analysis instance and the executed deck a results command
+    /// asked for, and the waveforms and the family member a hand-off into
+    /// Results opens its viewer or form on.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
             |app, Execute(key)| app.execute_command_key(key),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, PromptAfterCommands(text)| app.state.workbench.prompt(text),
         );
         requests::drain(
             self,
@@ -222,19 +224,6 @@ impl RSpiceApp {
             },
         );
     }
-}
-
-/// Whether a project operation still in progress holds back a command that
-/// declares `flags`.
-fn held_by_project_operation(flags: CommandFlags, platform: &PlatformState) -> bool {
-    flags.contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
-        && crate::workbench::lifecycle::project_lifecycle::operation_in_progress(platform)
-}
-
-/// Whether a command that declares `flags` needs an open project and none is
-/// open.
-fn lacks_open_project(flags: CommandFlags, platform: &PlatformState) -> bool {
-    flags.contains(CommandFlags::REQUIRES_OPEN_PROJECT) && !platform.project_lifecycle.is_open()
 }
 
 impl Command {

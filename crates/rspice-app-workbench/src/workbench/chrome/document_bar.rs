@@ -10,7 +10,7 @@ use crate::workbench::framework::host::DocumentHost;
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 
 use super::super::layout::LayoutSpec;
-use super::super::state::{Workspace, WorkspaceDocumentId};
+use super::super::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::ui::panels::{WorkbenchIcon, elide_text};
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
@@ -743,14 +743,19 @@ pub fn activate_document(state: &mut impl DocumentSession, document: &WorkspaceD
     }
     let activated = state.activate_owned_document(document);
     if activated {
-        state.workbench_mut().documents.activate(document.clone());
-        let window = state.workbench().window_session.current();
-        let _ = state
-            .workbench_mut()
-            .window_session
-            .set_active_document(window, document.clone());
+        record_active_document(state.workbench_mut(), document);
     }
     activated
+}
+
+/// Make `document`, which its owner has just shown, the active document of
+/// its workspace and of the window that holds it.
+pub fn record_active_document(workbench: &mut WorkbenchSession, document: &WorkspaceDocumentId) {
+    workbench.documents.activate(document.clone());
+    let window = workbench.window_session.current();
+    let _ = workbench
+        .window_session
+        .set_active_document(window, document.clone());
 }
 
 pub fn close_document(
