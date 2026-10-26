@@ -143,3 +143,68 @@ fn recursive_expression_forms_return_diagnostics_within(stack_size: usize) {
         .join()
         .unwrap();
 }
+
+#[test]
+fn expanded_function_sums_are_not_refused_as_deep_nesting() {
+    // Xyce certification deck BUG_1222_SON/bug_1222_son_1: `.PRINT {dino(...)}`
+    // calls .FUNCs five deep whose bodies are flat sums of ten terms and
+    // `&` chains of four comparisons. The authored nesting is shallow; the
+    // expanded sums must not read back as one group per term.
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::measure_signals::evaluate_dc_output_requests_with_abort;
+    use rspice_core::config::ExpressionDialect;
+    use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
+    use rspice_core::resource::ResourceLimits;
+
+    let netlist = Netlist::parse_with_options(
+        include_str!(
+            "../../../tests/xyce/Netlists/Certification_Tests/BUG_1222_SON/bug_1222_son_1.cir"
+        ),
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        },
+    )
+    .expect("bug_1222_son_1 parses");
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    });
+    let sweep = engine
+        .run_dc_sweep(&netlist, "V1", 1.0, 1.0, 1.0)
+        .expect("bug_1222_son_1 DC sweep runs");
+    let columns = evaluate_dc_output_requests_with_abort(
+        &netlist,
+        &sweep,
+        ResourceLimits::default(),
+        &NoAbort,
+    )
+    .expect("every authored .PRINT column evaluates");
+
+    // Xyce 7.10, OutputData/Certification_Tests/BUG_1222_SON/bug_1222_son_1.cir.prn,
+    // for V(1), V(2) and the three BETTY columns. The two DINO columns are
+    // only required to evaluate here: Xyce prints 0 for both, where the
+    // deck's lexically scoped .FUNC tables give 6e-9 and 9e-9.
+    let expected = [
+        Some(1.0),
+        Some(0.0),
+        None,
+        None,
+        Some(7.0e-9),
+        Some(7.0e-9),
+        Some(9.0e-9),
+    ];
+    assert_eq!(columns.len(), expected.len(), "{columns:?}");
+    for ((name, _, values), expected) in columns.iter().zip(expected) {
+        assert_eq!(values.len(), 1, "{name}");
+        assert!(values[0].is_finite(), "{name}: got {}", values[0]);
+        if let Some(expected) = expected {
+            assert!(
+                (values[0] - expected).abs() <= 1.0e-6 * expected.abs() + 1.0e-15,
+                "{name}: got {}, Xyce 7.10 gives {expected}",
+                values[0]
+            );
+        }
+    }
+}

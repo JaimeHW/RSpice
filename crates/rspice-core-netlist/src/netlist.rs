@@ -14918,8 +14918,8 @@ mod tests {
             })
             .expect("X2 behavioral source exists");
 
-        assert_eq!(x1_expression, "((1*V(1))*V(1))");
-        assert_eq!(x2_expression, "((2*V(1))*V(1))");
+        assert_eq!(x1_expression, "(1*V(1)*V(1))");
+        assert_eq!(x2_expression, "(2*V(1)*V(1))");
     }
 
     #[test]

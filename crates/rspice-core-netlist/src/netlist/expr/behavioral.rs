@@ -2048,9 +2048,28 @@ fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> 
     }
 }
 
+/// Whether `left (inner) op` reads back as the same tree without parentheses
+/// around `left`: both expression parsers fold an operator chain of one
+/// precedence level to the left, so `(a+b)-c` is `a+b-c`.
+///
+/// Parenthesizing such a left operand anyway turns an expanded `.FUNC` sum of
+/// n terms into n nested groups, and every group is a level of grammar
+/// recursion the reparse counts against its nesting bound, so a deck's
+/// flat sums would be refused as deep nesting. The modulo and comparison
+/// levels keep their parentheses: the two parsers do not group them alike.
+fn folds_left_into(inner: BinOpKind, outer: BinOpKind) -> bool {
+    use BinOpKind::{Add, And, Div, Mul, Or, Sub};
+    matches!(
+        (inner, outer),
+        (Add | Sub, Add | Sub) | (Mul | Div, Mul | Div) | (And, And) | (Or, Or)
+    )
+}
+
 fn serialize_expr(expr: &NetExpr) -> String {
     enum Task<'a> {
         Expr(&'a NetExpr),
+        /// A binary operation without its enclosing parentheses.
+        Operands(BinOpKind, &'a NetExpr, &'a NetExpr),
         Static(&'static str),
         Owned(String),
     }
@@ -2101,6 +2120,11 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 }));
             }
             Task::Expr(NetExpr::BinOp { op, left, right }) => {
+                tasks.push(Task::Static(")"));
+                tasks.push(Task::Operands(*op, left, right));
+                tasks.push(Task::Static("("));
+            }
+            Task::Operands(op, left, right) => {
                 let symbol = match op {
                     BinOpKind::Add => "+",
                     BinOpKind::Sub => "-",
@@ -2117,11 +2141,18 @@ fn serialize_expr(expr: &NetExpr) -> String {
                     BinOpKind::And => "&&",
                     BinOpKind::Or => "||",
                 };
-                tasks.push(Task::Static(")"));
                 tasks.push(Task::Expr(right));
                 tasks.push(Task::Static(symbol));
-                tasks.push(Task::Expr(left));
-                tasks.push(Task::Static("("));
+                match left {
+                    NetExpr::BinOp {
+                        op: left_op,
+                        left: left_left,
+                        right: left_right,
+                    } if folds_left_into(*left_op, op) => {
+                        tasks.push(Task::Operands(*left_op, left_left, left_right));
+                    }
+                    _ => tasks.push(Task::Expr(left)),
+                }
             }
             Task::Expr(NetExpr::FnCall { name, args }) => {
                 tasks.push(Task::Static(")"));

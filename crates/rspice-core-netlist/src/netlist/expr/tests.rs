@@ -842,7 +842,7 @@ fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
     let prepared = prepare_behavioral_expression("gain(V(node), I(vsense))", &ctx)
         .expect("behavioral expression prepares");
 
-    assert_eq!(prepared, "((2*V(node))*I(vsense))");
+    assert_eq!(prepared, "(2*V(node)*I(vsense))");
 }
 
 #[test]
@@ -952,7 +952,7 @@ fn behavioral_preparation_treats_xyce_function_names_as_identifiers() {
     let prepared = prepare_behavioral_expression("#V(1)+@I(2)", &ctx)
         .expect("special-character function expression prepares");
 
-    assert_eq!(prepared, "((1+2)+(2+3))");
+    assert_eq!(prepared, "(1+2+(2+3))");
 }
 
 #[test]
