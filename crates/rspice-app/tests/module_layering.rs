@@ -722,6 +722,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The results feature: its commands' answers over its own slot, the
     // model, the session and the platform state.
     "results",
+    // The account console, which the cloud feature registers and draws on
+    // the shell's route.
+    "account_organization",
     // The cloud feature: its commands' answers over its own slot, the model,
     // the session, and the account service and live-session engine it runs.
     "cloud",
@@ -739,7 +742,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "tools/jobs_manager",
     "preflight",
     "cross_probe",
-    "account_organization",
     "browser/navigation",
     // Opening an example replaces the session with a new project and saves
     // it, through the project workflow; its test runs the plan through the

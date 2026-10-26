@@ -17,7 +17,6 @@ use crate::services::live_protocol::PeerIdentity;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app_state::run_preflight::PreflightDialogState;
 use crate::workbench::app_state::{Model, PlatformState};
@@ -102,28 +101,6 @@ pub(crate) struct LiveSessionParts<'a> {
     pub platform: &'a PlatformState,
     pub preflight: &'a mut PreflightDialogState,
     pub outbox: &'a mut Outbox,
-}
-
-impl RSpiceApp {
-    /// The live-session dialog step: draw the dialog over the parts the
-    /// cloud holds, then answer what it raised, as every feature's dialog
-    /// step does.
-    pub(in crate::workbench) fn render_live_session_dialog(&mut self, ctx: &Context) {
-        let state = &mut self.state;
-        render_live_session_dialog(
-            &mut LiveSessionParts {
-                dialog: &mut state.cloud.live_session,
-                account: &mut self.cloud.account,
-                engine: &mut self.cloud.live_session,
-                model: &state.model,
-                platform: &state.platform,
-                preflight: &mut state.runs.preflight,
-                outbox: &mut state.workbench.outbox,
-            },
-            ctx,
-        );
-        self.after_contribution();
-    }
 }
 
 /// Draw the live-session dialog for this frame, when it is open, and carry

@@ -20,7 +20,12 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app::dialogs::unpublish_web::{
+    UnpublishWebDialogState, open_unpublish_web_dialog,
+};
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{
     HardcopyPort, PublicationDraft, publication_timestamp_utc,
 };
@@ -94,6 +99,7 @@ pub(crate) struct SnapshotSource<'a> {
 
 impl<'a> SnapshotSource<'a> {
     /// The parts `state` holds.
+    #[cfg(test)]
     fn of(state: &'a AppState) -> Self {
         Self {
             hardcopy: &*state.hardcopy,
@@ -166,223 +172,249 @@ pub(crate) fn open_publish_web_dialog(
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_publish_web_dialog(&mut self, ctx: &Context) {
-        if !self.state.cloud.publish_web.open {
+/// What the publish dialog reads and writes: its own fields, the unpublish
+/// dialog it hands a live page to, the account service that publishes, the
+/// model it builds from and logs to, the session it prompts in, and what the
+/// hardcopy feature, the results workspace and the run tier lend the build.
+pub(crate) struct PublishWebParts<'a> {
+    pub dialog: &'a mut PublishWebDialogState,
+    pub unpublish: &'a mut UnpublishWebDialogState,
+    pub account: &'a mut CloudAccountService,
+    pub hardcopy: &'a dyn HardcopyPort,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub results: &'a dyn ResultsPort,
+    pub runs: &'a RunsState,
+}
+
+impl PublishWebParts<'_> {
+    /// What a review build reads, lent from these parts.
+    fn source(&self) -> SnapshotSource<'_> {
+        SnapshotSource {
+            hardcopy: self.hardcopy,
+            model: &*self.model,
+            workbench: &*self.workbench,
+            results: self.results,
+            runs: self.runs,
+        }
+    }
+}
+
+/// Draw the publish dialog for this frame, when it is open, and carry out
+/// what the reader chose in it.
+pub(crate) fn render_publish_web_dialog(parts: &mut PublishWebParts<'_>, ctx: &Context) {
+    if !parts.dialog.open {
+        return;
+    }
+    if !parts.dialog.submitted && parts.dialog.scope.is_none() {
+        let draft = publication_draft(parts.dialog);
+        parts.dialog.scope = Some(build_scope(parts.source(), &draft));
+    }
+
+    // Server-side facts, cloned before the body borrows the dialog's state.
+    let publish_state = parts.account.snapshot().publish.clone();
+    let publications = parts.account.snapshot().publications.clone();
+    let workspaces = parts.account.snapshot().workspaces.clone();
+    let binding = parts
+        .model
+        .workspace
+        .content
+        .project
+        .cloud_publication()
+        .map(|binding| {
+            (
+                binding.workspace_id().to_owned(),
+                binding.circuit_id().to_owned(),
+            )
+        });
+    let live_publication = binding.as_ref().and_then(|_| {
+        publications
+            .iter()
+            .find(|publication| {
+                publication.unpublished_at.is_none() && publication.page_status == "live"
+            })
+            .cloned()
+    });
+    let version_count = if binding.is_some() {
+        publications.len()
+    } else {
+        0
+    };
+
+    let submitted = parts.dialog.submitted;
+    let in_flight = submitted
+        && matches!(
+            publish_state,
+            None | Some(PublishState::Publishing) | Some(PublishState::AwaitingPage { .. })
+        );
+    let succeeded = submitted && matches!(publish_state, Some(PublishState::Live { .. }));
+    let failed_message = if submitted {
+        match &publish_state {
+            Some(PublishState::Failed { message }) => Some(message.clone()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let scope_ok = matches!(parts.dialog.scope, Some(Ok(_)));
+    let imported_models_confirmed = parts
+        .dialog
+        .scope
+        .as_ref()
+        .and_then(|scope| scope.as_ref().ok())
+        .is_none_or(|scope| {
+            scope.imported_model_sources == 0 || parts.dialog.imported_models_acknowledged
+        });
+    let compose_ready = scope_ok
+        && imported_models_confirmed
+        && !parts.dialog.title.trim().is_empty()
+        && (binding.is_some() || !workspaces.is_empty());
+
+    let publish_label = if version_count > 0 {
+        format!("Publish version {}", version_count + 1)
+    } else {
+        "Publish".to_owned()
+    };
+    let (primary, primary_enabled): (String, bool) = if succeeded {
+        ("Close".to_owned(), true)
+    } else if in_flight {
+        ("Publishing…".to_owned(), false)
+    } else {
+        (publish_label, compose_ready)
+    };
+    let hint = if let Some((_, circuit)) = &binding {
+        format!("published versions never change · circuit {circuit}")
+    } else {
+        "published versions never change · earlier versions keep their URLs".to_owned()
+    };
+
+    let mut dialog = Dialog::new("Publish to web", &primary)
+        .description(
+            "Review the snapshot that leaves this machine, then publish it as a new page \
+             version.",
+        )
+        .size(DialogSize::Transaction)
+        .ghost(if submitted { "Close" } else { "Cancel" })
+        .hint(&hint)
+        .primary_enabled(primary_enabled)
+        .primary_on_enter(false);
+    let secondary_unpublishes = !submitted && live_publication.is_some();
+    if secondary_unpublishes {
+        dialog = dialog.secondary("Unpublish…");
+    } else if succeeded {
+        dialog = dialog.secondary("Copy URL");
+    }
+
+    let dialog_state = &mut *parts.dialog;
+    let choice = dialog.show(ctx, |ui| {
+        let t = Tokens::get(ui.ctx());
+        let c = t.color;
+
+        if submitted {
+            render_progress(ui, publish_state.as_ref());
             return;
         }
-        if !self.state.cloud.publish_web.submitted && self.state.cloud.publish_web.scope.is_none() {
-            let draft = publication_draft(&self.state.cloud.publish_web);
-            self.state.cloud.publish_web.scope =
-                Some(build_scope(SnapshotSource::of(&self.state), &draft));
+
+        if let Some(message) = &failed_message {
+            problem_note(ui, Problem::Failure, message);
+            ui.add_space(tokens::SP_4);
         }
-
-        // Server-side facts, cloned before the body borrows app state.
-        let publish_state = self.cloud.account.snapshot().publish.clone();
-        let publications = self.cloud.account.snapshot().publications.clone();
-        let workspaces = self.cloud.account.snapshot().workspaces.clone();
-        let binding = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .cloud_publication()
-            .map(|binding| {
-                (
-                    binding.workspace_id().to_owned(),
-                    binding.circuit_id().to_owned(),
-                )
-            });
-        let live_publication = binding.as_ref().and_then(|_| {
-            publications
-                .iter()
-                .find(|publication| {
-                    publication.unpublished_at.is_none() && publication.page_status == "live"
-                })
-                .cloned()
-        });
-        let version_count = if binding.is_some() {
-            publications.len()
-        } else {
-            0
-        };
-
-        let submitted = self.state.cloud.publish_web.submitted;
-        let in_flight = submitted
-            && matches!(
-                publish_state,
-                None | Some(PublishState::Publishing) | Some(PublishState::AwaitingPage { .. })
+        if let Some(live) = &live_publication {
+            note(
+                ui,
+                &format!(
+                    "Version {version_count} is live at {}. Publishing creates version {} \
+                     from the scope below; every earlier version stays resolvable at its \
+                     pinned URL.",
+                    live.url_path,
+                    version_count + 1
+                ),
+                c.text_dim,
             );
-        let succeeded = submitted && matches!(publish_state, Some(PublishState::Live { .. }));
-        let failed_message = if submitted {
-            match &publish_state {
-                Some(PublishState::Failed { message }) => Some(message.clone()),
-                _ => None,
-            }
-        } else {
-            None
-        };
-
-        let scope_ok = matches!(self.state.cloud.publish_web.scope, Some(Ok(_)));
-        let imported_models_confirmed = self
-            .state
-            .cloud
-            .publish_web
-            .scope
-            .as_ref()
-            .and_then(|scope| scope.as_ref().ok())
-            .is_none_or(|scope| {
-                scope.imported_model_sources == 0
-                    || self.state.cloud.publish_web.imported_models_acknowledged
-            });
-        let compose_ready = scope_ok
-            && imported_models_confirmed
-            && !self.state.cloud.publish_web.title.trim().is_empty()
-            && (binding.is_some() || !workspaces.is_empty());
-
-        let publish_label = if version_count > 0 {
-            format!("Publish version {}", version_count + 1)
-        } else {
-            "Publish".to_owned()
-        };
-        let (primary, primary_enabled): (String, bool) = if succeeded {
-            ("Close".to_owned(), true)
-        } else if in_flight {
-            ("Publishing…".to_owned(), false)
-        } else {
-            (publish_label, compose_ready)
-        };
-        let hint = if let Some((_, circuit)) = &binding {
-            format!("published versions never change · circuit {circuit}")
-        } else {
-            "published versions never change · earlier versions keep their URLs".to_owned()
-        };
-
-        let mut dialog = Dialog::new("Publish to web", &primary)
-            .description(
-                "Review the snapshot that leaves this machine, then publish it as a new page \
-                 version.",
-            )
-            .size(DialogSize::Transaction)
-            .ghost(if submitted { "Close" } else { "Cancel" })
-            .hint(&hint)
-            .primary_enabled(primary_enabled)
-            .primary_on_enter(false);
-        let secondary_unpublishes = !submitted && live_publication.is_some();
-        if secondary_unpublishes {
-            dialog = dialog.secondary("Unpublish…");
-        } else if succeeded {
-            dialog = dialog.secondary("Copy URL");
+            ui.add_space(tokens::SP_4);
         }
 
-        let dialog_state = &mut self.state.cloud.publish_web;
-        let choice = dialog.show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            let c = t.color;
-
-            if submitted {
-                render_progress(ui, publish_state.as_ref());
-                return;
+        match dialog_state.scope.clone() {
+            Some(Err(reason)) => {
+                ui.columns(2, |columns| {
+                    section_head(&mut columns[0], "Scope");
+                    problem_note(
+                        &mut columns[0],
+                        Problem::Failure,
+                        &format!("Nothing can be published: {reason}"),
+                    );
+                    render_page_column(
+                        &mut columns[1],
+                        dialog_state,
+                        binding.is_some(),
+                        &workspaces,
+                        live_publication.as_ref().map(|live| live.url_path.as_str()),
+                    );
+                });
             }
-
-            if let Some(message) = &failed_message {
-                problem_note(ui, Problem::Failure, message);
+            Some(Ok(scope)) => {
+                ui.columns(2, |columns| {
+                    render_scope_column(&mut columns[0], &scope);
+                    render_page_column(
+                        &mut columns[1],
+                        dialog_state,
+                        binding.is_some(),
+                        &workspaces,
+                        live_publication.as_ref().map(|live| live.url_path.as_str()),
+                    );
+                });
                 ui.add_space(tokens::SP_4);
-            }
-            if let Some(live) = &live_publication {
+                render_leaves_machine(ui, &scope, dialog_state);
+                ui.add_space(tokens::SP_4);
                 note(
                     ui,
-                    &format!(
-                        "Version {version_count} is live at {}. Publishing creates version {} \
-                         from the scope below; every earlier version stays resolvable at its \
-                         pinned URL.",
-                        live.url_path,
-                        version_count + 1
-                    ),
-                    c.text_dim,
+                    "Everything listed becomes publicly retrievable at the page URL. \
+                     Each publish adds a new version and never rewrites an earlier one.",
+                    c.text_faint,
                 );
-                ui.add_space(tokens::SP_4);
             }
+            None => {}
+        }
+    });
 
-            match dialog_state.scope.clone() {
-                Some(Err(reason)) => {
-                    ui.columns(2, |columns| {
-                        section_head(&mut columns[0], "Scope");
-                        problem_note(
-                            &mut columns[0],
-                            Problem::Failure,
-                            &format!("Nothing can be published: {reason}"),
-                        );
-                        render_page_column(
-                            &mut columns[1],
-                            dialog_state,
-                            binding.is_some(),
-                            &workspaces,
-                            live_publication.as_ref().map(|live| live.url_path.as_str()),
-                        );
-                    });
-                }
-                Some(Ok(scope)) => {
-                    ui.columns(2, |columns| {
-                        render_scope_column(&mut columns[0], &scope);
-                        render_page_column(
-                            &mut columns[1],
-                            dialog_state,
-                            binding.is_some(),
-                            &workspaces,
-                            live_publication.as_ref().map(|live| live.url_path.as_str()),
-                        );
-                    });
-                    ui.add_space(tokens::SP_4);
-                    render_leaves_machine(ui, &scope, dialog_state);
-                    ui.add_space(tokens::SP_4);
-                    note(
-                        ui,
-                        "Everything listed becomes publicly retrievable at the page URL. \
-                         Each publish adds a new version and never rewrites an earlier one.",
-                        c.text_faint,
+    match choice {
+        DialogChoice::None => {}
+        DialogChoice::Cancelled | DialogChoice::Ghost => {
+            // An in-flight publish keeps running on the executor; the
+            // receipt still binds the project and reports to the console,
+            // and a failure is reported once this dialog is not there to
+            // show it. A publish that already ended was shown here.
+            parts.dialog.open = false;
+            parts.dialog.submitted = in_flight;
+        }
+        DialogChoice::Secondary => {
+            if secondary_unpublishes {
+                if let (Some((_, circuit_id)), Some(live)) = (&binding, &live_publication) {
+                    parts.dialog.open = false;
+                    open_unpublish_web_dialog(
+                        parts.unpublish,
+                        circuit_id.clone(),
+                        live.id.clone(),
+                        live.url_path.clone(),
+                        version_count,
                     );
                 }
-                None => {}
+            } else if succeeded && let Some(PublishState::Live { url_path }) = &publish_state {
+                ctx.copy_text(url_path.clone());
             }
-        });
-
-        match choice {
-            DialogChoice::None => {}
-            DialogChoice::Cancelled | DialogChoice::Ghost => {
-                // An in-flight publish keeps running on the executor; the
-                // receipt still binds the project and reports to the console,
-                // and a failure is reported once this dialog is not there to
-                // show it. A publish that already ended was shown here.
-                self.state.cloud.publish_web.open = false;
-                self.state.cloud.publish_web.submitted = in_flight;
-            }
-            DialogChoice::Secondary => {
-                if secondary_unpublishes {
-                    if let (Some((_, circuit_id)), Some(live)) = (&binding, &live_publication) {
-                        self.state.cloud.publish_web.open = false;
-                        self.open_unpublish_web_dialog(
-                            circuit_id.clone(),
-                            live.id.clone(),
-                            live.url_path.clone(),
-                            version_count,
-                        );
-                    }
-                } else if succeeded && let Some(PublishState::Live { url_path }) = &publish_state {
-                    ctx.copy_text(url_path.clone());
-                }
-            }
-            DialogChoice::Primary => {
-                if succeeded {
-                    self.state.cloud.publish_web.open = false;
-                } else if !in_flight {
-                    self.submit_publish(binding, &workspaces);
-                }
+        }
+        DialogChoice::Primary => {
+            if succeeded {
+                parts.dialog.open = false;
+            } else if !in_flight {
+                submit_publish(parts, binding, &workspaces);
             }
         }
     }
+}
 
+impl RSpiceApp {
     /// Drain the executor's publish receipt: bind the project to its page
     /// lineage and report the URL. Runs every frame from the app loop so a
     /// closed dialog never loses the binding, or the failure.
@@ -447,64 +479,60 @@ impl RSpiceApp {
         self.state.cloud.publish_web.submitted = false;
         self.state.report_failure("Publish failed", message);
     }
+}
 
-    /// Rebuild the snapshot with the confirmed page fields and hand the
-    /// publish request to the executor.
-    fn submit_publish(
-        &mut self,
-        binding: Option<(String, String)>,
-        workspaces: &[crate::services::cloud_account::WorkspaceSummary],
-    ) {
-        let include_netlist = self.state.cloud.publish_web.include_netlist;
-        let imported_models_acknowledged =
-            self.state.cloud.publish_web.imported_models_acknowledged;
-        let imported_model_sources =
-            imported_model_source_count(&self.state.model, include_netlist);
-        if imported_model_sources > 0 && !imported_models_acknowledged {
-            self.state.prompt(
-                "Publish stopped: confirm that imported model source text may be uploaded.",
-            );
+/// Rebuild the snapshot with the confirmed page fields and hand the
+/// publish request to the executor.
+fn submit_publish(
+    parts: &mut PublishWebParts<'_>,
+    binding: Option<(String, String)>,
+    workspaces: &[crate::services::cloud_account::WorkspaceSummary],
+) {
+    let include_netlist = parts.dialog.include_netlist;
+    let imported_models_acknowledged = parts.dialog.imported_models_acknowledged;
+    let imported_model_sources = imported_model_source_count(parts.model, include_netlist);
+    if imported_model_sources > 0 && !imported_models_acknowledged {
+        parts
+            .workbench
+            .prompt("Publish stopped: confirm that imported model source text may be uploaded.");
+        return;
+    }
+    let dialog = &*parts.dialog;
+    let title = dialog.title.trim().to_owned();
+    let description = dialog.description.trim().to_owned();
+    let public = dialog.public_visibility;
+    let workspace_index = dialog.workspace_index;
+
+    let target = match resolve_target(binding, workspaces, workspace_index, public) {
+        Ok(target) => target,
+        Err(message) => {
+            parts.dialog.scope = Some(Err(message));
             return;
         }
-        let dialog = &self.state.cloud.publish_web;
-        let title = dialog.title.trim().to_owned();
-        let description = dialog.description.trim().to_owned();
-        let public = dialog.public_visibility;
-        let workspace_index = dialog.workspace_index;
-
-        let target = match resolve_target(binding, workspaces, workspace_index, public) {
-            Ok(target) => target,
-            Err(message) => {
-                self.state.cloud.publish_web.scope = Some(Err(message));
-                return;
-            }
-        };
-        let draft = publication_draft(dialog);
-        let built = SnapshotSource::of(&self.state)
-            .build(&draft)
-            .and_then(|snapshot| {
-                snapshot
-                    .canonical_bytes()
-                    .map_err(|error| error.to_string())
+    };
+    let draft = publication_draft(dialog);
+    let built = parts.source().build(&draft).and_then(|snapshot| {
+        snapshot
+            .canonical_bytes()
+            .map_err(|error| error.to_string())
+    });
+    match built {
+        Ok(snapshot_bytes) => {
+            parts.account.publish_snapshot(PublishRequest {
+                target,
+                title,
+                description,
+                snapshot_bytes,
             });
-        match built {
-            Ok(snapshot_bytes) => {
-                self.cloud.account.publish_snapshot(PublishRequest {
-                    target,
-                    title,
-                    description,
-                    snapshot_bytes,
-                });
-                self.state.cloud.publish_web.submitted = true;
-            }
-            Err(message) => {
-                self.state.cloud.publish_web.scope = Some(Err(message));
-                self.state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    "Publish stopped: the project could not be packaged for the page.",
-                );
-            }
+            parts.dialog.submitted = true;
+        }
+        Err(message) => {
+            parts.dialog.scope = Some(Err(message));
+            parts.model.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                "Publish stopped: the project could not be packaged for the page.",
+            );
         }
     }
 }

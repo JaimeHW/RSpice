@@ -314,11 +314,11 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("dialogs::property_dialog::render_property_dialog", "design"),
     ("process_pdk_settings_dialog", "models"),
     ("features::render_dialog", "settings"),
-    ("render_license_dialog", "cloud"),
+    ("features::render_dialog", "cloud"),
     ("render_new_project_dialog", "project"),
-    ("render_publish_web_dialog", "cloud"),
-    ("render_live_session_dialog", "cloud"),
-    ("render_unpublish_web_dialog", "cloud"),
+    ("features::render_dialog", "cloud"),
+    ("features::render_dialog", "cloud"),
+    ("features::render_dialog", "cloud"),
     ("command_palette::render_command_palette", "framework"),
     ("render_bus_tap_dialog", "design"),
     ("render_builtin_xspice_placement_dialog", "design"),
@@ -408,7 +408,7 @@ const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
 /// owns each: above every dialog, so a workflow opened from one of them is
 /// the top modal. The dialog order lists each as a step of its own.
 const ROUTE_OVERLAYS: &[(&str, &str)] = &[
-    ("account_organization::show", "cloud"),
+    ("features::render_dialog", "cloud"),
     ("tools::jobs_manager::show", "simulate"),
     ("tools::specialist_tool_browser::show", "framework"),
     ("surfaces::show_simulation_workflow_dialogs", "simulate"),

@@ -13,9 +13,10 @@
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 use crate::services::cloud_account::{
-    CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot,
+    CloudAccountAvailability, CloudAccountService, CloudSessionPhase, CloudSessionSnapshot,
 };
 use crate::services::license::LicenseInfo;
+use crate::state::command_catalog::CommandKey;
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -24,7 +25,8 @@ use crate::ui::{
         paint_problem_mark,
     },
 };
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::app::dialogs::license::LicenseDialogState;
+use crate::workbench::state::WorkbenchSession;
 
 use super::design_system::elide_text;
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
@@ -484,47 +486,55 @@ impl AccountAction {
     }
 }
 
-fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
+/// What the account console reads and writes: the license dialog it opens
+/// over itself, the license this machine holds, the account service, and the
+/// session whose route it is drawn on.
+pub(crate) struct AccountConsoleParts<'a> {
+    pub license_dialog: &'a mut LicenseDialogState,
+    pub license: Option<&'a LicenseInfo>,
+    pub account: &'a mut CloudAccountService,
+    pub workbench: &'a mut WorkbenchSession,
+}
+
+/// Carry out `action`; the command it runs, for the caller to run once the
+/// console has drawn.
+fn execute_action(
+    parts: &mut AccountConsoleParts<'_>,
+    action: AccountAction,
+) -> Option<CommandKey> {
     use crate::workbench::framework::command_registry::ids;
     match action {
         AccountAction::PersonalPreferences => {
-            if app
-                .state
+            if parts
                 .workbench
                 .previous_route()
                 .is_some_and(|route| route.surface_id() == SurfaceId::Preferences)
             {
-                app.state
-                    .workbench
-                    .navigate_back(RouteTransitionSource::User);
-                return;
+                parts.workbench.navigate_back(RouteTransitionSource::User);
+                return None;
             }
             let route = SurfaceRoute::surface(SurfaceId::Preferences);
-            if let Err(error) = app
-                .state
-                .workbench
-                .navigate(route, RouteTransitionSource::User)
-            {
-                app.state.prompt(error.to_string());
+            if let Err(error) = parts.workbench.navigate(route, RouteTransitionSource::User) {
+                parts.workbench.prompt(error.to_string());
             }
         }
         AccountAction::ActivateLicense | AccountAction::ManageLicense => {
-            let cloud = &mut *app.state.cloud;
             crate::workbench::app::dialogs::license::open_license_dialog(
-                &mut cloud.license_dialog,
-                cloud.license.as_ref(),
+                parts.license_dialog,
+                parts.license,
             );
         }
-        AccountAction::SignIn => app.cloud.account.sign_in(),
-        AccountAction::ReopenSignInPage => app.cloud.account.reopen_sign_in_page(),
-        AccountAction::CancelSignIn => app.cloud.account.cancel_sign_in(),
-        AccountAction::SignOut => app.cloud.account.sign_out(),
-        AccountAction::RefreshSession => app.cloud.account.refresh(),
-        AccountAction::RevokeLease(lease_id) => app.cloud.account.revoke_lease(lease_id),
-        AccountAction::LegalPrivacy => app.execute_command_key(ids::LEGAL_PRIVACY),
-        AccountAction::SupportBundle => app.execute_command_key(ids::SUPPORT_BUNDLE),
-        AccountAction::HelpCenter => app.execute_command_key(ids::HELP_CENTER),
+        AccountAction::SignIn => parts.account.sign_in(),
+        AccountAction::ReopenSignInPage => parts.account.reopen_sign_in_page(),
+        AccountAction::CancelSignIn => parts.account.cancel_sign_in(),
+        AccountAction::SignOut => parts.account.sign_out(),
+        AccountAction::RefreshSession => parts.account.refresh(),
+        AccountAction::RevokeLease(lease_id) => parts.account.revoke_lease(lease_id),
+        AccountAction::LegalPrivacy => return Some(ids::LEGAL_PRIVACY),
+        AccountAction::SupportBundle => return Some(ids::SUPPORT_BUNDLE),
+        AccountAction::HelpCenter => return Some(ids::HELP_CENTER),
     }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -533,18 +543,19 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
 
 /// Render the route owner. The local license dialog is rendered earlier in
 /// the application pass; temporarily yielding this parent keeps that child
-/// transaction visually and interactively on top.
-pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if app.state.workbench.current_route().surface_id() != SurfaceId::AccountOrganization
-        || app.state.cloud.license_dialog.open
+/// transaction visually and interactively on top. Returns the command the
+/// reader asked of the console, for the caller to run once it has drawn.
+pub(crate) fn show(ctx: &egui::Context, parts: &mut AccountConsoleParts<'_>) -> Option<CommandKey> {
+    if parts.workbench.current_route().surface_id() != SurfaceId::AccountOrganization
+        || parts.license_dialog.open
     {
-        return;
+        return None;
     }
 
     let model = AccountConsoleModel::project(
-        app.state.cloud.license.as_ref(),
-        app.cloud.account.snapshot(),
-        app.cloud.account.availability(),
+        parts.license,
+        parts.account.snapshot(),
+        parts.account.availability(),
     );
     let mut requested_action = None;
     let choice = Dialog::new(ACCOUNT_TITLE, "Close")
@@ -571,31 +582,25 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     match choice {
         DialogChoice::Primary | DialogChoice::Cancelled | DialogChoice::Ghost => {
-            close_to_source(&mut app.state);
-            return;
+            close_to_source(parts.workbench);
+            return None;
         }
         DialogChoice::Secondary => requested_action = Some(AccountAction::PersonalPreferences),
         _ => {}
     }
-    if let Some(action) = requested_action {
-        execute_action(app, action);
-    }
+    requested_action.and_then(|action| execute_action(parts, action))
 }
 
-fn close_to_source(state: &mut AppState) {
-    if state
-        .workbench
+fn close_to_source(workbench: &mut WorkbenchSession) {
+    if workbench
         .navigate_back(RouteTransitionSource::User)
         .is_some()
     {
         return;
     }
-    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(state.workbench.workspace));
-    if let Err(error) = state
-        .workbench
-        .replace_route(fallback, RouteTransitionSource::User)
-    {
-        state.prompt(format!(
+    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(workbench.workspace));
+    if let Err(error) = workbench.replace_route(fallback, RouteTransitionSource::User) {
+        workbench.prompt(format!(
             "Could not close Account and administration: {error}"
         ));
     }
@@ -1293,7 +1298,38 @@ mod tests {
     use crate::services::cloud_account::{
         EntitlementSummary, LeaseSummary, NativeLicenseSummary, PrincipalSummary,
     };
-    use crate::workbench::BrowserHistoryEffect;
+    use crate::workbench::{AppState, BrowserHistoryEffect, RSpiceApp};
+
+    /// The console's parts in `app`.
+    fn console_parts(app: &mut RSpiceApp) -> AccountConsoleParts<'_> {
+        let cloud = &mut *app.state.cloud;
+        AccountConsoleParts {
+            license_dialog: &mut cloud.license_dialog,
+            license: cloud.license.as_ref(),
+            account: &mut app.cloud.account,
+            workbench: &mut app.state.workbench,
+        }
+    }
+
+    /// Draw the console over `app`'s parts and run the command the reader
+    /// asked of it, as the cloud feature's dialog step does.
+    fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
+        if let Some(key) =
+            crate::workbench::account_organization::show(ctx, &mut console_parts(app))
+        {
+            app.execute_command_key(key);
+        }
+    }
+
+    /// Carry out `action` over `app`'s parts and run the command it asks
+    /// for, as the cloud feature's dialog step does.
+    fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
+        if let Some(key) =
+            crate::workbench::account_organization::execute_action(&mut console_parts(app), action)
+        {
+            app.execute_command_key(key);
+        }
+    }
 
     fn account_route() -> SurfaceRoute {
         SurfaceRoute::surface(SurfaceId::AccountOrganization)
@@ -1479,7 +1515,7 @@ mod tests {
             state.workbench.take_browser_history_effect(),
             Some(BrowserHistoryEffect::Push(account_route()))
         );
-        close_to_source(&mut state);
+        close_to_source(&mut state.workbench);
         assert_eq!(state.workbench.current_route(), source);
         assert_eq!(
             state.workbench.take_browser_history_effect(),
@@ -1498,7 +1534,7 @@ mod tests {
             .workbench
             .navigate(account_route(), RouteTransitionSource::BrowserPop)
             .expect("account manager route is executable");
-        close_to_source(&mut state);
+        close_to_source(&mut state.workbench);
         assert_eq!(state.workbench.current_route(), fallback);
         assert_eq!(
             state.workbench.take_browser_history_effect(),

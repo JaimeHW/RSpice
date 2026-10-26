@@ -57,8 +57,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("cloud.license"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.cloud.license_dialog.open),
-        render: |app, ctx| app.render_license_dialog(ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("cloud.license"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("cloud.license")),
     },
     DialogSpec {
         key: DialogKey("project.new_project"),
@@ -69,20 +69,20 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("cloud.publish_web"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.cloud.publish_web.open),
-        render: |app, ctx| app.render_publish_web_dialog(ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("cloud.publish_web"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("cloud.publish_web")),
     },
     DialogSpec {
         key: DialogKey("cloud.live_session"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.cloud.live_session.open),
-        render: |app, ctx| app.render_live_session_dialog(ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("cloud.live_session"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("cloud.live_session")),
     },
     DialogSpec {
         key: DialogKey("cloud.unpublish_web"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.cloud.unpublish_web.open),
-        render: |app, ctx| app.render_unpublish_web_dialog(ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("cloud.unpublish_web"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("cloud.unpublish_web")),
     },
     DialogSpec {
         key: DialogKey("framework.command_palette"),
@@ -495,7 +495,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         is_open: Some(|state| {
             state.workbench.current_route().surface_id() == SurfaceId::AccountOrganization
         }),
-        render: |app, ctx| crate::workbench::account_organization::show(ctx, app),
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("cloud.account_organization"));
+        },
     },
     DialogSpec {
         key: DialogKey("simulate.jobs_manager"),

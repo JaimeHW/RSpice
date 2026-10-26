@@ -15,7 +15,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::Model;
 
 /// Where the license-activation flow stands.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -54,164 +54,171 @@ pub(crate) fn open_license_dialog(dialog: &mut LicenseDialogState, license: Opti
     };
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_license_dialog(&mut self, ctx: &Context) {
-        if !self.state.cloud.license_dialog.open {
-            return;
-        }
-        let already_active = self.state.cloud.license.is_some()
-            && matches!(
-                self.state.cloud.license_dialog.phase,
-                LicensePhase::Verified(_)
-            )
-            && self.state.cloud.license_dialog.text.is_empty();
+/// What the license dialog reads and writes: its own inputs, the key and
+/// the grant this machine holds, and the model's log it reports to.
+pub(crate) struct LicenseParts<'a> {
+    pub dialog: &'a mut LicenseDialogState,
+    pub license_key: &'a mut Option<String>,
+    pub license: &'a mut Option<LicenseInfo>,
+    pub model: &'a mut Model,
+}
 
-        let phase = self.state.cloud.license_dialog.phase.clone();
-        let empty = self.state.cloud.license_dialog.text.trim().is_empty();
-        let (title, primary) = match &phase {
-            LicensePhase::Entry | LicensePhase::Error(_) => ("Enter license key", "Verify"),
-            LicensePhase::Verified(_) if already_active => ("License", "Close"),
-            LicensePhase::Verified(_) => ("Enter license key", "Activate"),
-        };
-        // The footer says why Verify waits, how to give it the key from the
-        // keyboard, and what Activate will do; a refusal is under the field.
-        let hint = match &phase {
-            LicensePhase::Entry if empty => Some("Paste a license key to verify it"),
-            LicensePhase::Entry => Some("Ctrl+Enter verifies the key"),
-            LicensePhase::Error(_) => None,
-            LicensePhase::Verified(_) if already_active => None,
-            LicensePhase::Verified(_) if cfg!(target_arch = "wasm32") => {
-                Some("Activate keeps the key in this browser; it works offline")
-            }
-            LicensePhase::Verified(_) => {
-                Some("Activate keeps the key on this machine; it works offline")
-            }
-        };
-        let primary_enabled = !matches!(phase, LicensePhase::Entry) || !empty;
-        let entering = matches!(phase, LicensePhase::Entry | LicensePhase::Error(_));
+/// Draw the license dialog for this frame, when it is open, and carry out
+/// what the reader chose in it.
+pub(crate) fn render_license_dialog(parts: &mut LicenseParts<'_>, ctx: &Context) {
+    if !parts.dialog.open {
+        return;
+    }
+    let already_active = parts.license.is_some()
+        && matches!(parts.dialog.phase, LicensePhase::Verified(_))
+        && parts.dialog.text.is_empty();
 
-        // Ctrl+Enter verifies; bare Enter belongs to the key field, where a
-        // line break pasted from an email is part of the key.
-        let ctrl_enter = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+    let phase = parts.dialog.phase.clone();
+    let empty = parts.dialog.text.trim().is_empty();
+    let (title, primary) = match &phase {
+        LicensePhase::Entry | LicensePhase::Error(_) => ("Enter license key", "Verify"),
+        LicensePhase::Verified(_) if already_active => ("License", "Close"),
+        LicensePhase::Verified(_) => ("Enter license key", "Activate"),
+    };
+    // The footer says why Verify waits, how to give it the key from the
+    // keyboard, and what Activate will do; a refusal is under the field.
+    let hint = match &phase {
+        LicensePhase::Entry if empty => Some("Paste a license key to verify it"),
+        LicensePhase::Entry => Some("Ctrl+Enter verifies the key"),
+        LicensePhase::Error(_) => None,
+        LicensePhase::Verified(_) if already_active => None,
+        LicensePhase::Verified(_) if cfg!(target_arch = "wasm32") => {
+            Some("Activate keeps the key in this browser; it works offline")
+        }
+        LicensePhase::Verified(_) => {
+            Some("Activate keeps the key on this machine; it works offline")
+        }
+    };
+    let primary_enabled = !matches!(phase, LicensePhase::Entry) || !empty;
+    let entering = matches!(phase, LicensePhase::Entry | LicensePhase::Error(_));
 
-        let state = &mut self.state;
-        let mut dialog = Dialog::new(title, primary)
-            .description(
-                "Verify a license key on this machine, then activate it; nothing is sent anywhere.",
-            )
-            .size(DialogSize::Transaction)
-            // Scroll-free: a reserved gutter would end the key field short
-            // of the right edge the title and footer share.
-            .overlay_scrollbar()
-            .ghost("Cancel")
-            .primary_enabled(primary_enabled)
-            .primary_on_enter(!entering);
-        if let Some(hint) = hint {
-            dialog = dialog.hint(hint).hint_tone(DialogHintTone::Neutral);
-        }
-        if already_active {
-            dialog = dialog.secondary("Remove license");
-        }
-        let mut edited = false;
-        let choice = dialog.show(ctx, |ui| {
-            fact_grid::show(ui, |rows| match &phase {
-                LicensePhase::Entry | LicensePhase::Error(_) => {
-                    let text = &mut state.cloud.license_dialog.text;
-                    rows.block("Key", |ui, width| {
-                        edited = ui
-                            .add(
-                                egui::TextEdit::multiline(text)
-                                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                                    .desired_rows(KEY_LINES)
-                                    .desired_width(width)
-                                    .hint_text("RSPICE-K1.\u{2026}"),
-                            )
-                            .changed();
-                    });
-                    match &phase {
-                        LicensePhase::Error(message) => {
-                            rows.note_toned(message, Tokens::get(ctx).color.err);
-                        }
-                        _ => rows.note(
-                            "Paste the whole key from your purchase email; line breaks are fine.",
-                        ),
+    // Ctrl+Enter verifies; bare Enter belongs to the key field, where a
+    // line break pasted from an email is part of the key.
+    let ctrl_enter = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+
+    let dialog_state = &mut *parts.dialog;
+    let mut dialog = Dialog::new(title, primary)
+        .description(
+            "Verify a license key on this machine, then activate it; nothing is sent anywhere.",
+        )
+        .size(DialogSize::Transaction)
+        // Scroll-free: a reserved gutter would end the key field short
+        // of the right edge the title and footer share.
+        .overlay_scrollbar()
+        .ghost("Cancel")
+        .primary_enabled(primary_enabled)
+        .primary_on_enter(!entering);
+    if let Some(hint) = hint {
+        dialog = dialog.hint(hint).hint_tone(DialogHintTone::Neutral);
+    }
+    if already_active {
+        dialog = dialog.secondary("Remove license");
+    }
+    let mut edited = false;
+    let choice = dialog.show(ctx, |ui| {
+        fact_grid::show(ui, |rows| match &phase {
+            LicensePhase::Entry | LicensePhase::Error(_) => {
+                let text = &mut dialog_state.text;
+                rows.block("Key", |ui, width| {
+                    edited = ui
+                        .add(
+                            egui::TextEdit::multiline(text)
+                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                .desired_rows(KEY_LINES)
+                                .desired_width(width)
+                                .hint_text("RSPICE-K1.\u{2026}"),
+                        )
+                        .changed();
+                });
+                match &phase {
+                    LicensePhase::Error(message) => {
+                        rows.note_toned(message, Tokens::get(ctx).color.err);
                     }
+                    _ => rows.note(
+                        "Paste the whole key from your purchase email; line breaks are fine.",
+                    ),
                 }
-                LicensePhase::Verified(info) => grant_rows(rows, info),
-            });
-        });
-        // A key edited after a refusal is a new key: the refusal was about
-        // the old one.
-        if edited && matches!(phase, LicensePhase::Error(_)) {
-            self.state.cloud.license_dialog.phase = LicensePhase::Entry;
-        }
-
-        let choice = if choice == DialogChoice::None && ctrl_enter && primary_enabled {
-            DialogChoice::Primary
-        } else {
-            choice
-        };
-
-        match choice {
-            DialogChoice::None => {}
-            DialogChoice::Cancelled | DialogChoice::Ghost => {
-                self.state.cloud.license_dialog.open = false;
             }
-            DialogChoice::Secondary if already_active => self.remove_license(),
-            DialogChoice::Secondary => {}
-            DialogChoice::Primary => match self.state.cloud.license_dialog.phase.clone() {
-                LicensePhase::Entry | LicensePhase::Error(_) => self.verify_license_input(),
-                LicensePhase::Verified(_) if already_active => {
-                    self.state.cloud.license_dialog.open = false;
-                }
-                LicensePhase::Verified(info) => self.activate_license(info),
-            },
-        }
+            LicensePhase::Verified(info) => grant_rows(rows, info),
+        });
+    });
+    // A key edited after a refusal is a new key: the refusal was about
+    // the old one.
+    if edited && matches!(phase, LicensePhase::Error(_)) {
+        parts.dialog.phase = LicensePhase::Entry;
     }
 
-    fn verify_license_input(&mut self) {
-        let text = self.state.cloud.license_dialog.text.clone();
-        self.state.cloud.license_dialog.phase = match license::parse_and_verify(&text) {
-            Ok(info) => LicensePhase::Verified(info),
-            Err(error) => LicensePhase::Error(error.message().to_owned()),
-        };
-    }
+    let choice = if choice == DialogChoice::None && ctrl_enter && primary_enabled {
+        DialogChoice::Primary
+    } else {
+        choice
+    };
 
-    fn activate_license(&mut self, info: LicenseInfo) {
-        let key = self.state.cloud.license_dialog.text.trim().to_owned();
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Err(error) = license::store_key(&key) {
-            self.state.record(
-                LogSeverity::Warning,
-                LogSource::Studio,
-                format!("The license is active for this session but could not be saved: {error}"),
-            );
+    match choice {
+        DialogChoice::None => {}
+        DialogChoice::Cancelled | DialogChoice::Ghost => {
+            parts.dialog.open = false;
         }
-        self.state.cloud.license_key = Some(key);
-        let message = format!(
-            "License activated: {} updates are available until {}.",
-            info.tier, info.updates_until
-        );
-        self.state.cloud.license = Some(info);
-        self.state.cloud.license_dialog.open = false;
-        self.state
-            .record(LogSeverity::Info, LogSource::Studio, message);
+        DialogChoice::Secondary if already_active => remove_license(parts),
+        DialogChoice::Secondary => {}
+        DialogChoice::Primary => match parts.dialog.phase.clone() {
+            LicensePhase::Entry | LicensePhase::Error(_) => verify_license_input(parts.dialog),
+            LicensePhase::Verified(_) if already_active => {
+                parts.dialog.open = false;
+            }
+            LicensePhase::Verified(info) => activate_license(parts, info),
+        },
     }
+}
 
-    fn remove_license(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = license::license_file_path() {
-            let _ = std::fs::remove_file(path);
-        }
-        self.state.cloud.license_key = None;
-        self.state.cloud.license = None;
-        self.state.cloud.license_dialog.open = false;
-        self.state.record(
-            LogSeverity::Info,
+fn verify_license_input(dialog: &mut LicenseDialogState) {
+    let text = dialog.text.clone();
+    dialog.phase = match license::parse_and_verify(&text) {
+        Ok(info) => LicensePhase::Verified(info),
+        Err(error) => LicensePhase::Error(error.message().to_owned()),
+    };
+}
+
+fn activate_license(parts: &mut LicenseParts<'_>, info: LicenseInfo) {
+    let key = parts.dialog.text.trim().to_owned();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Err(error) = license::store_key(&key) {
+        parts.model.record(
+            LogSeverity::Warning,
             LogSource::Studio,
-            "License removed from this machine.",
+            format!("The license is active for this session but could not be saved: {error}"),
         );
     }
+    *parts.license_key = Some(key);
+    let message = format!(
+        "License activated: {} updates are available until {}.",
+        info.tier, info.updates_until
+    );
+    *parts.license = Some(info);
+    parts.dialog.open = false;
+    parts
+        .model
+        .record(LogSeverity::Info, LogSource::Studio, message);
+}
+
+fn remove_license(parts: &mut LicenseParts<'_>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(path) = license::license_file_path() {
+        let _ = std::fs::remove_file(path);
+    }
+    *parts.license_key = None;
+    *parts.license = None;
+    parts.dialog.open = false;
+    parts.model.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        "License removed from this machine.",
+    );
 }
 
 /// The grant a verified key carries, and where the key is kept.
@@ -249,6 +256,7 @@ fn key_storage() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
 
     /// Every text the dialog published for a reader to hear. Generic over the
     /// app so that a test helper is not counted as a handler that takes the
@@ -287,7 +295,16 @@ mod tests {
 
     impl LicenseDialogHost for RSpiceApp {
         fn render(&mut self, ctx: &egui::Context) {
-            self.render_license_dialog(ctx);
+            let cloud = &mut *self.state.cloud;
+            render_license_dialog(
+                &mut LicenseParts {
+                    dialog: &mut cloud.license_dialog,
+                    license_key: &mut cloud.license_key,
+                    license: &mut cloud.license,
+                    model: &mut self.state.model,
+                },
+                ctx,
+            );
         }
     }
 
@@ -299,7 +316,7 @@ mod tests {
         let cloud = &mut *app.state.cloud;
         open_license_dialog(&mut cloud.license_dialog, cloud.license.as_ref());
         app.state.cloud.license_dialog.text = license::SAMPLE_KEY.to_owned();
-        app.verify_license_input();
+        verify_license_input(&mut app.state.cloud.license_dialog);
         let shown = shown_texts(&mut app);
         assert!(
             !shown.iter().any(|text| text.contains("%APPDATA%")),
@@ -328,10 +345,10 @@ mod tests {
         open_license_dialog(&mut cloud.license_dialog, cloud.license.as_ref());
         let mut seen = shown_texts(&mut app);
         app.state.cloud.license_dialog.text = "RSPICE-K1.TRUNCATED".to_owned();
-        app.verify_license_input();
+        verify_license_input(&mut app.state.cloud.license_dialog);
         seen.extend(shown_texts(&mut app));
         app.state.cloud.license_dialog.text = license::SAMPLE_KEY.to_owned();
-        app.verify_license_input();
+        verify_license_input(&mut app.state.cloud.license_dialog);
         seen.extend(shown_texts(&mut app));
         assert!(
             seen.iter().any(|text| text == "Verify") && seen.iter().any(|text| text == "Activate"),

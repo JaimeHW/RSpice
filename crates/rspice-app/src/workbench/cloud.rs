@@ -12,11 +12,24 @@ pub(crate) mod commands;
 use crate::services::cloud_account::{
     CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, LIVE_COLLABORATION_FEATURE,
 };
-use crate::workbench::app::dialogs::license::open_license_dialog;
-use crate::workbench::app::dialogs::live_session::open_live_session_dialog;
-use crate::workbench::app::dialogs::publish_web::{SnapshotSource, open_publish_web_dialog};
+use crate::workbench::account_organization::{self, AccountConsoleParts};
+use crate::workbench::app::dialogs::license::{
+    LicenseParts, open_license_dialog, render_license_dialog,
+};
+use crate::workbench::app::dialogs::live_session::{
+    LiveSessionParts, open_live_session_dialog, render_live_session_dialog,
+};
+use crate::workbench::app::dialogs::publish_web::{
+    PublishWebParts, SnapshotSource, open_publish_web_dialog, render_publish_web_dialog,
+};
+use crate::workbench::app::dialogs::unpublish_web::{
+    UnpublishWebParts, render_unpublish_web_dialog,
+};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
-use crate::workbench::framework::feature::{CommandSet, Cx, Feature, FeatureRegistry, Reads};
+use crate::workbench::framework::dialogs::DialogKey;
+use crate::workbench::framework::feature::{
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, Reads,
+};
 use crate::workbench::live_session::CloudHandles;
 use crate::workbench::slots::CloudState;
 use crate::workbench::state::WorkbenchSession;
@@ -34,6 +47,111 @@ impl Feature for CloudFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CloudCommand>();
+        registry.dialogs(DIALOGS);
+    }
+}
+
+/// The dialog steps the feature draws, under the keys the shell's dialog
+/// order lists them by: the license, publish, live-session and unpublish
+/// dialogs, and the account console.
+const DIALOGS: &[FeatureDialog<CloudFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("cloud.license"),
+        is_open: |cloud| cloud.license_dialog.open,
+        render: |cx, ctx| render_license_dialog(&mut license_parts(cx), ctx),
+    },
+    FeatureDialog {
+        key: DialogKey("cloud.publish_web"),
+        is_open: |cloud| cloud.publish_web.open,
+        render: |cx, ctx| render_publish_web_dialog(&mut publish_web_parts(cx), ctx),
+    },
+    FeatureDialog {
+        key: DialogKey("cloud.live_session"),
+        is_open: |cloud| cloud.live_session.open,
+        render: |cx, ctx| render_live_session_dialog(&mut live_session_parts(cx), ctx),
+    },
+    FeatureDialog {
+        key: DialogKey("cloud.unpublish_web"),
+        is_open: |cloud| cloud.unpublish_web.open,
+        render: |cx, ctx| render_unpublish_web_dialog(&mut unpublish_web_parts(cx), ctx),
+    },
+    // The console is open while its route is current. The route is the
+    // shell's, and the dialog order's step asks it there; nothing in the
+    // cloud's own state opens the console.
+    FeatureDialog {
+        key: DialogKey("cloud.account_organization"),
+        is_open: |_| false,
+        render: render_account_console,
+    },
+];
+
+/// What the license dialog reads and writes, borrowed from the feature's
+/// context.
+fn license_parts<'a>(cx: &'a mut Cx<'_, CloudFeature>) -> LicenseParts<'a> {
+    let cloud = &mut *cx.state;
+    LicenseParts {
+        dialog: &mut cloud.license_dialog,
+        license_key: &mut cloud.license_key,
+        license: &mut cloud.license,
+        model: cx.model,
+    }
+}
+
+/// What the publish dialog reads and writes, borrowed from the feature's
+/// context.
+fn publish_web_parts<'a>(cx: &'a mut Cx<'_, CloudFeature>) -> PublishWebParts<'a> {
+    let cloud = &mut *cx.state;
+    PublishWebParts {
+        dialog: &mut cloud.publish_web,
+        unpublish: &mut cloud.unpublish_web,
+        account: &mut cx.own.account,
+        hardcopy: cx.peers.hardcopy(),
+        model: cx.model,
+        workbench: cx.wb,
+        results: cx.peers.results(),
+        runs: cx.runs,
+    }
+}
+
+/// What the live-session dialog reads and writes, borrowed from the
+/// feature's context.
+fn live_session_parts<'a>(cx: &'a mut Cx<'_, CloudFeature>) -> LiveSessionParts<'a> {
+    LiveSessionParts {
+        dialog: &mut cx.state.live_session,
+        account: &mut cx.own.account,
+        engine: &mut cx.own.live_session,
+        model: cx.model,
+        platform: cx.platform,
+        preflight: &mut cx.runs.preflight,
+        outbox: &mut cx.wb.outbox,
+    }
+}
+
+/// What the unpublish dialog reads and writes, borrowed from the feature's
+/// context.
+fn unpublish_web_parts<'a>(cx: &'a mut Cx<'_, CloudFeature>) -> UnpublishWebParts<'a> {
+    UnpublishWebParts {
+        dialog: &mut cx.state.unpublish_web,
+        account: &mut cx.own.account,
+        workbench: cx.wb,
+    }
+}
+
+/// Draw the account console while its route is current, then run the
+/// command the reader asked of it once this step returns.
+fn render_account_console(cx: &mut Cx<'_, CloudFeature>, ctx: &egui::Context) {
+    let cloud = &mut *cx.state;
+    let command = account_organization::show(
+        ctx,
+        &mut AccountConsoleParts {
+            license_dialog: &mut cloud.license_dialog,
+            license: cloud.license.as_ref(),
+            account: &mut cx.own.account,
+            workbench: cx.wb,
+        },
+    );
+    if let Some(key) = command {
+        cx.execute(key);
     }
 }
 
