@@ -22,18 +22,16 @@ pub const fn analysis_result_kind(kind: AnalysisKind) -> Option<AnalysisResultKi
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NonUiSurface {
     Cli,
-    Python,
     Wasm,
     EngineAdapter,
 }
 
 impl NonUiSurface {
-    pub const ALL: [Self; 4] = [Self::Cli, Self::Python, Self::Wasm, Self::EngineAdapter];
+    pub const ALL: [Self; 3] = [Self::Cli, Self::Wasm, Self::EngineAdapter];
 
     pub const fn heading(self) -> &'static str {
         match self {
             Self::Cli => "CLI",
-            Self::Python => "Python",
             Self::Wasm => "WASM",
             Self::EngineAdapter => "Engine adapter",
         }
@@ -94,7 +92,6 @@ impl SurfaceCapability {
 pub struct AnalysisResultCapability {
     pub result: AnalysisResultKind,
     pub cli: SurfaceCapability,
-    pub python: SurfaceCapability,
     pub wasm: SurfaceCapability,
     pub engine_adapter: SurfaceCapability,
 }
@@ -103,7 +100,6 @@ impl AnalysisResultCapability {
     pub const fn surface(self, surface: NonUiSurface) -> SurfaceCapability {
         match surface {
             NonUiSurface::Cli => self.cli,
-            NonUiSurface::Python => self.python,
             NonUiSurface::Wasm => self.wasm,
             NonUiSurface::EngineAdapter => self.engine_adapter,
         }
@@ -114,14 +110,6 @@ impl AnalysisResultCapability {
 /// its canonical analysis identity, for a scalar deck and for every coordinate
 /// of a `.STEP` or `.TEMP` axis.
 const fn cli_mapped_axes() -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Mapped,
-        MappingStatus::Mapped,
-        MappingStatus::Mapped,
-    )
-}
-
-const fn python_mapped_axes() -> SurfaceCapability {
     SurfaceCapability::new(
         MappingStatus::Mapped,
         MappingStatus::Mapped,
@@ -153,161 +141,138 @@ pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 27] = [
     AnalysisResultCapability {
         result: AnalysisResultKind::OperatingPoint,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::DcSweep,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Ac,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Transient,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Noise,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::SParameters,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::TransferFunction,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Stability,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PoleZero,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fourier,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fft,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pac,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pxf,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pstb,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::HarmonicBalance,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Envelope,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::DcMatch,
         cli: cli_mapped_axes(),
-        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
@@ -321,9 +286,6 @@ const fn quasiperiodic_capability(result: AnalysisResultKind) -> AnalysisResultC
     AnalysisResultCapability {
         result,
         cli: cli_mapped_axes(),
-        python: SurfaceCapability::unsupported(
-            "the Python frontend has no shared quasiperiodic document adapter",
-        ),
         wasm: SurfaceCapability::unsupported(
             "the WASM frontend has no shared quasiperiodic document adapter",
         ),
@@ -373,7 +335,6 @@ pub const fn analysis_result_capability(
 pub struct SignalCapability {
     pub signal: SignalKind,
     pub cli: MappingStatus,
-    pub python: MappingStatus,
     pub wasm: MappingStatus,
     pub engine_adapter: MappingStatus,
 }
@@ -382,7 +343,6 @@ impl SignalCapability {
     pub const fn surface(self, surface: NonUiSurface) -> MappingStatus {
         match surface {
             NonUiSurface::Cli => self.cli,
-            NonUiSurface::Python => self.python,
             NonUiSurface::Wasm => self.wasm,
             NonUiSurface::EngineAdapter => self.engine_adapter,
         }
@@ -393,7 +353,7 @@ impl SignalCapability {
 // `SignalKind::Digital` names the *flattened* column — one `f64` per analysis
 // time point, holding 0, 1 or 0.5, with the drive strength gone — so no
 // surface's descriptor inventory carries a digital signal in full. What
-// separates the four notes below is which lossless carrier each surface also
+// separates the three notes below is which lossless carrier each surface also
 // offers beside that column, and what that carrier costs.
 //
 // A bus declaration is no longer one of those reasons. The typed document,
@@ -404,7 +364,6 @@ impl SignalCapability {
 // every carrier on every surface below now forwards it. What each note still
 // says about buses is what its surface *does* with one, not whether it has it.
 const CLI_DIGITAL_FLATTENED_PLUS_EVENTS: &str = "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength; a declared bus now reaches all three, as bus plots, as digitalBuses, and as one $var wire N whose dump is byte for byte the one to_vcd() and toVcd() write, convert --to vcd reads the declaration back from any of them, --variables names a bus by its name, its range or one of its bits, and --expand-buses writes the members as scalars for a reader that cannot take a vector";
-const PYTHON_DIGITAL_TYPED_EVENTS_FLAT_COLUMN: &str = "the twelve-state event histories reach a caller typed: digital_nodes() lists the event nodes a transient captured, digital_events(node) returns every committed change with the state and strength labels the shared document publishes and the 0..=12 event code encoding the same pair, real_trace_names/real_trace answer the real-valued event nodes on both transient containers, digital_buses() names each declared word and bus_events(bus) reassembles it through the one core implementation every route uses, both pickles carry the bus table beside the histories, and to_vcd()/write_vcd() publish the dump the command line publishes byte for byte; what stays partial is the descriptor inventory, where a digital signal is still the flattened D(node) column that saved_signals, to_csv and the raw exporters read";
 const WASM_DIGITAL_TYPED_EVENTS_FLAT_COLUMN: &str = "the twelve-state event histories cross the browser boundary typed: digitalNodes(resultIndex) lists the event nodes with their change counts and the bus that claims each one, digitalEvents(resultIndex, node) returns every committed change with the document's own state and strength tags and the 0..=12 event code, digitalBuses(resultIndex) names each declared word and busEvents(resultIndex, bus) reassembles it through the one core implementation every route uses, all bounded by the same transfer ceiling a window obeys, toVcd(resultIndex) writes the dump the command line writes, and the payload descriptor counts what there is to ask for; what stays partial is the descriptor inventory, where a digital signal is still the flattened logic column, and the real event histories, still reachable only through the whole-document JSON export";
 const ADAPTER_DIGITAL_DOCUMENT_ONLY: &str = "the typed document the adapter publishes carries the event histories verbatim, state and strength included, and any bus declarations beside them, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact";
 
@@ -414,35 +373,30 @@ pub const SIGNAL_CAPABILITY_MATRIX: [SignalCapability; 5] = [
     SignalCapability {
         signal: SignalKind::Voltage,
         cli: MappingStatus::Mapped,
-        python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Current,
         cli: MappingStatus::Mapped,
-        python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Mapped,
-        python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Mapped,
-        python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Digital,
         cli: MappingStatus::Partial(CLI_DIGITAL_FLATTENED_PLUS_EVENTS),
-        python: MappingStatus::Partial(PYTHON_DIGITAL_TYPED_EVENTS_FLAT_COLUMN),
         wasm: MappingStatus::Partial(WASM_DIGITAL_TYPED_EVENTS_FLAT_COLUMN),
         engine_adapter: MappingStatus::Partial(ADAPTER_DIGITAL_DOCUMENT_ONLY),
     },

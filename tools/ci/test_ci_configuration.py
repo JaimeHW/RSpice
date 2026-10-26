@@ -30,7 +30,7 @@ VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
     "public_paths_snapshot": (
         "holds no test: it only names public paths, so a route would run "
         "nothing. Its Verilog-A paths are compiled by the all-features Clippy "
-        "in python.yml."
+        "in ci.yml's native-feature-lint job."
     ),
 }
 
@@ -395,7 +395,6 @@ class CiConfigurationTests(unittest.TestCase):
         workflows = [
             ".github/workflows/ci.yml",
             ".github/workflows/nightly.yml",
-            ".github/workflows/python.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
             ".github/workflows/native-release.yml",
@@ -429,7 +428,6 @@ class CiConfigurationTests(unittest.TestCase):
         read_only_workflows = [
             ".github/workflows/ci.yml",
             ".github/workflows/nightly.yml",
-            ".github/workflows/python.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
             ".github/workflows/native-release.yml",
@@ -439,28 +437,6 @@ class CiConfigurationTests(unittest.TestCase):
             with self.subTest(workflow=workflow_path):
                 workflow = read_text(workflow_path)
                 self.assertRegex(workflow, r"(?m)^permissions:\n  contents: read\n")
-
-    def test_rspice_python_generates_windows_abi3_import_library(self) -> None:
-        manifest = read_text("crates/rspice-python/Cargo.toml")
-
-        pyo3 = re.search(
-            r"pyo3\s*=\s*\{[^}]*features\s*=\s*\[([^\]]*)\]",
-            manifest,
-            flags=re.DOTALL,
-        )
-
-        self.assertIsNotNone(pyo3, "rspice-python must declare PyO3 features")
-        features = set(re.findall(r'"([^"]+)"', pyo3.group(1)))
-        self.assertIn("abi3-py310", features)
-        self.assertIn("generate-import-lib", features)
-
-    def test_rspice_python_windows_runtime_detection_supports_py_launcher(self) -> None:
-        build_script = read_text("crates/rspice-python/build.rs")
-
-        self.assertIn('OsString::from("python")', build_script)
-        self.assertIn('OsString::from("py")', build_script)
-        self.assertIn('&["-3"]', build_script)
-        self.assertIn("query_python_base_prefix", build_script)
 
     def test_no_shipping_crate_depends_on_the_conformance_crate(self) -> None:
         """Nothing a user installs may depend on rspice-conformance.
@@ -481,7 +457,6 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-app-state",
             "rspice-app-services",
             "rspice-app-runs",
-            "rspice-python",
             "rspice-core",
             "rspice-core-base",
             "rspice-core-netlist",
@@ -666,7 +641,6 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-app-state",
             "rspice-app-services",
             "rspice-app-runs",
-            "rspice-python",
             "rspice-conformance",
         }
         generated = {name for name in workspace_member_names()
@@ -1471,7 +1445,7 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn(
-            "cargo clippy --locked --workspace --exclude rspice-python --all-targets --message-format short -- -D warnings",
+            "cargo clippy --locked --workspace --all-targets --message-format short -- -D warnings",
             workflow,
         )
 
@@ -1489,7 +1463,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         Nothing else covers the shard. The workspace Clippy in this job
         runs default features, which leave the generated catalog out
-        entirely, and `python.yml` lints `-p rspice-core --all-features`,
+        entirely, and `native-feature-lint` lints `-p rspice-core --all-features`,
         which selects every model and so always sees the enum inhabited.
         """
         workflow = read_text(".github/workflows/ci.yml")
@@ -1506,14 +1480,14 @@ class CiConfigurationTests(unittest.TestCase):
 
         # The two lanes whose blind spots make the line above load-bearing.
         self.assertIn(
-            "cargo clippy --locked --workspace --exclude rspice-python"
+            "cargo clippy --locked --workspace"
             " --all-targets --message-format short -- -D warnings",
             workflow,
         )
         self.assertIn(
             "cargo clippy --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices"
             " --all-targets --all-features -- -D warnings",
-            read_text(".github/workflows/python.yml"),
+            workflow_job_body(workflow, "native-feature-lint"),
         )
 
     def test_model_gated_core_library_units_have_an_executing_build(self) -> None:
@@ -1873,7 +1847,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("unknown-git = \"deny\"", deny)
         self.assertIn("package-ecosystem: \"cargo\"", dependabot)
         self.assertIn("package-ecosystem: \"github-actions\"", dependabot)
-        self.assertIn("package-ecosystem: \"pip\"", dependabot)
 
     def test_advisory_gate_uses_committed_lockfile_on_every_change(self) -> None:
         security = read_text(".github/workflows/security.yml")
@@ -1920,122 +1893,18 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("security/advisory-exceptions.toml", codeowners)
         self.assertIn("tools/security/", codeowners)
 
-    def test_python_ci_matches_supported_abi_and_smokes_built_wheels(self) -> None:
-        workflow = read_text(".github/workflows/python.yml")
-        pyproject = read_text("crates/rspice-python/pyproject.toml")
-        constraints = read_text("crates/rspice-python/ci-constraints.txt")
-        binding_readme = read_text("crates/rspice-python/README.md")
+    def test_core_all_features_union_is_linted_with_bounded_memory(self) -> None:
+        job = workflow_job_body(read_text(".github/workflows/ci.yml"), "native-feature-lint")
 
-        self.assertIn('requires-python = ">=3.10"', pyproject)
-        self.assertIn('requires = ["maturin==1.15.0"]', pyproject)
-        self.assertIn('MATURIN_VERSION: "1.15.0"', workflow)
-        self.assertNotIn("maturin==1.14.1", binding_readme)
-        self.assertIn("maturin==1.15.0", binding_readme)
-        self.assertIn(
-            'python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]',
-            workflow,
-        )
-        self.assertIn("maturin develop --release --locked", workflow)
-        self.assertIn("args: --release --locked --compatibility pypi --out dist", workflow)
-        self.assertIn("python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl", workflow)
-        self.assertIn("wheel smoke passed", workflow)
-        self.assertIn("Python 3.10 abi3 smoke passed", workflow)
         self.assertIn(
             "cargo clippy --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices"
             " --all-targets --all-features -- -D warnings",
-            workflow,
+            job,
         )
-        self.assertIn(
-            "cargo clippy --locked -p rspice-python --all-targets --all-features -- -D warnings",
-            workflow,
-        )
-        self.assertIn("native-feature-lint:", workflow)
-        self.assertIn('CARGO_BUILD_JOBS: "1"', workflow)
-        self.assertIn('CARGO_PROFILE_DEV_DEBUG: "0"', workflow)
-        self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', workflow)
-        self.assertIn("shared-key: python-native-feature-lint-linux", workflow)
-        test_job = workflow.split("  native-feature-lint:", maxsplit=1)[0]
-        native_lint_job = workflow.split("  native-feature-lint:", maxsplit=1)[1].split(
-            "  wheels:", maxsplit=1
-        )[0]
-        self.assertIn("timeout-minutes: 60", native_lint_job)
-        self.assertNotIn(
-            "Lint every native feature combination",
-            test_job,
-            "all-feature Clippy must not run after building every Python matrix variant",
-        )
-        self.assertIn("python ../../tools/release/repair_sdist_lock.py", workflow)
-        self.assertIn("CARGO_NET_OFFLINE=true", workflow)
-        self.assertIn("cp314t wheel (${{ matrix.platform.name }})", workflow)
-        self.assertIn("-i python3.14t", workflow)
-        self.assertIn("assert not sys._is_gil_enabled()", workflow)
-        self.assertEqual(workflow.count("actions/attest@"), 3)
-        self.assertIn("subject-path: crates/rspice-python/dist/*.whl", workflow)
-        self.assertIn("subject-path: crates/rspice-python/dist/*.tar.gz", workflow)
-        self.assertIn("maturin==1.15.0", constraints)
-        self.assertIn("numpy==2.2.6", constraints)
-        self.assertIn("numpy==2.5.0", constraints)
-
-    def test_python_binding_modules_stay_navigable(self) -> None:
-        """No binding source file may exceed the ceiling, and none may grow.
-
-        The binding layer had accumulated two monoliths (`results.rs` at 7363
-        lines carrying 32 pyclasses, `engine.rs` at 4231 with a 45-method
-        dispatch block). They are being split per analysis family. This ratchet
-        holds the result: a file over the ceiling must appear in the allowlist
-        with its current size, and a file may never exceed its allowlisted
-        size, so the only permitted direction is down. An allowlisted file that
-        has dropped under the ceiling must be removed from the allowlist, which
-        keeps the list from rotting into a permanent exemption.
-        """
-        ceiling = 900
-
-        # path -> current line count. Shrink an entry when a split lands; never
-        # raise one.
-        #
-        # engine/mod.rs is the one structural exception rather than debt. PyO3
-        # permits a single `#[pymethods]` block per type unless the
-        # `multiple-pymethods` feature is enabled, which pulls in `inventory`
-        # for a dependency this project does not want. That block is the whole
-        # public Engine surface, and most of its bulk is the Python-facing
-        # docstrings, which belong beside the signatures they document.
-        # Everything that can leave has: the validators, the RF configuration
-        # builders, the value types, the private helper impl, and the directive
-        # runner all live in sibling modules.
-        allowlist = {
-            "crates/rspice-python/src/engine/mod.rs": 1850,
-        }
-
-        source_root = ROOT / "crates" / "rspice-python" / "src"
-        over_ceiling = {}
-        for path in sorted(source_root.rglob("*.rs")):
-            relative = path.relative_to(ROOT).as_posix()
-            lines = len(path.read_text(encoding="utf-8").splitlines())
-            if lines > ceiling:
-                over_ceiling[relative] = lines
-
-        for relative, lines in sorted(over_ceiling.items()):
-            with self.subTest(module=relative):
-                self.assertIn(
-                    relative,
-                    allowlist,
-                    f"{relative} is {lines} lines, over the {ceiling}-line ceiling; "
-                    "split it per analysis family rather than adding it here",
-                )
-                self.assertLessEqual(
-                    lines,
-                    allowlist[relative],
-                    f"{relative} grew to {lines} lines from an allowlisted "
-                    f"{allowlist[relative]}; binding debt may only shrink",
-                )
-
-        stale = sorted(set(allowlist) - set(over_ceiling))
-        self.assertEqual(
-            [],
-            stale,
-            f"these modules are now under the {ceiling}-line ceiling and must be "
-            "dropped from the allowlist",
-        )
+        self.assertIn("timeout-minutes: 60", job)
+        self.assertIn('CARGO_BUILD_JOBS: "1"', job)
+        self.assertIn('CARGO_PROFILE_DEV_DEBUG: "0"', job)
+        self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', job)
 
     def test_native_desktop_claim_has_macos_ui_cli_ci_coverage(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")

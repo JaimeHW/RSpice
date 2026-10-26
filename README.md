@@ -6,9 +6,9 @@
 
 **An analog and mixed-signal circuit simulator, written in Rust.**
 
-Run SPICE netlists from a command line, a desktop application, Python, or the
-browser: operating points and transient waveforms through harmonic balance and
-phase noise.
+Run SPICE netlists from a command line, a desktop application, or the browser:
+operating points and transient waveforms through harmonic balance and phase
+noise.
 
 [![License](https://img.shields.io/badge/license-source--available-informational?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.94-orange?style=flat-square)](rust-toolchain.toml)
@@ -34,9 +34,8 @@ first-class: RSpice has both halves of Verilog-AMS, so digital and real-number
 modules simulate alongside the analog solve, with connect modules inserted
 automatically where a deck node joins analog and discrete ports.
 
-RSpice has one engine behind every interface. The command line, the desktop
-and browser application and the Python bindings all run the same
-`rspice-core` code, so a result never depends on how the run was launched. Where a deck needs physics RSpice does not have, the answer is a
+RSpice has one engine behind every interface. The command line and the desktop
+and browser application run the same `rspice-core` code, so a result never depends on how the run was launched. Where a deck needs physics RSpice does not have, the answer is a
 typed error naming the parameter or model level responsible, never a silent
 approximation.
 
@@ -86,8 +85,8 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 At the workspace root, plain `cargo build`, `cargo check` and `cargo test`
 select the CLI and the application and their dependencies, not every model or
-development tool. Use `-p <package>` for the bindings and tools, or
-`--workspace` for everything.
+development tool. Use `-p <package>` for the tools, or `--workspace` for
+everything.
 
 ## Analyses
 
@@ -293,36 +292,6 @@ client.
 cargo run --release -p rspice-app
 ```
 
-### Python
-
-```bash
-cd crates/rspice-python
-pip install maturin
-maturin develop --release
-```
-
-```python
-import rspice
-
-# Netlist.parse takes statements only: no title line, so nothing is swallowed.
-netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
-engine = rspice.Engine()
-result = engine.run_dc_op(netlist)
-print(result.voltage(1))  # 10.0
-```
-
-Transient and AC results come back as NumPy arrays. The crate README covers
-installation, verification, export, errors and cancellation, the
-maturin/pytest workflow CI uses, and the Windows `PYO3_PYTHON` override for
-Microsoft Store interpreter aliases:
-[crates/rspice-python/README.md](crates/rspice-python/README.md).
-
-These bindings put RSpice inside your Python. The application has the reverse,
-Python automation inside RSpice. The two are separate: automation runs on a
-signed, application-local CPython staged into the release, never an
-interpreter discovered from `PATH`, the registry, a virtualenv, or user
-site-packages.
-
 ### Verilog-AMS
 
 Verilog-A is the analog subset of Verilog-AMS, and RSpice treats them as the
@@ -431,7 +400,6 @@ use faer.
 | :--- | :--- |
 | [`rspice-cli`](crates/rspice-cli) | The `rspice` command-line simulator |
 | [`rspice-app`](crates/rspice-app) | The desktop and browser application |
-| [`rspice-python`](crates/rspice-python) | Python bindings built with PyO3 |
 
 **Application libraries**
 

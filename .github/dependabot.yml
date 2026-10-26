@@ -27,16 +27,3 @@ updates:
       time: "09:30"
       timezone: "America/Chicago"
     open-pull-requests-limit: 5
-
-  - package-ecosystem: "pip"
-    directory: "/crates/rspice-python"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "10:00"
-      timezone: "America/Chicago"
-    open-pull-requests-limit: 5
-    ignore:
-      # Pinned by CI gate compatibility: the type-check gate is calibrated to
-      # this release, and a proposed bump reopens the whole diagnostic set.
-      - dependency-name: "mypy"

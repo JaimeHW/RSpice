@@ -36,7 +36,7 @@ jobs:
             packages: >-
               --workspace --exclude rspice-core --exclude rspice-core-base
               --exclude rspice-core-netlist --exclude rspice-core-devices --exclude rspice-app --exclude rspice-app-state
-              --exclude rspice-app-services --exclude rspice-app-runs --exclude rspice-python
+              --exclude rspice-app-services --exclude rspice-app-runs
               --exclude rspice-conformance
               --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
     env:

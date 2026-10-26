@@ -72,5 +72,4 @@ regenerating on Windows and Linux produces identical output.
 Native release packaging copies only `SHIPPING.toml`, the two shipped indexes,
 and the allowlisted pack directories. Browser and mobile builds receive the
 same foundation source through `rspice-core`; they do not carry a separate
-pack tree. The Python source-distribution repair follows compiled
-`include_str!` targets, so it adds only `foundation/lib/foundation.lib`.
+pack tree.

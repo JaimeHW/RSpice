@@ -1,3 +1,0 @@
-# The compiled implementation is an intentionally private package submodule.
-# Its entire public surface is re-exported and typed by rspice/__init__.pyi.
-rspice.rspice

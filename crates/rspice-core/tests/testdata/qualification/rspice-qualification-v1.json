@@ -28,17 +28,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -67,17 +56,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -126,17 +104,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -165,17 +132,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -224,17 +180,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -263,17 +208,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -322,17 +256,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -361,17 +284,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -420,17 +332,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -459,17 +360,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -518,17 +408,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -557,17 +436,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -616,17 +484,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -655,17 +512,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -714,17 +560,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -753,17 +588,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -812,17 +636,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -851,17 +664,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -910,17 +712,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -949,17 +740,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -1008,17 +788,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -1057,17 +826,6 @@
                 "status": "mapped"
               }
             },
-            "Python": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
             "WASM": {
               "scalar": {
                 "status": "mapped"
@@ -1096,17 +854,6 @@
               }
             },
             "Engine adapter": {
-              "scalar": {
-                "status": "mapped"
-              },
-              "stepped": {
-                "status": "mapped"
-              },
-              "temperature": {
-                "status": "mapped"
-              }
-            },
-            "Python": {
               "scalar": {
                 "status": "mapped"
               },
@@ -1158,20 +905,6 @@
                 "status": "unsupported"
               }
             },
-            "Python": {
-              "scalar": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "stepped": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "temperature": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              }
-            },
             "WASM": {
               "scalar": {
                 "reason": "the WASM frontend has no shared quasiperiodic document adapter",
@@ -1213,20 +946,6 @@
               },
               "temperature": {
                 "reason": "the engine adapter has no shared quasiperiodic document projection",
-                "status": "unsupported"
-              }
-            },
-            "Python": {
-              "scalar": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "stepped": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "temperature": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
                 "status": "unsupported"
               }
             },
@@ -1274,20 +993,6 @@
                 "status": "unsupported"
               }
             },
-            "Python": {
-              "scalar": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "stepped": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "temperature": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              }
-            },
             "WASM": {
               "scalar": {
                 "reason": "the WASM frontend has no shared quasiperiodic document adapter",
@@ -1332,20 +1037,6 @@
                 "status": "unsupported"
               }
             },
-            "Python": {
-              "scalar": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "stepped": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              },
-              "temperature": {
-                "reason": "the Python frontend has no shared quasiperiodic document adapter",
-                "status": "unsupported"
-              }
-            },
             "WASM": {
               "scalar": {
                 "reason": "the WASM frontend has no shared quasiperiodic document adapter",
@@ -1373,9 +1064,6 @@
             "Engine adapter": {
               "status": "mapped"
             },
-            "Python": {
-              "status": "mapped"
-            },
             "WASM": {
               "status": "mapped"
             }
@@ -1388,9 +1076,6 @@
               "status": "mapped"
             },
             "Engine adapter": {
-              "status": "mapped"
-            },
-            "Python": {
               "status": "mapped"
             },
             "WASM": {
@@ -1407,9 +1092,6 @@
             "Engine adapter": {
               "status": "mapped"
             },
-            "Python": {
-              "status": "mapped"
-            },
             "WASM": {
               "status": "mapped"
             }
@@ -1422,9 +1104,6 @@
               "status": "mapped"
             },
             "Engine adapter": {
-              "status": "mapped"
-            },
-            "Python": {
               "status": "mapped"
             },
             "WASM": {
@@ -1441,10 +1120,6 @@
             },
             "Engine adapter": {
               "reason": "the typed document the adapter publishes carries the event histories verbatim, state and strength included, and any bus declarations beside them, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact",
-              "status": "partial"
-            },
-            "Python": {
-              "reason": "the twelve-state event histories reach a caller typed: digital_nodes() lists the event nodes a transient captured, digital_events(node) returns every committed change with the state and strength labels the shared document publishes and the 0..=12 event code encoding the same pair, real_trace_names/real_trace answer the real-valued event nodes on both transient containers, digital_buses() names each declared word and bus_events(bus) reassembles it through the one core implementation every route uses, both pickles carry the bus table beside the histories, and to_vcd()/write_vcd() publish the dump the command line publishes byte for byte; what stays partial is the descriptor inventory, where a digital signal is still the flattened D(node) column that saved_signals, to_csv and the raw exporters read",
               "status": "partial"
             },
             "WASM": {

@@ -212,14 +212,13 @@ this repository or in product artifacts.
 RSpice links against open-source Rust crates. Most are dual-licensed
 MIT OR Apache-2.0 (serde, clap, egui, eframe, egui-wgpu, wgpu, rustfft,
 rayon, thiserror, log, env_logger, num-complex, png, base64, uuid, once_cell,
-indexmap, smol_str, pyo3, toml, dirs, getrandom, wasm-bindgen, svgtypes,
+indexmap, smol_str, toml, dirs, getrandom, wasm-bindgen, svgtypes,
 portable-atomic, rustc-hash, clap_complete, tokio[MIT], and others) or plain
 MIT (faer, nom, bincode, indicatif, mimalloc, rfd, rustyhdf5,
 serde-wasm-bindgen). Dependencies under other permissive licenses:
 
   - usvg                 — MPL-2.0 (used unmodified; source available at
                            https://crates.io/crates/usvg)
-  - numpy (rust-numpy)   — BSD-2-Clause
   - libloading           — ISC
   - winit                — Apache-2.0
   - wide, bytemuck, raw-window-handle — Zlib OR Apache-2.0 OR MIT
