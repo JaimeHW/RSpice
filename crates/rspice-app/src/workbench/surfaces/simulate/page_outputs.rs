@@ -1233,7 +1233,10 @@ pub(super) fn open_materialized_traces(
         return;
     }
     // Raised first and taken once the viewer's command has run, so the
-    // waveforms are revealed and selected in the viewer it opened.
+    // waveforms are revealed and selected in the viewer it opened. The
+    // command only chooses the waveform viewer and activates Results, and
+    // reads none of the visibility, the selection or the cursors, so they
+    // end as if they had been written before it.
     app.state.workbench.outbox.push(ShowWaveforms {
         visibility,
         selected,
