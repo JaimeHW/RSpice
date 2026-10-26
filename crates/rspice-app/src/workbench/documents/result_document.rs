@@ -37,7 +37,7 @@ mod scatter;
 mod sensitivity;
 mod smith;
 mod soa;
-mod specs;
+pub(crate) mod specs;
 mod table;
 mod transfer_function;
 pub(crate) mod view_context;

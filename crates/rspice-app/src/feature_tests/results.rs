@@ -6,4 +6,5 @@ mod commands;
 mod inspector;
 mod navigation;
 mod persistent_document;
+mod specs;
 mod viewer_capabilities;
