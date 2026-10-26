@@ -6,8 +6,8 @@
 //! sources is reported with the sources it would break instead of being
 //! offered as a plain choice.
 
-use super::super::pdk_technology_admin::{diff_area_label, diff_impact_label};
 use super::*;
+use crate::state::pdk_config::{diff_area_label, diff_impact_label};
 
 #[derive(Debug, Clone)]
 pub(super) struct TechnologyCandidate {

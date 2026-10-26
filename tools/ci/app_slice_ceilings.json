@@ -8,7 +8,7 @@
     "models->design": 12,
     "project->code": 19,
     "project->design": 20,
-    "project->models": 6,
+    "project->models": 2,
     "project->simulate": 3,
     "simulate->design": 4,
     "simulate->models": 11,

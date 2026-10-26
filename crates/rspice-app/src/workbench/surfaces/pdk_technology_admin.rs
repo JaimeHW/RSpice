@@ -16,10 +16,10 @@ use crate::state::pdk_config::{
     PdkExtractionQuantity, PdkLayerAlias, PdkLayerKind, PdkLayerPurposeRef, PdkRecognitionContract,
     PdkRecognitionQualificationVector, PdkRecognitionTerminal, PdkStreamMapEntry,
     PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyBinding,
-    PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
-    PdkTechnologyDiffKind, PdkTechnologyDraft, PdkTechnologyLayer, PdkTechnologyManifest,
-    PdkTechnologyRevisionDiff, PdkTrustAuditAction, PdkViaDefinition, ProjectPdkCallbackReceipt,
-    TrustedPdkPublisherKey, ValidatedPdkTechnologyPackage,
+    PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact, PdkTechnologyDiffKind,
+    PdkTechnologyDraft, PdkTechnologyLayer, PdkTechnologyManifest, PdkTechnologyRevisionDiff,
+    PdkTrustAuditAction, PdkViaDefinition, ProjectPdkCallbackReceipt, TrustedPdkPublisherKey,
+    ValidatedPdkTechnologyPackage, diff_area_label, diff_impact_label,
 };
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::tokens::Tokens;
@@ -1224,35 +1224,11 @@ fn diff_table_cell(
     });
 }
 
-pub(super) const fn diff_area_label(area: PdkTechnologyDiffArea) -> &'static str {
-    match area {
-        PdkTechnologyDiffArea::Identity => "Identity",
-        PdkTechnologyDiffArea::Compatibility => "Compatibility",
-        PdkTechnologyDiffArea::ModelSource => "Model source",
-        PdkTechnologyDiffArea::Symbol => "Symbol",
-        PdkTechnologyDiffArea::Layer => "Layer",
-        PdkTechnologyDiffArea::StreamMap => "Stream map",
-        PdkTechnologyDiffArea::Connectivity => "Connectivity",
-        PdkTechnologyDiffArea::Recognition => "Recognition",
-        PdkTechnologyDiffArea::Extraction => "Extraction",
-        PdkTechnologyDiffArea::Callback => "Callback",
-        PdkTechnologyDiffArea::Artifact => "Artifact",
-    }
-}
-
 const fn diff_kind_label(kind: PdkTechnologyDiffKind) -> &'static str {
     match kind {
         PdkTechnologyDiffKind::Added => "Added",
         PdkTechnologyDiffKind::Removed => "Removed",
         PdkTechnologyDiffKind::Changed => "Changed",
-    }
-}
-
-pub(super) const fn diff_impact_label(impact: PdkTechnologyDiffImpact) -> &'static str {
-    match impact {
-        PdkTechnologyDiffImpact::Informational => "Information",
-        PdkTechnologyDiffImpact::ReviewRequired => "Review",
-        PdkTechnologyDiffImpact::Breaking => "Breaking",
     }
 }
 

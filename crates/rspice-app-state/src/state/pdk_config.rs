@@ -67,6 +67,7 @@ pub use technology_diff::tests::fixture_revision_archives as signed_technology_d
 pub use technology_diff::{
     PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
     PdkTechnologyDiffKind, PdkTechnologyMigrationEvidence, PdkTechnologyRevisionDiff,
+    diff_area_label, diff_impact_label,
 };
 
 /// Supported model file extensions.

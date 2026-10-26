@@ -1,6 +1,34 @@
-//! Application integration tests for signed-PDK revision comparisons.
+//! Signed-PDK revision comparisons as the application states them, and
+//! their integration tests.
 
 pub use rspice_model_library::pdk::diff::*;
+
+/// What a revision comparison calls an area, wherever one is read: the PDK
+/// administration page and a project's technology migration.
+pub const fn diff_area_label(area: PdkTechnologyDiffArea) -> &'static str {
+    match area {
+        PdkTechnologyDiffArea::Identity => "Identity",
+        PdkTechnologyDiffArea::Compatibility => "Compatibility",
+        PdkTechnologyDiffArea::ModelSource => "Model source",
+        PdkTechnologyDiffArea::Symbol => "Symbol",
+        PdkTechnologyDiffArea::Layer => "Layer",
+        PdkTechnologyDiffArea::StreamMap => "Stream map",
+        PdkTechnologyDiffArea::Connectivity => "Connectivity",
+        PdkTechnologyDiffArea::Recognition => "Recognition",
+        PdkTechnologyDiffArea::Extraction => "Extraction",
+        PdkTechnologyDiffArea::Callback => "Callback",
+        PdkTechnologyDiffArea::Artifact => "Artifact",
+    }
+}
+
+/// What a revision comparison calls an entry's impact, in the same places.
+pub const fn diff_impact_label(impact: PdkTechnologyDiffImpact) -> &'static str {
+    match impact {
+        PdkTechnologyDiffImpact::Informational => "Information",
+        PdkTechnologyDiffImpact::ReviewRequired => "Review",
+        PdkTechnologyDiffImpact::Breaking => "Breaking",
+    }
+}
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod tests {
