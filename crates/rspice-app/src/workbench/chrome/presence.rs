@@ -39,12 +39,13 @@ struct PresenceFacts {
 
 fn presence_facts(app: &RSpiceApp) -> Option<PresenceFacts> {
     use crate::services::cloud_account::LiveSessionState;
-    let (hosting, summary) = match app.cloud_account.snapshot().live_session.as_ref()? {
+    let (hosting, summary) = match app.cloud.account.snapshot().live_session.as_ref()? {
         LiveSessionState::Hosting(summary) => (true, summary),
         LiveSessionState::Participating(summary) => (false, summary),
         _ => return None,
     };
     let connected_principals: std::collections::HashSet<String> = app
+        .cloud
         .live_session
         .peers()
         .map(|peer| peer.identity.principal_id.to_string())
@@ -257,6 +258,7 @@ fn render_presence_popover(
     ui.add_space(4.0);
     // Where each participant works right now, from their presence frames.
     let focused: std::collections::HashMap<String, String> = app
+        .cloud
         .live_session
         .peers()
         .filter_map(|peer| {

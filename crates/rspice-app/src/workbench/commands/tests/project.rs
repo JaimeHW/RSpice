@@ -186,7 +186,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         // A build with no cloud endpoints offers neither cloud row at all,
         // and that rule outranks the closed-project reason.
         let expected = if matches!(command, Command::LiveSession | Command::PublishToWeb)
-            && app.cloud_account.availability()
+            && app.cloud.account.availability()
                 == crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
         {
             CommandAvailability::Hidden

@@ -108,7 +108,7 @@ impl RSpiceApp {
                     let circuit_id = dialog.circuit_id.clone();
                     let publication_id = dialog.publication_id.clone();
                     let url_path = dialog.url_path.clone();
-                    self.cloud_account.unpublish(circuit_id, publication_id);
+                    self.cloud.account.unpublish(circuit_id, publication_id);
                     self.state
                         .prompt(format!("Unpublish requested for {url_path}."));
                     self.state.cloud.unpublish_web.open = false;

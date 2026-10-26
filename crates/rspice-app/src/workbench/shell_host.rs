@@ -333,15 +333,15 @@ impl Host for RSpiceApp {
                 for action in session_presence_cluster(ui, app, large_targets) {
                     match action {
                         PresenceAction::OpenDialog => app.open_live_session_dialog(),
-                        PresenceAction::EndSession => app.cloud_account.end_live_session(),
+                        PresenceAction::EndSession => app.cloud.account.end_live_session(),
                         PresenceAction::LeaveSession => {
-                            app.cloud_account.leave_live_session();
+                            app.cloud.account.leave_live_session();
                         }
                         PresenceAction::RequestLease(doc) => {
-                            app.live_session.request_lease(&doc);
+                            app.cloud.live_session.request_lease(&doc);
                         }
                         PresenceAction::ReleaseLease(doc) => {
-                            app.live_session.release_lease(&doc);
+                            app.cloud.live_session.release_lease(&doc);
                         }
                     }
                 }
@@ -494,7 +494,7 @@ impl Host for RSpiceApp {
 
     fn account_holder(&self) -> Option<String> {
         crate::workbench::user_identity::account_holder(
-            self.cloud_account.snapshot(),
+            self.cloud.account.snapshot(),
             self.state.cloud.license.as_ref(),
         )
     }

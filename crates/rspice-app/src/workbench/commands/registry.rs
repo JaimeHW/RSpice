@@ -784,7 +784,7 @@ impl Command {
         // publish, whatever the reader does, so it offers neither rather than
         // showing two rows that are grey for good.
         if matches!(self, Self::LiveSession | Self::PublishToWeb)
-            && app.cloud_account.availability()
+            && app.cloud.account.availability()
                 == crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
         {
             return CommandAvailability::Hidden;
@@ -925,7 +925,7 @@ impl Command {
             | Self::SnapSelectionToGrid => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
-            Self::PublishToWeb => match app.cloud_account.availability() {
+            Self::PublishToWeb => match app.cloud.account.availability() {
                 crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild => {
                     "this build has no cloud endpoints pinned"
                 }
@@ -933,20 +933,20 @@ impl Command {
                     "web publishing is currently available in the desktop application"
                 }
                 crate::services::cloud_account::CloudAccountAvailability::Native => {
-                    if app.cloud_account.snapshot().signed_in() {
+                    if app.cloud.account.snapshot().signed_in() {
                         "the signed-in plan does not include cloud publishing"
                     } else {
                         "sign in to RSpice Cloud from the Account console"
                     }
                 }
             },
-            Self::LiveSession => match app.cloud_account.availability() {
+            Self::LiveSession => match app.cloud.account.availability() {
                 crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild => {
                     "this build has no cloud endpoints pinned"
                 }
                 crate::services::cloud_account::CloudAccountAvailability::Native
                 | crate::services::cloud_account::CloudAccountAvailability::Browser => {
-                    if app.cloud_account.snapshot().signed_in() {
+                    if app.cloud.account.snapshot().signed_in() {
                         "the signed-in seat is not licensed for live collaboration"
                     } else {
                         "sign in to RSpice Cloud from the Account console"

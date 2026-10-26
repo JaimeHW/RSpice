@@ -1200,7 +1200,7 @@ fn a_grey_run_row_says_a_run_is_already_in_progress() {
 fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
     let app = title_test_app();
     assert_eq!(
-        app.cloud_account.availability(),
+        app.cloud.account.availability(),
         crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild,
         "the test build pins no cloud endpoints"
     );

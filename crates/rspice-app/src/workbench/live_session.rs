@@ -187,6 +187,15 @@ struct PendingRunRequest {
     requested_at: Instant,
 }
 
+/// What the cloud feature runs, held by the application beside its state:
+/// the account session boundary (sign-in, entitlements, license leases) and
+/// the live-session engine that drains it each frame (document sync, write
+/// leases and presence over the relay port the account hands out).
+pub(crate) struct CloudHandles {
+    pub(crate) account: CloudAccountService,
+    pub(crate) live_session: LiveSessionEngine,
+}
+
 /// The per-frame live-session pump. Owned by the application shell right
 /// next to the cloud account service it drains.
 pub(crate) struct LiveSessionEngine {

@@ -53,10 +53,10 @@ impl Command {
             }
             Self::PublishToWeb => {
                 matches!(
-                    app.cloud_account.availability(),
+                    app.cloud.account.availability(),
                     crate::services::cloud_account::CloudAccountAvailability::Native
                 ) && app
-                    .cloud_account
+                    .cloud.account
                     .snapshot()
                     .cloud_feature_enabled(crate::services::cloud_account::CLOUD_PUBLISHING_FEATURE)
             }
@@ -64,10 +64,10 @@ impl Command {
             // code from any state — so the command never requires one.
             Self::LiveSession => {
                 matches!(
-                    app.cloud_account.availability(),
+                    app.cloud.account.availability(),
                     crate::services::cloud_account::CloudAccountAvailability::Native
                         | crate::services::cloud_account::CloudAccountAvailability::Browser
-                ) && app.cloud_account.snapshot().cloud_feature_enabled(
+                ) && app.cloud.account.snapshot().cloud_feature_enabled(
                     crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
                 )
             }

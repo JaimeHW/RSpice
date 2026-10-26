@@ -291,15 +291,13 @@ pub struct RSpiceApp {
     /// Project identity currently authorized to own the process/worker. Any
     /// identity change terminates the worker before another event is polled.
     pub(crate) automation_runtime_project_id: crate::product::ProjectId,
-    /// Cloud account session boundary (sign-in, entitlements, license leases).
-    pub(crate) cloud_account: crate::services::cloud_account::CloudAccountService,
+    /// What the cloud feature runs: the account session boundary and the
+    /// live-session engine that drains it.
+    pub(crate) cloud: crate::workbench::live_session::CloudHandles,
     /// Distributed model packs: the verified catalog, what is installed, and
     /// the store a background install writes through. It is outside persisted
     /// state because it describes this machine, not this project.
     pub(crate) model_hub: crate::services::model_hub::ModelHubService,
-    /// Live-session engine: document sync, write leases, and presence over
-    /// the relay port the cloud service hands out.
-    pub(crate) live_session: crate::workbench::live_session::LiveSessionEngine,
     /// File workflow IO backend (native in production, injectable in tests).
     pub(crate) file_workflow_io: Box<dyn crate::io::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
@@ -408,13 +406,15 @@ impl RSpiceApp {
             #[cfg(target_arch = "wasm32")]
             automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
             automation_runtime_project_id,
-            cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            cloud: crate::workbench::live_session::CloudHandles {
+                account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+                live_session: crate::workbench::live_session::LiveSessionEngine::default(),
+            },
             // A test opens no real pack store: doing so would make every test
             // read and write this developer's application-data directory.
             model_hub: crate::services::model_hub::ModelHubService::unavailable(
                 "This test instance runs without a model-pack store.",
             ),
-            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
             export_workflow_io: Box::new(
                 crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
@@ -576,9 +576,12 @@ impl RSpiceApp {
             #[cfg(target_arch = "wasm32")]
             automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
             automation_runtime_project_id,
-            cloud_account: crate::services::cloud_account::CloudAccountService::new(Some(
-                cc.egui_ctx.clone(),
-            )),
+            cloud: crate::workbench::live_session::CloudHandles {
+                account: crate::services::cloud_account::CloudAccountService::new(Some(
+                    cc.egui_ctx.clone(),
+                )),
+                live_session: crate::workbench::live_session::LiveSessionEngine::default(),
+            },
             // Opening sweeps whatever a killed install left behind. A failure
             // here is recorded as a reason and nothing else: a machine that
             // cannot store packs still edits, simulates, and saves. The hub
@@ -587,7 +590,6 @@ impl RSpiceApp {
             model_hub: crate::services::model_hub::ModelHubService::open(
                 &crate::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider,
             ),
-            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::io::NativeFileWorkflowIo,
             ),
@@ -1033,21 +1035,21 @@ impl eframe::App for RSpiceApp {
             });
         }
         self.prepare_frame(&ctx);
-        if let Some(reason) = self.cloud_account.poll_for_lost_session() {
+        if let Some(reason) = self.cloud.account.poll_for_lost_session() {
             self.state
                 .report_warning("Signed out of RSpice Cloud", reason);
         }
-        if let Some(refusal) = self.cloud_account.take_local_error() {
+        if let Some(refusal) = self.cloud.account.take_local_error() {
             self.state.prompt(refusal);
         }
-        if let Some(failure) = self.cloud_account.take_storage_failure() {
+        if let Some(failure) = self.cloud.account.take_storage_failure() {
             self.state.record(
                 crate::diagnostics::LogSeverity::Error,
                 crate::diagnostics::LogSource::Studio,
                 failure,
             );
         }
-        if let Some(url) = self.cloud_account.take_browser_request() {
+        if let Some(url) = self.cloud.account.take_browser_request() {
             #[cfg(not(target_arch = "wasm32"))]
             ctx.open_url(egui::OpenUrl::new_tab(url));
             #[cfg(target_arch = "wasm32")]
@@ -1063,8 +1065,9 @@ impl eframe::App for RSpiceApp {
             }
         }
         self.record_publish_receipt();
-        self.live_session
-            .pump(&mut self.state, &mut self.cloud_account);
+        self.cloud
+            .live_session
+            .pump(&mut self.state, &mut self.cloud.account);
         crate::workbench::framework::requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,

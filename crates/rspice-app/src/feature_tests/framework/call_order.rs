@@ -41,16 +41,16 @@ const UI: &[Step] = &[
     (
         "6",
         &[
-            "self.cloud_account.poll_for_lost_session()",
-            "self.cloud_account.take_local_error()",
-            "self.cloud_account.take_storage_failure()",
-            "self.cloud_account.take_browser_request()",
+            "self.cloud.account.poll_for_lost_session()",
+            "self.cloud.account.take_local_error()",
+            "self.cloud.account.take_storage_failure()",
+            "self.cloud.account.take_browser_request()",
         ],
     ),
     ("7", &["self.record_publish_receipt()"]),
     (
         "8",
-        &["self.live_session.pump(&mut self.state, &mut self.cloud_account)"],
+        &["self.cloud.live_session.pump(&mut self.state, &mut self.cloud.account)"],
     ),
     (
         "9",

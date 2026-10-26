@@ -511,12 +511,12 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
         AccountAction::ActivateLicense | AccountAction::ManageLicense => {
             app.open_license_dialog();
         }
-        AccountAction::SignIn => app.cloud_account.sign_in(),
-        AccountAction::ReopenSignInPage => app.cloud_account.reopen_sign_in_page(),
-        AccountAction::CancelSignIn => app.cloud_account.cancel_sign_in(),
-        AccountAction::SignOut => app.cloud_account.sign_out(),
-        AccountAction::RefreshSession => app.cloud_account.refresh(),
-        AccountAction::RevokeLease(lease_id) => app.cloud_account.revoke_lease(lease_id),
+        AccountAction::SignIn => app.cloud.account.sign_in(),
+        AccountAction::ReopenSignInPage => app.cloud.account.reopen_sign_in_page(),
+        AccountAction::CancelSignIn => app.cloud.account.cancel_sign_in(),
+        AccountAction::SignOut => app.cloud.account.sign_out(),
+        AccountAction::RefreshSession => app.cloud.account.refresh(),
+        AccountAction::RevokeLease(lease_id) => app.cloud.account.revoke_lease(lease_id),
         AccountAction::LegalPrivacy => Command::LegalPrivacy.execute(app),
         AccountAction::SupportBundle => Command::SupportBundle.execute(app),
         AccountAction::HelpCenter => Command::HelpCenter.execute(app),
@@ -552,8 +552,8 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     let model = AccountConsoleModel::project(
         app.state.cloud.license.as_ref(),
-        app.cloud_account.snapshot(),
-        app.cloud_account.availability(),
+        app.cloud.account.snapshot(),
+        app.cloud.account.availability(),
     );
     let mut requested_action = None;
     let choice = Dialog::new(ACCOUNT_TITLE, "Close")
@@ -1553,7 +1553,7 @@ mod tests {
         ] {
             execute_action(&mut cloud_app, action);
         }
-        assert!(!cloud_app.cloud_account.snapshot().signed_in());
+        assert!(!cloud_app.cloud.account.snapshot().signed_in());
     }
 
     /// Draw the console for `app` at `size` and collect every painted string,
@@ -1615,7 +1615,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn signed_in_app_with(snapshot: CloudSessionSnapshot) -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
-        app.cloud_account = crate::services::cloud_account::CloudAccountService::with_snapshot(
+        app.cloud.account = crate::services::cloud_account::CloudAccountService::with_snapshot(
             CloudAccountAvailability::Native,
             snapshot,
         );

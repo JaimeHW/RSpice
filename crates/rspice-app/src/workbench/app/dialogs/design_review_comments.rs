@@ -276,7 +276,7 @@ impl RSpiceApp {
     /// The name a reply, a resolution and "My assignments" use for the user.
     fn review_actor(&self) -> String {
         crate::workbench::user_identity::user_display_name(
-            self.cloud_account.snapshot(),
+            self.cloud.account.snapshot(),
             self.state.cloud.license.as_ref(),
         )
     }

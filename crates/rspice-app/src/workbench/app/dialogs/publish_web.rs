@@ -81,17 +81,19 @@ impl RSpiceApp {
     /// as the default author credit. No-op unless this build can publish.
     pub(crate) fn open_publish_web_dialog(&mut self) {
         if !matches!(
-            self.cloud_account.availability(),
+            self.cloud.account.availability(),
             CloudAccountAvailability::Native
         ) || !self
-            .cloud_account
+            .cloud
+            .account
             .snapshot()
             .cloud_feature_enabled(CLOUD_PUBLISHING_FEATURE)
         {
             return;
         }
         let author = self
-            .cloud_account
+            .cloud
+            .account
             .snapshot()
             .principal
             .as_ref()
@@ -136,7 +138,8 @@ impl RSpiceApp {
             .project
             .cloud_publication()
         {
-            self.cloud_account
+            self.cloud
+                .account
                 .refresh_publications(binding.circuit_id().to_owned());
         }
     }
@@ -151,9 +154,9 @@ impl RSpiceApp {
         }
 
         // Server-side facts, cloned before the body borrows app state.
-        let publish_state = self.cloud_account.snapshot().publish.clone();
-        let publications = self.cloud_account.snapshot().publications.clone();
-        let workspaces = self.cloud_account.snapshot().workspaces.clone();
+        let publish_state = self.cloud.account.snapshot().publish.clone();
+        let publications = self.cloud.account.snapshot().publications.clone();
+        let workspaces = self.cloud.account.snapshot().workspaces.clone();
         let binding = self
             .state
             .model
@@ -361,7 +364,7 @@ impl RSpiceApp {
     /// closed dialog never loses the binding, or the failure.
     pub(in crate::workbench) fn record_publish_receipt(&mut self) {
         self.report_unwatched_publish_failure();
-        let Some(receipt) = self.cloud_account.take_publish_receipt() else {
+        let Some(receipt) = self.cloud.account.take_publish_receipt() else {
             return;
         };
         match crate::state::ProjectCloudPublicationBinding::new(
@@ -413,7 +416,7 @@ impl RSpiceApp {
         if dialog.open || !dialog.submitted {
             return;
         }
-        let Some(PublishState::Failed { message }) = &self.cloud_account.snapshot().publish else {
+        let Some(PublishState::Failed { message }) = &self.cloud.account.snapshot().publish else {
             return;
         };
         let message = message.clone();
@@ -462,7 +465,7 @@ impl RSpiceApp {
             });
         match built {
             Ok(snapshot_bytes) => {
-                self.cloud_account.publish_snapshot(PublishRequest {
+                self.cloud.account.publish_snapshot(PublishRequest {
                     target,
                     title,
                     description,
@@ -1051,7 +1054,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.cloud_account = failed("The page could not be rendered.");
+        app.cloud.account = failed("The page could not be rendered.");
         app.state.cloud.publish_web.open = true;
         app.state.cloud.publish_web.submitted = true;
         app.record_publish_receipt();

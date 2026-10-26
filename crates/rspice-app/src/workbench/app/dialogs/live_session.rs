@@ -61,16 +61,17 @@ impl RSpiceApp {
     /// this build reaches the cloud and the seat carries the entitlement.
     pub(crate) fn open_live_session_dialog(&mut self) {
         if !matches!(
-            self.cloud_account.availability(),
+            self.cloud.account.availability(),
             CloudAccountAvailability::Native | CloudAccountAvailability::Browser
         ) || !self
-            .cloud_account
+            .cloud
+            .account
             .snapshot()
             .cloud_feature_enabled(LIVE_COLLABORATION_FEATURE)
         {
             return;
         }
-        let policy_draft = match self.cloud_account.snapshot().live_session.as_ref() {
+        let policy_draft = match self.cloud.account.snapshot().live_session.as_ref() {
             Some(LiveSessionState::Hosting(summary)) => Some(summary.policy),
             _ => None,
         };
@@ -80,8 +81,8 @@ impl RSpiceApp {
             ..Default::default()
         };
         // Freshen the roster and clear any stale notice before rendering.
-        if self.cloud_account.snapshot().live_session.is_some() {
-            self.cloud_account.refresh_live_session();
+        if self.cloud.account.snapshot().live_session.is_some() {
+            self.cloud.account.refresh_live_session();
         }
     }
 
@@ -90,7 +91,7 @@ impl RSpiceApp {
             return;
         }
 
-        let session = self.cloud_account.snapshot().live_session.clone();
+        let session = self.cloud.account.snapshot().live_session.clone();
         let mirroring = self.state.model.live_write_locks.mirror;
         let circuit_id = self
             .state
@@ -101,9 +102,9 @@ impl RSpiceApp {
             .cloud_publication()
             .map(|binding| binding.circuit_id().to_owned());
         let project_open = self.state.platform.project_lifecycle.is_open();
-        let incompatible_peer = self.live_session.incompatible_peer_seen();
-        let host_run: Option<String> = self.live_session.guest_run_status().map(describe_run);
-        let pending_run_requests = self.live_session.pending_run_requests();
+        let incompatible_peer = self.cloud.live_session.incompatible_peer_seen();
+        let host_run: Option<String> = self.cloud.live_session.guest_run_status().map(describe_run);
+        let pending_run_requests = self.cloud.live_session.pending_run_requests();
 
         // Resolve the dialog chrome for the current lifecycle state.
         let (title, primary, primary_enabled, secondary): (String, String, bool, Option<&str>) =
@@ -246,21 +247,24 @@ impl RSpiceApp {
 
         for action in actions {
             match action {
-                LiveDialogAction::Join(code) => self.cloud_account.join_live_session(code),
+                LiveDialogAction::Join(code) => self.cloud.account.join_live_session(code),
                 LiveDialogAction::CopyCode(code) => ctx.copy_text(code),
-                LiveDialogAction::RotateCode => self.cloud_account.regenerate_live_session_code(),
+                LiveDialogAction::RotateCode => self.cloud.account.regenerate_live_session_code(),
                 LiveDialogAction::Approve(principal_id) => self
-                    .cloud_account
+                    .cloud
+                    .account
                     .approve_live_session_participant(principal_id),
                 LiveDialogAction::SetEditor(principal_id, editor) => self
-                    .cloud_account
+                    .cloud
+                    .account
                     .set_live_session_participant_editor(principal_id, editor),
                 LiveDialogAction::Remove(principal_id) => self
-                    .cloud_account
+                    .cloud
+                    .account
                     .remove_live_session_participant(principal_id),
-                LiveDialogAction::RequestHostRun => self.live_session.request_run(),
+                LiveDialogAction::RequestHostRun => self.cloud.live_session.request_run(),
                 LiveDialogAction::ApproveHostRun(sender) => {
-                    if self.live_session.approve_run_request(sender) {
+                    if self.cloud.live_session.approve_run_request(sender) {
                         // Dialogs render after the frame loop, so this request
                         // is served on the next pass. Ask for one rather than
                         // waiting on the next inbound relay message.
@@ -269,7 +273,7 @@ impl RSpiceApp {
                     }
                 }
                 LiveDialogAction::DenyHostRun(sender) => {
-                    self.live_session.deny_run_request(sender);
+                    self.cloud.live_session.deny_run_request(sender);
                 }
             }
         }
@@ -282,10 +286,10 @@ impl RSpiceApp {
                 self.state.cloud.live_session.open = false;
             }
             DialogChoice::Secondary => match &session {
-                Some(LiveSessionState::Hosting(_)) => self.cloud_account.end_live_session(),
+                Some(LiveSessionState::Hosting(_)) => self.cloud.account.end_live_session(),
                 Some(LiveSessionState::AwaitingApproval(_))
                 | Some(LiveSessionState::Participating(_)) => {
-                    self.cloud_account.leave_live_session();
+                    self.cloud.account.leave_live_session();
                 }
                 _ => {}
             },
@@ -297,11 +301,11 @@ impl RSpiceApp {
                         .live_session
                         .policy_draft
                         .unwrap_or_else(default_policy);
-                    self.cloud_account.start_live_session(policy, circuit_id);
+                    self.cloud.account.start_live_session(policy, circuit_id);
                 }
                 Some(LiveSessionState::Hosting(_)) => {
                     if let Some(policy) = self.state.cloud.live_session.policy_draft {
-                        self.cloud_account.apply_live_session_policy(policy);
+                        self.cloud.account.apply_live_session_policy(policy);
                     }
                 }
                 Some(LiveSessionState::Participating(_)) => {
@@ -309,7 +313,9 @@ impl RSpiceApp {
                         self.state.cloud.live_session.open = false;
                     } else {
                         #[cfg(not(target_arch = "wasm32"))]
-                        self.live_session.request_mirror_entry(&mut self.state);
+                        self.cloud
+                            .live_session
+                            .request_mirror_entry(&mut self.state);
                     }
                 }
                 _ => {}

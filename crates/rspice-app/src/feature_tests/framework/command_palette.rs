@@ -276,11 +276,13 @@ fn test_app() -> RSpiceApp {
         simulation_controller: crate::simulation::SimulationController::new(),
         automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
         automation_runtime_project_id,
-        cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+        cloud: crate::workbench::live_session::CloudHandles {
+            account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
+        },
         model_hub: crate::services::model_hub::ModelHubService::unavailable(
             "This test instance runs without a model-pack store.",
         ),
-        live_session: crate::workbench::live_session::LiveSessionEngine::default(),
         file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
         export_workflow_io: Box::new(
             crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,

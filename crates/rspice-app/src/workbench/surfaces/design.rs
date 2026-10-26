@@ -65,6 +65,7 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
         app.state.model.workspace.content.active_key()
     );
     let cursors: Vec<_> = app
+        .cloud
         .live_session
         .peers()
         .filter_map(|peer| match peer.cursor.as_ref() {
@@ -74,7 +75,7 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
                 y,
             }) if peer_doc == &doc && x.is_finite() && y.is_finite() => Some((
                 peer.identity,
-                app.live_session.display_name(&peer.identity),
+                app.cloud.live_session.display_name(&peer.identity),
                 *x,
                 *y,
             )),
