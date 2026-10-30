@@ -119,7 +119,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-struct PendingBrowserPublication {
+pub struct PendingBrowserPublication {
     plan: std::sync::Arc<HardcopyPlan>,
     opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
     metadata: HardcopySceneMetadata,
@@ -1518,7 +1518,7 @@ pub fn current_metadata(parts: &HardcopyParts<'_>) -> Result<HardcopySceneMetada
 }
 
 #[cfg(target_arch = "wasm32")]
-fn begin_publication_authentication(
+pub fn begin_publication_authentication(
     parts: &mut HardcopyParts<'_>,
     pending: PendingBrowserPublication,
 ) -> Result<(), String> {
