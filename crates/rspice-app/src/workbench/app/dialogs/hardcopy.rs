@@ -253,7 +253,7 @@ impl From<HardcopyRenderError> for BlockedSetup {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum HardcopyDialogError {
+pub enum HardcopyDialogError {
     #[error(transparent)]
     Contract(#[from] HardcopyError),
     #[error("select a printer and resolve its current capabilities before printing")]
