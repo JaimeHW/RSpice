@@ -323,6 +323,9 @@ pub struct Vdmos {
     gmb_prev: Value,
     id_eq: Value,
     limiter_applied: bool,
+    /// The last `update` began an iterate that no second `update` has seen
+    /// yet (see `update`).
+    update_open: bool,
     has_branch_history: bool,
     /// The deck marked this instance `OFF`.
     initial_off: bool,
@@ -497,6 +500,7 @@ impl Vdmos {
             gmb_prev: Value::NAN,
             id_eq: Value::NAN,
             limiter_applied: false,
+            update_open: false,
             has_branch_history: false,
             initial_off: false,
             initial_off_seed_pending: true,
@@ -2970,17 +2974,6 @@ impl Vdmos {
 
 impl NonlinearDevice for Vdmos {
     fn update(&mut self, voltages: &[Value]) {
-        self.vgs_prev = self.prev_vgs;
-        self.vds_prev = self.prev_vds;
-        self.vbs_prev = self.prev_vbs;
-        self.eval_vgs_prev = self.eval_vgs;
-        self.eval_vds_prev = self.eval_vds;
-        self.eval_vbs_prev = self.eval_vbs;
-        self.id_prev = self.id;
-        self.gm_prev = self.gm;
-        self.gds_prev = self.gds;
-        self.gmb_prev = self.gmb;
-
         let g = self.gate;
         let b = self.bulk;
         let di = self.drain_int.unwrap_or(self.drain);
@@ -2994,6 +2987,32 @@ impl NonlinearDevice for Vdmos {
         let vgs = vg - vsi;
         let vds = vdi - vsi;
         let vbs = vb - vsi;
+        // One Newton iterate reaches `update` twice, after its solve and again
+        // before its stamp. The device limits each load once against the
+        // previous iterate, so the second pass of a limited iterate keeps the
+        // history the first pass started from and limits against it again
+        // instead of compounding DEVfetlim/DEVlimvds/DEVpnjlim on its own
+        // output. A third update at the same raw voltages is the next
+        // iteration, which a solve that repeats them still has to advance.
+        let same_iterate = std::mem::take(&mut self.update_open)
+            && self.limiter_applied
+            && self.has_branch_history
+            && !(self.initial_off && self.initial_off_seed_pending)
+            && [vgs, vds, vbs].map(Value::to_bits)
+                == [self.prev_vgs, self.prev_vds, self.prev_vbs].map(Value::to_bits);
+        if !same_iterate {
+            self.vgs_prev = self.prev_vgs;
+            self.vds_prev = self.prev_vds;
+            self.vbs_prev = self.prev_vbs;
+            self.eval_vgs_prev = self.eval_vgs;
+            self.eval_vds_prev = self.eval_vds;
+            self.eval_vbs_prev = self.eval_vbs;
+            self.id_prev = self.id;
+            self.gm_prev = self.gm;
+            self.gds_prev = self.gds;
+            self.gmb_prev = self.gmb;
+        }
+        self.update_open = !same_iterate;
         // The OFF startup state owns the device only until Newton produces a
         // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
         // ngspice's first load. The operating-point seed here is primed and
@@ -3590,5 +3609,33 @@ mod tests {
         let d1_vds = vdmos.d1_charge_branch_voltage_at(&voltages);
 
         assert_eq!(d1_vds, -0.5);
+    }
+
+    #[test]
+    fn a_limited_iterate_updated_twice_is_limited_once() {
+        let mut vdmos = xyce_level18_test_device(VdmosType::NVdmos);
+        vdmos.update(&[0.0; 4]);
+
+        // A 10 V gate step out of cutoff, which DEVfetlim holds at vto + 0.5.
+        let iterate = [1.0, 10.0, 0.0, 1.0];
+        let mut once = vdmos.clone();
+        once.update(&iterate);
+        assert!(once.limiter_applied);
+        let once = (once.eval_vgs, once.eval_vds, once.eval_vbs);
+
+        // The engine updates an iterate after its solve and again before it
+        // stamps it; both passes see one limiting.
+        vdmos.update(&iterate);
+        vdmos.update(&iterate);
+        assert_eq!((vdmos.eval_vgs, vdmos.eval_vds, vdmos.eval_vbs), once);
+
+        // A third update at the same raw voltages is the next iteration,
+        // which limits again from where this one stopped.
+        vdmos.update(&iterate);
+        assert!(
+            vdmos.eval_vgs > once.0,
+            "the next iteration advances: {}",
+            vdmos.eval_vgs
+        );
     }
 }
