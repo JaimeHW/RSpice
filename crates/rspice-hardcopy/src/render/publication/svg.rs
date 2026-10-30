@@ -230,7 +230,7 @@ pub(super) fn write_svg_primitive(
                 svg_color(resolve_color(plan, *color)),
             )
             .expect("write to string");
-            escape_xml_into(text, output);
+            write_svg_text_runs(output, *font, text);
             output.push_str("</text>");
         }
         ScenePrimitive::ClippedGroup {
@@ -381,11 +381,42 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
 }
 
 pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
-    match font {
-        SceneFont::Sans => (PUBLICATION_SANS, "400"),
-        SceneFont::SansSemibold => (PUBLICATION_SANS, "600"),
-        SceneFont::Monospace => (PUBLICATION_MONO, "400"),
-        SceneFont::MonospaceMedium => (PUBLICATION_MONO, "500"),
+    svg_face(font.fallback_chain()[0])
+}
+
+/// The family and weight a face is published under.
+pub(super) fn svg_face(face: PrintFace) -> (&'static str, &'static str) {
+    match face {
+        PrintFace::SansRegular => (PUBLICATION_SANS, "400"),
+        PrintFace::SansSemibold => (PUBLICATION_SANS, "600"),
+        PrintFace::MonoRegular => (PUBLICATION_MONO, "400"),
+        PrintFace::MonoMedium => (PUBLICATION_MONO, "500"),
+    }
+}
+
+/// Write `text` as `font` letters it. A run in the element's own face is
+/// character data; a run another face carries is a `tspan` naming that face,
+/// so every renderer letters each glyph from the face the chain chose rather
+/// than from whichever face its own fallback finds first.
+pub(super) fn write_svg_text_runs(output: &mut String, font: SceneFont, text: &str) {
+    let Ok(faces) = PrintFaces::get() else {
+        escape_xml_into(text, output);
+        return;
+    };
+    let own = font.fallback_chain()[0];
+    for run in faces.runs(font, text) {
+        if run.face == own {
+            escape_xml_into(&run.text, output);
+        } else {
+            let (family, weight) = svg_face(run.face);
+            write!(
+                output,
+                "<tspan font-family=\"{family}\" font-weight=\"{weight}\">"
+            )
+            .expect("write to string");
+            escape_xml_into(&run.text, output);
+            output.push_str("</tspan>");
+        }
     }
 }
 
@@ -421,14 +452,16 @@ pub(super) fn write_svg_decorations(
             printable.x.micrometres()
         )
         .expect("write to string");
-        escape_xml_into(scene.metadata.title(), output);
+        write_svg_text_runs(output, SceneFont::SansSemibold, scene.metadata.title());
         output.push_str("</text>");
         write!(
             output,
             "<text x=\"{page_right}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"end\">"
         )
         .expect("write to string");
-        escape_xml_into(
+        write_svg_text_runs(
+            output,
+            SceneFont::Monospace,
             &format!(
                 "rev {} · page {} / {} · {}",
                 plan.source().revision().get(),
@@ -436,7 +469,6 @@ pub(super) fn write_svg_decorations(
                 plan.pagination().pages().len(),
                 page.coordinate()
             ),
-            output,
         );
         output.push_str("</text>");
         if let Some(line) = scene.metadata.header_lines.first() {
@@ -446,7 +478,7 @@ pub(super) fn write_svg_decorations(
                 "<text x=\"{center}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"middle\">"
             )
             .expect("write to string");
-            escape_xml_into(line, output);
+            write_svg_text_runs(output, SceneFont::Sans, line);
             output.push_str("</text>");
         }
     }
@@ -457,7 +489,7 @@ pub(super) fn write_svg_decorations(
             row.x_um, row.baseline_um
         )
         .expect("write to string");
-        escape_xml_into(&row.text, output);
+        write_svg_text_runs(output, SceneFont::Monospace, &row.text);
         output.push_str("</text>");
     }
     if let Some(legend) = legend_layout(plan, scene, page)? {
@@ -500,7 +532,7 @@ pub(super) fn write_svg_decorations(
                 slot.origin.0, slot.origin.1
             )
             .expect("write to string");
-            escape_xml_into(&slot.label, output);
+            write_svg_text_runs(output, SceneFont::Sans, &slot.label);
             output.push_str("</text>");
         }
         output.push_str("</g>");
@@ -568,7 +600,7 @@ pub(super) fn write_svg_watermark(
         "<text x=\"{cx}\" y=\"{cy}\" fill=\"{ink}\" fill-opacity=\"0.16\" font-family=\"{PUBLICATION_SANS}\" font-weight=\"600\" font-size=\"{size}\" text-anchor=\"middle\" transform=\"rotate(-35 {cx} {cy})\">"
     )
     .expect("write to string");
-    escape_xml_into(text, output);
+    write_svg_text_runs(output, SceneFont::SansSemibold, text);
     output.push_str("</text>");
     let _ = scene;
 }

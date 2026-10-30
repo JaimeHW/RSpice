@@ -8,30 +8,25 @@
 
 use super::*;
 
+/// One PDF font per bundled face, and the runs a scene font letters in.
 pub(super) struct PdfFonts {
-    pub(super) sans: Font,
-    pub(super) semibold: Font,
-    pub(super) mono: Font,
-    pub(super) mono_medium: Font,
+    faces: &'static PrintFaces,
+    fonts: Vec<Font>,
 }
 
 impl PdfFonts {
     fn load() -> Result<Self, HardcopyRenderError> {
         Ok(Self {
-            sans: load_pdf_font(IBM_PLEX_SANS_REGULAR, "IBM Plex Sans Regular")?,
-            semibold: load_pdf_font(IBM_PLEX_SANS_SEMIBOLD, "IBM Plex Sans Semibold")?,
-            mono: load_pdf_font(IBM_PLEX_MONO_REGULAR, "IBM Plex Mono Regular")?,
-            mono_medium: load_pdf_font(IBM_PLEX_MONO_MEDIUM, "IBM Plex Mono Medium")?,
+            faces: PrintFaces::get()?,
+            fonts: PrintFace::ALL
+                .into_iter()
+                .map(|face| load_pdf_font(face.bytes(), face.name()))
+                .collect::<Result<_, _>>()?,
         })
     }
 
-    fn get(&self, font: SceneFont) -> &Font {
-        match font {
-            SceneFont::Sans => &self.sans,
-            SceneFont::SansSemibold => &self.semibold,
-            SceneFont::Monospace => &self.mono,
-            SceneFont::MonospaceMedium => &self.mono_medium,
-        }
+    fn font(&self, face: PrintFace) -> &Font {
+        &self.fonts[face.index()]
     }
 }
 
@@ -533,11 +528,12 @@ pub(super) fn draw_pdf_primitive(
             }
             draw_pdf_text(
                 surface,
+                fonts,
                 (x, y),
                 text,
                 *anchor,
                 PdfTextStyle {
-                    font: fonts.get(*font),
+                    font: *font,
                     size: coordinate_to_points(transform.length(*size)),
                     color: resolve_color(plan, *color),
                     outlined: !plan.setup().render().fonts().preserve_searchable_text(),
@@ -563,20 +559,23 @@ pub(super) fn draw_pdf_primitive(
     Ok(())
 }
 
-struct PdfTextStyle<'a> {
-    font: &'a Font,
+struct PdfTextStyle {
+    font: SceneFont,
     size: f32,
     color: Rgb8,
     outlined: bool,
     opacity: NormalizedF32,
 }
 
+/// Letter `text` run by run, each in the face that carries its glyphs, and
+/// place the whole by its measured advance.
 fn draw_pdf_text(
     surface: &mut krilla::surface::Surface<'_>,
+    fonts: &PdfFonts,
     (mut x, y): (f32, f32),
     text: &str,
     anchor: TextAnchor,
-    style: PdfTextStyle<'_>,
+    style: PdfTextStyle,
 ) {
     let PdfTextStyle {
         font,
@@ -585,22 +584,31 @@ fn draw_pdf_text(
         outlined,
         opacity,
     } = style;
-    let estimated_width = text.chars().count() as f32 * size * 0.55;
+    let runs = fonts.faces.runs(font, text);
+    let em = fonts.faces.units_per_em(font) as f32;
+    let advances = runs
+        .iter()
+        .map(|run| fonts.faces.run_advance_units(font, run) as f32 * size / em)
+        .collect::<Vec<_>>();
+    let width: f32 = advances.iter().sum();
     match anchor {
         TextAnchor::Start => {}
-        TextAnchor::Middle => x -= estimated_width / 2.0,
-        TextAnchor::End => x -= estimated_width,
+        TextAnchor::Middle => x -= width / 2.0,
+        TextAnchor::End => x -= width,
     }
     set_pdf_fill(surface, color, opacity);
     surface.set_stroke(None);
-    surface.draw_text(
-        Point::from_xy(x, y),
-        font.clone(),
-        size,
-        text,
-        outlined,
-        TextDirection::LeftToRight,
-    );
+    for (run, advance) in runs.iter().zip(advances) {
+        surface.draw_text(
+            Point::from_xy(x, y),
+            fonts.font(run.face).clone(),
+            size,
+            &run.text,
+            outlined,
+            TextDirection::LeftToRight,
+        );
+        x += advance;
+    }
 }
 
 pub(super) fn draw_pdf_decorations(
@@ -622,11 +630,12 @@ pub(super) fn draw_pdf_decorations(
         let font_size = um_to_points(DECORATION_TEXT_UM);
         draw_pdf_text(
             surface,
+            fonts,
             (left, baseline),
             scene.metadata.title(),
             TextAnchor::Start,
             PdfTextStyle {
-                font: &fonts.semibold,
+                font: SceneFont::SansSemibold,
                 size: font_size,
                 color: ink,
                 outlined,
@@ -635,6 +644,7 @@ pub(super) fn draw_pdf_decorations(
         );
         draw_pdf_text(
             surface,
+            fonts,
             (right, baseline),
             &format!(
                 "rev {} · page {} / {} · {}",
@@ -645,7 +655,7 @@ pub(super) fn draw_pdf_decorations(
             ),
             TextAnchor::End,
             PdfTextStyle {
-                font: &fonts.mono,
+                font: SceneFont::Monospace,
                 size: font_size,
                 color: secondary,
                 outlined,
@@ -655,11 +665,12 @@ pub(super) fn draw_pdf_decorations(
         if let Some(line) = scene.metadata.header_lines.first() {
             draw_pdf_text(
                 surface,
+                fonts,
                 ((left + right) / 2.0, baseline),
                 line,
                 TextAnchor::Middle,
                 PdfTextStyle {
-                    font: &fonts.sans,
+                    font: SceneFont::Sans,
                     size: font_size,
                     color: secondary,
                     outlined,
@@ -671,11 +682,12 @@ pub(super) fn draw_pdf_decorations(
     for row in provenance_rows(plan, scene, page)? {
         draw_pdf_text(
             surface,
+            fonts,
             (um_to_points(row.x_um), um_to_points(row.baseline_um)),
             &row.text,
             TextAnchor::Start,
             PdfTextStyle {
-                font: &fonts.mono,
+                font: SceneFont::Monospace,
                 size: um_to_points(PROVENANCE_TEXT_UM),
                 color: secondary,
                 outlined,
@@ -759,11 +771,12 @@ pub(super) fn draw_pdf_decorations(
             }
             draw_pdf_text(
                 surface,
+                fonts,
                 (um_to_points(slot.origin.0), um_to_points(slot.origin.1)),
                 &slot.label,
                 TextAnchor::Start,
                 PdfTextStyle {
-                    font: &fonts.sans,
+                    font: SceneFont::Sans,
                     size: um_to_points(LEGEND_TEXT_UM),
                     color: ink,
                     outlined,
@@ -796,11 +809,12 @@ pub(super) fn draw_pdf_watermark(
     surface.push_transform(&Transform::from_rotate_at(-35.0, cx, cy));
     draw_pdf_text(
         surface,
+        fonts,
         (cx, cy),
         text,
         TextAnchor::Middle,
         PdfTextStyle {
-            font: &fonts.semibold,
+            font: SceneFont::SansSemibold,
             size,
             color: resolve_color(plan, SemanticColor::Secondary),
             outlined: !plan.setup().render().fonts().preserve_searchable_text(),
@@ -847,11 +861,12 @@ pub(super) fn draw_pdf_registration_marks(
     }
     draw_pdf_text(
         surface,
+        fonts,
         (um_to_points(left + 2_500), um_to_points(top + 3_000)),
         page.coordinate(),
         TextAnchor::Start,
         PdfTextStyle {
-            font: &fonts.mono,
+            font: SceneFont::Monospace,
             size: um_to_points(2_200),
             color: resolve_color(plan, SemanticColor::Secondary),
             outlined: !plan.setup().render().fonts().preserve_searchable_text(),

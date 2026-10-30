@@ -109,16 +109,13 @@ pub(super) fn legend_layout<'a>(
     let shown = usize::try_from(grid.capacity())
         .unwrap_or(usize::MAX)
         .min(scene.legend.len());
-    let face = FontCoverage::load()?.sans;
-    let units = u64::from(face.units_per_em());
+    let faces = PrintFaces::get()?;
+    let units = faces.units_per_em(SceneFont::Sans);
     let to_um = |value: u64| value.saturating_mul(LEGEND_TEXT_UM).div_ceil(units);
     let to_units = |value: u64| value.saturating_mul(units) / LEGEND_TEXT_UM;
     let measure = |text: &str| -> Result<Vec<(usize, u64)>, HardcopyRenderError> {
         text.grapheme_indices(true)
-            .map(|(offset, grapheme)| {
-                grapheme_width(&face, "IBM Plex Sans Regular", grapheme, "print legend")
-                    .map(|width| (offset, width))
-            })
+            .map(|(offset, grapheme)| Ok((offset, faces.grapheme_width(SceneFont::Sans, grapheme))))
             .collect()
     };
     let labels = page_labels(scene)
@@ -385,17 +382,12 @@ mod tests {
 
     #[test]
     fn a_shortened_label_keeps_its_end_and_where_it_differs() {
-        let face = FontCoverage::load().unwrap().sans;
+        let faces = PrintFaces::get().unwrap();
         let measure = |text: &'static str| MeasuredLabel {
             text,
             graphemes: text
                 .grapheme_indices(true)
-                .map(|(offset, grapheme)| {
-                    (
-                        offset,
-                        grapheme_width(&face, "sans", grapheme, "test").unwrap(),
-                    )
-                })
+                .map(|(offset, grapheme)| (offset, faces.grapheme_width(SceneFont::Sans, grapheme)))
                 .collect(),
         };
         let label = measure("lib/amp/schematic · Main · Wires and junctions");

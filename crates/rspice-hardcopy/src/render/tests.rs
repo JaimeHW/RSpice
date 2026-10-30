@@ -3,6 +3,7 @@
 //! These cases pin semantic-scene compilation, pagination, archival output,
 //! worker transfer, and exact output parity across supported formats.
 
+mod glyph_fallback;
 mod legend;
 mod plot_overlay;
 mod provenance;
@@ -534,46 +535,6 @@ fn scene_validation_rejects_geometry_outside_declared_extent() {
             Vec::new(),
         ),
         Err(HardcopyRenderError::PrimitiveOutsideExtent)
-    ));
-}
-
-#[test]
-fn embedded_fonts_cover_engineering_symbols_and_reject_notdef() {
-    let coverage = FontCoverage::load().unwrap();
-    let glyphs = "Ω µ μ Δ ≥ ≤ ± ° × · √";
-    coverage
-        .validate_text(SceneFont::Sans, glyphs, "engineering glyph")
-        .unwrap();
-    for font in [SceneFont::Monospace] {
-        for glyph in glyphs
-            .chars()
-            .filter(|character| !character.is_whitespace())
-        {
-            match coverage.validate_text(font, &glyph.to_string(), "engineering glyph") {
-                Ok(()) => {}
-                Err(HardcopyRenderError::UnsupportedGlyph { codepoint, context }) => {
-                    assert_eq!(codepoint, glyph as u32);
-                    assert_eq!(context, "engineering glyph");
-                }
-                Err(error) => panic!("unexpected font validation failure: {error}"),
-            }
-        }
-    }
-    for font in [SceneFont::Sans, SceneFont::Monospace] {
-        assert!(matches!(
-            coverage.validate_text(font, "∠", "engineering angle"),
-            Err(HardcopyRenderError::UnsupportedGlyph {
-                codepoint: 0x2220,
-                context: "engineering angle"
-            })
-        ));
-    }
-    assert!(matches!(
-        coverage.validate_text(SceneFont::Sans, "\u{10ffff}", "test"),
-        Err(HardcopyRenderError::UnsupportedGlyph {
-            codepoint: 0x10ffff,
-            context: "test"
-        })
     ));
 }
 

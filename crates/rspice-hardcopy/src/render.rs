@@ -22,9 +22,12 @@ use krilla::paint::{Fill, FillRule, LineCap, LineJoin, Stroke, StrokeDash};
 use krilla::text::{Font, TextDirection};
 use krilla::{Document, SerializeSettings};
 mod compiler;
+mod glyph_runs;
 mod publication;
 
 use compiler::*;
+use glyph_runs::PrintFaces;
+pub use glyph_runs::{GlyphRun, PrintFace, REPLACEMENT_CHARACTER};
 
 use publication::auto_trace_pattern;
 pub use publication::*;
@@ -589,18 +592,8 @@ impl HardcopyScene {
 
     fn validate(&self) -> Result<(), HardcopyRenderError> {
         self.metadata.validate()?;
-        let coverage = FontCoverage::load()?;
-        coverage.validate_text(
-            SceneFont::SansSemibold,
-            &self.metadata.title,
-            "document title",
-        )?;
-        for line in &self.metadata.header_lines {
-            coverage.validate_text(SceneFont::Sans, line, "page header")?;
-        }
-        for line in &self.metadata.provenance_lines {
-            coverage.validate_text(SceneFont::Monospace, line, "page provenance")?;
-        }
+        // Every face parses before any backend letters in one.
+        PrintFaces::get()?;
         if self.primitives.len() > MAX_SCENE_PRIMITIVES {
             return Err(HardcopyRenderError::ResourceLimit {
                 scope: "scene primitives",
@@ -628,11 +621,6 @@ impl HardcopyScene {
             }
             validate_text("aggregate source key", &section.source_key, 1_024)?;
             validate_text("aggregate display name", &section.display_name, 1_024)?;
-            coverage.validate_text(
-                SceneFont::Sans,
-                &section.display_name,
-                "aggregate display name",
-            )?;
             validate_point(section.origin, self.extent)?;
             let section_right = section
                 .origin
@@ -672,7 +660,7 @@ impl HardcopyScene {
         let mut text_bytes = 0_usize;
         let mut vertices = 0_usize;
         for primitive in &self.primitives {
-            validate_primitive(primitive, self.extent, &mut text_bytes, &coverage)?;
+            validate_primitive(primitive, self.extent, &mut text_bytes)?;
             vertices = vertices
                 .checked_add(primitive_vertex_count(primitive))
                 .ok_or(HardcopyRenderError::ResourceLimit {
@@ -688,7 +676,6 @@ impl HardcopyScene {
         }
         for entry in &self.legend {
             validate_text("legend label", &entry.label, 512)?;
-            coverage.validate_text(SceneFont::Sans, &entry.label, "print legend")?;
             text_bytes = text_bytes.checked_add(entry.label.len()).ok_or(
                 HardcopyRenderError::ResourceLimit {
                     scope: "scene text bytes",
@@ -717,51 +704,6 @@ impl HardcopyScene {
     #[must_use]
     pub fn extent(&self) -> ContentExtent {
         self.extent
-    }
-}
-
-struct FontCoverage {
-    sans: ttf_parser::Face<'static>,
-    semibold: ttf_parser::Face<'static>,
-    mono: ttf_parser::Face<'static>,
-    mono_medium: ttf_parser::Face<'static>,
-}
-
-impl FontCoverage {
-    fn load() -> Result<Self, HardcopyRenderError> {
-        Ok(Self {
-            sans: ttf_parser::Face::parse(IBM_PLEX_SANS_REGULAR, 0)
-                .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Sans Regular"))?,
-            semibold: ttf_parser::Face::parse(IBM_PLEX_SANS_SEMIBOLD, 0)
-                .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Sans Semibold"))?,
-            mono: ttf_parser::Face::parse(IBM_PLEX_MONO_REGULAR, 0)
-                .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Mono Regular"))?,
-            mono_medium: ttf_parser::Face::parse(IBM_PLEX_MONO_MEDIUM, 0)
-                .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Mono Medium"))?,
-        })
-    }
-
-    fn validate_text(
-        &self,
-        font: SceneFont,
-        text: &str,
-        context: &'static str,
-    ) -> Result<(), HardcopyRenderError> {
-        let face = match font {
-            SceneFont::Sans => &self.sans,
-            SceneFont::SansSemibold => &self.semibold,
-            SceneFont::Monospace => &self.mono,
-            SceneFont::MonospaceMedium => &self.mono_medium,
-        };
-        for character in text.chars() {
-            if face.glyph_index(character).is_none() {
-                return Err(HardcopyRenderError::UnsupportedGlyph {
-                    codepoint: character as u32,
-                    context,
-                });
-            }
-        }
-        Ok(())
     }
 }
 

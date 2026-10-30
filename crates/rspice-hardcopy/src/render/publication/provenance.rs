@@ -24,7 +24,8 @@ pub(super) fn provenance_rows(
     if !plan.setup().decorations().includes_provenance() {
         return Ok(Vec::new());
     }
-    let face = FontCoverage::load()?.mono;
+    let faces = PrintFaces::get()?;
+    let face = faces.face(PrintFace::MonoRegular);
     let units = u64::from(face.units_per_em());
     let to_um = |value: u64| (value * PROVENANCE_TEXT_UM).div_ceil(units);
     let bounds = face.global_bounding_box();
@@ -76,8 +77,7 @@ pub(super) fn provenance_rows(
             let mut word_break = None;
             let mut advance = 0;
             for (offset, grapheme) in remaining.grapheme_indices(true) {
-                let next = advance
-                    + grapheme_width(&face, "IBM Plex Mono Regular", grapheme, "page provenance")?;
+                let next = advance + faces.grapheme_width(SceneFont::Monospace, grapheme);
                 if next > width_units {
                     break;
                 }
@@ -112,36 +112,4 @@ pub(super) fn provenance_rows(
             baseline_um: first_baseline + index as u64 * pitch,
         })
         .collect())
-}
-
-/// Include glyph overhangs as well as advances. Graphemes stay intact when a
-/// key must wrap; conservative widths also cover decomposed accented names.
-/// The width is in `face`'s font units.
-pub(super) fn grapheme_width(
-    face: &ttf_parser::Face<'_>,
-    font: &'static str,
-    text: &str,
-    context: &'static str,
-) -> Result<u64, HardcopyRenderError> {
-    let mut advance = 0i64;
-    let mut left = 0;
-    let mut right = 0;
-    for character in text.chars() {
-        let glyph = face
-            .glyph_index(character)
-            .ok_or(HardcopyRenderError::UnsupportedGlyph {
-                codepoint: character as u32,
-                context,
-            })?;
-        if let Some(bounds) = face.glyph_bounding_box(glyph) {
-            left = left.min(advance + i64::from(bounds.x_min));
-            right = right.max(advance + i64::from(bounds.x_max));
-        }
-        advance += i64::from(
-            face.glyph_hor_advance(glyph)
-                .ok_or(HardcopyRenderError::InvalidEmbeddedFont(font))?,
-        );
-        right = right.max(advance);
-    }
-    Ok((right - left) as u64)
 }

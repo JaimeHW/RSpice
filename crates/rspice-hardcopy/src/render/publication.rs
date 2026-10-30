@@ -1008,11 +1008,6 @@ pub enum HardcopyRenderError {
     InvalidCrossHatch,
     #[error("text size must be between 1 micrometre and 100 millimetres")]
     InvalidTextSize,
-    #[error("embedded hardcopy font has no glyph for U+{codepoint:04X} in {context}")]
-    UnsupportedGlyph {
-        codepoint: u32,
-        context: &'static str,
-    },
     #[error("hardcopy scene extent does not match the immutable render plan")]
     ExtentMismatch,
     #[error("aggregate scene sections do not match the immutable pagination plan")]
@@ -1734,26 +1729,11 @@ fn page_is_registered(plan: &HardcopyPlan, page: &PreviewPage) -> bool {
             .is_some()
 }
 
-fn validate_plan_font_coverage(plan: &HardcopyPlan) -> Result<(), HardcopyRenderError> {
-    let coverage = FontCoverage::load()?;
-    if let Watermark::Custom(text) = plan.setup().decorations().watermark() {
-        coverage.validate_text(SceneFont::SansSemibold, text, "custom watermark")?;
-    }
-    // Validate renderer-authored punctuation up front. Authored engineering
-    // symbols are checked against their selected face as each scene text node
-    // is validated; unsupported symbols fail precisely instead of making all
-    // unrelated publications unavailable.
-    const FIXED_PUBLICATION_GLYPHS: &str = "rev · page / source plan";
-    coverage.validate_text(
-        SceneFont::Sans,
-        FIXED_PUBLICATION_GLYPHS,
-        "fixed publication text",
-    )?;
-    coverage.validate_text(
-        SceneFont::Monospace,
-        FIXED_PUBLICATION_GLYPHS,
-        "fixed publication text",
-    )
+/// Every face a plan can letter in parses. Text itself is never refused for
+/// its glyphs: a face falls back per glyph, and what no face carries prints
+/// as the canvas's replacement.
+fn validate_plan_font_coverage(_plan: &HardcopyPlan) -> Result<(), HardcopyRenderError> {
+    PrintFaces::get().map(|_| ())
 }
 
 fn validate_decoration_capacity(
@@ -1930,7 +1910,6 @@ pub(super) fn validate_primitive(
     primitive: &ScenePrimitive,
     extent: ContentExtent,
     text_bytes: &mut usize,
-    coverage: &FontCoverage,
 ) -> Result<(), HardcopyRenderError> {
     match primitive {
         ScenePrimitive::Line { from, to, stroke } => {
@@ -1997,7 +1976,6 @@ pub(super) fn validate_primitive(
         } => {
             validate_rect(*rect, extent)?;
             validate_text("figure alternative text", alternative_text, 16_384)?;
-            coverage.validate_text(SceneFont::Sans, alternative_text, "figure alternative text")?;
             if png.is_empty() || png.len() > MAX_EMBEDDED_FIGURE_BYTES {
                 return Err(HardcopyRenderError::ResourceLimit {
                     scope: "embedded figure bytes",
@@ -2018,18 +1996,13 @@ pub(super) fn validate_primitive(
             Ok(())
         }
         ScenePrimitive::Text {
-            origin,
-            text,
-            font,
-            size,
-            ..
+            origin, text, size, ..
         } => {
             validate_point(*origin, extent)?;
             validate_text("scene text", text, 65_536)?;
             if *size == Length::ZERO || size.micrometres() > 100_000 {
                 return Err(HardcopyRenderError::InvalidTextSize);
             }
-            coverage.validate_text(*font, text, "scene text")?;
             *text_bytes =
                 text_bytes
                     .checked_add(text.len())
@@ -2083,7 +2056,7 @@ pub(super) fn validate_primitive(
                 if matches!(primitive, ScenePrimitive::ClippedGroup { .. }) {
                     return Err(HardcopyRenderError::InvalidClippedScene);
                 }
-                validate_primitive(primitive, *source_extent, text_bytes, coverage)?;
+                validate_primitive(primitive, *source_extent, text_bytes)?;
             }
             Ok(())
         }
