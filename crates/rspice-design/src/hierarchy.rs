@@ -897,9 +897,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 HierarchyBindingStatus::Unresolved,
                 resolution_error.or_else(|| {
                     Some(format!(
-                        "no executable master resolved for {} using {}",
+                        "{} has no {} view",
                         hierarchy_display_path(&requested),
-                        search_order.join(" → ")
+                        view_alternatives(&search_order)
                     ))
                 }),
             ),

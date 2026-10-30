@@ -332,7 +332,14 @@ pub(in crate::workbench) fn validate_candidate_configuration(
             &state.model.workspace.content.active_view,
             &state.model.schematic,
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| match error {
+            // Each unbound instance's own sentence names its cell and the
+            // views it was searched for; nothing needs to wrap them.
+            rspice_design::projection::ConfigurationExecutionPlanError::Unresolved(unbound) => {
+                format!("{unbound}.")
+            }
+            error => error.to_string(),
+        })?;
     projection
         .connectivity()
         .validate()
@@ -494,6 +501,36 @@ mod tests {
             project_revision
         );
         assert!(app.state.project.configuration.is_dirty(&before));
+    }
+
+    /// An apply that leaves an instance without a view names the cell and
+    /// the views it was searched for, in words, not the netlister's terms.
+    #[test]
+    fn an_apply_that_unbinds_an_instance_names_its_cell_and_views() {
+        let (mut app, id) = reference_app();
+        let catalog = app.state.model.workspace.content.configuration_sets.clone();
+        app.state
+            .project
+            .configuration
+            .edit(&catalog, id, |definition| {
+                crate::workbench::project::configuration_state::set_instance_view(
+                    definition,
+                    "/X1",
+                    Some("spice"),
+                );
+            });
+
+        let refusal = commit_configuration_transaction(&mut app, ConfigurationTransaction::Apply)
+            .expect_err("an instance with no view is refused");
+
+        assert_eq!(
+            refusal,
+            "Cannot apply Reference hierarchy: user/amp has no spice view."
+        );
+        assert_eq!(
+            app.state.model.workspace.content.configuration_sets,
+            catalog
+        );
     }
 
     #[test]

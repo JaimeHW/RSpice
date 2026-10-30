@@ -300,6 +300,16 @@ pub(super) fn hierarchy_display_path(reference: &CellViewRef) -> String {
     format!("{}/{}", reference.library, reference.cell)
 }
 
+/// The views an instance was searched for, as a sentence names them:
+/// `spice`, `schematic or spice`, `schematic, extracted or spice`.
+pub(super) fn view_alternatives(views: &[String]) -> String {
+    match views {
+        [] => "executable".to_owned(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+    }
+}
+
 pub(super) fn hierarchy_view_search_order(requested: &str, is_root: bool) -> Vec<String> {
     let requested = if requested.eq_ignore_ascii_case("symbol") {
         DEFAULT_SCHEMATIC_VIEW
