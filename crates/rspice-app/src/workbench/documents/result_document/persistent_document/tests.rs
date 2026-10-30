@@ -2,55 +2,13 @@
 //! the project-owned Results document projection.
 
 use super::*;
-use crate::state::{
-    AnalysisResultProvenance, AnalysisResultSourceDomain, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunLifecycle,
-    SimulationRunProvenance,
-};
+use crate::state::{AnalysisResultProvenance, AnalysisResultSourceDomain, SimulationRunLifecycle};
+use crate::workbench::documents::result_document::test_fixtures::{completed_prepared_run, digest};
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
-
-pub(crate) fn digest(byte: u8) -> ContentDigest {
-    ContentDigest::from_bytes([byte; 32])
-}
 
 // -----------------------------------------------------------------
 // marker ownership
 // -----------------------------------------------------------------
-
-pub(crate) fn completed_prepared_run(
-    plan_id: SimulationPlanId,
-    project_revision: ObjectRevision,
-    source_digest: ContentDigest,
-) -> SimulationRun {
-    let task = PreparedRunTaskReceipt::new(
-        AnalysisInstanceId::new(),
-        ObjectRevision::INITIAL,
-        Vec::new(),
-        5,
-        digest(0x44),
-    )
-    .expect("task receipt");
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-        source_domain: AnalysisResultSourceDomain::SimulationPlan,
-        simulation_plan_id: Some(plan_id),
-        project_revision,
-        prepared_snapshot_digest: digest(0x41),
-        source_content_digest: source_digest,
-        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        tasks: vec![task],
-    })
-    .expect("run receipt");
-    let mut run = SimulationRun::new(1);
-    run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
-        .expect("run provenance");
-    run.mark_running().expect("running lifecycle");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("completed lifecycle");
-    run
-}
 
 // -----------------------------------------------------------------
 // per-document selection and lifecycle

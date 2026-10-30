@@ -455,6 +455,8 @@ mod exact_evidence_quarantine_tests;
 mod copied_value_tests;
 
 #[cfg(test)]
+pub(crate) mod test_fixtures;
+#[cfg(test)]
 pub(crate) mod test_host;
 #[cfg(test)]
 pub(crate) use test_host::ResultsTestHost;

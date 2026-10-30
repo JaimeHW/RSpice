@@ -1,6 +1,7 @@
 //! Cross-format result-import adapter tests and binary fixture builders.
 
 use super::*;
+use crate::workbench::documents::result_document::test_fixtures::generated_fst;
 use arrow_array::{ArrayRef, Float64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use std::collections::HashMap;
@@ -451,51 +452,6 @@ fn a_vector_no_f64_sample_can_hold_reaches_the_grid_one_bit_at_a_time() {
         "unexpected notes: {:?}",
         parsed.notes
     );
-}
-
-fn generated_fst() -> Vec<u8> {
-    use fst_writer::{
-        FstFileType, FstInfo, FstScopeType, FstSignalType, FstVarDirection, FstVarType,
-    };
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "rspice-result-import-{}-{nonce}.fst",
-        std::process::id()
-    ));
-    let info = FstInfo {
-        start_time: 0,
-        timescale_exponent: -9,
-        version: "RSpice import fixture".to_owned(),
-        date: "2026-08-31".to_owned(),
-        file_type: FstFileType::Verilog,
-    };
-    let mut header = fst_writer::open_fst(&path, &info).expect("open FST fixture");
-    header
-        .scope("top", "top", FstScopeType::Module)
-        .expect("FST scope");
-    let clock = header
-        .var(
-            "clock",
-            FstSignalType::bit_vec(1),
-            FstVarType::Wire,
-            FstVarDirection::Implicit,
-            None,
-        )
-        .expect("FST signal");
-    header.up_scope().expect("FST upscope");
-    let mut body = header.finish().expect("FST header");
-    for tick in 0..96_u64 {
-        body.time_change(tick).expect("FST time change");
-        body.signal_change(clock, if tick & 1 == 0 { b"0" } else { b"1" })
-            .expect("FST signal change");
-    }
-    body.finish().expect("FST finish");
-    let bytes = std::fs::read(&path).expect("read FST fixture");
-    let _ = std::fs::remove_file(&path);
-    bytes
 }
 
 fn fst_test_blocks(bytes: &[u8]) -> Vec<(u8, usize, usize)> {

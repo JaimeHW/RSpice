@@ -10,12 +10,7 @@ use crate::results::visualization_document::DocumentEdit;
 use crate::results::visualization_document::Marker;
 use crate::results::visualization_document::PaneId;
 use crate::results::visualization_document::TypedValue;
-use crate::state::AnalysisResultSourceDomain;
-use crate::state::PreparedRunReceipt;
-use crate::state::PreparedRunTaskReceipt;
-use crate::state::PreparedSourceCheckReceipt;
 use crate::state::SimulationRunLifecycle;
-use crate::state::SimulationRunProvenance;
 use crate::state::{AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun};
 use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
@@ -25,6 +20,7 @@ use crate::workbench::documents::result_document::persistent_document::*;
 use crate::workbench::documents::result_document::persistent_document::{
     LatestBinding, current_result_source_digest, refresh_latest_binding, show,
 };
+use crate::workbench::documents::result_document::test_fixtures::{completed_prepared_run, digest};
 use egui::Ui;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
@@ -1635,45 +1631,6 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
                 == crate::results::visualization_document::LinkKind::CursorPosition),
         "the second toggle takes the links away"
     );
-}
-
-pub(crate) fn digest(byte: u8) -> ContentDigest {
-    ContentDigest::from_bytes([byte; 32])
-}
-
-pub(crate) fn completed_prepared_run(
-    plan_id: SimulationPlanId,
-    project_revision: ObjectRevision,
-    source_digest: ContentDigest,
-) -> SimulationRun {
-    let task = PreparedRunTaskReceipt::new(
-        AnalysisInstanceId::new(),
-        ObjectRevision::INITIAL,
-        Vec::new(),
-        5,
-        digest(0x44),
-    )
-    .expect("task receipt");
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-        source_domain: AnalysisResultSourceDomain::SimulationPlan,
-        simulation_plan_id: Some(plan_id),
-        project_revision,
-        prepared_snapshot_digest: digest(0x41),
-        source_content_digest: source_digest,
-        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        tasks: vec![task],
-    })
-    .expect("run receipt");
-    let mut run = SimulationRun::new(1);
-    run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
-        .expect("run provenance");
-    run.mark_running().expect("running lifecycle");
-    run.finish_lifecycle(SimulationRunLifecycle::Completed)
-        .expect("completed lifecycle");
-    run
 }
 
 /// The fixture's one trace's X samples, as the drawn pane knows them.

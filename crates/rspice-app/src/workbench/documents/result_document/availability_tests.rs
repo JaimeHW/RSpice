@@ -7,10 +7,11 @@ use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain,
     AnalysisType, RetainedTrace, SensitivityResultMode, SensitivityResultRow, SimulationRun,
 };
+use crate::workbench::documents::result_document::test_fixtures::{
+    events_analysis, optimization_analysis, soa_analysis,
+};
 
-mod fixtures;
 mod markers;
-use fixtures::*;
 
 fn state_with_analysis(analysis: AnalysisResult) -> ResultsTestHost {
     let mut state = ResultsTestHost::default();

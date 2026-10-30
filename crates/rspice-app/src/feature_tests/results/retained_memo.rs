@@ -2,28 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::state::{
-    AnalysisResult, AnalysisType, RetainedTrace, SimulationRunLifecycle, SimulationRunProvenance,
-};
+use crate::state::{AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
+use crate::workbench::documents::result_document::test_fixtures::analysis;
 use crate::workbench::documents::result_document::{create_document, view_context};
 use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{AppState, RSpiceApp, ResultViewer};
-
-fn analysis(kind: AnalysisType, id: u64, samples: usize) -> AnalysisResult {
-    let (name, value) = match kind {
-        AnalysisType::Noise => ("onoise", 1.0e-12),
-        AnalysisType::Disto => ("HD2", 1.0),
-        _ => ("V(out)", 1.0),
-    };
-    AnalysisResult::new(id, kind, name).with_waveforms(vec![RetainedTrace::new(
-        name,
-        (1..=samples)
-            .map(|sample| sample as f64)
-            .collect::<Vec<_>>(),
-        vec![value; samples],
-        "#55aaff",
-    )])
-}
 
 fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
     let mut state = AppState::default();

@@ -7,6 +7,7 @@
 //! round trip and refusals are in `binary_formats`.
 
 use super::*;
+use crate::workbench::documents::result_document::test_fixtures::{MockExportWorkflowIo, waveform};
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
 mod binary_formats;
@@ -14,8 +15,7 @@ mod periodic_noise;
 mod soa;
 mod typed_csv;
 
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
@@ -26,83 +26,6 @@ use crate::state::{
     SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
     SoaViolationSeverityEvidence,
 };
-
-#[derive(Debug)]
-struct MockExportWorkflowIo {
-    datasets: RefCell<Vec<crate::io::WaveformDataset>>,
-    paths: RefCell<Vec<PathBuf>>,
-    text_files: RefCell<Vec<(PathBuf, String)>>,
-    byte_files: RefCell<Vec<(PathBuf, Vec<u8>, String)>>,
-    dialog_titles: RefCell<Vec<String>>,
-    saved_paths_are_reopenable: bool,
-    /// Why the save dialog could not open, when it cannot.
-    dialog_error: Option<String>,
-}
-
-impl Default for MockExportWorkflowIo {
-    fn default() -> Self {
-        Self {
-            datasets: RefCell::default(),
-            paths: RefCell::default(),
-            text_files: RefCell::default(),
-            byte_files: RefCell::default(),
-            dialog_titles: RefCell::default(),
-            saved_paths_are_reopenable: true,
-            dialog_error: None,
-        }
-    }
-}
-
-impl ExportWorkflowIo for MockExportWorkflowIo {
-    fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Result<Option<PathBuf>, String> {
-        self.dialog_titles
-            .borrow_mut()
-            .push(config.title.to_owned());
-        if let Some(error) = &self.dialog_error {
-            return Err(error.clone());
-        }
-        Ok(Some(PathBuf::from(config.default_name)))
-    }
-
-    fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
-        self.text_files
-            .borrow_mut()
-            .push((path.to_path_buf(), contents.to_owned()));
-        Ok(())
-    }
-
-    fn write_waveform_csv(
-        &self,
-        dataset: &crate::io::WaveformDataset,
-        path: &Path,
-    ) -> Result<(), String> {
-        self.datasets.borrow_mut().push(dataset.clone());
-        self.paths.borrow_mut().push(path.to_path_buf());
-        Ok(())
-    }
-
-    fn write_bytes_file_observed(
-        &self,
-        destination: &crate::workbench::workflows::export_workflow::ObservedExportDestination,
-        contents: &[u8],
-        mime_type: &str,
-    ) -> Result<(), String> {
-        self.byte_files.borrow_mut().push((
-            destination.path().to_path_buf(),
-            contents.to_vec(),
-            mime_type.to_owned(),
-        ));
-        Ok(())
-    }
-
-    fn saved_paths_are_reopenable(&self) -> bool {
-        self.saved_paths_are_reopenable
-    }
-}
-
-fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> RetainedTrace {
-    RetainedTrace::new(name.to_owned(), x, y, "#4f81bd")
-}
 
 fn floquet_certificate(problem_order: u64) -> FloquetSpectrumCertificateEvidence {
     FloquetSpectrumCertificateEvidence {

@@ -195,52 +195,13 @@ fn matrix_csv(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::state::{AnalysisResultFamilyMetadata, RetainedTrace, SimulationRun};
-
-    pub(crate) fn fixture(mixed: bool) -> AnalysisResult {
-        let mut traces = Vec::new();
-        let ports = if mixed { 4 } else { 2 };
-        for row in 0..ports {
-            for column in 0..ports {
-                let name = if mixed {
-                    format!(
-                        "S{}{}{}{}",
-                        if row < 2 { "d" } else { "c" },
-                        if column < 2 { "d" } else { "c" },
-                        row % 2 + 1,
-                        column % 2 + 1
-                    )
-                } else {
-                    format!("S{}{}", row + 1, column + 1)
-                };
-                let value = if row == column { 0.25 } else { 0.01 };
-                traces.push(
-                    RetainedTrace::new(
-                        format!("|{name}|"),
-                        vec![1e6, 2e6],
-                        vec![value; 2],
-                        "#00aaff",
-                    )
-                    .with_complex_components(
-                        name,
-                        vec![value; 2],
-                        vec![0.0; 2],
-                    ),
-                );
-            }
-        }
-        AnalysisResult::new(1, AnalysisType::SParameter, "Network")
-            .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
-                reference_impedances_ohm: vec![50.0; ports],
-                noise_reference_temperature_kelvin: None,
-            })
-            .with_waveforms(traces)
-    }
+    use crate::state::{AnalysisResultFamilyMetadata, SimulationRun};
+    use crate::workbench::documents::result_document::test_fixtures::network_matrix_analysis;
 
     #[test]
     fn complete_physical_and_mixed_matrices_have_exact_references_and_values() {
         for mixed in [false, true] {
-            let analysis = fixture(mixed);
+            let analysis = network_matrix_analysis(mixed);
             assert!(structure_is_renderable(&analysis));
             let matrix = resolve(&analysis).unwrap();
             let csv = matrix_csv(&matrix, &analysis, 0, 1);
@@ -260,7 +221,7 @@ pub(crate) mod tests {
 
     #[test]
     fn replacing_evidence_cannot_reuse_a_sampled_diagnostic() {
-        let analysis = fixture(false);
+        let analysis = network_matrix_analysis(false);
         let mut simulation = crate::state::SimulationState::default();
         let mut run = SimulationRun::new(1);
         let key = AnalysisPresentationKey::new(run.dataset_id, &analysis);
@@ -275,30 +236,30 @@ pub(crate) mod tests {
         controls.bind(key, &simulation);
         assert!(controls.controls.diagnostic.is_none());
         controls.controls.diagnostic = Some((0, 0, "old evidence".to_owned()));
-        simulation.retained.runs[0].analyses[0] = fixture(false);
+        simulation.retained.runs[0].analyses[0] = network_matrix_analysis(false);
         controls.bind(key, &simulation);
         assert!(controls.controls.diagnostic.is_none());
     }
 
     #[test]
     fn absent_duplicate_or_misaligned_coefficients_are_refused() {
-        let mut missing = fixture(false);
+        let mut missing = network_matrix_analysis(false);
         missing.waveforms.pop();
         assert!(!structure_is_renderable(&missing));
-        let mut duplicate = fixture(false);
+        let mut duplicate = network_matrix_analysis(false);
         duplicate
             .data
             .waveforms
             .push(duplicate.data.waveforms[0].clone());
         assert!(!structure_is_renderable(&duplicate));
-        let mut wrong_grid = fixture(false);
+        let mut wrong_grid = network_matrix_analysis(false);
         wrong_grid.waveforms[0].x = vec![1e6, 3e6].into();
         assert!(!structure_is_renderable(&wrong_grid));
     }
 
     #[test]
     fn translated_blocks_and_large_port_indexes_keep_their_identity() {
-        let mut periodic = fixture(false);
+        let mut periodic = network_matrix_analysis(false);
         periodic.analysis_type = AnalysisType::Psp;
         let mut second = periodic.waveforms.clone();
         for waveform in &mut second {
@@ -313,7 +274,7 @@ pub(crate) mod tests {
 
     #[test]
     fn mixed_mode_needs_complete_equal_reference_pairs() {
-        let mut analysis = fixture(true);
+        let mut analysis = network_matrix_analysis(true);
         let Some(AnalysisResultFamilyMetadata::SParameter {
             reference_impedances_ohm,
             ..
@@ -327,7 +288,7 @@ pub(crate) mod tests {
 
     #[test]
     fn exact_export_round_trips_complex_components() {
-        let analysis = fixture(false);
+        let analysis = network_matrix_analysis(false);
         let matrix = resolve(&analysis).unwrap();
         let table = matrix.exact_table(&analysis, 0, 1).unwrap();
         for (index, row) in table.rows.iter().enumerate() {
@@ -374,7 +335,7 @@ pub(crate) mod tests {
             let mut app =
                 crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
             let mut run = SimulationRun::new(1);
-            run.add_analysis(fixture(true));
+            run.add_analysis(network_matrix_analysis(true));
             app.model.simulation.retained.runs.push(run);
             assert!(app.model.simulation.select_run(0));
             let before = app
@@ -490,7 +451,7 @@ pub(crate) mod tests {
             let mut app =
                 crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
             let mut run = SimulationRun::new(1);
-            run.add_analysis(fixture(true));
+            run.add_analysis(network_matrix_analysis(true));
             app.model.simulation.retained.runs.push(run);
             assert!(app.model.simulation.select_run(0));
             let before = app

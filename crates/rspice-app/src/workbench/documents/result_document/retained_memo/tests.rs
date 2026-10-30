@@ -1,26 +1,11 @@
 //! Retained evidence must be rechecked without relying on a painted frame.
 
+use crate::workbench::documents::result_document::test_fixtures::analysis;
 use std::sync::Arc;
 
 use super::super::*;
 
-use crate::state::{AnalysisType, RetainedTrace, SimulationRunLifecycle, SimulationRunProvenance};
-
-fn analysis(kind: AnalysisType, id: u64, samples: usize) -> AnalysisResult {
-    let (name, value) = match kind {
-        AnalysisType::Noise => ("onoise", 1.0e-12),
-        AnalysisType::Disto => ("HD2", 1.0),
-        _ => ("V(out)", 1.0),
-    };
-    AnalysisResult::new(id, kind, name).with_waveforms(vec![RetainedTrace::new(
-        name,
-        (1..=samples)
-            .map(|sample| sample as f64)
-            .collect::<Vec<_>>(),
-        vec![value; samples],
-        "#55aaff",
-    )])
-}
+use crate::state::{AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
 
 fn retained_state(kind: AnalysisType, samples: usize) -> ResultsTestHost {
     let mut state = ResultsTestHost::default();
