@@ -17,7 +17,7 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::commands::result_navigation::{open_run_log, producing_run};
 use super::results::{RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT, ResultArtifact};
-use super::row_context_menu;
+use rspice_app_workbench::workbench::docks::navigator::row_context_menu;
 
 /// Put every checked quantity of the active dataset into the requested plot
 /// state. Toggling one at a time is the same act repeated, so the batch runs

@@ -24,7 +24,8 @@ use super::super::super::design_system::{
     WorkbenchIcon, property_row, property_row_input_action, property_row_problem,
 };
 use super::super::super::state::Workspace;
-use super::{compact_readout, result_authority, run_details};
+use super::{result_authority, run_details};
+use rspice_app_workbench::workbench::docks::inspector::compact_readout;
 
 pub(in crate::workbench) fn results(
     ui: &mut Ui,

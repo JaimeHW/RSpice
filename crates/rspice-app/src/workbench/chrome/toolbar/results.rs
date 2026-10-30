@@ -11,7 +11,9 @@ use crate::workbench::layout::LayoutSpec;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 
-use super::{explicit_label_width, take_projected_tool_slot};
+use rspice_app_workbench::workbench::chrome::toolbar::{
+    explicit_label_width, take_projected_tool_slot,
+};
 
 /// A group of the Results toolbar's commands, drawn as icons and named by
 /// the host, with a rule between one group and the next.
