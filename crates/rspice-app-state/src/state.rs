@@ -240,12 +240,13 @@ pub use viewer_cache::{SpecializedViewerAnalysisIdentity, SpecializedViewerCache
 pub use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,
-    DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, HierarchyBindingRule,
-    MembershipMove, MissingMeasurementPolicy, MonteCarloSpecificationGate, NetlistExecutionProfile,
-    NetlistLineEnding, NetlistSourceDialect, NetlistTextEncoding, NominalFailurePolicy,
-    OpenCellView, OutputSelectionMode, OwnedNetlistDescriptor, OwnedNetlistEditStrategy,
-    OwnedNetlistIncludeDescriptor, OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+    DEFAULT_STOP_VIEW_TYPES, DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy,
+    DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
+    DesignVariableSweepEligibility, HierarchyBindingRule, MembershipMove, MissingMeasurementPolicy,
+    MonteCarloSpecificationGate, NetlistExecutionProfile, NetlistLineEnding, NetlistSourceDialect,
+    NetlistTextEncoding, NominalFailurePolicy, OpenCellView, OutputSelectionMode,
+    OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistIncludeDescriptor,
+    OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
     PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION, ProjectCloudPublicationBinding, ProjectDescriptor,
     ProjectLibraryMutation, ProjectTechnologyBinding, ProjectTechnologyChangeAuthority,
     ProjectTechnologyChangeContext, ProjectWorkspace, RegressionComparisonMethod,
@@ -254,8 +255,8 @@ pub use workspace::{
     RetainedOwnedNetlistDeck, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, SpecPointScope,
-    SpecificationDefinition, SpecificationPolicy, SpecificationRole, UNGROUPED_NAME, group_namer,
-    validate_owned_netlist_artifact_path,
+    SpecificationDefinition, SpecificationPolicy, SpecificationRole, UNGROUPED_NAME,
+    default_view_search_order, group_namer, validate_owned_netlist_artifact_path,
 };
 
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};

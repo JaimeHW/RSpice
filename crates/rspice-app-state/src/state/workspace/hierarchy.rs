@@ -5,7 +5,8 @@ use super::*;
 use hierarchy_core::HierarchySourceFiles;
 pub use hierarchy_core::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationVerilogABinding,
-    HierarchyBindingRule, HierarchyResolution, ResolvedHierarchyBinding,
+    DEFAULT_STOP_VIEW_TYPES, HierarchyBindingRule, HierarchyResolution, ResolvedHierarchyBinding,
+    default_view_search_order,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use hierarchy_core::{HierarchyBindingStatus, MasterRecord};

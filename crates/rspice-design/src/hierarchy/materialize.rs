@@ -377,11 +377,18 @@ fn configured_scope(pattern: &str) -> Result<InstancePathPattern, String> {
         .map_err(|error| format!("configured scope '{pattern}' is not a hierarchy scope: {error}"))
 }
 
+/// View types that are terminal implementations: a stop at one of these ends
+/// the hierarchy, and the built-in default stops at them; any other view is
+/// descended into.
+pub const DEFAULT_STOP_VIEW_TYPES: [ViewType; 4] = [
+    ViewType::Spice,
+    ViewType::Verilog,
+    ViewType::VerilogA,
+    ViewType::Extracted,
+];
+
 pub fn hierarchy_stop_view(view_type: ViewType) -> bool {
-    matches!(
-        view_type,
-        ViewType::Spice | ViewType::Verilog | ViewType::VerilogA | ViewType::Extracted
-    )
+    DEFAULT_STOP_VIEW_TYPES.contains(&view_type)
 }
 
 pub(super) fn hierarchy_model_section(

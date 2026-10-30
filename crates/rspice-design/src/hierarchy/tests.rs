@@ -527,3 +527,54 @@ fn rows_a_different_rule_chose_are_never_merged() {
     assert_eq!(instance_bound.rule, HierarchyBindingRule::InstanceBinding);
     assert_eq!(instance_bound.instance_paths, ["/X2"]);
 }
+
+#[test]
+fn the_built_in_default_reads_as_the_resolver_follows_it() {
+    assert_eq!(
+        default_view_search_order("symbol", false),
+        ["schematic", "extracted", "spice"]
+    );
+    assert_eq!(
+        default_view_search_order("schematic", true),
+        ["schematic", "spice"]
+    );
+    let unconfigured = resolve_bound(None);
+    assert_eq!(
+        row(&unconfigured, "/X1").view_search_order,
+        default_view_search_order("schematic", false)
+    );
+    assert_eq!(
+        row(&unconfigured, "/").view_search_order,
+        default_view_search_order("schematic", true)
+    );
+
+    for view_type in [
+        ViewType::Schematic,
+        ViewType::Symbol,
+        ViewType::Layout,
+        ViewType::Testbench,
+        ViewType::Verilog,
+        ViewType::VerilogA,
+        ViewType::Spice,
+        ViewType::Document,
+        ViewType::Extracted,
+        ViewType::Abstract,
+        ViewType::Config,
+        ViewType::Custom,
+    ] {
+        assert_eq!(
+            hierarchy_stop_view(view_type),
+            DEFAULT_STOP_VIEW_TYPES.contains(&view_type),
+            "{view_type:?}"
+        );
+    }
+    assert_eq!(
+        DEFAULT_STOP_VIEW_TYPES,
+        [
+            ViewType::Spice,
+            ViewType::Verilog,
+            ViewType::VerilogA,
+            ViewType::Extracted
+        ]
+    );
+}

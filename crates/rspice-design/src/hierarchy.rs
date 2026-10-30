@@ -43,8 +43,9 @@ mod materialize;
 mod source;
 use materialize::*;
 pub use materialize::{
-    SourceViewSource, hierarchy_stop_view, materialize_authoritative_source_binding,
-    metadata_value, project_veriloga_binding_for_view, source_view_source,
+    DEFAULT_STOP_VIEW_TYPES, SourceViewSource, hierarchy_stop_view,
+    materialize_authoritative_source_binding, metadata_value, project_veriloga_binding_for_view,
+    source_view_source,
 };
 pub use source::HierarchySource;
 
@@ -92,6 +93,13 @@ pub struct HierarchyContext<'a, D, F> {
     pub project_id: ProjectId,
     pub project_sources: &'a ProjectSourceRegistry,
     pub source_files: &'a F,
+}
+
+/// The built-in view search order for one requested view: what resolution
+/// follows when no configuration is active, and what reviewed fallback
+/// appends after a configured list.
+pub fn default_view_search_order(requested: &str, is_root: bool) -> Vec<String> {
+    hierarchy_view_search_order(requested, is_root)
 }
 
 pub fn resolve_hierarchy<'a, D: HierarchyDocuments, F: HierarchySourceFiles>(
