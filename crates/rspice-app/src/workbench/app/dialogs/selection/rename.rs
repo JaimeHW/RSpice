@@ -983,6 +983,7 @@ mod tests {
                 black_box_policy:
                     crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: Vec::new(),
+                cell_bindings: Vec::new(),
                 model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
                 owner: "Rename test".to_owned(),
             })

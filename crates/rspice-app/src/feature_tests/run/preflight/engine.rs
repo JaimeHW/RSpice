@@ -326,6 +326,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Behavioral design".to_owned(),
         })

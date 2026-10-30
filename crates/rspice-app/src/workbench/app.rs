@@ -1554,6 +1554,7 @@ mod tests {
                 unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
                 black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: Vec::new(),
+                cell_bindings: Vec::new(),
                 model_profile: ConfigurationModelProfile::ProjectRunSetSections,
                 owner: "Local project".to_owned(),
             })

@@ -1023,6 +1023,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Mixed-signal design".to_owned(),
         })

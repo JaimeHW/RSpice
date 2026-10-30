@@ -842,6 +842,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Lifecycle test".to_owned(),
         })
@@ -1799,6 +1800,7 @@ fn state_with_populated_user_library() -> AppState {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Lifecycle test".to_owned(),
         })

@@ -685,6 +685,7 @@ impl Rebindable {
                 unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
                 black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: Vec::new(),
+                cell_bindings: Vec::new(),
                 model_profile: ConfigurationModelProfile::ProjectRunSetSections,
                 owner: "drc walk test".to_owned(),
             })
@@ -829,6 +830,7 @@ fn a_rebound_occurrence_is_checked_with_what_it_instantiates() {
                 model_section: None,
                 eligible_platforms: crate::configuration_set::ConfigurationPlatform::ALL.to_vec(),
             }],
+            cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
             owner: "drc walk test".to_owned(),
         })

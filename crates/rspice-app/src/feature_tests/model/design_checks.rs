@@ -572,6 +572,7 @@ fn design_checks_state_an_unresolved_configuration_rather_than_checking_the_buff
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })

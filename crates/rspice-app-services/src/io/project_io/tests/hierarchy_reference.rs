@@ -265,6 +265,7 @@ fn configuration_named(
         black_box_policy:
             crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
         overrides: Vec::new(),
+        cell_bindings: Vec::new(),
         model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
         owner: "Verification".to_owned(),
     }

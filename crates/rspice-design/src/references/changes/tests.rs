@@ -16,6 +16,7 @@ fn reference_deltas_prepare_forward_and_reverse_without_mutating_sources() {
             unresolved_policy: Default::default(),
             black_box_policy: Default::default(),
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: Default::default(),
             owner: "design".to_owned(),
         })

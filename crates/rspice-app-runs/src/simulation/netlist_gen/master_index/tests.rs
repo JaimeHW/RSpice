@@ -874,6 +874,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "test".to_owned(),
         })
@@ -1035,6 +1036,7 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
                 model_section: None,
                 eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "test".to_owned(),
         })
@@ -1110,6 +1112,7 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Catalog test".to_owned(),
         })

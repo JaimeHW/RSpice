@@ -117,6 +117,7 @@ fn workspace_with_two_cell_views() -> (
             unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection fixture".to_owned(),
         })

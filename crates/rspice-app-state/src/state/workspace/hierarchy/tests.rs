@@ -34,6 +34,7 @@ fn view_policy_configuration(
         black_box_policy:
             crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
         overrides: Vec::new(),
+        cell_bindings: Vec::new(),
         model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
         owner: "Analog design".to_owned(),
     }
@@ -299,6 +300,7 @@ fn a_configuration_written_before_the_implicit_root_names_the_same_instances() {
                 model_section: None,
                 eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Analog design".to_owned(),
         })
@@ -355,6 +357,7 @@ fn an_override_pattern_is_measured_against_the_instances_the_walk_reached() {
                 model_section: None,
                 eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Local project".to_owned(),
         })

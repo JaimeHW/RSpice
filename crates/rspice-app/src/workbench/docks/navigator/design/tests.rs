@@ -899,6 +899,7 @@ fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })

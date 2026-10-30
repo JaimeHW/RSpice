@@ -1,10 +1,10 @@
 //! Project-owned hierarchy and executable-view configuration sets.
 //!
 //! A configuration set is the durable authority that decides which design
-//! root, DUT instance, executable views, stop views, scoped overrides, and
-//! model profile participate in netlisting. Mutations use clone-and-validate
-//! transactions so invalid input or a stale revision cannot partially alter
-//! the catalog.
+//! root, DUT instance, executable views, stop views, scoped overrides, cell
+//! bindings, and model profile participate in netlisting. Mutations use
+//! clone-and-validate transactions so invalid input or a stale revision
+//! cannot partially alter the catalog.
 //!
 //! Every hierarchical path here is persisted as text and read through
 //! [`InstancePath`] and [`InstancePathPattern`]: this module decides what a
@@ -39,6 +39,7 @@ pub const MAX_CONFIGURATION_NAME_BYTES: usize = 128;
 pub const MAX_CONFIGURATION_OWNER_BYTES: usize = 256;
 pub const MAX_CONFIGURATION_VIEW_POLICY_ENTRIES: usize = 32;
 pub const MAX_CONFIGURATION_OVERRIDES: usize = 4_096;
+pub const MAX_CONFIGURATION_CELL_BINDINGS: usize = 4_096;
 pub const MAX_CONFIGURATION_MODEL_SECTION_BYTES: usize = 256;
 
 // The hierarchy-audit receipts in `rspice-design-model` name this identity, so
@@ -59,6 +60,21 @@ pub struct ConfigurationSetOverride {
     pub eligible_platforms: Vec<ConfigurationPlatform>,
 }
 
+/// Ordered view list for every instance of one library cell.
+///
+/// A cell binding governs each instance of `library`/`cell` that no override
+/// names, ahead of the configuration's global view list. Library and cell
+/// match case-insensitively. A binding for a cell the hierarchy never reaches
+/// is kept and binds nothing, so removing a cell does not discard its binding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigurationCellBinding {
+    pub library: String,
+    pub cell: String,
+    pub executable_views: Vec<String>,
+    pub stop_view: Option<String>,
+}
+
 /// Editable semantic definition. Stable identity, revision, lineage, and
 /// digest are catalog-owned and therefore cannot be supplied by callers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +90,10 @@ pub struct ConfigurationSetDefinition {
     #[serde(default)]
     pub black_box_policy: ConfigurationBlackBoxPolicy,
     pub overrides: Vec<ConfigurationSetOverride>,
+    /// Omitted while empty, so a definition without cell bindings serializes,
+    /// and therefore digests, exactly as one written before they existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cell_bindings: Vec<ConfigurationCellBinding>,
     #[serde(default)]
     pub model_profile: ConfigurationModelProfile,
     pub owner: String,
@@ -272,6 +292,11 @@ impl ConfigurationSet {
     }
 
     #[must_use]
+    pub fn cell_bindings(&self) -> &[ConfigurationCellBinding] {
+        &self.definition.cell_bindings
+    }
+
+    #[must_use]
     pub const fn model_profile(&self) -> ConfigurationModelProfile {
         self.definition.model_profile
     }
@@ -405,37 +430,64 @@ impl ConfigurationSetCatalog {
             .collect()
     }
 
-    /// Remap configuration roots as part of a cell rename. Every affected
-    /// configuration receives a new revision and semantic digest, while the
-    /// catalog is committed only after the complete candidate validates.
+    /// Remap configuration roots and cell bindings as part of a cell rename.
+    /// Every affected configuration receives a new revision and semantic
+    /// digest, while the catalog is committed only after the complete
+    /// candidate validates. A rename onto a cell another binding already names
+    /// is refused rather than letting either binding silently win.
     pub fn rename_cell_roots(
         &mut self,
         library: &str,
         old_cell: &str,
         new_cell: &str,
     ) -> Result<usize, ConfigurationSetError> {
-        self.remap_roots(
-            |root| {
-                root.library.eq_ignore_ascii_case(library)
-                    && root.cell.eq_ignore_ascii_case(old_cell)
-            },
-            |root| root.cell = new_cell.to_owned(),
-        )
+        self.remap_definitions(|definition| {
+            let root = &mut definition.root;
+            let mut changed = false;
+            if root.library.eq_ignore_ascii_case(library)
+                && root.cell.eq_ignore_ascii_case(old_cell)
+            {
+                root.cell = new_cell.to_owned();
+                changed = true;
+            }
+            changed
+                | remap_cell_bindings(
+                    &mut definition.cell_bindings,
+                    |binding| {
+                        binding.library.eq_ignore_ascii_case(library)
+                            && binding.cell.eq_ignore_ascii_case(old_cell)
+                    },
+                    |binding| binding.cell = new_cell.to_owned(),
+                )
+        })
     }
 
-    /// Remap configuration roots as part of a library rename.
+    /// Remap configuration roots and cell bindings as part of a library
+    /// rename.
     pub fn rename_library_roots(
         &mut self,
         from_library: &str,
         to_library: &str,
     ) -> Result<usize, ConfigurationSetError> {
-        self.remap_roots(
-            |root| root.library.eq_ignore_ascii_case(from_library),
-            |root| root.library = to_library.to_owned(),
-        )
+        self.remap_definitions(|definition| {
+            let root = &mut definition.root;
+            let mut changed = false;
+            if root.library.eq_ignore_ascii_case(from_library) {
+                root.library = to_library.to_owned();
+                changed = true;
+            }
+            changed
+                | remap_cell_bindings(
+                    &mut definition.cell_bindings,
+                    |binding| binding.library.eq_ignore_ascii_case(from_library),
+                    |binding| binding.library = to_library.to_owned(),
+                )
+        })
     }
 
     /// Remap configuration roots as part of a view rename inside one cell.
+    /// A cell binding names views the way the global view list does, so a
+    /// view rename leaves it as authored.
     pub fn rename_view_roots(
         &mut self,
         library: &str,
@@ -443,14 +495,16 @@ impl ConfigurationSetCatalog {
         from_view: &str,
         to_view: &str,
     ) -> Result<usize, ConfigurationSetError> {
-        self.remap_roots(
-            |root| {
-                root.library.eq_ignore_ascii_case(library)
-                    && root.cell.eq_ignore_ascii_case(cell)
-                    && root.view.eq_ignore_ascii_case(from_view)
-            },
-            |root| root.view = to_view.to_owned(),
-        )
+        self.remap_definitions(|definition| {
+            let root = &mut definition.root;
+            let selected = root.library.eq_ignore_ascii_case(library)
+                && root.cell.eq_ignore_ascii_case(cell)
+                && root.view.eq_ignore_ascii_case(from_view);
+            if selected {
+                root.view = to_view.to_owned();
+            }
+            selected
+        })
     }
 
     /// Rewrite original paths in one declared configuration. Callers resolve
@@ -510,22 +564,20 @@ impl ConfigurationSetCatalog {
         Ok(1)
     }
 
-    /// Apply one root rewrite to every configuration the selector names,
-    /// revising and re-digesting each, and committing only once the complete
-    /// candidate validates.
-    fn remap_roots(
+    /// Apply one library rewrite to every configuration, revising and
+    /// re-digesting each one the rewrite reports it touched, and committing
+    /// only once the complete candidate validates.
+    fn remap_definitions(
         &mut self,
-        selects: impl Fn(&CellViewRef) -> bool,
-        rewrite: impl Fn(&mut CellViewRef),
+        rewrite: impl Fn(&mut ConfigurationSetDefinition) -> bool,
     ) -> Result<usize, ConfigurationSetError> {
         self.validate()?;
         let mut candidate = self.clone();
         let mut changed = 0usize;
         for configuration in &mut candidate.configurations {
-            if !selects(&configuration.definition.root) {
+            if !rewrite(&mut configuration.definition) {
                 continue;
             }
-            rewrite(&mut configuration.definition.root);
             configuration.revision = configuration
                 .revision
                 .checked_add(1)
@@ -729,6 +781,7 @@ impl ConfigurationSetCatalog {
                 definition.unresolved_policy = source.definition.unresolved_policy;
                 definition.black_box_policy = source.definition.black_box_policy;
                 definition.overrides = source.definition.overrides.clone();
+                definition.cell_bindings = source.definition.cell_bindings.clone();
                 definition
             }
             ConfigurationCloneScope::EnvironmentOnly => {
@@ -907,6 +960,20 @@ fn normalize_definition(mut definition: ConfigurationSetDefinition) -> Configura
         scoped.eligible_platforms.dedup();
     }
     sort_overrides(&mut definition.overrides);
+    for binding in &mut definition.cell_bindings {
+        binding.library = binding.library.trim().to_owned();
+        binding.cell = binding.cell.trim().to_owned();
+        binding.executable_views = binding
+            .executable_views
+            .drain(..)
+            .map(|view| view.trim().to_ascii_lowercase())
+            .collect();
+        binding.stop_view = binding
+            .stop_view
+            .take()
+            .map(|view| view.trim().to_ascii_lowercase());
+    }
+    sort_cell_bindings(&mut definition.cell_bindings);
     definition
 }
 
@@ -922,6 +989,42 @@ fn sort_overrides(overrides: &mut [ConfigurationSetOverride]) {
             .cmp(&override_fold_key(&right.instance_path))
             .then_with(|| left.instance_path.cmp(&right.instance_path))
     });
+}
+
+/// The identity of the cell a binding names: its library and cell, folded the
+/// way the catalog and the hierarchy resolver match library and cell names.
+pub(crate) fn cell_binding_key(library: &str, cell: &str) -> (String, String) {
+    (library.to_ascii_lowercase(), cell.to_ascii_lowercase())
+}
+
+/// Store cell bindings in the one order the catalog recognizes: by the cell
+/// they name, with the author's spelling breaking the remaining ties.
+fn sort_cell_bindings(bindings: &mut [ConfigurationCellBinding]) {
+    bindings.sort_by(|left, right| {
+        cell_binding_key(&left.library, &left.cell)
+            .cmp(&cell_binding_key(&right.library, &right.cell))
+            .then_with(|| (&left.library, &left.cell).cmp(&(&right.library, &right.cell)))
+    });
+}
+
+/// Rewrite every cell binding the selector names, then restore the stored
+/// order the rewrite may have broken. Reports whether any binding was named.
+fn remap_cell_bindings(
+    bindings: &mut [ConfigurationCellBinding],
+    selects: impl Fn(&ConfigurationCellBinding) -> bool,
+    rewrite: impl Fn(&mut ConfigurationCellBinding),
+) -> bool {
+    let mut changed = false;
+    for binding in bindings.iter_mut() {
+        if selects(binding) {
+            rewrite(binding);
+            changed = true;
+        }
+    }
+    if changed {
+        sort_cell_bindings(bindings);
+    }
+    changed
 }
 
 fn validate_definition(
@@ -1014,7 +1117,67 @@ fn validate_definition(
             }
         }
     }
+    validate_cell_bindings(&definition.cell_bindings)
+}
+
+/// A cell binding is refused on the same terms as an override: bounded,
+/// stored in canonical order, unique per cell, and naming a non-empty ordered
+/// view list whose stop view is one of its own views. Whether the cell exists
+/// is not asked; a binding for a cell the hierarchy never reaches binds
+/// nothing.
+fn validate_cell_bindings(
+    bindings: &[ConfigurationCellBinding],
+) -> Result<(), ConfigurationSetError> {
+    if bindings.len() > MAX_CONFIGURATION_CELL_BINDINGS {
+        return Err(ConfigurationSetError::CellBindingLimitExceeded {
+            actual: bindings.len(),
+            maximum: MAX_CONFIGURATION_CELL_BINDINGS,
+        });
+    }
+    if bindings.windows(2).any(|pair| {
+        cell_binding_key(&pair[0].library, &pair[0].cell)
+            > cell_binding_key(&pair[1].library, &pair[1].cell)
+    }) {
+        return Err(ConfigurationSetError::UnsortedCellBindings);
+    }
+    let mut cells = HashSet::with_capacity(bindings.len());
+    for binding in bindings {
+        validate_cell_binding_name("configuration.cell-binding.library", &binding.library)?;
+        validate_cell_binding_name("configuration.cell-binding.cell", &binding.cell)?;
+        if !cells.insert(cell_binding_key(&binding.library, &binding.cell)) {
+            return Err(ConfigurationSetError::DuplicateCellBinding {
+                library: binding.library.clone(),
+                cell: binding.cell.clone(),
+            });
+        }
+        validate_view_policy(
+            "configuration.cell-binding.executable-views",
+            &binding.executable_views,
+            true,
+        )?;
+        if let Some(stop_view) = binding.stop_view.as_deref() {
+            validate_executable_view("configuration.cell-binding.stop-view", stop_view)?;
+            require_view_is_member(
+                "configuration.cell-binding.stop-view",
+                stop_view,
+                &binding.executable_views,
+            )?;
+        }
+    }
     Ok(())
+}
+
+fn validate_cell_binding_name(
+    field: &'static str,
+    name: &str,
+) -> Result<(), ConfigurationSetError> {
+    validate_cell_view_name_segment(name).map_err(|reason| {
+        ConfigurationSetError::InvalidCellBindingName {
+            field,
+            name: name.to_owned(),
+            reason: reason.to_string(),
+        }
+    })
 }
 
 fn validate_text(
@@ -1376,11 +1539,28 @@ pub enum ConfigurationSetError {
     UnsortedOverridePaths,
     #[error("scoped override {0:?} must authorize at least one execution platform")]
     NoEligiblePlatforms(String),
+    #[error("configuration contains {actual} cell bindings; maximum is {maximum}")]
+    CellBindingLimitExceeded { actual: usize, maximum: usize },
+    #[error("{field} name {name:?} is invalid: {reason}")]
+    InvalidCellBindingName {
+        field: &'static str,
+        name: String,
+        reason: String,
+    },
+    #[error(
+        "cell binding {library}/{cell} is duplicated (library and cell names are case-insensitive)"
+    )]
+    DuplicateCellBinding { library: String, cell: String },
+    #[error("cell bindings must be stored in canonical case-insensitive library/cell order")]
+    UnsortedCellBindings,
     #[error("model section {0:?} is not a valid SPICE library-section identifier")]
     InvalidModelSection(String),
     #[error("configuration-set digest serialization failed: {0}")]
     Serialization(String),
 }
+
+#[cfg(test)]
+mod cell_binding_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1406,6 +1586,7 @@ mod tests {
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: all_configuration_platforms(),
             }],
+            cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Analog design".to_owned(),
         }

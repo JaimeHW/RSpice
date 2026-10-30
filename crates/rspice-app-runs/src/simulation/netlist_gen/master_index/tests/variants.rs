@@ -45,6 +45,7 @@ fn fixture(configured: bool) -> (ProjectWorkspace, LibraryManager, SchematicStat
                 black_box_policy:
                     crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: Vec::new(),
+                cell_bindings: Vec::new(),
                 model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
                 owner: "test".to_owned(),
             })

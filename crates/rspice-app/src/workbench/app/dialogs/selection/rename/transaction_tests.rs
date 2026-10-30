@@ -71,6 +71,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
             owner: "test".to_owned(),
             unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
         })
         .unwrap();

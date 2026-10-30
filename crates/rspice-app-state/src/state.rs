@@ -44,9 +44,10 @@ pub use rspice_model_library::CATALOG_LIBRARY_SERIALIZATIONS;
 
 pub use active_viewer::ActiveViewer;
 pub use configuration_set::{
-    ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
-    ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetDefinition,
-    ConfigurationSetError, ConfigurationSetId, ConfigurationSetOverride, UnresolvedBindingPolicy,
+    ConfigurationBlackBoxPolicy, ConfigurationCellBinding, ConfigurationCloneScope,
+    ConfigurationModelProfile, ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog,
+    ConfigurationSetDefinition, ConfigurationSetError, ConfigurationSetId,
+    ConfigurationSetOverride, MAX_CONFIGURATION_CELL_BINDINGS, UnresolvedBindingPolicy,
 };
 pub use connectivity_contract::{
     BundleWidthMismatchPolicy, ConnectivityContract, ConnectivityPolicy,

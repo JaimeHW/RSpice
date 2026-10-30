@@ -858,6 +858,7 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Analog design".to_owned(),
         })
@@ -915,6 +916,7 @@ fn active_configuration_rejects_missing_dut_and_override_paths() {
                 model_section: None,
                 eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Local project".to_owned(),
         })
@@ -968,6 +970,7 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Local project".to_owned(),
         })
@@ -1005,6 +1008,7 @@ fn configuration_catalog_replacement_advances_project_revision_atomically() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Local project".to_owned(),
         })
@@ -1050,6 +1054,7 @@ fn configuration_catalog_replacement_rejects_unmaterialized_roots_atomically() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Local project".to_owned(),
         })
@@ -1353,6 +1358,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Mixed-signal design".to_owned(),
         })

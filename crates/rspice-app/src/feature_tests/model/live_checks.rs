@@ -408,6 +408,7 @@ fn a_drawing_that_cannot_be_checked_says_so_once() {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "live check test".to_owned(),
         })

@@ -550,6 +550,7 @@ fn project_file_round_trips_configuration_execution_authority() {
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: vec![crate::state::ConfigurationPlatform::Browser],
             }],
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Verification".to_owned(),
         })

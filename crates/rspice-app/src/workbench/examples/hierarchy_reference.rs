@@ -602,6 +602,7 @@ fn install_configuration(state: &mut AppState, top: &CellViewRef) -> Configurati
                     ConfigurationPlatform::Browser,
                 ],
             }],
+            cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Hierarchy reference".to_owned(),
         })

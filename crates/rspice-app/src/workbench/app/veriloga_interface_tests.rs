@@ -324,6 +324,7 @@ pub(super) fn ensure_veriloga_configuration(state: &mut AppState) {
                 black_box_policy:
                     crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: Vec::new(),
+                cell_bindings: Vec::new(),
                 model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
                 owner: "Behavioral design".to_owned(),
             })

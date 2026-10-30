@@ -1208,6 +1208,7 @@ fn state_with_a_stop_view_warning() -> AppState {
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
+            cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })
