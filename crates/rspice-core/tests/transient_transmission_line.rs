@@ -572,3 +572,91 @@ fn a_pulse_corner_and_a_line_arrival_one_ulp_apart_land_together() {
         );
     }
 }
+
+/// Xyce's TRANSLINE/transline_step deck at its first step, NL=5 and F=0.5 GHz:
+/// a matched 10 ns line driven by a pulse train. The breakpoint schedule carries
+/// the 25 ns corner through the delay by rounded addition, to
+/// 3.4999999999999996e-8 s; the line owns that arrival exactly, rounded up, at
+/// 3.5000000000000002e-8 s. A step stopped on the breakpoint left the arrival a
+/// tail under the solver floor, and fitting that tail halved the interval on
+/// every step, so the run crept onto each arrival through intervals down to
+/// 1e-21 s. The breakpoint is the arrival computed another way, and the step
+/// that reaches it lands on the arrival. Rows are Xyce 7.10's.
+#[test]
+fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
+    use rspice_core::engine::{ConvergenceConfig, TransientStartupMode};
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let deck = Netlist::parse(
+        "transline_step\n\
+         VIN in 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)\n\
+         RIN1 in near 50\n\
+         TLINE1 near 0 far 0 Z0=50 F=0.5GHZ NL=5\n\
+         RL1 far 0 50\n\
+         .end\n",
+    )
+    .unwrap();
+    // The Xyce suite's transient engine settings for this deck.
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: SimulationConfig::default().max_iterations.max(1200),
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::Trapezoidal,
+        temperature: 300.15,
+        transient_initial_timestep: Some(0.25e-9),
+        ..SimulationConfig::default()
+    });
+    let result = engine
+        .run_tran_with_startup_mode(&deck, 60.0e-9, 6.0e-9, TransientStartupMode::OperatingPoint)
+        .unwrap();
+    let arrival: f64 = 25.0e-9_f64.next_up() + 10.0e-9;
+    assert_eq!(arrival, 3.5000000000000002e-8);
+    assert!(result.time.contains(&arrival));
+    assert!(!result.time.contains(&(25.0e-9 + 10.0e-9)));
+    let shortest = result
+        .time
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0], pair[1]))
+        .fold((f64::INFINITY, 0.0), |a, b| if b.0 < a.0 { b } else { a });
+    assert!(
+        shortest.0 > 1.0e-17,
+        "{} points; interval {:e} s before {:.17e} s",
+        result.time.len(),
+        shortest.0,
+        shortest.1
+    );
+
+    // Xyce 7.10: time, V(near), V(far).
+    let xyce = [
+        (1.41879999999999696e-08, 0.0, 2.5),
+        (1.50999999999999996e-08, 0.0, 2.5),
+        (1.51006250000000003e-08, 0.0, 2.48437500000000311),
+        (1.51050000000000019e-08, 0.0, 2.37499999999996225),
+        (1.51400000000000019e-08, 0.0, 1.49999999999996203),
+        (1.51800000000000009e-08, 0.0, 4.99999999999986677e-01),
+        (1.52000000000000005e-08, 0.0, 0.0),
+        (3.42880000000000421e-08, 0.0, 0.0),
+        (3.50000000000000024e-08, 0.0, 0.0),
+        (3.50000097656250031e-08, 0.0, 2.44140625017078895e-04),
+        (3.50003125000000044e-08, 0.0, 7.81250000005021678e-03),
+        (3.50025000000000052e-08, 0.0, 6.25000000000708600e-02),
+    ];
+    let near = result.try_voltage_waveform_named("near").unwrap();
+    let far = result.try_voltage_waveform_named("far").unwrap();
+    let at = |values: &[f64], time: f64| {
+        let high = result.time.partition_point(|&sample| sample < time);
+        if result.time[high] == time {
+            return values[high];
+        }
+        let (t0, t1) = (result.time[high - 1], result.time[high]);
+        values[high - 1] + (values[high] - values[high - 1]) * (time - t0) / (t1 - t0)
+    };
+    for (time, v_near, v_far) in xyce {
+        assert!(
+            (at(near, time) - v_near).abs() < 1.0e-6,
+            "v(near) at {time:e}"
+        );
+        assert!((at(far, time) - v_far).abs() < 1.0e-6, "v(far) at {time:e}");
+    }
+}

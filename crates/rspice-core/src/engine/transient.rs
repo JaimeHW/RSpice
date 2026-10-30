@@ -8023,10 +8023,23 @@ impl Engine {
             // Stopping on the breakpoint left the activation a sliver no step
             // could cross, landed one floor late. An analog model's event keeps
             // the landing it always had.
+            //
+            // A transmission-line arrival is carried the same way. The schedule
+            // propagates a source corner through the delay by rounded addition
+            // (`25n + 10n` is 3.4999999999999996e-8) while the line owns the
+            // arrival exactly (3.5000000000000002e-8). Stopped on the
+            // breakpoint, every step left the arrival a tail under the floor
+            // and the approach fit halved it again, creeping onto the arrival.
+            // A GP phase arrival keeps its own landing.
             let breakpoint_before_activation = |target: Value| {
+                let carried = if pending_veriloga_event_time == Some(target) {
+                    !pending_analog_model_event
+                } else {
+                    physical_event_time == Some(target)
+                        && phase_arrival.is_none_or(|arrival| arrival.time != target)
+                };
                 locked_grid.is_none()
-                    && !pending_analog_model_event
-                    && pending_veriloga_event_time == Some(target)
+                    && carried
                     && breakpoints.next_after(t).is_some_and(|breakpoint| {
                         breakpoint - t <= dt
                             && crate::numerics::integration::coincides_before(
