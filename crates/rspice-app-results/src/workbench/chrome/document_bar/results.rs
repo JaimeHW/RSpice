@@ -13,10 +13,6 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 /// in the order the project made them.
 pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
     let content = &model.workspace.content;
-    // An edit to a result document is committed to the project's catalog as
-    // it is made, and the catalog is saved and reverted whole, with the result
-    // history: its one unsaved flag is every document's.
-    let unsaved = content.visualization_documents_dirty;
     let datasets = model
         .simulation
         .retained
@@ -35,7 +31,12 @@ pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
             id: WorkspaceDocumentId::VisualizationDocument(document.id()),
             label: document.title().to_owned(),
             icon: WorkbenchIcon::Results,
-            dirty: unsaved,
+            // Only this document's own edits mark its tab. An expression
+            // trace edits the results session's presentation, not a saved
+            // document, so it marks none; the project's unsaved state shows it.
+            dirty: content
+                .visualization_documents_modified
+                .contains(&document.id()),
         });
     datasets.chain(documents).collect()
 }

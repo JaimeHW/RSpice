@@ -206,6 +206,12 @@ pub struct ProjectWorkspace {
     /// Runtime dirty projection for project-owned result documents.
     #[serde(default, skip)]
     pub visualization_documents_dirty: bool,
+    /// The result documents edited since the catalog was last saved or
+    /// reverted, so each document's tab marks only its own edits. The flag
+    /// above stays the project's save gate, and is also raised by edits that
+    /// belong to no document.
+    #[serde(default, skip)]
+    pub visualization_documents_modified: HashSet<ResultDocumentId>,
     /// Runtime dirty projection for committed per-document page setups.
     #[serde(default, skip)]
     pub hardcopy_setups_dirty: bool,
@@ -265,6 +271,7 @@ impl Default for ProjectWorkspace {
             project_metadata_dirty: false,
             report_documents_dirty: false,
             visualization_documents_dirty: false,
+            visualization_documents_modified: HashSet::new(),
             hardcopy_setups_dirty: false,
             hardcopy_receipts_dirty: false,
             project_print_mappings_dirty: false,

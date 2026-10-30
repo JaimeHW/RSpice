@@ -1060,6 +1060,12 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
                 .remove(index);
         }
         state.model.workspace.content.visualization_documents_dirty = previous_documents_dirty;
+        state
+            .model
+            .workspace
+            .content
+            .visualization_documents_modified
+            .remove(&document_id);
         state.workbench.activate(previous_workspace);
         return Err(CreateResultDocumentError::InvalidDraft(
             "The created result document could not resolve its retained dataset binding."

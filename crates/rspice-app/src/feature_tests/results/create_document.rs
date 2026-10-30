@@ -413,6 +413,170 @@ fn duplicate_name_revalidation_leaves_project_unchanged() {
     );
 }
 
+/// The Results workspace of a whole application, drawn frame by frame with
+/// AccessKit on, over one retained transient run and an open project.
+#[cfg(not(target_arch = "wasm32"))]
+struct ResultsWindow {
+    ctx: egui::Context,
+    app: RSpiceApp,
+    frame: eframe::Frame,
+    time: f64,
+    dataset_id: crate::product::DatasetId,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ResultsWindow {
+    fn new() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        let mut run = retained_run_with(AnalysisType::Transient);
+        // A project saves a run only once its provenance is classified.
+        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+            .expect("the fixture run is explicitly legacy");
+        let dataset_id = run.dataset_id;
+        app.state.model.simulation.retained.runs = vec![run].into();
+        assert!(app.state.model.simulation.select_run(0));
+        app.state.workbench.activate(Workspace::Results);
+        Self {
+            ctx,
+            app,
+            frame: eframe::Frame::_new_kittest(),
+            time: 0.0,
+            dataset_id,
+        }
+    }
+
+    /// Three frames, the first carrying `events`; the last one's nodes.
+    fn frames(
+        &mut self,
+        mut events: Vec<egui::Event>,
+    ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            self.time += 0.1;
+            let (app, frame) = (&mut self.app, &mut self.frame);
+            let output = self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::pos2(0.0, 0.0),
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    time: Some(self.time),
+                    focused: true,
+                    events: std::mem::take(&mut events),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, frame),
+            );
+            nodes = output
+                .platform_output
+                .accesskit_update
+                .map(|update| update.nodes)
+                .unwrap_or_default();
+        }
+        nodes
+    }
+
+    /// Create a two-pane waveform document named `name` over the run, the
+    /// way the Create result document form commits it.
+    fn create(
+        &mut self,
+        name: &str,
+    ) -> Result<crate::product::ResultDocumentId, CreateResultDocumentError> {
+        self.app.state.results.create_result_document = CreateResultDocumentDialogState {
+            open: true,
+            name: name.to_owned(),
+            name_touched: true,
+            dataset_id: Some(self.dataset_id),
+            family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
+            viewer_id: "viewer-waveform".to_owned(),
+            layout_id: ResultDocumentLayout::TwoLinkedPanes.id().to_owned(),
+            validation_error: None,
+        };
+        commit(&mut self.app.state.results_parts())
+    }
+
+    /// Save the whole project to a fresh file, as Save all does.
+    fn save(&mut self) {
+        use crate::workbench::lifecycle::project_lifecycle::{
+            DestinationAuthority, SaveScope, save_native,
+        };
+        let folder = std::env::temp_dir().join(format!(
+            "rspice-result-document-marks-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&folder).expect("create the test folder");
+        save_native(
+            &mut self.app.state,
+            SaveScope::AllDocuments,
+            &folder.join("marks.rspiceproj"),
+            DestinationAuthority::UserSelected,
+        )
+        .expect("save the project");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    fn project_unsaved(&self) -> bool {
+        crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.app.state)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drawn(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+    role: egui::accesskit::Role,
+    label: &str,
+) -> bool {
+    nodes
+        .iter()
+        .any(|(_, node)| node.role() == role && node.label() == Some(label))
+}
+
+/// The document bar's tabs left to right, by where the strip drew them. Its
+/// tabs are the ones that say how they close; the viewer and console tabs
+/// say nothing.
+#[cfg(not(target_arch = "wasm32"))]
+fn document_tabs(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    let mut tabs = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == egui::accesskit::Role::Tab
+                && node.description().is_some_and(|description| {
+                    description.ends_with("Press Delete to close.")
+                        || description == "Pinned primary document."
+                        || description == "Unsaved changes."
+                })
+        })
+        .filter_map(|(id, node)| Some((node.bounds()?.x0, *id, node.clone())))
+        .collect::<Vec<_>>();
+    tabs.sort_by(|left, right| left.0.total_cmp(&right.0));
+    tabs.into_iter().map(|(_, id, node)| (id, node)).collect()
+}
+
+/// Each drawn document tab's label, and whether it is marked unsaved.
+#[cfg(not(target_arch = "wasm32"))]
+fn tab_marks(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<(String, bool)> {
+    document_tabs(nodes)
+        .iter()
+        .map(|(_, node)| {
+            (
+                node.label().unwrap_or_default().to_owned(),
+                node.description()
+                    .is_some_and(|description| description.starts_with("Unsaved changes")),
+            )
+        })
+        .collect()
+}
+
 /// What the Results workspace draws, through whole frames of the
 /// application, once a result document is created: the stage draws the
 /// document, the document bar gives it a tab after the dataset's, and the
@@ -422,8 +586,8 @@ fn duplicate_name_revalidation_leaves_project_unchanged() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
-    use egui::accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId};
-    use egui::{Context, Event, Key, Modifiers, Rect, pos2, vec2};
+    use egui::accesskit::{Action, ActionRequest, Role, TreeId};
+    use egui::{Event, Key, Modifiers};
 
     // What only each surface draws: the stage's bar offers to create a
     // document over a dataset's viewer and to add a pane over a document, and
@@ -433,84 +597,13 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
     const DOCUMENT_STAGE: &str = "Add a pane to this result document";
     const DOCUMENT_TOOLBAR: &str = "Historical";
 
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    let run = retained_run_with(AnalysisType::Transient);
-    let dataset_id = run.dataset_id;
-    app.state.model.simulation.retained.runs = vec![run].into();
-    assert!(app.state.model.simulation.select_run(0));
-    app.state.workbench.activate(Workspace::Results);
-    let mut frame = eframe::Frame::_new_kittest();
-    let mut time = 0.0;
-    // Three frames, the first carrying `events`; the last one's nodes.
-    let mut frames = |app: &mut RSpiceApp, mut events: Vec<Event>| -> Vec<(NodeId, Node)> {
-        let mut nodes = Vec::new();
-        for _ in 0..3 {
-            time += 0.1;
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
-                    time: Some(time),
-                    focused: true,
-                    events: std::mem::take(&mut events),
-                    ..Default::default()
-                },
-                |ui| eframe::App::ui(app, ui, &mut frame),
-            );
-            nodes = output
-                .platform_output
-                .accesskit_update
-                .map(|update| update.nodes)
-                .unwrap_or_default();
-        }
-        nodes
-    };
-    let drawn = |nodes: &[(NodeId, Node)], role: Role, label: &str| {
-        nodes
-            .iter()
-            .any(|(_, node)| node.role() == role && node.label() == Some(label))
-    };
-    // The document bar's tabs left to right, by where the strip drew them.
-    // Its tabs are the ones that say how they close; the viewer and console
-    // tabs say nothing.
-    let tabs = |nodes: &[(NodeId, Node)]| {
-        let mut tabs = nodes
-            .iter()
-            .filter(|(_, node)| {
-                node.role() == Role::Tab
-                    && node.description().is_some_and(|description| {
-                        description.ends_with("Press Delete to close.")
-                            || description == "Pinned primary document."
-                            || description == "Unsaved changes."
-                    })
-            })
-            .filter_map(|(id, node)| Some((node.bounds()?.x0, *id, node.clone())))
-            .collect::<Vec<_>>();
-        tabs.sort_by(|left, right| left.0.total_cmp(&right.0));
-        tabs.into_iter()
-            .map(|(_, id, node)| (id, node))
-            .collect::<Vec<_>>()
-    };
-
-    let nodes = frames(&mut app, Vec::new());
+    let mut window = ResultsWindow::new();
+    let nodes = window.frames(Vec::new());
     assert!(drawn(&nodes, Role::Button, DATASET_STAGE));
     assert!(!drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR));
 
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: ResultDocumentLayout::TwoLinkedPanes.id().to_owned(),
-        validation_error: None,
-    };
-    let document_id = commit(&mut app.state.results_parts()).expect("document commits");
-    let nodes = frames(&mut app, Vec::new());
+    let document_id = window.create("Transient review").expect("document commits");
+    let nodes = window.frames(Vec::new());
 
     assert!(
         drawn(&nodes, Role::Button, DOCUMENT_STAGE),
@@ -524,12 +617,14 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
         drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
         "the toolbar's document control is missing beside the document"
     );
-    let strip = tabs(&nodes);
+    let strip = document_tabs(&nodes);
     let labels = strip
         .iter()
         .map(|(_, node)| node.label().unwrap_or_default())
         .collect::<Vec<_>>();
-    let dataset_label = app.state.model.simulation.retained.runs[0].label.clone();
+    let dataset_label = window.app.state.model.simulation.retained.runs[0]
+        .label
+        .clone();
     assert_eq!(labels, [dataset_label.as_str(), "Transient review"]);
     let (document_tab, tab) = &strip[1];
     assert_eq!(
@@ -538,28 +633,24 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
         "the document's tab is not the active one"
     );
 
-    frames(
-        &mut app,
-        vec![Event::AccessKitActionRequest(ActionRequest {
-            action: Action::Focus,
-            target_tree: TreeId::ROOT,
-            target_node: *document_tab,
-            data: None,
-        })],
-    );
-    let nodes = frames(
-        &mut app,
-        vec![Event::Key {
-            key: Key::Delete,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::NONE,
-        }],
-    );
+    window.frames(vec![Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Focus,
+        target_tree: TreeId::ROOT,
+        target_node: *document_tab,
+        data: None,
+    })]);
+    let nodes = window.frames(vec![Event::Key {
+        key: Key::Delete,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }]);
 
     assert!(
-        app.state
+        window
+            .app
+            .state
             .model
             .workspace
             .content
@@ -578,7 +669,124 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
     );
     // The dataset is the one document left, and a strip of one is not drawn.
     assert!(
-        tabs(&nodes).is_empty(),
+        document_tabs(&nodes).is_empty(),
         "the closed document still has a tab"
+    );
+}
+
+/// An edit to one of two saved documents marks that document's tab and not
+/// the other's, and saving the project clears the mark.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_edit_marks_only_its_own_document_tab_until_the_project_is_saved() {
+    let mut window = ResultsWindow::new();
+    let first = window.create("Review A").expect("A commits");
+    window.create("Review B").expect("B commits");
+    window.save();
+    let dataset = window.app.state.model.simulation.retained.runs[0]
+        .label
+        .clone();
+    assert_eq!(
+        tab_marks(&window.frames(Vec::new())),
+        [
+            (dataset.clone(), false),
+            ("Review A".to_owned(), false),
+            ("Review B".to_owned(), false),
+        ]
+    );
+
+    let content = &mut window.app.state.model.workspace.content;
+    let document = content.visualization_document(first).expect("A is saved");
+    let (revision, page) = (document.revision(), document.pages()[0].id);
+    content
+        .transact_visualization_document(
+            first,
+            revision,
+            vec![
+                crate::results::visualization_document::DocumentEdit::Rename {
+                    entity: crate::results::visualization_document::EntityRef::Page(page),
+                    value: "Settling".to_owned(),
+                },
+            ],
+        )
+        .expect("A takes the edit");
+    assert!(window.project_unsaved());
+    assert_eq!(
+        tab_marks(&window.frames(Vec::new())),
+        [
+            (dataset.clone(), false),
+            ("Review A".to_owned(), true),
+            ("Review B".to_owned(), false),
+        ],
+        "only the edited document's tab is marked"
+    );
+
+    window.save();
+    assert!(!window.project_unsaved());
+    assert_eq!(
+        tab_marks(&window.frames(Vec::new())),
+        [
+            (dataset, false),
+            ("Review A".to_owned(), false),
+            ("Review B".to_owned(), false),
+        ],
+        "saving leaves a mark behind"
+    );
+}
+
+/// An expression trace edits the results session's presentation, not a saved
+/// document: no document's tab is marked, and the project still reads
+/// unsaved.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_expression_trace_marks_no_document_tab_but_leaves_the_project_unsaved() {
+    let mut window = ResultsWindow::new();
+    window.create("Review A").expect("A commits");
+    window.save();
+    assert!(!window.project_unsaved());
+
+    let state = &mut window.app.state;
+    state.results.calculator_panel.expression = "V(out)*2".to_owned();
+    crate::workbench::results::calculator::plot_expression(
+        &mut state.results,
+        &mut state.model,
+        &mut state.workbench,
+    );
+    assert_eq!(state.prompt_text(), Some("Plotted V(out)*2"));
+
+    assert!(window.project_unsaved(), "the plotted trace is not unsaved");
+    assert!(
+        tab_marks(&window.frames(Vec::new()))
+            .iter()
+            .all(|(_, marked)| !marked),
+        "an expression trace marked a document tab"
+    );
+}
+
+/// A create refused after it reached the catalog is rolled back whole: the
+/// document is gone and no tab carries a mark for it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_rolled_back_create_leaves_no_mark() {
+    let mut window = ResultsWindow::new();
+    window.create("Review A").expect("A commits");
+    window.save();
+
+    // The Results route with another workspace showing: the new document
+    // reaches the catalog and is then refused when it cannot be shown.
+    window.app.state.workbench.workspace = Workspace::Design;
+    assert!(window.create("Review B").is_err());
+    let content = &window.app.state.model.workspace.content;
+    assert_eq!(content.visualization_documents.len(), 1);
+    assert!(content.visualization_documents_modified.is_empty());
+    assert!(!content.visualization_documents_dirty);
+
+    window.app.state.workbench.activate(Workspace::Results);
+    let dataset = window.app.state.model.simulation.retained.runs[0]
+        .label
+        .clone();
+    assert_eq!(
+        tab_marks(&window.frames(Vec::new())),
+        [(dataset, false), ("Review A".to_owned(), false)]
     );
 }

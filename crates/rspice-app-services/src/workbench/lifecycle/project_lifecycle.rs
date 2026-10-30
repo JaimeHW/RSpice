@@ -1645,6 +1645,12 @@ pub fn revert_document_model(
             state.model.workspace.content.visualization_documents =
                 baseline.file.workspace.visualization_documents;
             state.model.workspace.content.visualization_documents_dirty = false;
+            state
+                .model
+                .workspace
+                .content
+                .visualization_documents_modified
+                .clear();
             RevertFollowUp::ResultHistory(baseline.file.result_presentation)
         }
         ProjectDocumentId::VerificationSpecifications => {

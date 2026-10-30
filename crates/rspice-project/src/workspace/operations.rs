@@ -612,6 +612,7 @@ impl ProjectWorkspace {
         self.project_metadata_dirty = false;
         self.report_documents_dirty = false;
         self.visualization_documents_dirty = false;
+        self.visualization_documents_modified.clear();
         self.hardcopy_setups_dirty = false;
         self.hardcopy_receipts_dirty = false;
         self.project_print_mappings_dirty = false;

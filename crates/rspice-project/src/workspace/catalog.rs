@@ -473,6 +473,7 @@ impl ProjectWorkspace {
         let document_id = document.id();
         self.visualization_documents.push(document);
         self.visualization_documents_dirty = true;
+        self.visualization_documents_modified.insert(document_id);
         Ok(document_id)
     }
 
@@ -510,6 +511,7 @@ impl ProjectWorkspace {
                 message: error.to_string(),
             })?;
         self.visualization_documents_dirty = true;
+        self.visualization_documents_modified.insert(document_id);
         Ok(receipt)
     }
 
