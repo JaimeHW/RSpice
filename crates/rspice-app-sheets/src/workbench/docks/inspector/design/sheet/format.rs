@@ -5,7 +5,10 @@
 use egui::Ui;
 
 use super::super::super::shared::{action_stack, count_label};
-use super::{PanelEdit, SheetIdentity, SheetInspector, SheetText, choice_row, text_row};
+use super::{
+    Empty, PanelEdit, SheetIdentity, SheetInspector, SheetText, choice_row, choice_row_showing,
+    text_row,
+};
 use rspice_schematic_editor::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetOverflowSummary,
 };
@@ -197,13 +200,24 @@ fn size_rows(
             (false, _) => "Custom size\u{2026}".to_owned(),
         },
     ));
-    match choice_row(
+    // The field names the size; its dimensions are in the menu and on hover.
+    // Name and dimensions together outran the field at the inspector's width
+    // for every size. A one-off size being edited is "Custom size", as its
+    // name and edges are the rows under it; one that cannot be edited keeps
+    // its dimensions, since no row gives them.
+    let shown = match (current, editable) {
+        (SizeChoice::OneOff, true) => Some("Custom size"),
+        (SizeChoice::OneOff, false) => None,
+        _ => Some(format.authored_size.label()),
+    };
+    match choice_row_showing(
         ui,
         editable,
         "Size",
         "sheet-inspector-size",
         current,
         &choices,
+        shown,
     ) {
         Some(SizeChoice::Standard(standard)) => {
             *edit = Some(Ok(DrawingSheetEdit::Size(standard)));
@@ -229,7 +243,14 @@ fn size_rows(
             SheetText::SizeName => text.label().to_owned(),
             _ => format!("{} ({unit})", text.label()),
         };
-        if let Some(typed) = text_row(ui, identity, text, &label, &text.stored(model, format), "") {
+        if let Some(typed) = text_row(
+            ui,
+            identity,
+            text,
+            &label,
+            &text.stored(model, format),
+            Empty::Blank,
+        ) {
             *edit = Some(text.edit(format, typed));
         }
     }

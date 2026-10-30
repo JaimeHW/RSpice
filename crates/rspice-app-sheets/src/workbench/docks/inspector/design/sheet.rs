@@ -36,7 +36,8 @@ use crate::workbench::app::drawing_sheet_edit::{
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::schematic_preferences::NET_NAME_CHARACTERS;
 use crate::workbench::design_system::{
-    Problem, problem_line, property_row_combo, property_row_input_with_hint,
+    Problem, problem_line, property_row_checklist, property_row_combo, property_row_combo_showing,
+    property_row_input_with_default, property_row_input_with_hint,
     schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
 };
 use crate::workbench::framework::requests::FollowSchematicGrid;
@@ -140,10 +141,24 @@ fn choice_row<T: Copy + PartialEq>(
     current: T,
     choices: &[(T, String)],
 ) -> Option<T> {
+    choice_row_showing(ui, editable, label, id, current, choices, None)
+}
+
+/// [`choice_row`] whose field states `shown`, the current choice's short
+/// name, where one is given. The menu still names every choice in full.
+fn choice_row_showing<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    editable: bool,
+    label: &str,
+    id: &str,
+    current: T,
+    choices: &[(T, String)],
+    shown: Option<&str>,
+) -> Option<T> {
     let position = choices.iter().position(|(choice, _)| *choice == current);
     if !editable {
-        let shown = position.map_or("\u{2014}", |index| choices[index].1.as_str());
-        property_row(ui, label, shown);
+        let full = position.map_or("\u{2014}", |index| choices[index].1.as_str());
+        property_row(ui, label, shown.unwrap_or(full));
         return None;
     }
     let mut selected = position.map_or_else(String::new, |index| index.to_string());
@@ -152,7 +167,13 @@ fn choice_row<T: Copy + PartialEq>(
         .enumerate()
         .map(|(index, (_, name))| (index.to_string(), name.clone()))
         .collect::<Vec<_>>();
-    if !property_row_combo(ui, label, id, &mut selected, &options, true) {
+    let chosen = match shown {
+        Some(shown) => {
+            property_row_combo_showing(ui, label, id, &mut selected, &options, shown, true)
+        }
+        None => property_row_combo(ui, label, id, &mut selected, &options, true),
+    };
+    if !chosen {
         return None;
     }
     selected
@@ -294,11 +315,12 @@ fn title_block_section(
             _ => field.default_value(),
         };
         if editable && !locked_by_organization(format, field) {
-            // An empty date shows the form it is written in.
-            let hint = if field.is_signature_date() {
-                field.entry_hint()
+            // An empty date shows the form it is written in; any other empty
+            // field shows what the block letters in its place.
+            let empty = if field.is_signature_date() {
+                Empty::Form(field.entry_hint())
             } else {
-                fallback
+                Empty::Prints(fallback)
             };
             if let Some(typed) = text_row(
                 ui,
@@ -306,7 +328,7 @@ fn title_block_section(
                 SheetText::Field(field),
                 field.display_label(),
                 &authored.value,
-                hint,
+                empty,
             ) {
                 *edit = Some(Ok(DrawingSheetEdit::TitleField(field, typed)));
             }
@@ -322,8 +344,9 @@ fn title_block_section(
 }
 
 /// The boxes on the sheet's form that the form leaves optional, which a sheet
-/// shows or not. One row holds them all: its menu shows or hides one box at
-/// a time, and the row says how many are shown.
+/// shows or not. One row holds them all: its checklist ticks each box shown,
+/// shows or hides one box per tick and stays open for the next, and the row
+/// says how many are shown.
 fn optional_boxes_row(
     ui: &mut Ui,
     format: &SchematicSheetFormat,
@@ -341,33 +364,24 @@ fn optional_boxes_row(
         return;
     }
     let shown = boxes.iter().filter(|(_, shown)| *shown).count();
-    let mut summary = format!("{shown} of {} shown", boxes.len());
+    let summary = format!("{shown} of {} shown", boxes.len());
     if !editable {
         property_row(ui, "Optional boxes", &summary);
         return;
     }
-    let options = boxes
+    let items = boxes
         .iter()
-        .enumerate()
-        .map(|(index, (field, shown))| {
-            let action = if *shown { "Hide" } else { "Show" };
-            (
-                index.to_string(),
-                format!("{action} {}", field.display_label()),
-            )
-        })
+        .map(|(field, shown)| (field.display_label().to_owned(), *shown))
         .collect::<Vec<_>>();
-    if property_row_combo(
+    if let Some((field, shown)) = property_row_checklist(
         ui,
         "Optional boxes",
         "sheet-inspector-optional-boxes",
-        &mut summary,
-        &options,
+        &summary,
+        &items,
         true,
-    ) && let Some((field, shown)) = summary
-        .parse::<usize>()
-        .ok()
-        .and_then(|index| boxes.get(index))
+    )
+    .and_then(|index| boxes.get(index))
     {
         *edit = Some(Ok(DrawingSheetEdit::BoxShown(*field, !shown)));
     }
@@ -440,10 +454,10 @@ fn document_section(
         if writable {
             // The date is refused unless it is written the one way the
             // document control reads it.
-            let hint = if field == DrawingSheetTitleFieldId::Date {
-                "YYYY-MM-DD"
+            let empty = if field == DrawingSheetTitleFieldId::Date {
+                Empty::Form("YYYY-MM-DD")
             } else {
-                ""
+                Empty::Blank
             };
             if let Some(typed) = text_row(
                 ui,
@@ -451,7 +465,7 @@ fn document_section(
                 SheetText::Field(field),
                 field.display_label(),
                 &stored,
-                hint,
+                empty,
             ) {
                 *edit = Some(Ok(DrawingSheetEdit::TitleField(field, typed)));
             }
@@ -474,7 +488,7 @@ fn document_section(
             SheetText::ChangeReference,
             SheetText::ChangeReference.label(),
             &control.change_reference,
-            "ECO or ticket",
+            Empty::Form("ECO or ticket"),
         ) {
             *edit = Some(Ok(DrawingSheetEdit::ChangeReference(typed)));
         }
@@ -673,6 +687,19 @@ fn take_text_draft(data: &mut egui::util::IdTypeMap, text: SheetText) -> Option<
     draft
 }
 
+/// What an empty field shows in its value's place.
+#[derive(Debug, Clone, Copy)]
+enum Empty<'a> {
+    /// Nothing.
+    Blank,
+    /// What the sheet prints while the field is empty. It reads as the value
+    /// that applies, a step below a typed one.
+    Prints(&'a str),
+    /// The form a value is written in, such as "YYYY-MM-DD". It reads
+    /// faintest, so it is never taken for a value.
+    Form(&'a str),
+}
+
 /// One typed value. It lands once, as one undo step, when the field is left
 /// — Enter, Tab or a click elsewhere — and Escape abandons it. Returns the
 /// text that lands, trimmed, when it differs from `stored`.
@@ -682,7 +709,7 @@ fn text_row(
     text: SheetText,
     label: &str,
     stored: &str,
-    hint: &str,
+    empty: Empty<'_>,
 ) -> Option<String> {
     let draft = ui
         .data_mut(|data| take_text_draft(data, text))
@@ -691,8 +718,12 @@ fn text_row(
         .as_ref()
         .map_or_else(|| stored.to_owned(), |draft| draft.text.clone());
     let response = ui
-        .push_id(text.label(), |ui| {
-            property_row_input_with_hint(ui, label, &mut typed, hint, false)
+        .push_id(text.label(), |ui| match empty {
+            Empty::Blank => property_row_input_with_hint(ui, label, &mut typed, "", false),
+            Empty::Prints(printed) => {
+                property_row_input_with_default(ui, label, &mut typed, printed, false)
+            }
+            Empty::Form(form) => property_row_input_with_hint(ui, label, &mut typed, form, false),
         })
         .inner;
     if response.has_focus() {

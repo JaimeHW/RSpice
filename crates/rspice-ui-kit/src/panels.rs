@@ -1211,7 +1211,7 @@ pub fn property_row_input_with_hint(
     hint: &str,
     invalid: bool,
 ) -> Response {
-    let hint_shown = hint_shows(value, hint);
+    let stand_in = hint_shows(value, hint).then_some(StandIn::Form);
     let mut resting = resting_layout(ui, invalid);
     property_row_text_edit_in(
         ui,
@@ -1220,8 +1220,43 @@ pub fn property_row_input_with_hint(
         Some(&mut resting),
         invalid,
         None,
-        hint_shown,
+        stand_in,
     )
+}
+
+/// [`property_row_input_with_hint`] where what stands in for an empty value
+/// is `default`, the value that applies while the field is empty: inherited,
+/// or what prints in its place. It reads a step below an authored value and
+/// a step above the form a value is written in, so a default is taken for
+/// neither.
+pub fn property_row_input_with_default(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    default: &str,
+    invalid: bool,
+) -> Response {
+    let stand_in = hint_shows(value, default).then_some(StandIn::Default);
+    let mut resting = resting_layout(ui, invalid);
+    property_row_text_edit_in(
+        ui,
+        label,
+        hinted_edit(value, default),
+        Some(&mut resting),
+        invalid,
+        None,
+        stand_in,
+    )
+}
+
+/// What an empty field shows in its value's place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StandIn {
+    /// The form a value is written in, such as "YYYY-MM-DD": the faintest
+    /// tone, so it never reads as a value.
+    Form,
+    /// The value that applies while the field is empty: the secondary tone.
+    Default,
 }
 
 /// [`property_row_input_with_hint`] with the label column its caller measured.
@@ -1233,7 +1268,7 @@ pub fn property_row_input_with_hint_labelled(
     invalid: bool,
     label_width: f32,
 ) -> Response {
-    let hint_shown = hint_shows(value, hint);
+    let stand_in = hint_shows(value, hint).then_some(StandIn::Form);
     let mut resting = resting_layout(ui, invalid);
     property_row_text_edit_in(
         ui,
@@ -1242,7 +1277,7 @@ pub fn property_row_input_with_hint_labelled(
         Some(&mut resting),
         invalid,
         Some(label_width),
-        hint_shown,
+        stand_in,
     )
 }
 
@@ -1280,7 +1315,18 @@ pub(crate) fn hinted_edit<'t>(value: &'t mut String, hint: &str) -> egui::TextEd
 /// does: a row whose value is inherited is still an empty field.
 fn show_property_field(ui: &mut Ui, rect: Rect, edit: egui::TextEdit<'_>) -> Response {
     let faint = Tokens::get(ui.ctx()).color.text_faint;
-    let restored = ui.visuals_mut().weak_text_color.replace(faint);
+    show_property_field_toned(ui, rect, edit, faint)
+}
+
+/// [`show_property_field`] with what stands in for an empty value painted in
+/// `stand_in`.
+fn show_property_field_toned(
+    ui: &mut Ui,
+    rect: Rect,
+    edit: egui::TextEdit<'_>,
+    stand_in: Color32,
+) -> Response {
+    let restored = ui.visuals_mut().weak_text_color.replace(stand_in);
     let response = ui.put(rect, edit);
     ui.visuals_mut().weak_text_color = restored;
     response
@@ -1293,7 +1339,7 @@ pub fn property_row_text_edit(
     edit: egui::TextEdit<'_>,
     invalid: bool,
 ) -> Response {
-    property_row_text_edit_in(ui, label, edit, None, invalid, None, false)
+    property_row_text_edit_in(ui, label, edit, None, invalid, None, None)
 }
 
 /// How a resting field lays its value out: on one line, cut to the field
@@ -1327,7 +1373,7 @@ fn property_row_text_edit_in<'t>(
     resting: Option<RestingLayout<'t>>,
     invalid: bool,
     label_width: Option<f32>,
-    hint_shown: bool,
+    stand_in: Option<StandIn>,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let (slot, row) = row_slot(ui, label_width, Sense::hover());
@@ -1351,7 +1397,7 @@ fn property_row_text_edit_in<'t>(
             ui,
             value_rect,
             FIELD_TEXT_INSET,
-            hint_shown,
+            stand_in.is_some(),
         ))
         .desired_width(value_rect.width())
         .text_color(ink);
@@ -1359,7 +1405,12 @@ fn property_row_text_edit_in<'t>(
     if let Some(resting) = resting.filter(|_| !editing) {
         edit = edit.layouter(resting);
     }
-    let response = show_property_field(ui, value_rect, edit);
+    let stand_in_tone = if stand_in == Some(StandIn::Default) {
+        t.color.text_dim
+    } else {
+        t.color.text_faint
+    };
+    let response = show_property_field_toned(ui, value_rect, edit, stand_in_tone);
     if rests {
         ui.data_mut(|data| data.insert_temp(row.id, response.id));
     }
@@ -1602,15 +1653,130 @@ fn property_row_combo_in(
     enabled: bool,
     label_width: Option<f32>,
 ) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let (slot, _) = row_slot(ui, label_width, Sense::hover());
-    row_label(ui, slot.label, label);
-    let value_rect = slot.field();
     let selected_label = options
         .iter()
         .find(|(value, _)| value == selected)
         .map_or_else(|| selected.clone(), |(_, display)| display.clone());
     let before = selected.clone();
+    property_row_dropdown_in(
+        ui,
+        id_source,
+        DropdownRow {
+            label,
+            closed: &selected_label,
+            named: &selected_label,
+            enabled,
+            label_width,
+            close_behavior: egui::PopupCloseBehavior::CloseOnClick,
+        },
+        |ui| {
+            for (value, display) in options {
+                ui.selectable_value(selected, value.clone(), display);
+            }
+        },
+    );
+    *selected != before
+}
+
+/// [`property_row_combo`] whose closed field states `shown`, the choice's
+/// short name, while its menu names every choice in full. Hovering the field
+/// names the chosen one in full. For choices whose full names outrun a
+/// panel's field, such as a sheet size and its dimensions.
+pub fn property_row_combo_showing(
+    ui: &mut Ui,
+    label: &str,
+    id_source: impl Hash + std::fmt::Debug,
+    selected: &mut String,
+    options: &[(String, String)],
+    shown: &str,
+    enabled: bool,
+) -> bool {
+    let named = options
+        .iter()
+        .find(|(value, _)| value == selected)
+        .map_or_else(|| shown.to_owned(), |(_, display)| display.clone());
+    let before = selected.clone();
+    property_row_dropdown_in(
+        ui,
+        id_source,
+        DropdownRow {
+            label,
+            closed: shown,
+            named: &named,
+            enabled,
+            label_width: None,
+            close_behavior: egui::PopupCloseBehavior::CloseOnClick,
+        },
+        |ui| {
+            for (value, display) in options {
+                ui.selectable_value(selected, value.clone(), display);
+            }
+        },
+    );
+    *selected != before
+}
+
+/// A row turning each of `items` on or off, each a name and whether it is on.
+/// Its menu is a checklist, one box per item, that stays open while boxes are
+/// ticked; the closed field states `summary`, such as how many are on.
+/// Returns the index of the item ticked or unticked this frame.
+pub fn property_row_checklist(
+    ui: &mut Ui,
+    label: &str,
+    id_source: impl Hash + std::fmt::Debug,
+    summary: &str,
+    items: &[(String, bool)],
+    enabled: bool,
+) -> Option<usize> {
+    let mut toggled = None;
+    property_row_dropdown_in(
+        ui,
+        id_source,
+        DropdownRow {
+            label,
+            closed: summary,
+            named: summary,
+            enabled,
+            label_width: None,
+            close_behavior: egui::PopupCloseBehavior::CloseOnClickOutside,
+        },
+        |ui| {
+            for (index, (name, on)) in items.iter().enumerate() {
+                let mut ticked = *on;
+                if ui.checkbox(&mut ticked, name.as_str()).changed() {
+                    toggled = Some(index);
+                }
+            }
+        },
+    );
+    toggled
+}
+
+/// A property row's dropdown as it stands closed.
+struct DropdownRow<'a> {
+    label: &'a str,
+    /// The closed field's text, painted in value ink.
+    closed: &'a str,
+    /// What hovering the closed field names: `closed` whole where the field
+    /// cuts it, or the choice in full where `closed` is its short name.
+    named: &'a str,
+    enabled: bool,
+    label_width: Option<f32>,
+    close_behavior: egui::PopupCloseBehavior,
+}
+
+/// The label and value columns every property-row dropdown shares, with
+/// `menu` as the dropdown's contents.
+fn property_row_dropdown_in(
+    ui: &mut Ui,
+    id_source: impl Hash + std::fmt::Debug,
+    row: DropdownRow<'_>,
+    menu: impl FnOnce(&mut Ui),
+) {
+    let t = Tokens::get(ui.ctx());
+    let (slot, _) = row_slot(ui, row.label_width, Sense::hover());
+    row_label(ui, slot.label, row.label);
+    let value_rect = slot.field();
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(value_rect)
@@ -1635,35 +1801,31 @@ fn property_row_combo_in(
             let font = egui::TextStyle::Button.resolve(ui.style());
             let cut = ui
                 .painter()
-                .layout_no_wrap(selected_label.clone(), font, Color32::PLACEHOLDER)
+                .layout_no_wrap(row.closed.to_owned(), font, Color32::PLACEHOLDER)
                 .size()
                 .x
                 > room;
-            ui.add_enabled_ui(enabled, |ui| {
+            ui.add_enabled_ui(row.enabled, |ui| {
                 // The choice is the row's value and reads in value ink, as a
                 // typed value and a read-only one do. Left to egui it takes
                 // the resting-button tone, the label column's grey.
                 let output = egui::ComboBox::from_id_salt(id_source)
                     .width(value_rect.width())
                     .truncate()
-                    .selected_text(egui::RichText::new(selected_label.clone()).color(t.color.text))
-                    .show_ui(ui, |ui| {
-                        for (value, display) in options {
-                            ui.selectable_value(selected, value.clone(), display);
-                        }
-                    });
-                let response = if cut {
-                    output.response.on_hover_text(selected_label)
+                    .close_behavior(row.close_behavior)
+                    .selected_text(egui::RichText::new(row.closed).color(t.color.text))
+                    .show_ui(ui, menu);
+                let response = if cut || row.named != row.closed {
+                    output.response.on_hover_text(row.named)
                 } else {
                     output.response
                 };
                 ui.ctx()
-                    .accesskit_node_builder(response.id, |node| node.set_label(label));
+                    .accesskit_node_builder(response.id, |node| node.set_label(row.label));
             });
         },
     );
     slot.close(ui);
-    *selected != before
 }
 
 fn property_row_with_tone(

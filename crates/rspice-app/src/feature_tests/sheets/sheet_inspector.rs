@@ -36,6 +36,9 @@ struct SheetPanel {
     ctx: egui::Context,
     app: RSpiceApp,
     controls: HashMap<String, egui::Rect>,
+    /// Every text the last pass painted, in paint order: its words, where it
+    /// stands and its ink.
+    painted: Vec<(String, egui::Rect, egui::Color32)>,
 }
 
 impl SheetPanel {
@@ -47,6 +50,7 @@ impl SheetPanel {
             ctx,
             app: RSpiceApp::test_instance(),
             controls: HashMap::new(),
+            painted: Vec::new(),
         }
     }
 
@@ -66,10 +70,16 @@ impl SheetPanel {
                     .show(ctx, |ui| sheet_panel(ui, &mut self.app.state));
             },
         );
+        self.painted.clear();
+        for clipped in &output.shapes {
+            collect_painted(&clipped.shape, &mut self.painted);
+        }
         if let Some(update) = output.platform_output.accesskit_update {
             for (_, node) in update.nodes {
-                if node.role() == egui::accesskit::Role::TextInput
-                    && let (Some(label), Some(bounds)) = (node.label(), node.bounds())
+                if matches!(
+                    node.role(),
+                    egui::accesskit::Role::TextInput | egui::accesskit::Role::ComboBox
+                ) && let (Some(label), Some(bounds)) = (node.label(), node.bounds())
                 {
                     self.controls.insert(
                         label.to_owned(),
@@ -84,7 +94,50 @@ impl SheetPanel {
     }
 
     fn click(&mut self, label: &str) {
-        let pos = self.controls[label].center();
+        self.click_at(self.controls[label].center());
+    }
+
+    /// Click the text painted last with these words: in an open menu, the
+    /// menu's entry rather than a row's label under it.
+    fn click_text(&mut self, text: &str) {
+        let pos = self
+            .painted
+            .iter()
+            .rev()
+            .find(|(painted, ..)| painted == text)
+            .unwrap_or_else(|| panic!("{text:?} is not painted"))
+            .1
+            .center();
+        self.click_at(pos);
+    }
+
+    /// Open the dropdown labelled `label` and return the words painted with
+    /// it open, one per line.
+    fn open(&mut self, label: &str) -> String {
+        self.pass(Vec::new());
+        self.click(label);
+        self.pass(Vec::new());
+        self.words()
+    }
+
+    /// The words the last pass painted, one per line.
+    fn words(&self) -> String {
+        self.painted
+            .iter()
+            .map(|(words, ..)| format!("{words}\n"))
+            .collect()
+    }
+
+    /// The ink of the text painted with these words.
+    fn ink(&self, text: &str) -> egui::Color32 {
+        self.painted
+            .iter()
+            .find(|(painted, ..)| painted == text)
+            .unwrap_or_else(|| panic!("{text:?} is not painted"))
+            .2
+    }
+
+    fn click_at(&mut self, pos: egui::Pos2) {
         self.pass(vec![
             egui::Event::PointerMoved(pos),
             egui::Event::PointerButton {
@@ -137,6 +190,37 @@ impl SheetPanel {
     }
 }
 
+/// Every text `shape` paints: its words, where it stands and its ink.
+fn collect_painted(
+    shape: &egui::epaint::Shape,
+    into: &mut Vec<(String, egui::Rect, egui::Color32)>,
+) {
+    match shape {
+        egui::epaint::Shape::Text(text) => {
+            let ink = text.override_text_color.unwrap_or_else(|| {
+                text.galley
+                    .job
+                    .sections
+                    .iter()
+                    .map(|section| section.format.color)
+                    .find(|color| *color != egui::Color32::PLACEHOLDER)
+                    .unwrap_or(text.fallback_color)
+            });
+            into.push((
+                text.galley.job.text.clone(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+                ink,
+            ));
+        }
+        egui::epaint::Shape::Vec(shapes) => {
+            for shape in shapes {
+                collect_painted(shape, into);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
     egui::Event::Key {
         key,
@@ -162,7 +246,7 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
     // Each editable value paints its hint and then its (empty) text.
     assert_eq!(
         painted,
-        "Sheet\nSize\nISO A4 · 297 × 210 mm\nOrientation\nLandscape\n\
+        "Sheet\nSize\nISO A4\nOrientation\nLandscape\n\
          Format from\nProject default\nFrame\nISO 5457 frame\nZones\n6 × 4\n\
          Centring marks\nDrawn\nUnits\nMillimetres\n\
          Title block\nTemplate\nISO 7200\nOptional boxes\n3 of 6 shown\n\
@@ -599,20 +683,31 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
     assert!(!panel.app.state.model.can_undo_project_design());
 }
 
-/// The size menu names each standard with its oriented size, and a choice
-/// lands on the sheet at once.
+/// The Size field names the size, and its menu names each standard with its
+/// oriented size. A choice from the menu lands on the sheet at once.
 #[test]
 fn a_size_chosen_in_the_panel_lands_on_the_sheet() {
-    let mut app = RSpiceApp::test_instance();
+    let mut panel = SheetPanel::new();
     apply_drawing_sheet_edit(
-        &mut app.state,
+        &mut panel.app.state,
         DrawingSheetEdit::Size(DrawingSheetStandard::IsoA3),
     )
     .unwrap();
-    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    let open = panel.open("Size");
+    assert!(open.contains("Size\nISO A3\n"), "{open}");
+    for entry in ["ISO A3 · 420 × 297 mm\n", "ISO A4 · 297 × 210 mm\n"] {
+        assert!(open.contains(entry), "{open}");
+    }
+    panel.click_text("ISO A4 · 297 × 210 mm");
+    panel.pass(Vec::new());
+    assert_eq!(
+        sheet_format(&panel.app.state).authored_size.label(),
+        "ISO A4"
+    );
     assert!(
-        painted.contains("Size\nISO A3 · 420 × 297 mm\n"),
-        "{painted}"
+        panel.words().contains("Size\nISO A4\n"),
+        "{}",
+        panel.words()
     );
 }
 
@@ -729,7 +824,7 @@ fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
     assert_eq!(settings.presets[0].name, "Lab panel");
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
     assert!(
-        painted.contains("Size\nLab panel · 250 × 400 mm\nOrientation\nPortrait\n"),
+        painted.contains("Size\nLab panel\nOrientation\nPortrait\n"),
         "{painted}"
     );
     assert!(!painted.contains("Width (mm)"), "{painted}");
@@ -784,10 +879,16 @@ fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
             .contains("Frame\nISO 5457 frame\nZones\nNone\nCentring marks\nNone\nUnits\nInches\n"),
         "{painted}"
     );
-    assert!(
-        painted.contains("Size\nISO A4 · 11.69291 × 8.26772 in\n"),
-        "{painted}"
-    );
+    assert!(painted.contains("Size\nISO A4\n"), "{painted}");
+    // The size menu states every size in the sheet's unit.
+    let mut inches = SheetPanel::new();
+    apply_drawing_sheet_edit(
+        &mut inches.app.state,
+        DrawingSheetEdit::Units(crate::state::DrawingSheetDisplayUnit::Inches),
+    )
+    .unwrap();
+    let menu = inches.open("Size");
+    assert!(menu.contains("ISO A4 · 11.69291 × 8.26772 in\n"), "{menu}");
 
     apply_drawing_sheet_edit(
         &mut app.state,
@@ -918,6 +1019,54 @@ fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
     );
 }
 
+/// Optional boxes open as a checklist with each optional box ticked where it
+/// is shown. A tick shows or hides that one box, and the list stays open for
+/// the next one.
+#[test]
+fn the_optional_boxes_are_a_checklist() {
+    let mut panel = SheetPanel::new();
+    let shown = |panel: &SheetPanel, field: DrawingSheetTitleFieldId| {
+        panel
+            .app
+            .state
+            .model
+            .active_drawing_sheet()
+            .format
+            .title_field_shown(field)
+    };
+    assert!(!shown(&panel, DrawingSheetTitleFieldId::CheckedBy));
+    let open = panel.open("Optional boxes");
+    assert!(open.contains("Optional boxes\n3 of 6 shown\n"), "{open}");
+    assert!(open.contains("Checked by\n"), "{open}");
+
+    panel.click_text("Checked by");
+    panel.pass(Vec::new());
+    assert!(shown(&panel, DrawingSheetTitleFieldId::CheckedBy));
+    let words = panel.words();
+    assert!(words.contains("Optional boxes\n4 of 6 shown\n"), "{words}");
+    // Still open: the next box is a tick away.
+    assert!(words.contains("Language\n"), "{words}");
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+    assert!(!shown(&panel, DrawingSheetTitleFieldId::CheckedBy));
+}
+
+/// What a sheet prints while a field is empty stands in that field a step
+/// below a typed value. The form a value is written in stands a step fainter
+/// again, so neither is taken for the other or for a value.
+#[test]
+fn a_printed_default_reads_apart_from_a_format_hint() {
+    let mut panel = SheetPanel::new();
+    panel.pass(Vec::new());
+    let palette = crate::ui::tokens::Tokens::default().color;
+    assert_eq!(panel.ink("Circuit diagram"), palette.text_dim);
+    assert_eq!(panel.ink("YYYY-MM-DD"), palette.text_faint);
+    assert_eq!(panel.ink("ECO or ticket"), palette.text_faint);
+    // An empty title prints the sheet's name.
+    assert_eq!(panel.ink("top"), palette.text_dim);
+    panel.enter("Approved by", "R. Okafor");
+    assert_eq!(panel.ink("R. Okafor"), palette.text);
+}
+
 /// The change order a revision answers to is the document's, typed with the
 /// rest of its values.
 #[test]
@@ -962,7 +1111,7 @@ fn content_outside_the_drawing_area_is_counted_under_the_size() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(
         painted.contains(
-            "Size\nISO A4 · 297 × 210 mm\n\
+            "Size\nISO A4\n\
              1 object outside the drawing area: 1 outside the border\n"
         ),
         "{painted}"

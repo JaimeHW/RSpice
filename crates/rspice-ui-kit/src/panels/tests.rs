@@ -1247,3 +1247,157 @@ fn a_cut_typed_value_ends_in_an_ellipsis_until_it_is_edited() {
     assert!(!editing.galley.elided, "an edited value is laid out whole");
     assert_eq!(typed, long, "the value itself is never cut");
 }
+
+/// A choice whose full name outruns its field shows its short name closed,
+/// in value ink, while the menu names every choice in full.
+#[test]
+fn a_short_named_choice_shows_its_name_closed() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut selected = "a3".to_owned();
+    let options = vec![
+        ("a3".to_owned(), "ISO A3 · 420 × 297 mm".to_owned()),
+        ("a4".to_owned(), "ISO A4 · 297 × 210 mm".to_owned()),
+    ];
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(278.0);
+            property_row_combo_showing(
+                ui,
+                "Size",
+                "short-name",
+                &mut selected,
+                &options,
+                "ISO A3",
+                true,
+            );
+        });
+    });
+    let texts = all_texts(&output.shapes);
+    let closed = texts
+        .iter()
+        .find(|text| text.galley.text() == "ISO A3")
+        .expect("the short name was painted");
+    assert!(!closed.galley.elided, "the short name fits its field");
+    assert_eq!(ink(closed), Tokens::default().color.text);
+    assert!(
+        texts.iter().all(|text| !text.galley.text().contains('·')),
+        "the full names wait in the menu"
+    );
+}
+
+/// A checklist states its summary closed, opens to one box per item, reports
+/// the one box ticked, and stays open for the next.
+#[test]
+fn a_checklist_reports_the_box_ticked_and_stays_open() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut items = vec![
+        ("Checked by".to_owned(), false),
+        ("Language".to_owned(), true),
+    ];
+    let run = |events: Vec<egui::Event>, items: &[(String, bool)]| {
+        let mut toggled = None;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let on = items.iter().filter(|(_, on)| *on).count();
+                    let summary = format!("{on} of {} shown", items.len());
+                    toggled = property_row_checklist(
+                        ui,
+                        "Optional boxes",
+                        "boxes",
+                        &summary,
+                        items,
+                        true,
+                    );
+                });
+            },
+        );
+        (all_texts(&output.shapes), toggled)
+    };
+    let at = |texts: &[egui::epaint::TextShape], wanted: &str| {
+        texts
+            .iter()
+            .find(|text| text.galley.text() == wanted)
+            .map(|text| Rect::from_min_size(text.pos, text.galley.size()).center())
+    };
+    let press = |pos: Pos2, pressed: bool| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]
+    };
+
+    let (closed, _) = run(Vec::new(), &items);
+    let summary = closed
+        .iter()
+        .find(|text| text.galley.text() == "1 of 2 shown")
+        .expect("the closed field states the summary");
+    assert_eq!(ink(summary), Tokens::default().color.text);
+    assert_eq!(at(&closed, "Checked by"), None, "closed, it lists nothing");
+
+    let field = at(&closed, "1 of 2 shown").unwrap();
+    run(press(field, true), &items);
+    run(press(field, false), &items);
+    let (open, _) = run(Vec::new(), &items);
+    let checked_by = at(&open, "Checked by").expect("open, it lists every box");
+    assert!(at(&open, "Language").is_some());
+
+    run(press(checked_by, true), &items);
+    let (_, toggled) = run(press(checked_by, false), &items);
+    assert_eq!(toggled, Some(0), "the box ticked is reported");
+    items[0].1 = true;
+
+    let (still, toggled) = run(Vec::new(), &items);
+    assert_eq!(toggled, None);
+    assert!(
+        at(&still, "Language").is_some(),
+        "the list stays open for the next box"
+    );
+    assert!(at(&still, "2 of 2 shown").is_some());
+}
+
+/// A default, the value that applies while a field is empty, reads a step
+/// above the form a value is written in and a step below a typed value.
+#[test]
+fn a_default_reads_apart_from_the_form_a_value_is_written_in() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let (mut document_type, mut date, mut title) = (String::new(), String::new(), "top".to_owned());
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(320.0);
+            property_row_input_with_default(
+                ui,
+                "Document type",
+                &mut document_type,
+                "Circuit diagram",
+                false,
+            );
+            property_row_input_with_hint(ui, "Date of issue", &mut date, "YYYY-MM-DD", false);
+            property_row_input(ui, "Title", &mut title, false);
+        });
+    });
+    let painted = |wanted: &str| {
+        output
+            .shapes
+            .iter()
+            .find_map(|clipped| painted_text(&clipped.shape, wanted))
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+    };
+    let palette = Tokens::default().color;
+    assert_eq!(ink(&painted("Circuit diagram")), palette.text_dim);
+    assert_eq!(ink(&painted("YYYY-MM-DD")), palette.text_faint);
+    assert_eq!(ink(&painted("top")), palette.text);
+}
