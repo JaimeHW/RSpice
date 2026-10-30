@@ -1,0 +1,21 @@
+[package]
+name = "rspice-fonts"
+description = "The faces RSpice embeds and the one fallback chain screen and print letter through"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# egui font definitions: every face installed, one family per role.
+egui = ["dep:egui"]
+
+[dependencies]
+egui = { version = "0.35.0", default-features = false, optional = true }
+skrifa = { version = "0.42.1", default-features = false, features = ["std"] }
+unicode-segmentation = "1.12"
