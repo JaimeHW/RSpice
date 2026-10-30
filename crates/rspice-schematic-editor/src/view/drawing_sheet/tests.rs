@@ -1096,3 +1096,98 @@ fn grid_dots_register_with_the_content_lattice() {
     });
     assert!(dots > 100, "the grid painted {dots} dots");
 }
+
+/// A large sheet fitted to an ordinary window, at one physical pixel per
+/// point, is still a ruled form in a lettered frame: its title block keeps
+/// every rule and its border every zone letter, as the same sheet does seen
+/// whole on a table. At this zoom the A1 to E sheets resolve one millimetre
+/// to between one and one and a half pixels.
+#[test]
+fn a_large_sheet_fitted_to_the_window_keeps_its_block_rules_and_zone_letters() {
+    for standard in [
+        DrawingSheetStandard::AnsiD,
+        DrawingSheetStandard::AnsiE,
+        DrawingSheetStandard::IsoA1,
+        DrawingSheetStandard::IsoA0,
+    ] {
+        let sheet = active(SchematicSheetFormat::from_standard(
+            standard,
+            SchematicPageOrientation::Landscape,
+        ));
+        let paper = sheet.geometry.paper;
+        let bounds = Rect::from_min_size(Pos2::ZERO, vec2(1_280.0, 800.0));
+        let zoom = (bounds.width() / (paper.max_x - paper.min_x) as f32)
+            .min(bounds.height() / (paper.max_y - paper.min_y) as f32)
+            * 0.95;
+        let viewport = Viewport {
+            offset: egui::pos2(
+                bounds.width() / 2.0 - (paper.min_x + paper.max_x) as f32 / 2.0 * zoom,
+                bounds.height() / 2.0 - (paper.min_y + paper.max_y) as f32 / 2.0 * zoom,
+            ),
+            zoom,
+            bounds,
+        };
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let painter = Painter::new(
+            ctx,
+            egui::LayerId::new(egui::Order::Background, egui::Id::new("fitted-sheet")),
+            bounds,
+        );
+        draw_base(
+            &painter,
+            bounds,
+            &viewport,
+            DrawingSheetCanvas {
+                layers: DrawingSheetLayerVisibility::default(),
+                grid: GridStyle::Dots,
+                grid_size: 10,
+            },
+            &sheet,
+            Vec::new,
+        );
+        let block = sheet
+            .geometry
+            .title_block
+            .expect("the sheet carries a title block")
+            .screen_rect(&viewport)
+            .expand(0.5);
+        let mut rules = 0;
+        let mut lettered = Vec::new();
+        painter.for_each_shape(|shape| match &shape.shape {
+            Shape::LineSegment { points, .. }
+                if points.iter().all(|point| block.contains(*point)) =>
+            {
+                rules += 1;
+            }
+            Shape::Text(text) => lettered.push(text.galley.text().to_owned()),
+            _ => {}
+        });
+        let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
+            .expect("the sheet carries a title block");
+        assert!(
+            rules >= layout.rules.len(),
+            "{standard:?}: {rules} of the block's {} rules drawn",
+            layout.rules.len()
+        );
+        let zone_letters = sheet
+            .geometry
+            .frame
+            .items
+            .iter()
+            .filter(|item| item.layer == DrawingSheetFrameLayer::ZoneLabels)
+            .filter_map(|item| match &item.mark {
+                DrawingSheetFrameMark::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!zone_letters.is_empty(), "{standard:?} is zoned");
+        for letter in &zone_letters {
+            assert!(
+                lettered.contains(letter),
+                "{standard:?}: zone {letter} is not lettered at fit: {lettered:?}"
+            );
+        }
+    }
+}

@@ -325,10 +325,11 @@ impl DrawingSheetLod {
         Self {
             tier,
             show_border: tier != DrawingSheetLodTier::Thumbnail,
-            show_zone_labels: matches!(
-                tier,
-                DrawingSheetLodTier::Working | DrawingSheetLodTier::Detail
-            ),
+            // Zone references are part of the frame, as the block's rules are,
+            // and are drawn wherever the frame is: a large sheet fitted to the
+            // window is read from as far away as the same sheet on a table,
+            // and from there its zone letters are still there to be seen.
+            show_zone_labels: tier != DrawingSheetLodTier::Thumbnail,
             // Title-block lettering is drawn at its authored paper height, so
             // it is legible only once that height resolves on screen. Below
             // that the block stays ruled and empty, which is what the sheet
@@ -1331,22 +1332,26 @@ fn draw_title_block(
             palette,
         );
     }
+    // Each cell's own rules, each drawn once at its own width. They are the
+    // form, drawn wherever the frame is, so a block whose lettering is too
+    // small to read is still the ruled form it prints as.
+    if lod.show_border {
+        for rule in &layout.rules {
+            painter.line_segment(
+                [
+                    pos2(x_at(rule.from_x_um), y_at(rule.from_y_um)),
+                    pos2(x_at(rule.to_x_um), y_at(rule.to_y_um)),
+                ],
+                rule_stroke(rule.width_um),
+            );
+        }
+    }
     if !lod.show_title_block_fields || field_grid.width() < 80.0 || field_grid.height() < 30.0 {
         return;
     }
     let fields = resolve_title_fields();
     if fields.is_empty() {
         return;
-    }
-    // Each cell's own rules, each drawn once at its own width.
-    for rule in &layout.rules {
-        painter.line_segment(
-            [
-                pos2(x_at(rule.from_x_um), y_at(rule.from_y_um)),
-                pos2(x_at(rule.to_x_um), y_at(rule.to_y_um)),
-            ],
-            rule_stroke(rule.width_um),
-        );
     }
     let padding = authored_title_cell_padding(layout.padding_um) * zoom;
     for line in layout.lettering(&fields) {
