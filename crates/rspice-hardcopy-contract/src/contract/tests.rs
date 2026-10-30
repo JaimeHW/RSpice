@@ -1276,3 +1276,84 @@ fn schematic_output_inclusion_contract_round_trips_and_legacy_setups_default() {
         SchematicHardcopySetup::default()
     );
 }
+
+#[test]
+fn an_authored_sheet_prints_as_the_page_itself_at_one_to_one() {
+    let millimetres = |value: u64| Length::from_micrometres(value * 1_000);
+    let setup = HardcopySetup::for_authored_sheets(vec![
+        AuthoredSheetMedia::try_new(0, "ISO A4 portrait", millimetres(210), millimetres(297))
+            .unwrap(),
+        AuthoredSheetMedia::try_new(1, "ISO A3 landscape", millimetres(420), millimetres(297))
+            .unwrap(),
+    ])
+    .unwrap();
+    // The title block identifies the sheet, so no band repeats it; a plot
+    // or a report keeps all three.
+    let bands = |setup: &HardcopySetup| {
+        let decorations = setup.decorations();
+        [
+            decorations.includes_header(),
+            decorations.includes_legends(),
+            decorations.includes_provenance(),
+        ]
+    };
+    assert_eq!(bands(&setup), [false; 3]);
+    assert_eq!(bands(&HardcopySetup::default()), [true; 3]);
+    let sheet = setup.schematic();
+    assert!(sheet.includes_border() && sheet.includes_title_block() && sheet.includes_zones());
+    assert!(!sheet.crop_marks() && !sheet.includes_paper());
+
+    let sections = vec![
+        HardcopyContentSection::try_new(
+            0,
+            digest(0x12),
+            Length::ZERO,
+            Length::ZERO,
+            ContentExtent::try_new(millimetres(210), millimetres(297)).unwrap(),
+            false,
+        )
+        .unwrap(),
+        HardcopyContentSection::try_new(
+            1,
+            digest(0x13),
+            Length::ZERO,
+            millimetres(302),
+            ContentExtent::try_new(millimetres(420), millimetres(297)).unwrap(),
+            true,
+        )
+        .unwrap(),
+    ];
+    let plan = HardcopyPlan::compile_with_sections(
+        source(),
+        setup,
+        ContentExtent::try_new(millimetres(420), millimetres(599)).unwrap(),
+        sections,
+    )
+    .unwrap();
+    let pages = plan.pagination().pages();
+    assert_eq!(pages.len(), 2);
+    for (page, (width, height)) in pages.iter().zip([(210, 297), (420, 297)]) {
+        let (width, height) = (millimetres(width), millimetres(height));
+        let geometry = page.geometry();
+        assert_eq!(geometry.physical_size(), (width, height));
+        assert_eq!(
+            geometry.content_rect(),
+            PageRect {
+                x: Length::ZERO,
+                y: Length::ZERO,
+                width,
+                height,
+            },
+            "the drawing takes the whole page"
+        );
+        assert_eq!(
+            [
+                geometry.header_band(),
+                geometry.legend_band(),
+                geometry.provenance_band()
+            ],
+            [Length::ZERO; 3]
+        );
+        assert_eq!(page.scale(), ScaleRatio::new(1, 1).unwrap());
+    }
+}

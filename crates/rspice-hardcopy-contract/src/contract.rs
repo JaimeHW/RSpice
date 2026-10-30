@@ -7,6 +7,7 @@
 //! neither pagination nor content identities depend on host floating-point
 //! behavior.
 
+mod authored_sheets;
 mod legend;
 mod mapping;
 mod page_setup;
