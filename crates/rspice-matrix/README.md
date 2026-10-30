@@ -86,8 +86,7 @@ matrix.solve_into(&[1.0, 2.0], &mut solution)?;
 ```
 
 `SolverOptions::default()` is deterministic and selects
-`RealSolverBackend::Auto`: the KLU-class kernel, except for patterns whose
-measured fill favors faer's supernodal LU. Under the default robustness
+`RealSolverBackend::Auto`: the KLU-class kernel. Under the default robustness
 policy, a circuit-LU solve that cannot certify its result falls back to
 equilibrated faer, except a Newton iteration's (below). A complex
 factorization is reused until the matrix's values are next written, so a noise

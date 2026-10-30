@@ -35,15 +35,13 @@ pub type Value = f64;
 
 /// Preferred real-valued numeric backend.
 ///
-/// Circuit LU uses RSpice's values-only refactorization kernel. `Auto` also
-/// routes measured high-fill patterns to equilibrated faer LU, and every
-/// Circuit LU solve fails safely to faer if it cannot satisfy the shared
+/// Circuit LU uses RSpice's values-only refactorization kernel. A Circuit LU
+/// solve falls back to equilibrated faer LU when it cannot factor or solve the
+/// system or, outside a Newton iteration's solve, cannot satisfy the shared
 /// backward-error acceptance criterion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RealSolverBackend {
-    /// Select Circuit LU for circuit-like fill and automatically retain faer
-    /// for patterns whose measured factor fill makes a supernodal solver the
-    /// better choice.
+    /// The default: Circuit LU, with faer answering what it cannot.
     Auto,
     /// RSpice's circuit-specialized, allocation-free numeric refactorization
     /// and triangular-solve kernel.

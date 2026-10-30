@@ -76,11 +76,11 @@ pub(super) fn write_solver_state(
         out.push_str("accepted_solver_state none\n");
         return Ok(());
     };
+    // The header's last field is a backend-routing flag no solver sets any
+    // more: written as 0, and read and ignored, so earlier checkpoints restore.
     out.push_str(&format!(
-        "accepted_solver_state {} {} {}\n",
-        state.version,
-        state.dimension,
-        u8::from(state.klu_auto_rejected)
+        "accepted_solver_state {} {} 0\n",
+        state.version, state.dimension,
     ));
     let o = state.options;
     out.push_str(&format!(
@@ -164,7 +164,7 @@ pub(super) fn read_solver_state(
         .ok_or("missing solver dimension")?
         .parse()
         .map_err(|_| "invalid solver dimension")?;
-    let klu_auto_rejected = parse_checkpoint_bool(
+    parse_checkpoint_bool(
         header.next().ok_or("missing solver routing state")?,
         "solver routing",
     )?;
@@ -302,7 +302,6 @@ pub(super) fn read_solver_state(
         col_ptr,
         row_idx,
         options,
-        klu_auto_rejected,
         klu,
         klu_factored_values,
         faer_factored_values,

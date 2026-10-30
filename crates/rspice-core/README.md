@@ -177,8 +177,8 @@ shooting `.PSS` and takes none.
   stored pivots make refactorization on the frozen pattern cheap; faer handles
   complex AC-family solves and is the certified fallback.
   `.OPTIONS SOLVER=AUTO|KLU|FAER` or `RSPICE_SOLVER` selects the real backend.
-  Left unstated, measured fill decides, and the Xyce dialect reproduces Xyce's
-  own KLU factorization policy.
+  Left unstated, the KLU-class kernel answers, and the Xyce dialect reproduces
+  Xyce's own KLU factorization policy.
 - **Newton-Raphson**, with tolerance, iteration-budget and
   residual checks in `engine/convergence/`.
 - **Convergence aids**, tried in order of cost when plain Newton fails: GMIN

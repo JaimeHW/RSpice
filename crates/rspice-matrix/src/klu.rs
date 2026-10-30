@@ -500,29 +500,6 @@ impl KluSolver {
         self.factored
     }
 
-    /// Release factor-sized numeric storage while preserving the symbolic
-    /// ordering. Auto routing uses this after measuring supernodal-friendly
-    /// fill so the rejected backend does not permanently double matrix memory.
-    pub(crate) fn discard_numeric_factorization(&mut self) {
-        self.row_perm = Vec::new();
-        self.l_col_ptr = Vec::new();
-        self.l_rows = Vec::new();
-        self.l_vals = Vec::new();
-        self.u_col_ptr = Vec::new();
-        self.u_rows = Vec::new();
-        self.u_vals = Vec::new();
-        self.u_diag_recip = Vec::new();
-        self.a_scatter = Vec::new();
-        self.row_scale = Vec::new();
-        self.a_entry_scale = Vec::new();
-        self.work = Vec::new();
-        self.batch_work = Vec::new();
-        self.factor_workspace = FactorWorkspace::default();
-        self.diagnostics = KluDiagnostics::default();
-        self.use_diag_recip = false;
-        self.factored = false;
-    }
-
     /// `(L, U)` stored nonzero counts of the current factorization —
     /// fill diagnostics for ordering quality.
     pub fn factor_nnz(&self) -> (usize, usize) {

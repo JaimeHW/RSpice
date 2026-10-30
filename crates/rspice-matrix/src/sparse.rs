@@ -242,8 +242,6 @@ pub struct StaticMatrixSolverCheckpoint {
     pub row_idx: Vec<usize>,
     /// Fully resolved factorization and backend policies.
     pub options: SolverOptions,
-    /// Auto routing has permanently rejected KLU for this pattern's fill.
-    pub klu_auto_rejected: bool,
     /// Current KLU factors, including their retained row scales.
     pub klu: Option<crate::KluNumericCheckpoint>,
     /// Native matrix values represented by `klu`; empty when KLU is unfactored.
@@ -306,8 +304,6 @@ impl StaticMatrixSolverCheckpoint {
             || options.pivot_tolerance > 1.0
             || !options.absolute_pivot_tolerance.is_finite()
             || options.absolute_pivot_tolerance < 0.0
-            || (self.klu_auto_rejected
-                && (self.klu.is_some() || options.real_backend != RealSolverBackend::Auto))
         {
             return Err(invalid("solver policy"));
         }
@@ -372,9 +368,6 @@ pub struct StaticMatrix {
     /// path. The immutable structure and source-value map live in
     /// `residual_layout`; this vector is reused without per-solve allocation.
     klu_oriented_values: Vec<Value>,
-    /// Auto-policy decision retained for the frozen sparsity pattern after a
-    /// measured high-fill Circuit LU factorization.
-    klu_auto_rejected: bool,
     /// Explicit per-matrix backend policy. This avoids process-global solver
     /// state while preserving an environment-aware compatibility constructor.
     solver_options: SolverOptions,
@@ -462,11 +455,6 @@ fn missing_matrix_position(method: &'static str, row: usize, col: usize) -> Miss
 /// and relative kernel cost on the current machine.
 pub(crate) fn klu_backend_enabled() -> bool {
     SolverOptions::from_env().real_backend != RealSolverBackend::Faer
-}
-
-#[inline]
-fn auto_rejects_circuit_lu_fill(n: usize, a_nnz: usize, l_nnz: usize, u_nnz: usize) -> bool {
-    n >= 256 && l_nnz.saturating_add(u_nnz) > a_nnz.saturating_mul(8)
 }
 
 #[inline]
@@ -1569,7 +1557,6 @@ impl StaticMatrix {
             klu: None,
             klu_factored_values: Vec::new(),
             klu_oriented_values: Vec::new(),
-            klu_auto_rejected: self.klu_auto_rejected,
             solver_options: self.solver_options,
             probe_values: None,
             probe_rhs: None,
@@ -1735,7 +1722,6 @@ impl StaticMatrix {
             klu: None,
             klu_factored_values: Vec::new(),
             klu_oriented_values: Vec::new(),
-            klu_auto_rejected: false,
             solver_options,
             probe_values: None,
             probe_rhs: None,
@@ -1780,7 +1766,6 @@ impl StaticMatrix {
                 Vec::new()
             },
             klu,
-            klu_auto_rejected: self.klu_auto_rejected,
             faer_factored_values: self
                 .lu
                 .as_ref()
@@ -1860,7 +1845,6 @@ impl StaticMatrix {
         self.klu = restored.klu;
         self.klu_factored_values = restored.klu_factored_values;
         self.klu_oriented_values = restored.klu_oriented_values;
-        self.klu_auto_rejected = checkpoint.klu_auto_rejected;
         Ok(())
     }
 
@@ -2910,7 +2894,7 @@ impl StaticMatrix {
                 rhs.len()
             )));
         }
-        if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
+        if self.solver_options.real_backend != RealSolverBackend::Faer {
             match self.try_solve_klu_operation_into(
                 rhs,
                 solution,
@@ -3017,7 +3001,7 @@ impl StaticMatrix {
             return Ok(());
         }
 
-        if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
+        if self.solver_options.real_backend != RealSolverBackend::Faer {
             match self.try_solve_many_klu_operation_into(
                 rhs,
                 rhs_count,
@@ -3049,7 +3033,6 @@ impl StaticMatrix {
             klu,
             klu_factored_values,
             klu_oriented_values,
-            klu_auto_rejected,
             solver_options,
             residual_scratch,
             residual_gross_scratch,
@@ -3097,16 +3080,6 @@ impl StaticMatrix {
             klu_factored_values.resize(values.len(), 0.0);
             klu_factored_values.copy_from_slice(values);
         }
-        if solver_options.real_backend == RealSolverBackend::Auto {
-            let (l_nnz, u_nnz) = backend.factor_nnz();
-            if auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz) {
-                *klu_auto_rejected = true;
-                backend.discard_numeric_factorization();
-                klu_factored_values.clear();
-                return Ok(false);
-            }
-        }
-
         let backend_operation = operation.for_circuit_lu(solver_options.circuit_lu_orientation);
         let solve_result = match backend_operation {
             RealSolveOp::Normal => backend.solve_many(rhs, rhs_count, solution),
@@ -3418,7 +3391,7 @@ impl StaticMatrix {
             )));
         }
 
-        if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
+        if self.solver_options.real_backend != RealSolverBackend::Faer {
             match self.try_solve_klu_operation_into(
                 rhs,
                 solution,
@@ -3843,7 +3816,6 @@ impl StaticMatrix {
             klu,
             klu_factored_values,
             klu_oriented_values,
-            klu_auto_rejected,
             solver_options,
             residual_scratch,
             residual_gross_scratch,
@@ -3888,9 +3860,8 @@ impl StaticMatrix {
             solver_options.circuit_lu_robustness,
         ) {
             // A numeric failure belongs to this changing Jacobian, not to the
-            // frozen sparsity pattern. Auto must retry Circuit LU after
-            // faer's per-solve fallback; only the measured fill policy below
-            // is a persistent rejection.
+            // frozen sparsity pattern: the next solve retries Circuit LU after
+            // faer's per-solve fallback.
             klu_factored_values.clear();
             if faithful {
                 return Err(error);
@@ -3904,24 +3875,6 @@ impl StaticMatrix {
         if action != KluNumericAction::Reuse && !values_current {
             klu_factored_values.resize(values.len(), 0.0);
             klu_factored_values.copy_from_slice(values);
-        }
-        if solver_options.real_backend == RealSolverBackend::Auto {
-            let (l_nnz, u_nnz) = backend.factor_nnz();
-            let factor_nnz = l_nnz.saturating_add(u_nnz);
-            let excessive_fill = auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz);
-            if excessive_fill {
-                *klu_auto_rejected = true;
-                backend.discard_numeric_factorization();
-                klu_factored_values.clear();
-                log::debug!(
-                    "auto backend retained faer for {}x{} pattern: Circuit LU fill {} / A nnz {}",
-                    n,
-                    n,
-                    factor_nnz,
-                    values.len()
-                );
-                return Ok(false);
-            }
         }
         let backend_operation = operation.for_circuit_lu(solver_options.circuit_lu_orientation);
         let solve_result = match backend_operation {
@@ -6688,54 +6641,6 @@ mod tests {
     }
 
     #[test]
-    fn solver_checkpoint_preserves_auto_fallback_routing() {
-        // A random pattern has no low-fill ordering, so Auto measures Circuit
-        // LU fill on the first factor and keeps faer from then on.
-        let n = 2048;
-        let mut state = 0x2545_f491_4f6c_dd1d_u64;
-        let mut triplets = Vec::with_capacity(9 * n);
-        for col in 0..n {
-            triplets.push((col, col, 20.0));
-            for _ in 0..8 {
-                state = state
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1_442_695_040_888_963_407);
-                triplets.push(((state >> 33) as usize % n, col, 0.125));
-            }
-        }
-        let options = SolverOptions {
-            real_backend: RealSolverBackend::Auto,
-            ..Default::default()
-        };
-        let mut source =
-            StaticMatrix::from_triplets_with_options(n, n, &triplets, options).unwrap();
-        let rhs: Vec<_> = (0..n)
-            .map(|row| (row as Value + 1.0) / n as Value)
-            .collect();
-        source.solve(&rhs).unwrap();
-        let checkpoint = source.capture_solver_checkpoint().unwrap();
-        assert!(checkpoint.klu_auto_rejected);
-        assert!(checkpoint.klu.is_none());
-        assert!(checkpoint.faer_factored_values.is_some());
-        let mut restored =
-            StaticMatrix::from_triplets_with_options(n, n, &triplets, options).unwrap();
-        restored.restore_solver_checkpoint(&checkpoint).unwrap();
-        for delta in [0.0, 0.25] {
-            source.add(0, 0, delta);
-            restored.add(0, 0, delta);
-            let expected = source.solve(&rhs).unwrap();
-            let actual = restored.solve(&rhs).unwrap();
-            assert!(
-                expected
-                    .iter()
-                    .zip(actual)
-                    .all(|(a, b)| a.to_bits() == b.to_bits())
-            );
-            assert!(restored.klu_auto_rejected);
-        }
-    }
-
-    #[test]
     fn solver_checkpoint_rejects_malformed_state_without_changing_live_factors() {
         let mut matrix = StaticMatrix::from_triplets_with_options(
             2,
@@ -8548,9 +8453,6 @@ mod tests {
             assert_eq!(matrix.solver_options().real_backend, real_backend);
             assert_relative_solution(&matrix.solve(&rhs).unwrap(), &[1.0, 2.0]);
         }
-        assert!(!auto_rejects_circuit_lu_fill(255, 100, 0, 10_000));
-        assert!(!auto_rejects_circuit_lu_fill(1_000, 100, 400, 400));
-        assert!(auto_rejects_circuit_lu_fill(1_000, 100, 401, 400));
     }
 
     #[test]
@@ -9958,50 +9860,9 @@ mod tests {
         matrix.clear_values();
         matrix.add(0, 0, Value::NAN);
         assert!(matches!(matrix.solve(&[1.0]), Err(SolverError::Overflow)));
-        assert!(!matrix.klu_auto_rejected);
 
         matrix.clear_values();
         matrix.add(0, 0, 2.0);
         assert_relative_solution(&matrix.solve(&[4.0]).unwrap(), &[2.0]);
-    }
-
-    #[test]
-    fn auto_keeps_klu_for_dense_device_blocks_on_a_shared_supply() {
-        // Dense 12-node blocks tied to one supply row: the shape BSIM4's stamp
-        // reservation gives a CMOS netlist. Over 12 entries per row, yet
-        // Circuit LU adds fill only between each block and the supply.
-        const BLOCK: usize = 12;
-        const BLOCKS: usize = 100;
-        let n = 1 + BLOCK * BLOCKS;
-        let mut triplets = vec![(0, 0, 1.0e3)];
-        for block in 0..BLOCKS {
-            let base = 1 + block * BLOCK;
-            for row in base..base + BLOCK {
-                for col in base..base + BLOCK {
-                    triplets.push((row, col, if row == col { 50.0 } else { -1.0 }));
-                }
-            }
-            triplets.push((0, base, -1.0));
-            triplets.push((base, 0, -1.0));
-        }
-        assert!(triplets.len() >= 8 * n);
-        let expected: Vec<Value> = (0..n).map(|row| 1.0 + row as Value / n as Value).collect();
-        let mut rhs = vec![0.0; n];
-        for &(row, col, value) in &triplets {
-            rhs[row] += value * expected[col];
-        }
-        let mut matrix = StaticMatrix::from_triplets_with_options(
-            n,
-            n,
-            &triplets,
-            SolverOptions {
-                real_backend: RealSolverBackend::Auto,
-                ..SolverOptions::default()
-            },
-        )
-        .unwrap();
-        assert_relative_solution(&matrix.solve(&rhs).unwrap(), &expected);
-        assert!(!matrix.klu_auto_rejected);
-        assert!(matrix.capture_solver_checkpoint().unwrap().klu.is_some());
     }
 }
