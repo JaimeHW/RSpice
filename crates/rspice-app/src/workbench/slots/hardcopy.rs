@@ -6,7 +6,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{HardcopyPort, PublicationDraft};
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::hardcopy_adapters::publication_snapshot::{
-    PublicationReads, build_publication_snapshot,
+    PublicationReads, build_publication_snapshot, publication_timestamp_utc,
 };
 use crate::workbench::hardcopy_adapters::sources::SourceReads;
 use crate::workbench::state::WorkbenchSession;
@@ -45,5 +45,9 @@ impl HardcopyPort for HardcopyState {
             runs,
         };
         build_publication_snapshot(reads, draft).map_err(|error| error.to_string())
+    }
+
+    fn publication_timestamp_utc(&self) -> String {
+        publication_timestamp_utc()
     }
 }

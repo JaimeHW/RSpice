@@ -113,6 +113,10 @@ impl HardcopyPort for NullPorts {
     ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
         Err("a feature's own test builds no publication snapshot".to_owned())
     }
+
+    fn publication_timestamp_utc(&self) -> String {
+        "1970-01-01T00:00:00Z".to_owned()
+    }
 }
 
 /// A fresh session has selected no specification.
@@ -288,4 +292,20 @@ fn command<F: Feature>(registry: &FeatureRegistry<F>, key: CommandKey) -> &Featu
     registry
         .command(key)
         .unwrap_or_else(|| panic!("the feature declares no {key:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A feature's own test reads no clock: the null hardcopy port stamps a
+    /// publication with the epoch, the stamp the hardcopy feature falls back
+    /// to when the clock is out of range.
+    #[test]
+    fn the_null_hardcopy_port_stamps_the_epoch() {
+        assert_eq!(
+            NullPorts.publication_timestamp_utc(),
+            "1970-01-01T00:00:00Z"
+        );
+    }
 }

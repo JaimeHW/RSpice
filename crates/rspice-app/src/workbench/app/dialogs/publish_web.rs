@@ -23,9 +23,7 @@ use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebDialogState, open_unpublish_web_dialog,
 };
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::feature::{
-    HardcopyPort, PublicationDraft, publication_timestamp_utc,
-};
+use crate::workbench::framework::feature::{HardcopyPort, PublicationDraft};
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -144,7 +142,7 @@ pub(crate) fn open_publish_web_dialog(
         open: true,
         title,
         author_credit: author,
-        created_utc: publication_timestamp_utc(),
+        created_utc: source.hardcopy.publication_timestamp_utc(),
         include_schematic: true,
         include_results: true,
         include_netlist: true,

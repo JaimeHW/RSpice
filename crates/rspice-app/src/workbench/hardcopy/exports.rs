@@ -4,7 +4,9 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::hardcopy_adapters::publication_snapshot::PublicationReads;
+use crate::workbench::hardcopy_adapters::publication_snapshot::{
+    PublicationReads, publication_timestamp_utc,
+};
 use crate::workbench::hardcopy_adapters::sources::SourceReads;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
@@ -91,7 +93,7 @@ pub(super) fn action_export_publication_snapshot_with_io(cx: &mut Cx<'_, Hardcop
             .unwrap_or_else(|| "Untitled project".to_string()),
         description: String::new(),
         author_display: "Local export".to_string(),
-        created_utc: crate::workbench::framework::feature::publication_timestamp_utc(),
+        created_utc: publication_timestamp_utc(),
         license: rspice_publication_contract::ContentLicense::AllRightsReserved,
         ..Default::default()
     };

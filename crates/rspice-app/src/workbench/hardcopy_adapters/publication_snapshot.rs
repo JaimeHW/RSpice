@@ -282,6 +282,20 @@ pub(crate) fn build_publication_snapshot(
     Ok(snapshot)
 }
 
+/// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
+/// the hardcopy pipeline's exact civil-date transform.
+pub(crate) fn publication_timestamp_utc() -> String {
+    let seconds = crate::time_compat::unix_epoch().as_secs();
+    rspice_hardcopy::render::HardcopyPublicationTimestamp::from_unix_seconds(seconds)
+        .map(|stamp| {
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second
+            )
+        })
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
 /// Project engineering identity published alongside the visual scenes.
 ///
 /// Connectivity and pin names come from the design projection — the same
