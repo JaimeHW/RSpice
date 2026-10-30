@@ -1,11 +1,11 @@
 //! Distribution selection and publication through the actual worker and renderer.
 
-use super::AppState;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     SimulationRunLifecycle, SimulationRunProvenance,
 };
 use crate::workbench::ResultViewer;
+use crate::workbench::app_state::AppState;
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, SourceReads, prepare_retained_hardcopy_resolution,
 };

@@ -64,6 +64,11 @@ impl ResultsTestHost {
             .map(|prompt| prompt.text.as_str())
     }
 
+    /// Whether a viewer is currently available for activation.
+    pub(crate) fn viewer_is_available(&self, viewer: crate::state::ActiveViewer) -> bool {
+        self.results_reads().viewer_capability(viewer).available
+    }
+
     /// The parts the results workspace's predicates read.
     pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
         self.results.reads(&self.model, &self.workbench)

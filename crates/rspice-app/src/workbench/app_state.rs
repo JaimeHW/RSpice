@@ -748,6 +748,12 @@ impl AppState {
             .map(|prompt| prompt.text.as_str())
     }
 
+    /// Whether a viewer is currently available for activation.
+    #[cfg(test)]
+    pub fn viewer_is_available(&self, viewer: crate::state::ActiveViewer) -> bool {
+        self.results_reads().viewer_capability(viewer).available
+    }
+
     /// Record an event in the Console and return its log id.
     ///
     /// Error: something the user asked for, or a background job, failed.

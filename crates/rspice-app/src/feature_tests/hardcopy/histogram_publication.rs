@@ -1,10 +1,8 @@
 //! Histogram publication, in the case that renders every display mode the
 //! results feature's histogram takes.
 
+use crate::feature_tests::results::histogram_publication::{distribution, setup};
 use crate::workbench::ResultViewer;
-use crate::workbench::app_state::viewer_capabilities::histogram_publication::{
-    distribution, setup,
-};
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, PreparedRetainedHardcopyResolution, SemanticAxisKind, SourceReads,
     prepare_retained_hardcopy_resolution,

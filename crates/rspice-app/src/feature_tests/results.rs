@@ -3,6 +3,7 @@
 //! read or write another feature's state on the way.
 
 mod commands;
+pub(super) mod histogram_publication;
 mod inspector;
 mod navigation;
 mod op_inspector;
