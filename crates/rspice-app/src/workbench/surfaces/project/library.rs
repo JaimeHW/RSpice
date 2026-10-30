@@ -1167,6 +1167,10 @@ fn open_view_label(view_type: ViewType) -> &'static str {
 mod tests {
     use super::*;
     use crate::state::{Cell, Library, View};
+    use crate::workbench::surfaces::project::library_publication::{
+        commit_project_library_publication, prepare_project_library_publication,
+        rollback_project_library_publication,
+    };
 
     #[test]
     fn selection_repairs_to_real_library_cell_and_view() {
@@ -1424,15 +1428,15 @@ mod tests {
         assert!(super::library_publication::publication_dialog_open(&ctx));
         assert!(!super::library_publication::rollback_dialog_open(&ctx));
 
-        let candidate = app
-            .prepare_project_library_publication(
-                "governance-intent-1.0.0",
-                "release-engineer@example.test",
-                "organization-release-authority",
-                "Exercise exact rollback reachability",
-            )
-            .expect("publication candidate prepares");
-        app.commit_project_library_publication(candidate)
+        let candidate = prepare_project_library_publication(
+            &app.state,
+            "governance-intent-1.0.0",
+            "release-engineer@example.test",
+            "organization-release-authority",
+            "Exercise exact rollback reachability",
+        )
+        .expect("publication candidate prepares");
+        commit_project_library_publication(&mut app.state, candidate)
             .expect("test-owned durable boundary commits");
         apply_library_intent(&ctx, &mut app, LibraryIntent::RollbackPublication);
 
@@ -1449,17 +1453,16 @@ mod tests {
         let project_revision = app.state.model.workspace.content.project.revision();
         let library_revision = app.state.model.library_manager.revision();
 
-        let candidate = app
-            .prepare_project_library_publication(
-                "analog-core-1.0.0",
-                "release-engineer@example.test",
-                "organization-release-authority",
-                "Qualified library handoff",
-            )
-            .expect("publication prepares");
+        let candidate = prepare_project_library_publication(
+            &app.state,
+            "analog-core-1.0.0",
+            "release-engineer@example.test",
+            "organization-release-authority",
+            "Qualified library handoff",
+        )
+        .expect("publication prepares");
         let bytes = candidate.artifact_bytes().to_vec();
-        let receipt = app
-            .commit_project_library_publication(candidate)
+        let receipt = commit_project_library_publication(&mut app.state, candidate)
             .expect("durably accepted publication commits");
 
         assert_eq!(receipt.project_id(), project_id);
@@ -1546,7 +1549,8 @@ mod tests {
         let last = tampered.last_mut().expect("nonempty publication artifact");
         *last ^= 0x01;
         let revision_before_rejection = app.state.model.workspace.content.project.revision();
-        let tampered_result = app.rollback_project_library_publication(
+        let tampered_result = rollback_project_library_publication(
+            &mut app.state,
             receipt.publication_id(),
             &tampered,
             "release-engineer@example.test",
@@ -1568,7 +1572,8 @@ mod tests {
             "rejected rollback must not partially replace the catalog"
         );
 
-        app.rollback_project_library_publication(
+        rollback_project_library_publication(
+            &mut app.state,
             receipt.publication_id(),
             &bytes,
             "release-engineer@example.test",
@@ -1614,7 +1619,8 @@ mod tests {
         ));
 
         let revision_after_first = app.state.model.workspace.content.project.revision();
-        let duplicate = app.prepare_project_library_publication(
+        let duplicate = prepare_project_library_publication(
+            &app.state,
             "ANALOG-CORE-1.0.0",
             "release-engineer@example.test",
             "organization-release-authority",
@@ -1631,14 +1637,14 @@ mod tests {
     #[test]
     fn publication_commit_rejects_intervening_catalog_change_atomically() {
         let mut app = RSpiceApp::test_instance();
-        let candidate = app
-            .prepare_project_library_publication(
-                "stale-candidate-1.0.0",
-                "release-engineer@example.test",
-                "organization-release-authority",
-                "Prepared before an intervening edit",
-            )
-            .expect("publication prepares");
+        let candidate = prepare_project_library_publication(
+            &app.state,
+            "stale-candidate-1.0.0",
+            "release-engineer@example.test",
+            "organization-release-authority",
+            "Prepared before an intervening edit",
+        )
+        .expect("publication prepares");
         let writable_library = app
             .state
             .model
@@ -1666,8 +1672,7 @@ mod tests {
             .publish_project_library_mutation(prepared_mutation);
         let revision_after_mutation = app.state.model.workspace.content.project.revision();
 
-        let error = app
-            .commit_project_library_publication(candidate)
+        let error = commit_project_library_publication(&mut app.state, candidate)
             .expect_err("stale publication cannot commit");
 
         assert!(error.contains("stale"));

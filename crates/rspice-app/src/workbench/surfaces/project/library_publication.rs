@@ -6,7 +6,7 @@
 //! downloads are deliberately not treated as durable publication.
 
 use super::*;
-use crate::product::ContentDigest;
+use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::workspace::ProjectLibraryPublicationReceipt;
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
@@ -137,7 +137,7 @@ impl RollbackDraft {
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserPublicationCompletion {
-    candidate: crate::ProjectLibraryPublicationCandidate,
+    candidate: ProjectLibraryPublicationCandidate,
     result: crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult,
 }
 
@@ -458,7 +458,8 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 .artifact_bytes
                 .as_deref()
                 .expect("enabled rollback owns validated artifact");
-            match app.rollback_project_library_publication(
+            match rollback_project_library_publication(
+                &mut app.state,
                 draft.publication_id,
                 bytes,
                 draft.actor_id.clone(),
@@ -730,7 +731,8 @@ fn publish_native(
     };
     crate::io::file_exchange::ensure_file_extension(&mut path, PROJECT_ARTIFACT_EXTENSION);
     let destination = app.export_workflow_io.observe_destination(&path)?;
-    let candidate = app.prepare_project_library_publication(
+    let candidate = prepare_project_library_publication(
+        &app.state,
         draft.label.clone(),
         draft.actor_id.clone(),
         draft.authority_id.clone(),
@@ -741,7 +743,7 @@ fn publish_native(
         candidate.artifact_bytes(),
         "application/vnd.rspice.project+json",
     )?;
-    let receipt = app.commit_project_library_publication(candidate)?;
+    let receipt = commit_project_library_publication(&mut app.state, candidate)?;
     Ok(PublicationAction::Published(format!(
         "Published the project library to {} (publication #{:04}, {} bytes).",
         destination.path().display(),
@@ -760,7 +762,8 @@ fn start_browser_publication(
         BrowserBindingBackend, BrowserWriteTarget, start_browser_write,
     };
 
-    let candidate = app.prepare_project_library_publication(
+    let candidate = prepare_project_library_publication(
+        &app.state,
         draft.label.clone(),
         draft.actor_id.clone(),
         draft.authority_id.clone(),
@@ -819,7 +822,7 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
                             .to_owned(),
                     )
                 } else {
-                    app.commit_project_library_publication(completion.candidate)
+                    commit_project_library_publication(&mut app.state, completion.candidate)
                         .map(|receipt| {
                             format!(
                                 "Published the project library to {display_name} (publication #{:04}, {} bytes).",
@@ -1060,6 +1063,304 @@ fn safe_file_stem(value: &str) -> String {
     }
 }
 
+pub(super) struct ProjectLibraryPublicationCandidate {
+    draft: crate::state::workspace::ProjectLibraryPublicationDraft,
+    artifact_bytes: Vec<u8>,
+    source_project_revision: ObjectRevision,
+}
+
+impl ProjectLibraryPublicationCandidate {
+    #[must_use]
+    pub fn artifact_bytes(&self) -> &[u8] {
+        &self.artifact_bytes
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[must_use]
+    pub fn publication_id(&self) -> uuid::Uuid {
+        self.draft.publication_id
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[must_use]
+    pub fn snapshot_digest(&self) -> ContentDigest {
+        self.draft.snapshot_digest
+    }
+}
+
+/// Prepare the exact artifact and receipt candidate without changing live
+/// project state. A native, browser, or repository writer must durably
+/// publish `artifact_bytes()` before commit.
+pub(super) fn prepare_project_library_publication(
+    state: &AppState,
+    label: impl Into<String>,
+    actor_id: impl Into<String>,
+    authority_id: impl Into<String>,
+    reason: impl Into<String>,
+) -> Result<ProjectLibraryPublicationCandidate, String> {
+    use sha2::Digest as _;
+
+    if state.model.safe_mode.project_read_only() {
+        return Err(
+            "project library publication is unavailable because the project is open read-only"
+                .to_owned(),
+        );
+    }
+    if state.model.simulation.execution.has_active_execution() {
+        return Err(
+            "project library publication is unavailable while a simulation is running".to_owned(),
+        );
+    }
+    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+        .map_err(|error| format!("project library publication snapshot failed: {error}"))?;
+    let serialized = crate::io::project_io::serialize_project_file(&snapshot)
+        .map_err(|error| format!("project library publication serialization failed: {error}"))?;
+    let bytes = serialized.into_bytes();
+    let snapshot_byte_len = u64::try_from(bytes.len())
+        .map_err(|_| "project library publication artifact is too large".to_owned())?;
+    let draft = crate::state::workspace::ProjectLibraryPublicationDraft {
+        publication_id: uuid::Uuid::new_v4(),
+        label: label.into(),
+        actor_id: actor_id.into(),
+        authority_id: authority_id.into(),
+        reason: reason.into(),
+        created_unix_ms: crate::time_compat::unix_epoch()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
+            .max(1),
+        library_revision: state.model.library_manager.revision(),
+        snapshot_digest: crate::product::ContentDigest::from_bytes(
+            sha2::Sha256::digest(&bytes).into(),
+        ),
+        snapshot_byte_len,
+    };
+    let mut descriptor_preflight = state.model.workspace.content.project.clone();
+    descriptor_preflight
+        .publish_library_snapshot(draft.clone())
+        .map_err(|error| format!("project library publication preflight failed: {error}"))?;
+    Ok(ProjectLibraryPublicationCandidate {
+        draft,
+        artifact_bytes: bytes,
+        source_project_revision: state.model.workspace.content.project.revision(),
+    })
+}
+
+/// Commit a publication only after its exact artifact was durably
+/// accepted. Any intervening project or catalog change rejects the
+/// candidate and leaves live state untouched.
+pub(super) fn commit_project_library_publication(
+    state: &mut AppState,
+    candidate: ProjectLibraryPublicationCandidate,
+) -> Result<ProjectLibraryPublicationReceipt, String> {
+    use sha2::Digest as _;
+
+    if state.model.safe_mode.project_read_only() {
+        return Err(
+            "project library publication is unavailable because the project is open read-only"
+                .to_owned(),
+        );
+    }
+    if state.model.simulation.execution.has_active_execution() {
+        return Err(
+            "project library publication is unavailable while a simulation is running".to_owned(),
+        );
+    }
+    if state.model.workspace.content.project.revision() != candidate.source_project_revision
+        || state.model.library_manager.revision() != candidate.draft.library_revision
+    {
+        return Err(
+            "project library publication candidate is stale; prepare and publish a new artifact"
+                .to_owned(),
+        );
+    }
+    let current_snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+        .map_err(|error| format!("project library publication recheck failed: {error}"))?;
+    let current_serialized = crate::io::project_io::serialize_project_file(&current_snapshot)
+        .map_err(|error| {
+            format!("project library publication recheck serialization failed: {error}")
+        })?;
+    let current_bytes = current_serialized.as_bytes();
+    if current_bytes.len() as u64 != candidate.draft.snapshot_byte_len
+        || crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(current_bytes).into())
+            != candidate.draft.snapshot_digest
+    {
+        return Err(
+            "project library publication content changed after the artifact was prepared"
+                .to_owned(),
+        );
+    }
+    let receipt = state
+        .model
+        .workspace
+        .content
+        .project
+        .publish_library_snapshot(candidate.draft)
+        .map_err(|error| format!("project library publication failed: {error}"))?;
+    state.model.workspace.content.project_metadata_dirty = true;
+    state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+    state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = None;
+    state.model.clear_project_design_history();
+    Ok(receipt)
+}
+
+/// Restore the exact complete project artifact named by an immutable
+/// library publication while preserving the current project identity,
+/// publication ledger, and intervening audit history. The rollback is one
+/// new revision; malformed, tampered, foreign, stale-authority, or
+/// technology-incompatible artifacts leave live state unchanged.
+pub(super) fn rollback_project_library_publication(
+    state: &mut AppState,
+    publication_id: uuid::Uuid,
+    artifact_bytes: &[u8],
+    actor_id: impl Into<String>,
+    authority_id: impl Into<String>,
+    reason: impl Into<String>,
+) -> Result<(), String> {
+    use sha2::Digest as _;
+
+    if state.model.safe_mode.project_read_only() {
+        return Err(
+            "project library rollback is unavailable because the project is open read-only"
+                .to_owned(),
+        );
+    }
+    if state.model.simulation.execution.has_active_execution() {
+        return Err(
+            "project library rollback is unavailable while a simulation is running".to_owned(),
+        );
+    }
+    let receipt = state
+        .model
+        .workspace
+        .content
+        .project
+        .library_publications()
+        .iter()
+        .find(|receipt| receipt.publication_id() == publication_id)
+        .cloned()
+        .ok_or_else(|| format!("project library publication {publication_id} is not retained"))?;
+    if artifact_bytes.len() as u64 != receipt.snapshot_byte_len()
+        || crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(artifact_bytes).into())
+            != receipt.snapshot_digest()
+    {
+        return Err(
+            "project library rollback artifact does not match its publication receipt".to_owned(),
+        );
+    }
+    let artifact_text = std::str::from_utf8(artifact_bytes)
+        .map_err(|error| format!("project library rollback artifact is not UTF-8: {error}"))?;
+    let mut artifact = crate::io::project_io::load_project_text(artifact_text, None)
+        .map_err(|error| format!("project library rollback artifact is invalid: {error}"))?;
+    if artifact.file.workspace.project.id() != receipt.project_id()
+        || artifact.file.workspace.project.revision() != receipt.source_project_revision()
+        || artifact.file.libraries.revision() != receipt.library_revision()
+    {
+        return Err(
+            "project library rollback artifact identity or revision does not match its receipt"
+                .to_owned(),
+        );
+    }
+    let expected_prior_publications = usize::try_from(receipt.sequence() - 1)
+        .map_err(|_| "project library publication sequence is invalid".to_owned())?;
+    if artifact.file.workspace.project.library_publications().len() != expected_prior_publications
+        || artifact
+            .file
+            .workspace
+            .project
+            .library_publications()
+            .last()
+            .map(ProjectLibraryPublicationReceipt::receipt_digest)
+            != receipt.previous_receipt_digest()
+    {
+        return Err(
+            "project library rollback artifact is missing publications recorded before it"
+                .to_owned(),
+        );
+    }
+    if artifact.file.workspace.project.technology_binding()
+        != state.model.workspace.content.project.technology_binding()
+    {
+        return Err(
+            "project library rollback cannot undo a change to the project's technology binding"
+                .to_owned(),
+        );
+    }
+
+    let mutation = crate::state::ProjectLibraryMutation::RollbackPublication {
+        publication_id,
+        publication_label: receipt.label().to_owned(),
+        snapshot_digest: receipt.snapshot_digest(),
+        actor_id: actor_id.into(),
+        authority_id: authority_id.into(),
+        reason: reason.into(),
+    };
+    let prepared = state.preflight_project_library_mutation(mutation)?;
+
+    let project_id = artifact.file.workspace.project.id();
+    let (simulation_plan, model_library_manager, execution_warnings) =
+        match artifact.file.execution_context.take() {
+            Some(context) => crate::io::restore_execution_context(context, project_id).map_err(|error| {
+                format!("project library rollback execution context is invalid: {error}")
+            })?,
+            None => (
+                crate::workbench::app_state::SimSetupState::new_with_user_preferences(
+                    &state.model.preferences,
+                ),
+                crate::workbench::app_state::default_model_library_manager(),
+                vec![
+                    "The publication predates durable simulation plans; documented defaults were restored"
+                        .to_owned(),
+                ],
+            ),
+        };
+
+    let mut candidate = state.clone();
+    let mut current_project = candidate.model.workspace.content.project.clone();
+    current_project.root_library = artifact.file.workspace.project.root_library.clone();
+    current_project.top_cell = artifact.file.workspace.project.top_cell.clone();
+    artifact.file.workspace.project = current_project;
+    candidate.clear_design_execution_context();
+    candidate
+        .model
+        .library_manager
+        .replace_catalog_from_snapshot(&artifact.file.libraries)?;
+    candidate.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+    candidate.model.workspace = crate::state::ProjectWorkspace::from_parts(
+        artifact.file.workspace,
+        artifact.workspace_session,
+    );
+    candidate.model.sim_setup = simulation_plan;
+    candidate.model.model_library_manager = model_library_manager;
+    candidate.restore_active_schematic_from_workspace();
+    candidate.model.simulation = crate::state::SimulationState::default();
+    crate::io::restore_simulation_results(
+        artifact.file.simulation_results,
+        &mut candidate.model.simulation,
+    )
+    .map_err(|error| format!("project library rollback result history is invalid: {error}"))?;
+    candidate.publish_project_library_mutation(prepared);
+    candidate
+        .model
+        .workspace
+        .content
+        .project
+        .validate()
+        .map_err(|error| format!("project library rollback metadata is invalid: {error}"))?;
+    state.commit_candidate(candidate);
+    for warning in execution_warnings {
+        state.record(
+            crate::diagnostics::LogSeverity::Warning,
+            crate::diagnostics::LogSource::Studio,
+            warning,
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1218,17 +1519,16 @@ mod tests {
     #[test]
     fn rollback_artifact_validation_is_exact_and_fail_closed() {
         let mut app = RSpiceApp::test_instance();
-        let candidate = app
-            .prepare_project_library_publication(
-                "analog-core-1.0.0",
-                "release-engineer@example.test",
-                "organization-release-authority",
-                "Qualified library handoff",
-            )
-            .expect("candidate prepares");
+        let candidate = prepare_project_library_publication(
+            &app.state,
+            "analog-core-1.0.0",
+            "release-engineer@example.test",
+            "organization-release-authority",
+            "Qualified library handoff",
+        )
+        .expect("candidate prepares");
         let bytes = candidate.artifact_bytes().to_vec();
-        let receipt = app
-            .commit_project_library_publication(candidate)
+        let receipt = commit_project_library_publication(&mut app.state, candidate)
             .expect("receipt commits after test-owned durable boundary");
 
         validate_rollback_artifact(&app.state, receipt.publication_id(), &bytes)
@@ -1250,15 +1550,15 @@ mod tests {
     #[test]
     fn governance_dialogs_render_accessible_fields_at_phone_width() {
         let mut app = RSpiceApp::test_instance();
-        let candidate = app
-            .prepare_project_library_publication(
-                "analog-core-1.0.0",
-                "release-engineer@example.test",
-                "organization-release-authority",
-                "Qualified library handoff",
-            )
-            .expect("candidate prepares");
-        app.commit_project_library_publication(candidate)
+        let candidate = prepare_project_library_publication(
+            &app.state,
+            "analog-core-1.0.0",
+            "release-engineer@example.test",
+            "organization-release-authority",
+            "Qualified library handoff",
+        )
+        .expect("candidate prepares");
+        commit_project_library_publication(&mut app.state, candidate)
             .expect("fixture receipt commits");
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);

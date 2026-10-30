@@ -902,6 +902,9 @@ fn muted(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::surfaces::project::library_publication::{
+        commit_project_library_publication, prepare_project_library_publication,
+    };
 
     fn assert_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= 0.001, "{actual} != {expected}");
@@ -1093,16 +1096,15 @@ mod tests {
             run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
                 .expect("seal run");
         }
-        let candidate = app
-            .prepare_project_library_publication(
-                "analog-core-1.2.0",
-                "james@example.test",
-                "org-release-authority",
-                "Qualified library handoff",
-            )
-            .expect("publication prepares");
-        app.commit_project_library_publication(candidate)
-            .expect("publication commits");
+        let candidate = prepare_project_library_publication(
+            &app.state,
+            "analog-core-1.2.0",
+            "james@example.test",
+            "org-release-authority",
+            "Qualified library handoff",
+        )
+        .expect("publication prepares");
+        commit_project_library_publication(&mut app.state, candidate).expect("publication commits");
         {
             use rspice_design::drc::{
                 DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,

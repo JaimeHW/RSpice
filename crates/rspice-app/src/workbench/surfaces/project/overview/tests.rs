@@ -6,6 +6,9 @@
 //! it were the length of the history.
 
 use super::*;
+use crate::workbench::surfaces::project::library_publication::{
+    commit_project_library_publication, prepare_project_library_publication,
+};
 
 #[test]
 fn stale_checks_never_reuse_retained_result_copy() {
@@ -95,15 +98,15 @@ fn published_library_snapshots_are_retained_project_operations() {
         "a project with no publication must not claim one"
     );
 
-    let candidate = app
-        .prepare_project_library_publication(
-            "analog-core-1.0.0",
-            "release-engineer@example.test",
-            "organization-release-authority",
-            "Qualified library handoff",
-        )
-        .expect("publication prepares");
-    app.commit_project_library_publication(candidate)
+    let candidate = prepare_project_library_publication(
+        &app.state,
+        "analog-core-1.0.0",
+        "release-engineer@example.test",
+        "organization-release-authority",
+        "Qualified library handoff",
+    )
+    .expect("publication prepares");
+    commit_project_library_publication(&mut app.state, candidate)
         .expect("durably accepted publication commits");
 
     let snapshot = OverviewSnapshot::capture(&app);
