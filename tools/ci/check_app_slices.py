@@ -49,6 +49,7 @@ LOWER_CRATES = {
     "run": ROOT / "crates" / "rspice-app-runs" / "src",
     "framework": ROOT / "crates" / "rspice-app-workbench" / "src",
     "sheets": ROOT / "crates" / "rspice-app-sheets" / "src",
+    "settings": ROOT / "crates" / "rspice-app-settings" / "src",
 }
 
 LOWER = ("model", "services", "run", "framework")

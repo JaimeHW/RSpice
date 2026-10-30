@@ -28,6 +28,7 @@ pub(crate) use rspice_app_workbench::workbench::app_state::problems_view;
 mod run_access;
 pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
 mod schematic_drag;
+#[cfg(test)]
 pub(crate) use rspice_app_state::workbench::app_state::schematic_preferences;
 pub(crate) mod services_access;
 pub(crate) mod session;

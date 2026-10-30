@@ -31,7 +31,7 @@ pub enum ShortcutArtifactImportErrorKind {
     InvalidUtf8,
     InvalidSourceName,
     UnsupportedPlatform,
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     ImportBusy,
     Detection,
 }
@@ -47,7 +47,7 @@ impl ShortcutArtifactImportErrorKind {
             Self::InvalidUtf8 => "shortcut-artifact.import-invalid-utf8",
             Self::InvalidSourceName => "shortcut-artifact.import-source-name",
             Self::UnsupportedPlatform => "shortcut-artifact.import-platform",
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::ImportBusy => "shortcut-artifact.import-busy",
             Self::Detection => "shortcut-artifact.import-detection",
         }
@@ -96,7 +96,7 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn kind(&self) -> ShortcutArtifactImportErrorKind {
         self.kind
     }
@@ -107,13 +107,13 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn source_name(&self) -> Option<&str> {
         self.source_name.as_deref()
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn cause_code(&self) -> Option<&'static str> {
         self.cause_code
     }
@@ -145,19 +145,19 @@ pub struct ReadyShortcutArtifactSource {
 
 impl ReadyShortcutArtifactSource {
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn source_name(&self) -> &str {
         &self.source_name
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn detected(&self) -> &DetectedShortcutArtifact {
         &self.detected
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn source_bytes(&self) -> &[u8] {
         match &self.detected {
             DetectedShortcutArtifact::RSpice(artifact) => artifact.source_bytes(),
@@ -166,7 +166,7 @@ impl ReadyShortcutArtifactSource {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn source_digest(&self) -> [u8; 32] {
         match &self.detected {
             DetectedShortcutArtifact::RSpice(artifact) => artifact.source_digest(),
@@ -373,14 +373,14 @@ pub fn import_shortcut_artifact_source(
     import_shortcut_artifact_source_with_io(&NativeShortcutArtifactImportIo, registry)
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct BrowserShortcutArtifactImportCompletion {
     token: crate::workbench::browser::file_import::TextImportToken,
     result: Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError>,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 thread_local! {
     pub static BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT: std::cell::RefCell<Option<BrowserShortcutArtifactImportCompletion>> =
         const { std::cell::RefCell::new(None) };
@@ -388,7 +388,7 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn begin_browser_shortcut_artifact_import()
 -> Result<crate::workbench::browser::file_import::TextImportToken, ShortcutArtifactImportError> {
     let token = crate::workbench::browser::file_import::try_begin_text_import(
@@ -441,7 +441,7 @@ fn browser_host_platform() -> Result<VscodeHostPlatform, ShortcutArtifactImportE
     platform_from_label(&platform)
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn browser_picker_result(
     platform: VscodeHostPlatform,
     result: Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
@@ -466,7 +466,7 @@ pub fn browser_picker_result(
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn complete_browser_shortcut_artifact_import(
     token: crate::workbench::browser::file_import::TextImportToken,
     result: Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError>,
@@ -502,7 +502,7 @@ pub fn start_browser_shortcut_artifact_import(
 }
 
 /// Return one current browser completion. Late or replaced completions vanish.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn poll_browser_shortcut_artifact_import()
 -> Option<Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError>> {
     let completion =
@@ -515,7 +515,7 @@ pub fn poll_browser_shortcut_artifact_import()
     Some(completion.result)
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 fn clear_browser_shortcut_artifact_import_owner(
     token: crate::workbench::browser::file_import::TextImportToken,
 ) {
@@ -531,7 +531,7 @@ fn clear_browser_shortcut_artifact_import_owner(
 /// A lease already replaced by another import is never cancelled. Any late
 /// callback from the cancelled picker fails its current-token check and is
 /// unable to publish a completion or release the replacement gate.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserShortcutArtifactImportCancelOutcome {
     /// This workflow's exact picker lease was cancelled.
@@ -542,7 +542,7 @@ pub enum BrowserShortcutArtifactImportCancelOutcome {
     StillOwned,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn cancel_browser_shortcut_artifact_import() -> BrowserShortcutArtifactImportCancelOutcome {
     let Some(token) = BROWSER_SHORTCUT_ARTIFACT_IMPORT_TOKEN.with(std::cell::Cell::get) else {
         return BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased;

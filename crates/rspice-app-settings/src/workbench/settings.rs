@@ -6,7 +6,7 @@
 //! route opens Preferences, and the platform services' state, whose autosave
 //! interval and recent files Preferences keeps.
 
-pub(crate) mod commands;
+pub mod commands;
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::dialogs::preferences::PreferencesDialogs;

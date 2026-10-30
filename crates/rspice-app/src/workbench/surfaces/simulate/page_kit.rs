@@ -1472,16 +1472,23 @@ mod tests {
         }
 
         let workbench = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench");
-        // A framework file compiles in rspice-app-workbench, at the same path under its `src`.
+        // A framework file compiles in rspice-app-workbench, and a settings file in
+        // rspice-app-settings, each at the same path under its crate's `src`.
         let framework =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench");
+        let settings =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src/workbench");
         let mut sites = Vec::new();
         for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
             for file in files {
-                let path = [workbench.join(file), framework.join(file)]
-                    .into_iter()
-                    .find(|path| path.is_file())
-                    .unwrap_or_else(|| workbench.join(file));
+                let path = [
+                    workbench.join(file),
+                    framework.join(file),
+                    settings.join(file),
+                ]
+                .into_iter()
+                .find(|path| path.is_file())
+                .unwrap_or_else(|| workbench.join(file));
                 let source = std::fs::read_to_string(&path)
                     .unwrap_or_else(|error| panic!("{surface}: read {}: {error}", path.display()));
                 let shipped = crate::source_guard::without_test_items(&source);

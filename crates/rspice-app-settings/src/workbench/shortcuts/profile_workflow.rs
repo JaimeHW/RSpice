@@ -39,14 +39,14 @@ impl ShortcutProfileWorkflowError {
 
     /// The JSON pointer the failure was raised at. Production reads it
     /// through `Display`; the contract tests below assert it directly.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn json_path(&self) -> &str {
         &self.path
     }
 
     /// The human explanation carried beside the code, likewise reached
     /// through `Display` outside tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn context(&self) -> &str {
         &self.context
     }

@@ -496,10 +496,10 @@ pub struct PreferencesFileRuntime {
     /// Set by a failed write and cleared by a successful one, so that a
     /// failure is reported once rather than once per attempt.
     failing: bool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub writes: usize,
     /// How many times the settings were hashed.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub looks: usize,
 }
 
@@ -651,7 +651,7 @@ impl PreferencesFileParts<'_> {
                 .is_none_or(|at| now.saturating_duration_since(at) >= IDLE_LOOK);
         if look {
             runtime.observed_at = Some(now);
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             {
                 runtime.looks += 1;
             }
@@ -710,7 +710,7 @@ impl PreferencesFileParts<'_> {
             }
             store.write(&bytes)?;
             runtime.written = Some(bytes);
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             {
                 runtime.writes += 1;
             }
@@ -856,7 +856,7 @@ pub fn stage_settings_import(
 }
 
 #[cfg(all(
-    not(test),
+    not(any(test, feature = "test-support")),
     not(target_arch = "wasm32"),
     any(target_os = "windows", target_os = "macos", target_os = "linux")
 ))]
@@ -865,7 +865,7 @@ fn show_folder(folder: &std::path::Path) -> Result<(), String> {
 }
 
 #[cfg(all(
-    not(test),
+    not(any(test, feature = "test-support")),
     not(target_arch = "wasm32"),
     not(any(target_os = "windows", target_os = "macos", target_os = "linux"))
 ))]
@@ -873,14 +873,14 @@ fn show_folder(_folder: &std::path::Path) -> Result<(), String> {
     Err("this system has no file manager RSpice can open".to_owned())
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 thread_local! {
     /// The folders a test build was asked to show, in place of a file manager.
     pub static SHOWN_FOLDERS: std::cell::RefCell<Vec<std::path::PathBuf>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 fn show_folder(folder: &std::path::Path) -> Result<(), String> {
     SHOWN_FOLDERS.with_borrow_mut(|shown| shown.push(folder.to_path_buf()));
     Ok(())

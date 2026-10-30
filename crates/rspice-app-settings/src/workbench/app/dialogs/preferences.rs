@@ -1,9 +1,9 @@
 //! Preferences — canonical mockup shell with durable, validated settings.
 
-pub(crate) mod preference_pages;
-pub(crate) mod preferences_shell;
-pub(crate) mod shortcut_portability_dialogs;
-pub(crate) mod shortcut_preferences;
+pub mod preference_pages;
+pub mod preferences_shell;
+pub mod shortcut_portability_dialogs;
+pub mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;
 
 pub use crate::services::session::normalize_autosave_minutes;

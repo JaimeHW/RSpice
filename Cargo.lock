@@ -5197,6 +5197,7 @@ dependencies = [
  "ropey",
  "rspice-app-runs",
  "rspice-app-services",
+ "rspice-app-settings",
  "rspice-app-sheets",
  "rspice-app-state",
  "rspice-app-workbench",
@@ -5315,6 +5316,28 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-app-settings"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "egui",
+ "js-sys",
+ "krilla",
+ "log",
+ "rfd",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "unicode-segmentation",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

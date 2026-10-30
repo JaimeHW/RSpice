@@ -23,7 +23,7 @@ pub enum ShortcutLibraryPersistenceRuntime {
         /// Browser publications complete between frames. The owning workflow
         /// consumes this once after the durable snapshot has become live.
         publication_completion: Option<Result<(), String>>,
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         volatile_test: bool,
     },
     #[cfg(target_arch = "wasm32")]
@@ -168,7 +168,7 @@ impl ShortcutLibraryParts<'_> {
         *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(persisted),
             publication_completion,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             volatile_test: false,
         };
     }
@@ -197,7 +197,7 @@ impl ShortcutLibraryParts<'_> {
             return Ok(ShortcutLibraryPublication::Published);
         }
 
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if matches!(
             *self.persistence,
             ShortcutLibraryPersistenceRuntime::Ready {
@@ -300,7 +300,7 @@ impl ShortcutLibraryParts<'_> {
         *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: predecessor,
             publication_completion: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             volatile_test: false,
         };
         true
@@ -346,7 +346,7 @@ impl ShortcutLibraryParts<'_> {
                         *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
                             persisted: predecessor,
                             publication_completion: Some(Err(error.to_string())),
-                            #[cfg(test)]
+                            #[cfg(any(test, feature = "test-support"))]
                             volatile_test: false,
                         };
                     }
@@ -460,7 +460,7 @@ impl ShortcutLibraryParts<'_> {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn enable_volatile_test_shortcut_persistence(&mut self) {
         let library = self.model.preferences.shortcut_profiles().clone();
         *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {

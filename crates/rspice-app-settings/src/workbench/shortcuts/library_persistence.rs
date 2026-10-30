@@ -42,7 +42,7 @@ impl ShortcutLibraryPersistenceError {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn code(&self) -> &'static str {
         self.code
     }
@@ -60,7 +60,7 @@ impl ShortcutLibraryPersistenceError {
     /// exact stored bytes afterwards. The caller must not restore stale CAS
     /// authority or attempt another write until storage is reloaded.
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub fn is_commit_in_doubt(&self) -> bool {
         self.code == "shortcut-library.browser-commit-in-doubt"
     }
@@ -82,7 +82,7 @@ pub struct ShortcutLibraryPersistenceToken {
 
 impl ShortcutLibraryPersistenceToken {
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn generation(self) -> u64 {
         self.generation
     }
@@ -101,14 +101,14 @@ impl PersistedShortcutProfileLibrary {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn token(&self) -> ShortcutLibraryPersistenceToken {
         self.token
     }
 
     /// Consume the durable result when the caller is ready to replace its live
     /// copy. This is the only library returned by a successful publication.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_snapshot(library: ShortcutProfileLibrary, generation: u64) -> Self {
         let file_digest = serde_json::to_vec(&library)
             .map(|bytes| sha256(&bytes))
@@ -133,7 +133,7 @@ pub struct RetainedShortcutLibraryBytes {
 
 impl RetainedShortcutLibraryBytes {
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn raw_bytes(&self) -> &[u8] {
         &self.raw_bytes
     }
@@ -161,7 +161,7 @@ pub enum ShortcutProfileLibraryRestore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, feature = "test-support", not(target_arch = "wasm32")))]
 pub enum ShortcutProfileLibraryStartup {
     Ready {
         persisted: Box<PersistedShortcutProfileLibrary>,
@@ -184,7 +184,7 @@ struct PreparedStoreWrite {
     persisted: PersistedShortcutProfileLibrary,
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, feature = "test-support", not(target_arch = "wasm32")))]
 pub trait ShortcutLibraryStore {
     fn read(&self) -> Result<Option<Vec<u8>>, ShortcutLibraryPersistenceError>;
     fn compare_exchange(
@@ -508,7 +508,7 @@ pub fn encode_store_bytes(
     Ok(bytes)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, feature = "test-support", not(target_arch = "wasm32")))]
 pub fn restore_from_store(
     store: &impl ShortcutLibraryStore,
     registry: &Registry,
@@ -522,7 +522,7 @@ pub fn restore_from_store(
     })
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, feature = "test-support", not(target_arch = "wasm32")))]
 pub fn create_in_store(
     store: &impl ShortcutLibraryStore,
     library: &ShortcutProfileLibrary,
@@ -533,7 +533,7 @@ pub fn create_in_store(
     Ok(prepared.persisted)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, feature = "test-support", not(target_arch = "wasm32")))]
 pub fn update_in_store(
     store: &impl ShortcutLibraryStore,
     predecessor: &PersistedShortcutProfileLibrary,
@@ -731,7 +731,7 @@ pub fn startup_shortcut_profile_library_native(
     startup_from_store(&store, compatible_session_library, registry)
 }
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, feature = "test-support", not(target_arch = "wasm32")))]
 pub fn startup_from_store(
     store: &impl ShortcutLibraryStore,
     compatible_session_library: Option<&ShortcutProfileLibrary>,
@@ -763,11 +763,11 @@ pub fn startup_from_store(
     })
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrowserShortcutLibraryWriteToken(u64);
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 #[derive(Debug, Default)]
 pub struct BrowserWriteLeaseState {
     next_generation: u64,
@@ -776,7 +776,7 @@ pub struct BrowserWriteLeaseState {
     completed: bool,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 impl BrowserWriteLeaseState {
     pub fn begin(
         &mut self,
@@ -844,7 +844,7 @@ impl BrowserWriteLeaseState {
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub fn finish_verified_browser_commit(
     commit: Result<(), ShortcutLibraryPersistenceError>,
     release: Result<(), ShortcutLibraryPersistenceError>,

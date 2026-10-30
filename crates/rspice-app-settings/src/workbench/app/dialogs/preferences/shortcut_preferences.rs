@@ -1,6 +1,6 @@
 //! Mockup-defined shortcut Preferences page and transactional binding editor.
 
-pub(crate) mod capture;
+pub mod capture;
 
 use capture::*;
 

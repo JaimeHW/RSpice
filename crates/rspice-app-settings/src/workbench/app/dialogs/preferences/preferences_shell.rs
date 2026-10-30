@@ -727,7 +727,7 @@ fn render_search_field(ui: &mut Ui, width: f32) {
 
 /// Put a query in the field without typing it, so a review render and the
 /// tests can show the filtered dialog as a reader would meet it.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn set_filter_for_review(ctx: &Context, query: &str) {
     write_filter(
         ctx,

@@ -133,7 +133,7 @@ impl DecodedShortcutArtifact {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn source_digest(&self) -> [u8; 32] {
         self.source_digest
     }
@@ -192,7 +192,7 @@ impl fmt::Display for ShortcutArtifactSchemaError {
 
 impl std::error::Error for ShortcutArtifactSchemaError {}
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn decode_shortcut_artifact_json(
     source_name: impl Into<String>,
     contents: &str,

@@ -5,6 +5,6 @@
 //! installations, the device-local persistence behind the preset library, and
 //! the import and export workflow.
 
-pub(crate) mod artifacts;
-pub(crate) mod library_persistence;
-pub(crate) mod profile_workflow;
+pub mod artifacts;
+pub mod library_persistence;
+pub mod profile_workflow;

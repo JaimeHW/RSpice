@@ -43,7 +43,8 @@ pub(in crate::workbench) mod pdk_settings;
 pub(in crate::workbench) mod pdk_workflow;
 pub(in crate::workbench) mod placement;
 pub(in crate::workbench) mod plan_removal;
-pub(crate) mod preferences;
+#[cfg(test)]
+pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
 pub(in crate::workbench) mod project;
 pub(in crate::workbench) mod project_revision_history;
 pub(in crate::workbench) mod property_dialog;

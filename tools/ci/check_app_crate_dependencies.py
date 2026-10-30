@@ -90,6 +90,10 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-app-state", "rspice-app-services", "rspice-app-workbench", "rspice-ui-kit",
         "rspice-schematic-editor",
     },
+    # The settings feature: the persisted model, the platform services, and the
+    # workbench framework it registers with, whose context carries the
+    # commands it labels and binds.
+    "rspice-app-settings": {"rspice-app-state", "rspice-app-services", "rspice-app-workbench"},
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -99,6 +103,7 @@ ALLOWED: dict[str, set[str]] = {
 HEADLESS = set(ALLOWED) - {
     "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
+    "rspice-app-settings",
 }
 # The application's features, each a crate of its own once it is extracted. A
 # feature reaches no other feature, and nothing above the workbench framework.

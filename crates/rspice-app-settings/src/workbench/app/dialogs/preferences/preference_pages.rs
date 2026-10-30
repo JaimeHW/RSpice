@@ -8,7 +8,7 @@
 //! runtime owner yet, and they stay off the page until one exists.
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod libraries;
+pub mod libraries;
 mod navigation;
 mod simulation;
 mod startup_files;

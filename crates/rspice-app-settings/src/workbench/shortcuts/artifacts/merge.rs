@@ -126,19 +126,19 @@ pub struct ShortcutImportConflict {
 
 impl ShortcutImportConflict {
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn kind(&self) -> ShortcutImportConflictKind {
         self.kind
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn platform(&self) -> Option<CommandPlatform> {
         self.platform
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn decision(&self) -> ShortcutImportDecision {
         self.decision
     }
@@ -172,7 +172,7 @@ pub struct ShortcutImportPlan {
     base_digest: [u8; 32],
     candidate_library: ShortcutProfileLibrary,
     summaries: Vec<ImportClassSummary>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     conflicts: Vec<ShortcutImportConflict>,
     audit: ShortcutProfileAudit,
     required_protected_confirmations: BTreeSet<String>,
@@ -189,7 +189,7 @@ impl ShortcutImportPlan {
         self.base_digest
     }
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn candidate_library(&self) -> &ShortcutProfileLibrary {
         &self.candidate_library
     }
@@ -198,7 +198,7 @@ impl ShortcutImportPlan {
         &self.summaries
     }
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn conflicts(&self) -> &[ShortcutImportConflict] {
         &self.conflicts
     }
@@ -689,7 +689,7 @@ pub fn plan_shortcut_import(
         base_digest: shortcut_library_digest(base)?,
         candidate_library,
         summaries: summaries.into_values().collect(),
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         conflicts,
         audit,
         required_protected_confirmations,

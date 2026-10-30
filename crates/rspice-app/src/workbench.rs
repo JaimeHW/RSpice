@@ -213,10 +213,11 @@ pub(crate) use rspice_app_workbench::workbench::routing;
 mod session {
     pub(crate) mod project_transactions;
 }
-pub(crate) mod settings;
+pub(crate) use rspice_app_settings::workbench::settings;
 pub(crate) use rspice_app_sheets::workbench::sheets;
 mod shell_host;
-pub(crate) mod shortcuts;
+#[cfg(test)]
+pub(crate) use rspice_app_settings::workbench::shortcuts;
 pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
@@ -252,10 +253,12 @@ pub use localization::UiTextLocale;
 pub(crate) use localization::{MessageCatalog, MessageId};
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
-    BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
-    EngineeringExportFormat, FolderListPreference, ScalarPreference, TogglePreference,
-    UserPreferences, WorkspacePreferences, WorkspacePreset,
+    BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, EngineeringExportFormat,
+    FolderListPreference, ScalarPreference, TogglePreference, WorkspacePreferences,
+    WorkspacePreset,
 };
+#[cfg(test)]
+pub use preferences::{ConsoleLaunchBehavior, UserPreferences};
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use routing::navigation::BrowserHistoryEffect;
 pub use routing::navigation::{RouteTransitionSource, SurfaceNavigation};

@@ -49,7 +49,7 @@ impl ShortcutArtifactFormat {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     pub const fn mime_type(self) -> &'static str {
         match self {
             Self::Json => "application/json",
@@ -126,7 +126,7 @@ pub enum ShortcutArtifactExportOutcome {
         path: PathBuf,
     },
     /// Browser handoff: the download began and claims no completion.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     DownloadStarted {
         suggested_filename: String,
     },
@@ -148,7 +148,7 @@ impl ShortcutArtifactIoError {
     }
 
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn code(&self) -> &'static str {
         self.code
     }
@@ -318,7 +318,7 @@ enum ArtifactDestinationExpectation {
 pub enum ArtifactPublication {
     #[cfg(any(test, not(target_arch = "wasm32")))]
     Durable,
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     DownloadStarted,
 }
 
@@ -473,7 +473,7 @@ pub fn export_shortcut_artifact_with_io(
     Ok(match publication {
         #[cfg(any(test, not(target_arch = "wasm32")))]
         ArtifactPublication::Durable => ShortcutArtifactExportOutcome::Published { path },
-        #[cfg(any(test, target_arch = "wasm32"))]
+        #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
         ArtifactPublication::DownloadStarted => ShortcutArtifactExportOutcome::DownloadStarted {
             suggested_filename: path
                 .file_name()

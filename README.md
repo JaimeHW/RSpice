@@ -411,6 +411,7 @@ use faer.
 | [`rspice-app-runs`](crates/rspice-app-runs) | The application's run tier: preparing, dispatching, watching and publishing simulation runs |
 | [`rspice-app-workbench`](crates/rspice-app-workbench) | The application's workbench framework: commands, feature registration, routing, the workbench session and its chrome, docks and tools |
 | [`rspice-app-sheets`](crates/rspice-app-sheets) | The application's sheets feature: drawing sheets, title blocks, sheet sizes and the sheets of one drawing |
+| [`rspice-app-settings`](crates/rspice-app-settings) | The application's settings feature: Preferences, the preferences file, keyboard shortcuts and their portable artifacts |
 | [`rspice-design`](crates/rspice-design) | Schematic documents, connectivity, hierarchy, rule checks and symbols |
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |

@@ -1,0 +1,45 @@
+[package]
+name = "rspice-app-settings"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's settings feature: Preferences, the preferences file, keyboard shortcuts and their portable artifacts"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# Opens the feature's test-only seams to the application's own tests. The
+# browser import's test seam reads the platform services' own.
+test-support = ["rspice-app-services/test-support"]
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-workbench.workspace = true
+egui = { version = "0.35.0", default-features = false }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+sha2 = "0.10"
+log = "0.4"
+unicode-segmentation = "1.12"
+krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
+
+[dev-dependencies]
+rspice-app-services = { workspace = true, features = ["test-support"] }
+rspice-app-workbench = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rfd = { version = "0.17", features = ["file-handle-inner"] }
+dirs = "7.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Storage", "Window"] }
+js-sys = "0.3"
+
+[lints]
+workspace = true

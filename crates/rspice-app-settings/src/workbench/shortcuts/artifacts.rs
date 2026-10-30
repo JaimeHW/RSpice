@@ -4,14 +4,14 @@
 //! transactional import planning. It deliberately has no egui rendering or
 //! platform IO so desktop, browser, and mobile surfaces consume one model.
 
-pub(crate) mod import_io;
-pub(crate) mod io;
-pub(crate) mod markdown;
-pub(crate) mod merge;
-pub(crate) mod pdf;
-pub(crate) mod projection;
-pub(crate) mod schema;
-pub(crate) mod vscode;
+pub mod import_io;
+pub mod io;
+pub mod markdown;
+pub mod merge;
+pub mod pdf;
+pub mod projection;
+pub mod schema;
+pub mod vscode;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use import_io::import_shortcut_artifact_source;
@@ -34,9 +34,9 @@ pub use projection::{ShortcutExportRequest, ShortcutExportScope, build_shortcut_
 pub use schema::DecodedShortcutArtifact;
 // Both serializers are reached through their own modules by the artifact
 // writers; only the tests name them from here, and the modules are private.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use projection::serialize_shortcut_reference_json;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use schema::decode_shortcut_artifact_json;
 pub use vscode::{
     DetectedShortcutArtifact, VSCODE_COMMAND_MAPPINGS, VscodeAdapterError, VscodeHostPlatform,

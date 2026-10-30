@@ -19,14 +19,14 @@ use crate::workbench::app_state::AppState;
 /// scan below reads them as it reads the pages written here.
 fn production_source() -> String {
     [
-        include_str!("../../workbench/app/dialogs/preferences/preference_pages/libraries.rs"),
-        include_str!("../../workbench/app/dialogs/preferences/preference_pages/navigation.rs"),
-        include_str!("../../workbench/app/dialogs/preferences/preference_pages/simulation.rs"),
-        include_str!("../../workbench/app/dialogs/preferences/preference_pages/startup_files.rs"),
+        include_str!("../../../../rspice-app-settings/src/workbench/app/dialogs/preferences/preference_pages/libraries.rs"),
+        include_str!("../../../../rspice-app-settings/src/workbench/app/dialogs/preferences/preference_pages/navigation.rs"),
+        include_str!("../../../../rspice-app-settings/src/workbench/app/dialogs/preferences/preference_pages/simulation.rs"),
+        include_str!("../../../../rspice-app-settings/src/workbench/app/dialogs/preferences/preference_pages/startup_files.rs"),
         include_str!(
-            "../../workbench/app/dialogs/preferences/preference_pages/waveform_defaults.rs"
+            "../../../../rspice-app-settings/src/workbench/app/dialogs/preferences/preference_pages/waveform_defaults.rs"
         ),
-        include_str!("../../workbench/app/dialogs/preferences/preference_pages.rs"),
+        include_str!("../../../../rspice-app-settings/src/workbench/app/dialogs/preferences/preference_pages.rs"),
     ]
     .map(|source| {
         source

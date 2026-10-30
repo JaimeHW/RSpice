@@ -17,7 +17,7 @@ pub(in crate::workbench) use rspice_app_services::workbench::slots::platform;
 mod project;
 mod results;
 pub(crate) use rspice_app_runs::workbench::slots::runs;
-mod settings;
+use rspice_app_settings::workbench::slots::settings;
 use rspice_app_sheets::workbench::slots::sheets;
 mod shell;
 mod simulate;
