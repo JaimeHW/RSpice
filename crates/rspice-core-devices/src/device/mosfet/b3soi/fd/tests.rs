@@ -689,3 +689,24 @@ fn electrothermal_startup_aids_pin_seed_prime_and_reset() {
     dev.update(&[1.5, 5.5, 0.0, 0.0, x[4]]);
     assert_eq!(dev.bias.vgs, 5.5, "a reset leaves no anchor");
 }
+
+/// The engine updates an iterate after its solve and again before it stamps
+/// it; both passes see one `B3SOIFDlimit` step, and an update after the load
+/// is the next iteration, which takes the next step.
+#[test]
+fn an_iterate_updated_twice_is_limited_once() {
+    let mut dev = device_for_stamp_test(false);
+    dev.update(&[0.0, 0.0, 0.0, 0.0]);
+    let far = [8.0, 7.0, -7.5, 0.5];
+    dev.update(&far);
+    dev.update(&far);
+    // vd, vg and vs each move 3 V once; ve moves 0.5 V.
+    assert_eq!((dev.bias.vds, dev.bias.vgs, dev.bias.ves), (6.0, 6.0, 3.5));
+
+    dev.stamp_nonlinear(&far, &mut RecordingStamper::default(), &mut []);
+    dev.update(&far);
+    assert_eq!(
+        (dev.bias.vds, dev.bias.vgs, dev.bias.ves),
+        (12.0, 12.0, 6.5)
+    );
+}
