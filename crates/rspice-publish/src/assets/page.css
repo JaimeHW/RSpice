@@ -15,6 +15,25 @@
   font-display: swap;
   src: url("fonts/ibm-plex-mono-medium.ttf") format("truetype");
 }
+/* The engineering symbols no Plex face carries (the diameter sign, ground,
+   the GD&T characteristics), the same face the product paints and prints
+   them from. One cut serves every weight, so no weight is synthesized, and
+   the range keeps it from being fetched for text without them. */
+@font-face {
+  font-family: "RSpice Symbols";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/rspice-symbols-regular.ttf") format("truetype");
+  unicode-range: U+207B, U+2103, U+2127, U+21A7, U+21D2, U+21E5, U+21E7, U+21EA, U+2205, U+2207,
+    U+2213, U+221D, U+2220, U+2225, U+223F, U+2261, U+229E, U+22A5, U+22C5,
+    U+2300-2301, U+2303-2304, U+2312-2313, U+2316, U+2318, U+2325-2326, U+232B,
+    U+232D, U+232F-2335, U+238B, U+238D-238E, U+2393, U+23CE, U+23DA-23DB,
+    U+23E4-23E7, U+23FB-23FE, U+24BB, U+24C1-24C2, U+24C5, U+24C8-24C9, U+24D8,
+    U+25A0-25A1, U+25B3-25B4, U+25B8, U+25BD-25BE, U+25C2, U+25C7, U+25CB,
+    U+25CE-25CF, U+25FB-25FC, U+2605-2606, U+26A0-26A1, U+2715, U+2717, U+27C2,
+    U+2B58;
+}
 
 :root {
   color-scheme: light;
@@ -131,7 +150,7 @@ body {
   min-width: 280px;
   background: var(--page-bg);
   color: var(--text);
-  font: 15px/1.5 "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font: 15px/1.5 "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif, "RSpice Symbols";
   text-rendering: optimizeLegibility;
 }
 button, input, select { font: inherit; }
@@ -181,7 +200,7 @@ a { color: var(--brand-strong); }
   border-radius: 1px;
   background: transparent;
   color: var(--text);
-  font: 680 .73rem/1.2 ui-monospace, Consolas, monospace;
+  font: 680 .73rem/1.2 ui-monospace, Consolas, monospace, "RSpice Symbols";
   letter-spacing: .02em;
   text-decoration: none;
   cursor: pointer;
@@ -199,18 +218,18 @@ a { color: var(--brand-strong); }
 }
 h1 { grid-area: title; max-width: 30ch; margin: 0; font-size: clamp(1.65rem, 2.6vw, 2.15rem); line-height: 1.04; letter-spacing: -.035em; text-wrap: balance; }
 .description { grid-area: description; max-width: 82ch; margin: .5rem 0 0; padding: 0; border: 0; color: var(--muted); font-size: .82rem; line-height: 1.45; }
-.byline { grid-area: byline; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .2rem .75rem; align-self: center; margin: 0; padding: 0; color: var(--muted); font: 620 .59rem/1.35 ui-monospace, Consolas, monospace; }
+.byline { grid-area: byline; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .2rem .75rem; align-self: center; margin: 0; padding: 0; color: var(--muted); font: 620 .59rem/1.35 ui-monospace, Consolas, monospace, "RSpice Symbols"; }
 .byline span { display: block; overflow-wrap: anywhere; }
 
 .publication-workspace { min-width: 0; padding-top: 2px; }
 .tabbar-wrap { position: sticky; z-index: 15; top: 0; min-width: 0; margin: 0; padding: 5px 0 9px; background: var(--paper); }
 .tabbar { display: flex; width: fit-content; max-width: 100%; gap: 2px; overflow-x: auto; padding: 4px; border-radius: 6px; background: var(--surface); scrollbar-width: none; }
 .tabbar::-webkit-scrollbar { display: none; }
-.tabbar a { position: relative; flex: 0 0 auto; min-height: 34px; display: inline-flex; align-items: center; gap: .5rem; padding: .4rem .72rem; border-radius: 3px; color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; letter-spacing: .005em; text-decoration: none; }
+.tabbar a { position: relative; flex: 0 0 auto; min-height: 34px; display: inline-flex; align-items: center; gap: .5rem; padding: .4rem .72rem; border-radius: 3px; color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif, "RSpice Symbols"; letter-spacing: .005em; text-decoration: none; }
 .tabbar a:hover { background: var(--surface-strong); color: var(--text); }
 .tabbar a[aria-current="page"] { background: var(--paper); color: var(--text); }
 .tabbar a[aria-current="page"]::before { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 1px; background: var(--brand); content: ""; }
-.tab-count { color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; opacity: .78; }
+.tab-count { color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "Segoe UI", sans-serif, "RSpice Symbols"; font-variant-numeric: tabular-nums; opacity: .78; }
 .tabbar a[aria-current="page"] .tab-count { color: var(--muted); }
 
 .content { min-width: 0; padding: 0; }
@@ -221,24 +240,24 @@ h1 { grid-area: title; max-width: 30ch; margin: 0; font-size: clamp(1.65rem, 2.6
 .surface { border: var(--rule); border-radius: 1px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .5fr); border-block: 1px solid var(--border-strong); }
 .overview-copy { padding: 1rem 1.4rem 1rem 0; border: 0; background: transparent; }
-.overview-copy h3, .side-card h3 { margin: 0 0 .75rem; font-size: .75rem; font-family: ui-monospace, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.overview-copy h3, .side-card h3 { margin: 0 0 .75rem; font-size: .75rem; font-family: ui-monospace, Consolas, monospace, "RSpice Symbols"; letter-spacing: .1em; text-transform: uppercase; }
 .overview-copy p { max-width: 76ch; margin: 0; color: var(--muted); font-size: .9rem; white-space: pre-line; }
 .side-card { padding: .9rem 1rem; border-width: 0 0 0 1px; background: transparent; }
 .spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 0; margin: 1.5rem 0 0; border-top: var(--rule); }
 .spec-grid div { min-width: 0; padding: .8rem .8rem .8rem 0; border-right: var(--rule); }
-.spec-grid dt { color: var(--muted); font: 650 .65rem/1.2 ui-monospace, Consolas, monospace; text-transform: uppercase; }
-.spec-grid dd { margin: .35rem 0 0; font: 720 1rem/1.2 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.spec-grid dt { color: var(--muted); font: 650 .65rem/1.2 ui-monospace, Consolas, monospace, "RSpice Symbols"; text-transform: uppercase; }
+.spec-grid dd { margin: .35rem 0 0; font: 720 1rem/1.2 ui-monospace, Consolas, monospace, "RSpice Symbols"; overflow-wrap: anywhere; }
 .spec-grid dd span { margin-left: .25rem; color: var(--muted); font-size: .68rem; font-weight: 550; }
 .facts { display: grid; margin: 0; }
 .facts div { display: grid; grid-template-columns: minmax(6rem, .7fr) minmax(0, 1.3fr); gap: .7rem; padding: .4rem 0; border-bottom: var(--rule); }
 .facts div:last-child { border-bottom: 0; }
 .facts dt { color: var(--muted); font-size: .72rem; }
-.facts dd { margin: 0; font: 650 .75rem/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.facts dd { margin: 0; font: 650 .75rem/1.4 ui-monospace, Consolas, monospace, "RSpice Symbols"; overflow-wrap: anywhere; }
 
 .figure-stack { display: grid; min-width: 0; gap: .8rem; }
 figure.figure-card { min-width: 0; margin: 0; overflow: hidden; border: 1px solid var(--border-strong); background: var(--paper); }
 .figure-heading { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 1rem; padding: .45rem .65rem; border-bottom: var(--rule); background: var(--surface-strong); }
-.figure-heading figcaption { min-width: 0; font: 700 .75rem/1.35 ui-monospace, Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; overflow-wrap: anywhere; }
+.figure-heading figcaption { min-width: 0; font: 700 .75rem/1.35 ui-monospace, Consolas, monospace, "RSpice Symbols"; letter-spacing: .04em; text-transform: uppercase; overflow-wrap: anywhere; }
 .figure-stage { position: relative; min-width: 0; overflow: auto; padding: clamp(.45rem, 1vw, .8rem); background: linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 16px 16px, linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 16px 16px, var(--canvas-bg); }
 .figure-stage svg { display: block; width: 100%; height: auto; min-height: 140px; }
 .figure-stage canvas.viewer { display: block; width: 100%; min-height: 240px; }
@@ -259,20 +278,20 @@ svg g.is-selected { opacity: 1; filter: drop-shadow(0 0 5px var(--brand)); }
 .table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; border-block: 1px solid var(--border-strong); }
 table { width: 100%; border-collapse: collapse; font-size: .82rem; font-variant-numeric: tabular-nums; }
 caption { padding: .8rem 0; color: var(--muted); text-align: left; }
-th { padding: .65rem .8rem; border-bottom: 1px solid var(--border-strong); background: var(--surface-strong); color: var(--muted); font: 680 .63rem/1.3 ui-monospace, Consolas, monospace; letter-spacing: .1em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+th { padding: .65rem .8rem; border-bottom: 1px solid var(--border-strong); background: var(--surface-strong); color: var(--muted); font: 680 .63rem/1.3 ui-monospace, Consolas, monospace, "RSpice Symbols"; letter-spacing: .1em; text-align: left; text-transform: uppercase; white-space: nowrap; }
 td { padding: .72rem .8rem; border-bottom: var(--rule); vertical-align: top; }
 tr:last-child td { border-bottom: 0; }
-td.num, code, pre { font-family: ui-monospace, Consolas, monospace; }
-.status { display: inline-flex; min-width: 4.2rem; justify-content: center; padding: .15rem .35rem; border: 1px solid currentColor; font: 720 .63rem/1.3 ui-monospace, Consolas, monospace; letter-spacing: .06em; }
+td.num, code, pre { font-family: ui-monospace, Consolas, monospace, "RSpice Symbols"; }
+.status { display: inline-flex; min-width: 4.2rem; justify-content: center; padding: .15rem .35rem; border: 1px solid currentColor; font: 720 .63rem/1.3 ui-monospace, Consolas, monospace, "RSpice Symbols"; letter-spacing: .06em; }
 .status.pass { color: var(--success); }
 .status.fail { color: var(--danger); }
 .status.neutral { color: var(--muted); }
 
 .section-stack { display: grid; min-width: 0; gap: .75rem; }
 .subsection { min-width: 0; }
-.subsection h3 { margin: 0 0 .75rem; font: 700 .76rem/1.3 ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.subsection h3 { margin: 0 0 .75rem; font: 700 .76rem/1.3 ui-monospace, Consolas, monospace, "RSpice Symbols"; letter-spacing: .08em; text-transform: uppercase; }
 details.deck { overflow: hidden; border-block: 1px solid var(--border-strong); background: var(--surface); }
-details.deck summary { padding: .75rem 0; cursor: pointer; font: 680 .74rem/1.3 ui-monospace, Consolas, monospace; }
+details.deck summary { padding: .75rem 0; cursor: pointer; font: 680 .74rem/1.3 ui-monospace, Consolas, monospace, "RSpice Symbols"; }
 pre.deck { max-height: 70vh; margin: 0; overflow: auto; padding: 1rem; border-top: var(--rule); background: var(--surface); color: var(--text); font-size: .76rem; line-height: 1.55; tab-size: 2; }
 .warning-list { display: grid; gap: 0; margin: .75rem 0 0; padding: 0; border-top: var(--rule); list-style: none; }
 .warning-list li { display: grid; grid-template-columns: minmax(6rem, auto) 1fr; gap: .7rem; padding: .6rem 0; border-bottom: var(--rule); }
@@ -280,12 +299,12 @@ pre.deck { max-height: 70vh; margin: 0; overflow: auto; padding: 1rem; border-to
 .asset-list { display: grid; gap: 0; margin: 0; padding: 0; border-top: 1px solid var(--border-strong); list-style: none; }
 .asset-item { display: flex; min-height: 66px; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 0; border-bottom: var(--rule); }
 .asset-main { min-width: 0; }
-.asset-main strong { display: block; font: 680 .78rem/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.asset-main strong { display: block; font: 680 .78rem/1.4 ui-monospace, Consolas, monospace, "RSpice Symbols"; overflow-wrap: anywhere; }
 .asset-main span, .asset-size { color: var(--muted); font-size: .72rem; }
 .asset-download { flex: 0 0 auto; }
 .cloud-context-grid { display: grid; grid-template-columns: minmax(220px, .55fr) minmax(0, 1.45fr); border-block: 1px solid var(--border-strong); }
 .cloud-context-grid .side-card { border-left: 0; border-right: var(--rule); }
-.cloud-version { display: block; margin-top: .6rem; font: 720 1.1rem/1.2 ui-monospace, Consolas, monospace; }
+.cloud-version { display: block; margin-top: .6rem; font: 720 1.1rem/1.2 ui-monospace, Consolas, monospace, "RSpice Symbols"; }
 .version-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
 .cloud-artifact-list { display: grid; gap: 0; margin: .7rem 0 0; padding: 0; border-top: var(--rule); list-style: none; }
 .cloud-artifact-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .65rem 0; border-bottom: var(--rule); }
@@ -296,9 +315,9 @@ pre.deck { max-height: 70vh; margin: 0; overflow: auto; padding: 1rem; border-to
 .empty-state h3 { margin: 0 0 .35rem; font-size: .95rem; }
 .empty-state p { margin: 0; color: var(--muted); }
 .noscript-note { margin: 0 0 1rem; padding: .65rem 0; border-block: var(--rule); color: var(--muted); }
-.publication-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; margin-top: 28px; padding: .7rem 0 0; border-top: 1px solid var(--border-strong); color: var(--muted); font: 620 .63rem/1.4 ui-monospace, Consolas, monospace; }
+.publication-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; margin-top: 28px; padding: .7rem 0 0; border-top: 1px solid var(--border-strong); color: var(--muted); font: 620 .63rem/1.4 ui-monospace, Consolas, monospace, "RSpice Symbols"; }
 .publication-footer code { overflow-wrap: anywhere; }
-.toast { position: fixed; z-index: 50; right: 1.25rem; bottom: 1.25rem; max-width: min(24rem, calc(100vw - 2.5rem)); padding: .65rem .8rem; border: 1px solid var(--brand); background: var(--paper); color: var(--text); font: 650 .74rem/1.35 ui-monospace, Consolas, monospace; }
+.toast { position: fixed; z-index: 50; right: 1.25rem; bottom: 1.25rem; max-width: min(24rem, calc(100vw - 2.5rem)); padding: .65rem .8rem; border: 1px solid var(--brand); background: var(--paper); color: var(--text); font: 650 .74rem/1.35 ui-monospace, Consolas, monospace, "RSpice Symbols"; }
 
 svg .s-foreground { stroke: var(--foreground); } svg .s-secondary { stroke: var(--secondary); } svg .s-grid { stroke: var(--grid); } svg .s-accent { stroke: var(--accent); } svg .s-warning { stroke: var(--warning); } svg .s-success { stroke: var(--success); }
 svg .s-trace-0 { stroke: var(--trace-0); } svg .s-trace-1 { stroke: var(--trace-1); } svg .s-trace-2 { stroke: var(--trace-2); } svg .s-trace-3 { stroke: var(--trace-3); } svg .s-trace-4 { stroke: var(--trace-4); } svg .s-trace-5 { stroke: var(--trace-5); } svg .s-trace-6 { stroke: var(--trace-6); } svg .s-trace-7 { stroke: var(--trace-7); }

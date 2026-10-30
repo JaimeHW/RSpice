@@ -28,11 +28,12 @@ const BRAND_LOGO_SVG: &str = include_str!("../../../assets/brand/logo.svg");
 pub const PAGE_STYLES: &str = include_str!("assets/page.css");
 /// Progressive page chrome, separate from the figure hydration loader.
 pub(crate) const PAGE_SCRIPT: &str = include_str!("assets/page.js");
-/// The IBM Plex Mono cuts the stylesheet declares for figure lettering, at
-/// the bundle paths it names, with the licence they are distributed under.
-/// A bundle with figures carries all three; one without carries none. Bundle
+/// The faces the stylesheet declares for figure lettering, at the bundle
+/// paths it names, with the licences they are distributed under: the IBM
+/// Plex Mono cuts, and RSpice Symbols for the symbols Plex lacks. A bundle
+/// with figures carries all five files; one without carries none. Bundle
 /// paths are lowercase because the cloud render worker refuses any other.
-pub(crate) const PAGE_FONTS: [(&str, &[u8]); 3] = [
+pub(crate) const PAGE_FONTS: [(&str, &[u8]); 5] = [
     (
         "assets/fonts/ibm-plex-mono-regular.ttf",
         Face::MonoRegular.bytes(),
@@ -44,6 +45,14 @@ pub(crate) const PAGE_FONTS: [(&str, &[u8]); 3] = [
     (
         "assets/fonts/ofl-ibm-plex.txt",
         Face::MonoRegular.licence().as_bytes(),
+    ),
+    (
+        "assets/fonts/rspice-symbols-regular.ttf",
+        Face::Symbols.bytes(),
+    ),
+    (
+        "assets/fonts/ofl-rspice-symbols.txt",
+        Face::Symbols.licence().as_bytes(),
     ),
 ];
 

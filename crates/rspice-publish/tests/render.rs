@@ -88,10 +88,98 @@ fn a_figure_bundle_ships_the_faces_its_stylesheet_declares() {
         bundle.contains_key("assets/fonts/ofl-ibm-plex.txt"),
         "the faces travel with their licence"
     );
+    // RSpice Symbols, for the symbols no Plex face carries, in one cut that
+    // serves every weight so none is synthesized.
+    assert!(
+        styles.contains(
+            "font-family: \"RSpice Symbols\";\n  font-style: normal;\n  font-weight: 100 900;\n  font-display: swap;\n  src: url(\"fonts/rspice-symbols-regular.ttf\")"
+        ),
+        "page.css must declare RSpice Symbols"
+    );
+    assert_eq!(
+        weight_class(&bundle["assets/fonts/rspice-symbols-regular.ttf"]),
+        400
+    );
+    assert!(
+        bundle.contains_key("assets/fonts/ofl-rspice-symbols.txt"),
+        "RSpice Symbols travels with its licence"
+    );
     assert!(
         utf8(&bundle["index.html"]).contains("font-family=\"'RSpice Plex Mono', "),
         "the figures letter in the face the page ships"
     );
+}
+
+/// Every font stack on the page, chrome and figures alike, ends in RSpice
+/// Symbols, so a symbol no earlier face carries letters from the face the
+/// product prints it in rather than as a missing glyph.
+#[test]
+fn every_font_stack_ends_in_rspice_symbols() {
+    let bundle =
+        render_bundle(&snapshot(RC_LOWPASS), "0".repeat(64).as_str(), &viewer()).expect("render");
+    let styles = utf8(&bundle["assets/page.css"]).replace("\r\n", "\n");
+    let mut rules = styles.as_str();
+    let mut stacks = 0;
+    while !rules.is_empty() {
+        let (rule, rest) = rules.split_once('}').unwrap_or((rules, ""));
+        rules = rest;
+        // A face's own declaration names one family, not a stack.
+        if rule.contains("@font-face") {
+            continue;
+        }
+        for declaration in rule.split(['{', ';']).map(str::trim) {
+            let Some(value) = declaration
+                .strip_prefix("font:")
+                .or_else(|| declaration.strip_prefix("font-family:"))
+            else {
+                continue;
+            };
+            if value.trim() == "inherit" {
+                continue;
+            }
+            stacks += 1;
+            assert!(
+                value.trim_end().ends_with(", \"RSpice Symbols\""),
+                "{declaration} does not end in RSpice Symbols"
+            );
+        }
+    }
+    assert!(stacks >= 10, "only {stacks} font stacks were found");
+
+    let html = utf8(&bundle["index.html"]);
+    assert!(
+        html.contains("monospace, 'RSpice Symbols'\""),
+        "a figure's monospace stack ends in RSpice Symbols"
+    );
+    assert!(
+        html.contains("sans-serif, 'RSpice Symbols'\""),
+        "a figure's sans stack ends in RSpice Symbols"
+    );
+
+    // The face is fetched only for the characters it carries.
+    let (_, range) = styles
+        .split_once("unicode-range:")
+        .expect("RSpice Symbols declares its unicode-range");
+    let range = &range[..range.find(';').expect("the range ends")];
+    let mut points = Vec::new();
+    for item in range.split(',').map(str::trim) {
+        let item = item.strip_prefix("U+").expect("a range item is U+hex");
+        let (first, last) = item.split_once('-').unwrap_or((item, item));
+        let first = u32::from_str_radix(first, 16).expect("hex");
+        let last = u32::from_str_radix(last, 16).expect("hex");
+        points.extend((first..=last).filter_map(char::from_u32));
+    }
+    assert_eq!(points.len(), 82, "the range lists every guaranteed symbol");
+    for point in &points {
+        assert!(
+            rspice_fonts::Face::Symbols.covers(*point),
+            "the range lists U+{:04X}, which RSpice Symbols lacks",
+            u32::from(*point)
+        );
+    }
+    for symbol in ['\u{2300}', '\u{23da}', '\u{25fb}'] {
+        assert!(points.contains(&symbol), "the range omits {symbol}");
+    }
 }
 
 /// The file types RSpice Cloud's render worker serves from a bundle (its
