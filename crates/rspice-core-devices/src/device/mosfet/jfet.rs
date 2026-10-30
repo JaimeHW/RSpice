@@ -713,6 +713,7 @@ impl Jfet {
             self.hfet_legacy_inverse_mode,
             self.hfet_legacy_inverse_active,
         ] = checkpoint.flags;
+        self.update_open.set(false);
         Ok(())
     }
 }
@@ -783,6 +784,9 @@ pub struct Jfet {
     last_raw_vgd: Value,
     eval_valid: bool,
     limiter_applied: bool,
+    /// No matrix load and no second `update` has seen the iterate the last
+    /// `update` limited yet.
+    update_open: std::cell::Cell<bool>,
     eval_ids: Value,
     eval_gm: Value,
     eval_gds: Value,

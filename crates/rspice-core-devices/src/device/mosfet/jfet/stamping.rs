@@ -362,6 +362,9 @@ impl Jfet {
 
     /// Stamp using O(1) direct indexing (call after `link`).
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+        // The load closes the iterate: an update at the same raw voltages
+        // after it is the next Newton iteration.
+        self.update_open.set(false);
         let (jacobian, injections) = self.linearized_terminal_stamp(voltages);
         let indices = [
             [self.indices.dd, self.indices.dg, self.indices.ds],
@@ -394,6 +397,7 @@ impl NonlinearDevice for Jfet {
         let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
         let vgs_raw = vg - vs;
         let vgd_raw = vg - vd;
+        let open = self.update_open.replace(false);
         if !matches!(
             self.params.channel_model,
             JfetChannelModel::XyceModifiedShockley
@@ -405,6 +409,27 @@ impl NonlinearDevice for Jfet {
             }
             self.last_raw_vgs_prev = self.last_raw_vgs;
             self.last_raw_vgd_prev = self.last_raw_vgd;
+            return;
+        }
+        // One Newton iterate reaches `update` twice, after its solve and again
+        // before its stamp. jfetload.c limits each load once against
+        // CKTstate0, so the second pass of a limited iterate keeps the first
+        // pass's evaluation instead of limiting the same raw junctions again
+        // against its own output. After a matrix load the same raw voltages
+        // are the next iteration. (The startup seed, which has no previous
+        // iterate, is released by the next update as before.)
+        if open
+            && self.limiter_applied
+            && self.eval_valid
+            && self.vgs_prev.is_finite()
+            && self.vds_prev.is_finite()
+            && !matches!(
+                self.params.channel_model,
+                JfetChannelModel::XyceModifiedShockley
+            )
+            && vgs_raw == self.last_raw_vgs
+            && vgd_raw == self.last_raw_vgd
+        {
             return;
         }
 
@@ -551,6 +576,7 @@ impl NonlinearDevice for Jfet {
         if !bypassed {
             self.cache_operating_terms_at(vgs, vds, vgd, external_vd, external_vs, true);
         }
+        self.update_open.set(true);
     }
 
     fn stamp_nonlinear(
@@ -559,6 +585,7 @@ impl NonlinearDevice for Jfet {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
+        self.update_open.set(false);
         let (jacobian, injections) = self.linearized_terminal_stamp(voltages);
         let nodes = [self.drain, self.gate, self.source];
         for (row, &node) in nodes.iter().enumerate() {
@@ -824,5 +851,47 @@ mod tests {
         assert_eq!(jfet.eval_ids.to_bits(), expected_ids.to_bits());
         assert_eq!(jfet.vgs.to_bits(), vgs.to_bits());
         assert!((jfet.vds - vds).abs() <= Value::EPSILON * vds.abs());
+    }
+
+    struct NoStamp;
+
+    impl MatrixStamper for NoStamp {
+        fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
+        fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {}
+    }
+
+    #[test]
+    fn a_limited_iterate_updated_twice_is_limited_once() {
+        // Drain on node 1, gate on node 2, source grounded.
+        let mut jfet = Jfet::njf("J1", 1, 2, 0);
+        let settled = [1.0, -0.5];
+        for _ in 0..8 {
+            jfet.update(&settled);
+            jfet.stamp_nonlinear(&settled, &mut NoStamp, &mut []);
+        }
+        assert!(!jfet.limiter_applied);
+
+        // A forward gate step, which DEVpnjlim holds a few vt above the old bias.
+        let iterate = [1.0, 2.0];
+        let mut once = jfet.clone();
+        once.update(&iterate);
+        assert!(once.limiter_applied);
+        let once = (once.vgs, once.vds);
+
+        // The engine updates an iterate after its solve and again before it
+        // stamps it; both passes see one limiting.
+        jfet.update(&iterate);
+        jfet.update(&iterate);
+        assert_eq!((jfet.vgs, jfet.vds), once);
+
+        // A solve that returns the same voltages after the load is the next
+        // iteration, which limits again from where this one stopped.
+        jfet.stamp_nonlinear(&iterate, &mut NoStamp, &mut []);
+        jfet.update(&iterate);
+        assert!(
+            jfet.vgs > once.0,
+            "the next iteration advances: {}",
+            jfet.vgs
+        );
     }
 }
