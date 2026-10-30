@@ -32,7 +32,7 @@ pub use geometry::{
 };
 use geometry::{
     canonical_annotation_semantics, canonical_cursor_semantics, canonical_marker_semantics,
-    layer_mapping, mapping_entry, symbol_bounds,
+    form_layer_mapping, layer_mapping, mapping_entry, symbol_bounds,
 };
 use mapping::default_print_mapping;
 pub(crate) use mapping::{SYMBOL_PRINT_INK, WIRE_PRINT_INK};

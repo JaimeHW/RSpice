@@ -25,6 +25,26 @@ pub(super) fn layer_mapping(
     )
 }
 
+/// A layer of the drawing form itself: the frame with its zones and marks,
+/// and the title block with every cell and note the form letters. The form
+/// prints black, as ISO 128-20 and ASME Y14.2 draw every line and letter of a
+/// drawing: black and uniform, its weight carried by line width, not tone.
+pub(super) fn form_layer_mapping(
+    stable_id: impl Into<String>,
+    display_name: impl Into<String>,
+    screen_style: impl Into<String>,
+) -> Result<PrintMappingEntry, HardcopySourceError> {
+    mapping_entry(
+        PrintObjectKind::Layer,
+        stable_id,
+        display_name,
+        screen_style,
+        PrintColor::Black,
+        PrintRedundancy::SourceStyle,
+        true,
+    )
+}
+
 pub(super) fn mapping_entry(
     kind: PrintObjectKind,
     stable_id: impl Into<String>,

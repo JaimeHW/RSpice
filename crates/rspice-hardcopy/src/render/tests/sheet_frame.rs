@@ -2,7 +2,7 @@
 //! widths, its marks and its size designation where the standard puts them.
 
 use super::*;
-use rspice_design_model::design_management::DrawingSheetFrameLayer;
+use rspice_design_model::design_management::{DrawingSheetFrameLayer, DrawingSheetRect};
 
 /// Paper, border and zones, with crop marks as asked.
 fn frame_output(crop_marks: bool) -> SchematicHardcopySetup {
@@ -139,4 +139,71 @@ fn iso_trimming_marks_are_filled_rectangles_and_only_when_asked() {
     };
     assert_eq!(filled(&plotted(&a4, frame_output(true))), 8);
     assert_eq!(filled(&plotted(&a4, frame_output(false))), 0);
+}
+
+/// The form prints black: an A3 sheet plotted 1:1 onto A3 has full black
+/// ink on its frame line and on its title block's outline, where both once
+/// printed 60 % grey (#666666).
+#[test]
+fn the_frame_and_title_block_print_black() {
+    let a3 = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Landscape,
+    );
+    let source = resolved_blank_schematic(&a3);
+    let dpi = 150;
+    let base = setup(OutputFormat::Png { dpi }, false);
+    let setup = HardcopySetup::try_new_with_schematic(
+        PhysicalPageSetup::try_new(
+            PaperSize::Standard(StandardPaper::A3),
+            PageMargins::uniform(Length::ZERO),
+            Bleed::None,
+            Orientation::Landscape,
+        )
+        .unwrap(),
+        ScaleMode::EngineeringOneToOne,
+        base.tiling(),
+        base.render().clone(),
+        DecorationSetup::try_new(false, false, false, Watermark::None).unwrap(),
+        SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+        ),
+        source.default_print_mapping().clone(),
+    )
+    .unwrap();
+    let plan =
+        HardcopyPlan::compile(source.authority().clone(), setup, source.content_extent()).unwrap();
+    assert_eq!(plan.pagination().pages().len(), 1);
+    let png = HardcopyRenderer::render_resolved(&plan, &source, resolved_metadata()).unwrap();
+    let decoder = png::Decoder::new(Cursor::new(png.single_part().unwrap().bytes()));
+    let mut reader = decoder.read_info().unwrap();
+    let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut rgba).unwrap();
+    let width = usize::try_from(info.width).unwrap();
+    let pixel = |x_um: i64, y_um: i64| {
+        let to_px = |um: i64| usize::try_from(um).unwrap() * usize::from(dpi) / 25_400;
+        let at = (to_px(y_um) * width + to_px(x_um)) * 4;
+        [rgba[at], rgba[at + 1], rgba[at + 2]]
+    };
+    let geometry = a3.geometry().unwrap();
+    let frame = geometry.drawing_area;
+    let block = geometry.title_block.expect("an ISO 7200 block");
+    let height = |rect: DrawingSheetRect| i64::try_from(rect.height_um).unwrap();
+    assert_eq!(
+        pixel(frame.x_um, frame.y_um + height(frame) / 2),
+        [0, 0, 0],
+        "the frame line"
+    );
+    assert_eq!(
+        pixel(block.x_um, block.y_um + height(block) / 2),
+        [0, 0, 0],
+        "the title block's outline"
+    );
 }

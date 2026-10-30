@@ -23,14 +23,14 @@ pub(super) fn default_print_mapping(
                     "authored paper edge",
                 )?);
                 if format.border != DrawingSheetBorderTemplate::None {
-                    entries.push(layer_mapping(
+                    entries.push(form_layer_mapping(
                         "layer:drawing-sheet-frame",
                         "Drawing sheet frame",
                         "authored border, zones, and marks",
                     )?);
                 }
                 if format.title_block.template != DrawingSheetTitleBlockTemplate::None {
-                    entries.push(layer_mapping(
+                    entries.push(form_layer_mapping(
                         "layer:drawing-sheet-title-block",
                         "Drawing sheet title block",
                         "authored title block fields",
