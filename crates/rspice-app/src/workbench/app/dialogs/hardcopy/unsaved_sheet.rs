@@ -40,7 +40,7 @@ impl HardcopyDialogState {
     /// set once the driver's printable rectangle for that paper is known; see
     /// [`Self::keep_unsaved_sheet_inside`]. Returns whether the page was laid
     /// out again.
-    pub(crate) fn fit_unsaved_sheet_to_printer(
+    pub fn fit_unsaved_sheet_to_printer(
         &mut self,
         capabilities: &PrinterCapabilitySnapshot,
         default_paper: Option<i16>,
@@ -62,7 +62,7 @@ impl HardcopyDialogState {
     /// Keep a fitted sheet with nothing saved inside the widest margin the
     /// driver cannot print, the same on every side so the sheet stays centred
     /// on its paper.
-    pub(crate) fn keep_unsaved_sheet_inside(&mut self, geometry: PrinterRasterGeometry, dpi: u16) {
+    pub fn keep_unsaved_sheet_inside(&mut self, geometry: PrinterRasterGeometry, dpi: u16) {
         let Some(sheet) = self.followed_unsaved_sheet() else {
             return;
         };

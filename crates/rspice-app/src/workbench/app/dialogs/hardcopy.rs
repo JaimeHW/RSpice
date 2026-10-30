@@ -942,7 +942,7 @@ impl HardcopyDialogState {
         Ok(())
     }
 
-    pub(crate) fn build_setup(&self) -> Result<HardcopySetup, HardcopyDialogError> {
+    pub fn build_setup(&self) -> Result<HardcopySetup, HardcopyDialogError> {
         self.build_setup_with_print_mapping(&self.print_mapping)
     }
 
