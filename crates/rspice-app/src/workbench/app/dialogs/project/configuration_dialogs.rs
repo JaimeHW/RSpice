@@ -60,12 +60,20 @@ impl StartFrom {
         let owned = |views: &[&str]| views.iter().map(|view| (*view).to_owned()).collect();
         match self {
             Self::Default => {
-                let views = default_view_search_order("schematic", false);
-                let stops = views
+                // Default searches an instance's own view first, which one
+                // list cannot say. Every view Default stops at follows the
+                // schematic order, so a cell placed by its Verilog-A or
+                // Verilog view still binds, and the stop list is Default's.
+                let mut views = default_view_search_order("schematic", false);
+                let stops: Vec<String> = DEFAULT_STOP_VIEW_TYPES
                     .iter()
-                    .filter(|view| DEFAULT_STOP_VIEW_TYPES.contains(&ViewType::from_name(view)))
-                    .cloned()
+                    .map(|view| view.display_name().to_owned())
                     .collect();
+                for stop in &stops {
+                    if !views.iter().any(|view| view.eq_ignore_ascii_case(stop)) {
+                        views.push(stop.clone());
+                    }
+                }
                 (views, stops)
             }
             Self::AnalogSchematic => (

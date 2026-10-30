@@ -85,6 +85,23 @@ fn new_configuration_asks_for_a_name_a_start_and_whether_runs_use_it() {
 }
 
 #[test]
+fn starting_from_default_writes_every_view_default_stops_at() {
+    let (views, stops) = StartFrom::Default.lists();
+    assert_eq!(views[..3], ["schematic", "extracted", "spice"]);
+    let default_stops = DEFAULT_STOP_VIEW_TYPES
+        .iter()
+        .map(ViewType::display_name)
+        .collect::<Vec<_>>();
+    assert_eq!(stops, default_stops);
+    for stop in &stops {
+        assert!(
+            views.contains(stop),
+            "stop {stop:?} must be in the view list {views:?}"
+        );
+    }
+}
+
+#[test]
 fn a_first_configuration_is_used_for_runs_and_a_clone_follows_its_source() {
     let mut app = RSpiceApp::test_instance();
     open_configuration_dialog(&mut app.state, ConfigurationDialogRequest::New);
