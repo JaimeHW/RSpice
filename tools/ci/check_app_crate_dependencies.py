@@ -78,13 +78,12 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-simulation-contract", "rspice-simulation", "rspice-schematic-editor",
     },
     # The workbench framework: the persisted model, the platform services, the
-    # run tier's status, the hardcopy pipeline's publication timestamp, and the
-    # painting crates its chrome, docks and tools are drawn with; no feature,
-    # window or shell crate.
+    # run tier's status, and the painting crates its chrome, docks and tools are
+    # drawn with; no feature, window or shell crate.
     "rspice-app-workbench": {
         "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-vocabulary",
         "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-design",
-        "rspice-results", "rspice-hardcopy",
+        "rspice-results",
     },
     # The sheets feature: the persisted model, the platform services, the
     # workbench framework it registers with, and the painting crates the sheet
@@ -108,6 +107,17 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-vocabulary", "rspice-design", "rspice-schematic-editor",
         "rspice-simulation-contract",
     },
+    # The hardcopy feature: the persisted model, the platform services, the run
+    # tier whose runs a publication records, the workbench framework it
+    # registers with, the hardcopy pipeline and its contracts, the publication
+    # contract, and the design, results and schematic crates whose documents it
+    # resolves and draws.
+    "rspice-app-hardcopy": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+        "rspice-vocabulary", "rspice-schematic-editor", "rspice-results-ui", "rspice-design",
+        "rspice-results", "rspice-hardcopy-contract", "rspice-hardcopy",
+        "rspice-publication-contract",
+    },
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -117,7 +127,7 @@ ALLOWED: dict[str, set[str]] = {
 HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
-    "rspice-app-settings", "rspice-app-results",
+    "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy",
 }
 # The application's features, each a crate of its own once it is extracted. A
 # feature reaches no other feature, and nothing above the workbench framework.

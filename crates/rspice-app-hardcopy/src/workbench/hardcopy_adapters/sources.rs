@@ -8,7 +8,7 @@
 //! rectangle.
 
 mod quick_view_overlay;
-pub(crate) mod report_inventory;
+pub mod report_inventory;
 
 pub use rspice_hardcopy::sources::*;
 // Module-private: `noise` and `quick_view_overlay`

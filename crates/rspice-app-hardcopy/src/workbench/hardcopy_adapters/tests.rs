@@ -1,6 +1,7 @@
 //! Application source resolution and headless renderer integration fixtures.
 
 use rspice_hardcopy::render::{HardcopyRenderError, HardcopySceneMetadata};
+#[cfg(test)]
 use rspice_hardcopy::render::{ScenePrimitive, scene_from_resolved};
 
 use rspice_hardcopy::sources::ResolvedHardcopyDocument;
@@ -20,16 +21,21 @@ pub fn source_metadata(
     Ok(metadata)
 }
 
+#[cfg(test)]
 use super::sources::{
     HardcopySemanticDocument, SchematicHardcopySource, resolve_hardcopy_source_set_with,
     resolve_schematic_source, schematic_sheet_identity, source_set_member_from_resolved,
 };
+#[cfg(test)]
 use crate::product::ObjectRevision;
+#[cfg(test)]
 use crate::state::{
     DrawingSheetTitleFieldId, SchematicState, SheetCatalog, SheetDefinition, SheetPageNumbering,
     SheetPortPolicy, SheetTemplate,
 };
+#[cfg(test)]
 use rspice_hardcopy_contract::sources::{HardcopySourceIdentity, HardcopySourceSet};
+#[cfg(test)]
 use rspice_hardcopy_contract::{
     HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, SchematicHardcopySetup,
 };

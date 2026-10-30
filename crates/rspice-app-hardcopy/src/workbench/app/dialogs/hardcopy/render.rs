@@ -5,7 +5,7 @@
 //! one semantic source and one immutable pagination plan.
 
 mod bodies;
-pub(crate) mod content_options;
+pub mod content_options;
 mod labels;
 mod preview;
 

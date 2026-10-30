@@ -1,0 +1,71 @@
+[package]
+name = "rspice-app-hardcopy"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's hardcopy feature: Page Setup, Print and Export, report authoring, hardcopy sources and the publication snapshot"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# Opens the feature's test-only seams to the application's own tests.
+test-support = []
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-runs.workspace = true
+rspice-app-workbench.workspace = true
+rspice-vocabulary.workspace = true
+rspice-schematic-editor.workspace = true
+rspice-results-ui.workspace = true
+rspice-design = { workspace = true, features = ["symbol-artwork"] }
+rspice-results = { workspace = true, features = ["engine-evidence"] }
+rspice-hardcopy-contract.workspace = true
+rspice-hardcopy.workspace = true
+rspice-publication-contract.workspace = true
+thiserror.workspace = true
+egui = { version = "0.35.0", default-features = false }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+
+[dev-dependencies]
+rspice-app-services = { workspace = true, features = ["test-support"] }
+rspice-app-workbench = { workspace = true, features = ["test-support"] }
+png = "0.18"
+# The dialog's tests round-trip a saved setup through the session format.
+ron = { version = "0.12.2", features = ["integer128"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+lopdf = { version = "0.45", default-features = false }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+    "Win32_Storage_Xps",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+# uuid needs an explicit browser entropy source on wasm32-unknown-unknown
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+web-sys = { version = "0.3", features = ["ErrorEvent", "Event", "MessageEvent", "Window", "Worker", "WorkerOptions", "WorkerType", "console"] }
+js-sys = "0.3"
+
+[lints]
+workspace = true

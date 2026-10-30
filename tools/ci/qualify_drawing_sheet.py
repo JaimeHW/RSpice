@@ -55,9 +55,9 @@ SHEET_SOURCE_SCOPES = (
     "crates/rspice-app-sheets/src/workbench/docks/inspector/design/sheet",
     "crates/rspice-app/src/feature_tests/sheets/sheet_edit.rs",
     "crates/rspice-app/src/feature_tests/sheets/sheet_inspector.rs",
-    "crates/rspice-app/src/workbench/app/dialogs/hardcopy.rs",
-    "crates/rspice-app/src/workbench/app/dialogs/hardcopy",
-    "crates/rspice-app/src/workbench/hardcopy_adapters",
+    "crates/rspice-app-hardcopy/src/workbench/app/dialogs/hardcopy.rs",
+    "crates/rspice-app-hardcopy/src/workbench/app/dialogs/hardcopy",
+    "crates/rspice-app-hardcopy/src/workbench/hardcopy_adapters",
     "crates/rspice-app/src/feature_tests/hardcopy.rs",
     "crates/rspice-app/src/feature_tests/hardcopy",
 )
@@ -70,6 +70,7 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-core/tests/save_directives.rs",
     "crates/rspice-app/Cargo.toml",
     "crates/rspice-app-sheets/Cargo.toml",
+    "crates/rspice-app-hardcopy/Cargo.toml",
     "crates/rspice-app-state/Cargo.toml",
     "crates/rspice-schematic-editor/Cargo.toml",
     "crates/rspice-hardcopy-contract/Cargo.toml",
@@ -421,6 +422,9 @@ def command_gates(
                 "--locked",
                 "-p",
                 "rspice-app",
+                # The hardcopy feature's own cases compile in its crate.
+                "-p",
+                "rspice-app-hardcopy",
                 # The workspace's page setup and source sets are model logic,
                 # and the sheet overflow's hardcopy extent is the editor's.
                 "-p",

@@ -14,7 +14,9 @@ WASM_WORKER = SIMULATION_SRC / "runner" / "wasm_worker.rs"
 WORKER_CONTRACT = SIMULATION_SRC / "runner" / "worker_contract.rs"
 MAIN = UI_SRC / "main.rs"
 APP = UI_SRC / "workbench" / "app.rs"
-HARDCOPY_WORKER = UI_SRC / "workbench" / "app" / "dialogs" / "hardcopy" / "worker.rs"
+HARDCOPY_WORKER = (
+    ROOT / "crates" / "rspice-app-hardcopy" / "src" / "workbench" / "app" / "dialogs" / "hardcopy" / "worker.rs"
+)
 SERVICES_SRC = ROOT / "crates" / "rspice-app-services" / "src"
 BROWSER_ACCESSIBILITY = SERVICES_SRC / "workbench" / "browser" / "accessibility.rs"
 

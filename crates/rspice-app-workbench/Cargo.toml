@@ -26,7 +26,6 @@ rspice-results-ui.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-publication-contract.workspace = true
-rspice-hardcopy.workspace = true
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
 thiserror.workspace = true

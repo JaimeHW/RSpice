@@ -11,7 +11,7 @@
 mod cloud;
 mod code;
 mod design;
-mod hardcopy;
+use rspice_app_hardcopy::workbench::slots::hardcopy;
 mod models;
 pub(in crate::workbench) use rspice_app_services::workbench::slots::platform;
 mod project;

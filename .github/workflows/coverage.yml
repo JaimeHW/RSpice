@@ -31,12 +31,12 @@ jobs:
           - group: core
             packages: -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices
           - group: ui
-            packages: -p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results
+            packages: -p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy
           - group: libraries
             packages: >-
               --workspace --exclude rspice-core --exclude rspice-core-base
               --exclude rspice-core-netlist --exclude rspice-core-devices --exclude rspice-app --exclude rspice-app-state
-              --exclude rspice-app-services --exclude rspice-app-runs --exclude rspice-app-workbench --exclude rspice-app-sheets --exclude rspice-app-settings --exclude rspice-app-results
+              --exclude rspice-app-services --exclude rspice-app-runs --exclude rspice-app-workbench --exclude rspice-app-sheets --exclude rspice-app-settings --exclude rspice-app-results --exclude rspice-app-hardcopy
               --exclude rspice-conformance
               --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
     env:

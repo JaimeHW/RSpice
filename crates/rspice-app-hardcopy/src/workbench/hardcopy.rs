@@ -16,10 +16,10 @@
 //! same context, and declares the tools the route's toolbar shows, which
 //! the shell lays out and dispatches like any other.
 
-pub(crate) mod commands;
-pub(crate) mod exports;
-pub(crate) mod report;
-pub(crate) mod report_authoring;
+pub mod commands;
+pub mod exports;
+pub mod report;
+pub mod report_authoring;
 
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app::{

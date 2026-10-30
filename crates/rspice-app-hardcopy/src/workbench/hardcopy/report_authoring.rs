@@ -5,7 +5,7 @@
 //! complete report workflow is ready for production use.
 
 mod presentation;
-pub(crate) mod result_insert;
+pub mod result_insert;
 use rspice_results_ui::report::composer::{PageMoveDirection, PageSettingEdit};
 use rspice_results_ui::report::inspector::DocumentPublicationEdit;
 use rspice_results_ui::report::session::{

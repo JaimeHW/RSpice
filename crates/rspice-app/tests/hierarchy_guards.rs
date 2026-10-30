@@ -348,6 +348,11 @@ fn app_results_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src")
 }
 
+/// The application's hardcopy feature, named the same way.
+fn app_hardcopy_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src")
+}
+
 fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
@@ -531,6 +536,7 @@ fn path_grammar_is_owned_by_one_module() {
         ("", app_sheets_src_dir()),
         ("", app_settings_src_dir()),
         ("", app_results_src_dir()),
+        ("", app_hardcopy_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
     ] {
@@ -666,6 +672,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
         app_sheets_src_dir(),
         app_settings_src_dir(),
         app_results_src_dir(),
+        app_hardcopy_src_dir(),
     ] {
         for (path, file) in production_files(&root) {
             let code = Source::read(&file).code;
@@ -1074,6 +1081,7 @@ fn every_command_has_a_user_route() {
                 app_sheets_src_dir().join(file),
                 app_settings_src_dir().join(file),
                 app_results_src_dir().join(file),
+                app_hardcopy_src_dir().join(file),
             ]
             .into_iter()
             .find(|path| path.is_file())
@@ -1412,6 +1420,7 @@ fn persisted_policies_reach_a_projection() {
         ("", app_sheets_src_dir()),
         ("", app_settings_src_dir()),
         ("", app_results_src_dir()),
+        ("", app_hardcopy_src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),

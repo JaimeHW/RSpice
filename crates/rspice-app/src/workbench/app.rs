@@ -158,10 +158,7 @@ pub(crate) use dialogs::symbol_definition::{
     open_symbol_import_dialog_for, open_symbol_parameter_form_dialog_for,
 };
 
-pub(crate) use dialogs::hardcopy::{
-    HardcopyDialogState, HardcopyParts, HardcopyWorkflow, open_hardcopy_workflow,
-    render_hardcopy_dialog,
-};
+pub(crate) use dialogs::hardcopy::HardcopyWorkflow;
 
 pub(crate) use dialogs::plan_removal::{
     PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,

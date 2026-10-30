@@ -5182,6 +5182,7 @@ dependencies = [
  "rfd",
  "ron",
  "ropey",
+ "rspice-app-hardcopy",
  "rspice-app-results",
  "rspice-app-runs",
  "rspice-app-services",
@@ -5239,6 +5240,39 @@ dependencies = [
  "winit",
  "winresource",
  "zip",
+]
+
+[[package]]
+name = "rspice-app-hardcopy"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "js-sys",
+ "lopdf",
+ "png",
+ "ron",
+ "rspice-app-runs",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "rspice-core",
+ "rspice-design",
+ "rspice-hardcopy",
+ "rspice-hardcopy-contract",
+ "rspice-publication-contract",
+ "rspice-results",
+ "rspice-results-ui",
+ "rspice-schematic-editor",
+ "rspice-vocabulary",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "uuid",
+ "wasm-bindgen",
+ "web-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5441,7 +5475,6 @@ dependencies = [
  "rspice-app-state",
  "rspice-core",
  "rspice-design",
- "rspice-hardcopy",
  "rspice-publication-contract",
  "rspice-results",
  "rspice-results-ui",

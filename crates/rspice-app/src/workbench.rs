@@ -179,9 +179,10 @@ pub(crate) mod examples {
 }
 mod features;
 pub(crate) mod frame;
+pub(crate) use rspice_app_hardcopy::workbench::hardcopy;
+#[cfg(test)]
+pub(crate) use rspice_app_hardcopy::workbench::hardcopy_adapters;
 pub(crate) use rspice_app_workbench::workbench::framework;
-pub(crate) mod hardcopy;
-pub(crate) mod hardcopy_adapters;
 pub(crate) use rspice_app_workbench::workbench::layout;
 pub(crate) mod lifecycle {
     //! Opening, checkpointing, and recovering a working session.

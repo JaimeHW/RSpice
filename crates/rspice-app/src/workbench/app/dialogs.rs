@@ -30,7 +30,7 @@ pub(in crate::workbench) mod engineering_table;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 pub(in crate::workbench) mod find_replace;
 pub(in crate::workbench) mod grid_snap_routing;
-pub(crate) mod hardcopy;
+pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
 pub(in crate::workbench) mod hierarchy;
 pub(in crate::workbench) mod library;

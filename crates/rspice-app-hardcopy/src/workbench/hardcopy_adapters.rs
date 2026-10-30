@@ -5,9 +5,9 @@
 //! sealed publication snapshot compiles the same resolved sources into the
 //! scenes `rspice-publication-contract` carries.
 
-pub(crate) mod print;
-pub(crate) mod publication_snapshot;
-pub(crate) mod sources;
+pub mod print;
+pub mod publication_snapshot;
+pub mod sources;
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

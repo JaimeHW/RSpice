@@ -100,6 +100,7 @@ pub(crate) use rspice_app_workbench::ui;
 pub(crate) mod workbench;
 
 /// Result document exports and application integration fixtures.
+#[cfg(test)]
 pub(crate) use rspice_app_state::results;
 
 /// Shared product identity and outcome vocabulary.

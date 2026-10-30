@@ -18,11 +18,11 @@ use rspice_hardcopy_contract::{
 use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod execution;
+pub mod execution;
 #[cfg(not(target_arch = "wasm32"))]
 mod finalize;
-pub(crate) mod publish;
-pub(crate) mod render;
+pub mod publish;
+pub mod render;
 #[cfg(test)]
 mod setting_effects;
 mod unsaved_sheet;

@@ -61,10 +61,10 @@ const LAYERS: &[(&str, u32)] = &[
     // `rspice-app-services`, and the run tier (the controller, its prepared
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
-    // compiles as `rspice-app-workbench`, and the sheets, settings and results
-    // features as `rspice-app-sheets`, `rspice-app-settings` and
-    // `rspice-app-results`, inside `workbench`, where the interior order below
-    // ranks them.
+    // compiles as `rspice-app-workbench`, and the sheets, settings, results and
+    // hardcopy features as `rspice-app-sheets`, `rspice-app-settings`,
+    // `rspice-app-results` and `rspice-app-hardcopy`, inside `workbench`, where
+    // the interior order below ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -349,9 +349,10 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// seven split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 8] = [
+/// eight split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 9] = [
     "rspice-app",
+    "rspice-app-hardcopy",
     "rspice-app-results",
     "rspice-app-runs",
     "rspice-app-services",
@@ -1015,18 +1016,19 @@ fn workbench_dir() -> PathBuf {
     src_dir().join("workbench")
 }
 
-/// The workbench's framework modules compile as `rspice-app-workbench`, and
-/// the sheets, settings and results features as `rspice-app-sheets`,
-/// `rspice-app-settings` and `rspice-app-results`, at the paths they had here,
-/// and keep their rank in the same order: each crate's `src/workbench` is
-/// scanned beside this crate's.
-fn workbench_roots() -> [PathBuf; 5] {
+/// The workbench's framework modules compile as `rspice-app-workbench`, and the
+/// sheets, settings, results and hardcopy features as `rspice-app-sheets`,
+/// `rspice-app-settings`, `rspice-app-results` and `rspice-app-hardcopy`, at
+/// the paths they had here, and keep their rank in the same order: each crate's
+/// `src/workbench` is scanned beside this crate's.
+fn workbench_roots() -> [PathBuf; 6] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src/workbench"),
     ]
 }
 
@@ -2032,6 +2034,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-sheets/src",
     "rspice-app-settings/src",
     "rspice-app-results/src",
+    "rspice-app-hardcopy/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",
