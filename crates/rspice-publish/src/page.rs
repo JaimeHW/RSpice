@@ -8,6 +8,7 @@
 
 use std::fmt::Write as _;
 
+use rspice_fonts::Face;
 use rspice_publication_contract::{
     Figure, FigureContent, FigurePresentation, PublicationSection, PublicationSnapshot, Scene,
     WarningSeverity,
@@ -34,15 +35,15 @@ pub(crate) const PAGE_SCRIPT: &str = include_str!("assets/page.js");
 pub(crate) const PAGE_FONTS: [(&str, &[u8]); 3] = [
     (
         "assets/fonts/ibm-plex-mono-regular.ttf",
-        include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf"),
+        Face::MonoRegular.bytes(),
     ),
     (
         "assets/fonts/ibm-plex-mono-medium.ttf",
-        include_bytes!("../../../assets/fonts/IBMPlexMono-Medium.ttf"),
+        Face::MonoMedium.bytes(),
     ),
     (
         "assets/fonts/ofl-ibm-plex.txt",
-        include_bytes!("../../../assets/fonts/OFL-IBMPlex.txt"),
+        Face::MonoRegular.licence().as_bytes(),
     ),
 ];
 
