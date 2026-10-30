@@ -492,3 +492,16 @@ impl ResultsState {
             .remove(&AnalysisPresentationKey::new(run.dataset_id, analysis));
     }
 }
+
+/// The project lifecycle captures the Results presentation it saves through
+/// this.
+impl rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource
+    for ResultsState
+{
+    fn project_presentation(
+        &self,
+        simulation: &crate::state::SimulationState,
+    ) -> ResultPresentation {
+        Self::project_presentation(self, simulation)
+    }
+}

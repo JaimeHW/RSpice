@@ -13,8 +13,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::FileWorkflowIo;
 use crate::io::ProjectSnapshot;
 use crate::services::session::SessionKept;
-use crate::state::result_presentation::ResultPresentation;
-use crate::state::{CellViewRef, LibraryManager, SimulationState};
+use crate::state::{CellViewRef, LibraryManager};
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::app_state::session::autosave::{self, AutosaveRestore};
@@ -22,18 +21,12 @@ use crate::workbench::app_state::session::serialization::WithoutRuns;
 use crate::workbench::app_state::session::session_store::{Offer, offer, settle};
 use crate::workbench::lifecycle::project_lifecycle::{
     self, CellViewRevert, LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut,
-    LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError,
-    ResultPresentationSource, RevertFollowUp, RevertReviewToken,
+    LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError, RevertFollowUp,
+    RevertReviewToken,
 };
 use crate::workbench::lifecycle::recovery::{self, RecoveryCandidate};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::workflows::file_workflow;
-
-impl ResultPresentationSource for crate::workbench::documents::result_document::ResultsState {
-    fn project_presentation(&self, simulation: &SimulationState) -> ResultPresentation {
-        Self::project_presentation(self, simulation)
-    }
-}
 
 impl LifecycleSource for AppState {
     fn lifecycle_view(&self) -> LifecycleView<'_> {
