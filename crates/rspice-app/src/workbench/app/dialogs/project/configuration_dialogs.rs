@@ -319,6 +319,7 @@ fn new_dialog(
         );
     }
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
         name_field(ui, name, write_allowed);
         let labels = StartFrom::ALL.map(|start| start.label().to_owned());
         if let Some(index) = picker(ui, "Start from", start.label(), &labels, write_allowed) {
@@ -427,6 +428,7 @@ fn name_dialog(
         );
     }
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
         kv_row(ui, "Configuration", &source_name);
         match dialog_state.open.as_mut() {
             Some(ConfigurationDialog::Clone {

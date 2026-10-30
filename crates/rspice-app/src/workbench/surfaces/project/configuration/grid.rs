@@ -14,7 +14,7 @@ const LABEL_WIDTH: f32 = 112.0;
 const ROW_HEIGHT: f32 = 32.0;
 const PICKER_WIDTH: f32 = 300.0;
 /// From this width the five rows sit in two columns.
-const TWO_COLUMN_WIDTH: f32 = 960.0;
+const TWO_COLUMN_WIDTH: f32 = 760.0;
 
 const UNRESOLVED_CHOICES: [(UnresolvedBindingPolicy, &str); 2] = [
     (UnresolvedBindingPolicy::BlockNetlist, "Stop the netlist"),
@@ -114,48 +114,65 @@ fn columns(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui))
     );
 }
 
-/// One grid row: its label, then whatever `body` draws, on a single line
-/// unless the body wraps.
+/// One grid row: its label, then whatever `body` draws, centred on the
+/// row's single line. A body that wraps (a long chip list) makes the row
+/// taller and keeps its first line on the label's.
 fn grid_row<R>(ui: &mut Ui, label: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
+    labelled_row(ui, label, false, body)
+}
+
+/// A grid row whose body is a chip list, which wraps onto more lines when
+/// the list outgrows the row.
+fn chip_row<R>(ui: &mut Ui, label: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
+    labelled_row(ui, label, true, body)
+}
+
+fn labelled_row<R>(ui: &mut Ui, label: &str, wrap: bool, body: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let shown = ui.allocate_ui_with_layout(
-        vec2(width, ROW_HEIGHT),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            ui.set_min_size(vec2(width, ROW_HEIGHT));
-            ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-            ui.add_space(10.0);
-            ui.allocate_ui_with_layout(
-                vec2(LABEL_WIDTH, 20.0),
-                Layout::left_to_right(Align::Center),
-                |ui| {
-                    ui.set_width(LABEL_WIDTH);
-                    ui.label(
-                        egui::RichText::new(label)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                },
-            );
-            let body_width = (ui.available_width() - 10.0).max(1.0);
-            ui.allocate_ui_with_layout(
-                vec2(body_width, 0.0),
-                Layout::left_to_right(Align::Center).with_main_wrap(true),
-                |ui| {
-                    ui.add_space(0.0);
-                    body(ui)
-                },
-            )
-            .inner
-        },
+    let top = ui.cursor().min;
+    let body_left = top.x + 10.0 + LABEL_WIDTH;
+    // A wrapping body centres each line on its tallest control, a control's
+    // height; starting it that much below the top puts its first line on the
+    // label's.
+    let inset = if wrap {
+        ((ROW_HEIGHT - t.metrics.ctl_h) * 0.5).max(0.0)
+    } else {
+        0.0
+    };
+    let body_rect = Rect::from_min_max(
+        pos2(body_left, top.y + inset),
+        pos2(
+            (top.x + width - 10.0).max(body_left + 1.0),
+            top.y + ROW_HEIGHT - inset,
+        ),
+    );
+    let layout = if wrap {
+        Layout::left_to_right(Align::Center).with_main_wrap(true)
+    } else {
+        Layout::left_to_right(Align::Center)
+    };
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body_rect).layout(layout));
+    child.spacing_mut().item_spacing = vec2(6.0, 4.0);
+    let inner = body(&mut child);
+    let used = child.min_rect().bottom() + inset - top.y;
+    let height = used.max(ROW_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    ui.painter().text(
+        pos2(rect.left() + 10.0, rect.top() + ROW_HEIGHT * 0.5),
+        Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
     );
     ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
+        rect.x_range(),
+        rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    shown.inner
+    inner
 }
 
 /// A read-only value in a grid row.
@@ -188,14 +205,14 @@ fn default_grid(ui: &mut Ui, state: &AppState) {
         ui,
         |ui| {
             grid_row(ui, "Top cell", |ui| value(ui, &top, true));
-            grid_row(ui, "DUT instance", |ui| value(ui, "\u{2014}", true));
+            grid_row(ui, "DUT instance", |ui| value(ui, "\u{2014}", false));
             grid_row(ui, "Unresolved cells", |ui| {
                 value(ui, UNRESOLVED_CHOICES[0].1, false);
             });
         },
         |ui| {
             grid_row(ui, "View list", |ui| value(ui, &view_list, false));
-            grid_row(ui, "Stop list", |ui| {
+            chip_row(ui, "Stop list", |ui| {
                 ordered_chips(
                     ui,
                     "default-stop-list",
@@ -304,7 +321,7 @@ fn configuration_grid(
             });
         },
         |ui| {
-            grid_row(ui, "View list", |ui| {
+            chip_row(ui, "View list", |ui| {
                 let addable = resolution
                     .view_names
                     .iter()
@@ -328,7 +345,7 @@ fn configuration_grid(
                     right_edit = Some(GridEdit::Views(chosen));
                 }
             });
-            grid_row(ui, "Stop list", |ui| {
+            chip_row(ui, "Stop list", |ui| {
                 // Only a view the list searches can stop it.
                 let addable = definition
                     .executable_view_policy
