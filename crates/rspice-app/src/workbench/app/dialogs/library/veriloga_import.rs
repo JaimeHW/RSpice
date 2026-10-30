@@ -12,6 +12,7 @@
 use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::workspace::{
     DeclaredModule, declared_cell_interface, place_veriloga_view, veriloga_cell_for_module,
     veriloga_view,
@@ -19,7 +20,7 @@ use crate::state::workspace::{
 use crate::state::{CellViewRef, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::MessageId;
-use crate::workbench::app::{RSpiceApp, VERILOGA_LIBRARY_NAME};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{VerilogAImportFormState, writable_libraries};
 

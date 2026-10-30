@@ -30,17 +30,17 @@ use std::collections::HashSet;
 use egui::Context;
 use rspice_design::symbol::generated::{PortEntryError, parse_port_entry};
 
-use super::new_view_dialog::{
-    starter_veriloga_source, verilog_module_name, verilog_port_declaration,
-};
-use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::workspace::VERILOGA_VIEW;
+use crate::state::workspace::{
+    VERILOGA_LIBRARY_NAME, VERILOGA_VIEW, starter_veriloga_source, verilog_module_name,
+    verilog_port_declaration,
+};
 use crate::state::{
     Cell, CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
     ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
     VerilogACompileReceipt, VerilogAPlacementHandoff, apply_receipt_interface,

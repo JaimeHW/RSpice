@@ -29,7 +29,7 @@ use egui::Context;
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::veriloga_library::{
-    VERILOGA_LIBRARY_NAME, restore_global_veriloga_library, save_global_veriloga_library,
+    restore_global_veriloga_library, save_global_veriloga_library,
 };
 
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;

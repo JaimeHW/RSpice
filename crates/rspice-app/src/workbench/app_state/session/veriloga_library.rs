@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
     CellViewRef, Library, LibraryManager, ProjectSourceLanguage, ProjectSourceOwner,
@@ -24,7 +25,6 @@ use crate::state::{
 #[cfg(target_arch = "wasm32")]
 use crate::state::{LibraryManager, ProjectWorkspace};
 
-pub(in crate::workbench) const VERILOGA_LIBRARY_NAME: &str = "veriloga";
 #[cfg(not(target_arch = "wasm32"))]
 const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
 #[cfg(not(target_arch = "wasm32"))]

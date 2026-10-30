@@ -7,7 +7,8 @@
 
 use egui::Context;
 
-use crate::workbench::app::{RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_veriloga_library};
+use crate::state::workspace::VERILOGA_LIBRARY_NAME;
+use crate::workbench::app::{RSpiceApp, save_global_veriloga_library};
 
 mod cell_ops_dialogs;
 mod library_ops_dialogs;

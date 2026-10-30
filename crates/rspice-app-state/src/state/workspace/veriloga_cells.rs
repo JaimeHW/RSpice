@@ -19,6 +19,9 @@ use crate::state::{
 /// The view every module is placed under.
 pub const VERILOGA_VIEW: &str = "veriloga";
 
+/// The global library user-authored Verilog-A devices live in.
+pub const VERILOGA_LIBRARY_NAME: &str = "veriloga";
+
 /// The root file of the demonstration module every new project used to be
 /// created with. A project whose project-wide bundle still holds exactly this
 /// carries nothing its author wrote, so loading it drops the bundle.

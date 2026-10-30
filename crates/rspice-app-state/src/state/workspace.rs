@@ -15,10 +15,16 @@ mod open_documents;
 mod reference_preparation;
 mod schematic_buffers;
 mod veriloga_cells;
+mod veriloga_starter;
 pub(crate) use veriloga_cells::retire_code_workspace_veriloga;
 pub use veriloga_cells::{
-    DeclaredModule, VERILOGA_VIEW, declared_cell_interface, place_veriloga_view,
-    survey_veriloga_bundle, survey_veriloga_file, veriloga_cell_for_module, veriloga_view,
+    DeclaredModule, VERILOGA_LIBRARY_NAME, VERILOGA_VIEW, declared_cell_interface,
+    place_veriloga_view, survey_veriloga_bundle, survey_veriloga_file, veriloga_cell_for_module,
+    veriloga_view,
+};
+
+pub use veriloga_starter::{
+    starter_veriloga_source, verilog_module_name, verilog_port_declaration,
 };
 
 // The two functions are renamed on export: bare `normalize` and
