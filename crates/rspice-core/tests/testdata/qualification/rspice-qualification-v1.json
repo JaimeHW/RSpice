@@ -1250,7 +1250,7 @@
       "note": "abort polls a completed transient performs",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 4282.0
+      "value": 3124.0
     },
     {
       "metric": "tran.abort_polls_after_cancel",
