@@ -320,6 +320,7 @@ pub mod ids {
         CANCEL = "cancel-active-command";
         CLEAR_CONSOLE = "console-clear";
         COMMAND_PALETTE = "command-palette";
+        COMPILE_VERILOG_A = "veriloga";
         COPY = "copy-selection";
         CYCLE_GRID = "cycle-grid";
         DESIGN_WORKSPACE = "design";
@@ -330,11 +331,14 @@ pub mod ids {
         HELP_CENTER = "help-center";
         LEGAL_PRIVACY = "legal-privacy-center";
         MEASUREMENT_LIBRARY = "measurement-library";
+        MODELS_CATALOG = "models-catalog";
         MODELS_WORKSPACE = "models";
+        MODEL_QUALIFICATION = "model-qualification";
         NETLIST_WORKSPACE = "netlist";
         OPEN_CONSOLE = "open-console";
         OPEN_NOTIFICATIONS = "open-notifications";
         OPEN_RUN_IN_RESULTS = "open-run-in-results";
+        PDK_SETTINGS = "pdk-settings";
         PREFERENCES = "preferences";
         PRINT_HARDCOPY = "print-hardcopy";
         PROJECT_LAUNCHER = "project-launcher";
