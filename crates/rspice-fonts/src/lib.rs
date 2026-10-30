@@ -24,6 +24,8 @@ use unicode_segmentation::UnicodeSegmentation;
 #[cfg(feature = "egui")]
 mod egui_families;
 mod han;
+#[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+pub mod system;
 #[cfg(feature = "egui")]
 pub use egui_families::egui_font_definitions;
 pub use han::{HanPreference, HanVariant, han_order};
