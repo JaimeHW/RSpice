@@ -371,7 +371,8 @@ pub(crate) mod tests {
     #[test]
     fn clicking_a_matrix_cell_opens_its_retained_coefficient_plot() {
         for width in [1280.0, 768.0] {
-            let mut app = crate::workbench::AppState::default();
+            let mut app =
+                crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
             app.model.simulation.retained.runs.push(run);
@@ -486,7 +487,8 @@ pub(crate) mod tests {
     #[test]
     fn renderer_runs_at_desktop_and_tablet_widths_without_changing_evidence() {
         for width in [1280.0, 768.0] {
-            let mut app = crate::workbench::AppState::default();
+            let mut app =
+                crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
             app.model.simulation.retained.runs.push(run);
