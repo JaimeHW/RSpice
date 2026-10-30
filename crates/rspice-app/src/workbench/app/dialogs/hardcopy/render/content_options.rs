@@ -1399,7 +1399,8 @@ mod tests {
     #[test]
     fn each_font_control_reaches_the_artifact_on_its_own() {
         // An SVG cannot outline text, so dropping the typefaces is only legal
-        // once the page carries none.
+        // once the page carries none: no form, grid or bands, and no
+        // watermark.
         let unlettered = || {
             let mut draft = sheet_draft();
             draft.include_sheet_paper = false;
@@ -1407,6 +1408,10 @@ mod tests {
             draft.include_sheet_title_block = false;
             draft.include_sheet_zones = false;
             draft.include_schematic_grid = false;
+            draft.include_legends = false;
+            draft.include_header = false;
+            draft.include_provenance = false;
+            draft.watermark = Watermark::None;
             draft.crop_marks = false;
             draft.embed_fonts = false;
             draft.searchable_text = false;
@@ -1414,19 +1419,34 @@ mod tests {
         };
         let mut linked = FontControls::new(unlettered());
         assert_eq!(linked.state(), (false, false));
-        let mut embedded = FontControls::new(unlettered());
-        embedded.click_checkbox("Embed fonts");
-        assert_eq!(embedded.state(), (true, false));
-
-        assert!(
-            String::from_utf8_lossy(&artifact(&embedded.draft, metadata(false)))
-                .contains("@font-face"),
-            "embedding fonts wrote no typeface into the artifact"
-        );
         assert!(
             !String::from_utf8_lossy(&artifact(&linked.draft, metadata(false)))
                 .contains("@font-face"),
             "the artifact carries a typeface nobody asked it to embed"
+        );
+
+        // An SVG embeds the faces its text is lettered in, so embedding is
+        // proved on a page lettered in one known face: the draft watermark,
+        // in Plex Sans SemiBold, is the only text on it.
+        let watermarked = || {
+            let mut draft = unlettered();
+            draft.watermark = Watermark::Draft;
+            draft
+        };
+        let mut embedded = FontControls::new(watermarked());
+        embedded.click_checkbox("Embed fonts");
+        assert_eq!(embedded.state(), (true, false));
+        let svg =
+            String::from_utf8(artifact(&embedded.draft, metadata(false))).expect("an SVG is UTF-8");
+        let faces: Vec<&str> = svg
+            .split("@font-face{")
+            .skip(1)
+            .map(|rule| rule.split_once(";src:").expect("a face carries its data").0)
+            .collect();
+        assert_eq!(
+            faces,
+            ["font-family:'RSpice Plex Sans';font-style:normal;font-weight:600"],
+            "embedding fonts did not write the watermark's typeface, and only it, into the artifact"
         );
 
         // Searchable text is the PDF writer's outlining decision, so it is read
