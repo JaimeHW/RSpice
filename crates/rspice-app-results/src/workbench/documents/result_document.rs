@@ -2750,14 +2750,18 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
         // The transfer-function, table and network-matrix panels held
-        // nothing but what their own sheet already states.
-        ResultViewer::TransferFunction | ResultViewer::Table | ResultViewer::NetworkMatrix => {}
+        // nothing but what their own sheet already states. The manifest's
+        // run identity is in Run details, and its saved outputs are in the
+        // inspector's run section, whichever sheet is showing.
+        ResultViewer::TransferFunction
+        | ResultViewer::Table
+        | ResultViewer::NetworkMatrix
+        | ResultViewer::Manifest => {}
         ResultViewer::Scatter => scatter::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::BoxViolin => box_violin::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::Events => events::right_panel(ui, state),
         ResultViewer::Soa => soa::right_panel(ui, state),
         ResultViewer::Optimization => optimization::right_panel(ui, state),
-        ResultViewer::Manifest => manifest::right_panel(ui, state),
     }
 }
 

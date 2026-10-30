@@ -1,19 +1,12 @@
-//! Dataset manifest tables, provenance readouts and explicit host actions.
+//! The dataset manifest sheet: one row per retained analysis.
 
 use crate::{presentation::well_hint, virtual_rows::RowOffsets};
 use egui::{Ui, WidgetInfo, WidgetType};
-use rspice_results::{
-    executed_deck::absent_deck_reason,
-    manifest::{ManifestRow, ManifestViewModel},
-    saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt},
-};
+use rspice_results::manifest::{ManifestRow, ManifestViewModel};
 use rspice_ui_kit::{
-    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::measurement_table,
 };
-use rspice_vocabulary::product::RunId;
 const MIN_TABLE_WIDTH: f32 = 1_030.0;
 const TABLE_HEAD_HEIGHT: f32 = 27.0;
 const TABLE_ROW_HEIGHT: f32 = 44.0;
@@ -28,30 +21,6 @@ const COLUMN_TITLES: [&str; 7] = [
     "Eligibility",
 ];
 
-pub struct SavedOutputs<'a> {
-    pub run_id: RunId,
-    pub analysis_id: u64,
-    pub analysis_label: &'a str,
-    pub receipts: &'a [SavedOutputReceipt],
-}
-pub struct ManifestPanel<'a> {
-    pub manifest: &'a ManifestViewModel,
-    pub saved_outputs: Option<SavedOutputs<'a>>,
-    pub executed_deck_points: usize,
-    pub plan_block: Option<&'a str>,
-    pub open_task_deck_label: &'a str,
-}
-pub struct MaterializeRequest {
-    pub run_id: RunId,
-    pub analysis_id: u64,
-    pub receipt_index: usize,
-}
-#[derive(Default)]
-pub struct ManifestResponse {
-    pub materialize: Option<MaterializeRequest>,
-    pub open_plan: bool,
-    pub open_task_deck: bool,
-}
 pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>) {
     let Some(manifest) = manifest else {
         well_hint(ui, "No retained dataset is selected");
@@ -153,188 +122,6 @@ pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>) {
         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
         .color(t.color.text_faint),
     );
-}
-pub fn right_panel(ui: &mut Ui, source: &ManifestPanel<'_>) -> ManifestResponse {
-    let manifest = source.manifest;
-    let executed_deck_points = source.executed_deck_points;
-    let plan_block = source.plan_block;
-    let t = Tokens::get(ui.ctx());
-
-    section_header(ui, "Dataset identity", None);
-    let identity = [
-        ("Dataset", manifest.dataset_id.as_str()),
-        ("Content digest", manifest.dataset_digest.as_str()),
-        ("Run", manifest.run_id.as_str()),
-        ("Run sequence", manifest.run_sequence.as_str()),
-        ("Lifecycle", manifest.lifecycle.as_str()),
-        ("Execution target", manifest.execution_target.as_str()),
-        ("Duration", manifest.elapsed_time.as_str()),
-    ];
-    measurement_table(ui, &identity);
-
-    section_header(ui, "Integrity and eligibility", None);
-    let task_count = manifest.task_count.to_string();
-    let retained_result_count = manifest.retained_result_count.to_string();
-    let integrity = [
-        ("Receipt", manifest.integrity.as_str()),
-        ("Qualification", manifest.qualification.as_str()),
-        ("Manifest tasks", task_count.as_str()),
-        ("Retained results", retained_result_count.as_str()),
-    ];
-    measurement_table(ui, &integrity);
-
-    // Resolved before the table so the control that leaves this document
-    // states the same refusal the dispatcher would, before the click rather
-    // than after it. Read-only documents do not dispatch; the frame drains
-    // the request, as it already does for the exports they raise.
-    let mut materialize = None;
-    let mut open_plan = false;
-    let mut open_task_deck = false;
-    if let Some(authority) = &manifest.authority {
-        section_header(ui, "Prepared source authority", None);
-        let plan = authority
-            .simulation_plan_id
-            .as_deref()
-            .unwrap_or("manual deck · no simulation plan");
-        let source = [
-            ("Source domain", authority.source_domain.as_str()),
-            ("Simulation plan", plan),
-            ("Project revision", authority.project_revision.as_str()),
-            (
-                "Prepared snapshot",
-                authority.prepared_snapshot_digest.as_str(),
-            ),
-            ("Source content", authority.source_content_digest.as_str()),
-            ("Source check", authority.source_check.as_str()),
-            ("Check digest", authority.source_check_digest.as_str()),
-        ];
-        measurement_table(ui, &source);
-
-        // The plan row above is an identity; this is the way back to the
-        // authoring surface that owns it, with the producing instance
-        // selected on arrival.
-        let response = rspice_ui_kit::widgets::Button::new("Open producing plan")
-            .enabled(plan_block.is_none())
-            .show(ui);
-        match plan_block {
-            None => {
-                open_plan = response
-                    .on_hover_text(
-                        "Open the Analyses page of the plan that produced this dataset, with the \
-                         producing instance selected",
-                    )
-                    .clicked();
-            }
-            Some(reason) => {
-                response.on_hover_text(reason);
-            }
-        }
-
-        if !authority.model_sources.is_empty() {
-            section_header(ui, "Model source digests", None);
-            let rows: Vec<(&str, &str)> = authority
-                .model_sources
-                .iter()
-                .map(|(name, digest)| (name.as_str(), digest.as_str()))
-                .collect();
-            measurement_table(ui, &rows);
-        }
-    }
-
-    // The digests above identify the source this run was authorized over.
-    // This is the way to the source itself, through the same owner the Netlist
-    // run strip's own control uses, so the document reached from here is
-    // byte-identical to the one reached from there. Offered for every run that
-    // still holds its decks, not only for the plan-backed ones: a manual deck
-    // run carries no prepared authority and its executed source is exactly as
-    // worth reading.
-    section_header(ui, "Executed source", None);
-    let deck = rspice_ui_kit::widgets::Button::new(source.open_task_deck_label)
-        .enabled(executed_deck_points > 0)
-        .show(ui);
-    if executed_deck_points > 0 {
-        open_task_deck = deck
-            .on_hover_text(format!(
-                "Opens the exact source this run handed its first task, as a read-only document \
-                 sealed with the run. The archive holds {executed_deck_points} of them."
-            ))
-            .clicked();
-    } else {
-        deck.on_hover_text(format!(
-            "This run has no executed source to open: {}.",
-            absent_deck_reason()
-        ));
-    }
-
-    if let Some(SavedOutputs {
-        run_id,
-        analysis_id,
-        analysis_label,
-        receipts,
-    }) = &source.saved_outputs
-        && !receipts.is_empty()
-    {
-        section_header(ui, "Saved outputs", Some(analysis_label));
-        let mut requested = None;
-        for (receipt_index, receipt) in receipts.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(&receipt.name);
-                    ui.label(
-                        egui::RichText::new(saved_output_status_label(receipt))
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if receipt.status == SavedOutputMaterializationStatus::Deferred
-                        && ui.button("Materialize").clicked()
-                    {
-                        requested = Some(receipt_index);
-                    }
-                });
-            });
-            ui.add_space(tokens::SP_2);
-        }
-        if let Some(receipt_index) = requested {
-            materialize = Some(MaterializeRequest {
-                run_id: *run_id,
-                analysis_id: *analysis_id,
-                receipt_index,
-            });
-        }
-    }
-    ManifestResponse {
-        materialize,
-        open_plan,
-        open_task_deck,
-    }
-}
-fn saved_output_status_label(receipt: &SavedOutputReceipt) -> String {
-    match &receipt.status {
-        SavedOutputMaterializationStatus::Materialized { sample_count, .. } => {
-            format!("materialized · {sample_count} samples")
-        }
-        SavedOutputMaterializationStatus::MaterializedDcFamily { members } => {
-            let samples = members
-                .iter()
-                .map(|member| u128::from(member.sample_count))
-                .sum::<u128>();
-            format!(
-                "materialized · {} DC members · {samples} samples",
-                members.len()
-            )
-        }
-        SavedOutputMaterializationStatus::Deferred => {
-            "deferred · retained source available".to_owned()
-        }
-        SavedOutputMaterializationStatus::SuppressedOnSuccess => {
-            "suppressed on successful analysis".to_owned()
-        }
-        SavedOutputMaterializationStatus::Unavailable { reason } => {
-            format!("unavailable · {reason}")
-        }
-    }
 }
 fn paint_header_row(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());

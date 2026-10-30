@@ -1,4 +1,4 @@
-//! Dataset-manifest cache ownership, exact export and application actions.
+//! Dataset-manifest cache ownership and exact export.
 
 use super::frame_work::{self, DatasetWalk};
 use crate::state::{RunHistoryRevision, SimulationRun};
@@ -44,96 +44,6 @@ pub(crate) fn active_manifest(state: &mut ResultsParts<'_>) -> Option<Arc<Manife
 pub(crate) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let plan = active_manifest(state);
     viewer::show(ui, plan.as_ref().map(|plan| &plan.model));
-}
-pub(crate) fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let Some(plan) = active_manifest(state) else {
-        return;
-    };
-    let Some(run) = state.model.simulation.active_run() else {
-        return;
-    };
-    let run_sequence = run.id;
-    let saved_outputs =
-        state
-            .model
-            .simulation
-            .active_analysis()
-            .map(|analysis| viewer::SavedOutputs {
-                run_id: run.run_id,
-                analysis_id: analysis.id,
-                analysis_label: &analysis.label,
-                receipts: &analysis.saved_output_receipts,
-            });
-    let executed_deck_points = state
-        .model
-        .simulation
-        .retained
-        .executed_decks
-        .get(run_sequence)
-        .map_or(0, |deck| deck.points.len());
-    let plan_block = crate::workbench::state::plan_provenance::producing_plan_block(
-        &state.model.simulation,
-        state.model.sim_setup.stable_analysis_plan().ok(),
-    );
-    let response = viewer::right_panel(
-        ui,
-        &viewer::ManifestPanel {
-            manifest: &plan.model,
-            saved_outputs,
-            executed_deck_points,
-            plan_block,
-            open_task_deck_label: crate::workbench::localization::OPEN_TASK_DECK,
-        },
-    );
-    if let Some(viewer::MaterializeRequest {
-        run_id,
-        analysis_id,
-        receipt_index,
-    }) = response.materialize
-    {
-        match state.model.simulation.materialize_deferred_saved_output(
-            run_id,
-            analysis_id,
-            receipt_index,
-        ) {
-            Ok(()) => {
-                state
-                    .analysis
-                    .synchronize_specialized_viewer_cache_authority(state.model);
-                state.record(
-                    crate::diagnostics::LogSeverity::Info,
-                    crate::diagnostics::LogSource::Studio,
-                    "Materialized the deferred saved output from the retained run data.",
-                );
-            }
-            Err(error) => {
-                state.record(
-                    crate::diagnostics::LogSeverity::Error,
-                    crate::diagnostics::LogSource::Studio,
-                    format!("Saved output could not be materialized: {error}"),
-                );
-            }
-        }
-    }
-    if response.open_plan {
-        state
-            .workbench
-            .outbox
-            .push(crate::workbench::framework::requests::OpenProducingPlan);
-    }
-    // Acted on after the panel is drawn, like the plan route above it, so the
-    // workspace switch happens once the section has drawn rather than under
-    // the widget that asked for it. The route answers whether the bytes are
-    // still held, and a released deck is refused by name rather than opening
-    // nothing.
-    if response.open_task_deck {
-        state
-            .workbench
-            .outbox
-            .push(crate::workbench::framework::requests::RevealExecutedDeck(
-                run_sequence,
-            ));
-    }
 }
 pub(crate) fn export_csv(run: &SimulationRun) -> super::ResultSheetCsv {
     let manifest = manifest_for_run(run);

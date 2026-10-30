@@ -9,7 +9,6 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::ResultViewer;
 use crate::workbench::app_state::Model;
 use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::analysis_evidence_failure;
@@ -65,14 +64,13 @@ pub(in crate::workbench) fn results(
     if let Some(run_id) = details {
         run_details::open(run_details, &state.model.simulation, run_id);
     }
+    saved_outputs(ui, state);
 
     // The active viewer owns its engineering readout (measurements, margins,
     // harmonics, eye metrics, distribution statistics, and so on). It follows
     // the trace and pane controls, matching the upgraded mockup's hierarchy
     // without creating a second result-data owner here.
-    if state.results.session.viewer != ResultViewer::Manifest {
-        crate::workbench::documents::result_document::right_panel(ui, state);
-    }
+    crate::workbench::documents::result_document::right_panel(ui, state);
 
     let Some(run) = state.model.simulation.active_run() else {
         return;
@@ -82,6 +80,47 @@ pub(in crate::workbench) fn results(
     {
         result_authority::result_convergence(ui, analysis);
         result_authority::result_dc_sweep(ui, analysis);
+    }
+}
+
+/// The active analysis's saved outputs, under the run that holds them, and the
+/// materialization the reader asked for from them. A deferred output's
+/// samples are evaluated from the run's retained data on request; the log
+/// says what came of it.
+fn saved_outputs(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let Some(run_id) = state.model.simulation.active_run().map(|run| run.run_id) else {
+        return;
+    };
+    let Some(analysis) = state.model.simulation.active_analysis() else {
+        return;
+    };
+    let analysis_id = analysis.id;
+    let Some(receipt_index) = result_authority::saved_outputs(ui, &analysis.saved_output_receipts)
+    else {
+        return;
+    };
+    match state.model.simulation.materialize_deferred_saved_output(
+        run_id,
+        analysis_id,
+        receipt_index,
+    ) {
+        Ok(()) => {
+            state
+                .analysis
+                .synchronize_specialized_viewer_cache_authority(state.model);
+            state.record(
+                crate::diagnostics::LogSeverity::Info,
+                crate::diagnostics::LogSource::Studio,
+                "Materialized the deferred saved output from the retained run data.",
+            );
+        }
+        Err(error) => {
+            state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                format!("Saved output could not be materialized: {error}"),
+            );
+        }
     }
 }
 

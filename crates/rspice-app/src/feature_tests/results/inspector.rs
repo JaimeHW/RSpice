@@ -650,6 +650,156 @@ fn the_waves_details_panel_states_ranges_and_method_as_rows_and_meta() {
     );
 }
 
+/// A deferred saved output is materialized from the inspector's run section
+/// while the manifest sheet is showing, the one sheet whose panel the
+/// inspector used to hide along with the only Materialize the product had.
+#[test]
+fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sheet() {
+    use egui::accesskit::{Action, ActionRequest, Role, TreeId};
+
+    let mut app = deferred_output_app();
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let pass = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(INSPECTOR_DEFAULT_WIDTH, 2400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| show(ui, app));
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default()
+    };
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = pass(&mut app, Vec::new());
+    }
+    let row_value = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("output_voltage") && node.value().is_some())
+            .and_then(|(_, node)| node.value().map(str::to_owned))
+    };
+    assert_eq!(row_value(&nodes).as_deref(), Some("Deferred"));
+    let materialize = nodes
+        .iter()
+        .find(|(_, node)| {
+            node.role() == Role::Button && node.label() == Some("Materialize output_voltage")
+        })
+        .map(|(id, _)| *id)
+        .expect("the deferred output's row offers Materialize on the manifest sheet");
+
+    pass(
+        &mut app,
+        vec![egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: materialize,
+            data: None,
+        })],
+    );
+    let nodes = pass(&mut app, Vec::new());
+
+    assert_eq!(
+        app.state.results.results.session.viewer,
+        ResultViewer::Manifest
+    );
+    let analysis = &app.state.model.simulation.retained.runs[0].analyses[0];
+    assert!(
+        matches!(
+            &analysis.saved_output_receipts[0].status,
+            crate::state::SavedOutputMaterializationStatus::Materialized {
+                waveform_name,
+                sample_count: 2,
+            } if waveform_name == "output_voltage"
+        ),
+        "{:?}",
+        analysis.saved_output_receipts[0].status
+    );
+    let materialized = analysis
+        .waveforms
+        .iter()
+        .find(|wave| wave.name == "output_voltage")
+        .expect("the materialized output is retained beside its source");
+    assert_eq!(materialized.x[..], [0.0, 1.0]);
+    assert_eq!(materialized.y[..], [0.0, 2.0]);
+    assert_eq!(row_value(&nodes).as_deref(), Some("2 pts"));
+    assert!(
+        !nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("Materialize output_voltage")),
+        "a materialized output offers Materialize again"
+    );
+}
+
+/// A finished transient on the manifest sheet whose analysis saved one output
+/// on demand: `output_voltage`, the recipe `V(out)` over the retained `out`.
+fn deferred_output_app() -> RSpiceApp {
+    use crate::state::{
+        AnalysisResult, AnalysisType, RetainedTrace, SavedOutputMaterializationStatus,
+        SavedOutputReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
+    };
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+        ]);
+    analysis.saved_output_receipts.push(SavedOutputReceipt {
+        source_bindings: Some(crate::state::SavedOutputSourceBindings {
+            axis: crate::state::SavedOutputAxis::Waveform {
+                name: "out".to_owned(),
+            },
+            references: [(
+                "v(out)".to_owned(),
+                crate::state::SavedOutputBoundSource::Waveform {
+                    name: "out".to_owned(),
+                },
+            )]
+            .into(),
+        }),
+        output_id: crate::product::SavedOutputId::new(),
+        output_revision: crate::product::ObjectRevision::INITIAL,
+        analysis_id: crate::product::AnalysisInstanceId::new(),
+        contract_digest: crate::product::ContentDigest::from_bytes([0x7a; 32]),
+        name: "output_voltage".to_owned(),
+        source_expression: "V(out)".to_owned(),
+        complex_policy: crate::state::ComplexExpressionPolicy::LegacyMagnitude,
+        output_kind: crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        save_policy: crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
+        stored_precision: crate::state::SavedOutputPrecision::FullSourcePrecision,
+        streaming: crate::state::SavedOutputStreaming::StoreOnly,
+        display_intent: crate::state::SavedOutputDisplayIntent::Plot,
+        status: SavedOutputMaterializationStatus::Deferred,
+    });
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.add_analysis(analysis);
+    run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+        .expect("legacy fixture is explicitly classified");
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.workbench.activate(Workspace::Results);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    app.state.model.simulation.view.active_analysis_idx = Some(0);
+    app.state.results.results.session.viewer = ResultViewer::Manifest;
+    app
+}
+
 /// The inspector's default width on a wide window and its floor in every
 /// window class (`workbench::layout::inspector_width_bounds`).
 pub(crate) const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
