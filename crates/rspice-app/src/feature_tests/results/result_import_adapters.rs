@@ -9,7 +9,7 @@ use crate::workbench::workflows::result_import_workflow::{
 
 /// Stage one imported dataset and commit it, as the import review's Import
 /// does.
-fn apply_imported_result_dataset(
+pub(super) fn apply_imported_result_dataset(
     state: &mut ResultsParts<'_>,
     source_name: &str,
     bytes: &[u8],
