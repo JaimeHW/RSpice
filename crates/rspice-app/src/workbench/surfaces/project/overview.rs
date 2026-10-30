@@ -1510,7 +1510,7 @@ fn design_register(
                 let configuration_command = Command::ConfigurationSets;
                 let (configuration_enabled, configuration_disabled_reason) =
                     command_gate(app, configuration_command);
-                let configuration = Button::new("Configuration sets…")
+                let configuration = Button::new("Configurations")
                     .enabled(configuration_enabled)
                     .show(ui);
                 let configuration = configuration_disabled_reason
@@ -2093,18 +2093,24 @@ fn drc_copy(current: bool, summary: Option<DrcCounts>) -> HealthCopy {
 
 fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
     let catalog = &app.state.model.workspace.content.configuration_sets;
+    // With no configuration used for runs the project runs Default: its own
+    // top cell through the built-in view list, with no DUT instance.
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference()
+        .display_path();
     if let Err(error) = catalog.validate() {
         let active = catalog.active();
         return ConfigurationSnapshot {
             configured: active.is_some(),
-            state: "Invalid catalog".to_owned(),
+            state: "Unreadable configurations".to_owned(),
             detail: error.to_string(),
-            root: active.map_or_else(
-                || "Not configured".to_owned(),
-                |configuration| configuration.root().display_path(),
-            ),
+            root,
             dut: active.map_or_else(
-                || "Not configured".to_owned(),
+                || "\u{2014}".to_owned(),
                 |configuration| configuration.dut_path().to_owned(),
             ),
             tone: Tone::Error,
@@ -2113,14 +2119,11 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
     let Some(active) = catalog.active() else {
         return ConfigurationSnapshot {
             configured: false,
-            state: "No active configuration".to_owned(),
-            detail: format!(
-                "{} configuration sets in project catalog",
-                catalog.configurations().len()
-            ),
-            root: "Not configured".to_owned(),
-            dut: "Not configured".to_owned(),
-            tone: Tone::Warn,
+            state: "Default".to_owned(),
+            detail: "Runs use the built-in view list".to_owned(),
+            root,
+            dut: "\u{2014}".to_owned(),
+            tone: Tone::Neutral,
         };
     };
     let projection = app
@@ -2135,15 +2138,13 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
     let (detail, tone) = match projection {
         Ok(projection) => (
             format!(
-                "rev {} · {} bindings · {} overrides · {}",
-                active.revision(),
+                "{} instances bound · {} instance bindings",
                 projection.plan().bindings().len(),
                 active.overrides().len(),
-                active.owner()
             ),
             Tone::Neutral,
         ),
-        Err(error) => (format!("Execution blocked: {error}"), Tone::Error),
+        Err(error) => (format!("Runs are blocked: {error}"), Tone::Error),
     };
     ConfigurationSnapshot {
         configured: true,

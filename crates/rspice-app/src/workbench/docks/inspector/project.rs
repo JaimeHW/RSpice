@@ -28,19 +28,17 @@ pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
     let project = &app.state.model.workspace.content;
-    let active_configuration = project.configuration_sets.active();
-    let testbench = active_configuration.map_or_else(
-        || "not configured".to_owned(),
-        |configuration| configuration.root().display_path(),
-    );
-    let configuration = active_configuration.map_or_else(
-        || "not configured".to_owned(),
-        |item| item.name().to_owned(),
-    );
+    // With no configuration used for runs, runs use Default: the project's
+    // own top cell through the built-in view list.
+    let testbench = project.simulation_root_reference().display_path();
+    let configuration = project
+        .configuration_sets
+        .active()
+        .map_or_else(|| "Default".to_owned(), |item| item.name().to_owned());
     let modified = dirty_document_count(&app.state);
 
-    // No "CURRENT"/"REVIEW" meta: "not configured" in the Configuration row
-    // is the actionable case, and it says so in the row itself. The run plan
+    // No "CURRENT"/"REVIEW" meta: the Configuration row names what runs use,
+    // Default included. The run plan
     // is on the toolbar and the execution target never varies, so neither is
     // a row here.
     section_header(ui, "Simulation setup", None);
@@ -112,7 +110,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
     if inspector_action(ui, "Revision history\u{2026}") {
         Command::RevisionHistory.execute(app);
     }
-    if inspector_action(ui, "Configuration sets\u{2026}") {
+    if inspector_action(ui, "Configurations") {
         Command::ConfigurationSets.execute(app);
     }
     if inspector_action(ui, "Switch project\u{2026}") {

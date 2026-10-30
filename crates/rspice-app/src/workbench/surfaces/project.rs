@@ -498,14 +498,15 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         .content
         .configuration_sets
         .active();
-    let configuration = active_configuration.map_or("none", |configuration| configuration.name());
-    // A configuration's name is a name, not a state, and "none" is a project
-    // that has not pinned one rather than a fault.
+    let configuration =
+        active_configuration.map_or("Default", |configuration| configuration.name());
+    // A configuration's name is a name, not a state, and Default is what a
+    // project that uses no configuration runs with rather than a fault.
     if project_status_chip(
         ui,
         "project-configuration",
         &format!("config {configuration}"),
-        &format!("Active project configuration: {configuration}"),
+        &format!("Configuration used for runs: {configuration}"),
         None,
         true,
     )

@@ -409,17 +409,26 @@ fn design_register_rows_have_unique_truthful_identities() {
     assert!(rows.first().is_some_and(|row| row.top));
 }
 
+/// With no configuration used for runs the project runs Default: the
+/// overview names it, roots it at the project's own top cell, and invents no
+/// DUT.
 #[test]
-fn overview_does_not_invent_a_testbench_or_dut_without_a_configuration() {
+fn overview_states_default_without_a_configuration() {
     let app = RSpiceApp::test_instance();
     let snapshot = OverviewSnapshot::capture(&app);
+    let project = &app.state.model.workspace.content.project;
 
     assert!(!snapshot.configuration.configured);
-    assert_eq!(snapshot.configuration.root, "Not configured");
-    assert_eq!(snapshot.configuration.dut, "Not configured");
+    assert_eq!(snapshot.configuration.state, "Default");
+    assert_eq!(
+        snapshot.configuration.root,
+        format!("{}/{}/schematic", project.root_library, project.top_cell)
+    );
+    assert_eq!(snapshot.configuration.dut, "\u{2014}");
+    assert!(snapshot.configuration.tone.problem().is_none());
     assert!(
         design_objects(&snapshot)
             .iter()
-            .all(|row| !row.name.eq_ignore_ascii_case("Not configured"))
+            .all(|row| row.name != "\u{2014}")
     );
 }
